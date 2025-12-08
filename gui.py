@@ -2,11 +2,13 @@
 import customtkinter as ctk
 import tkinter as tk
 import math
+import time
 import webbrowser
 from datetime import datetime
 from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT, COLOR_WARNING, COLOR_DANGER, COLOR_SUCCESS, COLOR_COLD, COLOR_HOT, PASSWORD
 from settings_gui import SettingsWindow
 from modules.ui_utils import CTkTooltip, ToastNotification
+from modules.graph_view import TimeSeriesPanel
 
 # 테마 설정
 ctk.set_appearance_mode("Dark")
@@ -235,6 +237,7 @@ class PasswordDialog(ctk.CTkToplevel):
         if pw == self.expected_password:
             self.verified = True
             PasswordDialog._last_geometry = self.geometry()
+            self.grab_release()
             self.destroy()
         else:
             self.lbl_error.configure(text="Incorrect Password")
@@ -244,6 +247,7 @@ class PasswordDialog(ctk.CTkToplevel):
 
     def on_cancel(self):
         PasswordDialog._last_geometry = self.geometry()
+        self.grab_release()
         self.destroy()
 
     def is_verified(self):
@@ -265,6 +269,11 @@ class SmartFactoryApp(ctk.CTk):
         self.last_data_time = datetime.now() # Watchdog timer
 
         self.setup_ui()
+        
+        # View Management
+        self.current_view = "dashboard" # "dashboard" or "graph"
+        self.btn_dashboard.configure(text_color=COLOR_ACCENT) # Active State visual (optional)
+        
         self.check_queue()
         
 # ... [StartLine 362 to EndLine 504 are unchanged, but we are replacing class definition wrapper if needed or just appending/modifying]
@@ -290,7 +299,17 @@ class SmartFactoryApp(ctk.CTk):
         self.header = ctk.CTkFrame(self, fg_color="transparent")
         self.header.grid(row=0, column=0, columnspan=3, sticky="ew", padx=30, pady=15)
         
-        ctk.CTkLabel(self.header, text="🏭 창녕 2호기", font=(FONT_MAIN, 32, "bold"), text_color="white").pack(side="left")
+        # Navigation Buttons (Title as Button)
+        self.btn_dashboard = ctk.CTkButton(self.header, text="🏭 창녕 2호기", font=(FONT_MAIN, 32, "bold"), 
+                                           fg_color="transparent", hover_color="#222222", 
+                                           command=lambda: self.switch_view("dashboard"))
+        self.btn_dashboard.pack(side="left")
+        
+        # Time Series Tab
+        self.btn_graph = ctk.CTkButton(self.header, text="📈 Time Series", font=(FONT_MAIN, 20), 
+                                       fg_color="transparent", hover_color="#222222", text_color="gray",
+                                       command=lambda: self.switch_view("graph"))
+        self.btn_graph.pack(side="left", padx=(20, 0))
         
         # 구분선 (Vertical Separator)
         ctk.CTkFrame(self.header, width=2, height=30, fg_color="#444444").pack(side="left", padx=20)
@@ -310,9 +329,23 @@ class SmartFactoryApp(ctk.CTk):
         self.status_lbl.configure(cursor="hand2")
         CTkTooltip(self.status_lbl, "System Status: Click for details")
 
+        # === Views Container ===
+        self.container = ctk.CTkFrame(self, fg_color="transparent")
+        self.container.grid(row=1, column=0, columnspan=3, sticky="nsew")
+        self.container.grid_rowconfigure(0, weight=1)
+        self.container.grid_columnconfigure(0, weight=1)
+
+        # 1. Dashboard View
+        self.view_dashboard = ctk.CTkFrame(self.container, fg_color="transparent")
+        self.view_dashboard.grid(row=0, column=0, sticky="nsew")
+        
+        self.view_dashboard.grid_columnconfigure(0, weight=1)
+        self.view_dashboard.grid_columnconfigure(1, weight=1)
+        self.view_dashboard.grid_columnconfigure(2, weight=1)
+
         # === Column 1: KPIs ===
-        self.col1 = ctk.CTkFrame(self, fg_color=COLOR_PANEL, corner_radius=10)
-        self.col1.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.col1 = ctk.CTkFrame(self.view_dashboard, fg_color=COLOR_PANEL, corner_radius=10)
+        self.col1.grid(row=0, column=0, sticky="nsew", padx=10, pady=10) # Modified row index
         
         lbl_kpi = ctk.CTkLabel(self.col1, text="⚡ PROCESS KPI", font=(FONT_MAIN, 24, "bold"), text_color=COLOR_TEXT_DIM)
         lbl_kpi.pack(anchor="w", pady=20, padx=20)
@@ -334,8 +367,8 @@ class SmartFactoryApp(ctk.CTk):
         self.card_endpos.pack(fill="x", pady=10, padx=20)
 
         # === Column 2: Temperatures ===
-        self.col2 = ctk.CTkFrame(self, fg_color=COLOR_PANEL, corner_radius=10)
-        self.col2.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
+        self.col2 = ctk.CTkFrame(self.view_dashboard, fg_color=COLOR_PANEL, corner_radius=10)
+        self.col2.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         
         ctk.CTkLabel(self.col2, text="🌡️ TEMPERATURES", font=(FONT_MAIN, 24, "bold"), text_color=COLOR_TEXT_DIM).pack(anchor="w", pady=20, padx=20)
         
@@ -360,8 +393,8 @@ class SmartFactoryApp(ctk.CTk):
         self.card_billet_l.pack(side="right", fill="x", expand=True, padx=(10, 0))
 
         # === Column 3: Molds & Env ===
-        self.col3 = ctk.CTkFrame(self, fg_color=COLOR_PANEL, corner_radius=10)
-        self.col3.grid(row=1, column=2, sticky="nsew", padx=10, pady=10)
+        self.col3 = ctk.CTkFrame(self.view_dashboard, fg_color=COLOR_PANEL, corner_radius=10)
+        self.col3.grid(row=0, column=2, sticky="nsew", padx=10, pady=10)
         
         ctk.CTkLabel(self.col3, text="⚙️ MOLDS & ENV", font=(FONT_MAIN, 24, "bold"), text_color=COLOR_TEXT_DIM).pack(anchor="w", pady=20, padx=20)
         
@@ -383,6 +416,11 @@ class SmartFactoryApp(ctk.CTk):
         self.card_at_pre = InfoCard(self.frame_env, "💧 At Pre", "0.0", "")
         self.card_at_pre.pack(side="right", fill="x", expand=True, padx=(10, 0))
 
+        # 2. Time Series View (Lazy Load or Init now)
+        self.view_graph = TimeSeriesPanel(self.container, fg_color="transparent")
+        self.view_graph.grid(row=0, column=0, sticky="nsew")
+        self.view_graph.grid_remove() # Hide initially
+
         # === Footer ===
         self.footer = ctk.CTkFrame(self, height=30, fg_color="#111111")
         self.footer.grid(row=2, column=0, columnspan=3, sticky="ew")
@@ -392,9 +430,28 @@ class SmartFactoryApp(ctk.CTk):
         self.copyright_lbl = ctk.CTkLabel(self.footer, text="Created by HOIHOU", font=(FONT_MAIN, 12, "bold"), text_color="#555555")
         self.copyright_lbl.pack(side="right", padx=20)
 
+    def switch_view(self, view_name):
+        self.current_view = view_name
+        
+        if view_name == "dashboard":
+            self.view_graph.grid_remove()
+            self.view_dashboard.grid()
+            self.btn_dashboard.configure(text_color=COLOR_ACCENT)
+            self.btn_graph.configure(text_color="gray")
+        else:
+            self.view_dashboard.grid_remove()
+            self.view_graph.grid()
+            self.btn_dashboard.configure(text_color="gray")
+            self.btn_graph.configure(text_color=COLOR_ACCENT)
+    
     def check_queue(self):
         try:
-            while not self.queue.empty():
+            # [Optimization] Time-Budget Processing (10ms)
+            # Instead of fixed count, run as much as we can in 10ms to keep UI responsive
+            start_time = time.time()
+            while (time.time() - start_time) < 0.010: # 10ms budget
+                if self.queue.empty(): break
+                
                 data = self.queue.get_nowait()
                 self.update_ui(data)
         except: pass
@@ -445,6 +502,10 @@ class SmartFactoryApp(ctk.CTk):
         self.card_at_pre.update_value(data.get('At_Pre', 0))
         
         self.log_lbl.configure(text=f"Last Update: {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
+        
+        # Update Graph if visible
+        if self.current_view == "graph":
+            self.view_graph.update_data(data)
 
     def show_diagnostics(self, event=None):
         win = ctk.CTkToplevel(self)
@@ -486,6 +547,9 @@ class SmartFactoryApp(ctk.CTk):
         # pw = dialog.get_input()
         
         if dialog.is_verified():
-            SettingsWindow(self)
+            if hasattr(self, 'settings_window') and self.settings_window and self.settings_window.winfo_exists():
+                self.settings_window.focus()
+            else:
+                self.settings_window = SettingsWindow(self)
         # elif pw is not None:
              # tk.messagebox.showerror("Error", "Incorrect Password")

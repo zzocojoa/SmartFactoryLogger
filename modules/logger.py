@@ -4,15 +4,16 @@ import csv
 import datetime
 import queue
 import logging
-from config import CSV_HEADER, LOG_PATH
+from config import CSV_HEADER, LOG_PATH, AUTO_SAVE, APP_DATA_DIR
 
 def setup_system_logger():
     """ 시스템 로그 설정 (system.log) """
     logger = logging.getLogger("SystemLogger")
     logger.setLevel(logging.INFO)
     
-    # 파일 핸들러 (시스템 로그도 LOG_PATH에 저장하려면 경로 수정 필요, 일단 유지)
-    file_handler = logging.FileHandler("system.log", encoding="utf-8")
+    # 파일 핸들러 (시스템 로그도 LOG_PATH 또는 APP_DATA_DIR에 저장)
+    sys_log_path = os.path.join(APP_DATA_DIR, "system.log")
+    file_handler = logging.FileHandler(sys_log_path, encoding="utf-8")
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     file_handler.setFormatter(formatter)
     
@@ -30,6 +31,9 @@ def setup_system_logger():
 sys_logger = setup_system_logger()
 
 def open_log_file(timestamp_str):
+    if not AUTO_SAVE:
+        return None, None
+        
     filename = f"Factory_Integrated_Log_{timestamp_str}.csv"
     full_path = os.path.join(LOG_PATH, filename) # [수정] 설정된 경로 사용
     try:
@@ -84,9 +88,10 @@ def file_writer_thread(data_queue):
                     new_timestamp = first_item_timestamp.strftime("%Y%m%d_%H%M%S")
                     f, writer = open_log_file(new_timestamp)
                 
-                if writer:
+                if writer and AUTO_SAVE:
                     writer.writerows([row for row, _ in buffer])
                     f.flush()
+                # If not AUTO_SAVE, just clear buffer (data is lost intentionally)
                     
                 buffer.clear()
                 last_flush_time = current_time

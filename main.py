@@ -91,22 +91,23 @@ def data_collection_loop(log_queue, gui_queue):
                 ls['Mold2'] if ls['Mold2'] is not None else "",
                 ls['Mold3'] if ls['Mold3'] is not None else "",
                 ls['Mold4'] if ls['Mold4'] is not None else "",
-                ls['Mold5'] if ls['Mold5'] is not None else "",
-                ls['Mold6'] if ls['Mold6'] is not None else "",
-                ls['Billet_Temp'] if ls['Billet_Temp'] is not None else "",
-                ls['At_Pre'] if ls['At_Pre'] is not None else "",
-                ls['At_Temp'] if ls['At_Temp'] is not None else ""
+                ls.get('Mold5', "") if ls.get('Mold5') is not None else "",
+                ls.get('Mold6', "") if ls.get('Mold6') is not None else "",
+                ls.get('Billet_Temp', "") if ls.get('Billet_Temp') is not None else "",
+                ls.get('At_Pre', "") if ls.get('At_Pre') is not None else "",
+                ls.get('At_Temp', "") if ls.get('At_Temp') is not None else ""
             ]
             
             # GUI 업데이트용 데이터 딕셔너리
             ui_data = {
-                'Speed': ext['Speed'], 'Press': ext['Press'], 'Count': ext['Count'], 'EndPos': ext['EndPos'],
-                'Billet': ext['Billet'], # [수정] 빌렛 길이 추가
-                'Spot': spot, 'Temp_F': ext['Temp_F'], 'Temp_B': ext['Temp_B'],
-                'Billet_Temp': ls['Billet_Temp'], # PLC Billet Temp
-                'Mold1': ls['Mold1'], 'Mold2': ls['Mold2'], 'Mold3': ls['Mold3'],
-                'Mold4': ls['Mold4'], 'Mold5': ls['Mold5'], 'Mold6': ls['Mold6'],
-                'At_Temp': ls['At_Temp'], 'At_Pre': ls['At_Pre']
+                'Time': now, # [수정] 타임스탬프 추가 (수집 시간 기준)
+                'Speed': ext.get('Speed'), 'Press': ext.get('Press'), 'Count': ext.get('Count'), 'EndPos': ext.get('EndPos'),
+                'Billet': ext.get('Billet'), # [수정] 빌렛 길이 추가
+                'Spot': spot, 'Temp_F': ext.get('Temp_F'), 'Temp_B': ext.get('Temp_B'),
+                'Billet_Temp': ls.get('Billet_Temp'), # PLC Billet Temp
+                'Mold1': ls.get('Mold1'), 'Mold2': ls.get('Mold2'), 'Mold3': ls.get('Mold3'),
+                'Mold4': ls.get('Mold4'), 'Mold5': ls.get('Mold5'), 'Mold6': ls.get('Mold6'),
+                'At_Temp': ls.get('At_Temp'), 'At_Pre': ls.get('At_Pre')
             }
 
             try: 

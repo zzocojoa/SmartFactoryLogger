@@ -4,7 +4,7 @@ from tkinter import filedialog, messagebox
 import configparser
 import os
 import sys
-from config import CONFIG_FILE, IP_EXT, PORT_EXT, IP_LS, PORT_LS, IP_SPOT, LOG_PATH, PASSWORD
+from config import CONFIG_FILE, IP_EXT, PORT_EXT, IP_LS, PORT_LS, IP_SPOT, LOG_PATH, PASSWORD, SNAPSHOT_PATH
 
 class SettingsWindow(ctk.CTkToplevel):
     _last_geometry = None
@@ -40,10 +40,12 @@ class SettingsWindow(ctk.CTkToplevel):
         self.tab_conn = self.tabview.add("📡 Connection")
         self.tab_store = self.tabview.add("💾 Storage")
         self.tab_sys = self.tabview.add("🔒 System")
+        self.tab_snap = self.tabview.add("📷 Snapshot") # [Added]
         self.tab_ext = self.tabview.add("➕ Extended") # Future use
         
         self.setup_connection_tab()
         self.setup_storage_tab()
+        self.setup_snapshot_tab() # [Added]
         self.setup_system_tab()
         
         # 하단 저장 버튼
@@ -108,7 +110,23 @@ class SettingsWindow(ctk.CTkToplevel):
         btn_browse = ctk.CTkButton(frame_path, text="...", width=40, command=self.browse_folder)
         btn_browse.pack(side="left", padx=10)
         
+        # [NEW] Auto Save Toggle
+        self.switch_autosave = ctk.CTkSwitch(self.tab_store, text="Automatic CSV Save", 
+                                             font=("Segoe UI", 14), 
+                                             onvalue=True, offvalue=False)
+        self.switch_autosave.pack(anchor="w", padx=20, pady=(20, 5))
+        
+        # Load value (Need to handle string "True"/"False" from config manually if not using ConfigParser's getboolean inside GUI logic heavily, 
+        # but here we use config object directly)
+        is_auto_save = self.config.getboolean("SETTINGS", "AutoSave", fallback=True)
+        if is_auto_save:
+            self.switch_autosave.select()
+        else:
+            self.switch_autosave.deselect()
+            
         ctk.CTkLabel(self.tab_store, text="* Changes will take effect after restart.", text_color="orange").pack(anchor="w", padx=20, pady=10)
+
+    # ... [browse_folder unchanged] ...
 
     def browse_folder(self):
         path = filedialog.askdirectory()
@@ -150,6 +168,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def on_close(self, event=None):
         SettingsWindow._last_geometry = self.geometry()
+        self.grab_release()
         self.destroy()
 
     def on_validate(self, entry, type_):
@@ -167,6 +186,28 @@ class SettingsWindow(ctk.CTkToplevel):
             entry.configure(border_color="red")
         else:
             entry.configure(border_color=["#979da2", "#565b5e"]) # Default colors
+
+    def setup_snapshot_tab(self):
+        lbl_snap = ctk.CTkLabel(self.tab_snap, text="[ Snapshot Save Path ]", font=("Segoe UI", 16, "bold"))
+        lbl_snap.pack(anchor="w", padx=20, pady=(20, 10))
+        
+        frame_path = ctk.CTkFrame(self.tab_snap, fg_color="transparent")
+        frame_path.pack(fill="x", padx=20)
+        
+        self.entry_snap_path = ctk.CTkEntry(frame_path, width=350)
+        self.entry_snap_path.pack(side="left", fill="x", expand=True)
+        self.entry_snap_path.insert(0, self.config.get("SETTINGS", "SnapshotPath", fallback=SNAPSHOT_PATH))
+        
+        btn_browse_snap = ctk.CTkButton(frame_path, text="...", width=40, command=self.browse_snap_folder)
+        btn_browse_snap.pack(side="left", padx=10)
+        
+        ctk.CTkLabel(self.tab_snap, text="* Default: ./snapshots in project folder", text_color="gray").pack(anchor="w", padx=20, pady=10)
+
+    def browse_snap_folder(self):
+        path = filedialog.askdirectory()
+        if path:
+            self.entry_snap_path.delete(0, tk.END)
+            self.entry_snap_path.insert(0, path)
 
     def view_recent_logs(self):
         log_path = self.config.get("SETTINGS", "LogPath", fallback=LOG_PATH)
@@ -223,6 +264,15 @@ class SettingsWindow(ctk.CTkToplevel):
         # Storage
         self.config.set("SETTINGS", "LogPath", self.entry_path.get())
         
+        # Snapshot
+        self.config.set("SETTINGS", "SnapshotPath", self.entry_snap_path.get())
+        
+        # [NEW] Check Auto Save Toggle
+        auto_save_val = "True" if self.switch_autosave.get() == 1 else "False" # CTkSwitch returns 1 or 0 usually or configured values
+        # Actually in CTkSwitch, get() returns the value (True/False if configured with onvalue/offvalue, or 1/0 default)
+        # We configured onvalue=True, offvalue=False.
+        self.config.set("SETTINGS", "AutoSave", str(self.switch_autosave.get()))
+        
         # System
         self.config.set("SETTINGS", "Password", self.entry_pw.get())
         
@@ -231,11 +281,27 @@ class SettingsWindow(ctk.CTkToplevel):
             with open(CONFIG_FILE, 'w', encoding='utf-8') as configfile:
                 self.config.write(configfile)
             
-            # Toast Notification
+            # Use Local Import to avoid circular dependency
             from modules.ui_utils import ToastNotification
             if self.master:
-                ToastNotification(self.master, "설정이 저장되었습니다. 변경 사항을 적용하려면 프로그램을 재시작하세요.", duration=5000)
-            
-            self.destroy()
+                # [Fix] Delay destroy to process button events
+                self.after(100, lambda: self._safe_close_with_toast(ToastNotification))
+            else:
+                self.after(50, self.destroy)
+
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save settings: {e}")
+
+    def _safe_close_with_toast(self, ToastClass):
+        if not self.winfo_exists(): return
+        try:
+             ToastClass(self.master, "설정이 저장되었습니다. 변경 사항을 적용하려면 프로그램을 재시작하세요.", duration=5000)
+        except: pass
+        self.destroy()
+
+    def on_close(self, event=None):
+        SettingsWindow._last_geometry = self.geometry()
+        self.grab_release()
+        try: self.master.focus_set()
+        except: pass
+        self.destroy()

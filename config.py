@@ -16,24 +16,77 @@ COLOR_SUCCESS = "#4ec9b0"
 COLOR_COLD = "#569cd6"
 COLOR_HOT = "#ce9178"
 
-# 설정 파일 경로 (배포 환경 고려)
-if getattr(sys, 'frozen', False):
-    # EXE 실행 시: 실행 파일과 같은 폴더
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    # 파이썬 실행 시: 현재 소스 파일 폴더
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 설정 파일 경로 (AppData/Roaming 사용)
+# C:\Users\<User>\AppData\Roaming\SmartFactoryLogger
+APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), 'SmartFactoryLogger')
 
-CONFIG_FILE = os.path.join(BASE_DIR, "config.ini")
+if not os.path.exists(APP_DATA_DIR):
+    try:
+        os.makedirs(APP_DATA_DIR)
+        print(f"[Info] Created AppData directory: {APP_DATA_DIR}")
+    except Exception as e:
+        print(f"[Critical] Failed to create AppData directory: {e}")
+
+# 설정 파일 위치
+CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.ini")
+
+# 기본 경로 설정을 위한 Base Dir (옵션)
+BASE_DIR = APP_DATA_DIR
 
 # ConfigParser 초기화
 config = configparser.ConfigParser()
 
 # 파일 존재 여부 확인 및 읽기
 if not os.path.exists(CONFIG_FILE):
-    print(f"[Critical] {CONFIG_FILE} not found!")
-    # 파일이 없으면 기본값으로 생성하거나 에러 처리 (여기선 에러)
-    sys.exit(1)
+    print(f"[Warning] {CONFIG_FILE} not found. Creating default configuration...")
+    try:
+        # Create default config
+        config['SYSTEM'] = {
+            'DeviceName': 'Line_1_Final',
+            'IntervalSec': '0.2'
+        }
+        config['EXTRUDER'] = {
+            'IP': '192.168.10.10',
+            'Port': '12289'
+        }
+        config['SPOT'] = {
+            'IP': '10.1.10.50'
+        }
+        config['LS_PLC'] = {
+            'IP': '192.168.10.220',
+            'Port': '2004'
+        }
+        config['SETTINGS'] = {
+            'Password': '1234',
+            # 로그와 스냅샷도 AppData 내부에 저장하거나 사용자가 변경 가능
+            'LogPath': os.path.join(APP_DATA_DIR, 'logs'),
+            'SnapshotPath': os.path.join(APP_DATA_DIR, 'snapshots'),
+            'AutoSave': 'True'
+        }
+        config['HEADERS'] = {
+            'CSV': "Date,Time,Temperature,메인압력,빌렛길이,콘테이너온도 앞쪽,콘테이너온도 뒷쪽,생산카운터,현재속도,압출종료 위치,Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp",
+            'CONSOLE': "| Temp  | 압력  | 빌렛L | 콘(앞)| 콘(뒤)| 카운트| 속도 | 종료 | Mold1 | Mold2 | Mold3 | Mold4 | Mold5 | Mold6 | BillT | AtPre | AtTmp"
+        }
+        # LS_PLC_TARGETS (Default)
+        config['LS_PLC_TARGETS'] = {
+            '%DW250': 'Mold1',
+            '%DW256': 'Mold2',
+            '%DW262': 'Mold3',
+            '%DW288': 'Mold4',
+            '%DW276': 'Mold5',
+            '%DW282': 'Mold6',
+            '%DW268': 'Billet_Temp',
+            '%DW40': 'At_Temp',
+            '%DW50': 'At_Pre'
+        }
+
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as configfile:
+            config.write(configfile)
+        
+        print(f"[Info] Default config created at {CONFIG_FILE}")
+    except Exception as e:
+        print(f"[Critical] Failed to create default config: {e}")
+        sys.exit(1)
 
 try:
     config.read(CONFIG_FILE, encoding='utf-8')
@@ -43,6 +96,8 @@ try:
     # ---------------------------------------------------------------------------
     PASSWORD = config.get("SETTINGS", "Password", fallback="1234")
     LOG_PATH = config.get("SETTINGS", "LogPath", fallback="./logs")
+    SNAPSHOT_PATH = config.get("SETTINGS", "SnapshotPath", fallback="./snapshots")
+    AUTO_SAVE = config.getboolean("SETTINGS", "AutoSave", fallback=True)
     
     # 로그 폴더 절대 경로 변환 (상대 경로일 경우 BASE_DIR 기준)
     if not os.path.isabs(LOG_PATH):
@@ -50,6 +105,14 @@ try:
         
     if not os.path.exists(LOG_PATH):
         try: os.makedirs(LOG_PATH)
+        except: pass
+
+    # 스냅샷 폴더 절대 경로 변환
+    if not os.path.isabs(SNAPSHOT_PATH):
+        SNAPSHOT_PATH = os.path.join(BASE_DIR, SNAPSHOT_PATH)
+
+    if not os.path.exists(SNAPSHOT_PATH):
+        try: os.makedirs(SNAPSHOT_PATH)
         except: pass
 
     # ---------------------------------------------------------------------------
