@@ -145,3 +145,50 @@
 [2025-12-08 10:17:09] [INFO] Data collection thread stopped.
 [2025-12-08 10:17:09] [INFO] File writer thread stopped.
 [2025-12-08 10:17:09] [INFO] Application exit.
+[2025-12-08 10:30:03] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_103003.csv
+[2025-12-08 10:30:03] [INFO] Data collection thread started.
+[2025-12-08 10:30:06] [INFO] File writer thread stopped.
+[2025-12-08 10:30:06] [INFO] Data collection thread stopped.
+[2025-12-08 10:30:06] [INFO] Application exit.
+[2025-12-08 10:32:27] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_103227.csv
+[2025-12-08 10:32:27] [INFO] Data collection thread started.
+[2025-12-08 10:32:46] [INFO] File writer thread stopped.
+[2025-12-08 10:32:46] [INFO] Data collection thread stopped.
+[2025-12-08 10:32:46] [INFO] Application exit.
+[2025-12-08 10:42:53] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_104253.csv
+[2025-12-08 10:42:53] [INFO] Data collection thread started.
+[2025-12-08 10:45:52] [INFO] Shutdown signal received: 2
+[2025-12-08 10:45:52] [INFO] File writer thread stopped.
+[2025-12-08 10:45:52] [INFO] Data collection thread stopped.
+[2025-12-08 10:45:52] [INFO] Application exit.
+[2025-12-08 10:46:06] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_104606.csv
+[2025-12-08 10:46:06] [INFO] Data collection thread started.
+[2025-12-08 10:48:36] [INFO] Shutdown signal received: 2
+[2025-12-08 10:48:36] [INFO] File writer thread stopped.
+[2025-12-08 10:48:36] [INFO] Data collection thread stopped.
+[2025-12-08 10:48:36] [INFO] Application exit.
+[2025-12-08 10:48:40] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_104840.csv
+[2025-12-08 10:48:40] [INFO] Data collection thread started.
+[2025-12-08 10:49:02] [INFO] File writer thread stopped.
+[2025-12-08 10:49:02] [INFO] Data collection thread stopped.
+[2025-12-08 10:49:02] [INFO] Application exit.
+[2025-12-08 10:49:04] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_104904.csv
+[2025-12-08 10:49:04] [INFO] Data collection thread started.
+[2025-12-08 10:50:10] [INFO] Data collection thread stopped.
+[2025-12-08 10:50:10] [INFO] File writer thread stopped.
+[2025-12-08 10:50:10] [INFO] Application exit.
+[2025-12-08 10:50:12] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_105012.csv
+[2025-12-08 10:50:12] [INFO] Data collection thread started.
+[2025-12-08 10:50:59] [INFO] Data collection thread stopped.
+[2025-12-08 10:50:59] [INFO] File writer thread stopped.
+[2025-12-08 10:50:59] [INFO] Application exit.
+[2025-12-08 10:51:03] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_105103.csv
+[2025-12-08 10:51:03] [INFO] Data collection thread started.
+[2025-12-08 10:51:38] [INFO] Data collection thread stopped.
+[2025-12-08 10:51:38] [INFO] File writer thread stopped.
+[2025-12-08 10:51:38] [INFO] Application exit.
+[2025-12-08 10:51:40] [INFO] CSV Log file opened: C:\Users\user\Documents\GitHub\SmartFactoryLogger\./logs\Factory_Integrated_Log_20251208_105140.csv
+[2025-12-08 10:51:40] [INFO] Data collection thread started.
+[2025-12-08 10:52:37] [INFO] File writer thread stopped.
+[2025-12-08 10:52:37] [INFO] Data collection thread stopped.
+[2025-12-08 10:52:37] [INFO] Application exit.

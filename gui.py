@@ -2,6 +2,7 @@
 import customtkinter as ctk
 import tkinter as tk
 import math
+import webbrowser
 from datetime import datetime
 from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT, COLOR_WARNING, COLOR_DANGER, COLOR_SUCCESS, COLOR_COLD, COLOR_HOT, PASSWORD
 from settings_gui import SettingsWindow
@@ -162,6 +163,25 @@ class InfoCard(ctk.CTkFrame):
         else:
             self.side_bar.configure(fg_color=COLOR_CARD) # 기본 상태
 
+    def add_button(self, text, command, tooltip=None):
+        # Use absolute positioning relative to content frame (top-right)
+        # We need to ensure we track how many buttons to stack them
+        if not hasattr(self, 'btn_count'): self.btn_count = 0
+        
+        btn = ctk.CTkButton(self.content, text=text, width=30, height=30, 
+                            fg_color="#444444", hover_color="#666666", 
+                            font=("Segoe UI Emoji", 16), command=command)
+        
+        # Place at top right: relx=1.0 - padding
+        # offset based on btn_count
+        offset_x = -35 * self.btn_count
+        btn.place(relx=1.0, x=offset_x, y=0, anchor="ne")
+        
+        if tooltip:
+             CTkTooltip(btn, tooltip)
+        
+        self.btn_count += 1
+
 class PasswordDialog(ctk.CTkToplevel):
     _last_geometry = None
 
@@ -308,9 +328,9 @@ class SmartFactoryApp(ctk.CTk):
         self.press_val = ctk.CTkLabel(self.col1, text="0.0 bar", font=(FONT_MAIN, 24, "bold"))
         self.press_val.pack(anchor="e", padx=20)
         
-        self.card_count = InfoCard(self.col1, "📦 Prod Count", "0", "", value_size=36)
+        self.card_count = InfoCard(self.col1, "📦 Prod Count", "0", "", value_size=42)
         self.card_count.pack(fill="x", pady=10, padx=20)
-        self.card_endpos = InfoCard(self.col1, "📏 End Position", "0", "mm", value_size=36)
+        self.card_endpos = InfoCard(self.col1, "📏 End Position", "0", "mm", value_size=42)
         self.card_endpos.pack(fill="x", pady=10, padx=20)
 
         # === Column 2: Temperatures ===
@@ -319,22 +339,24 @@ class SmartFactoryApp(ctk.CTk):
         
         ctk.CTkLabel(self.col2, text="🌡️ TEMPERATURES", font=(FONT_MAIN, 24, "bold"), text_color=COLOR_TEXT_DIM).pack(anchor="w", pady=20, padx=20)
         
-        self.card_spot = InfoCard(self.col2, "🎯 SPOT Temp (Product)", "0.0", "°C", color=COLOR_WARNING, title_size=24, value_size=64)
+        self.card_spot = InfoCard(self.col2, "🎯 SPOT Temp (Product)", "0.0", "°C", color=COLOR_WARNING, title_size=24, value_size=78)
         self.card_spot.pack(fill="x", pady=20, padx=20)
+        self.card_spot.add_button("🌍", lambda: webbrowser.open("http://10.1.10.60/index.ssi"), "Open Settings (Actuator)")
+        self.card_spot.add_button("📷", lambda: webbrowser.open("http://10.1.10.50/image.ssi"), "Open Camera View")
         CTkTooltip(self.card_spot, "Infrared Sensor Reading (Non-contact)")
         
         self.frame_cont = ctk.CTkFrame(self.col2, fg_color="transparent")
         self.frame_cont.pack(fill="x", pady=10, padx=20)
-        self.card_cont_f = InfoCard(self.frame_cont, "🔥 Cont. Front", "0", "°C")
+        self.card_cont_f = InfoCard(self.frame_cont, "🔥 Cont. Front", "0", "°C", value_size=42)
         self.card_cont_f.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self.card_cont_b = InfoCard(self.frame_cont, "🔥 Cont. Back", "0", "°C")
+        self.card_cont_b = InfoCard(self.frame_cont, "🔥 Cont. Back", "0", "°C", value_size=42)
         self.card_cont_b.pack(side="right", fill="x", expand=True, padx=(10, 0))
         
         self.frame_billet = ctk.CTkFrame(self.col2, fg_color="transparent")
         self.frame_billet.pack(fill="x", pady=10, padx=20)
-        self.card_billet_t = InfoCard(self.frame_billet, "🥖 Billet Temp", "0", "°C")
+        self.card_billet_t = InfoCard(self.frame_billet, "🥖 Billet Temp", "0", "°C", value_size=42)
         self.card_billet_t.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self.card_billet_l = InfoCard(self.frame_billet, "📏 Billet Length", "0", "mm")
+        self.card_billet_l = InfoCard(self.frame_billet, "📏 Billet Length", "0", "mm", value_size=42)
         self.card_billet_l.pack(side="right", fill="x", expand=True, padx=(10, 0))
 
         # === Column 3: Molds & Env ===
@@ -347,7 +369,7 @@ class SmartFactoryApp(ctk.CTk):
         self.mold_frame.pack(fill="x", padx=15)
         self.mold_cards = []
         for i in range(6):
-            card = InfoCard(self.mold_frame, f"🛡️ Mold {i+1}", "0", "°C", value_size=24)
+            card = InfoCard(self.mold_frame, f"🛡️ Mold {i+1}", "0", "°C", value_size=42)
             r, c = divmod(i, 2)
             card.grid(row=r, column=c, sticky="ew", padx=5, pady=5)
             self.mold_frame.grid_columnconfigure(c, weight=1)
