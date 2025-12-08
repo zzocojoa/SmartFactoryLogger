@@ -130,16 +130,23 @@ class CircularGauge(ctk.CTkCanvas):
             self.update_dynamic()
 
 class InfoCard(ctk.CTkFrame):
-    def __init__(self, master, title, value="--", unit="", color=COLOR_SUCCESS, title_size=14, value_size=28, **kwargs):
+    def __init__(self, master, title, value="--", unit="", color=COLOR_SUCCESS, title_size=14, value_size=28, height=None, **kwargs):
+        # [Fix] Fixed Height Application
+        if height:
+            kwargs['height'] = height
+            
         super().__init__(master, fg_color=COLOR_CARD, corner_radius=8, **kwargs) # 각진 모서리 (Modern)
+        
+        if height:
+            self.pack_propagate(False) # 고정 높이 강제 (내용물에 의해 줄어들지 않음)
         
         # 사이드 바 (상태 표시줄)
         self.side_bar = ctk.CTkFrame(self, width=6, fg_color=COLOR_CARD, corner_radius=0) # 초기엔 숨김(배경색과 동일)
-        self.side_bar.pack(side="left", fill="y", padx=(0, 10))
+        self.side_bar.pack(side="left", fill="y", padx=(0, 5)) 
         
-        # 컨텐츠 영역
+        # 컨텐츠 영역 (Vertical Center Alignment for Fixed Height)
         self.content = ctk.CTkFrame(self, fg_color="transparent")
-        self.content.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        self.content.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         
         self.title_lbl = ctk.CTkLabel(self.content, text=title, font=(FONT_MAIN, title_size), text_color=COLOR_TEXT_DIM)
         self.title_lbl.pack(anchor="w")
@@ -261,6 +268,23 @@ class SmartFactoryApp(ctk.CTk):
         self.geometry("1600x900")
         self.configure(fg_color=COLOR_BG)
         
+        # [Icon] 작업표시줄 및 타이틀바 아이콘 적용 (PyInstaller 호환)
+        import os, sys
+        def resource_path(relative_path):
+            """ Get absolute path to resource, works for dev and for PyInstaller """
+            try:
+                # PyInstaller creates a temp folder and stores path in _MEIxxxxxx
+                base_path = sys._MEIPASS
+            except Exception:
+                base_path = os.path.abspath(".")
+            return os.path.join(base_path, relative_path)
+
+        try:
+            icon_path = resource_path("icon.ico")
+            self.iconbitmap(icon_path)
+        except Exception as e:
+            print(f"Icon load failed: {e}")
+                
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self.grid_columnconfigure(2, weight=1)
@@ -339,13 +363,15 @@ class SmartFactoryApp(ctk.CTk):
         self.view_dashboard = ctk.CTkFrame(self.container, fg_color="transparent")
         self.view_dashboard.grid(row=0, column=0, sticky="nsew")
         
+        # [Fix] Expand Row 0 to fill vertical space
+        self.view_dashboard.grid_rowconfigure(0, weight=1)
         self.view_dashboard.grid_columnconfigure(0, weight=1)
         self.view_dashboard.grid_columnconfigure(1, weight=1)
         self.view_dashboard.grid_columnconfigure(2, weight=1)
 
         # === Column 1: KPIs ===
         self.col1 = ctk.CTkFrame(self.view_dashboard, fg_color=COLOR_PANEL, corner_radius=10)
-        self.col1.grid(row=0, column=0, sticky="nsew", padx=10, pady=10) # Modified row index
+        self.col1.grid(row=0, column=0, sticky="nsew", padx=5, pady=5) # Reduced 10->5
         
         lbl_kpi = ctk.CTkLabel(self.col1, text="⚡ PROCESS KPI", font=(FONT_MAIN, 24, "bold"), text_color=COLOR_TEXT_DIM)
         lbl_kpi.pack(anchor="w", pady=20, padx=20)
@@ -361,18 +387,18 @@ class SmartFactoryApp(ctk.CTk):
         self.press_val = ctk.CTkLabel(self.col1, text="0.0 bar", font=(FONT_MAIN, 24, "bold"))
         self.press_val.pack(anchor="e", padx=20)
         
-        self.card_count = InfoCard(self.col1, "📦 Prod Count", "0", "", value_size=42)
+        self.card_count = InfoCard(self.col1, "📦 Prod Count", "0", "", value_size=42, height=90)
         self.card_count.pack(fill="x", pady=10, padx=20)
-        self.card_endpos = InfoCard(self.col1, "📏 End Position", "0", "mm", value_size=42)
+        self.card_endpos = InfoCard(self.col1, "📏 End Position", "0", "mm", value_size=42, height=90)
         self.card_endpos.pack(fill="x", pady=10, padx=20)
 
         # === Column 2: Temperatures ===
         self.col2 = ctk.CTkFrame(self.view_dashboard, fg_color=COLOR_PANEL, corner_radius=10)
-        self.col2.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.col2.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         
         ctk.CTkLabel(self.col2, text="🌡️ TEMPERATURES", font=(FONT_MAIN, 24, "bold"), text_color=COLOR_TEXT_DIM).pack(anchor="w", pady=20, padx=20)
         
-        self.card_spot = InfoCard(self.col2, "🎯 SPOT Temp (Product)", "0.0", "°C", color=COLOR_WARNING, title_size=24, value_size=78)
+        self.card_spot = InfoCard(self.col2, "🎯 SPOT Temp (Product)", "0.0", "°C", color=COLOR_WARNING, title_size=24, value_size=78, height=145)
         self.card_spot.pack(fill="x", pady=20, padx=20)
         self.card_spot.add_button("🌍", lambda: webbrowser.open("http://10.1.10.60/index.ssi"), "Open Settings (Actuator)")
         self.card_spot.add_button("📷", lambda: webbrowser.open("http://10.1.10.50/image.ssi"), "Open Camera View")
@@ -380,21 +406,21 @@ class SmartFactoryApp(ctk.CTk):
         
         self.frame_cont = ctk.CTkFrame(self.col2, fg_color="transparent")
         self.frame_cont.pack(fill="x", pady=10, padx=20)
-        self.card_cont_f = InfoCard(self.frame_cont, "🔥 Cont. Front", "0", "°C", value_size=42)
+        self.card_cont_f = InfoCard(self.frame_cont, "🔥 Cont. Front", "0", "°C", value_size=42, height=90)
         self.card_cont_f.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self.card_cont_b = InfoCard(self.frame_cont, "🔥 Cont. Back", "0", "°C", value_size=42)
+        self.card_cont_b = InfoCard(self.frame_cont, "🔥 Cont. Back", "0", "°C", value_size=42, height=90)
         self.card_cont_b.pack(side="right", fill="x", expand=True, padx=(10, 0))
         
         self.frame_billet = ctk.CTkFrame(self.col2, fg_color="transparent")
         self.frame_billet.pack(fill="x", pady=10, padx=20)
-        self.card_billet_t = InfoCard(self.frame_billet, "🥖 Billet Temp", "0", "°C", value_size=42)
+        self.card_billet_t = InfoCard(self.frame_billet, "🥖 Billet Temp", "0", "°C", value_size=42, height=90)
         self.card_billet_t.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self.card_billet_l = InfoCard(self.frame_billet, "📏 Billet Length", "0", "mm", value_size=42)
+        self.card_billet_l = InfoCard(self.frame_billet, "📏 Billet Length", "0", "mm", value_size=42, height=90)
         self.card_billet_l.pack(side="right", fill="x", expand=True, padx=(10, 0))
 
         # === Column 3: Molds & Env ===
         self.col3 = ctk.CTkFrame(self.view_dashboard, fg_color=COLOR_PANEL, corner_radius=10)
-        self.col3.grid(row=0, column=2, sticky="nsew", padx=10, pady=10)
+        self.col3.grid(row=0, column=2, sticky="nsew", padx=5, pady=5)
         
         ctk.CTkLabel(self.col3, text="⚙️ MOLDS & ENV", font=(FONT_MAIN, 24, "bold"), text_color=COLOR_TEXT_DIM).pack(anchor="w", pady=20, padx=20)
         
@@ -402,7 +428,7 @@ class SmartFactoryApp(ctk.CTk):
         self.mold_frame.pack(fill="x", padx=15)
         self.mold_cards = []
         for i in range(6):
-            card = InfoCard(self.mold_frame, f"🛡️ Mold {i+1}", "0", "°C", value_size=42)
+            card = InfoCard(self.mold_frame, f"🛡️ Mold {i+1}", "0", "°C", value_size=42, height=90)
             r, c = divmod(i, 2)
             card.grid(row=r, column=c, sticky="ew", padx=5, pady=5)
             self.mold_frame.grid_columnconfigure(c, weight=1)
@@ -411,9 +437,9 @@ class SmartFactoryApp(ctk.CTk):
             
         self.frame_env = ctk.CTkFrame(self.col3, fg_color="transparent")
         self.frame_env.pack(fill="x", pady=25, padx=20)
-        self.card_at_temp = InfoCard(self.frame_env, "🏠 At Temp", "0.0", "°C")
+        self.card_at_temp = InfoCard(self.frame_env, "🏠 At Temp", "0.0", "°C", height=70, value_size=36)
         self.card_at_temp.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self.card_at_pre = InfoCard(self.frame_env, "💧 At Pre", "0.0", "")
+        self.card_at_pre = InfoCard(self.frame_env, "💧 At Pre", "0.0", "%", height=70, value_size=36)
         self.card_at_pre.pack(side="right", fill="x", expand=True, padx=(10, 0))
 
         # 2. Time Series View (Lazy Load or Init now)
@@ -482,11 +508,57 @@ class SmartFactoryApp(ctk.CTk):
         
         # Spot
         spot = data.get('Spot', 0) or 0
-        self.card_spot.update_value(f"{spot:.1f}")
+        f_spot = float(spot)
+        self.card_spot.update_value(f"{f_spot:.1f}")
+
+        # [Logic] 4-Stage Color for SPOT Temp
+        # < 450: Cold (Blue)
+        # 450-500: Pre-Heat (Yellow/Orange)
+        # 500-550: Optimal (Green)
+        # > 550: Overheat (Red)
+        spot_color = COLOR_COLD
+        if f_spot >= 550:
+            spot_color = COLOR_HOT
+        elif f_spot >= 500:
+            spot_color = COLOR_SUCCESS
+        elif f_spot >= 450:
+            spot_color = COLOR_WARNING # Yellow
+        else:
+            spot_color = COLOR_COLD # Blue
+
+        self.card_spot.update_value(f"{f_spot:.1f}", color=spot_color, status_color=spot_color)
         
-        self.card_cont_f.update_value(data.get('Temp_F', 0))
-        self.card_cont_b.update_value(data.get('Temp_B', 0))
-        self.card_billet_t.update_value(data.get('Billet_Temp', 0))
+        
+        # [Logic] 4-Stage Color for Container Temps
+        # < 350: Blue, 350-400: Yellow, 400-450: Green, > 450: Red
+        cont_f = data.get('Temp_F', 0)
+        f_cont_f = float(cont_f)
+        cont_f_color = COLOR_COLD
+        if f_cont_f >= 450: cont_f_color = COLOR_HOT
+        elif f_cont_f >= 400: cont_f_color = COLOR_SUCCESS
+        elif f_cont_f >= 350: cont_f_color = COLOR_WARNING
+        
+        self.card_cont_f.update_value(cont_f, color=cont_f_color, status_color=cont_f_color)
+
+        cont_b = data.get('Temp_B', 0)
+        f_cont_b = float(cont_b)
+        cont_b_color = COLOR_COLD
+        if f_cont_b >= 450: cont_b_color = COLOR_HOT
+        elif f_cont_b >= 400: cont_b_color = COLOR_SUCCESS
+        elif f_cont_b >= 350: cont_b_color = COLOR_WARNING
+
+        self.card_cont_b.update_value(cont_b, color=cont_b_color, status_color=cont_b_color)
+        
+        # [Logic] 4-Stage Color for Billet Temp
+        # < 440: Blue, 440-460: Yellow, 460-480: Green, > 480: Red
+        billet_t = data.get('Billet_Temp', 0)
+        f_billet_t = float(billet_t)
+        billet_t_color = COLOR_COLD
+        if f_billet_t >= 480: billet_t_color = COLOR_HOT
+        elif f_billet_t >= 460: billet_t_color = COLOR_SUCCESS
+        elif f_billet_t >= 440: billet_t_color = COLOR_WARNING
+        
+        self.card_billet_t.update_value(billet_t, color=billet_t_color, status_color=billet_t_color)
         self.card_billet_l.update_value(data.get('Billet', 0))
         
         # Molds (Side Bar Color Logic)
@@ -498,14 +570,46 @@ class SmartFactoryApp(ctk.CTk):
             status_color = COLOR_COLD if f_val < 100 else COLOR_HOT
             self.mold_cards[i].update_value(val, status_color=status_color)
             
-        self.card_at_temp.update_value(data.get('At_Temp', 0))
-        self.card_at_pre.update_value(data.get('At_Pre', 0))
+            self.mold_cards[i].update_value(val, status_color=status_color)
+            
+        # [Logic] Env Color & Text Logic
+        # At Temp: <10 추움(Blue), 10-28 쾌적(Green), >28 더움(Red)
+        at_temp = data.get('At_Temp', 0)
+        f_at_temp = float(at_temp)
+        at_temp_color = COLOR_SUCCESS
+        at_temp_text = "쾌적"
+        
+        if f_at_temp >= 28:
+            at_temp_color = COLOR_HOT
+            at_temp_text = "더움"
+        elif f_at_temp < 10:
+            at_temp_color = COLOR_COLD
+            at_temp_text = "추움"
+            
+        self.card_at_temp.update_value(f"{f_at_temp} ({at_temp_text})", color=at_temp_color)
+
+        # At Pre (Humidity): <30 건조(Yellow), 30-60 쾌적(Green), >60 다습(Blue)
+        at_pre = data.get('At_Pre', 0)
+        f_at_pre = float(at_pre)
+        at_pre_color = COLOR_SUCCESS
+        at_pre_text = "쾌적"
+        
+        if f_at_pre >= 60:
+            at_pre_color = COLOR_COLD # Blue for Humid
+            at_pre_text = "다습"
+        elif f_at_pre < 30:
+            at_pre_color = COLOR_WARNING # Yellow for Dry
+            at_pre_text = "건조"
+
+        self.card_at_pre.update_value(f"{f_at_pre} ({at_pre_text})", color=at_pre_color)
         
         self.log_lbl.configure(text=f"Last Update: {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
         
-        # Update Graph if visible
-        if self.current_view == "graph":
-            self.view_graph.update_data(data)
+        
+        # [Fix] Update Graph Data Buffers (Background Buffering)
+        # Always send data to graph module so it maintains history even when hidden.
+        # Graph module handles drawing optimization (only draws if visible/needed).
+        self.view_graph.update_data(data)
 
     def show_diagnostics(self, event=None):
         win = ctk.CTkToplevel(self)

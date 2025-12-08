@@ -35,7 +35,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=datas,
+    datas=[('icon.ico', '.')] + datas, # [Fix] Bundle icon inside EXE
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -68,4 +68,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='icon.ico', # [Icon] 데스크탑/실행파일 아이콘 설정
 )
