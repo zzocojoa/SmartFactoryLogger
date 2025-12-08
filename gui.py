@@ -5,7 +5,11 @@ import math
 import time
 import webbrowser
 from datetime import datetime
-from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT, COLOR_WARNING, COLOR_DANGER, COLOR_SUCCESS, COLOR_COLD, COLOR_HOT, PASSWORD
+import urllib.request
+import io
+import threading
+from PIL import Image, ImageDraw
+from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT, COLOR_WARNING, COLOR_DANGER, COLOR_SUCCESS, COLOR_COLD, COLOR_HOT, PASSWORD, URL_SPOT_IMAGE, SPOT_REFRESH_INTERVAL, SPOT_CROSSHAIR_X, SPOT_CROSSHAIR_Y, ACTUATOR_CMD_LEFT, ACTUATOR_CMD_RIGHT
 from settings_gui import SettingsWindow
 from modules.ui_utils import CTkTooltip, ToastNotification
 from modules.graph_view import TimeSeriesPanel
@@ -260,6 +264,133 @@ class PasswordDialog(ctk.CTkToplevel):
     def is_verified(self):
         return self.verified
 
+class CameraWidget(ctk.CTkFrame):
+    def __init__(self, master, url, width=320, height=240, refresh_rate=1.0, **kwargs):
+        super().__init__(master, fg_color="black", corner_radius=10, **kwargs)
+        self.url = url
+        self.target_width = width
+        self.target_height = height
+        self.crosshair_x = SPOT_CROSSHAIR_X
+        self.crosshair_y = SPOT_CROSSHAIR_Y
+        self.refresh_interval = int(1000 / refresh_rate) # ms
+        self.running = True
+        self.current_image = None
+        self.error_msg = "Initializing..."
+        self.lock = threading.Lock()
+        
+        # Placeholder / Status Label
+        self.lbl_status = ctk.CTkLabel(self, text=self.error_msg, text_color="gray", wraplength=width-40)
+        self.lbl_status.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Actuator Controls (Overlay)
+        self.btn_left = ctk.CTkButton(self, text="<", width=30, height=50, 
+                                      fg_color="#333333", hover_color="#555555", 
+                                      font=("Arial", 16, "bold"),
+                                      command=lambda: self.move_actuator("left"))
+        self.btn_left.place(relx=0.06, rely=0.5, anchor="center")
+        
+        self.btn_right = ctk.CTkButton(self, text=">", width=30, height=50, 
+                                       fg_color="#333333", hover_color="#555555", 
+                                       font=("Arial", 16, "bold"),
+                                       command=lambda: self.move_actuator("right"))
+        self.btn_right.place(relx=0.94, rely=0.5, anchor="center")
+        
+        # Image Display Label
+        self.lbl_image = ctk.CTkLabel(self, text="")
+        self.lbl_image.pack(expand=True, fill="both", padx=2, pady=2)
+        
+        # Start Fetch Thread
+        self.thread = threading.Thread(target=self.fetch_loop, daemon=True)
+        self.thread.start()
+        
+        # Start UI Update Loop
+        self.after(500, self.update_image_ui)
+
+    def fetch_loop(self):
+        while self.running:
+            try:
+                # Try to fetch
+                with urllib.request.urlopen(self.url, timeout=2) as response:
+                    data = response.read()
+                    img = Image.open(io.BytesIO(data))
+                    
+                    # [Draw Crosshair]
+                    draw = ImageDraw.Draw(img)
+                    w, h = img.size
+                    cx, cy = w * self.crosshair_x, h * self.crosshair_y
+                    
+                    # Cross style: Red 'X' or '+'
+                    # Length of arms
+                    arm_len = 20
+                    thick = 3
+                    color = "red"
+                    
+                    # Draw 'X'
+                    draw.line((cx - arm_len, cy - arm_len, cx + arm_len, cy + arm_len), fill=color, width=thick)
+                    draw.line((cx - arm_len, cy + arm_len, cx + arm_len, cy - arm_len), fill=color, width=thick)
+                    
+                    with self.lock:
+                        self.current_image = img
+                        self.error_msg = None
+            except Exception as e:
+                # [Log] Print error to console
+                print(f"[Camera] Connection Error: {e}")
+                with self.lock:
+                    self.error_msg = f"Error: {e}"
+                
+            time.sleep(SPOT_REFRESH_INTERVAL) # Fetch interval from config
+            
+    def update_image_ui(self):
+        if not self.winfo_exists():
+            self.running = False
+            return
+            
+        img = None
+        err = None
+        with self.lock:
+            img = self.current_image
+            err = self.error_msg
+            # self.current_image = None # Keep last image to avoid flicker
+            
+        if img:
+            # Create CTkImage
+            w, h = img.size
+            ratio = min(self.target_width/w, self.target_height/h)
+            new_w = int(w * ratio)
+            new_h = int(h * ratio)
+            
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(new_w, new_h))
+            
+            # Show Image Label, Hide Status
+            self.lbl_image.configure(image=ctk_img)
+            self.lbl_image.pack(expand=True, fill="both", padx=2, pady=2)
+            self.lbl_status.place_forget()
+        elif err:
+            # Hide Image Label to ensure text is visible
+            self.lbl_image.pack_forget()
+            
+            # Show Status
+            self.lbl_status.configure(text=err, text_color="#ff5555")
+            self.lbl_status.place(relx=0.5, rely=0.5, anchor="center")
+            
+        self.after(500, self.update_image_ui)
+
+    def move_actuator(self, direction):
+        url = ACTUATOR_CMD_LEFT if direction == "left" else ACTUATOR_CMD_RIGHT
+        print(f"[Actuator] Moving {direction} -> {url}")
+        threading.Thread(target=self._send_command, args=(url,), daemon=True).start()
+
+    def _send_command(self, url):
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                print(f"[Actuator] Response: {response.status}")
+        except Exception as e:
+            print(f"[Actuator] Command Failed: {e}")
+
+    def destroy(self):
+        self.running = False
+        super().destroy()
+
 class SmartFactoryApp(ctk.CTk):
     def __init__(self, queue):
         super().__init__()
@@ -441,6 +572,16 @@ class SmartFactoryApp(ctk.CTk):
         self.card_at_temp.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.card_at_pre = InfoCard(self.frame_env, "💧 At Pre", "0.0", "%", height=90, value_size=36)
         self.card_at_pre.pack(side="right", fill="x", expand=True, padx=(10, 0))
+
+        # [NEW] Camera Widget in Column 2 (Bottom)
+        self.cam_frame = ctk.CTkFrame(self.col2, fg_color="transparent")
+        self.cam_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        ctk.CTkLabel(self.cam_frame, text="📷 SPOT Camera View", font=(FONT_MAIN, 16, "bold"), text_color=COLOR_TEXT_DIM).pack(anchor="w", pady=(0, 5))
+        
+        # Use URL from config
+        # [Resize] 512x288 (16:9) verified from actual image
+        self.camera_widget = CameraWidget(self.cam_frame, url=URL_SPOT_IMAGE, width=512, height=288)
+        self.camera_widget.pack(anchor="center") # Center it instead of fill/expand to keep aspect ratio
 
         # 2. Time Series View (Lazy Load or Init now)
         self.view_graph = TimeSeriesPanel(self.container, fg_color="transparent")

@@ -27,7 +27,6 @@ excludes = [
     'test',
     'unittest',
     'pydoc_data',
-    'setuptools',
     'distutils'
 ]
 
@@ -36,7 +35,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('icon.ico', '.')] + datas, # [Fix] Bundle icon inside EXE
-    hiddenimports=[],
+    hiddenimports=['PIL', 'PIL.Image'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -129,8 +129,19 @@ try:
     PORT_EXT = config.getint("EXTRUDER", "Port", fallback=12289)
 
     # [적외선 온도기]
+    # [적외선 온도기]
     IP_SPOT = config.get("SPOT", "IP", fallback="10.1.10.50")
     URL_SPOT = f"http://{IP_SPOT}/output?p=temperature"
+    # Default to /image.jpg (Confirmed working)
+    URL_SPOT_IMAGE = config.get("SPOT", "ImageURL", fallback=f"http://{IP_SPOT}/image.jpg")
+    SPOT_REFRESH_INTERVAL = config.getfloat("SPOT", "RefreshInterval", fallback=3.0)
+    SPOT_CROSSHAIR_X = config.getfloat("SPOT", "CrosshairX", fallback=0.5)
+    SPOT_CROSSHAIR_Y = config.getfloat("SPOT", "CrosshairY", fallback=0.5)
+    
+    # [SPOT Actuator Control]
+    # Placeholder URLs. User must update these in config.ini
+    ACTUATOR_CMD_LEFT = config.get("ACTUATOR", "CmdLeft", fallback=f"http://{IP_SPOT}/control?move=left")
+    ACTUATOR_CMD_RIGHT = config.get("ACTUATOR", "CmdRight", fallback=f"http://{IP_SPOT}/control?move=right")
 
     # [LS PLC (XGT)]
     IP_LS = config.get("LS_PLC", "IP", fallback="192.168.10.220")
