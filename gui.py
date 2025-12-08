@@ -7,11 +7,13 @@ import webbrowser
 from datetime import datetime
 import urllib.request
 import io
+import io
 import threading
+import queue
 from PIL import Image, ImageDraw
-from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT, COLOR_WARNING, COLOR_DANGER, COLOR_SUCCESS, COLOR_COLD, COLOR_HOT, PASSWORD, URL_SPOT_IMAGE, SPOT_REFRESH_INTERVAL, SPOT_CROSSHAIR_X, SPOT_CROSSHAIR_Y, ACTUATOR_CMD_LEFT, ACTUATOR_CMD_RIGHT
+from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT, COLOR_WARNING, COLOR_DANGER, COLOR_SUCCESS, COLOR_COLD, COLOR_HOT, PASSWORD, URL_SPOT_IMAGE, SPOT_REFRESH_INTERVAL, SPOT_CROSSHAIR_X, SPOT_CROSSHAIR_Y, SPOT_WIDGET_WIDTH, SPOT_WIDGET_HEIGHT
 from settings_gui import SettingsWindow
-from modules.ui_utils import CTkTooltip, ToastNotification
+from modules.ui_utils import CTkTooltip, ToastNotification, draw_dashed_line
 from modules.graph_view import TimeSeriesPanel
 
 # 테마 설정
@@ -266,7 +268,10 @@ class PasswordDialog(ctk.CTkToplevel):
 
 class CameraWidget(ctk.CTkFrame):
     def __init__(self, master, url, width=320, height=240, refresh_rate=1.0, **kwargs):
-        super().__init__(master, fg_color="black", corner_radius=10, **kwargs)
+        super().__init__(master, width=width, height=height, fg_color="black", corner_radius=10, **kwargs)
+        self.pack_propagate(False) # [Fix] Prevent collapsing when empty
+        self.grid_propagate(False) 
+        
         self.url = url
         self.target_width = width
         self.target_height = height
@@ -282,22 +287,26 @@ class CameraWidget(ctk.CTkFrame):
         self.lbl_status = ctk.CTkLabel(self, text=self.error_msg, text_color="gray", wraplength=width-40)
         self.lbl_status.place(relx=0.5, rely=0.5, anchor="center")
         
-        # Actuator Controls (Overlay)
-        self.btn_left = ctk.CTkButton(self, text="<", width=30, height=50, 
+        # Focus Controls (Overlay)
+        self.btn_left = ctk.CTkButton(self, text="◀", width=30, height=50, 
                                       fg_color="#333333", hover_color="#555555", 
-                                      font=("Arial", 16, "bold"),
-                                      command=lambda: self.move_actuator("left"))
+                                      font=("Segoe UI Emoji", 20),
+                                      command=lambda: self.change_focus(-1))
         self.btn_left.place(relx=0.06, rely=0.5, anchor="center")
         
-        self.btn_right = ctk.CTkButton(self, text=">", width=30, height=50, 
+        self.btn_right = ctk.CTkButton(self, text="▶", width=30, height=50, 
                                        fg_color="#333333", hover_color="#555555", 
-                                       font=("Arial", 16, "bold"),
-                                       command=lambda: self.move_actuator("right"))
+                                       font=("Segoe UI Emoji", 20),
+                                       command=lambda: self.change_focus(1))
         self.btn_right.place(relx=0.94, rely=0.5, anchor="center")
         
         # Image Display Label
         self.lbl_image = ctk.CTkLabel(self, text="")
         self.lbl_image.pack(expand=True, fill="both", padx=2, pady=2)
+        
+        # Focus Queue
+        self.focus_queue = queue.Queue()
+        threading.Thread(target=self.focus_loop, daemon=True).start()
         
         # Start Fetch Thread
         self.thread = threading.Thread(target=self.fetch_loop, daemon=True)
@@ -326,8 +335,8 @@ class CameraWidget(ctk.CTkFrame):
                     color = "red"
                     
                     # Draw 'X'
-                    draw.line((cx - arm_len, cy - arm_len, cx + arm_len, cy + arm_len), fill=color, width=thick)
-                    draw.line((cx - arm_len, cy + arm_len, cx + arm_len, cy - arm_len), fill=color, width=thick)
+                    draw_dashed_line(draw, (cx - arm_len, cy - arm_len), (cx + arm_len, cy + arm_len), fill=color, width=thick, dash=(4, 4))
+                    draw_dashed_line(draw, (cx - arm_len, cy + arm_len), (cx + arm_len, cy - arm_len), fill=color, width=thick, dash=(4, 4))
                     
                     with self.lock:
                         self.current_image = img
@@ -375,17 +384,61 @@ class CameraWidget(ctk.CTkFrame):
             
         self.after(500, self.update_image_ui)
 
-    def move_actuator(self, direction):
-        url = ACTUATOR_CMD_LEFT if direction == "left" else ACTUATOR_CMD_RIGHT
-        print(f"[Actuator] Moving {direction} -> {url}")
-        threading.Thread(target=self._send_command, args=(url,), daemon=True).start()
+    def change_focus(self, direction):
+        # direction: 1 (increase) or -1 (decrease)
+        # Just put in queue, return immediately (Responsive UI)
+        self.focus_queue.put(direction)
 
-    def _send_command(self, url):
-        try:
-            with urllib.request.urlopen(url, timeout=2) as response:
-                print(f"[Actuator] Response: {response.status}")
-        except Exception as e:
-            print(f"[Actuator] Command Failed: {e}")
+    def focus_loop(self):
+        from config import URL_SPOT_FOCUS, SPOT_FOCUS_STEP
+        
+        while self.running:
+            try:
+                # 1. Wait for first item (Blocking)
+                direction = self.focus_queue.get()
+                
+                # 2. Check for burst clicks (Queue Merging)
+                # If user clicked 5 times quickly, consume them all
+                steps = direction
+                while not self.focus_queue.empty():
+                    try:
+                        steps += self.focus_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                
+                if steps == 0: continue # +1 then -1 = 0 movement
+                
+                # 3. Execute Control (Network I/O)
+                try:
+                    # GET Current Focus
+                    with urllib.request.urlopen(URL_SPOT_FOCUS, timeout=2) as response:
+                        current_val = int(response.read().decode().strip())
+                        
+                    # Calculate new value
+                    delta = steps * SPOT_FOCUS_STEP
+                    new_val = current_val + delta
+                    new_val = max(300, min(10000, new_val)) # Clamp
+                    
+                    print(f"[Focus] Merged Steps: {steps} -> Change {current_val} to {new_val}")
+                    
+                    if new_val != current_val:
+                        # PUT New Focus
+                        req = urllib.request.Request(URL_SPOT_FOCUS, data=str(new_val).encode(), method='PUT')
+                        with urllib.request.urlopen(req, timeout=2) as response:
+                            print(f"[Focus] Updated: {response.read().decode().strip()}")
+                    else:
+                        print("[Focus] Value limit reached, skipping update.")
+                            
+                except Exception as e:
+                    print(f"[Focus] IO Error: {e}")
+                    
+                # Small delay to prevent hammering if queue fills up instantly again
+                time.sleep(0.1)
+                
+            except Exception as e:
+                print(f"[FocusWorker] Error: {e}")
+
+
 
     def destroy(self):
         self.running = False
@@ -579,8 +632,8 @@ class SmartFactoryApp(ctk.CTk):
         ctk.CTkLabel(self.cam_frame, text="📷 SPOT Camera View", font=(FONT_MAIN, 16, "bold"), text_color=COLOR_TEXT_DIM).pack(anchor="w", pady=(0, 5))
         
         # Use URL from config
-        # [Resize] 512x288 (16:9) verified from actual image
-        self.camera_widget = CameraWidget(self.cam_frame, url=URL_SPOT_IMAGE, width=512, height=288)
+        # [Resize] Configurable size from config.ini
+        self.camera_widget = CameraWidget(self.cam_frame, url=URL_SPOT_IMAGE, width=SPOT_WIDGET_WIDTH, height=SPOT_WIDGET_HEIGHT)
         self.camera_widget.pack(anchor="center") # Center it instead of fill/expand to keep aspect ratio
 
         # 2. Time Series View (Lazy Load or Init now)

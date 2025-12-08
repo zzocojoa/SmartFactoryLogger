@@ -94,3 +94,29 @@ class CTkTooltip:
         if self.tooltip_window:
             self.tooltip_window.destroy()
             self.tooltip_window = None
+
+def draw_dashed_line(draw, start, end, fill="red", width=1, dash=(5, 5)):
+    """
+    PIL ImageDraw에 점선을 그리는 함수
+    dash=(선 길이, 공백 길이)
+    """
+    import math
+    x0, y0 = start
+    x1, y1 = end
+    dx, dy = x1 - x0, y1 - y0
+    dist = math.sqrt(dx**2 + dy**2)
+    if dist == 0: return
+    
+    dash_len, gap_len = dash
+    step_x = dx / dist
+    step_y = dy / dist
+    
+    curr_dist = 0
+    while curr_dist < dist:
+        e_dist = min(curr_dist + dash_len, dist)
+        s_x = x0 + step_x * curr_dist
+        s_y = y0 + step_y * curr_dist
+        e_x = x0 + step_x * e_dist
+        e_y = y0 + step_y * e_dist
+        draw.line((s_x, s_y, e_x, e_y), fill=fill, width=width)
+        curr_dist += dash_len + gap_len

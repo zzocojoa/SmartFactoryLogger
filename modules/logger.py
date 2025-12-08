@@ -98,6 +98,12 @@ def file_writer_thread(data_queue):
                 
         except Exception as e:
             sys_logger.error(f"Error in file_writer_thread: {e}")
+            # [Fix] Reset file handle to force re-open on next attempt
+            if f:
+                try: f.close()
+                except: pass
+            f, writer = None, None
+            
             if buffer: buffer.clear() # Prevent sticking error loop
             
     # Final Flush on exit

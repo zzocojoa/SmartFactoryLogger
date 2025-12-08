@@ -17,8 +17,14 @@ COLOR_COLD = "#569cd6"
 COLOR_HOT = "#ce9178"
 
 # 설정 파일 경로 (AppData/Roaming 사용)
-# C:\Users\<User>\AppData\Roaming\SmartFactoryLogger
-APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), 'SmartFactoryLogger')
+# 플랫폼별 앱 데이터 경로 설정
+if sys.platform == "win32":
+    APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), 'SmartFactoryLogger')
+elif sys.platform == "darwin":
+    APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "SmartFactoryLogger")
+else:
+    # Linux/Unix
+    APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".config", "SmartFactoryLogger")
 
 if not os.path.exists(APP_DATA_DIR):
     try:
@@ -33,71 +39,120 @@ CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.ini")
 # 기본 경로 설정을 위한 Base Dir (옵션)
 BASE_DIR = APP_DATA_DIR
 
-# ConfigParser 초기화
+# ---------------------------------------------------------------------------
+# [0] Default Configuration (Source of Truth)
+# ---------------------------------------------------------------------------
+DEFAULT_CONFIG = {
+    'SYSTEM': {
+        'DeviceName': '창녕 2호기',
+        'IntervalSec': '0.2'
+    },
+    'EXTRUDER': {
+        'IP': '192.168.10.10',
+        'Port': '12289'
+    },
+    'SPOT': {
+        'IP': '10.1.10.50',
+        'RefreshInterval': '3.0',
+        'ImageURL': 'http://10.1.10.50/image.jpg',
+        'CrosshairX': '0.5',
+        'CrosshairY': '0.5',
+        'FocusURL': 'http://10.1.10.50/control?p=focus',
+        'FocusStep': '50',
+        'WidgetWidth': '512',
+        'WidgetHeight': '288'
+    },
+    'LS_PLC': {
+        'IP': '192.168.10.220',
+        'Port': '2004'
+    },
+    'LS_PLC_TARGETS': {
+        '%DW250': 'Mold1',
+        '%DW256': 'Mold2',
+        '%DW262': 'Mold3',
+        '%DW288': 'Mold4',
+        '%DW276': 'Mold5',
+        '%DW282': 'Mold6',
+        '%DW268': 'Billet_Temp',
+        '%DW40': 'At_Temp',
+        '%DW50': 'At_Pre'
+    },
+    'SETTINGS': {
+        'Password': '1234',
+        'LogPath': 'logs', # Relative to APP_DATA_DIR
+        'SnapshotPath': 'snapshots',
+        'AutoSave': 'True'
+    },
+    'HEADERS': {
+        'CSV': "Date,Time,Temperature,메인압력,빌렛길이,콘테이너온도 앞쪽,콘테이너온도 뒷쪽,생산카운터,현재속도,압출종료 위치,Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp",
+        'CONSOLE': "| Temp  | 압력  | 빌렛L | 콘(앞)| 콘(뒤)| 카운트| 속도 | 종료 | Mold1 | Mold2 | Mold3 | Mold4 | Mold5 | Mold6 | BillT | AtPre | AtTmp"
+    }
+}
+
+# ConfigParser Init
 config = configparser.ConfigParser()
 
-# 파일 존재 여부 확인 및 읽기
-if not os.path.exists(CONFIG_FILE):
-    print(f"[Warning] {CONFIG_FILE} not found. Creating default configuration...")
-    try:
-        # Create default config
-        config['SYSTEM'] = {
-            'DeviceName': '창녕 2호기',
-            'IntervalSec': '0.2'
-        }
-        config['EXTRUDER'] = {
-            'IP': '192.168.10.10',
-            'Port': '12289'
-        }
-        config['SPOT'] = {
-            'IP': '10.1.10.50'
-        }
-        config['LS_PLC'] = {
-            'IP': '192.168.10.220',
-            'Port': '2004'
-        }
-        config['SETTINGS'] = {
-            'Password': '1234',
-            # 로그와 스냅샷도 AppData 내부에 저장하거나 사용자가 변경 가능
-            'LogPath': os.path.join(APP_DATA_DIR, 'logs'),
-            'SnapshotPath': os.path.join(APP_DATA_DIR, 'snapshots'),
-            'AutoSave': 'True'
-        }
-        config['HEADERS'] = {
-            'CSV': "Date,Time,Temperature,메인압력,빌렛길이,콘테이너온도 앞쪽,콘테이너온도 뒷쪽,생산카운터,현재속도,압출종료 위치,Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp",
-            'CONSOLE': "| Temp  | 압력  | 빌렛L | 콘(앞)| 콘(뒤)| 카운트| 속도 | 종료 | Mold1 | Mold2 | Mold3 | Mold4 | Mold5 | Mold6 | BillT | AtPre | AtTmp"
-        }
-        # LS_PLC_TARGETS (Default)
-        config['LS_PLC_TARGETS'] = {
-            '%DW250': 'Mold1',
-            '%DW256': 'Mold2',
-            '%DW262': 'Mold3',
-            '%DW288': 'Mold4',
-            '%DW276': 'Mold5',
-            '%DW282': 'Mold6',
-            '%DW268': 'Billet_Temp',
-            '%DW40': 'At_Temp',
-            '%DW50': 'At_Pre'
-        }
+def sync_config(config_obj, file_path, defaults):
+    """
+    Synchronizes the config object with default values.
+    - Creates file if not likely exists.
+    - Adds missing sections/keys.
+    - Preserves existing user values.
+    """
+    is_modified = False
+    
+    # 1. Load existing
+    if os.path.exists(file_path):
+        try:
+            config_obj.read(file_path, encoding='utf-8')
+        except Exception as e:
+            print(f"[Config] Error reading config: {e}. Using defaults.")
+            
+    # 2. Merge Defaults
+    for section, keys in defaults.items():
+        if not config_obj.has_section(section):
+            config_obj.add_section(section)
+            is_modified = True
+            
+        for key, value in keys.items():
+            if not config_obj.has_option(section, key):
+                config_obj.set(section, key, str(value))
+                is_modified = True
+                
+    # 3. Save if needed
+    if is_modified:
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                config_obj.write(f)
+            print(f"[Config] Updated configuration at {file_path}")
+        except Exception as e:
+            print(f"[Config] Failed to save config: {e}")
 
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as configfile:
-            config.write(configfile)
-        
-        print(f"[Info] Default config created at {CONFIG_FILE}")
-    except Exception as e:
-        print(f"[Critical] Failed to create default config: {e}")
-        sys.exit(1)
+def safe_get_int(section, key, fallback):
+    try:
+        return config.getint(section, key, fallback=fallback)
+    except Exception:
+        print(f"[Config] Invalid integer for [{section}] {key}. Using default: {fallback}")
+        return fallback
+
+def safe_get_float(section, key, fallback):
+    try:
+        return config.getfloat(section, key, fallback=fallback)
+    except Exception:
+        print(f"[Config] Invalid float for [{section}] {key}. Using default: {fallback}")
+        return fallback
+
+# Perform Sync
+sync_config(config, CONFIG_FILE, DEFAULT_CONFIG)
 
 try:
-    config.read(CONFIG_FILE, encoding='utf-8')
-
     # ---------------------------------------------------------------------------
     # [0] 환경 설정 (SETTINGS)
     # ---------------------------------------------------------------------------
-    PASSWORD = config.get("SETTINGS", "Password", fallback="1234")
-    LOG_PATH = config.get("SETTINGS", "LogPath", fallback="./logs")
-    SNAPSHOT_PATH = config.get("SETTINGS", "SnapshotPath", fallback="./snapshots")
-    AUTO_SAVE = config.getboolean("SETTINGS", "AutoSave", fallback=True)
+    PASSWORD = config.get("SETTINGS", "Password", fallback=DEFAULT_CONFIG['SETTINGS']['Password'])
+    LOG_PATH = config.get("SETTINGS", "LogPath", fallback=DEFAULT_CONFIG['SETTINGS']['LogPath'])
+    SNAPSHOT_PATH = config.get("SETTINGS", "SnapshotPath", fallback=DEFAULT_CONFIG['SETTINGS']['SnapshotPath'])
+    AUTO_SAVE = config.getboolean("SETTINGS", "AutoSave", fallback=DEFAULT_CONFIG['SETTINGS']['AutoSave'] == 'True')
     
     # 로그 폴더 절대 경로 변환 (상대 경로일 경우 BASE_DIR 기준)
     if not os.path.isabs(LOG_PATH):
@@ -118,34 +173,38 @@ try:
     # ---------------------------------------------------------------------------
     # [1] 기본 설정
     # ---------------------------------------------------------------------------
-    DEVICE_NAME = config.get("SYSTEM", "DeviceName", fallback="창녕 2호기")
-    INTERVAL_SEC = config.getfloat("SYSTEM", "IntervalSec", fallback=0.2)
+    DEVICE_NAME = config.get("SYSTEM", "DeviceName", fallback=DEFAULT_CONFIG['SYSTEM']['DeviceName'])
+    INTERVAL_SEC = safe_get_float("SYSTEM", "IntervalSec", float(DEFAULT_CONFIG['SYSTEM']['IntervalSec']))
 
     # ---------------------------------------------------------------------------
     # [2] 장비 IP 및 포트 설정
     # ---------------------------------------------------------------------------
     # [압출기]
-    IP_EXT = config.get("EXTRUDER", "IP", fallback="192.168.10.10")
-    PORT_EXT = config.getint("EXTRUDER", "Port", fallback=12289)
+    IP_EXT = config.get("EXTRUDER", "IP", fallback=DEFAULT_CONFIG['EXTRUDER']['IP'])
+    PORT_EXT = safe_get_int("EXTRUDER", "Port", int(DEFAULT_CONFIG['EXTRUDER']['Port']))
 
     # [적외선 온도기]
-    # [적외선 온도기]
-    IP_SPOT = config.get("SPOT", "IP", fallback="10.1.10.50")
+    IP_SPOT = config.get("SPOT", "IP", fallback=DEFAULT_CONFIG['SPOT']['IP'])
     URL_SPOT = f"http://{IP_SPOT}/output?p=temperature"
     # Default to /image.jpg (Confirmed working)
-    URL_SPOT_IMAGE = config.get("SPOT", "ImageURL", fallback=f"http://{IP_SPOT}/image.jpg")
-    SPOT_REFRESH_INTERVAL = config.getfloat("SPOT", "RefreshInterval", fallback=3.0)
-    SPOT_CROSSHAIR_X = config.getfloat("SPOT", "CrosshairX", fallback=0.5)
-    SPOT_CROSSHAIR_Y = config.getfloat("SPOT", "CrosshairY", fallback=0.5)
+    URL_SPOT_IMAGE = config.get("SPOT", "ImageURL", fallback=DEFAULT_CONFIG['SPOT']['ImageURL'])
+    SPOT_REFRESH_INTERVAL = safe_get_float("SPOT", "RefreshInterval", float(DEFAULT_CONFIG['SPOT']['RefreshInterval']))
+    SPOT_CROSSHAIR_X = safe_get_float("SPOT", "CrosshairX", float(DEFAULT_CONFIG['SPOT']['CrosshairX']))
+    SPOT_CROSSHAIR_Y = safe_get_float("SPOT", "CrosshairY", float(DEFAULT_CONFIG['SPOT']['CrosshairY']))
     
     # [SPOT Actuator Control]
-    # Placeholder URLs. User must update these in config.ini
-    ACTUATOR_CMD_LEFT = config.get("ACTUATOR", "CmdLeft", fallback=f"http://{IP_SPOT}/control?move=left")
-    ACTUATOR_CMD_RIGHT = config.get("ACTUATOR", "CmdRight", fallback=f"http://{IP_SPOT}/control?move=right")
+    # Actuator Manual Move is NOT supported by standard API.
+    # We use Focus Control instead.
+    URL_SPOT_FOCUS = config.get("SPOT", "FocusURL", fallback=DEFAULT_CONFIG['SPOT']['FocusURL'])
+    SPOT_FOCUS_STEP = safe_get_int("SPOT", "FocusStep", int(DEFAULT_CONFIG['SPOT']['FocusStep'])) # mm step
+
+    # [SPOT Widget Size]
+    SPOT_WIDGET_WIDTH = safe_get_int("SPOT", "WidgetWidth", int(DEFAULT_CONFIG['SPOT']['WidgetWidth']))
+    SPOT_WIDGET_HEIGHT = safe_get_int("SPOT", "WidgetHeight", int(DEFAULT_CONFIG['SPOT']['WidgetHeight']))
 
     # [LS PLC (XGT)]
-    IP_LS = config.get("LS_PLC", "IP", fallback="192.168.10.220")
-    PORT_LS = config.getint("LS_PLC", "Port", fallback=2004)
+    IP_LS = config.get("LS_PLC", "IP", fallback=DEFAULT_CONFIG['LS_PLC']['IP'])
+    PORT_LS = safe_get_int("LS_PLC", "Port", int(DEFAULT_CONFIG['LS_PLC']['Port']))
 
     # ---------------------------------------------------------------------------
     # [3] LS PLC 타겟 및 컬럼 매핑
