@@ -323,6 +323,11 @@ class CameraWidget(ctk.CTkFrame):
                     data = response.read()
                     img = Image.open(io.BytesIO(data))
                     
+                    # [Memory Optimization] Resize immediately to target size
+                    # This reduces texture memory usage significantly.
+                    if self.target_width > 0 and self.target_height > 0:
+                        img = img.resize((self.target_width, self.target_height), Image.Resampling.LANCZOS)
+                    
                     # [Draw Crosshair]
                     draw = ImageDraw.Draw(img)
                     w, h = img.size

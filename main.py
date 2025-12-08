@@ -137,9 +137,9 @@ def run_logger():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # 큐 생성 (버퍼 증설)
-    log_queue = queue.Queue(maxsize=5000) # [수정] 1000 -> 5000
-    gui_queue = queue.Queue(maxsize=5000)
+    # 큐 생성 (버퍼 최적화)
+    log_queue = queue.Queue(maxsize=1000) # [Memory Optimization] 5000 -> 1000
+    gui_queue = queue.Queue(maxsize=1000)
     
     # 파일 쓰기 스레드
     writer_thread = threading.Thread(target=file_writer_thread, args=(log_queue,), daemon=True)

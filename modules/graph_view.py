@@ -190,15 +190,17 @@ class TimeSeriesPanel(ctk.CTkFrame):
         self.fig.subplots_adjust(left=0.08, right=0.95, top=0.88, bottom=0.1) 
 
     def setup_custom_legend(self):
+        # [Memory Optimization] Cleanup previous artists
+        if hasattr(self, 'custom_artists'):
+            for artist in self.custom_artists:
+                try: artist.remove()
+                except: pass
+        self.custom_artists = []
+        
         # Clear existing texts if any
         self.legend_labels = {} 
-        self.legend_lines = [] # Store lines to remove later if needed
-        self.leg_map = {} # [New] Map artist -> orig_line
-        
-        # Remove old custom lines manually added to figure
-        # Note: Ideally we should track them better. For now simple clear logic if possible.
-        # But for robustness in this session context where we might not be clearing perfectly:
-        # We'll just append new ones. (Memory leak if called often, but typically setup is once per view switch/init)
+        self.legend_lines = [] 
+        self.leg_map = {} 
         
         # 1. Spot (Left 1/3, Large)
         key = 'Spot'
@@ -214,8 +216,9 @@ class TimeSeriesPanel(ctk.CTkFrame):
             
             l = Line2D([line_x, line_x + line_len], [line_y, line_y], 
                        transform=self.fig.transFigure, color=color, linewidth=4)
-            l.set_picker(10) # [Increased Tolerance]
-            self.fig.add_artist(l) # [Use add_artist]
+            l.set_picker(10) 
+            self.fig.add_artist(l) 
+            self.custom_artists.append(l) # Track
             self.leg_map[l] = orig_line
             
             # Text (White/Gray)
@@ -224,6 +227,7 @@ class TimeSeriesPanel(ctk.CTkFrame):
                               va='top', ha='left')
             t.set_picker(5) 
             self.legend_labels[key] = t
+            self.custom_artists.append(t) # Track
             self.leg_map[t] = orig_line
 
         # 2. Others (Right 2/3, 2 Rows Grid)
@@ -248,14 +252,16 @@ class TimeSeriesPanel(ctk.CTkFrame):
                 # Line
                 l = Line2D([cx, cx + line_len], [cy, cy], 
                            transform=self.fig.transFigure, color=c, linewidth=3)
-                l.set_picker(10) # [Increased Tolerance]
-                self.fig.add_artist(l) # [Use add_artist]
+                l.set_picker(10) 
+                self.fig.add_artist(l) 
+                self.custom_artists.append(l) # Track
                 self.leg_map[l] = orig_line_ref
                 
                 # Text
                 t = self.fig.text(cx + line_len + 0.005, cy, f"{lbl} --", color='#cccccc', **font_props)
                 t.set_picker(5) 
                 self.legend_labels[k] = t
+                self.custom_artists.append(t) # Track
                 self.leg_map[t] = orig_line_ref
 
         for i, k in enumerate(row1_keys):
