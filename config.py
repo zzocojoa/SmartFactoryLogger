@@ -42,7 +42,7 @@ if not os.path.exists(CONFIG_FILE):
     try:
         # Create default config
         config['SYSTEM'] = {
-            'DeviceName': 'Line_1_Final',
+            'DeviceName': '창녕 2호기',
             'IntervalSec': '0.2'
         }
         config['EXTRUDER'] = {
@@ -118,7 +118,7 @@ try:
     # ---------------------------------------------------------------------------
     # [1] 기본 설정
     # ---------------------------------------------------------------------------
-    DEVICE_NAME = config.get("SYSTEM", "DeviceName", fallback="Line_1_Final")
+    DEVICE_NAME = config.get("SYSTEM", "DeviceName", fallback="창녕 2호기")
     INTERVAL_SEC = config.getfloat("SYSTEM", "IntervalSec", fallback=0.2)
 
     # ---------------------------------------------------------------------------

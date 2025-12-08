@@ -264,7 +264,7 @@ class SmartFactoryApp(ctk.CTk):
     def __init__(self, queue):
         super().__init__()
         self.queue = queue
-        self.title("Smart Factory Logger - Line 1 Final")
+        self.title("HOIHOU Smart Factory")
         self.geometry("1600x900")
         self.configure(fg_color=COLOR_BG)
         
@@ -437,9 +437,9 @@ class SmartFactoryApp(ctk.CTk):
             
         self.frame_env = ctk.CTkFrame(self.col3, fg_color="transparent")
         self.frame_env.pack(fill="x", pady=25, padx=20)
-        self.card_at_temp = InfoCard(self.frame_env, "🏠 At Temp", "0.0", "°C", height=70, value_size=36)
+        self.card_at_temp = InfoCard(self.frame_env, "🏠 At Temp", "0.0", "°C", height=90, value_size=36)
         self.card_at_temp.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self.card_at_pre = InfoCard(self.frame_env, "💧 At Pre", "0.0", "%", height=70, value_size=36)
+        self.card_at_pre = InfoCard(self.frame_env, "💧 At Pre", "0.0", "%", height=90, value_size=36)
         self.card_at_pre.pack(side="right", fill="x", expand=True, padx=(10, 0))
 
         # 2. Time Series View (Lazy Load or Init now)
@@ -453,7 +453,7 @@ class SmartFactoryApp(ctk.CTk):
         self.log_lbl = ctk.CTkLabel(self.footer, text="System Ready.", font=(FONT_MONO, 12), text_color="gray")
         self.log_lbl.pack(side="left", padx=20)
         
-        self.copyright_lbl = ctk.CTkLabel(self.footer, text="Created by HOIHOU", font=(FONT_MAIN, 12, "bold"), text_color="#555555")
+        self.copyright_lbl = ctk.CTkLabel(self.footer, text="Copyright © HOIHOU. All Rights Reserved.", font=(FONT_MAIN, 12, "bold"), text_color="#555555")
         self.copyright_lbl.pack(side="right", padx=20)
 
     def switch_view(self, view_name):
