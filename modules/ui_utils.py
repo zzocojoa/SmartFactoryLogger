@@ -2,7 +2,7 @@ import customtkinter as ctk
 import tkinter as tk
 
 class ToastNotification(ctk.CTkToplevel):
-    def __init__(self, master, message, duration=2000):
+    def __init__(self, master, message, duration=2000, color=None):
         super().__init__(master)
         self.message = message
         self.duration = duration
@@ -15,7 +15,8 @@ class ToastNotification(ctk.CTkToplevel):
         self.configure(fg_color="#333333")
         
         # Label
-        self.lbl = ctk.CTkLabel(self, text=message, font=("Segoe UI", 14), text_color="white", padx=20, pady=10)
+        text_col = color if color else "white"
+        self.lbl = ctk.CTkLabel(self, text=message, font=("Segoe UI", 14), text_color=text_col, padx=20, pady=10)
         self.lbl.pack()
         
         # Position logic (Bottom Center of Master)

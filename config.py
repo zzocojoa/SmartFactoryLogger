@@ -63,7 +63,7 @@ DEFAULT_CONFIG = {
         'CrosshairSize': '20',
         'CrosshairGap': '5',
         'FocusURL': 'http://10.1.10.50/control?p=focus',
-        'FocusStep': '50',
+        'FocusStep': '200',
         'WidgetWidth': '512',
         'WidgetHeight': '288'
     },

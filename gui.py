@@ -418,79 +418,78 @@ class CameraWidget(ctk.CTkFrame):
     def change_focus(self, direction):
         # direction: 1 (increase) or -1 (decrease)
         print(f"[UI] Button Clicked: {direction}")
-        # Debug Toast: Confirm Click
-        self.after(0, lambda: ToastNotification(self, "Button Clicked", duration=500)) 
-        
         self.focus_queue.put(direction)
 
     def focus_loop(self):
-        from config import URL_SPOT_FOCUS, SPOT_FOCUS_STEP
-        
-        while self.running:
-            try:
-                # 1. Wait for first item (Blocking)
-                direction = self.focus_queue.get()
-                
-                # 2. Check for burst clicks (Queue Merging)
-                # If user clicked 5 times quickly, consume them all
-                steps = direction
-                while not self.focus_queue.empty():
-                    try:
-                        steps += self.focus_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                
-                if steps == 0: continue # +1 then -1 = 0 movement
-                
-                # 3. Execute Control (Network I/O using requests)
+        try:
+             from config import URL_SPOT_FOCUS, SPOT_FOCUS_STEP, IP_SPOT
+             
+             while self.running:
                 try:
-                    # [Fix] Construct URL dynamically to match current IP (Avoid stale config)
-                    from config import IP_SPOT
-                    focus_url = f"http://{IP_SPOT}/control?p=focus"
+                    # 1. Wait for first item (Blocking)
+                    direction = self.focus_queue.get()
                     
-                    # GET Current Focus
-                    resp_get = requests.get(focus_url, timeout=2)
-                    # [Robust Parsing] Remove 'mm' or other non-digits
-                    clean_text = re.sub(r'[^\d]', '', resp_get.text)
-                    if not clean_text:
-                        raise ValueError(f"Invalid Response: {resp_get.text}")
-                        
-                    current_val = int(clean_text)
-                        
-                    # Calculate new value
-                    delta = steps * SPOT_FOCUS_STEP
-                    new_val = current_val + delta
-                    new_val = max(300, min(10000, new_val)) # Clamp
+                    # 2. Check for burst clicks (Queue Merging)
+                    # If user clicked 5 times quickly, consume them all
+                    steps = direction
+                    while not self.focus_queue.empty():
+                        try:
+                            steps += self.focus_queue.get_nowait()
+                        except queue.Empty:
+                            break
                     
-                    print(f"[Focus] Merged Steps: {steps} -> Change {current_val} to {new_val}")
+                    if steps == 0: continue # +1 then -1 = 0 movement
                     
-                    if new_val != current_val:
-                        # PUT New Focus (With explicit headers for robustness)
-                        headers = {'Content-Type': 'text/plain'}
-                        resp_put = requests.put(focus_url, data=str(new_val), headers=headers, timeout=2)
+                    # 3. Execute Control (Network I/O using requests)
+                    try:
+                        # [Fix] Construct URL dynamically to match current IP (Avoid stale config)
+                        # IP_SPOT is imported above
+                        focus_url = f"http://{IP_SPOT}/control?p=focus"
                         
-                        if resp_put.status_code == 200:
-                             print(f"[Focus] Updated: {resp_put.text.strip()}")
-                             # Toast on Success (Optional, maybe too noisy? Let's show it for now since user is debugging)
-                             # self.after(0, lambda: ToastNotification(self, f"Focus Set: {new_val}", duration=1000))
-                        else:
-                             raise Exception(f"HTTP {resp_put.status_code}: {resp_put.text}")
-                    else:
-                        print("[Focus] Value limit reached, skipping update.")
-                        self.after(0, lambda: ToastNotification(self, "Focus Limit Reached", duration=1000))
+                        # GET Current Focus
+                        resp_get = requests.get(focus_url, timeout=2)
+                        # [Robust Parsing] Remove 'mm' or other non-digits
+                        clean_text = re.sub(r'[^\d]', '', resp_get.text)
+                        if not clean_text:
+                            raise ValueError(f"Invalid Response: {resp_get.text}")
                             
+                        current_val = int(clean_text)
+                            
+                        # Calculate new value
+                        delta = steps * SPOT_FOCUS_STEP
+                        new_val = current_val + delta
+                        new_val = max(300, min(10000, new_val)) # Clamp
+                        
+                        print(f"[Focus] Merged Steps: {steps} -> Change {current_val} to {new_val}")
+                        
+                        if new_val != current_val:
+                            # PUT New Focus (With explicit headers for robustness)
+                            headers = {'Content-Type': 'text/plain'}
+                            resp_put = requests.put(focus_url, data=str(new_val), headers=headers, timeout=2)
+                            
+                            if resp_put.status_code == 200:
+                                 print(f"[Focus] Updated: {resp_put.text.strip()}")
+                                 # Toast on Success 
+                                 self.after(0, lambda: ToastNotification(self, f"Focus OK: {new_val}", duration=1000, color=COLOR_SUCCESS))
+                            else:
+                                 raise Exception(f"HTTP {resp_put.status_code}: {resp_put.text}")
+                        else:
+                            print("[Focus] Value limit reached, skipping update.")
+                            self.after(0, lambda: ToastNotification(self, "Focus Limit Reached", duration=1000, color=COLOR_WARNING))
+                                
+                    except Exception as e:
+                        print(f"[Focus] IO Error: {e}")
+                        # [User Feedback] Show Error Toast
+                        self.after(0, lambda: ToastNotification(self, f"Focus Error: {e}", duration=3000, color=COLOR_DANGER))
+                        
+                    # Small delay to prevent hammering if queue fills up instantly again
+                    time.sleep(0.1)
+                    
                 except Exception as e:
-                    print(f"[Focus] IO Error: {e}")
-                    # [User Feedback] Show Error Toast
-                    self.after(0, lambda: ToastNotification(self, f"Focus Error: {e}", duration=3000, color=COLOR_DANGER))
-                    
-                # Small delay to prevent hammering if queue fills up instantly again
-                    
-                # Small delay to prevent hammering if queue fills up instantly again
-                time.sleep(0.1)
-                
-            except Exception as e:
-                print(f"[FocusWorker] Error: {e}")
+                    print(f"[FocusWorker] Loop Error: {e}")
+        except Exception as e:
+             print(f"[FocusWorker] Fatal Error: {e}")
+             self.after(0, lambda: ToastNotification(self, f"Focus Thread Crash: {e}", duration=5000, color=COLOR_DANGER))
 
 
 
@@ -741,6 +740,14 @@ class SmartFactoryApp(ctk.CTk):
         self.after(100, self.check_queue)
 
     def update_ui(self, data):
+        # [Error Handling]
+        if 'error' in data:
+            err = data['error']
+            # Show Error Toast
+            ToastNotification(self, f"System Error: {err}", duration=5000, color=COLOR_DANGER)
+            self.status_lbl.configure(text="● Error", text_color=COLOR_DANGER)
+            return
+
         self.last_data_time = datetime.now()
         self.clock_lbl.configure(text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         

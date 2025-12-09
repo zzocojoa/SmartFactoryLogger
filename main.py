@@ -121,8 +121,12 @@ def data_collection_loop(log_queue, gui_queue):
             if sleep_time > 0: time.sleep(sleep_time)
 
     except Exception as e:
-        print(f"\n❌ 데이터 수집 중 에러: {e}")
-        sys_logger.critical(f"Data loop exception: {e}", exc_info=True)
+        err_msg = f"Data Loop Error: {e}"
+        print(f"\n❌ {err_msg}")
+        sys_logger.critical(err_msg, exc_info=True)
+        # [Fix] Send error to GUI so user can see it
+        try: gui_queue.put({'error': str(e)}, timeout=1.0)
+        except: pass
     finally:
         executor.shutdown(wait=False)
         try: extruder.close()
