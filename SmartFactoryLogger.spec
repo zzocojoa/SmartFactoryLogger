@@ -47,12 +47,25 @@ a = Analysis(
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# [Splash Screen]
+splash = Splash(
+    'icon.png',
+    binaries=a.binaries,
+    datas=a.datas,
+    text_pos=(10, 240), # Bottom-Left (assuming 256px height)
+    text_size=10,       # Smaller professional font
+    text_color='white',
+    always_on_top=True,
+)
+
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
     a.zipfiles,
     a.datas,
+    splash, # [Splash] Include splash target
+    splash.binaries, # [Splash] Include splash binaries
     [],
     name='SmartFactoryLogger',
     debug=False,

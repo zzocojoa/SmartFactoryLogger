@@ -157,6 +157,15 @@ def run_logger():
     try:
         app = SmartFactoryApp(gui_queue)
         
+        # [Splash Screen] Close splash when UI is ready (only in frozen EXE)
+        if getattr(sys, 'frozen', False):
+            try:
+                import pyi_splash
+                # Wait a tiny bit (optional) or just close
+                # You can also update text: pyi_splash.update_text('Starting UI...')
+                pyi_splash.close()
+            except: pass
+        
         # 윈도우 닫기 버튼 처리
         def on_close():
             global running

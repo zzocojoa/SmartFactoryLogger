@@ -18,14 +18,27 @@ COLOR_COLD = "#569cd6"
 COLOR_HOT = "#ce9178"
 
 # 설정 파일 경로 (AppData/Roaming 사용)
-# 플랫폼별 앱 데이터 경로 설정
-if sys.platform == "win32":
-    APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), 'SmartFactoryLogger')
-elif sys.platform == "darwin":
-    APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "SmartFactoryLogger")
+# 설정 파일 경로 (Portable vs AppData)
+# 1. 실행 파일 위치 확인
+if getattr(sys, 'frozen', False):
+    EXE_DIR = os.path.dirname(sys.executable)
 else:
-    # Linux/Unix
-    APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".config", "SmartFactoryLogger")
+    EXE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 2. 실행 파일 옆에 config.ini가 있는지 확인 (Portable Mode 우선)
+LOCAL_CONFIG = os.path.join(EXE_DIR, "config.ini")
+if os.path.exists(LOCAL_CONFIG):
+    APP_DATA_DIR = EXE_DIR
+    print(f"[Config] Portable Mode Detected. Using: {APP_DATA_DIR}")
+else:
+    # 3. 없으면 AppData 사용 (Standard Install Mode)
+    if sys.platform == "win32":
+        APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), 'SmartFactoryLogger')
+    elif sys.platform == "darwin":
+        APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "SmartFactoryLogger")
+    else:
+        APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".config", "SmartFactoryLogger")
+    print(f"[Config] Portable Config NOT found. Using AppData: {APP_DATA_DIR}")
 
 if not os.path.exists(APP_DATA_DIR):
     try:
@@ -147,6 +160,8 @@ def sync_config(config_obj, file_path, defaults):
 # Perform Sync
 sync_config(config_parser, CONFIG_FILE, DEFAULT_CONFIG)
 
+# [Debug] Popup Removed - Configuration Verified
+
 # ---------------------------------------------------------------------------
 # [Safe Loading] Pydantic Validation
 # ---------------------------------------------------------------------------
@@ -219,16 +234,23 @@ INTERVAL_SEC = app_config.SYSTEM.IntervalSec
 IP_EXT = app_config.EXTRUDER.IP
 PORT_EXT = app_config.EXTRUDER.Port
 
-# [적외선 온도기]
+# [적외선 온도기 & 카메라]
 IP_SPOT = app_config.SPOT.IP
+# Dual IP Support: If ActuatorIP is defined, use it. Else fall back to Main IP.
+IP_SPOT_ACTUATOR = app_config.SPOT.ActuatorIP if app_config.SPOT.ActuatorIP else IP_SPOT
+
 URL_SPOT = f"http://{IP_SPOT}/output?p=temperature"
-URL_SPOT_IMAGE = app_config.SPOT.ImageURL
+URL_SPOT_IMAGE = app_config.SPOT.ImageURL # Usually contains main IP
 SPOT_REFRESH_INTERVAL = app_config.SPOT.RefreshInterval
 
 SPOT_CROSSHAIR_X = app_config.SPOT.CrosshairX
 SPOT_CROSSHAIR_Y = app_config.SPOT.CrosshairY
 
 URL_SPOT_FOCUS = app_config.SPOT.FocusURL
+# [Actuator] Override Focus with Scan/Move API (Targeting Actuator IP)
+URL_SPOT_ACTUATOR = f"http://{IP_SPOT_ACTUATOR}/scan.cgi"
+SPOT_ACTUATOR_STEP = app_config.SPOT.ActuatorStep # Configurable step size
+
 SPOT_CROSSHAIR_COLOR = app_config.SPOT.CrosshairColor
 SPOT_CROSSHAIR_THICK = app_config.SPOT.CrosshairThickness
 SPOT_CROSSHAIR_SIZE = app_config.SPOT.CrosshairSize

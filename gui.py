@@ -422,7 +422,9 @@ class CameraWidget(ctk.CTkFrame):
 
     def focus_loop(self):
         try:
-             from config import URL_SPOT_FOCUS, SPOT_FOCUS_STEP, IP_SPOT
+             # from config import URL_SPOT_FOCUS, SPOT_FOCUS_STEP, IP_SPOT
+             # [Switch] Use Actuator Config
+             from config import URL_SPOT_ACTUATOR, SPOT_ACTUATOR_STEP, IP_SPOT
              
              while self.running:
                 try:
@@ -430,66 +432,71 @@ class CameraWidget(ctk.CTkFrame):
                     direction = self.focus_queue.get()
                     
                     # 2. Check for burst clicks (Queue Merging)
-                    # If user clicked 5 times quickly, consume them all
                     steps = direction
                     while not self.focus_queue.empty():
                         try:
-                            steps += self.focus_queue.get_nowait()
+                             steps += self.focus_queue.get_nowait()
                         except queue.Empty:
                             break
                     
-                    if steps == 0: continue # +1 then -1 = 0 movement
+                    if steps == 0: continue
                     
-                    # 3. Execute Control (Network I/O using requests)
+                    # 3. Execute Control (Actuator API: scan.cgi)
                     try:
-                        # [Fix] Construct URL dynamically to match current IP (Avoid stale config)
-                        # IP_SPOT is imported above
-                        focus_url = f"http://{IP_SPOT}/control?p=focus"
+                        # [Step 1] Read Current Position
+                        # GET /scan.cgi?scan=3 (Assume this returns current state/form)
+                        # We need 'scan=3' because user used it.
+                        read_url = f"{URL_SPOT_ACTUATOR}?scan=3"
                         
-                        # GET Current Focus
-                        resp_get = requests.get(focus_url, timeout=2)
-                        # [Robust Parsing] Remove 'mm' or other non-digits
-                        clean_text = re.sub(r'[^\d]', '', resp_get.text)
-                        if not clean_text:
-                            raise ValueError(f"Invalid Response: {resp_get.text}")
-                            
-                        current_val = int(clean_text)
-                            
-                        # Calculate new value
-                        delta = steps * SPOT_FOCUS_STEP
+                        # [Fix] Use Bytes Regex to avoid encoding issues (BOM, etc.)
+                        resp_read = requests.get(read_url, timeout=3)
+                        resp_content = resp_read.content
+                        
+                        # Pattern: ...<!--#Pos-->592... (Bytes)
+                        match = re.search(rb'Pos-->\s*(\d+)', resp_content)
+                        if not match:
+                             # Fallback: Dump raw bytes
+                             raise ValueError(f"Parse fail. Raw: {resp_content[:60]}")
+                             
+                        current_val = int(match.group(1).decode('ascii'))
+                        
+                        # [Step 2] Calculate New Position
+                        delta = steps * SPOT_ACTUATOR_STEP
                         new_val = current_val + delta
-                        new_val = max(300, min(10000, new_val)) # Clamp
+                        new_val = max(0, min(1000, new_val)) # Clamp (Assume 0-1000 range based on 593)
                         
-                        print(f"[Focus] Merged Steps: {steps} -> Change {current_val} to {new_val}")
+                        print(f"[Actuator] Steps: {steps} | {current_val} -> {new_val}")
                         
                         if new_val != current_val:
-                            # PUT New Focus (With explicit headers for robustness)
-                            headers = {'Content-Type': 'text/plain'}
-                            resp_put = requests.put(focus_url, data=str(new_val), headers=headers, timeout=2)
+                            # [Step 3] Write New Position
+                            # GET /scan.cgi?scan=3&move={new_val}
+                            write_url = f"{URL_SPOT_ACTUATOR}?scan=3&move={new_val}"
                             
-                            if resp_put.status_code == 200:
-                                 print(f"[Focus] Updated: {resp_put.text.strip()}")
-                                 # Toast on Success 
-                                 self.after(0, lambda: ToastNotification(self, f"Focus OK: {new_val}", duration=1000, color=COLOR_SUCCESS))
+                            resp_write = requests.get(write_url, timeout=3)
+                            
+                            
+                            if resp_write.status_code == 200:
+                                 # Toast Success
+                                 self.after(0, lambda: ToastNotification(self, f"Pos OK: {new_val} (Step: {SPOT_ACTUATOR_STEP})", duration=1000, color=COLOR_SUCCESS))
                             else:
-                                 raise Exception(f"HTTP {resp_put.status_code}: {resp_put.text}")
+                                 raise Exception(f"HTTP {resp_write.status_code}")
                         else:
-                            print("[Focus] Value limit reached, skipping update.")
-                            self.after(0, lambda: ToastNotification(self, "Focus Limit Reached", duration=1000, color=COLOR_WARNING))
+                            self.after(0, lambda: ToastNotification(self, "Limit Reached", duration=1000, color=COLOR_WARNING))
                                 
                     except Exception as e:
-                        print(f"[Focus] IO Error: {e}")
-                        # [User Feedback] Show Error Toast
-                        self.after(0, lambda: ToastNotification(self, f"Focus Error: {e}", duration=3000, color=COLOR_DANGER))
+                        print(f"[Actuator] IO Error: {e}")
+                        # Show error with URL context
+                        err_str = f"[{read_url}] {e}"
+                        if len(err_str) > 50: err_str = err_str[:50] + "..."
+                        self.after(0, lambda: ToastNotification(self, f"Actuator Error: {err_str}", duration=4000, color=COLOR_DANGER))
                         
-                    # Small delay to prevent hammering if queue fills up instantly again
+                    # Small delay
                     time.sleep(0.1)
                     
                 except Exception as e:
-                    print(f"[FocusWorker] Loop Error: {e}")
+                    print(f"[ActuatorWorker] Loop Error: {e}")
         except Exception as e:
-             print(f"[FocusWorker] Fatal Error: {e}")
-             self.after(0, lambda: ToastNotification(self, f"Focus Thread Crash: {e}", duration=5000, color=COLOR_DANGER))
+             print(f"[ActuatorWorker] Fatal Error: {e}")
 
 
 

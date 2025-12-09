@@ -19,6 +19,8 @@ class NetworkConfig(BaseModel):
 
 class SpotConfig(BaseModel):
     IP: str = Field(..., regex=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+    # [Dual-IP Support] Actuator might be on a different IP (e.g. .60 vs .50)
+    ActuatorIP: Optional[str] = Field(None, regex=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
     Port: int = Field(80, ge=1, le=65535) # Optional, default 80
     RefreshInterval: float = Field(3.0, gt=0.0)
     ImageURL: str
@@ -31,6 +33,8 @@ class SpotConfig(BaseModel):
     CrosshairGap: int = Field(5, ge=0)   # Center gap
     FocusURL: Optional[str] = None
     FocusStep: int = Field(50, ge=1)
+    # [Actuator] Step Size for Position Control
+    ActuatorStep: int = Field(5, ge=1, le=100, description="Step size for Actuator (1-100)")
     WidgetWidth: int = Field(512, ge=100)
     WidgetHeight: int = Field(288, ge=100)
 

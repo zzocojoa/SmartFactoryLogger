@@ -132,3 +132,41 @@ $\text{SPOT+}$가 $\text{Actuator}$와 함께 사용될 때 (Extrusion $\text{Mo
 | **Web Server / REST API** | $\text{Open}$ | $\text{N/A}$ (보안 설정) | $\text{Web Server}$ 및 **$\text{REST API}$ 통신이 $\text{Open}$ 모드**로 설정되어 있습니다,. $\text{Open}$ 모드에서는 **보안 없이** 어떤 데이터 속도로든 쓰기 작업이 허용되지만, 사설 네트워크에서만 권장됩니다,. |
 
 **결론:** 이전 $\text{API}$ 요약은 **$\text{SPOT+}$ $\text{REST API}$의 기능과 명령어 목록을 거의 완벽하게** 정리했으며, 이는 소스 내용에 완전히 부합합니다. 새로 추가된 스크린샷의 구체적인 설정값들은 이 $\text{API}$ 기능을 고객님의 장비에 적용할 때 필요한 맥락을 제공해줍니다.
+
+## 포커스 이동 API 정보
+
+$\text{SPOT+}$ $\text{REST API}$의 **`/control`** 노드에 $\text{focus}$라는 파라미터가 있으며, 이를 통해 포커스 거리를 설정할 수 있습니다.
+
+| API 파라미터 | 정의 및 범위 | 요청 (Request) | 형식 |
+| :--- | :--- | :--- | :--- |
+| **`focus`** | 장비 전면에서 타겟까지의 **포커스 거리**. | $\text{GET}$ / $\text{PUT}$ | **`/control?p=focus`** |
+| **값 범위** | 정수 값으로 **$300 \text{ mm}$에서 $10000 \text{ mm}$까지** 설정 가능. | $\text{PUT}$ $\text{BODY}$=500 (예시) | $\text{mm}$ 단위 |
+
+### 1. 포커스 거리 읽기 (GET 요청)
+
+현재 설정된 포커스 거리를 읽으려면 다음과 같이 $\text{GET}$ 요청을 사용합니다.
+
+```
+GET http://[ipaddress]/control?p=focus
+```
+**응답 예시:** $1000$ (단위: $\text{mm}$)
+
+### 2. 포커스 거리 설정 (PUT 요청)
+
+포커스 거리를 $500 \text{ mm}$로 변경하여 모터를 구동시키려면 다음과 같이 $\text{PUT}$ 요청을 사용합니다.
+
+```
+PUT http://[ipaddress]/control?p=focus
+BODY=500
+```
+**응답 예시:** $500$
+
+### 3. Actuator와의 관계
+
+$\text{Actuator}$는 $\text{Extrusion Mode}$에서 소재의 **가장 뜨거운 위치를 수평으로 추적($\text{Scan}$)**하는 역할을 합니다. 반면, 위에서 언급된 $\text{focus}$ $\text{API}$는 $\text{SPOT+}$ 온도계의 **내부 초점 모터**를 제어하여 **측정 거리**를 조절하는 $\text{API}$입니다.
+
+따라서, 귀하가 찾으시는 **온도계의 포커스를 원격으로 제어하는 $\text{API}$**는 **`focus`** 파라미터가 맞습니다,.
+
+### 4. 주의 사항 (쓰기 작업 시)
+
+포커스 값을 변경하는 $\text{PUT}$ 요청은 **쓰기(Write)** 작업에 해당하므로, $\text{SPOT+}$ 온도계가 현재 **$\text{Secure}$ 모드**로 설정되어 있다면 **$\text{JSON}$ $\text{Web}$ $\text{Token}$**을 사용한 인증($\text{Handshake}$) 절차가 필수적입니다,,. 고객님과의 이전 대화에서 현재 설정이 **$\text{Open}$ 모드**임을 확인했으므로, 인증 절차 없이 $\text{PUT}$ 요청을 보낼 수 있습니다. 하지만 $\text{Open}$ 모드는 **사설 네트워크 내에서만 권장**됩니다.
