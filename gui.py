@@ -5,13 +5,15 @@ import math
 import time
 import webbrowser
 from datetime import datetime
-import urllib.request
+from datetime import datetime
+import requests
 import io
 import io
 import threading
 import queue
+import re # [Focus Logic]
 from PIL import Image, ImageDraw
-from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT, COLOR_WARNING, COLOR_DANGER, COLOR_SUCCESS, COLOR_COLD, COLOR_HOT, PASSWORD, URL_SPOT_IMAGE, SPOT_REFRESH_INTERVAL, SPOT_CROSSHAIR_X, SPOT_CROSSHAIR_Y, SPOT_WIDGET_WIDTH, SPOT_WIDGET_HEIGHT
+from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT, COLOR_WARNING, COLOR_DANGER, COLOR_SUCCESS, COLOR_COLD, COLOR_HOT, PASSWORD, URL_SPOT_IMAGE, SPOT_REFRESH_INTERVAL, SPOT_CROSSHAIR_X, SPOT_CROSSHAIR_Y, SPOT_WIDGET_WIDTH, SPOT_WIDGET_HEIGHT, SPOT_CROSSHAIR_COLOR, SPOT_CROSSHAIR_THICK, SPOT_CROSSHAIR_SIZE, SPOT_CROSSHAIR_GAP
 from settings_gui import SettingsWindow
 from modules.ui_utils import CTkTooltip, ToastNotification, draw_dashed_line
 from modules.graph_view import TimeSeriesPanel
@@ -283,11 +285,15 @@ class CameraWidget(ctk.CTkFrame):
         self.error_msg = "Initializing..."
         self.lock = threading.Lock()
         
+        # Image Display Label (Create FIRST so buttons overlay it)
+        self.lbl_image = ctk.CTkLabel(self, text="")
+        self.lbl_image.pack(expand=True, fill="both", padx=2, pady=2)
+
         # Placeholder / Status Label
         self.lbl_status = ctk.CTkLabel(self, text=self.error_msg, text_color="gray", wraplength=width-40)
         self.lbl_status.place(relx=0.5, rely=0.5, anchor="center")
         
-        # Focus Controls (Overlay)
+        # Focus Controls (Overlay - Create AFTER image to be on top)
         self.btn_left = ctk.CTkButton(self, text="◀", width=30, height=50, 
                                       fg_color="#333333", hover_color="#555555", 
                                       font=("Segoe UI Emoji", 20),
@@ -300,14 +306,13 @@ class CameraWidget(ctk.CTkFrame):
                                        command=lambda: self.change_focus(1))
         self.btn_right.place(relx=0.94, rely=0.5, anchor="center")
         
-        # Image Display Label
-        self.lbl_image = ctk.CTkLabel(self, text="")
-        self.lbl_image.pack(expand=True, fill="both", padx=2, pady=2)
-        
         # Focus Queue
         self.focus_queue = queue.Queue()
         threading.Thread(target=self.focus_loop, daemon=True).start()
         
+        # [Optimization] Use requests.Session for Keep-Alive
+        self.session = requests.Session()
+
         # Start Fetch Thread
         self.thread = threading.Thread(target=self.fetch_loop, daemon=True)
         self.thread.start()
@@ -318,34 +323,55 @@ class CameraWidget(ctk.CTkFrame):
     def fetch_loop(self):
         while self.running:
             try:
-                # Try to fetch
-                with urllib.request.urlopen(self.url, timeout=2) as response:
-                    data = response.read()
-                    img = Image.open(io.BytesIO(data))
-                    
-                    # [Memory Optimization] Resize immediately to target size
-                    # This reduces texture memory usage significantly.
-                    if self.target_width > 0 and self.target_height > 0:
-                        img = img.resize((self.target_width, self.target_height), Image.Resampling.LANCZOS)
-                    
-                    # [Draw Crosshair]
-                    draw = ImageDraw.Draw(img)
-                    w, h = img.size
-                    cx, cy = w * self.crosshair_x, h * self.crosshair_y
-                    
-                    # Cross style: Red 'X' or '+'
-                    # Length of arms
-                    arm_len = 20
-                    thick = 3
-                    color = "red"
-                    
-                    # Draw 'X'
-                    draw_dashed_line(draw, (cx - arm_len, cy - arm_len), (cx + arm_len, cy + arm_len), fill=color, width=thick, dash=(4, 4))
-                    draw_dashed_line(draw, (cx - arm_len, cy + arm_len), (cx + arm_len, cy - arm_len), fill=color, width=thick, dash=(4, 4))
-                    
-                    with self.lock:
-                        self.current_image = img
-                        self.error_msg = None
+                # Try to fetch using requests Session (Keep-Alive)
+                response = self.session.get(self.url, timeout=2)
+                response.raise_for_status()
+                
+                img = Image.open(io.BytesIO(response.content))
+                
+                # [Memory Optimization] Resize immediately to target size
+                # [Perf Optimization] Use BILINEAR instead of LANCZOS for video streams
+                if self.target_width > 0 and self.target_height > 0:
+                    img = img.resize((self.target_width, self.target_height), Image.Resampling.BILINEAR)
+                
+                # [Draw Crosshair] Enhanced Double-Layered Dashed Line
+                draw = ImageDraw.Draw(img)
+                w, h = img.size
+                cx, cy = w * self.crosshair_x, h * self.crosshair_y
+                
+                # Configurable Style
+                arm_len = SPOT_CROSSHAIR_SIZE
+                gap = SPOT_CROSSHAIR_GAP
+                thick = SPOT_CROSSHAIR_THICK
+                color_fg = SPOT_CROSSHAIR_COLOR
+                color_bg = "black"
+                
+                # Helper to draw double layer line
+                def draw_double_Line(p1, p2):
+                    # 1. Background (Contrast) - Thicker, Black
+                    draw_dashed_line(draw, p1, p2, fill=color_bg, width=thick+2, dash=(4, 4))
+                    # 2. Foreground (Visibility) - Nominal, Lime/Yellow
+                    draw_dashed_line(draw, p1, p2, fill=color_fg, width=thick, dash=(4, 4))
+
+                # Draw 4 Arms with Gap (Always Start from Center -> Outwards for Symmetry)
+                # Left (Center -> Left)
+                draw_double_Line((cx - gap, cy), (cx - arm_len, cy))
+                # Right (Center -> Right)
+                draw_double_Line((cx + gap, cy), (cx + arm_len, cy))
+                # Top (Center -> Top)
+                draw_double_Line((cx, cy - gap), (cx, cy - arm_len))
+                # Bottom (Center -> Bottom)
+                draw_double_Line((cx, cy + gap), (cx, cy + arm_len))
+
+                # [Optional] Center Circle (Reticle)
+                # Small ring to mark the absolute center
+                r = 3 
+                draw.ellipse((cx-r, cy-r, cx+r, cy+r), outline="black", width=3) # Background
+                draw.ellipse((cx-r, cy-r, cx+r, cy+r), outline=color_fg, width=1) # Foreground
+                
+                with self.lock:
+                    self.current_image = img
+                    self.error_msg = None
             except Exception as e:
                 # [Log] Print error to console
                 print(f"[Camera] Connection Error: {e}")
@@ -391,7 +417,10 @@ class CameraWidget(ctk.CTkFrame):
 
     def change_focus(self, direction):
         # direction: 1 (increase) or -1 (decrease)
-        # Just put in queue, return immediately (Responsive UI)
+        print(f"[UI] Button Clicked: {direction}")
+        # Debug Toast: Confirm Click
+        self.after(0, lambda: ToastNotification(self, "Button Clicked", duration=500)) 
+        
         self.focus_queue.put(direction)
 
     def focus_loop(self):
@@ -413,11 +442,20 @@ class CameraWidget(ctk.CTkFrame):
                 
                 if steps == 0: continue # +1 then -1 = 0 movement
                 
-                # 3. Execute Control (Network I/O)
+                # 3. Execute Control (Network I/O using requests)
                 try:
+                    # [Fix] Construct URL dynamically to match current IP (Avoid stale config)
+                    from config import IP_SPOT
+                    focus_url = f"http://{IP_SPOT}/control?p=focus"
+                    
                     # GET Current Focus
-                    with urllib.request.urlopen(URL_SPOT_FOCUS, timeout=2) as response:
-                        current_val = int(response.read().decode().strip())
+                    resp_get = requests.get(focus_url, timeout=2)
+                    # [Robust Parsing] Remove 'mm' or other non-digits
+                    clean_text = re.sub(r'[^\d]', '', resp_get.text)
+                    if not clean_text:
+                        raise ValueError(f"Invalid Response: {resp_get.text}")
+                        
+                    current_val = int(clean_text)
                         
                     # Calculate new value
                     delta = steps * SPOT_FOCUS_STEP
@@ -427,15 +465,26 @@ class CameraWidget(ctk.CTkFrame):
                     print(f"[Focus] Merged Steps: {steps} -> Change {current_val} to {new_val}")
                     
                     if new_val != current_val:
-                        # PUT New Focus
-                        req = urllib.request.Request(URL_SPOT_FOCUS, data=str(new_val).encode(), method='PUT')
-                        with urllib.request.urlopen(req, timeout=2) as response:
-                            print(f"[Focus] Updated: {response.read().decode().strip()}")
+                        # PUT New Focus (With explicit headers for robustness)
+                        headers = {'Content-Type': 'text/plain'}
+                        resp_put = requests.put(focus_url, data=str(new_val), headers=headers, timeout=2)
+                        
+                        if resp_put.status_code == 200:
+                             print(f"[Focus] Updated: {resp_put.text.strip()}")
+                             # Toast on Success (Optional, maybe too noisy? Let's show it for now since user is debugging)
+                             # self.after(0, lambda: ToastNotification(self, f"Focus Set: {new_val}", duration=1000))
+                        else:
+                             raise Exception(f"HTTP {resp_put.status_code}: {resp_put.text}")
                     else:
                         print("[Focus] Value limit reached, skipping update.")
+                        self.after(0, lambda: ToastNotification(self, "Focus Limit Reached", duration=1000))
                             
                 except Exception as e:
                     print(f"[Focus] IO Error: {e}")
+                    # [User Feedback] Show Error Toast
+                    self.after(0, lambda: ToastNotification(self, f"Focus Error: {e}", duration=3000, color=COLOR_DANGER))
+                    
+                # Small delay to prevent hammering if queue fills up instantly again
                     
                 # Small delay to prevent hammering if queue fills up instantly again
                 time.sleep(0.1)
@@ -447,6 +496,8 @@ class CameraWidget(ctk.CTkFrame):
 
     def destroy(self):
         self.running = False
+        try: self.session.close()
+        except: pass
         super().destroy()
 
 class SmartFactoryApp(ctk.CTk):

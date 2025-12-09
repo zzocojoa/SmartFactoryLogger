@@ -7,7 +7,8 @@ from datetime import datetime
 import collections
 import time 
 import os
-from config import SNAPSHOT_PATH # [New]
+import configparser # [Persistence]
+from config import SNAPSHOT_PATH, THRESHOLDS_CONFIG, CONFIG_FILE # [Persistence]
 from modules.threshold_gui import ThresholdSettingsWindow
 from modules.ui_utils import ToastNotification 
 
@@ -45,8 +46,8 @@ class TimeSeriesPanel(ctk.CTkFrame):
         # Blitting Background Storage
         self.bg = None
         
-        # Thresholds Config {Key: {value: float, enabled: bool}, MASTER_ON: bool}
-        self.thresholds = {"MASTER_ON": False} 
+        # Thresholds Config loaded from config.py
+        self.thresholds = THRESHOLDS_CONFIG.copy()
         self.hlines = {} # Store line objects
         # Track last data values
         self.last_values = {key: 0.0 for key in self.data_keys}
@@ -142,6 +143,38 @@ class TimeSeriesPanel(ctk.CTkFrame):
                 line.set_visible(False)
         
         self.canvas.draw_idle()
+
+        # [Persistence] Save to config.ini
+        try:
+            cfg = configparser.ConfigParser()
+            cfg.read(CONFIG_FILE, encoding='utf-8')
+            
+            if not cfg.has_section("THRESHOLDS_VALUE"): cfg.add_section("THRESHOLDS_VALUE")
+            if not cfg.has_section("THRESHOLDS_ENABLE"): cfg.add_section("THRESHOLDS_ENABLE")
+            
+            # Save Master
+            cfg.set("THRESHOLDS_ENABLE", "MASTER_ON", str(new_thresholds.get("MASTER_ON", False)))
+            
+            for key, data in new_thresholds.items():
+                if key == "MASTER_ON": continue
+                
+                valid_val = data.get("value")
+                enabled = data.get("enabled", False)
+                
+                # Write Value (None -> Empty string)
+                val_str = str(valid_val) if valid_val is not None else ""
+                cfg.set("THRESHOLDS_VALUE", key, val_str)
+                
+                # Write Enable
+                cfg.set("THRESHOLDS_ENABLE", key, str(enabled))
+                
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                cfg.write(f)
+                
+            print("[Thresholds] Saved to config.ini")
+            
+        except Exception as e:
+            print(f"[Thresholds] Save Error: {e}")
 
     def setup_plots(self):
         items = [

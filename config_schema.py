@@ -1,0 +1,68 @@
+from pydantic import BaseModel, Field, validator
+from typing import Optional, Dict
+
+class SystemConfig(BaseModel):
+    DeviceName: str = Field(..., min_length=1)
+    IntervalSec: float = Field(0.2, gt=0.0, description="데이터 수집 주기(초)")
+
+    class Config:
+        alias_generator = lambda s: s.lower()
+        allow_population_by_field_name = True
+
+class NetworkConfig(BaseModel):
+    IP: str = Field(..., regex=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+    Port: int = Field(..., ge=1, le=65535)
+
+    class Config:
+        alias_generator = lambda s: s.lower()
+        allow_population_by_field_name = True
+
+class SpotConfig(BaseModel):
+    IP: str = Field(..., regex=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+    Port: int = Field(80, ge=1, le=65535) # Optional, default 80
+    RefreshInterval: float = Field(3.0, gt=0.0)
+    ImageURL: str
+    CrosshairX: float = Field(0.5, ge=0.0, le=1.0)
+    CrosshairY: float = Field(0.5, ge=0.0, le=1.0)
+    # [Visuals] Crosshair Customization
+    CrosshairColor: str = "lime" # Foreground color
+    CrosshairThickness: int = Field(2, ge=1)
+    CrosshairSize: int = Field(20, ge=5) # Arm length
+    CrosshairGap: int = Field(5, ge=0)   # Center gap
+    FocusURL: Optional[str] = None
+    FocusStep: int = Field(50, ge=1)
+    WidgetWidth: int = Field(512, ge=100)
+    WidgetHeight: int = Field(288, ge=100)
+
+    class Config:
+        alias_generator = lambda s: s.lower()
+        allow_population_by_field_name = True
+
+class SettingsConfig(BaseModel):
+    Password: str
+    LogPath: str
+    SnapshotPath: str
+    AutoSave: bool = True
+
+    class Config:
+        alias_generator = lambda s: s.lower()
+        allow_population_by_field_name = True
+
+class ThresholdsValue(BaseModel):
+    # Dynamic fields but listing known ones helps validation/IDE
+    # Using extra='allow' to support any key
+    class Config:
+        extra = 'allow'
+
+class ThresholdsEnable(BaseModel):
+    class Config:
+        extra = 'allow'
+
+class AppConfig(BaseModel):
+    SYSTEM: SystemConfig
+    EXTRUDER: NetworkConfig
+    SPOT: SpotConfig
+    LS_PLC: NetworkConfig
+    SETTINGS: SettingsConfig
+    THRESHOLDS_VALUE: Optional[ThresholdsValue] = Field(default_factory=ThresholdsValue)
+    THRESHOLDS_ENABLE: Optional[ThresholdsEnable] = Field(default_factory=ThresholdsEnable)

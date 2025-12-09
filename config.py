@@ -2,6 +2,7 @@
 import configparser
 import os
 import sys
+from config_schema import AppConfig
 
 # 색상 상수
 COLOR_BG = "#1e1e1e"       # VS Code style dark bg
@@ -57,6 +58,10 @@ DEFAULT_CONFIG = {
         'ImageURL': 'http://10.1.10.50/image.jpg',
         'CrosshairX': '0.5',
         'CrosshairY': '0.5',
+        'CrosshairColor': 'lime',
+        'CrosshairThickness': '2',
+        'CrosshairSize': '20',
+        'CrosshairGap': '5',
         'FocusURL': 'http://10.1.10.50/control?p=focus',
         'FocusStep': '50',
         'WidgetWidth': '512',
@@ -86,11 +91,22 @@ DEFAULT_CONFIG = {
     'HEADERS': {
         'CSV': "Date,Time,Temperature,메인압력,빌렛길이,콘테이너온도 앞쪽,콘테이너온도 뒷쪽,생산카운터,현재속도,압출종료 위치,Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp",
         'CONSOLE': "| Temp  | 압력  | 빌렛L | 콘(앞)| 콘(뒤)| 카운트| 속도 | 종료 | Mold1 | Mold2 | Mold3 | Mold4 | Mold5 | Mold6 | BillT | AtPre | AtTmp"
+    },
+    'THRESHOLDS_VALUE': {
+        'Speed': '', 'Press': '', 'Spot': '', 'Temp_F': '', 'Temp_B': '',
+        'Billet': '', 'Billet_Temp': '', 'At_Temp': '', 'At_Pre': '',
+        'Count': '', 'EndPos': ''
+    },
+    'THRESHOLDS_ENABLE': {
+        'Speed': 'False', 'Press': 'False', 'Spot': 'False', 'Temp_F': 'False', 'Temp_B': 'False',
+        'Billet': 'False', 'Billet_Temp': 'False', 'At_Temp': 'False', 'At_Pre': 'False',
+        'Count': 'False', 'EndPos': 'False',
+        'MASTER_ON': 'False'
     }
 }
 
 # ConfigParser Init
-config = configparser.ConfigParser()
+config_parser = configparser.ConfigParser()
 
 def sync_config(config_obj, file_path, defaults):
     """
@@ -128,109 +144,151 @@ def sync_config(config_obj, file_path, defaults):
         except Exception as e:
             print(f"[Config] Failed to save config: {e}")
 
-def safe_get_int(section, key, fallback):
-    try:
-        return config.getint(section, key, fallback=fallback)
-    except Exception:
-        print(f"[Config] Invalid integer for [{section}] {key}. Using default: {fallback}")
-        return fallback
-
-def safe_get_float(section, key, fallback):
-    try:
-        return config.getfloat(section, key, fallback=fallback)
-    except Exception:
-        print(f"[Config] Invalid float for [{section}] {key}. Using default: {fallback}")
-        return fallback
-
 # Perform Sync
-sync_config(config, CONFIG_FILE, DEFAULT_CONFIG)
+sync_config(config_parser, CONFIG_FILE, DEFAULT_CONFIG)
 
+# ---------------------------------------------------------------------------
+# [Safe Loading] Pydantic Validation
+# ---------------------------------------------------------------------------
 try:
-    # ---------------------------------------------------------------------------
-    # [0] 환경 설정 (SETTINGS)
-    # ---------------------------------------------------------------------------
-    PASSWORD = config.get("SETTINGS", "Password", fallback=DEFAULT_CONFIG['SETTINGS']['Password'])
-    LOG_PATH = config.get("SETTINGS", "LogPath", fallback=DEFAULT_CONFIG['SETTINGS']['LogPath'])
-    SNAPSHOT_PATH = config.get("SETTINGS", "SnapshotPath", fallback=DEFAULT_CONFIG['SETTINGS']['SnapshotPath'])
-    AUTO_SAVE = config.getboolean("SETTINGS", "AutoSave", fallback=DEFAULT_CONFIG['SETTINGS']['AutoSave'] == 'True')
+    # 1. Parser -> Dict 변환
+    config_dict = {s: dict(config_parser.items(s)) for s in config_parser.sections()}
     
-    # 로그 폴더 절대 경로 변환 (상대 경로일 경우 BASE_DIR 기준)
-    if not os.path.isabs(LOG_PATH):
-        LOG_PATH = os.path.join(BASE_DIR, LOG_PATH)
-        
-    if not os.path.exists(LOG_PATH):
-        try: os.makedirs(LOG_PATH)
-        except: pass
-
-    # 스냅샷 폴더 절대 경로 변환
-    if not os.path.isabs(SNAPSHOT_PATH):
-        SNAPSHOT_PATH = os.path.join(BASE_DIR, SNAPSHOT_PATH)
-
-    if not os.path.exists(SNAPSHOT_PATH):
-        try: os.makedirs(SNAPSHOT_PATH)
-        except: pass
-
-    # ---------------------------------------------------------------------------
-    # [1] 기본 설정
-    # ---------------------------------------------------------------------------
-    DEVICE_NAME = config.get("SYSTEM", "DeviceName", fallback=DEFAULT_CONFIG['SYSTEM']['DeviceName'])
-    INTERVAL_SEC = safe_get_float("SYSTEM", "IntervalSec", float(DEFAULT_CONFIG['SYSTEM']['IntervalSec']))
-
-    # ---------------------------------------------------------------------------
-    # [2] 장비 IP 및 포트 설정
-    # ---------------------------------------------------------------------------
-    # [압출기]
-    IP_EXT = config.get("EXTRUDER", "IP", fallback=DEFAULT_CONFIG['EXTRUDER']['IP'])
-    PORT_EXT = safe_get_int("EXTRUDER", "Port", int(DEFAULT_CONFIG['EXTRUDER']['Port']))
-
-    # [적외선 온도기]
-    IP_SPOT = config.get("SPOT", "IP", fallback=DEFAULT_CONFIG['SPOT']['IP'])
-    URL_SPOT = f"http://{IP_SPOT}/output?p=temperature"
-    # Default to /image.jpg (Confirmed working)
-    URL_SPOT_IMAGE = config.get("SPOT", "ImageURL", fallback=DEFAULT_CONFIG['SPOT']['ImageURL'])
-    SPOT_REFRESH_INTERVAL = safe_get_float("SPOT", "RefreshInterval", float(DEFAULT_CONFIG['SPOT']['RefreshInterval']))
-    SPOT_CROSSHAIR_X = safe_get_float("SPOT", "CrosshairX", float(DEFAULT_CONFIG['SPOT']['CrosshairX']))
-    SPOT_CROSSHAIR_Y = safe_get_float("SPOT", "CrosshairY", float(DEFAULT_CONFIG['SPOT']['CrosshairY']))
+    # 2. Pydantic을 이용한 유효성 검사 및 타입 변환
+    #    (검증 실패 시 except 블록으로 이동하여 기본값 사용)
+    app_config = AppConfig(**config_dict)
     
-    # [SPOT Actuator Control]
-    # Actuator Manual Move is NOT supported by standard API.
-    # We use Focus Control instead.
-    URL_SPOT_FOCUS = config.get("SPOT", "FocusURL", fallback=DEFAULT_CONFIG['SPOT']['FocusURL'])
-    SPOT_FOCUS_STEP = safe_get_int("SPOT", "FocusStep", int(DEFAULT_CONFIG['SPOT']['FocusStep'])) # mm step
-
-    # [SPOT Widget Size]
-    SPOT_WIDGET_WIDTH = safe_get_int("SPOT", "WidgetWidth", int(DEFAULT_CONFIG['SPOT']['WidgetWidth']))
-    SPOT_WIDGET_HEIGHT = safe_get_int("SPOT", "WidgetHeight", int(DEFAULT_CONFIG['SPOT']['WidgetHeight']))
-
-    # [LS PLC (XGT)]
-    IP_LS = config.get("LS_PLC", "IP", fallback=DEFAULT_CONFIG['LS_PLC']['IP'])
-    PORT_LS = safe_get_int("LS_PLC", "Port", int(DEFAULT_CONFIG['LS_PLC']['Port']))
-
-    # ---------------------------------------------------------------------------
-    # [3] LS PLC 타겟 및 컬럼 매핑
-    # ---------------------------------------------------------------------------
-    # INI 파일의 [LS_PLC_TARGETS] 섹션을 읽어서 리스트로 변환
-    # (Key, Value) -> ("%DW250", "Mold1")
-    LS_TARGETS = []
-    if config.has_section("LS_PLC_TARGETS"):
-        for key, value in config.items("LS_PLC_TARGETS"):
-            # configparser는 키를 소문자로 변환하므로, 대문자 유지가 필요하면 주의
-            # 여기서는 주소(%DW...)가 대소문자 구분 없거나, 원본 키를 가져오는 로직 필요시 optionxform 사용
-            # 하지만 %DW는 대소문자 상관없으므로 그대로 사용. 단, % 기호 처리에 주의.
-            # configparser에서 %는 interpolation으로 쓰일 수 있음. -> RawConfigParser 사용 권장 혹은 % escaping.
-            # 여기서는 SafeConfigParser(기본) 사용 시 %를 %%로 써야 할 수도 있음.
-            # 간단하게는 키를 대문자로 변환하여 저장.
-            addr = key.upper() 
-            LS_TARGETS.append((addr, value))
-    
-    # ---------------------------------------------------------------------------
-    # [4] CSV 및 출력 헤더 설정
-    # ---------------------------------------------------------------------------
-    csv_str = config.get("HEADERS", "CSV", fallback="")
-    CSV_HEADER = [x.strip() for x in csv_str.split(",") if x.strip()]
-
-    CONSOLE_HEADER = config.get("HEADERS", "CONSOLE", fallback="Header Error").strip('"')
+    print("[Config] Configuration loaded and validated successfully.")
 
 except Exception as e:
-    print(f"[Critical] Error parsing config.ini: {e}")
-    sys.exit(1)
+    print(f"[Config] Validation Failed: {e}")
+    
+    # [Debug] Alert User on Startup
+    try:
+        import tkinter.messagebox
+        import tkinter as tk
+        _root = tk.Tk()
+        _root.withdraw() # Hide main
+        
+        # Capture problematic data
+        debug_info = ""
+        if 'config_dict' in locals():
+            sys_val = config_dict.get('SYSTEM', {})
+            debug_info = f"\n[Debug Data]\nSYSTEM Section: {sys_val}"
+            
+        tkinter.messagebox.showwarning("Config Error", f"설정 파일(config.ini) 데이터 오류.\n\nError: {e}{debug_info}")
+        _root.destroy()
+    except: pass
+    
+    print("[Config] Falling back to DEFAULT configuration for safety.")
+    # Fallback: Default 값을 사용하여 AppConfig 생성 (타입 변환 보장)
+    # 주의: DEFAULT_CONFIG의 값들은 모두 string이므로, AppConfig가 이를 파싱해야 함.
+    # Pydantic은 문자열 '0.2'를 float 0.2로 자동 변환해줌.
+    app_config = AppConfig(**DEFAULT_CONFIG)
+
+# ---------------------------------------------------------------------------
+# [Export] 전역 변수 설정 (사용 편의성)
+# ---------------------------------------------------------------------------
+
+# [0] 환경 설정 (SETTINGS)
+PASSWORD = app_config.SETTINGS.Password
+LOG_PATH = app_config.SETTINGS.LogPath
+SNAPSHOT_PATH = app_config.SETTINGS.SnapshotPath
+AUTO_SAVE = app_config.SETTINGS.AutoSave
+
+# 로그 폴더 절대 경로 변환
+if not os.path.isabs(LOG_PATH):
+    LOG_PATH = os.path.join(BASE_DIR, LOG_PATH)
+if not os.path.exists(LOG_PATH):
+    try: os.makedirs(LOG_PATH)
+    except: pass
+
+# 스냅샷 폴더 절대 경로 변환
+if not os.path.isabs(SNAPSHOT_PATH):
+    SNAPSHOT_PATH = os.path.join(BASE_DIR, SNAPSHOT_PATH)
+if not os.path.exists(SNAPSHOT_PATH):
+    try: os.makedirs(SNAPSHOT_PATH)
+    except: pass
+
+# [1] 기본 설정
+DEVICE_NAME = app_config.SYSTEM.DeviceName
+INTERVAL_SEC = app_config.SYSTEM.IntervalSec
+
+# [2] 장비 IP 및 포트 설정
+# [압출기]
+IP_EXT = app_config.EXTRUDER.IP
+PORT_EXT = app_config.EXTRUDER.Port
+
+# [적외선 온도기]
+IP_SPOT = app_config.SPOT.IP
+URL_SPOT = f"http://{IP_SPOT}/output?p=temperature"
+URL_SPOT_IMAGE = app_config.SPOT.ImageURL
+SPOT_REFRESH_INTERVAL = app_config.SPOT.RefreshInterval
+
+SPOT_CROSSHAIR_X = app_config.SPOT.CrosshairX
+SPOT_CROSSHAIR_Y = app_config.SPOT.CrosshairY
+
+URL_SPOT_FOCUS = app_config.SPOT.FocusURL
+SPOT_CROSSHAIR_COLOR = app_config.SPOT.CrosshairColor
+SPOT_CROSSHAIR_THICK = app_config.SPOT.CrosshairThickness
+SPOT_CROSSHAIR_SIZE = app_config.SPOT.CrosshairSize
+SPOT_CROSSHAIR_GAP = app_config.SPOT.CrosshairGap
+
+# [Thresholds] Construction
+def get_thresholds():
+    t_data = {"MASTER_ON": False}
+    if hasattr(app_config, 'THRESHOLDS_ENABLE') and app_config.THRESHOLDS_ENABLE:
+        # Pydantic model to dict
+        enables = app_config.THRESHOLDS_ENABLE.dict()
+        t_data["MASTER_ON"] = enables.pop('MASTER_ON', False)
+        
+        values = {}
+        if hasattr(app_config, 'THRESHOLDS_VALUE') and app_config.THRESHOLDS_VALUE:
+             values = app_config.THRESHOLDS_VALUE.dict()
+
+        # Combine
+        # Keys are "Speed", "Press" etc.
+        # We need to iterate all potential keys.
+        # Let's union keys from both
+        all_keys = set(enables.keys()) | set(values.keys())
+        
+        for k in all_keys:
+            if k == 'MASTER_ON': continue
+            
+            # Value convert (None if empty/invalid)
+            val = values.get(k)
+            try:
+                f_val = float(val) if val is not None and val != "" else None
+            except:
+                f_val = None
+                
+            is_enabled = enables.get(k, False)
+            # Pydantic boolean might be True/False directly
+            
+            t_data[k] = {
+                "value": f_val,
+                "enabled": bool(is_enabled)
+            }
+            
+    return t_data
+
+THRESHOLDS_CONFIG = get_thresholds()
+SPOT_FOCUS_STEP = app_config.SPOT.FocusStep
+SPOT_WIDGET_WIDTH = app_config.SPOT.WidgetWidth
+SPOT_WIDGET_HEIGHT = app_config.SPOT.WidgetHeight
+
+# [LS PLC (XGT)]
+IP_LS = app_config.LS_PLC.IP
+PORT_LS = app_config.LS_PLC.Port
+
+# [3] LS PLC 타겟 및 컬럼 매핑 (Legacy Dict handling)
+LS_TARGETS = []
+if config_parser.has_section("LS_PLC_TARGETS"):
+    for key, value in config_parser.items("LS_PLC_TARGETS"):
+        addr = key.upper() 
+        LS_TARGETS.append((addr, value))
+
+# [4] CSV 및 출력 헤더 설정
+csv_str = config_parser.get("HEADERS", "CSV", fallback="")
+CSV_HEADER = [x.strip() for x in csv_str.split(",") if x.strip()]
+CONSOLE_HEADER = config_parser.get("HEADERS", "CONSOLE", fallback="Header Error").strip('"')

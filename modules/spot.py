@@ -3,6 +3,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from config import URL_SPOT
+from modules.schemas import SpotData
 
 # 세션 설정
 http_session = requests.Session()
@@ -14,7 +15,8 @@ def get_spot_temp():
         r = http_session.get(URL_SPOT, timeout=0.15)
         if r.status_code == 200: 
             val = float(r.text.strip())
-            if val > 2000.0: return 0.0
-            return val
+            # Pydantic Validation
+            validated = SpotData(temperature=val)
+            return validated.temperature
     except: pass
     return None

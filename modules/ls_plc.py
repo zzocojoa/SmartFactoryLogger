@@ -3,6 +3,7 @@ import socket
 import struct
 import time
 from config import LS_TARGETS
+from modules.schemas import LSPLCData
 
 class LSPLCClient:
     def __init__(self, ip, port):
@@ -125,4 +126,4 @@ class LSPLCClient:
         except Exception:
             self.close()
             
-        return data
+        return LSPLCData(**data).dict()

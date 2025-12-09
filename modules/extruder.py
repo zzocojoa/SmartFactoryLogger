@@ -1,6 +1,7 @@
 # modules/extruder.py
 import socket
 import time
+from modules.schemas import ExtruderData
 
 class ExtruderClient:
     def __init__(self, ip, port):
@@ -56,7 +57,7 @@ class ExtruderClient:
                     hex_val = data_part[i:i+4]
                     if len(hex_val) == 4:
                         try: values.append(int(hex_val, 16))
-                        except: values.append(0)
+                        except: values.append(None)
                 return values
         except Exception:
             self.close()
@@ -96,4 +97,13 @@ class ExtruderClient:
 
         except Exception:
             self.close()
-        return data
+            
+        # Pydantic Validation
+        try:
+            validated = ExtruderData(**data)
+            return validated.dict()
+        except Exception as e:
+            # 검증 실패 시 로그 출력 후 빈 데이터(또는 유효한 부분만) 반환
+            # 여기서는 안전하게 기본 None 데이터 반환 (또는 에러 로깅)
+            print(f"[Extruder] Validation Error: {e}")
+            return data
