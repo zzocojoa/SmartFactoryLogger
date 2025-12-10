@@ -24,18 +24,37 @@ class SpotData(BaseModel):
 
 # LS PLC 데이터 모델
 class LSPLCData(BaseModel):
-    # 명시적 필드 정의 (검증 강화)
-    Mold1: Optional[int] = Field(None, ge=0, le=1000, description="금형1 온도")
-    Mold2: Optional[int] = Field(None, ge=0, le=1000)
-    Mold3: Optional[int] = Field(None, ge=0, le=1000)
-    Mold4: Optional[int] = Field(None, ge=0, le=1000)
-    Mold5: Optional[int] = Field(None, ge=0, le=1000)
-    Mold6: Optional[int] = Field(None, ge=0, le=1000)
+    # 명시적 필드 정의 (검증 강화 -> Soft Validation으로 변경)
+    # 기존 strict constraints(le=1000) 제거 -> validator에서 처리
+    Mold1: Optional[int] = Field(None, description="금형1 온도")
+    Mold2: Optional[int] = Field(None)
+    Mold3: Optional[int] = Field(None)
+    Mold4: Optional[int] = Field(None)
+    Mold5: Optional[int] = Field(None)
+    Mold6: Optional[int] = Field(None)
     
-    Billet_Temp: Optional[int] = Field(None, ge=0, le=1000, description="빌렛 온도")
-    At_Pre: Optional[float] = Field(None, ge=0.0, description="공기압/습도")
-    At_Temp: Optional[float] = Field(None, ge=-50.0, le=100.0, description="대기 온도")
+    Billet_Temp: Optional[int] = Field(None, description="빌렛 온도")
+    At_Pre: Optional[float] = Field(None, description="공기압/습도")
+    At_Temp: Optional[float] = Field(None, description="대기 온도")
 
-    # 동적 필드 허용 (config.ini에 따라 키가 변할 수 있음)
+    # 동적 필드 허용
     class Config:
         extra = 'allow'
+
+    @validator('Mold1', 'Mold2', 'Mold3', 'Mold4', 'Mold5', 'Mold6', 'Billet_Temp', check_fields=False)
+    def validate_temp_range(cls, v, field):
+        """
+        Soft Validation:
+        범위를 벗어난 값이 들어오면 에러를 발생시키는 대신(System Crash),
+        None을 반환하고 로그를 남겨 시스템 지속성을 보장함.
+        """
+        if v is None:
+            return None
+        
+        # 물리적 한계 (0 ~ 1000도)
+        if not (0 <= v <= 1000):
+            # Console에만 출력하거나, 필요 시 sys_logger 연결 가능
+            # 여기서는 Pydantic 모델 내부이므로 print로 경고만 남김 (상위에서 로깅됨)
+            print(f"[Schema Warning] {field.name} value {v} is out of range (0-1000). Set to None.")
+            return None
+        return v

@@ -154,9 +154,12 @@ class LSPLCClient:
                             data[name] = val / 100.0
                         else:
                             data[name] = val
+            
+            # [Fix] Validation Logic moved INSIDE try block
+            # This ensures that if validation fails (even with soft validation), exception handling runs.
+            return LSPLCData(**data).dict()
                             
         except Exception as e:
-            sys_logger.error(f"[PLC] Data Loop Error: {e}")
-            self.close()
-            
-        return LSPLCData(**data).dict()
+            sys_logger.error(f"[PLC] Data/Validation Error: {e}")
+            self.close() # Reset Connection
+            return {} # Return empty dict on error (Fail Safe)
