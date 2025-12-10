@@ -729,20 +729,32 @@ class SmartFactoryApp(ctk.CTk):
     def check_queue(self):
         try:
             # [Optimization] Time-Budget Processing (10ms)
-            # Instead of fixed count, run as much as we can in 10ms to keep UI responsive
             start_time = time.time()
             while (time.time() - start_time) < 0.010: # 10ms budget
-                if self.queue.empty(): break
+                # Support both Queue and Deque
+                if hasattr(self.queue, 'empty') and self.queue.empty(): break
+                if hasattr(self.queue, '__len__') and len(self.queue) == 0: break
                 
-                data = self.queue.get_nowait()
-                self.update_ui(data)
+                try:
+                    if hasattr(self.queue, 'get_nowait'):
+                        data = self.queue.get_nowait()
+                    else:
+                        data = self.queue.popleft() # Deque
+                    self.update_ui(data)
+                except: break
         except: pass
         
-        # Connection Watchdog
-        if (datetime.now() - self.last_data_time).total_seconds() > 3:
-            self.status_lbl.configure(text="● Disconnected", text_color=COLOR_DANGER)
-        else:
-            self.status_lbl.configure(text="● Running", text_color=COLOR_SUCCESS)
+        # [UX] Connection Watchdog & Warning Retention
+        # If we have a recent warning, keep it visible for at least 2 seconds
+        is_warning_active = False
+        if hasattr(self, 'warning_until') and datetime.now() < self.warning_until:
+            is_warning_active = True
+            
+        if not is_warning_active:
+            if (datetime.now() - self.last_data_time).total_seconds() > 3:
+                self.status_lbl.configure(text="● Disconnected", text_color=COLOR_DANGER)
+            else:
+                self.status_lbl.configure(text="● Running", text_color=COLOR_SUCCESS)
             
         self.after(100, self.check_queue)
 
@@ -750,9 +762,17 @@ class SmartFactoryApp(ctk.CTk):
         # [Error Handling]
         if 'error' in data:
             err = data['error']
-            # Show Error Toast
             ToastNotification(self, f"System Error: {err}", duration=5000, color=COLOR_DANGER)
             self.status_lbl.configure(text="● Error", text_color=COLOR_DANGER)
+            return
+
+        # [Warning Handling] (Queue Full, etc)
+        if 'warning' in data:
+            msg = data['warning']
+            # No Toast, just Status Label (Orange) as per plan
+            self.status_lbl.configure(text=f"● {msg}", text_color=COLOR_WARNING)
+            # Keep this status for 2 seconds
+            self.warning_until = datetime.now() + datetime.timedelta(seconds=2)
             return
 
         self.last_data_time = datetime.now()

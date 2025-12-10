@@ -5,6 +5,8 @@ import time
 from config import LS_TARGETS
 from modules.schemas import LSPLCData
 
+from modules.logger import sys_logger
+
 class LSPLCClient:
     def __init__(self, ip, port):
         self.ip = ip
@@ -26,10 +28,12 @@ class LSPLCClient:
             self.sock.settimeout(0.5)
             self.sock.connect((self.ip, self.port))
             self.retry_interval = 1.0
+            sys_logger.info(f"[PLC] Connected to {self.ip}:{self.port}")
             return True
-        except:
+        except Exception as e:
             self.sock = None
-            self.retry_interval = 3.0 # [수정] 60초 -> 3초 (빠른 재연결)
+            self.retry_interval = 3.0
+            sys_logger.debug(f"[PLC] Connection failed: {e}")
             return False
 
     def close(self):
@@ -64,25 +68,53 @@ class LSPLCClient:
         return header + body
 
     def _parse_response(self, data):
-        # Header(20) + Cmd(2) + Type(2) + Res(2) + Err(2) + BlkCnt(2) = 30 bytes minimum
-        if len(data) < 30: return None
+        # 1. Header Validation (20 bytes)
+        if len(data) < 20: 
+            return None
         
-        error_status = struct.unpack('<H', data[26:28])[0]
-        if error_status != 0: return None
+        # Check 'LSIS-XGT' signature
+        if data[:8] != b'LSIS-XGT':
+            sys_logger.error(f"[PLC] Invalid Header Signature: {data[:8]}")
+            return None
+            
+        # Get Body Length (Offset 16, 2 bytes)
+        body_len = struct.unpack('<H', data[16:18])[0]
         
-        block_count = struct.unpack('<H', data[28:30])[0]
+        # Validate Total Length
+        if len(data) < 20 + body_len:
+            sys_logger.warning(f"[PLC] Incomplete Packet: Exp {20+body_len}, Act {len(data)}")
+            return None
+            
+        # 2. Body Parsing (Starts at offset 20)
+        # Body Header: Cmd(2) + Type(2) + Res(2) + Err(2) + BlkCnt(2) = 10 bytes minimum
+        body = data[20:]
+        
+        if len(body) < 10: return None
+        
+        # Error Check (Offset 6 in Body)
+        error_status = struct.unpack('<H', body[6:8])[0]
+        if error_status != 0:
+            sys_logger.error(f"[PLC] Response Error Code: {error_status}")
+            return None
+            
+        block_count = struct.unpack('<H', body[8:10])[0]
         
         values = []
-        offset = 30
+        offset = 10 # Start of data blocks in Body
         
         for _ in range(block_count):
-            if offset + 2 > len(data): break
-            data_len = struct.unpack('<H', data[offset:offset+2])[0]
+            if offset + 2 > len(body): break
+            
+            # Data Length (2 bytes)
+            data_len = struct.unpack('<H', body[offset:offset+2])[0]
             offset += 2
             
-            if offset + data_len > len(data): break
-            raw_val = data[offset:offset+data_len]
+            # Data Value
+            if offset + data_len > len(body): break
+            raw_val = body[offset:offset+data_len]
             
+            # Assuming Word (2 bytes) for now as per current logic
+            # Future improvement: Handle different types based on request
             if len(raw_val) == 2:
                 val = struct.unpack('<H', raw_val)[0]
                 values.append(val)
@@ -123,7 +155,8 @@ class LSPLCClient:
                         else:
                             data[name] = val
                             
-        except Exception:
+        except Exception as e:
+            sys_logger.error(f"[PLC] Data Loop Error: {e}")
             self.close()
             
         return LSPLCData(**data).dict()

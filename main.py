@@ -2,6 +2,7 @@
 import time
 import datetime
 import queue
+import collections
 import threading
 import concurrent.futures
 import sys
@@ -18,6 +19,48 @@ from modules.ls_plc import LSPLCClient
 from modules.spot import get_spot_temp
 from modules.logger import file_writer_thread, sys_logger
 from gui import SmartFactoryApp
+import os
+import traceback
+
+# ---------------------------------------------------------------------------
+# [Global Exception Handler] Crash Dump
+# ---------------------------------------------------------------------------
+def exception_hook(exctype, value, tb):
+    if issubclass(exctype, KeyboardInterrupt):
+        sys.__excepthook__(exctype, value, tb)
+        return
+
+    from config import LOG_PATH
+    try:
+        if not os.path.exists(LOG_PATH): os.makedirs(LOG_PATH)
+        log_file = os.path.join(LOG_PATH, "crash.log")
+        
+        err_msg = "".join(traceback.format_exception(exctype, value, tb))
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"\n{'='*40}\n[{timestamp}] UNHANDLED EXCEPTION\n{'='*40}\n")
+            f.write(err_msg)
+            f.write("-" * 80 + "\n")
+            
+        print(f"\n[CRITICAL] Error logged to: {log_file}", file=sys.stderr)
+        
+        # GUI Alert (Optional, only if GUI is likely dead)
+        try:
+            import tkinter.messagebox
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+            tkinter.messagebox.showerror("Fatal Error", f"A critical error occurred.\nProgram must terminate.\n\nLog: {log_file}")
+            root.destroy()
+        except: pass
+
+    except Exception as e:
+        print(f"Failed to log crash: {e}", file=sys.stderr)
+    
+    sys.__excepthook__(exctype, value, tb)
+
+sys.excepthook = exception_hook
 
 def safe_fmt(val, fmt_str):
     if val is None: return " null"
@@ -110,12 +153,22 @@ def data_collection_loop(log_queue, gui_queue):
                 'At_Temp': ls.get('At_Temp'), 'At_Pre': ls.get('At_Pre')
             }
 
-            try: 
-                log_queue.put((row, now), timeout=0.1)
-                gui_queue.put(ui_data, timeout=0.1)
-            except queue.Full:
-                sys_logger.warning("Queue full!")
-                pass
+            # [Queue Logic] Deque Append (Ring Buffer)
+            # Check for fullness before append to trigger warning
+            is_queue_full = False
+            if len(log_queue) >= log_queue.maxlen or len(gui_queue) >= gui_queue.maxlen:
+                is_queue_full = True
+            
+            log_queue.append((row, now))
+            gui_queue.append(ui_data)
+
+            if is_queue_full:
+                sys_logger.warning("Queue full! Ring Buffer dropped oldest data.")
+                # Throttle GUI Warning (Once every 2 seconds)
+                if 'last_q_warn' not in locals(): last_q_warn = 0
+                if time.time() - last_q_warn > 2.0:
+                    gui_queue.append({'warning': 'Queue Full'})
+                    last_q_warn = time.time()
 
             sleep_time = next_tick - time.time()
             if sleep_time > 0: time.sleep(sleep_time)
@@ -125,7 +178,7 @@ def data_collection_loop(log_queue, gui_queue):
         print(f"\n❌ {err_msg}")
         sys_logger.critical(err_msg, exc_info=True)
         # [Fix] Send error to GUI so user can see it
-        try: gui_queue.put({'error': str(e)}, timeout=1.0)
+        try: gui_queue.append({'error': str(e)})
         except: pass
     finally:
         executor.shutdown(wait=False)
@@ -142,8 +195,9 @@ def run_logger():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # 큐 생성 (버퍼 최적화)
-    log_queue = queue.Queue(maxsize=1000) # [Memory Optimization] 5000 -> 1000
-    gui_queue = queue.Queue(maxsize=1000)
+    # 큐 생성 (버퍼 최적화: Ring Buffer using Deque)
+    log_queue = collections.deque(maxlen=1000) 
+    gui_queue = collections.deque(maxlen=1000)
     
     # 파일 쓰기 스레드
     writer_thread = threading.Thread(target=file_writer_thread, args=(log_queue,), daemon=True)
@@ -180,7 +234,7 @@ def run_logger():
     finally:
         running = False
         print("종료 처리 중...")
-        log_queue.put(None)
+        log_queue.append(None)
         writer_thread.join(timeout=2.0)
         data_thread.join(timeout=2.0)
         sys_logger.info("Application exit.")

@@ -123,8 +123,55 @@ class SettingsWindow(ctk.CTkToplevel):
             self.switch_autosave.select()
         else:
             self.switch_autosave.deselect()
+
+        # --- [Cycle Logging Settings] ---
+        # Separator
+        ctk.CTkFrame(self.tab_store, height=2, fg_color="gray").pack(fill="x", padx=20, pady=10)
+        
+        lbl_cycle = ctk.CTkLabel(self.tab_store, text="[ Cycle Logging (Billet Split) ]", font=("Segoe UI", 16, "bold"))
+        lbl_cycle.pack(anchor="w", padx=20, pady=(5, 10))
+
+        # Toggle Billet Splitting
+        self.switch_billet = ctk.CTkSwitch(self.tab_store, text="Pressure-Triggered Log Split",
+                                           font=("Segoe UI", 14),
+                                           command=self.toggle_billet_settings)
+        self.switch_billet.pack(anchor="w", padx=20, pady=5)
+        
+        # Determine initial state
+        current_mode = self.config.get("LOGGING", "RotationMode", fallback="DAILY")
+        if current_mode == "BILLET":
+            self.switch_billet.select()
+        else:
+            self.switch_billet.deselect()
+
+        # Detailed Settings Frame
+        self.frame_billet = ctk.CTkFrame(self.tab_store, fg_color="transparent")
+        self.frame_billet.pack(fill="x", padx=40, pady=5)
+
+        # Idle Time
+        ctk.CTkLabel(self.frame_billet, text="Idle Time (sec):").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        self.entry_idle = ctk.CTkEntry(self.frame_billet, width=80)
+        self.entry_idle.grid(row=0, column=1, sticky="w", padx=5)
+        self.entry_idle.insert(0, self.config.get("LOGGING", "CycleIdleTime", fallback="10"))
+        
+        # Threshold
+        ctk.CTkLabel(self.frame_billet, text="Start Threshold (bar):").grid(row=0, column=2, sticky="w", padx=(20, 5), pady=5)
+        self.entry_thres = ctk.CTkEntry(self.frame_billet, width=80)
+        self.entry_thres.grid(row=0, column=3, sticky="w", padx=5)
+        self.entry_thres.insert(0, self.config.get("LOGGING", "CycleThresholdPress", fallback="20.0"))
+        
+        # Initialize UI State
+        self.toggle_billet_settings()
             
         ctk.CTkLabel(self.tab_store, text="* Changes will take effect after restart.", text_color="orange").pack(anchor="w", padx=20, pady=10)
+
+    def toggle_billet_settings(self):
+        if self.switch_billet.get() == 1:
+            self.entry_idle.configure(state="normal")
+            self.entry_thres.configure(state="normal")
+        else:
+            self.entry_idle.configure(state="disabled")
+            self.entry_thres.configure(state="disabled")
 
     # ... [browse_folder unchanged] ...
 
@@ -275,6 +322,14 @@ class SettingsWindow(ctk.CTkToplevel):
         
         # System
         self.config.set("SETTINGS", "Password", self.entry_pw.get())
+        
+        # [NEW] Cycle Logging
+        if not self.config.has_section("LOGGING"): self.config.add_section("LOGGING")
+        
+        rotation_mode = "BILLET" if self.switch_billet.get() == 1 else "DAILY"
+        self.config.set("LOGGING", "RotationMode", rotation_mode)
+        self.config.set("LOGGING", "CycleIdleTime", self.entry_idle.get())
+        self.config.set("LOGGING", "CycleThresholdPress", self.entry_thres.get())
         
         # Write to file
         try:

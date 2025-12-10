@@ -101,6 +101,11 @@ DEFAULT_CONFIG = {
         'SnapshotPath': 'snapshots',
         'AutoSave': 'True'
     },
+    'LOGGING': {
+        'RotationMode': 'BILLET', # BILLET, DAILY
+        'CycleIdleTime': '30',    # Seconds (Wait for new billet)
+        'CycleThresholdPress': '20' # Bar (Start trigger)
+    },
     'HEADERS': {
         'CSV': "Date,Time,Temperature,메인압력,빌렛길이,콘테이너온도 앞쪽,콘테이너온도 뒷쪽,생산카운터,현재속도,압출종료 위치,Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp",
         'CONSOLE': "| Temp  | 압력  | 빌렛L | 콘(앞)| 콘(뒤)| 카운트| 속도 | 종료 | Mold1 | Mold2 | Mold3 | Mold4 | Mold5 | Mold6 | BillT | AtPre | AtTmp"
@@ -125,8 +130,9 @@ def sync_config(config_obj, file_path, defaults):
     """
     Synchronizes the config object with default values.
     - Creates file if not likely exists.
-    - Adds missing sections/keys.
+    - Adds missing sections/keys (Merge).
     - Preserves existing user values.
+    - Creates a backup (.bak) before modifying if file exists.
     """
     is_modified = False
     
@@ -151,9 +157,19 @@ def sync_config(config_obj, file_path, defaults):
     # 3. Save if needed
     if is_modified:
         try:
+            # [Safety] Backup existing config before overwriting
+            if os.path.exists(file_path):
+                import shutil
+                bak_path = file_path + ".bak"
+                try:
+                    shutil.copy2(file_path, bak_path)
+                    print(f"[Config] Backup created: {bak_path}")
+                except Exception as e:
+                    print(f"[Config] Backup failed: {e}")
+
             with open(file_path, 'w', encoding='utf-8') as f:
                 config_obj.write(f)
-            print(f"[Config] Updated configuration at {file_path}")
+            print(f"[Config] Updated configuration at {file_path} (Merged new defaults)")
         except Exception as e:
             print(f"[Config] Failed to save config: {e}")
 
@@ -178,28 +194,70 @@ try:
 except Exception as e:
     print(f"[Config] Validation Failed: {e}")
     
-    # [Debug] Alert User on Startup
+    # [Auto-Repair] Check for bracket corruption "['value']"
+    repaired = False
     try:
-        import tkinter.messagebox
-        import tkinter as tk
-        _root = tk.Tk()
-        _root.withdraw() # Hide main
-        
-        # Capture problematic data
-        debug_info = ""
         if 'config_dict' in locals():
-            sys_val = config_dict.get('SYSTEM', {})
-            debug_info = f"\n[Debug Data]\nSYSTEM Section: {sys_val}"
+            import re
+            fixed_count = 0
+            for section, params in config_dict.items():
+                for key, val in params.items():
+                    if isinstance(val, str) and val.startswith("['") and val.endswith("']"):
+                        # remove brackets and quotes
+                        clean_val = val[2:-2]
+                        config_parser.set(section, key, clean_val)
+                        config_dict[section][key] = clean_val
+                        fixed_count += 1
+                        
+            if fixed_count > 0:
+                print(f"[Config] Detected {fixed_count} corrupted values. Attempting repair...")
+                # Re-validate
+                app_config = AppConfig(**config_dict)
+                print("[Config] Repair successful! Saving fixed config.")
+                
+                with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                    config_parser.write(f)
+                
+                repaired = True
+                
+    except Exception as repair_err:
+        print(f"[Config] Auto-repair failed: {repair_err}")
+
+    if not repaired:
+        # [Debug] Alert User on Startup
+        try:
+            import tkinter.messagebox
+            import tkinter as tk
+            _root = tk.Tk()
+            _root.withdraw() # Hide main
             
-        tkinter.messagebox.showwarning("Config Error", f"설정 파일(config.ini) 데이터 오류.\n\nError: {e}{debug_info}")
-        _root.destroy()
-    except: pass
-    
-    print("[Config] Falling back to DEFAULT configuration for safety.")
-    # Fallback: Default 값을 사용하여 AppConfig 생성 (타입 변환 보장)
-    # 주의: DEFAULT_CONFIG의 값들은 모두 string이므로, AppConfig가 이를 파싱해야 함.
-    # Pydantic은 문자열 '0.2'를 float 0.2로 자동 변환해줌.
-    app_config = AppConfig(**DEFAULT_CONFIG)
+            # Capture problematic data
+            debug_info = ""
+            if 'config_dict' in locals():
+                sys_val = config_dict.get('SYSTEM', {})
+                debug_info = f"\n[Debug Data]\nSYSTEM Section: {sys_val}"
+                
+            tkinter.messagebox.showwarning("Config Error", f"설정 파일(config.ini) 데이터 오류.\n초기 설정으로 복구합니다.\n\nError: {e}{debug_info}")
+            _root.destroy()
+        except: pass
+        
+        print("[Config] Falling back to DEFAULT configuration for safety.")
+        # Fallback: Default 값을 사용하여 AppConfig 생성
+        app_config = AppConfig(**DEFAULT_CONFIG)
+        
+        # [Safety] Overwrite corrupt file with defaults to prevent future errors
+        try:
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                temp_parser = configparser.ConfigParser()
+                # Need to populate temp_parser manually from DEFAULT_CONFIG dict structure
+                # This is complex because DEFAULT_CONFIG is dict of dicts.
+                for sec, keys in DEFAULT_CONFIG.items():
+                    temp_parser.add_section(sec)
+                    for k, v in keys.items():
+                        temp_parser.set(sec, k, str(v))
+                temp_parser.write(f)
+            print("[Config] Corrupt config.ini reset to DEFAULTS.")
+        except: pass
 
 # ---------------------------------------------------------------------------
 # [Export] 전역 변수 설정 (사용 편의성)
@@ -224,6 +282,11 @@ if not os.path.isabs(SNAPSHOT_PATH):
 if not os.path.exists(SNAPSHOT_PATH):
     try: os.makedirs(SNAPSHOT_PATH)
     except: pass
+
+# [0-1] 로깅 설정 (LOGGING)
+ROTATION_MODE = getattr(app_config.LOGGING, 'RotationMode', 'DAILY')
+CYCLE_IDLE_TIME = int(getattr(app_config.LOGGING, 'CycleIdleTime', 10))
+CYCLE_THRESHOLD_PRESS = float(getattr(app_config.LOGGING, 'CycleThresholdPress', 20.0))
 
 # [1] 기본 설정
 DEVICE_NAME = app_config.SYSTEM.DeviceName
@@ -268,14 +331,24 @@ def get_thresholds():
         if hasattr(app_config, 'THRESHOLDS_VALUE') and app_config.THRESHOLDS_VALUE:
              values = app_config.THRESHOLDS_VALUE.dict()
 
-        # Combine
-        # Keys are "Speed", "Press" etc.
-        # We need to iterate all potential keys.
-        # Let's union keys from both
-        all_keys = set(enables.keys()) | set(values.keys())
+        # [Fix] Normalize keys to match DEFAULT_CONFIG (e.g. 'press' -> 'Press')
+        # ConfigParser validation forces lowercase, but UI expects Capitalized keys.
+        canonical_map = {}
+        # Union keys from DEFAULT_CONFIG sections
+        for k in DEFAULT_CONFIG.get('THRESHOLDS_VALUE', {}).keys():
+            canonical_map[k.lower()] = k
+        for k in DEFAULT_CONFIG.get('THRESHOLDS_ENABLE', {}).keys():
+            canonical_map[k.lower()] = k
+            
+        # Combine keys from loaded config
+        all_loaded_keys = set(enables.keys()) | set(values.keys())
         
-        for k in all_keys:
-            if k == 'MASTER_ON': continue
+        for k in all_loaded_keys:
+            if k.lower() == 'master_on': continue
+            
+            # Map lowercase key back to Canonical Key (e.g. 'press' -> 'Press')
+            # If not in map, keep original (e.g. custom keys)
+            norm_k = canonical_map.get(k.lower(), k)
             
             # Value convert (None if empty/invalid)
             val = values.get(k)
@@ -287,7 +360,7 @@ def get_thresholds():
             is_enabled = enables.get(k, False)
             # Pydantic boolean might be True/False directly
             
-            t_data[k] = {
+            t_data[norm_k] = {
                 "value": f_val,
                 "enabled": bool(is_enabled)
             }

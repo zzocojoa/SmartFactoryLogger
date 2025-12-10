@@ -73,8 +73,3 @@ count = False
 endpos = False
 master_on = False
 
-[LOGGING]
-rotationmode = BILLET
-cycleidletime = 10
-cyclethresholdpress = 20
-

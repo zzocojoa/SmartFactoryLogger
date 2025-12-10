@@ -3,6 +3,8 @@ import socket
 import time
 from modules.schemas import ExtruderData
 
+from modules.logger import sys_logger
+
 class ExtruderClient:
     def __init__(self, ip, port):
         self.ip = ip
@@ -24,10 +26,12 @@ class ExtruderClient:
             self.sock.settimeout(0.15) 
             self.sock.connect((self.ip, self.port))
             self.retry_interval = 1.0
+            sys_logger.info(f"[Extru] Connected to {self.ip}:{self.port}")
             return True
-        except:
+        except Exception as e:
             self.sock = None
-            self.retry_interval = 3.0 # [수정] 60초 -> 3초 (빠른 재연결)
+            self.retry_interval = 3.0 
+            sys_logger.debug(f"[Extru] Connection failed: {e}")
             return False
 
     def close(self):
@@ -59,7 +63,8 @@ class ExtruderClient:
                         try: values.append(int(hex_val, 16))
                         except: values.append(None)
                 return values
-        except Exception:
+        except Exception as e:
+            sys_logger.error(f"[Extru] IO Error on {addr_str}: {e}")
             self.close()
         return []
 
@@ -95,7 +100,8 @@ class ExtruderClient:
             b4 = self._read_block("D1900", 20)
             if len(b4) > 10: data["Billet"] = b4[11]
 
-        except Exception:
+        except Exception as e:
+            sys_logger.error(f"[Extru] Data Loop Error: {e}")
             self.close()
             
         # Pydantic Validation
@@ -103,7 +109,5 @@ class ExtruderClient:
             validated = ExtruderData(**data)
             return validated.dict()
         except Exception as e:
-            # 검증 실패 시 로그 출력 후 빈 데이터(또는 유효한 부분만) 반환
-            # 여기서는 안전하게 기본 None 데이터 반환 (또는 에러 로깅)
-            print(f"[Extruder] Validation Error: {e}")
+            sys_logger.warning(f"[Extru] Validation Warn: {e}")
             return data

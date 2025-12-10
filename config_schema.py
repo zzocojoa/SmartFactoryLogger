@@ -58,6 +58,15 @@ class ThresholdsValue(BaseModel):
     class Config:
         extra = 'allow'
 
+class LoggingConfig(BaseModel):
+    RotationMode: str = "DAILY" # BILLET, DAILY
+    CycleIdleTime: int = 10
+    CycleThresholdPress: float = 20.0
+    
+    class Config:
+        alias_generator = lambda s: s.lower()
+        allow_population_by_field_name = True
+
 class ThresholdsEnable(BaseModel):
     class Config:
         extra = 'allow'
@@ -68,5 +77,6 @@ class AppConfig(BaseModel):
     SPOT: SpotConfig
     LS_PLC: NetworkConfig
     SETTINGS: SettingsConfig
+    LOGGING: Optional[LoggingConfig] = Field(default_factory=LoggingConfig)
     THRESHOLDS_VALUE: Optional[ThresholdsValue] = Field(default_factory=ThresholdsValue)
     THRESHOLDS_ENABLE: Optional[ThresholdsEnable] = Field(default_factory=ThresholdsEnable)
