@@ -78,7 +78,13 @@ DEFAULT_CONFIG = {
         'FocusURL': 'http://10.1.10.50/control?p=focus',
         'FocusStep': '200',
         'WidgetWidth': '512',
-        'WidgetHeight': '288'
+        'WidgetHeight': '288',
+        'RefreshInterval': '0.5',
+        'ActuatorIP': '10.1.10.60' # Dedicated Controller IP
+    },
+    'ACTUATOR': {
+        'CmdLeft': 'http://10.1.10.60/scan.cgi?scan=3',
+        'CmdRight': 'http://10.1.10.60/scan.cgi?scan=2'
     },
     'LS_PLC': {
         'IP': '192.168.10.220',
