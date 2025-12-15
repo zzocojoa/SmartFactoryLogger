@@ -29,11 +29,11 @@ excludes = [
 ]
 
 a = Analysis(
-    ['main.py'],
-    pathex=['.'], # [Fix] Explicitly look in current directory
+    ['src/main.py'],
+    pathex=['.', 'src'], # [Fix] Look in root and src
     binaries=[],
-    datas=[('icon.ico', '.')] + datas, 
-    hiddenimports=['PIL', 'PIL.Image', 'requests'] + hidden_modules, # [Fix] Add all collected modules
+    datas=[('assets/icon.ico', 'assets'), ('config/config.ini', 'config')] + datas, 
+    hiddenimports=['PIL', 'PIL.Image', 'requests'] + hidden_modules,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -47,7 +47,7 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # [Splash Screen]
 splash = Splash(
-    'icon.png',
+    'assets/icon.png',
     binaries=a.binaries,
     datas=a.datas,
     text_pos=(10, 240), # Bottom-Left (assuming 256px height)
@@ -78,5 +78,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico', # [Icon] 데스크탑/실행파일 아이콘 설정
+    icon='assets/icon.ico', # [Icon] 데스크탑/실행파일 아이콘 설정
 )

@@ -20,4 +20,4 @@ fi
 
 # Run the application
 echo "Starting SmartFactoryLogger..."
-python main.py
+python src/main.py

@@ -264,8 +264,11 @@ class TimeSeriesPanel(ctk.CTkFrame):
             self.leg_map[t] = orig_line
 
         # 2. Others (Right 2/3, 2 Rows Grid)
-        row1_keys = ['Press', 'Billet', 'Temp_F', 'Temp_B', 'Count']
-        row2_keys = ['EndPos', 'Billet_Temp', 'At_Pre', 'At_Temp', 'Speed']
+        # [User Request] Reordered Keys
+        # Row 1: Press, ConF, BillT, Cnt, AtTmp
+        row1_keys = ['Press', 'Temp_F', 'Billet_Temp', 'Count', 'At_Temp']
+        # Row 2: Spd, ConB, Billet, EndP, AtPre (Assumed AtPre for the duplicate AtTmp slot)
+        row2_keys = ['Speed', 'Temp_B', 'Billet', 'EndPos', 'At_Pre']
         
         start_x = 0.32
         col_width = 0.13

@@ -23,23 +23,38 @@ COLOR_HOT = "#ce9178"
 if getattr(sys, 'frozen', False):
     EXE_DIR = os.path.dirname(sys.executable)
 else:
-    EXE_DIR = os.path.dirname(os.path.abspath(__file__))
+    # src/config.py -> parent is src -> parent is root
+    EXE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 2. 실행 파일 옆에 config.ini가 있는지 확인 (Portable Mode 우선)
+# 2. 실행 파일 옆에 config.ini가 있는지 확인 (Portable Mode 우선)
 LOCAL_CONFIG = os.path.join(EXE_DIR, "config.ini")
+CONFIG_FILE = None
+
 if os.path.exists(LOCAL_CONFIG):
     APP_DATA_DIR = EXE_DIR
+    CONFIG_FILE = LOCAL_CONFIG
     print(f"[Config] Portable Mode Detected. Using: {APP_DATA_DIR}")
 else:
-    # 3. 없으면 AppData 사용 (Standard Install Mode)
-    if sys.platform == "win32":
-        APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), 'SmartFactoryLogger')
-    elif sys.platform == "darwin":
-        APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "SmartFactoryLogger")
+    # Dev/Source Mode: check config/config.ini
+    DEV_CONFIG = os.path.join(EXE_DIR, "config", "config.ini")
+    if os.path.exists(DEV_CONFIG):
+       APP_DATA_DIR = EXE_DIR
+       CONFIG_FILE = DEV_CONFIG
+       print(f"[Config] Source Mode Detected. Using: {CONFIG_FILE}")
     else:
-        APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".config", "SmartFactoryLogger")
-    print(f"[Config] Portable Config NOT found. Using AppData: {APP_DATA_DIR}")
+        # 3. 없으면 AppData 사용 (Standard Install Mode)
+        if sys.platform == "win32":
+            APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), 'SmartFactoryLogger')
+        elif sys.platform == "darwin":
+            APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "SmartFactoryLogger")
+        else:
+            APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".config", "SmartFactoryLogger")
+        
+        CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.ini")
+        print(f"[Config] Portable Config NOT found. Standard Mode: {CONFIG_FILE}")
 
+# Ensure AppData dir exists (for Standard Mode)
 if not os.path.exists(APP_DATA_DIR):
     try:
         os.makedirs(APP_DATA_DIR)
@@ -47,8 +62,9 @@ if not os.path.exists(APP_DATA_DIR):
     except Exception as e:
         print(f"[Critical] Failed to create AppData directory: {e}")
 
-# 설정 파일 위치
-CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.ini")
+# 설정 파일 위치 (Final Check)
+if CONFIG_FILE is None:
+    CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.ini")
 
 # 기본 경로 설정을 위한 Base Dir (옵션)
 BASE_DIR = APP_DATA_DIR

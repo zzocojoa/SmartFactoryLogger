@@ -294,17 +294,18 @@ class CameraWidget(ctk.CTkFrame):
         self.lbl_status.place(relx=0.5, rely=0.5, anchor="center")
         
         # Focus Controls (Overlay - Create AFTER image to be on top)
+        # [User Request] Swapped Positions (Left button to Right, Right button to Left)
         self.btn_left = ctk.CTkButton(self, text="◀", width=30, height=50, 
                                       fg_color="#333333", hover_color="#555555", 
                                       font=("Segoe UI Emoji", 20),
                                       command=lambda: self.change_focus(-1))
-        self.btn_left.place(relx=0.06, rely=0.5, anchor="center")
+        self.btn_left.place(relx=0.94, rely=0.5, anchor="center") # Moved to Right
         
         self.btn_right = ctk.CTkButton(self, text="▶", width=30, height=50, 
                                        fg_color="#333333", hover_color="#555555", 
                                        font=("Segoe UI Emoji", 20),
                                        command=lambda: self.change_focus(1))
-        self.btn_right.place(relx=0.94, rely=0.5, anchor="center")
+        self.btn_right.place(relx=0.06, rely=0.5, anchor="center") # Moved to Left
         
         # Focus Queue
         self.focus_queue = queue.Queue()
@@ -526,7 +527,7 @@ class SmartFactoryApp(ctk.CTk):
             return os.path.join(base_path, relative_path)
 
         try:
-            icon_path = resource_path("icon.ico")
+            icon_path = resource_path("assets/icon.ico")
             self.iconbitmap(icon_path)
         except Exception as e:
             print(f"Icon load failed: {e}")
@@ -687,6 +688,31 @@ class SmartFactoryApp(ctk.CTk):
         self.card_at_temp.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.card_at_pre = InfoCard(self.frame_env, "💧 At Pre", "0.0", "%", height=90, value_size=36)
         self.card_at_pre.pack(side="right", fill="x", expand=True, padx=(10, 0))
+
+        # [NEW] Operator Notice Card (Enhanced Visibility)
+        self.card_notice = ctk.CTkFrame(self.col3, fg_color=COLOR_CARD, corner_radius=12, border_width=2, border_color=COLOR_WARNING)
+        self.card_notice.pack(fill="x", pady=(10, 20), padx=20)
+        
+        # Header
+        notice_header = ctk.CTkFrame(self.card_notice, fg_color="transparent")
+        notice_header.pack(fill="x", padx=20, pady=(15, 10))
+        ctk.CTkLabel(notice_header, text="⚠️ OPERATOR CHECK", font=(FONT_MAIN, 22, "bold"), text_color=COLOR_WARNING).pack(side="left")
+        
+        # Body Content (Split for styling)
+        content_frame = ctk.CTkFrame(self.card_notice, fg_color="transparent")
+        content_frame.pack(fill="x", padx=20, pady=(0, 20))
+        
+        # 1. Main Instruction
+        ctk.CTkLabel(content_frame, text="적외선 센서 조준 상태를 상시 확인하십시오.", 
+                     font=(FONT_MAIN, 18, "bold"), text_color="white", justify="left").pack(anchor="w", pady=(0, 5))
+        
+        # 2. Reasoning (Dimmed)
+        ctk.CTkLabel(content_frame, text="※ 제품 위치 변동 시 온도가 측정되지 않을 수 있습니다.", 
+                     font=(FONT_MAIN, 14), text_color="#aaaaaa", justify="left").pack(anchor="w", pady=(0, 10))
+        
+        # 3. Action Call (Highlighted)
+        ctk.CTkLabel(content_frame, text="▶ 'SPOT Camera View' 화살표로\n    포인트 위치를 조정해 주세요.", 
+                     font=(FONT_MAIN, 20, "bold"), text_color=COLOR_ACCENT, justify="left").pack(anchor="w")
 
         # [NEW] Camera Widget in Column 2 (Bottom)
         self.cam_frame = ctk.CTkFrame(self.col2, fg_color="transparent")
