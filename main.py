@@ -18,6 +18,7 @@ from modules.extruder import ExtruderClient
 from modules.ls_plc import LSPLCClient
 from modules.spot import get_spot_temp
 from modules.logger import file_writer_thread, sys_logger
+from modules.logic_processor import LogicProcessor
 from gui import SmartFactoryApp
 import os
 import traceback
@@ -95,6 +96,9 @@ def data_collection_loop(log_queue, gui_queue):
     extruder = ExtruderClient(IP_EXT, PORT_EXT)
     ls_plc = LSPLCClient(IP_LS, PORT_LS)
     
+    # [New] Logic Processor 초기화
+    logic_processor = LogicProcessor()
+    
     # 스레드 풀
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
     
@@ -119,6 +123,15 @@ def data_collection_loop(log_queue, gui_queue):
             # 콘솔 출력 (선택 사항: GUI가 있으면 줄여도 됨)
             # print(f" {time_s} | ...") 
 
+            # [New] Logic Processor Update
+            # count, pressure, speed, timestamp
+            die_id, billet_cycle_id = logic_processor.update(
+                ext.get('Count'), 
+                ext.get('Press'), 
+                ext.get('Speed'), 
+                now
+            )
+
             # CSV 저장용 데이터
             row = [
                 date_s, time_s, 
@@ -138,7 +151,10 @@ def data_collection_loop(log_queue, gui_queue):
                 ls.get('Mold6', "") if ls.get('Mold6') is not None else "",
                 ls.get('Billet_Temp', "") if ls.get('Billet_Temp') is not None else "",
                 ls.get('At_Pre', "") if ls.get('At_Pre') is not None else "",
-                ls.get('At_Temp', "") if ls.get('At_Temp') is not None else ""
+                ls.get('At_Temp', "") if ls.get('At_Temp') is not None else "",
+                # [New] Columns
+                die_id if die_id else "",
+                billet_cycle_id if billet_cycle_id is not None else ""
             ]
             
             # GUI 업데이트용 데이터 딕셔너리

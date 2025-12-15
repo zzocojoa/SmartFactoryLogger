@@ -113,7 +113,7 @@ DEFAULT_CONFIG = {
         'CycleThresholdPress': '20' # Bar (Start trigger)
     },
     'HEADERS': {
-        'CSV': "Date,Time,Temperature,메인압력,빌렛길이,콘테이너온도 앞쪽,콘테이너온도 뒷쪽,생산카운터,현재속도,압출종료 위치,Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp",
+        'CSV': "Date,Time,Temperature,메인압력,빌렛길이,콘테이너온도 앞쪽,콘테이너온도 뒷쪽,생산카운터,현재속도,압출종료 위치,Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp,DIE_ID,Billet_CycleID",
         'CONSOLE': "| Temp  | 압력  | 빌렛L | 콘(앞)| 콘(뒤)| 카운트| 속도 | 종료 | Mold1 | Mold2 | Mold3 | Mold4 | Mold5 | Mold6 | BillT | AtPre | AtTmp"
     },
     'THRESHOLDS_VALUE': {
@@ -393,3 +393,36 @@ if config_parser.has_section("LS_PLC_TARGETS"):
 csv_str = config_parser.get("HEADERS", "CSV", fallback="")
 CSV_HEADER = [x.strip() for x in csv_str.split(",") if x.strip()]
 CONSOLE_HEADER = config_parser.get("HEADERS", "CONSOLE", fallback="Header Error").strip('"')
+
+# [Migration] Auto-add missing columns to existing config.ini
+def ensure_config_migration():
+    """
+    Check if config.ini exists and has the old CSV header.
+    If 'DIE_ID' is missing, append the new columns and save.
+    """
+    if not os.path.exists(CONFIG_FILE):
+        return
+
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(CONFIG_FILE, encoding='utf-8')
+        if 'HEADERS' in parser and 'CSV' in parser['HEADERS']:
+            current_header = parser['HEADERS']['CSV']
+            if "DIE_ID" not in current_header:
+                print("[Config] Old CSV header detected. Migrating...")
+                new_header = current_header + ",DIE_ID,Billet_CycleID"
+                parser['HEADERS']['CSV'] = new_header
+                
+                with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                    parser.write(f)
+                print("[Config] Migration Complete: Added DIE_ID, Billet_CycleID.")
+            else:
+                 # Ensure internal config also reflects it if parser read old file before update?
+                 # Actually config_parser is already loaded. This is for persistent file update.
+                 pass
+
+    except Exception as e:
+        print(f"[Config] Migration Failed: {e}")
+
+# Run migration on import
+ensure_config_migration()

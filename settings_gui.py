@@ -257,9 +257,12 @@ class SettingsWindow(ctk.CTkToplevel):
             self.entry_snap_path.insert(0, path)
 
     def view_recent_logs(self):
-        log_path = self.config.get("SETTINGS", "LogPath", fallback=LOG_PATH)
+        log_path = self.config.get("SETTINGS", "LogPath", fallback="logs")
+        if not os.path.isabs(log_path):
+             log_path = os.path.join(BASE_DIR, log_path)
+             
         if not os.path.exists(log_path):
-            messagebox.showerror("Error", "Log path does not exist.")
+            messagebox.showerror("Error", f"Log path does not exist:\n{log_path}")
             return
             
         try:

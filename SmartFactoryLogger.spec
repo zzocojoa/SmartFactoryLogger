@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -7,13 +7,11 @@ block_cipher = None
 # CTk needs its theme/json files to work
 datas = collect_data_files('customtkinter')
 
+# Collect all submodules in 'modules' package explicitly
+hidden_modules = collect_submodules('modules')
+
 # Exclude heavy libraries not used
-# Verify carefully: 
-# - pandas: Not used (we use CSV module and lists)
-# - scipy: Not used
-# - notebook, IPython: Dev tools
-# - sqlite3: Not used (Using CSV)
-# - tk/tcl: KEPT because we use tkinter
+# ... (Same excludes list) ...
 excludes = [
     'pandas', 
     'scipy', 
@@ -32,10 +30,10 @@ excludes = [
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['.'], # [Fix] Explicitly look in current directory
     binaries=[],
-    datas=[('icon.ico', '.')] + datas, # [Fix] Bundle icon inside EXE
-    hiddenimports=['PIL', 'PIL.Image', 'requests'],
+    datas=[('icon.ico', '.')] + datas, 
+    hiddenimports=['PIL', 'PIL.Image', 'requests'] + hidden_modules, # [Fix] Add all collected modules
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
