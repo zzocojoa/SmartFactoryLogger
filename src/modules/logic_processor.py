@@ -146,7 +146,7 @@ class LogicProcessor:
         # -----------------------------------------------------------
         # 2. Billet Cycle Logic (Simplified: Speed Trigger -> Reflect Logic)
         # -----------------------------------------------------------
-        SPEED_THRESHOLD = 0.2  # [User Request] Lower threshold
+        SPEED_THRESHOLD = 0.1  # [User Request] Lower threshold
         
         try:
             current_speed = float(speed) if speed is not None else 0.0
