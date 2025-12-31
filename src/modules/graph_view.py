@@ -8,7 +8,9 @@ import collections
 import time 
 import os
 import configparser # [Persistence]
-from config import SNAPSHOT_PATH, THRESHOLDS_CONFIG, CONFIG_FILE # [Persistence]
+from tkinter import messagebox
+from config import SNAPSHOT_PATH, THRESHOLDS_CONFIG, CONFIG_FILE, APP_DATA_DIR, read_config_with_fallback, safe_write_config_parser # [Persistence]
+from modules.logger import sys_logger
 from modules.threshold_gui import ThresholdSettingsWindow
 from modules.ui_utils import ToastNotification 
 
@@ -98,11 +100,24 @@ class TimeSeriesPanel(ctk.CTkFrame):
             filename = f"Snapshot_{timestamp}.png"
             
             # Use Variable Path
-            if not os.path.exists(SNAPSHOT_PATH):
-                try: os.makedirs(SNAPSHOT_PATH)
-                except: pass
-                
-            path = os.path.join(SNAPSHOT_PATH, filename)
+            target_dir = SNAPSHOT_PATH
+            if not os.path.exists(target_dir):
+                try:
+                    os.makedirs(target_dir)
+                except Exception:
+                    fallback_dir = os.path.join(APP_DATA_DIR, "snapshots")
+                    if not os.path.exists(fallback_dir):
+                        try:
+                            os.makedirs(fallback_dir)
+                        except Exception:
+                            pass
+                    if fallback_dir != target_dir:
+                        sys_logger.warning(
+                            f"Snapshot path not usable: {target_dir}. Using fallback: {fallback_dir}"
+                        )
+                    target_dir = fallback_dir
+            
+            path = os.path.join(target_dir, filename)
             
             # Save visible extent
             self.fig.savefig(path, facecolor=self.fig.get_facecolor(), dpi=100)
@@ -147,7 +162,10 @@ class TimeSeriesPanel(ctk.CTkFrame):
         # [Persistence] Save to config.ini
         try:
             cfg = configparser.ConfigParser()
-            cfg.read(CONFIG_FILE, encoding='utf-8')
+            try:
+                read_config_with_fallback(cfg, CONFIG_FILE)
+            except Exception as e:
+                sys_logger.warning(f"Thresholds config read failed: {e}")
             
             if not cfg.has_section("THRESHOLDS_VALUE"): cfg.add_section("THRESHOLDS_VALUE")
             if not cfg.has_section("THRESHOLDS_ENABLE"): cfg.add_section("THRESHOLDS_ENABLE")
@@ -168,13 +186,24 @@ class TimeSeriesPanel(ctk.CTkFrame):
                 # Write Enable
                 cfg.set("THRESHOLDS_ENABLE", key, str(enabled))
                 
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                cfg.write(f)
-                
-            print("[Thresholds] Saved to config.ini")
+            ok, err, pending = safe_write_config_parser(cfg, CONFIG_FILE)
+            if ok:
+                print("[Thresholds] Saved to config.ini")
+                sys_logger.info("Thresholds saved to config.ini")
+            else:
+                is_perm = isinstance(err, PermissionError) or getattr(err, "winerror", None) in (5, 32)
+                if is_perm:
+                    msg = "설정 파일이 읽기 전용이거나 권한이 없습니다. 관리자 권한이 필요합니다."
+                else:
+                    msg = f"설정 저장 실패: {err}"
+                if pending:
+                    msg += f"\n임시 저장 위치: {pending}"
+                messagebox.showerror("Error", msg)
+                sys_logger.error(f"Thresholds save failed: {err}; pending={pending}")
             
         except Exception as e:
             print(f"[Thresholds] Save Error: {e}")
+            sys_logger.error(f"Thresholds save error: {e}")
 
     def setup_plots(self):
         items = [

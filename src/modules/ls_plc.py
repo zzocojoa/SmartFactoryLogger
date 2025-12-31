@@ -13,8 +13,17 @@ class LSPLCClient:
         self.port = port
         self.sock = None
         self.last_connect_time = 0
-        self.retry_interval = 1.0
+        self.base_retry = 1.0
+        self.max_retry = 8.0
+        self.retry_interval = self.base_retry
         self.connect()
+
+    def _reset_backoff(self):
+        self.retry_interval = self.base_retry
+
+    def _increase_backoff(self):
+        self.retry_interval = min(self.max_retry, max(self.base_retry, self.retry_interval * 2))
+        self.last_connect_time = time.time()
 
     def connect(self):
         now = time.time()
@@ -27,12 +36,12 @@ class LSPLCClient:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.settimeout(0.5)
             self.sock.connect((self.ip, self.port))
-            self.retry_interval = 1.0
+            self._reset_backoff()
             sys_logger.info(f"[PLC] Connected to {self.ip}:{self.port}")
             return True
         except Exception as e:
             self.sock = None
-            self.retry_interval = 3.0
+            self._increase_backoff()
             sys_logger.debug(f"[PLC] Connection failed: {e}")
             return False
 
@@ -66,6 +75,20 @@ class LSPLCClient:
         header += b'\x00\x00'
         
         return header + body
+
+    def _recv_exact(self, size):
+        if not self.sock:
+            return None
+        data = bytearray()
+        try:
+            while len(data) < size:
+                chunk = self.sock.recv(size - len(data))
+                if not chunk:
+                    return None
+                data.extend(chunk)
+        except Exception:
+            return None
+        return bytes(data)
 
     def _parse_response(self, data):
         # 1. Header Validation (20 bytes)
@@ -138,11 +161,37 @@ class LSPLCClient:
             
             # 2. 한 번의 패킷으로 모든 데이터 요청 (Multi-read)
             req = self._create_packet(addr_list)
-            self.sock.send(req)
-            res = self.sock.recv(4096)
+            self.sock.sendall(req)
+
+            header = self._recv_exact(20)
+            if not header:
+                sys_logger.warning("[PLC] Incomplete header response.")
+                self._increase_backoff()
+                self.close()
+                return data
+
+            body_len = struct.unpack('<H', header[16:18])[0]
+            if body_len <= 0 or body_len > 8192:
+                sys_logger.warning(f"[PLC] Invalid body length: {body_len}")
+                self._increase_backoff()
+                self.close()
+                return data
+
+            body = self._recv_exact(body_len)
+            if not body:
+                sys_logger.warning("[PLC] Incomplete body response.")
+                self._increase_backoff()
+                self.close()
+                return data
+
+            res = header + body
             
             # 3. 응답 파싱 (값 리스트 반환)
             values = self._parse_response(res)
+            if values is None:
+                self._increase_backoff()
+                self.close()
+                return data
             
             # 4. 결과 매핑
             if values and len(values) == len(LS_TARGETS):
@@ -161,5 +210,6 @@ class LSPLCClient:
                             
         except Exception as e:
             sys_logger.error(f"[PLC] Data/Validation Error: {e}")
+            self._increase_backoff()
             self.close() # Reset Connection
-            return {} # Return empty dict on error (Fail Safe)
+            return data # Return default dict on error (Fail Safe)

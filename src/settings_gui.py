@@ -4,7 +4,12 @@ from tkinter import filedialog, messagebox
 import configparser
 import os
 import sys
-from config import CONFIG_FILE, IP_EXT, PORT_EXT, IP_LS, PORT_LS, IP_SPOT, LOG_PATH, PASSWORD, SNAPSHOT_PATH
+from config import (
+    CONFIG_FILE, IP_EXT, PORT_EXT, IP_LS, PORT_LS, IP_SPOT,
+    LOG_PATH, PASSWORD, SNAPSHOT_PATH,
+    read_config_with_fallback, safe_write_config_parser, resolve_storage_path
+)
+from modules.logger import sys_logger
 
 class SettingsWindow(ctk.CTkToplevel):
     _last_geometry = None
@@ -23,7 +28,11 @@ class SettingsWindow(ctk.CTkToplevel):
         self.grab_set() # 모달 창으로 설정 (뒤 화면 클릭 방지)
 
         self.config = configparser.ConfigParser()
-        self.config.read(CONFIG_FILE, encoding='utf-8')
+        try:
+            read_config_with_fallback(self.config, CONFIG_FILE)
+        except Exception as e:
+            messagebox.showwarning("Warning", f"설정 파일을 읽는 중 오류가 발생했습니다.\n기본값으로 진행합니다.\n\nError: {e}")
+            sys_logger.warning(f"Config read failed: {e}")
         
         self.setup_ui()
         
@@ -257,12 +266,12 @@ class SettingsWindow(ctk.CTkToplevel):
             self.entry_snap_path.insert(0, path)
 
     def view_recent_logs(self):
-        log_path = self.config.get("SETTINGS", "LogPath", fallback="logs")
-        if not os.path.isabs(log_path):
-             log_path = os.path.join(BASE_DIR, log_path)
-             
+        log_path_value = self.config.get("SETTINGS", "LogPath", fallback="logs")
+        log_path = resolve_storage_path(log_path_value, "logs", "LogPath")
+        
         if not os.path.exists(log_path):
             messagebox.showerror("Error", f"Log path does not exist:\n{log_path}")
+            sys_logger.error(f"Log path does not exist: {log_path}")
             return
             
         try:
@@ -335,10 +344,9 @@ class SettingsWindow(ctk.CTkToplevel):
         self.config.set("LOGGING", "CycleThresholdPress", self.entry_thres.get())
         
         # Write to file
-        try:
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as configfile:
-                self.config.write(configfile)
-            
+        ok, err, pending = safe_write_config_parser(self.config, CONFIG_FILE)
+        if ok:
+            sys_logger.info(f"Settings saved: {CONFIG_FILE}")
             # Use Local Import to avoid circular dependency
             from modules.ui_utils import ToastNotification
             if self.master:
@@ -346,9 +354,16 @@ class SettingsWindow(ctk.CTkToplevel):
                 self.after(100, lambda: self._safe_close_with_toast(ToastNotification))
             else:
                 self.after(50, self.destroy)
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save settings: {e}")
+        else:
+            is_perm = isinstance(err, PermissionError) or getattr(err, "winerror", None) in (5, 32)
+            if is_perm:
+                msg = "설정 파일이 읽기 전용이거나 권한이 없습니다. 관리자 권한이 필요합니다."
+            else:
+                msg = f"설정 저장 실패: {err}"
+            if pending:
+                msg += f"\n임시 저장 위치: {pending}"
+            messagebox.showerror("Error", msg)
+            sys_logger.error(f"Settings save failed: {err}; pending={pending}")
 
     def _safe_close_with_toast(self, ToastClass):
         if not self.winfo_exists(): return

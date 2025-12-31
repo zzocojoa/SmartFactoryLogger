@@ -1,7 +1,10 @@
 # config.py
 import configparser
+import datetime
 import os
+import shutil
 import sys
+import tempfile
 from config_schema import AppConfig
 
 # 색상 상수
@@ -26,47 +29,82 @@ else:
     # src/config.py -> parent is src -> parent is root
     EXE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 2. 실행 파일 옆에 config.ini가 있는지 확인 (Portable Mode 우선)
-# 2. 실행 파일 옆에 config.ini가 있는지 확인 (Portable Mode 우선)
+def get_user_data_dir():
+    if sys.platform == "win32":
+        base = os.getenv('APPDATA') or os.path.expanduser("~")
+        return os.path.join(base, 'SmartFactoryLogger')
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "SmartFactoryLogger")
+    return os.path.join(os.path.expanduser("~"), ".config", "SmartFactoryLogger")
+
+APP_DATA_DIR = get_user_data_dir()
 LOCAL_CONFIG = os.path.join(EXE_DIR, "config.ini")
-CONFIG_FILE = None
+DEV_CONFIG = os.path.join(EXE_DIR, "config", "config.ini")
+CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.ini")
+CONFIG_BACKUP_VERSIONS = 3
 
-if os.path.exists(LOCAL_CONFIG):
-    APP_DATA_DIR = EXE_DIR
-    CONFIG_FILE = LOCAL_CONFIG
-    print(f"[Config] Portable Mode Detected. Using: {APP_DATA_DIR}")
-else:
-    # Dev/Source Mode: check config/config.ini
-    DEV_CONFIG = os.path.join(EXE_DIR, "config", "config.ini")
-    if os.path.exists(DEV_CONFIG):
-       APP_DATA_DIR = EXE_DIR
-       CONFIG_FILE = DEV_CONFIG
-       print(f"[Config] Source Mode Detected. Using: {CONFIG_FILE}")
+def _config_log(level, message):
+    try:
+        logs_dir = os.path.join(APP_DATA_DIR, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        log_path = os.path.join(logs_dir, "system.log")
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] [{level}] [Config] {message}\n")
+    except Exception:
+        pass
+
+def _ensure_writable_dir(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception:
+        return False
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix=".perm_", dir=path)
+        os.close(fd)
+        os.remove(tmp_path)
+        return True
+    except Exception:
+        return False
+
+def resolve_storage_path(path_value, default_subdir, label):
+    raw_value = path_value if path_value else default_subdir
+    if not os.path.isabs(raw_value):
+        candidate = os.path.join(APP_DATA_DIR, raw_value)
     else:
-        # 3. 없으면 AppData 사용 (Standard Install Mode)
-        if sys.platform == "win32":
-            APP_DATA_DIR = os.path.join(os.getenv('APPDATA'), 'SmartFactoryLogger')
-        elif sys.platform == "darwin":
-            APP_DATA_DIR = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "SmartFactoryLogger")
-        else:
-            APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".config", "SmartFactoryLogger")
-        
-        CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.ini")
-        print(f"[Config] Portable Config NOT found. Standard Mode: {CONFIG_FILE}")
+        candidate = raw_value
+    if _ensure_writable_dir(candidate):
+        return candidate
+    fallback = os.path.join(APP_DATA_DIR, default_subdir)
+    _ensure_writable_dir(fallback)
+    _config_log("WARNING", f"{label} path not usable: {candidate}. Using fallback: {fallback}")
+    return fallback
 
-# Ensure AppData dir exists (for Standard Mode)
+# Ensure AppData dir exists
 if not os.path.exists(APP_DATA_DIR):
     try:
         os.makedirs(APP_DATA_DIR)
-        print(f"[Info] Created AppData directory: {APP_DATA_DIR}")
+        print(f"[Config] Created AppData directory: {APP_DATA_DIR}")
     except Exception as e:
-        print(f"[Critical] Failed to create AppData directory: {e}")
+        print(f"[Config] Failed to create AppData directory: {e}")
 
-# 설정 파일 위치 (Final Check)
-if CONFIG_FILE is None:
-    CONFIG_FILE = os.path.join(APP_DATA_DIR, "config.ini")
+# Seed AppData config from local or dev config if missing
+if not os.path.exists(CONFIG_FILE):
+    if os.path.exists(LOCAL_CONFIG):
+        try:
+            import shutil
+            shutil.copy2(LOCAL_CONFIG, CONFIG_FILE)
+            print(f"[Config] Copied local config to AppData: {CONFIG_FILE}")
+        except Exception as e:
+            print(f"[Config] Copy local config failed: {e}")
+    elif os.path.exists(DEV_CONFIG):
+        try:
+            import shutil
+            shutil.copy2(DEV_CONFIG, CONFIG_FILE)
+            print(f"[Config] Copied dev config to AppData: {CONFIG_FILE}")
+        except Exception as e:
+            print(f"[Config] Copy dev config failed: {e}")
 
-# 기본 경로 설정을 위한 Base Dir (옵션)
 BASE_DIR = APP_DATA_DIR
 
 # ---------------------------------------------------------------------------
@@ -148,52 +186,223 @@ DEFAULT_CONFIG = {
 # ConfigParser Init
 config_parser = configparser.ConfigParser()
 
+def read_config_with_fallback(config_obj, file_path):
+    encodings = ["utf-8-sig", "utf-8", "cp949"]
+    last_err = None
+    for enc in encodings:
+        try:
+            config_obj.read(file_path, encoding=enc)
+            return enc
+        except Exception as e:
+            last_err = e
+    if last_err:
+        raise last_err
+    return None
+
+
+def rotate_backups(file_path, max_versions=CONFIG_BACKUP_VERSIONS):
+    if max_versions < 1:
+        return None
+    bak_base = file_path + ".bak"
+    if max_versions > 1:
+        oldest = f"{bak_base}.{max_versions - 1}"
+        if os.path.exists(oldest):
+            try:
+                os.remove(oldest)
+            except Exception:
+                pass
+        for i in range(max_versions - 2, 0, -1):
+            src = f"{bak_base}.{i}"
+            dst = f"{bak_base}.{i + 1}"
+            if os.path.exists(src):
+                try:
+                    os.replace(src, dst)
+                except Exception:
+                    pass
+        if os.path.exists(bak_base):
+            try:
+                os.replace(bak_base, f"{bak_base}.1")
+            except Exception:
+                pass
+    if not os.path.exists(file_path):
+        return None
+    try:
+        shutil.copy2(file_path, bak_base)
+        print(f"[Config] Backup created: {bak_base}")
+        return bak_base
+    except Exception as e:
+        print(f"[Config] Backup failed: {e}")
+        _config_log("ERROR", f"Backup failed for {file_path}: {e}")
+        return None
+
+
+def backup_config(file_path, max_versions=CONFIG_BACKUP_VERSIONS):
+    return rotate_backups(file_path, max_versions=max_versions)
+
+
+def _write_pending_file(file_path, write_func):
+    candidates = [file_path + ".pending"]
+    base_name = os.path.basename(file_path)
+    candidates.append(os.path.join(APP_DATA_DIR, base_name + ".pending"))
+    candidates.append(os.path.join(tempfile.gettempdir(), base_name + ".pending"))
+    for pending_path in candidates:
+        try:
+            os.makedirs(os.path.dirname(pending_path), exist_ok=True)
+            with open(pending_path, "w", encoding="utf-8-sig") as f:
+                write_func(f)
+            return pending_path
+        except Exception:
+            continue
+    return None
+
+
+def _write_temp_file(file_path, write_func, encoding="utf-8-sig"):
+    dir_path = os.path.dirname(file_path)
+    os.makedirs(dir_path, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", dir=dir_path)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            write_func(f)
+        return tmp_path
+    except Exception:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise
+
+
+def safe_write_file(file_path, write_func, backup_versions=CONFIG_BACKUP_VERSIONS, encoding="utf-8-sig"):
+    tmp_path = None
+    try:
+        tmp_path = _write_temp_file(file_path, write_func, encoding=encoding)
+        if os.path.exists(file_path):
+            backup_config(file_path, max_versions=backup_versions)
+        os.replace(tmp_path, file_path)
+        return True, None, None
+    except Exception as e:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        is_perm = isinstance(e, PermissionError) or getattr(e, "winerror", None) in (5, 32)
+        pending_path = None
+        if is_perm:
+            pending_path = _write_pending_file(file_path, write_func)
+        _config_log("ERROR", f"Safe write failed for {file_path}: {e}")
+        return False, e, pending_path
+
+
+def safe_write_config_parser(config_obj, file_path, backup_versions=CONFIG_BACKUP_VERSIONS):
+    def _write(f):
+        config_obj.write(f)
+    return safe_write_file(file_path, _write, backup_versions=backup_versions)
+
+
+def build_defaults_index(defaults):
+    index = {}
+    for sec, keys in defaults.items():
+        key_index = {k.lower(): k for k in keys.keys()}
+        index[sec.lower()] = (sec, key_index)
+    return index
+
+
+def merge_with_defaults(config_dict, defaults):
+    merged = {}
+    defaults_index = build_defaults_index(defaults)
+    for sec, keys in defaults.items():
+        merged[sec] = {k: str(v) for k, v in keys.items()}
+    for sec, keys in config_dict.items():
+        sec_lower = sec.lower()
+        if sec_lower in defaults_index:
+            sec_name, key_index = defaults_index[sec_lower]
+        else:
+            sec_name, key_index = sec, {}
+        if sec_name not in merged:
+            merged[sec_name] = {}
+        for key, value in keys.items():
+            key_name = key_index.get(key.lower(), key)
+            merged[sec_name][key_name] = value
+    return merged
+
+
+def apply_validation_defaults(config_dict, defaults, errors):
+    if not errors:
+        return config_dict
+    defaults_index = build_defaults_index(defaults)
+    for err in errors:
+        loc = err.get("loc") if isinstance(err, dict) else None
+        if not loc:
+            continue
+        if len(loc) >= 2:
+            sec = str(loc[0])
+            key = str(loc[1])
+            sec_lower = sec.lower()
+            if sec_lower in defaults_index:
+                sec_name, key_index = defaults_index[sec_lower]
+                key_name = key_index.get(key.lower(), key)
+                if sec_name not in config_dict:
+                    config_dict[sec_name] = {}
+                if sec_name in defaults and key_name in defaults[sec_name]:
+                    config_dict[sec_name][key_name] = str(defaults[sec_name][key_name])
+    return config_dict
+
+
+def write_config_dict(file_path, data):
+    parser = configparser.ConfigParser()
+    for sec, keys in data.items():
+        if not parser.has_section(sec):
+            parser.add_section(sec)
+        for k, v in keys.items():
+            parser.set(sec, k, str(v))
+    ok, err, pending = safe_write_config_parser(parser, file_path)
+    if not ok:
+        print(f"[Config] Failed to save config: {err}")
+        if pending:
+            print(f"[Config] Pending config saved: {pending}")
+
+
 def sync_config(config_obj, file_path, defaults):
-    """
-    Synchronizes the config object with default values.
-    - Creates file if not likely exists.
-    - Adds missing sections/keys (Merge).
-    - Preserves existing user values.
-    - Creates a backup (.bak) before modifying if file exists.
-    """
+    # Synchronizes the config object with default values.
+    # - Creates file if not likely exists.
+    # - Adds missing sections/keys (Merge).
+    # - Preserves existing user values.
+    # - Creates a backup (.bak) before modifying if file exists.
     is_modified = False
-    
+
     # 1. Load existing
     if os.path.exists(file_path):
         try:
-            config_obj.read(file_path, encoding='utf-8')
+            read_config_with_fallback(config_obj, file_path)
         except Exception as e:
             print(f"[Config] Error reading config: {e}. Using defaults.")
-            
+
     # 2. Merge Defaults
     for section, keys in defaults.items():
         if not config_obj.has_section(section):
             config_obj.add_section(section)
             is_modified = True
-            
+
         for key, value in keys.items():
             if not config_obj.has_option(section, key):
                 config_obj.set(section, key, str(value))
                 is_modified = True
-                
+
     # 3. Save if needed
     if is_modified:
-        try:
-            # [Safety] Backup existing config before overwriting
-            if os.path.exists(file_path):
-                import shutil
-                bak_path = file_path + ".bak"
-                try:
-                    shutil.copy2(file_path, bak_path)
-                    print(f"[Config] Backup created: {bak_path}")
-                except Exception as e:
-                    print(f"[Config] Backup failed: {e}")
-
-            with open(file_path, 'w', encoding='utf-8') as f:
-                config_obj.write(f)
+        ok, err, pending = safe_write_config_parser(config_obj, file_path)
+        if ok:
             print(f"[Config] Updated configuration at {file_path} (Merged new defaults)")
-        except Exception as e:
-            print(f"[Config] Failed to save config: {e}")
+        else:
+            print(f"[Config] Failed to save config: {err}")
+            if pending:
+                print(f"[Config] Pending config saved: {pending}")
 
 # Perform Sync
 sync_config(config_parser, CONFIG_FILE, DEFAULT_CONFIG)
@@ -204,23 +413,24 @@ sync_config(config_parser, CONFIG_FILE, DEFAULT_CONFIG)
 # [Safe Loading] Pydantic Validation
 # ---------------------------------------------------------------------------
 try:
-    # 1. Parser -> Dict 변환
+    # 1. Parser -> Dict
     config_dict = {s: dict(config_parser.items(s)) for s in config_parser.sections()}
-    
-    # 2. Pydantic을 이용한 유효성 검사 및 타입 변환
-    #    (검증 실패 시 except 블록으로 이동하여 기본값 사용)
+
+    # 2. Pydantic Validation
     app_config = AppConfig(**config_dict)
-    
+
     print("[Config] Configuration loaded and validated successfully.")
 
 except Exception as e:
     print(f"[Config] Validation Failed: {e}")
-    
-    # [Auto-Repair] Check for bracket corruption "['value']"
+
     repaired = False
+    if 'config_dict' not in locals():
+        config_dict = {}
+
+    # [Auto-Repair] Check for bracket corruption "['value']"
     try:
         if 'config_dict' in locals():
-            import re
             fixed_count = 0
             for section, params in config_dict.items():
                 for key, val in params.items():
@@ -230,20 +440,45 @@ except Exception as e:
                         config_parser.set(section, key, clean_val)
                         config_dict[section][key] = clean_val
                         fixed_count += 1
-                        
+
             if fixed_count > 0:
                 print(f"[Config] Detected {fixed_count} corrupted values. Attempting repair...")
                 # Re-validate
                 app_config = AppConfig(**config_dict)
                 print("[Config] Repair successful! Saving fixed config.")
-                
-                with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                    config_parser.write(f)
-                
+
+                ok, err, pending = safe_write_config_parser(config_parser, CONFIG_FILE)
+                if not ok:
+                    print(f"[Config] Failed to save repaired config: {err}")
+                    if pending:
+                        print(f"[Config] Pending config saved: {pending}")
+
                 repaired = True
-                
+
     except Exception as repair_err:
         print(f"[Config] Auto-repair failed: {repair_err}")
+
+    if not repaired:
+        try:
+            merged = merge_with_defaults(config_dict, DEFAULT_CONFIG)
+            try:
+                app_config = AppConfig(**merged)
+                print("[Config] Validation recovered by defaults merge.")
+                backup_config(CONFIG_FILE)
+                write_config_dict(CONFIG_FILE, merged)
+                config_parser.read_dict(merged)
+                repaired = True
+            except Exception as merge_err:
+                errors = merge_err.errors() if hasattr(merge_err, 'errors') else []
+                merged = apply_validation_defaults(merged, DEFAULT_CONFIG, errors)
+                app_config = AppConfig(**merged)
+                print("[Config] Validation recovered by targeted defaults.")
+                backup_config(CONFIG_FILE)
+                write_config_dict(CONFIG_FILE, merged)
+                config_parser.read_dict(merged)
+                repaired = True
+        except Exception as merge_err2:
+            print(f"[Config] Validation recovery failed: {merge_err2}")
 
     if not repaired:
         # [Debug] Alert User on Startup
@@ -252,35 +487,24 @@ except Exception as e:
             import tkinter as tk
             _root = tk.Tk()
             _root.withdraw() # Hide main
-            
+
             # Capture problematic data
             debug_info = ""
             if 'config_dict' in locals():
                 sys_val = config_dict.get('SYSTEM', {})
                 debug_info = f"\n[Debug Data]\nSYSTEM Section: {sys_val}"
-                
+
             tkinter.messagebox.showwarning("Config Error", f"설정 파일(config.ini) 데이터 오류.\n초기 설정으로 복구합니다.\n\nError: {e}{debug_info}")
             _root.destroy()
         except: pass
-        
-        print("[Config] Falling back to DEFAULT configuration for safety.")
-        # Fallback: Default 값을 사용하여 AppConfig 생성
-        app_config = AppConfig(**DEFAULT_CONFIG)
-        
-        # [Safety] Overwrite corrupt file with defaults to prevent future errors
-        try:
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                temp_parser = configparser.ConfigParser()
-                # Need to populate temp_parser manually from DEFAULT_CONFIG dict structure
-                # This is complex because DEFAULT_CONFIG is dict of dicts.
-                for sec, keys in DEFAULT_CONFIG.items():
-                    temp_parser.add_section(sec)
-                    for k, v in keys.items():
-                        temp_parser.set(sec, k, str(v))
-                temp_parser.write(f)
-            print("[Config] Corrupt config.ini reset to DEFAULTS.")
-        except: pass
 
+        print("[Config] Falling back to DEFAULT configuration for safety.")
+        # Fallback: Default values in memory only
+        app_config = AppConfig(**DEFAULT_CONFIG)
+        try:
+            config_parser.read_dict(DEFAULT_CONFIG)
+        except Exception:
+            pass
 # ---------------------------------------------------------------------------
 # [Export] 전역 변수 설정 (사용 편의성)
 # ---------------------------------------------------------------------------
@@ -291,19 +515,9 @@ LOG_PATH = app_config.SETTINGS.LogPath
 SNAPSHOT_PATH = app_config.SETTINGS.SnapshotPath
 AUTO_SAVE = app_config.SETTINGS.AutoSave
 
-# 로그 폴더 절대 경로 변환
-if not os.path.isabs(LOG_PATH):
-    LOG_PATH = os.path.join(BASE_DIR, LOG_PATH)
-if not os.path.exists(LOG_PATH):
-    try: os.makedirs(LOG_PATH)
-    except: pass
-
-# 스냅샷 폴더 절대 경로 변환
-if not os.path.isabs(SNAPSHOT_PATH):
-    SNAPSHOT_PATH = os.path.join(BASE_DIR, SNAPSHOT_PATH)
-if not os.path.exists(SNAPSHOT_PATH):
-    try: os.makedirs(SNAPSHOT_PATH)
-    except: pass
+# Resolve and validate log/snapshot paths with fallback
+LOG_PATH = resolve_storage_path(LOG_PATH, "logs", "LogPath")
+SNAPSHOT_PATH = resolve_storage_path(SNAPSHOT_PATH, "snapshots", "SnapshotPath")
 
 # [0-1] 로깅 설정 (LOGGING)
 ROTATION_MODE = getattr(app_config.LOGGING, 'RotationMode', 'DAILY')
@@ -421,7 +635,7 @@ def ensure_config_migration():
 
     parser = configparser.ConfigParser()
     try:
-        parser.read(CONFIG_FILE, encoding='utf-8')
+        read_config_with_fallback(parser, CONFIG_FILE)
         if 'HEADERS' in parser and 'CSV' in parser['HEADERS']:
             current_header = parser['HEADERS']['CSV']
             if "DIE_ID" not in current_header:
@@ -429,8 +643,11 @@ def ensure_config_migration():
                 new_header = current_header + ",DIE_ID,Billet_CycleID"
                 parser['HEADERS']['CSV'] = new_header
                 
-                with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                    parser.write(f)
+                ok, err, pending = safe_write_config_parser(parser, CONFIG_FILE)
+                if not ok:
+                    print(f"[Config] Migration save failed: {err}")
+                    if pending:
+                        print(f"[Config] Pending config saved: {pending}")
                 print("[Config] Migration Complete: Added DIE_ID, Billet_CycleID.")
             else:
                  # Ensure internal config also reflects it if parser read old file before update?

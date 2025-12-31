@@ -7,9 +7,10 @@ import threading
 import concurrent.futures
 import sys
 import signal
+import atexit
 
 from config import (
-    DEVICE_NAME, INTERVAL_SEC, 
+    DEVICE_NAME, INTERVAL_SEC, APP_DATA_DIR,
     IP_EXT, PORT_EXT, 
     IP_LS, PORT_LS, 
     CONSOLE_HEADER
@@ -71,6 +72,68 @@ def safe_fmt(val, fmt_str):
 # 전역 플래그
 running = True
 app = None
+_lock_fd = None
+
+def _pid_is_alive(pid):
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+    return True
+
+def release_single_instance_lock():
+    global _lock_fd
+    lock_path = os.path.join(APP_DATA_DIR, "app.lock")
+    try:
+        if _lock_fd is not None:
+            os.close(_lock_fd)
+            _lock_fd = None
+    except Exception:
+        pass
+    try:
+        if os.path.exists(lock_path):
+            os.remove(lock_path)
+    except Exception:
+        pass
+
+def acquire_single_instance_lock():
+    global _lock_fd
+    lock_path = os.path.join(APP_DATA_DIR, "app.lock")
+    try:
+        _lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(_lock_fd, str(os.getpid()).encode("ascii", errors="ignore"))
+        atexit.register(release_single_instance_lock)
+        return True
+    except FileExistsError:
+        existing_pid = 0
+        try:
+            with open(lock_path, "r", encoding="utf-8") as f:
+                raw = f.read().strip()
+                if raw.isdigit():
+                    existing_pid = int(raw)
+        except Exception:
+            existing_pid = 0
+
+        if existing_pid and _pid_is_alive(existing_pid):
+            sys_logger.error(f"Another instance is already running (pid={existing_pid}). Exiting.")
+            return False
+
+        # Stale lock detected; remove and retry once
+        try:
+            os.remove(lock_path)
+        except Exception:
+            sys_logger.error("Stale lock detected but could not remove. Exiting.")
+            return False
+        return acquire_single_instance_lock()
+    except Exception as e:
+        sys_logger.warning(f"Failed to acquire single instance lock: {e}")
+        return True
 
 def signal_handler(sig, frame):
     global running
@@ -103,6 +166,8 @@ def data_collection_loop(log_queue, gui_queue):
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
     
     next_tick = time.time()
+    last_q_log = 0
+    last_gui_warn = 0
 
     try:
         while running:
@@ -119,6 +184,16 @@ def data_collection_loop(log_queue, gui_queue):
             spot = future_spot.result()
             ext  = future_ext.result()
             ls   = future_ls.result()
+
+            mold1 = ls.get('Mold1')
+            mold2 = ls.get('Mold2')
+            mold3 = ls.get('Mold3')
+            mold4 = ls.get('Mold4')
+            mold5 = ls.get('Mold5')
+            mold6 = ls.get('Mold6')
+            billet_temp = ls.get('Billet_Temp')
+            at_pre = ls.get('At_Pre')
+            at_temp = ls.get('At_Temp')
 
             # 콘솔 출력 (선택 사항: GUI가 있으면 줄여도 됨)
             # print(f" {time_s} | ...") 
@@ -143,15 +218,15 @@ def data_collection_loop(log_queue, gui_queue):
                 ext['Count'] if ext['Count'] is not None else "",
                 ext['Speed'] if ext['Speed'] is not None else "",
                 ext['EndPos'] if ext['EndPos'] is not None else "",
-                ls['Mold1'] if ls['Mold1'] is not None else "",
-                ls['Mold2'] if ls['Mold2'] is not None else "",
-                ls['Mold3'] if ls['Mold3'] is not None else "",
-                ls['Mold4'] if ls['Mold4'] is not None else "",
-                ls.get('Mold5', "") if ls.get('Mold5') is not None else "",
-                ls.get('Mold6', "") if ls.get('Mold6') is not None else "",
-                ls.get('Billet_Temp', "") if ls.get('Billet_Temp') is not None else "",
-                ls.get('At_Pre', "") if ls.get('At_Pre') is not None else "",
-                ls.get('At_Temp', "") if ls.get('At_Temp') is not None else "",
+                mold1 if mold1 is not None else "",
+                mold2 if mold2 is not None else "",
+                mold3 if mold3 is not None else "",
+                mold4 if mold4 is not None else "",
+                mold5 if mold5 is not None else "",
+                mold6 if mold6 is not None else "",
+                billet_temp if billet_temp is not None else "",
+                at_pre if at_pre is not None else "",
+                at_temp if at_temp is not None else "",
                 # [New] Columns
                 die_id if die_id else "",
                 billet_cycle_id if billet_cycle_id is not None else ""
@@ -163,28 +238,31 @@ def data_collection_loop(log_queue, gui_queue):
                 'Speed': ext.get('Speed'), 'Press': ext.get('Press'), 'Count': ext.get('Count'), 'EndPos': ext.get('EndPos'),
                 'Billet': ext.get('Billet'), # [수정] 빌렛 길이 추가
                 'Spot': spot, 'Temp_F': ext.get('Temp_F'), 'Temp_B': ext.get('Temp_B'),
-                'Billet_Temp': ls.get('Billet_Temp'), # PLC Billet Temp
-                'Mold1': ls.get('Mold1'), 'Mold2': ls.get('Mold2'), 'Mold3': ls.get('Mold3'),
-                'Mold4': ls.get('Mold4'), 'Mold5': ls.get('Mold5'), 'Mold6': ls.get('Mold6'),
-                'At_Temp': ls.get('At_Temp'), 'At_Pre': ls.get('At_Pre')
+                'Billet_Temp': billet_temp, # PLC Billet Temp
+                'Mold1': mold1, 'Mold2': mold2, 'Mold3': mold3,
+                'Mold4': mold4, 'Mold5': mold5, 'Mold6': mold6,
+                'At_Temp': at_temp, 'At_Pre': at_pre
             }
 
             # [Queue Logic] Deque Append (Ring Buffer)
             # Check for fullness before append to trigger warning
-            is_queue_full = False
-            if len(log_queue) >= log_queue.maxlen or len(gui_queue) >= gui_queue.maxlen:
-                is_queue_full = True
+            log_full = len(log_queue) >= log_queue.maxlen
+            gui_full = len(gui_queue) >= gui_queue.maxlen
             
             log_queue.append((row, now))
             gui_queue.append(ui_data)
 
-            if is_queue_full:
-                sys_logger.warning("Queue full! Ring Buffer dropped oldest data.")
-                # Throttle GUI Warning (Once every 2 seconds)
-                if 'last_q_warn' not in locals(): last_q_warn = 0
-                if time.time() - last_q_warn > 2.0:
+            if log_full or gui_full:
+                now_ts = time.time()
+                if now_ts - last_q_log > 5.0:
+                    sys_logger.warning(
+                        f"Queue full! drop oldest data. log={len(log_queue)}/{log_queue.maxlen}, "
+                        f"gui={len(gui_queue)}/{gui_queue.maxlen}"
+                    )
+                    last_q_log = now_ts
+                if now_ts - last_gui_warn > 2.0:
                     gui_queue.append({'warning': 'Queue Full'})
-                    last_q_warn = time.time()
+                    last_gui_warn = now_ts
 
             sleep_time = next_tick - time.time()
             if sleep_time > 0: time.sleep(sleep_time)
@@ -210,10 +288,13 @@ def run_logger():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    if not acquire_single_instance_lock():
+        return
+
     # 큐 생성 (버퍼 최적화)
     # 큐 생성 (버퍼 최적화: Ring Buffer using Deque)
-    log_queue = collections.deque(maxlen=1000) 
-    gui_queue = collections.deque(maxlen=1000)
+    log_queue = collections.deque(maxlen=5000) 
+    gui_queue = collections.deque(maxlen=5000)
     
     # 파일 쓰기 스레드
     writer_thread = threading.Thread(target=file_writer_thread, args=(log_queue,), daemon=True)
@@ -254,6 +335,7 @@ def run_logger():
         writer_thread.join(timeout=2.0)
         data_thread.join(timeout=2.0)
         sys_logger.info("Application exit.")
+        release_single_instance_lock()
         print("프로그램이 종료되었습니다.")
 
 if __name__ == "__main__":

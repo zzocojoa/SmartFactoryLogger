@@ -56,12 +56,39 @@ def setup_system_logger():
 # 전역 로거 인스턴스
 sys_logger = setup_system_logger()
 
+LOG_FALLBACK_DIR = os.path.join(APP_DATA_DIR, "logs")
+_active_log_dir = LOG_PATH
+_logpath_warned = False
+
+def _ensure_dir(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+        return True
+    except Exception:
+        return False
+
+def _get_log_dir():
+    global _active_log_dir, _logpath_warned
+    if _ensure_dir(_active_log_dir):
+        return _active_log_dir
+    if _active_log_dir != LOG_FALLBACK_DIR:
+        if not _logpath_warned:
+            sys_logger.warning(
+                f"LOG_PATH not usable: {_active_log_dir}. Using fallback: {LOG_FALLBACK_DIR}"
+            )
+            _logpath_warned = True
+        _active_log_dir = LOG_FALLBACK_DIR
+        _ensure_dir(_active_log_dir)
+    return _active_log_dir
+
 def open_log_file(timestamp_str, prefix="Factory_Integrated_Log"):
     if not AUTO_SAVE:
         return None, None
-        
+    
+    global _active_log_dir
     filename = f"{prefix}_{timestamp_str}.csv"
-    full_path = os.path.join(LOG_PATH, filename)
+    log_dir = _get_log_dir()
+    full_path = os.path.join(log_dir, filename)
     try:
         f = open(full_path, "a", newline="", encoding="utf-8-sig")
         writer = csv.writer(f)
@@ -72,6 +99,21 @@ def open_log_file(timestamp_str, prefix="Factory_Integrated_Log"):
         return f, writer
     except Exception as e:
         sys_logger.error(f"Failed to open CSV log file: {e}")
+        if log_dir != LOG_FALLBACK_DIR:
+            fallback_dir = LOG_FALLBACK_DIR
+            if _ensure_dir(fallback_dir):
+                fallback_path = os.path.join(fallback_dir, filename)
+                try:
+                    f = open(fallback_path, "a", newline="", encoding="utf-8-sig")
+                    writer = csv.writer(f)
+                    if f.tell() == 0:
+                        writer.writerow(CSV_HEADER)
+                        f.flush()
+                    sys_logger.warning(f"CSV log fallback path used: {fallback_path}")
+                    _active_log_dir = fallback_dir
+                    return f, writer
+                except Exception as e2:
+                    sys_logger.error(f"Failed to open CSV log file (fallback): {e2}")
         return None, None
 
 import time
@@ -194,6 +236,7 @@ def file_writer_thread(data_queue):
             f, writer = None, None
             
             if buffer: buffer.clear() # Prevent sticking error loop
+            time.sleep(0.5)
             
     # Final Flush on exit
     if f and buffer:
