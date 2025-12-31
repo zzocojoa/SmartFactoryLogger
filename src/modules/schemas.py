@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_validator, ValidationInfo
 from typing import Optional, Dict, Any
 
 # 압출기 데이터 모델
@@ -41,8 +41,9 @@ class LSPLCData(BaseModel):
     class Config:
         extra = 'allow'
 
-    @validator('Mold1', 'Mold2', 'Mold3', 'Mold4', 'Mold5', 'Mold6', 'Billet_Temp', check_fields=False)
-    def validate_temp_range(cls, v, field):
+    @field_validator('Mold1', 'Mold2', 'Mold3', 'Mold4', 'Mold5', 'Mold6', 'Billet_Temp', check_fields=False)
+    @classmethod
+    def validate_temp_range(cls, v, info: ValidationInfo):
         """
         Soft Validation:
         범위를 벗어난 값이 들어오면 에러를 발생시키는 대신(System Crash),
@@ -55,6 +56,6 @@ class LSPLCData(BaseModel):
         if not (0 <= v <= 1000):
             # Console에만 출력하거나, 필요 시 sys_logger 연결 가능
             # 여기서는 Pydantic 모델 내부이므로 print로 경고만 남김 (상위에서 로깅됨)
-            print(f"[Schema Warning] {field.name} value {v} is out of range (0-1000). Set to None.")
+            print(f"[Schema Warning] {info.field_name} value {v} is out of range (0-1000). Set to None.")
             return None
         return v

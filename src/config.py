@@ -20,6 +20,10 @@ COLOR_SUCCESS = "#4ec9b0"
 COLOR_COLD = "#569cd6"
 COLOR_HOT = "#ce9178"
 
+# 폰트 상수
+FONT_MAIN = "Arial"
+FONT_MONO = "Consolas"
+
 # 설정 파일 경로 (AppData/Roaming 사용)
 # 설정 파일 경로 (Portable vs AppData)
 # 1. 실행 파일 위치 확인

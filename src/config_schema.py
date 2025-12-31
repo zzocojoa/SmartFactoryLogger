@@ -7,20 +7,20 @@ class SystemConfig(BaseModel):
 
     class Config:
         alias_generator = lambda s: s.lower()
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 class NetworkConfig(BaseModel):
-    IP: str = Field(..., regex=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+    IP: str = Field(..., pattern=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
     Port: int = Field(..., ge=1, le=65535)
 
     class Config:
         alias_generator = lambda s: s.lower()
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 class SpotConfig(BaseModel):
-    IP: str = Field(..., regex=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+    IP: str = Field(..., pattern=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
     # [Dual-IP Support] Actuator might be on a different IP (e.g. .60 vs .50)
-    ActuatorIP: Optional[str] = Field(None, regex=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+    ActuatorIP: Optional[str] = Field(None, pattern=r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
     Port: int = Field(80, ge=1, le=65535) # Optional, default 80
     RefreshInterval: float = Field(3.0, gt=0.0)
     ImageURL: str
@@ -40,7 +40,7 @@ class SpotConfig(BaseModel):
 
     class Config:
         alias_generator = lambda s: s.lower()
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 class SettingsConfig(BaseModel):
     Password: str
@@ -50,7 +50,7 @@ class SettingsConfig(BaseModel):
 
     class Config:
         alias_generator = lambda s: s.lower()
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 class ThresholdsValue(BaseModel):
     # Dynamic fields but listing known ones helps validation/IDE
@@ -65,7 +65,7 @@ class LoggingConfig(BaseModel):
     
     class Config:
         alias_generator = lambda s: s.lower()
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 class ThresholdsEnable(BaseModel):
     class Config:

@@ -17,6 +17,7 @@ from config import COLOR_BG, COLOR_PANEL, COLOR_CARD, COLOR_TEXT, COLOR_TEXT_DIM
 from settings_gui import SettingsWindow
 from modules.ui_utils import CTkTooltip, ToastNotification, draw_dashed_line
 from modules.graph_view import TimeSeriesPanel
+from modules.ui_components import StatusBar, NotificationDrawer
 
 # 테마 설정
 ctk.set_appearance_mode("Dark")
@@ -179,6 +180,20 @@ class InfoCard(ctk.CTkFrame):
             self.side_bar.configure(fg_color=status_color)
         else:
             self.side_bar.configure(fg_color=COLOR_CARD) # 기본 상태
+
+    def set_status(self, level):
+        """
+        level: 0 (Normal), 1 (Warning), 2 (Danger)
+        """
+        if level == 2:
+            self.configure(border_width=2, border_color=COLOR_DANGER)
+            self.side_bar.configure(fg_color=COLOR_DANGER)
+        elif level == 1:
+            self.configure(border_width=2, border_color=COLOR_WARNING)
+            self.side_bar.configure(fg_color=COLOR_WARNING)
+        else:
+            self.configure(border_width=0)
+            self.side_bar.configure(fg_color=COLOR_CARD)
 
     def add_button(self, text, command, tooltip=None):
         # Use absolute positioning relative to content frame (top-right)
@@ -535,7 +550,9 @@ class SmartFactoryApp(ctk.CTk):
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=1)
         self.grid_columnconfigure(2, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=0) # Status Bar
+        self.grid_rowconfigure(1, weight=0) # Nav Bar
+        self.grid_rowconfigure(2, weight=1) # Main Content
 
         self.last_data_time = datetime.now() # Watchdog timer
 
@@ -565,44 +582,50 @@ class SmartFactoryApp(ctk.CTk):
 # Multi-replace is better here.
 
 
+    def open_notification_center(self):
+        self.status_bar.toggle_badge(False)
+        self.drawer.show()
+
+    def show_diagnostics(self, event=None):
+        pass
+
     def setup_ui(self):
-        # === Header ===
-        self.header = ctk.CTkFrame(self, fg_color="transparent")
-        self.header.grid(row=0, column=0, columnspan=3, sticky="ew", padx=30, pady=15)
+        # === Header (Replaced by Status Bar) ===
+        self.status_bar = StatusBar(self, height=38)
+        self.status_bar.grid(row=0, column=0, columnspan=3, sticky="ew")
+        self.status_bar.update_clock()
         
-        # Navigation Buttons (Title as Button)
-        self.btn_dashboard = ctk.CTkButton(self.header, text="🏭 창녕 2호기", font=(FONT_MAIN, 32, "bold"), 
+        # === Drawer (Overlay) ===
+        self.drawer = NotificationDrawer(self, width=320, height=450)
+        # Link Bell Button
+        self.status_bar.on_bell_callback = self.open_notification_center
+        # Link Smart Buttons
+        self.status_bar.btn_diag.configure(command=self.show_diagnostics)
+        self.status_bar.on_settings_callback = self.open_settings
+        
+        # === Navigation / Sub-Header (Optional, kept for View Switching) ===
+        self.nav_frame = ctk.CTkFrame(self, fg_color="transparent", height=40)
+        self.nav_frame.grid(row=1, column=0, columnspan=3, sticky="ew", padx=20, pady=(5, 0))
+        
+        self.btn_dashboard = ctk.CTkButton(self.nav_frame, text="🏭 창녕 2호기", font=(FONT_MAIN, 24, "bold"), 
                                            fg_color="transparent", hover_color="#222222", 
                                            command=lambda: self.switch_view("dashboard"))
         self.btn_dashboard.pack(side="left")
         
-        # Time Series Tab
-        self.btn_graph = ctk.CTkButton(self.header, text="📈 Time Series", font=(FONT_MAIN, 20), 
+        self.btn_graph = ctk.CTkButton(self.nav_frame, text="📈 Time Series", font=(FONT_MAIN, 18), 
                                        fg_color="transparent", hover_color="#222222", text_color="gray",
                                        command=lambda: self.switch_view("graph"))
-        self.btn_graph.pack(side="left", padx=(20, 0))
-        
-        # 구분선 (Vertical Separator)
-        ctk.CTkFrame(self.header, width=2, height=30, fg_color="#444444").pack(side="left", padx=20)
-        
-        self.clock_lbl = ctk.CTkLabel(self.header, text="00:00:00", font=(FONT_MONO, 28), text_color=COLOR_TEXT_DIM)
-        self.clock_lbl.pack(side="left")
+        self.btn_graph.pack(side="left", padx=(10, 0))
 
-        # Settings Button (Gear) -> Right side
-        self.btn_settings = ctk.CTkButton(self.header, text="⚙️", width=40, height=40, font=("Arial", 20),
-                                          fg_color="transparent", hover_color="#333333", command=self.open_settings)
-        self.btn_settings.pack(side="right", padx=(10, 0))
-        CTkTooltip(self.btn_settings, "Settings & Configuration")
+        # Settings Icon (Moved to Nav Frame or Status Bar? Plan said Status Bar, but keep here for access)
+        # Actually Status Bar has placeholders. Let's redirect Status Bar buttons if needed.
+        # But for P0, we just need basic integration.
         
-        self.status_lbl = ctk.CTkLabel(self.header, text="● Running", font=(FONT_MAIN, 18), text_color=COLOR_SUCCESS)
-        self.status_lbl.pack(side="right")
-        self.status_lbl.bind("<Button-1>", self.show_diagnostics)
-        self.status_lbl.configure(cursor="hand2")
-        CTkTooltip(self.status_lbl, "System Status: Click for details")
+
 
         # === Views Container ===
         self.container = ctk.CTkFrame(self, fg_color="transparent")
-        self.container.grid(row=1, column=0, columnspan=3, sticky="nsew")
+        self.container.grid(row=2, column=0, columnspan=3, sticky="nsew") # Shifted to Row 2
         self.container.grid_rowconfigure(0, weight=1)
         self.container.grid_columnconfigure(0, weight=1)
 
@@ -615,6 +638,9 @@ class SmartFactoryApp(ctk.CTk):
         self.view_dashboard.grid_columnconfigure(0, weight=1)
         self.view_dashboard.grid_columnconfigure(1, weight=1)
         self.view_dashboard.grid_columnconfigure(2, weight=1)
+
+        # ... (Dashboard Content setup remains same) ...
+
 
         # === Column 1: KPIs ===
         self.col1 = ctk.CTkFrame(self.view_dashboard, fg_color=COLOR_PANEL, corner_radius=10)
@@ -731,7 +757,7 @@ class SmartFactoryApp(ctk.CTk):
 
         # === Footer ===
         self.footer = ctk.CTkFrame(self, height=30, fg_color="#111111")
-        self.footer.grid(row=2, column=0, columnspan=3, sticky="ew")
+        self.footer.grid(row=3, column=0, columnspan=3, sticky="ew") # Shifted to Row 3
         self.log_lbl = ctk.CTkLabel(self.footer, text="System Ready.", font=(FONT_MONO, 12), text_color="gray")
         self.log_lbl.pack(side="left", padx=20)
         
@@ -778,31 +804,61 @@ class SmartFactoryApp(ctk.CTk):
             
         if not is_warning_active:
             if (datetime.now() - self.last_data_time).total_seconds() > 3:
-                self.status_lbl.configure(text="● Disconnected", text_color=COLOR_DANGER)
+                # self.status_lbl.configure(text="● Disconnected", text_color=COLOR_DANGER)
+                self.status_bar.set_status('Disconnected')
             else:
-                self.status_lbl.configure(text="● Running", text_color=COLOR_SUCCESS)
+                # self.status_lbl.configure(text="● Running", text_color=COLOR_SUCCESS)
+                self.status_bar.set_status('Running')
             
         self.after(100, self.check_queue)
 
     def update_ui(self, data):
+        # [Watchdog Update] Alive Signal
+        self.last_data_time = datetime.now()
+        
         # [Error Handling]
         if 'error' in data:
             err = data['error']
             ToastNotification(self, f"System Error: {err}", duration=5000, color=COLOR_DANGER)
-            self.status_lbl.configure(text="● Error", text_color=COLOR_DANGER)
+            # Self-healing status bar
+            self.status_bar.set_status('Disconnected')
+            self.status_bar.update_ticker(f"Error: {err}", is_error=True)
+            self.drawer.add_notification("System Error", err, level="error")
+            self.status_bar.toggle_badge(True)
             return
 
         # [Warning Handling] (Queue Full, etc)
         if 'warning' in data:
             msg = data['warning']
             # No Toast, just Status Label (Orange) as per plan
-            self.status_lbl.configure(text=f"● {msg}", text_color=COLOR_WARNING)
+            # self.status_lbl.configure(text=f"● {msg}", text_color=COLOR_WARNING)
+            self.status_bar.set_status('Degraded')
+            self.status_bar.update_ticker(msg, is_error=False)
+            self.drawer.add_notification("Warning", msg, level="warning")
+            self.status_bar.toggle_badge(True)
             # Keep this status for 2 seconds
+
             self.warning_until = datetime.now() + datetime.timedelta(seconds=2)
             return
 
-        self.last_data_time = datetime.now()
-        self.clock_lbl.configure(text=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        # Latency Calculation
+        latency = 0
+        data_time = data.get('Time')
+        if data_time:
+            if isinstance(data_time, datetime):
+                delta = datetime.now() - data_time
+                latency = int(delta.total_seconds() * 1000)
+            elif isinstance(data_time, str):
+                # Try parse? Simplified: just 0 if str
+                pass
+        
+        # Update Status Bar with Latency
+        current_status_text = self.status_bar.lbl_status.cget("text") # Hacky check?
+        # Better: determine status based on 'warning' flag in data or queue emptiness
+        # But here running is default.
+        if 'warning' not in data: # If warning exists, it was handled above.
+             self.status_bar.set_status('Running', latency_ms=latency)
+
         
         # Speed
         speed = data.get('Speed', 0) or 0
@@ -822,51 +878,72 @@ class SmartFactoryApp(ctk.CTk):
         self.card_spot.update_value(f"{f_spot:.1f}")
 
         # [Logic] 4-Stage Color for SPOT Temp
-        # < 450: Cold (Blue)
-        # 450-500: Pre-Heat (Yellow/Orange)
-        # 500-550: Optimal (Green)
-        # > 550: Overheat (Red)
         spot_color = COLOR_COLD
         if f_spot >= 550:
             spot_color = COLOR_HOT
+            self.card_spot.set_status(2) # Danger Glow
         elif f_spot >= 500:
             spot_color = COLOR_SUCCESS
+            self.card_spot.set_status(0)
         elif f_spot >= 450:
             spot_color = COLOR_WARNING # Yellow
+            self.card_spot.set_status(1) # Warning Glow
         else:
             spot_color = COLOR_COLD # Blue
-
+            self.card_spot.set_status(0)
         self.card_spot.update_value(f"{f_spot:.1f}", color=spot_color, status_color=spot_color)
         
         
         # [Logic] 4-Stage Color for Container Temps
-        # < 350: Blue, 350-400: Yellow, 400-450: Green, > 450: Red
         cont_f = data.get('Temp_F', 0)
         f_cont_f = float(cont_f)
         cont_f_color = COLOR_COLD
-        if f_cont_f >= 450: cont_f_color = COLOR_HOT
-        elif f_cont_f >= 400: cont_f_color = COLOR_SUCCESS
-        elif f_cont_f >= 350: cont_f_color = COLOR_WARNING
-        
+        if f_cont_f >= 450: 
+            cont_f_color = COLOR_HOT
+            self.card_cont_f.set_status(2)
+        elif f_cont_f >= 400: 
+            cont_f_color = COLOR_SUCCESS
+            self.card_cont_f.set_status(0)
+        elif f_cont_f >= 350: 
+            cont_f_color = COLOR_WARNING
+            self.card_cont_f.set_status(1)
+        else:
+            self.card_cont_f.set_status(0)
+            
         self.card_cont_f.update_value(cont_f, color=cont_f_color, status_color=cont_f_color)
 
         cont_b = data.get('Temp_B', 0)
         f_cont_b = float(cont_b)
         cont_b_color = COLOR_COLD
-        if f_cont_b >= 450: cont_b_color = COLOR_HOT
-        elif f_cont_b >= 400: cont_b_color = COLOR_SUCCESS
-        elif f_cont_b >= 350: cont_b_color = COLOR_WARNING
+        if f_cont_b >= 450: 
+            cont_b_color = COLOR_HOT
+            self.card_cont_b.set_status(2)
+        elif f_cont_b >= 400: 
+            cont_b_color = COLOR_SUCCESS
+            self.card_cont_b.set_status(0)
+        elif f_cont_b >= 350: 
+            cont_b_color = COLOR_WARNING
+            self.card_cont_b.set_status(1)
+        else:
+            self.card_cont_b.set_status(0)
 
         self.card_cont_b.update_value(cont_b, color=cont_b_color, status_color=cont_b_color)
         
         # [Logic] 4-Stage Color for Billet Temp
-        # < 440: Blue, 440-460: Yellow, 460-480: Green, > 480: Red
         billet_t = data.get('Billet_Temp', 0)
         f_billet_t = float(billet_t)
         billet_t_color = COLOR_COLD
-        if f_billet_t >= 480: billet_t_color = COLOR_HOT
-        elif f_billet_t >= 460: billet_t_color = COLOR_SUCCESS
-        elif f_billet_t >= 440: billet_t_color = COLOR_WARNING
+        if f_billet_t >= 480: 
+            billet_t_color = COLOR_HOT
+            self.card_billet_t.set_status(2)
+        elif f_billet_t >= 460: 
+            billet_t_color = COLOR_SUCCESS
+            self.card_billet_t.set_status(0)
+        elif f_billet_t >= 440: 
+            billet_t_color = COLOR_WARNING
+            self.card_billet_t.set_status(1)
+        else:
+             self.card_billet_t.set_status(0)
         
         self.card_billet_t.update_value(billet_t, color=billet_t_color, status_color=billet_t_color)
         self.card_billet_l.update_value(data.get('Billet', 0))

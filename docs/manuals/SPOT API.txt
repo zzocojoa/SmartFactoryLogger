@@ -1,0 +1,172 @@
+제공해주신 소스 파일들(특히 $\text{SPOT+}$ $\text{REST API}$ 사용자 가이드)과 기존 대화 내용을 종합하여 **LAND SPOT+ Application Pyrometer**의 모든 $\text{API}$ 및 통신 관련 정보를 상세히 정리하였습니다.
+
+$\text{SPOT+}$ 온도계는 $\text{REST API}$를 포함한 다양한 $\text{Ethernet}$ 프로토콜을 통해 원격 제어 및 데이터 읽기를 완벽하게 지원하며, 이 기능은 파이썬 $\text{GUI}$ 프로그램 통합에 핵심적인 역할을 합니다,.
+
+---
+
+## I. SPOT+ REST API 개요 및 구조
+
+$\text{SPOT+}$는 $\text{HTTP}$ $\text{GET}$ (읽기) 및 $\text{PUT}$ (쓰기) 요청을 사용하는 $\text{REST}$ ($\text{REpresentational State Transfer}$) $\text{API}$ 프로토콜을 지원하며,, 이는 소프트웨어 개발에 매우 유연합니다.
+
+| 항목 | 내용 | 참조 |
+| :--- | :--- | :--- |
+| **통신 프로토콜** | **$\text{REST API}$** ($\text{http}$), **$\text{Modbus TCP/IP}$**, **$\text{EtherNet/IP}$** 지원,. |, |
+| **기본 $\text{IP}$ 주소** | **$\text{10.1.10.50}$** (기본 $\text{Static IP}$ 주소),. |,, |
+| **API 노드 구조** | 세 가지 주요 $\text{JSON}$ 노드: **$\text{output}$**, **$\text{buffer}$**, **$\text{control}$**. | |
+| **기본 요청 형식** | 읽기: `GET http://[ipaddress]/[node]?p=[parameter]`,<br>쓰기: `PUT http://[ipaddress]/[node]?p=[parameter]` + $\text{BODY}$, | |
+
+---
+
+## II. 데이터 출력 (Read Only - GET 요청)
+
+**`/output` 노드:** 온도, 알람 상태 등 주요 측정 결과에 대한 $\text{GET}$ 요청.
+
+| API 파라미터 | 정의 및 범위 | 관련 장비 유형 |
+| :--- | :--- | :--- |
+| **`temperature`** | 타겟 온도 (시간 함수 적용 후 최종 출력값). $0 \sim 6500^\circ\text{C}$ 또는 $\text{F}$ (1자리 소수점). | 모든 장비 |
+| **`itemperature`** | 장비의 내부 온도. $0 \sim 100^\circ\text{C}$ 또는 $212^\circ\text{F}$. | 모든 장비 |
+| **`alarmstatus`** | 알람 상태 바이트. 값이 $0$보다 크면 $\text{CMD Out}$ 릴레이가 닫힘,. | 모든 장비 |
+| **`d1temperature`** | $\text{Mono1}$ 채널 측정 온도,. | $\text{Ratio}$ 또는 $\text{Application}$ |
+| **`d2temperature`** | $\text{Mono2}$ 채널 측정 온도,. | $\text{Ratio}$ 또는 $\text{Application}$ |
+| **`signalpc`** | 적외선 신호 강도 (0-100% 정수),,. | $\text{Ratio}$ 또는 $\text{Application}$ |
+| **`e1out` / `e2out`** | $\text{Application}$ $\text{pyrometer}$가 계산한 방사율 (각 채널). $0 \sim 1.2$ (3자리 소수점). | $\text{Application}$ |
+| **다중 읽기** | $\text{GET http://[ipaddress]/output}$ 요청 시, 장비 유형에 맞는 모든 매개변수를 포함하는 $\text{JSON}$ 파일을 반환,,. | 모든 장비 |
+
+### Fast Buffer 및 이미지 스트리밍
+
+| 항목 | 요청 (Request) | 정의 |
+| :--- | :--- | :--- |
+| **Fast Buffer** | $\text{GET http://[ipaddress]/buffer}$, | 빠른 응답 시간을 위해 사용되는 **100개 항목의 온도 측정 버퍼**와 가장 최근 측정 위치를 나타내는 $\text{pointer}$ ($0\sim99$)를 함께 반환,. |
+| **카메라 이미지** | **$\text{GET http://[ipaddress]/image.jpg}$**, | **$\text{JPG}$ 형식**의 가장 최근 가시광선 카메라 이미지를 직접 읽어옴. |
+
+---
+
+## III. 제어 파라미터 (Read/Write - GET/PUT 요청)
+
+**`/control` 노드:** 장비 설정 및 제어 기능에 대한 $\text{GET}$ (읽기) 및 $\text{PUT}$ (쓰기) 요청.
+
+| API 파라미터 | 정의 및 범위 | 쓰기 요청 예시 (PUT BODY) |
+| :--- | :--- | :--- |
+| **`emissivity1`** | $\text{Mono}$ 또는 $\text{Mono1}$ 채널 방사율 값. $0.05 \sim 1.2$ (0.001 단위),. | $\text{BODY}=0.76$ |
+| **`emissivity2`** | $\text{Mono2}$ 채널 방사율 값 (Ratio/App 전용). | $\text{BODY}=0.76$ |
+| **`Bgdtemperature`** | 배경 온도 (정수). $0 \sim 6500^\circ\text{C}$ 또는 $\text{F}$,. | $\text{BODY}=890$ |
+| **`focus`** | 포커스 거리 ($\text{mm}$ 단위). $300 \sim 10000 \text{ mm}$ (모터 구동 초점),,. | $\text{BODY}=500$ |
+| **`led`** | **$\text{LED}$ 점멸 시작(1) 또는 중지(0) 명령**. 마지막 명령 후 $\mathbf{30 \text{ s}}$ 뒤 자동 $\text{Timeout}$,,. | $\text{BODY}=1$ |
+| **`cmdin`** | $\text{Peak Picker}$ 리셋 또는 샘플링 시작을 위한 트리거 명령. $1$=활성화, $0$=해제,. | $\text{BODY}=1$ |
+| **`appnumber`** | 현재 $\text{App Mode}$의 인덱스,. | $\text{BODY}=1$ |
+| **`appoffset`** | 현재 $\text{App}$의 보정 $\text{offset}$. 정수 $-2000 \sim 2000$,. | $\text{BODY}=500$ |
+| **`reftemperature`** | 방사율 보정 또는 $\text{App}$ $\text{offset}$ 조정을 위한 기준 온도,. | 해당 없음 (읽기 전용 필드) |
+| **`info`** | 장비 유형, 모드 및 현재 설정을 상세히 나타내는 문자열 (읽기 전용),. | 해당 없음 |
+
+---
+
+## IV. 네트워크 및 보안 설정
+
+$\text{SPOT+}$는 $\text{Web Server}$를 통해 네트워크 및 보안 설정을 구성할 수 있습니다.
+
+### 통신 모드 및 IP 설정
+
+*   **네트워크 모드:** $\text{DHCP}$ (자동 할당) 또는 $\text{Static IP}$ (수동 설정) 중 선택 가능.
+*   **기본 $\text{IP}$ 주소:** 기본값은 **$\text{10.1.10.50}$**,.
+*   **$\text{I/O}$ 아날로그 범위:** $\text{Target}$ $\text{I/O}$는 $4 \text{ mA}$를 $200^\circ\text{C}$, $20 \text{ mA}$를 $800^\circ\text{C}$로 설정 가능,.
+
+### 보안 및 인증
+
+| 보안 모드 | 설명 | 읽기 ($\text{GET}$) | 쓰기 ($\text{PUT}$) | 제한 사항 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Secure (기본값)** | $\text{SPOT+}$는 이 모드로 출고되며 $\text{Web Server}$와 $\text{REST API}$가 **읽기 전용**으로 설정됨,,,. | 인증 불필요,. | **$\text{JSON}$ $\text{Web}$ $\text{Token}$** 기반의 **핸드셰이크** 및 암호 인증 필수,. | 암호 해킹 방지를 위해 쓰기 속도가 **초당 1회**로 제한됨,. |
+| **Open** | 이전 $\text{SPOT}$ 모델과 유사하게 **비보안 쓰기**를 허용,. | 인증 불필요. | 데이터 전송 속도 제한 없이 비보안 쓰기 가능,. | **사설 네트워크 내에서만 권장**되며 악성 공격에 취약. |
+| **Default Password** | 장비의 **6자리 일련번호**,. | | | |
+
+---
+
+## V. Actuator 관련 설정 (I/O 및 Actuator 제어)
+
+$\text{SPOT+}$가 $\text{Actuator}$와 함께 사용될 때 (Extrusion $\text{Mode}$), $\text{I/O}$ 메뉴의 $\text{Scan}$ 설정이 활성화됩니다.
+
+| 항목 | 설정 메뉴 | 설명 |
+| :--- | :--- | :--- |
+| **Actuator 제어 활성화** | $\text{I/O}$ 메뉴의 **$\text{Scan}$** 설정. | $\text{Scan}$이 켜지면 $\text{CMD In}$ 및 $\text{CMD Out}$ 기능은 $\text{Actuator}$ 인터페이스 용도로 사용됨. |
+| **Actuator Scan 범위** | $\text{Settings}$ 메뉴의 **$\text{Range}$**,. | $\text{Actuator}$는 일반적으로 **좌, 우 $45^\circ$ 회전 범위 내**에서 $\text{Scan}$ 및 $\text{Tracking}$을 수행하며, 이 각도를 조절 가능,. |
+| **$\text{LED}$ 제어** | $\text{CMD In}$ 기능의 **$\text{LED}$** 옵션. | 로직 신호를 통해 $\text{LED}$를 활성화/비활성화할 수 있음. 상승 에지 또는 하강 에지 신호에 응답함. |
+
+---
+
+## I. 이전 $\text{API}$ 요약의 포괄성 확인
+
+이전에 정리된 $\text{REST API}$ 정보는 다음과 같은 핵심 요소들을 빠짐없이 포함했습니다.
+
+1.  **핵심 $\text{API}$ 노드 및 파라미터:** $\text{SPOT+}$가 지원하는 **`/output`**, **`/buffer`**, **`/control`** 세 가지 $\text{JSON}$ 노드와 $\text{image.jpg}$ 읽기 요청 형식이 모두 포함되었습니다.
+2.  **보안 및 인증:** $\text{Secure}$ 모드와 $\text{Open}$ 모드의 차이점, $\text{Secure}$ 모드에서의 **$\mathbf{1 \text{ Hz}}$ 쓰기 속도 제한** (초당 1회), $\text{JSON}$ $\text{Web}$ $\text{Token}$ 기반 인증 및 $\text{Handshake}$ 필요성이 상세히 언급되었습니다,,.
+3.  **$\text{LED}$ 및 이미지:** 카메라 이미지(`image.jpg`) 읽기 요청과 $\text{LED}$(`led` 파라미터) 켜기/끄기 명령, 그리고 $\text{LED}$가 **$\mathbf{30 \text{초}}$ 뒤 자동 꺼짐** 기능(Demo 모드 시 $\text{15분}$)까지 모두 포함되었습니다,,.
+4.  **Actuator 연동:** $\text{CMD In}$ 및 $\text{CMD Out}$ 기능이 $\text{Scan}$ (Actuator) 설정이 활성화되었을 때 $\text{Actuator}$ 인터페이스 용도로 사용되어 다른 $\text{CMD}$ 기능들이 비활성화된다는 내용이 포함되었습니다,.
+
+---
+
+## II. 추가된 소스를 통해 확인된 구체적인 설정값
+
+새로 제공된 스크린샷은 $\text{SPOT+ AL}$의 구체적인 설정 환경을 보여주며, 이 값들이 $\text{API}$ 파라미터와 어떻게 연동되는지 확인할 수 있습니다.
+
+### 1. I/O (입력/출력) 설정,
+
+| 설정 항목 | 소스 값 | 관련 $\text{API}$ 파라미터 | 상세 정보 |
+| :--- | :--- | :--- | :--- |
+| **Mode** | $\text{4-20mA}$ | $\text{N/A}$ (아날로그 출력 선택) | 아날로그 출력이 $\mathbf{4 \text{ mA} \text{ to } 20 \text{ mA}}$ 범위로 설정되어 있습니다,,. |
+| **Target Range** | $\mathbf{4 \text{ mA} = 200 \text{ C}}$, $\mathbf{20 \text{ mA} = 800 \text{ C}}$ | $\text{N/A}$ (아날로그 출력 설정) | 아날로그 출력이 $\mathbf{200^\circ\text{C}}$부터 $\mathbf{800^\circ\text{C}}$까지의 온도 범위를 나타내도록 설정되어 있습니다,. |
+| **CMD Out** | $\text{Alarms}$ | $\text{alarmstatus}$ (Output) | $\text{Scan}$이 비활성화되었을 때, $\text{CMD Out}$ 릴레이가 **알람 출력용**으로 사용되도록 기본 설정되어 있음을 보여줍니다,,. |
+
+### 2. Settings (측정 설정),,,
+
+| 설정 항목 | 소스 값 | 관련 $\text{API}$ 파라미터 | 상세 정보 |
+| :--- | :--- | :--- | :--- |
+| **Mode** | $\text{App1: AL E}$ | $\text{appnumber}$ (Control) | 온도계가 **알루미늄 압출($\text{AL E}$)** 전용 측정 알고리즘을 사용 중이며, 이 모드의 측정 범위($\text{Range}$)는 $\mathbf{200 \text{ to } 900^\circ\text{C}}$입니다,,. |
+| **Emissivity (1), (2)** | $0.079, 0.073$ | $\text{e1out}, \text{e2out}$ (Output) | $\text{Application Mode}$에서는 방사율 값을 수정할 수 없으며, 온도계가 **자동으로 계산한 방사율 값**을 표시합니다. |
+| **Offset** | $\mathbf{305}$ | $\text{appoffset}$ (Control) | $\text{Thermocouple}$ 측정값을 사용하여 알고리즘을 조정하거나 수동으로 입력된 **$\mathbf{305}$의 보정 오프셋 값**이 적용되어 있음을 보여줍니다,,,. 이 값은 $\text{PUT}$ 요청을 통해 원격으로 변경 가능합니다,. |
+
+### 3. Network 및 Security 설정,,,
+
+| 설정 항목 | 소스 값 | 관련 $\text{API}$ 파라미터 | 상세 정보 |
+| :--- | :--- | :--- | :--- |
+| **Mode** | $\text{Static IP}$ | $\text{N/A}$ | 네트워크 모드가 $\text{Static IP}$로 설정되어 있습니다,. |
+| **Default IP / Current IP** | $\mathbf{10.1.10.50}$ | $\text{N/A}$ | $\text{SPOT+}$의 기본 $\text{IP}$ 주소이자 현재 사용 중인 주소입니다,,. |
+| **Web Server / REST API** | $\text{Open}$ | $\text{N/A}$ (보안 설정) | $\text{Web Server}$ 및 **$\text{REST API}$ 통신이 $\text{Open}$ 모드**로 설정되어 있습니다,. $\text{Open}$ 모드에서는 **보안 없이** 어떤 데이터 속도로든 쓰기 작업이 허용되지만, 사설 네트워크에서만 권장됩니다,. |
+
+**결론:** 이전 $\text{API}$ 요약은 **$\text{SPOT+}$ $\text{REST API}$의 기능과 명령어 목록을 거의 완벽하게** 정리했으며, 이는 소스 내용에 완전히 부합합니다. 새로 추가된 스크린샷의 구체적인 설정값들은 이 $\text{API}$ 기능을 고객님의 장비에 적용할 때 필요한 맥락을 제공해줍니다.
+
+## 포커스 이동 API 정보
+
+$\text{SPOT+}$ $\text{REST API}$의 **`/control`** 노드에 $\text{focus}$라는 파라미터가 있으며, 이를 통해 포커스 거리를 설정할 수 있습니다.
+
+| API 파라미터 | 정의 및 범위 | 요청 (Request) | 형식 |
+| :--- | :--- | :--- | :--- |
+| **`focus`** | 장비 전면에서 타겟까지의 **포커스 거리**. | $\text{GET}$ / $\text{PUT}$ | **`/control?p=focus`** |
+| **값 범위** | 정수 값으로 **$300 \text{ mm}$에서 $10000 \text{ mm}$까지** 설정 가능. | $\text{PUT}$ $\text{BODY}$=500 (예시) | $\text{mm}$ 단위 |
+
+### 1. 포커스 거리 읽기 (GET 요청)
+
+현재 설정된 포커스 거리를 읽으려면 다음과 같이 $\text{GET}$ 요청을 사용합니다.
+
+```
+GET http://[ipaddress]/control?p=focus
+```
+**응답 예시:** $1000$ (단위: $\text{mm}$)
+
+### 2. 포커스 거리 설정 (PUT 요청)
+
+포커스 거리를 $500 \text{ mm}$로 변경하여 모터를 구동시키려면 다음과 같이 $\text{PUT}$ 요청을 사용합니다.
+
+```
+PUT http://[ipaddress]/control?p=focus
+BODY=500
+```
+**응답 예시:** $500$
+
+### 3. Actuator와의 관계
+
+$\text{Actuator}$는 $\text{Extrusion Mode}$에서 소재의 **가장 뜨거운 위치를 수평으로 추적($\text{Scan}$)**하는 역할을 합니다. 반면, 위에서 언급된 $\text{focus}$ $\text{API}$는 $\text{SPOT+}$ 온도계의 **내부 초점 모터**를 제어하여 **측정 거리**를 조절하는 $\text{API}$입니다.
+
+따라서, 귀하가 찾으시는 **온도계의 포커스를 원격으로 제어하는 $\text{API}$**는 **`focus`** 파라미터가 맞습니다,.
+
+### 4. 주의 사항 (쓰기 작업 시)
+
+포커스 값을 변경하는 $\text{PUT}$ 요청은 **쓰기(Write)** 작업에 해당하므로, $\text{SPOT+}$ 온도계가 현재 **$\text{Secure}$ 모드**로 설정되어 있다면 **$\text{JSON}$ $\text{Web}$ $\text{Token}$**을 사용한 인증($\text{Handshake}$) 절차가 필수적입니다,,. 고객님과의 이전 대화에서 현재 설정이 **$\text{Open}$ 모드**임을 확인했으므로, 인증 절차 없이 $\text{PUT}$ 요청을 보낼 수 있습니다. 하지만 $\text{Open}$ 모드는 **사설 네트워크 내에서만 권장**됩니다.

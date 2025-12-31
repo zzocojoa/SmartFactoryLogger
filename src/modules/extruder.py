@@ -24,6 +24,7 @@ class ExtruderClient:
         self.merge_retry_growth = 2
         self.merge_retry_pending = False
         self.split_success_count = 0
+        self.skip_counter = 0
         self.connect()
 
     def _reset_backoff(self):
@@ -42,6 +43,7 @@ class ExtruderClient:
                 try: self.sock.close()
                 except: pass
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.sock.settimeout(self.timeout) 
             self.sock.connect((self.ip, self.port))
             self._reset_backoff()
@@ -75,37 +77,37 @@ class ExtruderClient:
                 break
         return bytes(data)
 
-    def _read_merged(self):
-        if not self.merge_blocks:
-            return None
-
-        d_main_start = 20
-        d_main_end = 421
-        d_aux_start = 1500
-        d_aux_end = 1911
-        d_main_count = d_main_end - d_main_start + 1
-        d_aux_count = d_aux_end - d_aux_start + 1
-
-        if d_main_count > self.max_merge_words or d_aux_count > self.max_merge_words:
-            return None
-
-        b_main = self._read_block(f"D{d_main_start:04}", d_main_count, min_count=d_main_count)
-        b_aux = self._read_block(f"D{d_aux_start:04}", d_aux_count, min_count=d_aux_count)
-        b_speed = self._read_block("B1502", 1, min_count=1)
-
-        if not b_main or not b_aux or not b_speed:
-            return None
-
-        merged = {
-            "Press": b_main[3] / 10.0,
-            "Temp_F": b_main[11],
-            "Temp_B": b_main[12],
-            "EndPos": b_main[401] / 10.0,
-            "Speed": b_speed[0] / 10.0,
-            "Count": b_aux[10],
-            "Billet": b_aux[411],
+    def _read_optimized(self):
+        # 1. Main Block (Pressure, Temp) D20~D35 (16 words)
+        b1 = self._read_block("D0020", 16)
+        if not b1: return None
+        
+        # 2. End Pos Block D420~D425 (6 words)
+        b2 = self._read_block("D0420", 6)
+        if not b2: return None
+        
+        # 3. Count Block D1500~D1515 (16 words)
+        b3 = self._read_block("D1500", 16)
+        if not b3: return None
+        
+        # 4. Billet Block D1900~D1915 (16 words)
+        b4 = self._read_block("D1900", 16)
+        if not b4: return None
+        
+        # 5. Speed (Bit/Word) B1502 (1 word)
+        b_spd = self._read_block("B1502", 1)
+        if not b_spd: return None
+        
+        # 매핑 및 리턴 (기존 구조 호환)
+        return {
+            "Press": b1[3] / 10.0,
+            "Temp_F": b1[11],
+            "Temp_B": b1[12],
+            "EndPos": b2[1] / 10.0,
+            "Count": b3[10],
+            "Billet": b4[11],
+            "Speed": b_spd[0] / 10.0
         }
-        return merged
 
     def _read_block(self, addr_str, count, min_count=None):
         """ 
@@ -143,18 +145,25 @@ class ExtruderClient:
             return values
         except Exception as e:
             sys_logger.error(f"[Extru] IO Error on {addr_str}: {e}")
+            self.skip_counter = 5
             self._increase_backoff()
             self.close()
         return []
 
     def get_data(self):
         data = {"Press": None, "Temp_F": None, "Temp_B": None, "Speed": None, "EndPos": None, "Count": None, "Billet": None}
+        
+        # [Skip Logic] 쿨다운 상태면 요청 건너뛰기 (0.2s 그리드 유지)
+        if self.skip_counter > 0:
+            self.skip_counter -= 1
+            return data
+
         if self.sock is None:
             if not self.connect(): return data
 
         try:
             if self.merge_blocks:
-                merged = self._read_merged()
+                merged = self._read_optimized()
                 if merged is not None:
                     data.update(merged)
                     self.merge_failures = 0
@@ -234,6 +243,8 @@ class ExtruderClient:
             sys_logger.error(f"[Extru] Data Loop Error: {e}")
             self._increase_backoff()
             self.close()
+            # [Skip Logic] 에러 발생 시 5회(약 1초) 동안 요청 생략
+            self.skip_counter = 5
             
         # Pydantic Validation
         try:

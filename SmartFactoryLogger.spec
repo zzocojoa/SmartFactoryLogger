@@ -25,7 +25,7 @@ excludes = [
     'test',
     'unittest',
     'pydoc_data',
-    'distutils'
+
 ]
 
 a = Analysis(

@@ -34,6 +34,7 @@ class LSPLCClient:
                 try: self.sock.close()
                 except: pass
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.sock.settimeout(0.5)
             self.sock.connect((self.ip, self.port))
             self._reset_backoff()
