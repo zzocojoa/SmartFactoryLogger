@@ -1,54 +1,32 @@
-# SmartFactoryLogger
+# Smart Factory Logger Project
 
-## 개요
+This repository manages the Smart Factory Logger application, supporting both
+the legacy Tkinter version and the next-generation Web Tech version.
 
-스마트 팩토리 데이터 수집 및 모니터링 시스템. Melsec PLC와 LS PLC 데이터를 0.2초
-주기로 수집하여 대시보드 시각화 및 CSV 로깅을 수행합니다.
+## Project Structure
 
-## 실행 방법 (Execution)
+### 📂 [v1_legacy](./v1_legacy/README.md)
 
-### 1️⃣ 가상 환경 활성화 (권장)
+**Status**: Stable (Maintenance Mode)\
+**Tech Stack**: Python, Tkinter\
+The original desktop application currently running in production. Use this for
+hotfixes and stable deployment.
 
-터미널에서 아래 명령어로 가상 환경을 활성화합니다.
+**Execution**:
 
-```powershell
-# Windows PowerShell
-.\venv\Scripts\activate
-```
-
-### 2️⃣ 프로그램 실행
-
-가상 환경이 활성화된 상태에서 메인 스크립트를 실행합니다.
-
-```powershell
+```bash
+cd v1_legacy
 python src/main.py
 ```
 
-### 3️⃣ 간편 실행 (Windows)
+### 📂 [v2_next](./v2_next/README.md)
 
-프로젝트 루트 폴더의 `start.bat` 파일을 더블 클릭하거나 터미널에서 실행하면 가상
-환경 활성화와 실행을 자동으로 수행합니다.
+**Status**: In Development (Implementation Phase)\
+**Tech Stack**: Python (FastAPI), React, Electron\
+The next-generation version featuring a flexible web-based dashboard and remote
+monitoring capabilities.
 
-```cmd
-start.bat
-```
+**Documentation**:
 
-## 주요 기능
-
-- **실시간 대시보드**: 속도, 압력, 온도(SPOT, Mold, Billet) 모니터링.
-- **상태 알림**: 시스템 연결 상태 및 이상 징후(Glow Effect) 시각화.
-- **이력 조회**: 우측 상단 알림 센터를 통한 에러/경고 이력 확인.
-
-## 개발 환경 설정
-
-- Python 3.12+
-- Dependencies: `requirements.txt` 참조
-  ```bash
-  pip install -r requirements.txt
-  ```
-
-## 개발 빌드 배포 (Windows)
-
-```bash
-python -m PyInstaller --clean --noconfirm SmartFactoryLogger.spec
-```
+- [V2 Implementation Roadmap](./v2_next/docs/V2/V2_Implementation_Phases.md)
+- [V2 Git Strategy](./v2_next/docs/V2/V2_0_Migration_Strategy.md)
