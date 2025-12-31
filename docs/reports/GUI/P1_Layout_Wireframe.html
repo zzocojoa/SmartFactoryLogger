@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartFactoryLogger P1 Layout Mockup</title>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --panel-color: #252526;
+            --card-color: #333333;
+            --text-color: #ffffff;
+            --text-dim: #aaaaaa;
+            --accent-color: #007acc;
+            --success-color: #4ec9b0;
+            --danger-color: #f14c4c;
+            --warning-color: #e0a800;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 1. Header (Status Bar) */
+        header {
+            height: 38px;
+            background-color: #2d2d2d;
+            display: flex;
+            align-items: center;
+            padding-right: 20px;
+            border-bottom: 1px solid #111;
+        }
+        .status-stripe { width: 5px; height: 100%; background-color: var(--success-color); margin-right: 15px; }
+        .status-label { font-weight: bold; font-size: 14px; margin-right: 10px; }
+        .latency-label { color: var(--text-dim); font-size: 12px; }
+        .header-right { margin-left: auto; display: flex; align-items: center; gap: 15px; }
+        .icon-btn { cursor: pointer; font-size: 16px; color: #ccc; }
+        .clock { font-family: 'Consolas', monospace; font-weight: bold; color: var(--text-dim); }
+
+        /* 2. Navigation Bar */
+        .nav-bar {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            padding: 0 40px; /* Aligned with content padding */
+            gap: 20px;
+            background-color: var(--bg-color); /* Transparent effectively */
+        }
+        .nav-title { font-size: 24px; font-weight: bold; color: var(--text-color); cursor: pointer; }
+        .nav-tab { font-size: 18px; color: gray; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+        .nav-tab:hover { color: #ddd; }
+        .nav-tab.active { color: var(--accent-color); }
+
+        /* Main Container */
+        .container {
+            display: flex;
+            flex: 1;
+            padding: 10px;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        /* Left Sidebar (Gauges) */
+        .sidebar {
+            width: 250px;
+            background-color: var(--panel-color);
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            border: 1px solid #444;
+        }
+        .sidebar-title {
+            color: var(--text-dim);
+            font-size: 0.9em;
+            text-transform: uppercase;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+        }
+        .gauge-card {
+            background-color: var(--card-color);
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            border: 1px solid #555;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .gauge-circle {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 8px solid var(--success-color);
+            margin: 0 auto 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8em;
+            font-weight: bold;
+            position: relative;
+        }
+        .gauge-circle::after { /* Simulate Gauge partial fill */
+            content: '';
+            position: absolute;
+            top: -8px; left: -8px; right: -8px; bottom: -8px;
+            border-radius: 50%;
+            border: 8px solid transparent;
+            border-top-color: #222; /* Cutout */
+            transform: rotate(45deg);
+        }
+        .gauge-label { font-size: 1.1em; color: var(--text-dim); }
+        .digital-count {
+            background-color: #000;
+            color: var(--success-color);
+            font-family: 'Consolas', monospace;
+            font-size: 2em;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 5px;
+        }
+
+        /* Right Content Area */
+        .content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-right: 10px; /* Spacing */
+            overflow-y: auto;    /* Enable scrolling if content is too tall */
+            min-height: 0;       /* Necessary for nested flex scrolling */
+        }
+
+        /* Top Row (SPOT + Molds) */
+        .top-row {
+            /* flex: 2; Removed fixed flex to allow natural height */
+            /* display: flex; gap: 10px; */
+        }
+
+        /* SPOT Card (Hero) */
+        .spot-card {
+            background-color: var(--card-color);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            border-left: 5px solid var(--success-color); /* Status Indicator */
+            margin-bottom: 10px;
+        }
+        .temp-title { font-size: 1.2em; color: var(--text-dim); }
+        .temp-value { font-size: 4em; font-weight: bold; }
+        .sparkline { height: 60px; position: relative; overflow: hidden; }
+        .sparkline::after { content: 'Last 10 points trend'; position: absolute; bottom: 5px; right: 5px; font-size: 0.8em; color: #888; }
+
+        /* Secondary Grid (Container & Billet) */
+        .secondary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .info-card {
+            background-color: var(--card-color);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            border: 1px solid #444;
+        }
+        .info-value { font-size: 2em; font-weight: bold; }
+        .info-label { font-size: 0.9em; color: var(--text-dim); }
+
+        /* Mold Grid */
+        .mold-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .mold-card {
+            background-color: var(--card-color);
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #444;
+            padding: 15px;
+        }
+        .mold-card.warning { border-color: var(--warning-color); color: var(--warning-color); }
+        .mold-value { font-size: 1.8em; font-weight: bold; }
+        .mold-label { font-size: 0.9em; color: var(--text-dim); }
+
+        /* NEW: Split Row (Camera Left, Notice Right) */
+        .split-row {
+            display: flex;
+            gap: 10px;
+            flex: 1; /* Expand to fill remaining space */
+            min-height: 200px;
+        }
+
+        /* Operator Notice */
+        .notice-card {
+            flex: 1;
+            background-color: var(--card-color);
+            border: 2px solid var(--warning-color);
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 10px;
+        }
+        .notice-header { font-size: 1.2em; font-weight: bold; color: var(--warning-color); display:flex; align-items:center; gap:10px;}
+        .notice-body { font-size: 1.1em; color: white; font-weight: bold; }
+        .notice-sub { font-size: 0.9em; color: #888; }
+        .notice-action { font-size: 1.1em; font-weight: bold; color: var(--accent-color); }
+
+        /* Camera Widget */
+        .camera-container {
+            flex: 1;
+            background-color: #000;
+            border-radius: 8px;
+            border: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            position: relative;
+        }
+        .camera-header { display:flex; justify-content:space-between; margin-bottom:5px; color:#aaa; font-weight:bold; }
+        .camera-placeholder {
+            flex:1;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #555;
+            background: repeating-linear-gradient(45deg, #111, #111 10px, #1a1a1a 10px, #1a1a1a 20px);
+        }
+
+        /* Env Bar */
+        .env-bar {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .env-card {
+            flex: 1;
+            background-color: var(--panel-color);
+            border-radius: 6px;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border: 1px solid #333;
+        }
+
+        /* Footer */
+        footer {
+            height: 30px;
+            background-color: #111;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            font-size: 12px;
+            color: gray;
+        }
+
+    </style>
+</head>
+<body>
+    <!-- 1. Header (Status Bar) -->
+    <header>
+        <div class="status-stripe"></div>
+        <div class="status-label">Running</div>
+        <div class="latency-label">12ms</div>
+        
+        <div class="header-right">
+            <span class="icon-btn">🔔</span>
+            <span class="clock">18:30:05</span>
+            <span class="icon-btn">💾</span>
+            <span class="icon-btn">⚙️</span>
+        </div>
+    </header>
+
+    <!-- 2. Nav Bar -->
+    <nav class="nav-bar">
+        <div class="nav-title">🏭 창녕 2호기</div>
+        <div class="nav-tab">
+            <span>📈</span> Time Series
+        </div>
+    </nav>
+
+    <!-- 3. Main Container -->
+    <div class="container">
+        <!-- Left Sidebar: Driver's View -->
+        <aside class="sidebar">
+            <div class="sidebar-title">Extruder Driving</div>
+            
+            <div class="gauge-card">
+                <div class="gauge-circle">145</div>
+                <div class="gauge-label">Main Pressure</div>
+            </div>
+
+            <div class="gauge-card">
+                <div class="gauge-circle">2.5</div>
+                <div class="gauge-label">Speed</div>
+            </div>
+
+            <div class="gauge-card">
+                <div class="gauge-label">Product Count</div>
+                <div class="digital-count">1,245</div>
+            </div>
+
+            <div class="gauge-card">
+                <div class="gauge-label">End Position</div>
+                <div class="info-value" style="color:#aaa;">15.4 mm</div>
+            </div>
+            
+            <div class="gauge-card">
+                <div class="gauge-label">Billet Length</div>
+                <div class="info-value" style="color:#aaa;">600 mm</div>
+            </div>
+        </aside>
+
+        <!-- Right Content -->
+        <main class="content">
+            <!-- Row 1: SPOT (Hero) -->
+            <div class="spot-card">
+                <div class="temp-title">🔥 SPOT Temperature</div>
+                <div class="temp-value">520.5 <small>°C</small></div>
+                <div class="sparkline">
+                    <svg width="100%" height="100%" viewBox="0 0 300 60" preserveAspectRatio="none">
+                         <defs>
+                            <linearGradient id="grad1" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" style="stop-color:rgb(78, 201, 176);stop-opacity:0.3" />
+                                <stop offset="100%" style="stop-color:rgb(78, 201, 176);stop-opacity:0" />
+                            </linearGradient>
+                        </defs>
+                        <path d="M0,50 L30,45 L60,48 L90,30 L120,35 L150,20 L180,25 L210,10 L240,15 L270,5 L300,20 V60 H0 Z" fill="url(#grad1)" stroke="none"/>
+                        <path d="M0,50 L30,45 L60,48 L90,30 L120,35 L150,20 L180,25 L210,10 L240,15 L270,5 L300,20" fill="none" stroke="#4ec9b0" stroke-width="2"/>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Row 2: Secondary Temperatures -->
+            <div class="secondary-grid">
+                <div class="info-card">
+                    <div class="info-value">450.0</div>
+                    <div class="info-label">Container Front</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-value">448.5</div>
+                    <div class="info-label">Container Back</div>
+                </div>
+                <div class="info-card">
+                    <div class="info-value">480.0</div>
+                    <div class="info-label">Billet Temp</div>
+                </div>
+            </div>
+
+            <!-- Row 3: Mold Grid -->
+            <div class="mold-grid">
+                <div class="mold-card">
+                    <div class="mold-value">450</div>
+                    <div class="mold-label">Mold 1</div>
+                </div>
+                <div class="mold-card">
+                    <div class="mold-value">452</div>
+                    <div class="mold-label">Mold 2</div>
+                </div>
+                <div class="mold-card warning">
+                    <div class="mold-value">480</div>
+                    <div class="mold-label">⚠️ Mold 3</div>
+                </div>
+                <div class="mold-card">
+                    <div class="mold-value">448</div>
+                    <div class="mold-label">Mold 4</div>
+                </div>
+                <div class="mold-card">
+                    <div class="mold-value">450</div>
+                    <div class="mold-label">Mold 5</div>
+                </div>
+                <div class="mold-card">
+                    <div class="mold-value">451</div>
+                    <div class="mold-label">Mold 6</div>
+                </div>
+            </div>
+
+            <!-- Row 4: Split Camera (Left) / Notice (Right) -->
+            <div class="split-row">
+                 <!-- Camera Left -->
+                <div class="camera-container">
+                     <div class="camera-header">
+                        <span>📷 SPOT Camera View</span>
+                        <span style="color:#555;">Live Feed</span>
+                     </div>
+                     <div class="camera-placeholder">
+                         <span>[ Real-time Video Stream ]</span>
+                     </div>
+                </div>
+
+                 <!-- Notice Right -->
+                <div class="notice-card">
+                    <div class="notice-header">⚠️ OPERATOR CHECK</div>
+                    <div class="notice-body">적외선 센서 조준 상태를 상시 확인하십시오.</div>
+                    <div class="notice-sub">※ 제품 위치 변동 시 온도가 측정되지 않을 수 있습니다.</div>
+                    <div class="notice-action">▶ 'SPOT Camera View' 화살표로<br>포인트 위치를 조정해 주세요.</div>
+                </div>
+            </div>
+            
+             <!-- Row 5: Environment -->
+             <div class="env-bar">
+                <div class="env-card">
+                    <span class="info-label">Air Temp</span>
+                    <span style="font-size:1.2em; font-weight:bold; color:var(--success-color);">24.5 °C (쾌적)</span>
+                </div>
+                <div class="env-card">
+                    <span class="info-label">Air Pressure</span>
+                    <span style="font-size:1.2em; font-weight:bold;">0.005 bar</span>
+                </div>
+             </div>
+        </main>
+    </div>
+
+    <!-- 4. Footer -->
+    <footer>
+        <div>System Ready.</div>
+        <div>Copyright © HOIHOU. All Rights Reserved.</div>
+    </footer>
+</body>
+</html>

@@ -50,5 +50,5 @@ start.bat
 ## 개발 빌드 배포 (Windows)
 
 ```bash
-pyinstaller --clean --noconfirm SmartFactoryLogger.spec
+python -m PyInstaller --clean --noconfirm SmartFactoryLogger.spec
 ```
