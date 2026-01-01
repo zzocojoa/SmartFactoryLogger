@@ -18,19 +18,12 @@ export class ReactWidget extends SceneObjectBase<ReactWidgetState> {
       <div className="scene-react-widget" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
         {title && (
           <div 
-            className="panel-header grid-drag-handle-dashboard-grid" 
-            style={{ 
-              marginBottom: '8px', 
-              fontWeight: 500, 
-              cursor: 'grab', 
-              background: '#f4f6f8',
-              padding: '4px 8px' 
-            }}
+            className="panel-header grid-drag-handle-dashboard-grid"
           >
              {title}
           </div>
         )}
-        <div className="panel-content" style={{ flexGrow: 1, overflow: 'hidden' }}>
+        <div className="panel-content">
           {renderWidget()}
         </div>
       </div>
