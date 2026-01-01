@@ -6,12 +6,40 @@ import { FactoryData, SpotConfig } from './types';
 import './App.css';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { getDashboardScene } from './scenes/DashboardScene';
-import { SceneGridLayout } from '@grafana/scenes';
-
-// Initialize Scenes Runtime (Mocking Grafana services)
-initScenesRuntime();
+import { SceneGridItemLike, SceneGridLayout } from '@grafana/scenes';
+import {
+  APP_TITLE,
+  NOTICE_BODY_PREFIX,
+  NOTICE_BODY_SUFFIX,
+  NOTICE_FOOTER,
+  NOTICE_TEMP_THRESHOLD,
+  NOTICE_TITLE,
+  SPOT_UNIT,
+} from './constants/uiText';
 
 const API_BASE = 'http://localhost:8000';
+
+type LayoutEntry = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type LayoutMap = Record<string, LayoutEntry>;
+
+const buildLayoutMap = (children: SceneGridItemLike[]): LayoutMap => {
+  const next: LayoutMap = {};
+  children.forEach((child) => {
+    const key = child.state.key;
+    const { x, y, width, height } = child.state;
+    if (!key || x === undefined || y === undefined || width === undefined || height === undefined) {
+      return;
+    }
+    next[key] = { x, y, width, height };
+  });
+  return next;
+};
 
 function App() {
   const [data, setData] = useState<FactoryData | null>(null);
@@ -21,9 +49,28 @@ function App() {
   const [spotImageError, setSpotImageError] = useState<string | null>(null);
   const [spotImageLoading, setSpotImageLoading] = useState(false);
   const [focusBusy, setFocusBusy] = useState(false);
+  const [layoutSaveMessage, setLayoutSaveMessage] = useState<string | null>(null);
+  const scenesRuntimeRef = useRef(false);
   const spotHasImage = useRef(false);
+  const saveMessageTimerRef = useRef<number | null>(null);
 
   // --- Data Fetching Hooks (Same as before) ---
+  useEffect(() => {
+    if (scenesRuntimeRef.current) {
+      return;
+    }
+    scenesRuntimeRef.current = true;
+    initScenesRuntime();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (saveMessageTimerRef.current !== null) {
+        window.clearTimeout(saveMessageTimerRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -81,63 +128,15 @@ function App() {
   const renderNotice = () => (
     <div className="card" style={{ height: '100%' }}>
       <p style={{ color: '#aaa', fontSize: '0.9rem', lineHeight: 1.5 }}>
-        ※ 작업자 주의사항<br />
-        SPOT 온도가 <b>500°C</b> 이상일 경우 즉시 관리자에게 알림.<br />
-        적외선 센서 조준 상태를 상시 확인하십시오.
+        {NOTICE_TITLE}<br />
+        {NOTICE_BODY_PREFIX}<b>{NOTICE_TEMP_THRESHOLD}</b>{NOTICE_BODY_SUFFIX}<br />
+        {NOTICE_FOOTER}
       </p>
     </div>
   );
 
   // --- Scene Creation ---
-  // Create the scene only once. Since ReactWidget uses model.useState(), 
-  // simply calling setState on the model would update it, BUT our ReactWidget component
-  // pulls fresh state from 'renderWidget' prop if we change it? 
-  // Actually, standard Scene objects are static. We are passing a function `renderKpi`.
-  // As `data` changes in App state, `renderKpi` (which closes over `data`) will return new JSX.
-  // The Scene component needs to re-render.
-  // `ReactWidget.Component` calls `model.useState()`. 
-  // We need to trigger an update on the model when `data` changes?
-  // Or simpler: The `ReactWidget` simply calls `renderWidget()` during its render.
-  // If `App` re-renders, does the Scene re-render? 
-  // Usually Scenes are self-contained. 
-  // To force update, we might need a `useEffect` that calls `scene.setState({})` or similar.
-  // However, since `renderKpi` is a closure, if `ReactWidget.Component` re-renders, it calls the *current* `renderKpi`?
-  // No, `model` is constant. We passed `renderKpi` *at creation time*.
-  // This `renderKpi` closure captures the *initial* `data` (null).
-  // We need a ref to mutable data or use a context.
-  // BETTER APPROACH: Use a `Context` provider wrapping the Scene, and have `renderWidget` use contexts.
-  // OR: Use a mutable ref for the render functions.
-  
-  const dataRef = useRef(data);
-  const spotConfigRef = useRef(spotConfig);
-  dataRef.current = data;
-  spotConfigRef.current = spotConfig;
-
-  // We wrap the renderers to use the refs
-  const sceneRenderers = useMemo(() => ({
-    renderKpi: () => {
-       const d = dataRef.current;
-       if (!d) return <div>Loading...</div>;
-       return (
-        <div className="card kpi-card" style={{ height: '100%' }}>
-          <div className="metric-row"><span>Speed</span><span className="value">{d.Speed}</span></div>
-          <div className="metric-row"><span>Pressure</span><span className="value">{d.Press}</span></div>
-          <div className="metric-row"><span>Count</span><span className="value">{d.Count}</span></div>
-        </div>
-       );
-    },
-    // ... Implement others similarly using refs ...
-    // For brevity in this replace, I will assume the closure issue needs solving.
-    // Actually, `ReactWidget` component is a React component. 
-    // If we trigger a re-render of the Scene App, it might re-render.
-    // But Scenes are optimized to NOT re-render the whole tree.
-    // We should probably force update the scene implementation?
-    // Let's use a "Force Update" on the scene object?
-  }), []);
-
-  // WAIT. Simplest way: The `renderWidget` function is stored in the model state.
-  // We can update the model state when data changes.
-  
+  // Scene is created once; widget data is read from DataContext.
   const scene = useMemo(() => getDashboardScene(
      () => <KpiComponent />,
      () => <SpotComponent />,
@@ -147,30 +146,50 @@ function App() {
      renderNotice
   ), []); 
 
+  const layoutRef = useRef<LayoutMap>({});
+
+  useEffect(() => {
+    const grid = scene.state.body;
+    if (!(grid instanceof SceneGridLayout)) {
+      return;
+    }
+
+    const updateLayoutRef = () => {
+      layoutRef.current = buildLayoutMap(grid.state.children);
+    };
+
+    updateLayoutRef();
+    const sub = grid.subscribeToState(() => updateLayoutRef());
+    return () => sub.unsubscribe();
+  }, [scene]);
+
   // --- Layout Persistence ---
   const saveLayout = () => {
-    // SceneGridLayout state contains the children with their current x,y,w,h
-    const grid = scene.state.body;
-    if (grid instanceof SceneGridLayout) {
-       // Access internal state safely with casting
-       const children = (grid.state as any).children || [];
-       const layoutState = children.map((c: any) => ({
-         x: c.state.x,
-         y: c.state.y,
-         width: c.state.width,
-         height: c.state.height,
-       }));
-       localStorage.setItem('grafana_scene_layout_v1', JSON.stringify(layoutState));
-       alert('Layout saved!');
+    if (Object.keys(layoutRef.current).length === 0) {
+      const grid = scene.state.body;
+      if (grid instanceof SceneGridLayout) {
+        layoutRef.current = buildLayoutMap(grid.state.children);
+      }
     }
+    localStorage.setItem('grafana_scene_layout_v1', JSON.stringify(layoutRef.current));
+    setLayoutSaveMessage('Saved');
+    if (saveMessageTimerRef.current !== null) {
+      window.clearTimeout(saveMessageTimerRef.current);
+    }
+    saveMessageTimerRef.current = window.setTimeout(() => {
+      setLayoutSaveMessage(null);
+      saveMessageTimerRef.current = null;
+    }, 2000);
   };
 
   return (
     <div className="App" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header className="app-header">
-        <h1>창녕 2호기 (Grafana Scenes)</h1>
+        <h1>{APP_TITLE}</h1>
          <div className="header-controls" style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'center', marginRight: '20px' }}>
-            <button onClick={saveLayout} style={{ padding: '6px 12px', cursor: 'pointer' }}>Save Layout</button>
+            <button onClick={saveLayout} style={{ padding: '6px 12px', cursor: 'pointer' }}>
+              {layoutSaveMessage ?? 'Save Layout'}
+            </button>
             <div className="status-badge" style={{ backgroundColor: connected ? '#4ec9b0' : '#f14c4c' }}>
                 {connected ? 'Running' : 'Offline'}
             </div>
@@ -191,7 +210,23 @@ function App() {
 
 // --- Context & Components ---
 // Define Context to pass data into the Scene's ReactWidgets
-const DataContext = React.createContext<any>(null);
+type DataContextValue = {
+  data: FactoryData | null;
+  spotConfig: SpotConfig | null;
+  spotImageUrl: string;
+  spotImageLoading: boolean;
+  spotImageError: string | null;
+  requestFocus: (steps: number) => void;
+};
+
+const DataContext = React.createContext<DataContextValue>({
+  data: null,
+  spotConfig: null,
+  spotImageUrl: '',
+  spotImageLoading: false,
+  spotImageError: null,
+  requestFocus: () => undefined,
+});
 
 const KpiComponent = () => {
   const { data } = React.useContext(DataContext);
@@ -210,7 +245,7 @@ const SpotComponent = () => {
     if (!data) return <div>Loading...</div>;
     return (
       <div className="card spot-card" style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <div className="hero-value">{data.Spot} °C</div>
+        <div className="hero-value">{data.Spot} {SPOT_UNIT}</div>
         <div className={`status-indicator ${data.Spot > 500 ? 'hot' : 'normal'}`}>
           {data.Spot > 500 ? 'HIGH TEMP' : 'NORMAL'}
         </div>
