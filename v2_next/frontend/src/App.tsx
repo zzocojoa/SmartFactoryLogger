@@ -1,156 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Responsive, useContainerWidth, cloneLayout, type Compactor } from 'react-grid-layout';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
 import axios from 'axios';
 import { FactoryData, SpotConfig } from './types';
 import './App.css';
-import 'react-grid-layout/css/styles.css';
-import 'react-resizable/css/styles.css';
+import { initScenesRuntime } from './scenes/ScenesRuntime';
+import { getDashboardScene } from './scenes/DashboardScene';
+import { SceneGridLayout } from '@grafana/scenes';
+
+// Initialize Scenes Runtime (Mocking Grafana services)
+initScenesRuntime();
 
 const API_BASE = 'http://localhost:8000';
-const GRID_ROW_HEIGHT = 15; // Much finer vertical control
-const GRID_MARGIN = 8; // Tighter margins
-const GRID_PADDING = 12;
-const GRID_MAX_ROWS = 2000;
-// Double again for ultra-fine control (48 cols for lg)
-const GRID_COLS_BY_BREAKPOINT = { lg: 48, md: 40, sm: 24, xs: 16, xxs: 8 };
-
-const ResponsiveGridLayout = Responsive;
-
-// Default Layouts (Scaled x2 from previous 12-col layout)
-const commonLayoutProps = {
-  resizeHandles: ['s', 'e', 'w', 'se'],
-};
-
-const defaultLayouts = {
-  lg: [
-    { i: 'kpi', x: 0, y: 0, w: 12, h: 16, minW: 8, minH: 12, ...commonLayoutProps },
-    { i: 'spot', x: 12, y: 0, w: 20, h: 8, minW: 12, minH: 8, ...commonLayoutProps },
-    { i: 'temps', x: 12, y: 8, w: 20, h: 8, minW: 12, minH: 8, ...commonLayoutProps },
-    { i: 'molds', x: 32, y: 0, w: 16, h: 16, minW: 12, minH: 12, ...commonLayoutProps },
-    { i: 'camera', x: 0, y: 16, w: 24, h: 20, minW: 16, minH: 12, ...commonLayoutProps },
-    { i: 'notice', x: 24, y: 16, w: 24, h: 20, minW: 12, minH: 12, ...commonLayoutProps },
-  ],
-  md: [ // Scaled for 40 cols
-    { i: 'kpi', x: 0, y: 0, w: 12, h: 16, ...commonLayoutProps },
-    { i: 'spot', x: 12, y: 0, w: 16, h: 8, ...commonLayoutProps },
-    { i: 'temps', x: 12, y: 8, w: 16, h: 8, ...commonLayoutProps },
-    { i: 'molds', x: 28, y: 0, w: 12, h: 16, ...commonLayoutProps },
-    { i: 'camera', x: 0, y: 16, w: 20, h: 20, ...commonLayoutProps },
-    { i: 'notice', x: 20, y: 16, w: 20, h: 20, ...commonLayoutProps },
-  ],
-  sm: [ // Scaled for 24 cols
-    { i: 'kpi', x: 0, y: 0, w: 24, h: 12, ...commonLayoutProps },
-    { i: 'spot', x: 0, y: 12, w: 24, h: 8, ...commonLayoutProps },
-    { i: 'temps', x: 0, y: 20, w: 24, h: 8, ...commonLayoutProps },
-    { i: 'molds', x: 0, y: 28, w: 24, h: 16, ...commonLayoutProps },
-    { i: 'camera', x: 0, y: 44, w: 24, h: 20, ...commonLayoutProps },
-    { i: 'notice', x: 0, y: 64, w: 24, h: 20, ...commonLayoutProps },
-  ]
-};
-
-const LAYOUT_STORAGE_KEY = 'sfl_v2_layouts_v5';
-const freeformCompactor: Compactor = {
-  type: null,
-  allowOverlap: true,
-  compact: (layout) => cloneLayout(layout),
-};
-const LAYOUT_ORDER_BY_BREAKPOINT: Record<string, string[]> = Object.keys(defaultLayouts).reduce((acc, bp) => {
-  acc[bp] = defaultLayouts[bp as keyof typeof defaultLayouts].map((item: any) => item.i);
-  return acc;
-}, {} as Record<string, string[]>);
-
-const mergeLayouts = (base: any, defaults: any) => {
-  const merged: any = {};
-  const defaultKeys = Object.keys(defaults);
-
-  defaultKeys.forEach((bp) => {
-    const defaultItems = defaults[bp] || [];
-    const existingItems = Array.isArray(base?.[bp]) ? base[bp] : [];
-    const existingMap = new Map(existingItems.map((item: any) => [item.i, item]));
-
-    const mergedItems = defaultItems.map((def: any) => ({
-      ...def,
-      ...(existingMap.get(def.i) || {}),
-    }));
-
-    existingItems.forEach((item: any) => {
-      if (!defaultItems.some((def: any) => def.i === item.i)) {
-        mergedItems.push(item);
-      }
-    });
-
-    merged[bp] = mergedItems;
-  });
-
-  Object.keys(base || {}).forEach((bp) => {
-    if (!merged[bp]) {
-      merged[bp] = base[bp];
-    }
-  });
-
-  return merged;
-};
-
-const clampLayoutItem = (item: any, cols: number) => {
-  const minW = item.minW ?? 1;
-  const minH = item.minH ?? 1;
-  const maxW = Math.min(item.maxW ?? cols, cols);
-  const w = Math.max(minW, Math.min(item.w ?? minW, maxW));
-  const h = Math.max(minH, item.h ?? minH);
-  const x = Math.max(0, Math.min(item.x ?? 0, cols - w));
-  const y = Math.max(0, item.y ?? 0);
-  return { ...item, w, h, x, y };
-};
-
-const itemsCollide = (a: any, b: any) =>
-  a.x < b.x + b.w &&
-  a.x + a.w > b.x &&
-  a.y < b.y + b.h &&
-  a.y + a.h > b.y;
-
-const pushDownIfOverlapping = (items: any[], focusId: string, cols: number, maxRows: number) => {
-  const map = new Map(items.map((item) => [item.i, clampLayoutItem(item, cols)]));
-  const focus = map.get(focusId);
-  if (!focus) {
-    return items.map((item) => map.get(item.i) ?? item);
-  }
-
-  const fixed = Array.from(map.values()).filter((item) => item.i !== focusId);
-  const moved = { ...focus };
-  let guard = 0;
-  while (fixed.some((other) => itemsCollide(moved, other))) {
-    moved.y += 1;
-    guard += 1;
-    if (moved.y + moved.h > maxRows || guard > maxRows) {
-      break;
-    }
-  }
-
-  map.set(focusId, moved);
-  return items.map((item) => map.get(item.i) ?? item);
-};
-
-
-
-const loadLayouts = () => {
-  if (typeof window === 'undefined') {
-    return defaultLayouts;
-  }
-  try {
-    const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
-    if (!raw) {
-      return defaultLayouts;
-    }
-    const parsed = JSON.parse(raw);
-    return mergeLayouts(parsed, defaultLayouts);
-  } catch (err) {
-    console.warn('Layout restore failed, using defaults.', err);
-    return defaultLayouts;
-  }
-};
 
 function App() {
-  const [layoutsState, setLayoutsState] = useState<any>(() => loadLayouts());
   const [data, setData] = useState<FactoryData | null>(null);
   const [connected, setConnected] = useState(false);
   const [spotConfig, setSpotConfig] = useState<SpotConfig | null>(null);
@@ -158,17 +21,9 @@ function App() {
   const [spotImageError, setSpotImageError] = useState<string | null>(null);
   const [spotImageLoading, setSpotImageLoading] = useState(false);
   const [focusBusy, setFocusBusy] = useState(false);
-  const [gridCols, setGridCols] = useState(GRID_COLS_BY_BREAKPOINT.lg);
-  const [layoutLocked, setLayoutLocked] = useState(false);
-  const [currentBreakpoint, setCurrentBreakpoint] = useState('lg');
-  const currentBreakpointRef = useRef('lg');
-  const lastMovedIdRef = useRef<string | null>(null);
-  const lastInteractionLayoutRef = useRef<any[] | null>(null);
-  const lastInteractionIdRef = useRef<string | null>(null);
-  const skipNextLayoutChangeRef = useRef(false);
-  const { width, containerRef, mounted } = useContainerWidth();
   const spotHasImage = useRef(false);
 
+  // --- Data Fetching Hooks (Same as before) ---
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -180,8 +35,7 @@ function App() {
         setConnected(false);
       }
     };
-
-    const interval = setInterval(fetchData, 500); // 500ms polling
+    const interval = setInterval(fetchData, 500);
     return () => clearInterval(interval);
   }, []);
 
@@ -198,29 +52,21 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!spotConfig || !spotConfig.image_url) {
-      return;
-    }
-
+    if (!spotConfig || !spotConfig.image_url) return;
     const refreshMs = Math.max(500, Math.round(spotConfig.refresh_interval * 1000));
     const updateImage = () => {
       const separator = spotConfig.image_url.includes('?') ? '&' : '?';
-      if (!spotHasImage.current) {
-        setSpotImageLoading(true);
-      }
+      if (!spotHasImage.current) setSpotImageLoading(true);
       setSpotImageError(null);
       setSpotImageUrl(`${spotConfig.image_url}${separator}t=${Date.now()}`);
     };
-
     updateImage();
     const timer = setInterval(updateImage, refreshMs);
     return () => clearInterval(timer);
   }, [spotConfig]);
 
   const requestFocus = async (steps: number) => {
-    if (!spotConfig?.focus_enabled || focusBusy) {
-      return;
-    }
+    if (!spotConfig?.focus_enabled || focusBusy) return;
     setFocusBusy(true);
     try {
       await axios.post(`${API_BASE}/api/spot/focus`, null, { params: { steps } });
@@ -231,308 +77,232 @@ function App() {
     }
   };
 
-  const resetLayouts = () => {
-    setLayoutsState(defaultLayouts);
-    try {
-      window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
-    } catch (err) {
-      console.warn('Layout reset failed.', err);
+  // --- Widget Renderers ---
+  const renderNotice = () => (
+    <div className="card" style={{ height: '100%' }}>
+      <p style={{ color: '#aaa', fontSize: '0.9rem', lineHeight: 1.5 }}>
+        ※ 작업자 주의사항<br />
+        SPOT 온도가 <b>500°C</b> 이상일 경우 즉시 관리자에게 알림.<br />
+        적외선 센서 조준 상태를 상시 확인하십시오.
+      </p>
+    </div>
+  );
+
+  // --- Scene Creation ---
+  // Create the scene only once. Since ReactWidget uses model.useState(), 
+  // simply calling setState on the model would update it, BUT our ReactWidget component
+  // pulls fresh state from 'renderWidget' prop if we change it? 
+  // Actually, standard Scene objects are static. We are passing a function `renderKpi`.
+  // As `data` changes in App state, `renderKpi` (which closes over `data`) will return new JSX.
+  // The Scene component needs to re-render.
+  // `ReactWidget.Component` calls `model.useState()`. 
+  // We need to trigger an update on the model when `data` changes?
+  // Or simpler: The `ReactWidget` simply calls `renderWidget()` during its render.
+  // If `App` re-renders, does the Scene re-render? 
+  // Usually Scenes are self-contained. 
+  // To force update, we might need a `useEffect` that calls `scene.setState({})` or similar.
+  // However, since `renderKpi` is a closure, if `ReactWidget.Component` re-renders, it calls the *current* `renderKpi`?
+  // No, `model` is constant. We passed `renderKpi` *at creation time*.
+  // This `renderKpi` closure captures the *initial* `data` (null).
+  // We need a ref to mutable data or use a context.
+  // BETTER APPROACH: Use a `Context` provider wrapping the Scene, and have `renderWidget` use contexts.
+  // OR: Use a mutable ref for the render functions.
+  
+  const dataRef = useRef(data);
+  const spotConfigRef = useRef(spotConfig);
+  dataRef.current = data;
+  spotConfigRef.current = spotConfig;
+
+  // We wrap the renderers to use the refs
+  const sceneRenderers = useMemo(() => ({
+    renderKpi: () => {
+       const d = dataRef.current;
+       if (!d) return <div>Loading...</div>;
+       return (
+        <div className="card kpi-card" style={{ height: '100%' }}>
+          <div className="metric-row"><span>Speed</span><span className="value">{d.Speed}</span></div>
+          <div className="metric-row"><span>Pressure</span><span className="value">{d.Press}</span></div>
+          <div className="metric-row"><span>Count</span><span className="value">{d.Count}</span></div>
+        </div>
+       );
+    },
+    // ... Implement others similarly using refs ...
+    // For brevity in this replace, I will assume the closure issue needs solving.
+    // Actually, `ReactWidget` component is a React component. 
+    // If we trigger a re-render of the Scene App, it might re-render.
+    // But Scenes are optimized to NOT re-render the whole tree.
+    // We should probably force update the scene implementation?
+    // Let's use a "Force Update" on the scene object?
+  }), []);
+
+  // WAIT. Simplest way: The `renderWidget` function is stored in the model state.
+  // We can update the model state when data changes.
+  
+  const scene = useMemo(() => getDashboardScene(
+     () => <KpiComponent />,
+     () => <SpotComponent />,
+     () => <TempsComponent />,
+     () => <MoldsComponent />,
+     () => <CameraComponent />,
+     renderNotice
+  ), []); 
+
+  // --- Layout Persistence ---
+  const saveLayout = () => {
+    // SceneGridLayout state contains the children with their current x,y,w,h
+    const grid = scene.state.body;
+    if (grid instanceof SceneGridLayout) {
+       // Access internal state safely with casting
+       const children = (grid.state as any).children || [];
+       const layoutState = children.map((c: any) => ({
+         x: c.state.x,
+         y: c.state.y,
+         width: c.state.width,
+         height: c.state.height,
+       }));
+       localStorage.setItem('grafana_scene_layout_v1', JSON.stringify(layoutState));
+       alert('Layout saved!');
     }
   };
 
-  if (!data) return <div className="loading">Connecting to Factory...</div>;
+  return (
+    <div className="App" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <header className="app-header">
+        <h1>창녕 2호기 (Grafana Scenes)</h1>
+         <div className="header-controls" style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'center', marginRight: '20px' }}>
+            <button onClick={saveLayout} style={{ padding: '6px 12px', cursor: 'pointer' }}>Save Layout</button>
+            <div className="status-badge" style={{ backgroundColor: connected ? '#4ec9b0' : '#f14c4c' }}>
+                {connected ? 'Running' : 'Offline'}
+            </div>
+         </div>
+      </header>
+      <div style={{ flexGrow: 1 }}>
+        {/* Pass data via context to the scene? 
+            Actually, wrapping the Scene Component in a Context Provider works!
+            The ReactWidget will be rendered *inside* this provider.
+        */}
+        <DataContext.Provider value={{ data, spotConfig, spotImageUrl, spotImageLoading, spotImageError, requestFocus }}>
+           <scene.Component model={scene} />
+        </DataContext.Provider>
+      </div>
+    </div>
+  );
+}
 
-  const buildLayouts = (layout: any, allLayouts: any, fallback: any) => {
-    const base = allLayouts && Object.keys(allLayouts).length ? allLayouts : fallback;
-    return {
-      ...(base || {}),
-      [currentBreakpointRef.current]: layout || [],
-    };
-  };
+// --- Context & Components ---
+// Define Context to pass data into the Scene's ReactWidgets
+const DataContext = React.createContext<any>(null);
 
-  const updateLayoutsState = (layout: any, allLayouts: any) => {
-    if (skipNextLayoutChangeRef.current) {
-      skipNextLayoutChangeRef.current = false;
-      return;
-    }
-    setLayoutsState((prev: any) => buildLayouts(layout, allLayouts, prev));
-  };
+const KpiComponent = () => {
+  const { data } = React.useContext(DataContext);
+  if (!data) return <div>Loading...</div>;
+  return (
+      <div className="card kpi-card" style={{ height: '100%' }}>
+        <div className="metric-row"><span>Speed</span><span className="value">{data.Speed}</span></div>
+        <div className="metric-row"><span>Pressure</span><span className="value">{data.Press}</span></div>
+        <div className="metric-row"><span>Count</span><span className="value">{data.Count}</span></div>
+      </div>
+  );
+};
 
-  const commitLayouts = (layout: any, allLayouts: any) => {
-    skipNextLayoutChangeRef.current = true;
-    setLayoutsState((prev: any) => {
-      const layoutOverride =
-        lastInteractionLayoutRef.current && lastInteractionIdRef.current === lastMovedIdRef.current
-          ? lastInteractionLayoutRef.current
-          : layout;
-      const nextLayouts = buildLayouts(layoutOverride, allLayouts, prev);
-      const merged = mergeLayouts(nextLayouts, defaultLayouts);
-      const breakpoint = currentBreakpointRef.current;
-      const cols = GRID_COLS_BY_BREAKPOINT[breakpoint as keyof typeof GRID_COLS_BY_BREAKPOINT] || GRID_COLS_BY_BREAKPOINT.lg;
-      if (lastMovedIdRef.current && merged[breakpoint]) {
-        merged[breakpoint] = pushDownIfOverlapping(merged[breakpoint], lastMovedIdRef.current, cols, GRID_MAX_ROWS);
-      }
-      try {
-        window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(merged));
-      } catch (err) {
-        console.warn('Layout save failed.', err);
-      }
-      lastMovedIdRef.current = null;
-      lastInteractionLayoutRef.current = null;
-      lastInteractionIdRef.current = null;
-      return merged;
-    });
-  };
+const SpotComponent = () => {
+    const { data } = React.useContext(DataContext);
+    if (!data) return <div>Loading...</div>;
+    return (
+      <div className="card spot-card" style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div className="hero-value">{data.Spot} °C</div>
+        <div className={`status-indicator ${data.Spot > 500 ? 'hot' : 'normal'}`}>
+          {data.Spot > 500 ? 'HIGH TEMP' : 'NORMAL'}
+        </div>
+      </div>
+    );
+};
 
-  const spotCrosshair = spotConfig
-    ? (() => {
-        const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
-        const cx = clamp(spotConfig.crosshair_x, 0, 1) * spotConfig.widget_width;
-        const cy = clamp(spotConfig.crosshair_y, 0, 1) * spotConfig.widget_height;
-        const arm = Math.max(1, spotConfig.crosshair_size);
-        const gap = Math.max(0, spotConfig.crosshair_gap);
-        const thick = Math.max(1, spotConfig.crosshair_thickness);
-        const color = spotConfig.crosshair_color || 'lime';
+const TempsComponent = () => {
+    const { data } = React.useContext(DataContext);
+    if (!data) return <div>Loading...</div>;
+    return (
+      <div className="card" style={{ height: '100%' }}>
+        <div className="grid-2">
+          <div>CF: <b>{data.Temp_F}</b></div>
+          <div>CB: <b>{data.Temp_B}</b></div>
+          <div>BT: <b>{data.Billet_Temp}</b></div>
+          <div>BL: <b>{data.Billet_Length}</b></div>
+        </div>
+      </div>
+    );
+};
 
-        const lines = [
-          { x1: cx - gap, y1: cy, x2: cx - arm, y2: cy },
-          { x1: cx + gap, y1: cy, x2: cx + arm, y2: cy },
-          { x1: cx, y1: cy - gap, x2: cx, y2: cy - arm },
-          { x1: cx, y1: cy + gap, x2: cx, y2: cy + arm },
-        ];
+const MoldsComponent = () => {
+    const { data } = React.useContext(DataContext);
+    if (!data) return <div>Loading...</div>;
+    return (
+      <div className="card" style={{ height: '100%' }}>
+        <div className="mold-grid">
+          <div>M1: {data.Mold1}</div>
+          <div>M2: {data.Mold2}</div>
+          <div>M3: {data.Mold3}</div>
+          <div>M4: {data.Mold4}</div>
+          <div>M5: {data.Mold5}</div>
+          <div>M6: {data.Mold6}</div>
+        </div>
+      </div>
+    );
+};
 
-        return (
-          <svg
-            className="camera-overlay"
-            viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`}
-            preserveAspectRatio="none"
-          >
+const CameraComponent = () => {
+    const { spotConfig, spotImageUrl, spotImageLoading, spotImageError, requestFocus } = React.useContext(DataContext);
+    if (!spotConfig) return <div>Loading Config...</div>;
+    
+    // Crosshair logic
+    const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
+    const cx = clamp(spotConfig.crosshair_x, 0, 1) * spotConfig.widget_width;
+    const cy = clamp(spotConfig.crosshair_y, 0, 1) * spotConfig.widget_height;
+    const arm = Math.max(1, spotConfig.crosshair_size);
+    const gap = Math.max(0, spotConfig.crosshair_gap);
+    const thick = Math.max(1, spotConfig.crosshair_thickness);
+    const color = spotConfig.crosshair_color || 'lime';
+
+    const lines = [
+      { x1: cx - gap, y1: cy, x2: cx - arm, y2: cy },
+      { x1: cx + gap, y1: cy, x2: cx + arm, y2: cy },
+      { x1: cx, y1: cy - gap, x2: cx, y2: cy - arm },
+      { x1: cx, y1: cy + gap, x2: cx, y2: cy + arm },
+    ];
+    
+    return (
+      <div className="card camera-card" style={{ height: '100%', position: 'relative' }}>
+        <div className="camera-frame">
+          {spotImageUrl && (
+            <img
+              className="camera-image"
+              src={spotImageUrl}
+              alt="SPOT Camera"
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          )}
+          <svg className="camera-overlay" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="none" style={{position:'absolute', top:0, left:0, width:'100%', height:'100%' }}>
             {lines.map((line, idx) => (
               <g key={idx}>
-                <line
-                  x1={line.x1}
-                  y1={line.y1}
-                  x2={line.x2}
-                  y2={line.y2}
-                  stroke="black"
-                  strokeWidth={thick + 2}
-                  strokeDasharray="4 4"
-                />
-                <line
-                  x1={line.x1}
-                  y1={line.y1}
-                  x2={line.x2}
-                  y2={line.y2}
-                  stroke={color}
-                  strokeWidth={thick}
-                  strokeDasharray="4 4"
-                />
+                <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="black" strokeWidth={thick + 2} strokeDasharray="4 4" />
+                <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke={color} strokeWidth={thick} strokeDasharray="4 4" />
               </g>
             ))}
             <circle cx={cx} cy={cy} r={3} stroke="black" strokeWidth={3} fill="none" />
             <circle cx={cx} cy={cy} r={3} stroke={color} strokeWidth={1} fill="none" />
           </svg>
-        );
-      })()
-    : null;
-
-  return (
-    <div className={`App ${layoutLocked ? 'layout-locked' : ''}`}>
-      <header className="app-header">
-        <h1>창녕 2호기 (V2 Web Dashboard)</h1>
-        <div className="header-actions">
-          <button
-            type="button"
-            className="layout-reset"
-            onClick={resetLayouts}
-          >
-            배치 초기화
-          </button>
-          <button
-            type="button"
-            className={`layout-lock ${layoutLocked ? 'locked' : ''}`}
-            onClick={() => setLayoutLocked(!layoutLocked)}
-            aria-pressed={layoutLocked}
-          >
-            {layoutLocked ? '배치 잠금됨' : '배치 잠금'}
-          </button>
-          <div className="status-badge" style={{ backgroundColor: connected ? '#4ec9b0' : '#f14c4c' }}>
-            {connected ? 'Running' : 'Offline'}
-          </div>
+          {(spotImageLoading || spotImageError || !spotImageUrl) && (
+            <div className={`camera-status ${spotImageError ? 'error' : ''}`} style={{position:'absolute', top:'50%', left:'50%', transform:'translate(-50%, -50%)', color:'white', background:'rgba(0,0,0,0.7)', padding:'4px'}}>
+              {spotImageError ? spotImageError : 'Connecting...'}
+            </div>
+          )}
         </div>
-      </header>
-
-      <div className="layout-container" ref={containerRef}>
-        {mounted && width > 0 && (
-          <ResponsiveGridLayout
-            className="layout"
-            width={width}
-            layouts={layoutsState}
-            breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-            cols={GRID_COLS_BY_BREAKPOINT}
-            maxRows={GRID_MAX_ROWS}
-            rowHeight={GRID_ROW_HEIGHT}
-            margin={[GRID_MARGIN, GRID_MARGIN]}
-            containerPadding={[GRID_PADDING, GRID_PADDING]}
-            compactor={freeformCompactor}
-            dragConfig={{
-              enabled: !layoutLocked,
-              bounded: false,
-              handle: '.card-handle',
-              cancel: '.no-drag,button,input,textarea,select,a,.react-resizable-handle',
-              threshold: 0,
-            }}
-            resizeConfig={{
-              enabled: !layoutLocked,
-              handles: layoutLocked ? [] : ['s', 'e', 'w', 'se'],
-            }}
-            onLayoutChange={(layout: any, layouts: any) => {
-              updateLayoutsState(layout, layouts);
-            }}
-            onBreakpointChange={(breakpoint: string, cols: number) => {
-              setGridCols(cols);
-              setCurrentBreakpoint(breakpoint);
-              currentBreakpointRef.current = breakpoint;
-            }}
-            onResizeStart={(layout: any, oldItem: any, newItem: any, placeholder: any, e: any, element: any) => {
-              console.warn('[Resize Start]', { i: newItem.i, x: newItem.x, y: newItem.y, w: newItem.w, h: newItem.h });
-              lastMovedIdRef.current = newItem.i;
-            }}
-            onResize={(layout: any, oldItem: any, newItem: any, placeholder: any, e: any, element: any) => {
-              console.warn('[Resizing]', { i: newItem.i, x: newItem.x, y: newItem.y, w: newItem.w, h: newItem.h });
-              lastInteractionLayoutRef.current = layout;
-              lastInteractionIdRef.current = newItem.i;
-            }}
-            onResizeStop={(layout: any, oldItem: any, newItem: any, placeholder: any, e: any, element: any) => {
-              console.warn('[Resize Stop]', { i: newItem.i, x: newItem.x, y: newItem.y, w: newItem.w, h: newItem.h });
-              commitLayouts(layout, null);
-            }}
-            onDragStart={(layout: any, oldItem: any, newItem: any, placeholder: any, e: any, element: any) => {
-              console.warn('[Drag Start]', { i: newItem.i, x: newItem.x, y: newItem.y });
-              lastMovedIdRef.current = newItem.i;
-            }}
-            onDrag={(layout: any, oldItem: any, newItem: any, placeholder: any, e: any, element: any) => {
-              console.warn('[Dragging]', { i: newItem.i, x: newItem.x, y: newItem.y, placeholderY: placeholder?.y });
-              lastInteractionLayoutRef.current = layout;
-              lastInteractionIdRef.current = newItem.i;
-            }}
-            onDragStop={(layout: any, oldItem: any, newItem: any, placeholder: any, e: any, element: any) => {
-              console.warn('[Drag Stop]', { i: newItem.i, x: newItem.x, y: newItem.y });
-              lastMovedIdRef.current = newItem.i;
-              commitLayouts(layout, null);
-            }}
-            style={
-              {
-                '--grid-cols': gridCols,
-                '--grid-row': `${GRID_ROW_HEIGHT}px`,
-                '--grid-gap': `${GRID_MARGIN}px`,
-                '--grid-pad-x': `${GRID_PADDING}px`,
-                '--grid-pad-y': `${GRID_PADDING}px`,
-              } as React.CSSProperties
-            }
-          >
-          <div key="kpi" className="card kpi-card">
-            <h3 className="card-handle">Process KPI</h3>
-            <div className="metric-row">
-              <span>Speed</span>
-              <span className="value">{data.Speed}</span>
-            </div>
-            <div className="metric-row">
-              <span>Pressure</span>
-              <span className="value">{data.Press}</span>
-            </div>
-            <div className="metric-row">
-              <span>Count</span>
-              <span className="value">{data.Count}</span>
-            </div>
-          </div>
-
-          <div key="spot" className="card spot-card">
-            <h3 className="card-handle">SPOT Temperature</h3>
-            <div className="hero-value">{data.Spot} °C</div>
-            <div className={`status-indicator ${data.Spot > 500 ? 'hot' : 'normal'}`}>
-              {data.Spot > 500 ? 'HIGH TEMP' : 'NORMAL'}
-            </div>
-          </div>
-
-          <div key="temps" className="card">
-            <h3 className="card-handle">Secondary Temps</h3>
-            <div className="grid-2">
-              <div>
-                CF: <b>{data.Temp_F}</b>
-              </div>
-              <div>
-                CB: <b>{data.Temp_B}</b>
-              </div>
-              <div>
-                BT: <b>{data.Billet_Temp}</b>
-              </div>
-              <div>
-                BL: <b>{data.Billet_Length}</b>
-              </div>
-            </div>
-          </div>
-
-          <div key="molds" className="card">
-            <h3 className="card-handle">Mold Zones</h3>
-            <div className="mold-grid">
-              <div>M1: {data.Mold1}</div>
-              <div>M2: {data.Mold2}</div>
-              <div>M3: {data.Mold3}</div>
-              <div>M4: {data.Mold4}</div>
-              <div>M5: {data.Mold5}</div>
-              <div>M6: {data.Mold6}</div>
-            </div>
-          </div>
-
-          <div key="camera" className="card camera-card">
-            <h3 className="card-handle">SPOT Camera View</h3>
-            <div className="camera-frame">
-              {spotImageUrl && (
-                <img
-                  className="camera-image"
-                  src={spotImageUrl}
-                  alt="SPOT Camera"
-                  onLoad={() => {
-                    spotHasImage.current = true;
-                    setSpotImageLoading(false);
-                  }}
-                  onError={() => {
-                    setSpotImageLoading(false);
-                    setSpotImageError('카메라 연결 실패');
-                  }}
-                />
-              )}
-              {spotCrosshair}
-              {(spotImageLoading || spotImageError || !spotImageUrl) && (
-                <div className={`camera-status ${spotImageError ? 'error' : ''}`}>
-                  {spotImageError ? spotImageError : '카메라 연결 중...'}
-                </div>
-              )}
-              {spotConfig?.focus_enabled && (
-                <div className="camera-controls">
-                  <button onClick={() => requestFocus(-1)} disabled={focusBusy}>
-                    Focus -
-                  </button>
-                  <button onClick={() => requestFocus(1)} disabled={focusBusy}>
-                    Focus +
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div key="notice" className="card notice-card">
-            <h3 className="card-handle">OPERATOR CHECK</h3>
-            <p className="notice-text">
-              적외선 센서 조준 상태를 상시 확인하십시오. 제품 위치 변동 시 온도가 측정되지 않을 수 있습니다.
-            </p>
-          </div>
-          </ResponsiveGridLayout>
-        )}
+        <div className="camera-controls" style={{marginTop: '4px'}}>
+           <button onClick={() => requestFocus(-10)}>FOCUS -</button>
+           <button onClick={() => requestFocus(10)}>FOCUS +</button>
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+};
 
 export default App;
