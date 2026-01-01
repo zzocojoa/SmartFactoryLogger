@@ -20,6 +20,7 @@ const LEGACY_GRID_COLUMNS = 24;
 const GRID_SCALE = GRID_COLUMNS / LEGACY_GRID_COLUMNS;
 const LAYOUT_STORAGE_KEY = 'grafana_scene_layout_v1';
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
+const LAYOUT_BACKUP_KEY = 'grafana_scene_layout_v1_backup';
 
 const scaleLayoutMap = (layout: SavedLayoutMap, scale: number): SavedLayoutMap => {
   const scaled: SavedLayoutMap = {};
@@ -62,6 +63,9 @@ const normalizeSavedLayout = (layout: SavedLayoutMap): SavedLayoutMap => {
   }
 
   if (savedCols === LEGACY_GRID_COLUMNS || (!Number.isFinite(savedCols) && isLegacy)) {
+    if (!localStorage.getItem(LAYOUT_BACKUP_KEY)) {
+      localStorage.setItem(LAYOUT_BACKUP_KEY, JSON.stringify(layout));
+    }
     const scaled = scaleLayoutMap(layout, GRID_SCALE);
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(scaled));
     localStorage.setItem(LAYOUT_COLS_KEY, String(GRID_COLUMNS));

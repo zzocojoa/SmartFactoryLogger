@@ -501,6 +501,18 @@ body {
   stroke: var(--danger-color);
 }
 
+.spot-fill-low {
+  stroke: var(--state-cool);
+}
+
+.spot-fill-high {
+  stroke: var(--warning-color);
+}
+
+.spot-fill-warning {
+  stroke: var(--danger-color);
+}
+
 .spot-value {
   position: absolute;
   display: flex;
@@ -544,7 +556,19 @@ body {
   background: rgba(78, 201, 176, 0.12);
 }
 
-.spot-status-danger {
+.spot-status-low {
+  color: var(--state-cool);
+  border-color: rgba(86, 166, 220, 0.6);
+  background: rgba(86, 166, 220, 0.12);
+}
+
+.spot-status-high {
+  color: var(--warning-color);
+  border-color: rgba(242, 201, 76, 0.6);
+  background: rgba(242, 201, 76, 0.12);
+}
+
+.spot-status-warning {
   color: var(--danger-color);
   border-color: rgba(241, 76, 76, 0.6);
   background: rgba(241, 76, 76, 0.12);

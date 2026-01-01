@@ -19,7 +19,9 @@ import {
 
 const API_BASE = 'http://localhost:8000';
 
-const SPOT_ALERT_TEMP = 500;
+const SPOT_WARN_TEMP = 580;
+const SPOT_NORMAL_MIN = 480;
+const SPOT_HIGH_MIN = 540;
 const SPOT_MAX_TEMP = 600;
 const SPEED_MAX = 8;
 const PRESS_MAX = 180;
@@ -50,6 +52,21 @@ const buildLayoutMap = (children: SceneGridItemLike[]): LayoutMap => {
 };
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const useLastValidNumber = (value: number | null | undefined) => {
+  const lastRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      lastRef.current = value;
+    }
+  }, [value]);
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  return lastRef.current;
+};
 
 const useSustainedFlag = (condition: boolean, durationMs: number) => {
   const [active, setActive] = useState(false);
@@ -86,9 +103,6 @@ const useThresholdLevel = (value: number, warnThreshold: number, dangerThreshold
     if (!Number.isFinite(value)) {
       warnSinceRef.current = null;
       dangerSinceRef.current = null;
-      if (level !== 'normal') {
-        setLevel('normal');
-      }
       return;
     }
 
@@ -177,6 +191,54 @@ const getPressState = (press: number) => {
   return { label: '낮음', className: 'press-low' };
 };
 
+type SpotState = {
+  label: string;
+  statusClass: string;
+  fillClass: string;
+  warning: boolean;
+};
+
+const getSpotState = (temp: number, warningActive: boolean): SpotState => {
+  if (!Number.isFinite(temp)) {
+    return {
+      label: '저온',
+      statusClass: 'spot-status-low',
+      fillClass: 'spot-fill-low',
+      warning: false,
+    };
+  }
+  if (temp >= SPOT_WARN_TEMP && warningActive) {
+    return {
+      label: '경고',
+      statusClass: 'spot-status-warning',
+      fillClass: 'spot-fill-warning',
+      warning: true,
+    };
+  }
+  if (temp >= SPOT_HIGH_MIN) {
+    return {
+      label: '고온',
+      statusClass: 'spot-status-high',
+      fillClass: 'spot-fill-high',
+      warning: false,
+    };
+  }
+  if (temp >= SPOT_NORMAL_MIN) {
+    return {
+      label: '보통',
+      statusClass: 'spot-status-normal',
+      fillClass: 'spot-fill-normal',
+      warning: false,
+    };
+  }
+  return {
+    label: '저온',
+    statusClass: 'spot-status-low',
+    fillClass: 'spot-fill-low',
+    warning: false,
+  };
+};
+
 const getMoldState = (value: number) => {
   if (!Number.isFinite(value)) {
     return { className: 'mold-muted' };
@@ -263,7 +325,11 @@ function App() {
   const scenesRuntimeRef = useRef(false);
   const spotHasImage = useRef(false);
   const saveMessageTimerRef = useRef<number | null>(null);
-  const spotAlertActive = useSustainedFlag(Boolean(data && data.Spot >= SPOT_ALERT_TEMP), ALERT_HOLD_MS);
+  const lastSpotValue = useLastValidNumber(data?.Spot);
+  const spotAlertActive = useSustainedFlag(
+    lastSpotValue !== null && lastSpotValue >= SPOT_WARN_TEMP,
+    ALERT_HOLD_MS
+  );
 
   // --- Data Fetching Hooks (Same as before) ---
   useEffect(() => {
@@ -311,12 +377,20 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!spotConfig?.image_url) {
+      return;
+    }
+    spotHasImage.current = false;
+    setSpotLastSuccessAt(null);
+    setSpotImageError(null);
+  }, [spotConfig?.image_url]);
+
+  useEffect(() => {
     if (!spotConfig || !spotConfig.image_url) return;
     const refreshMs = Math.max(500, Math.round(spotConfig.refresh_interval * 1000));
     const updateImage = () => {
       const separator = spotConfig.image_url.includes('?') ? '&' : '?';
       if (!spotHasImage.current) setSpotImageLoading(true);
-      setSpotImageError(null);
       setSpotImageUrl(`${spotConfig.image_url}${separator}t=${Date.now()}`);
     };
     updateImage();
@@ -507,16 +581,22 @@ const DataContext = React.createContext<DataContextValue>({
 
 const KpiComponent = () => {
   const { data, lastDataAt } = React.useContext(DataContext);
+  const speedValue = useLastValidNumber(data?.Speed);
+  const pressValue = useLastValidNumber(data?.Press);
   if (!data) return <div>Loading...</div>;
   const missing = !Number.isFinite(data.Speed) || !Number.isFinite(data.Press);
-  const jamCondition = data.Speed === 0 && data.Press >= PRESS_RUNNING_THRESHOLD;
+  const speedForLogic = speedValue ?? data.Speed;
+  const pressForLogic = pressValue ?? data.Press;
+  const safeSpeed = Number.isFinite(speedForLogic) ? speedForLogic : 0;
+  const safePress = Number.isFinite(pressForLogic) ? pressForLogic : 0;
+  const jamCondition = safeSpeed === 0 && safePress >= PRESS_RUNNING_THRESHOLD;
   const jamWarn = useSustainedFlag(jamCondition, ALERT_HOLD_MS);
   const jamDanger = useSustainedFlag(jamCondition, ALERT_HOLD_LONG_MS);
   const kpiAlertClass = jamDanger ? 'card-danger' : jamWarn ? 'card-warning' : '';
-  const speedState = getSpeedState(data.Speed);
-  const pressState = getPressState(data.Press);
-  const speedPercent = calcPercent(data.Speed, SPEED_MAX);
-  const pressPercent = calcPercent(data.Press, PRESS_MAX);
+  const speedState = getSpeedState(safeSpeed);
+  const pressState = getPressState(safePress);
+  const speedPercent = calcPercent(safeSpeed, SPEED_MAX);
+  const pressPercent = calcPercent(safePress, PRESS_MAX);
   return (
     <div className={`card kpi-card ${kpiAlertClass}`} style={{ height: '100%' }}>
       <div className="kpi-metric">
@@ -573,10 +653,12 @@ const SpotComponent = () => {
     const { data, spotAlertActive, lastDataAt } = React.useContext(DataContext);
     if (!data) return <div>Loading...</div>;
     const missing = !Number.isFinite(data.Spot);
-    const isDanger = spotAlertActive;
-    const spotPercent = calcPercent(data.Spot, SPOT_MAX_TEMP);
+    const spotValue = useLastValidNumber(data.Spot);
+    const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : data.Spot;
+    const spotState = getSpotState(spotDisplayValue, spotAlertActive);
+    const spotPercent = calcPercent(spotDisplayValue, SPOT_MAX_TEMP);
     return (
-      <div className={`card spot-card ${isDanger ? 'spot-danger' : 'spot-normal'}`} style={{ height: '100%' }}>
+      <div className={`card spot-card ${spotState.warning ? 'spot-danger' : 'spot-normal'}`} style={{ height: '100%' }}>
         <div className="spot-gauge">
           <svg viewBox="0 0 200 120" className="spot-gauge-svg" aria-hidden="true">
             <path
@@ -585,22 +667,22 @@ const SpotComponent = () => {
               pathLength={100}
             />
             <path
-              className={`spot-gauge-fill ${isDanger ? 'spot-fill-danger' : 'spot-fill-normal'}`}
+              className={`spot-gauge-fill ${spotState.fillClass}`}
               d="M20 100 A80 80 0 0 1 180 100"
               pathLength={100}
               strokeDasharray={`${spotPercent} 100`}
             />
           </svg>
           <div className="spot-value">
-            <span className="spot-value-number">{formatNumber(data.Spot, 1)}</span>
+            <span className="spot-value-number">{formatNumber(spotDisplayValue, 1)}</span>
             <span className="spot-unit">{SPOT_UNIT}</span>
           </div>
         </div>
         <div className="spot-status-row">
-          <span className={`spot-status ${isDanger ? 'spot-status-danger' : 'spot-status-normal'}`}>
-            {isDanger ? '경고' : '정상'}
+          <span className={`spot-status ${spotState.statusClass}`}>
+            {spotState.label}
           </span>
-          {isDanger && (
+          {spotState.warning && (
             <span className="spot-alert-icon" aria-label="SPOT 경고">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 3L2 21h20L12 3zm0 5.5c.6 0 1 .4 1 1v5c0 .6-.4 1-1 1s-1-.4-1-1v-5c0-.6.4-1 1-1zm0 9c.7 0 1.3.6 1.3 1.3S12.7 20 12 20s-1.3-.6-1.3-1.3S11.3 17.5 12 17.5z" />
@@ -789,7 +871,7 @@ const NoticeComponent = () => {
     const noticeMessages: string[] = [];
 
     if (spotAlertActive) {
-      noticeMessages.push(`SPOT 온도 ${SPOT_ALERT_TEMP}${SPOT_UNIT} 이상 감지`);
+      noticeMessages.push(`SPOT 온도 ${SPOT_WARN_TEMP}${SPOT_UNIT} 이상 감지`);
     }
     if (cameraStatus) {
       const detail = cameraStatus.detail ? ` (${cameraStatus.detail})` : '';
