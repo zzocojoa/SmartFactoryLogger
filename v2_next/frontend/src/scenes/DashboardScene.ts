@@ -47,19 +47,30 @@ export function getDashboardScene(
 
   const savedMap = savedLayout ?? {};
 
+  // Scale factor: 60 (User) -> 24 (Scene) = 0.4
+  const SCALE_TO_SCENE = 24 / 60;
+
   // Merge saved layout
   const children = defaultChildren.map((item) => {
     const saved = savedMap[item.key];
-    if (saved) {
-      return new SceneGridItem({
-        ...item,
-        x: saved.x ?? item.x,
-        y: saved.y ?? item.y,
-        width: saved.width ?? item.width,
-        height: saved.height ?? item.height,
-      });
-    }
-    return new SceneGridItem(item);
+    const base = saved || item;
+
+    // Apply scaling and rounding to fit integer grid
+    const x = Math.round((base.x ?? item.x) * SCALE_TO_SCENE);
+    const y = base.y ?? item.y; // Height is row-based, no scaling needed usually unless ratio changed
+    const width = Math.round((base.width ?? item.width) * SCALE_TO_SCENE);
+    const height = base.height ?? item.height;
+
+    // Ensure minimum width of 1 column in scene (approx 2.5 in user grid)
+    const safeWidth = Math.max(1, width);
+
+    return new SceneGridItem({
+      ...item,
+      x,
+      y,
+      width: safeWidth,
+      height,
+    });
   });
 
   return new EmbeddedScene({
@@ -67,6 +78,8 @@ export function getDashboardScene(
       key: 'dashboard-grid',
       isDraggable: false,
       isResizable: false,
+      // @ts-ignore: Force 60 columns support if engine allows
+      cols: 60,
       children: children,
     }),
   });

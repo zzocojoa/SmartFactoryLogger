@@ -9,6 +9,7 @@ from .. import config
 from .logger_service import logger_service
 from .config_manager import config_manager
 from .status_service import StatusEvaluator
+from .observability_service import observability_service
 
 class PLCService:
     def __init__(self, use_mock: bool = True):
@@ -97,6 +98,10 @@ class PLCService:
                 
             except Exception as e:
                 print(f"[PLCService] Error: {e}")
+                try:
+                    observability_service.record_error("plc_loop", str(e))
+                except Exception:
+                    pass
                 time.sleep(1.0) # Backoff
                 
     def get_latest_data(self) -> FactoryData:

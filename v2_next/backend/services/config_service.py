@@ -1,5 +1,6 @@
 import configparser
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 import os
 import shutil
 from pathlib import Path
@@ -23,9 +24,9 @@ def _load_parser(path: Path) -> tuple[configparser.ConfigParser, Optional[str]]:
     if not path.exists():
         return parser, None
     enc_candidates = [
-        config.CONFIG_ENCODING,
         "utf-8-sig",
         "utf-8",
+        config.CONFIG_ENCODING,
         "cp949",
         "euc-kr",
     ]
@@ -134,12 +135,27 @@ def get_config_snapshot() -> dict:
     thresholds_enable = {key: _get_bool(parser, "THRESHOLDS_ENABLE", key, False) for key in _THRESHOLD_KEYS}
     thresholds_enable["master_on"] = _get_bool(parser, "THRESHOLDS_ENABLE", "master_on", False)
 
+    pending_info = None
+    pending_path = _pending_path(path)
+    if pending_path.exists():
+        try:
+            pending_raw = json.loads(pending_path.read_text(encoding="utf-8"))
+            pending_info = {
+                "path": str(pending_path),
+                "created_at": pending_raw.get("created_at"),
+                "source": pending_raw.get("source"),
+                "reason": pending_raw.get("reason"),
+            }
+        except Exception:
+            pending_info = {"path": str(pending_path)}
+
     return {
         "config_path": str(path),
         "encoding": encoding,
         "meta": meta,
         "config_writable": config_writable,
         "apply": config_manager.get_apply_result(),
+        "pending": pending_info,
         "values": {
             "extruder": extruder,
             "ls_plc": ls_plc,
@@ -191,6 +207,87 @@ def _is_writable(path: Path) -> bool:
         return False
 
 
+def _pending_path(path: Path) -> Path:
+    candidate = path.with_suffix(".pending.json")
+    try:
+        if os.access(candidate.parent, os.W_OK):
+            return candidate
+    except Exception:
+        pass
+    return Path(config.APP_DATA_DIR) / "config.pending.json"
+
+
+def _build_pending_payload(
+    payload: ConfigUpdate,
+    source: str,
+    reason: str,
+    encoding: Optional[str],
+    path: Path,
+) -> dict:
+    data = payload.dict(exclude_none=True)
+    settings = data.get("settings")
+    if isinstance(settings, dict) and "password" in settings:
+        settings["password"] = "***"
+    return {
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": source,
+        "reason": reason,
+        "config_path": str(path),
+        "encoding": encoding,
+        "payload": data,
+    }
+
+
+def _write_pending(path: Path, payload: ConfigUpdate, source: str, reason: str, encoding: Optional[str]) -> Path:
+    pending_path = _pending_path(path)
+    pending_path.parent.mkdir(parents=True, exist_ok=True)
+    pending_payload = _build_pending_payload(payload, source, reason, encoding, path)
+    pending_path.write_text(json.dumps(pending_payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    return pending_path
+
+
+def _clear_pending(path: Path) -> None:
+    pending_path = _pending_path(path)
+    try:
+        if pending_path.exists():
+            pending_path.unlink()
+    except Exception:
+        pass
+
+
+def _load_pending(path: Path) -> Optional[dict]:
+    pending_path = _pending_path(path)
+    if not pending_path.exists():
+        return None
+    try:
+        return json.loads(pending_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def apply_pending_config() -> dict:
+    path = _config_path()
+    pending = _load_pending(path)
+    if not pending:
+        raise FileNotFoundError("Pending config not found")
+    payload_data = pending.get("payload") or {}
+    settings = payload_data.get("settings")
+    if isinstance(settings, dict) and settings.get("password") == "***":
+        settings.pop("password", None)
+    payload = ConfigUpdate(**payload_data)
+    source = pending.get("source") or "local"
+    return update_config(payload, source=source, override_allowed=source != "local")
+
+
+def clear_pending_config() -> dict:
+    path = _config_path()
+    pending_path = _pending_path(path)
+    if not pending_path.exists():
+        raise FileNotFoundError("Pending config not found")
+    _clear_pending(path)
+    return {"ok": True, "path": str(pending_path)}
+
+
 def restore_defaults() -> dict:
     _require_local_override()
     path = _config_path()
@@ -231,6 +328,7 @@ def restore_backup() -> dict:
     if not backup_path.exists():
         raise FileNotFoundError("Config backup not found")
     shutil.copy2(backup_path, path)
+    _clear_pending(path)
     _, encoding = _load_parser(path)
     meta = config_meta.record_local_update()
     changes = config_manager.reload()
@@ -260,6 +358,14 @@ def update_config(
         if meta.get("override_enabled") and not override_allowed:
             raise PermissionError("Local override is enabled")
     path = _config_path()
+    if not _is_writable(path):
+        reason = "Config file is read-only"
+        try:
+            pending_path = _write_pending(path, payload, source, reason, config.CONFIG_ENCODING)
+            config._config_log("WARNING", f"Config save blocked: {reason}. Pending={pending_path}")
+        except Exception:
+            config._config_log("ERROR", f"Config save blocked and pending write failed: {reason}")
+        raise PermissionError("Config file is read-only")
     parser, encoding = _load_parser(path)
     _ensure_section(parser, "EXTRUDER")
     _ensure_section(parser, "LS_PLC")
@@ -331,19 +437,28 @@ def update_config(
                     parser.set("THRESHOLDS_ENABLE", key, str(enabled))
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        backup_path = path.with_suffix(".bak")
+    write_encoding = "utf-8-sig"
+    try:
+        if path.exists():
+            backup_path = path.with_suffix(".bak")
+            try:
+                shutil.copy2(path, backup_path)
+            except Exception:
+                pass
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text("", encoding=write_encoding)
+        with tmp_path.open("w", encoding=write_encoding) as handle:
+            parser.write(handle)
+        tmp_path.replace(path)
+        _clear_pending(path)
+    except Exception as exc:
+        reason = str(exc)
         try:
-            shutil.copy2(path, backup_path)
+            pending_path = _write_pending(path, payload, source, reason, write_encoding)
+            config._config_log("ERROR", f"Config save failed, pending stored at {pending_path}")
         except Exception:
-            pass
-
-    write_encoding = encoding or "utf-8-sig"
-    tmp_path = path.with_suffix(".tmp")
-    tmp_path.write_text("", encoding=write_encoding)
-    with tmp_path.open("w", encoding=write_encoding) as handle:
-        parser.write(handle)
-    tmp_path.replace(path)
+            config._config_log("ERROR", "Config save failed and pending write failed")
+        raise
 
     if source == "central":
         existing = config_meta.load_meta()

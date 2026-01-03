@@ -38,9 +38,9 @@ def _load_parser(path: Path) -> tuple[configparser.ConfigParser, Optional[str]]:
     if not path.exists():
         return parser, None
     enc_candidates = [
-        config.CONFIG_ENCODING,
         "utf-8-sig",
         "utf-8",
+        config.CONFIG_ENCODING,
         "cp949",
         "euc-kr",
     ]

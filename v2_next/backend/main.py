@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import atexit
-from datetime import datetime
+from datetime import datetime, timezone
 import base64
+import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -18,11 +19,13 @@ import traceback
 import time
 import uvicorn
 from urllib.request import Request, urlopen
+from typing import Any
 
 # Import Service Layer
 from .services.plc_service import plc_service
 from .services.logger_service import logger_service
 from .services.comm_metrics_logger import comm_metrics_logger_service
+from .services.observability_service import observability_service
 from .services.layout_service import (
     delete_layout_slot,
     get_active_layout,
@@ -33,6 +36,8 @@ from .services.layout_service import (
     save_layout_slot,
 )
 from .services.config_service import (
+    apply_pending_config,
+    clear_pending_config,
     get_config_snapshot,
     set_override_enabled,
     update_config,
@@ -76,6 +81,23 @@ class VerificationCompareRequest(BaseModel):
     reference_csv_path: str
     sample_count: int = 50
     interval_sec: float | None = None
+
+
+class ShutdownRequest(BaseModel):
+    reason: str | None = None
+
+
+class FrontendErrorPayload(BaseModel):
+    time: float
+    type: str
+    message: str
+    detail: str | None = None
+    stack: str | None = None
+
+
+class ObservabilityExportRequest(BaseModel):
+    include_errors: bool = True
+    front_errors: list[FrontendErrorPayload] | None = None
     tolerance_abs: dict[str, float] | None = None
     tolerance_pct: dict[str, float] | None = None
 
@@ -120,6 +142,7 @@ _stats_last_path: str | None = None
 _stats_last_status: int | None = None
 _stats_last_time: float | None = None
 _stats_error_count = 0
+_last_observability_export_path: Path | None = None
 
 _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
@@ -182,6 +205,65 @@ def _resolve_log_dir() -> Path:
             return candidate
     _log_dir = Path.cwd()
     return _log_dir
+
+
+def _observability_state_path() -> Path:
+    return _resolve_log_dir() / "observability_last_export.json"
+
+
+def _persist_observability_export_state(path: Path) -> None:
+    try:
+        payload = {
+            "path": str(path),
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        _observability_state_path().write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _load_observability_export_state() -> tuple[Path | None, str | None]:
+    state_path = _observability_state_path()
+    if not state_path.exists():
+        return None, None
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, None
+    path_str = raw.get("path")
+    if not path_str:
+        return None, raw.get("updated_at")
+    return Path(path_str), raw.get("updated_at")
+
+
+def _latest_observability_snapshot(log_dir: Path) -> Path | None:
+    try:
+        candidates = sorted(
+            log_dir.glob("observability_snapshot_*.json"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+    except Exception:
+        return None
+
+
+def _resolve_last_observability_export() -> tuple[Path | None, str | None]:
+    global _last_observability_export_path
+    if _last_observability_export_path and _last_observability_export_path.exists():
+        return _last_observability_export_path, None
+    state_path, updated_at = _load_observability_export_state()
+    if state_path and state_path.exists():
+        _last_observability_export_path = state_path
+        return state_path, updated_at
+    latest = _latest_observability_snapshot(_resolve_log_dir())
+    if latest:
+        _last_observability_export_path = latest
+        return latest, None
+    return None, updated_at
 
 
 def _test_tcp(ip: str | None, port: int | None, timeout: float = 1.5) -> dict:
@@ -577,9 +659,32 @@ async def record_request_stats(request: Request, call_next):
     try:
         response = await call_next(request)
         status_code = response.status_code
+        if status_code >= 500:
+            try:
+                observability_service.record_error(
+                    "api",
+                    f"HTTP {status_code}",
+                    path=request.url.path,
+                )
+            except Exception:
+                pass
         return response
+    except Exception as exc:
+        try:
+            observability_service.record_error(
+                "api",
+                str(exc),
+                path=request.url.path,
+            )
+        except Exception:
+            pass
+        raise
     finally:
         elapsed_ms = (time.perf_counter() - start) * 1000
+        try:
+            observability_service.record_request(request.url.path, status_code, elapsed_ms)
+        except Exception:
+            pass
         with _stats_lock:
             _stats_total_requests += 1
             _stats_total_latency_ms += elapsed_ms
@@ -609,23 +714,109 @@ def health():
 
 @app.get("/stats")
 def stats():
-    with _stats_lock:
-        total = _stats_total_requests
-        avg_latency_ms = (_stats_total_latency_ms / total) if total else None
-        error_count = _stats_error_count
-        last = {
-            "latency_ms": _stats_last_latency_ms,
-            "path": _stats_last_path,
-            "status": _stats_last_status,
-            "timestamp": _stats_last_time,
+    data = observability_service.get_stats()
+    data["uptime_sec"] = int(time.time() - _app_start_time)
+    return data
+
+@app.get("/api/observability/errors")
+def list_observability_errors(limit: int = 50):
+    try:
+        items = observability_service.get_errors(limit)
+        summary = observability_service.get_error_summary()
+        return {"items": items, "summary": summary}
+    except Exception as exc:
+        _logger.error("Observability errors fetch failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/observability/errors/clear")
+def clear_observability_errors():
+    try:
+        observability_service.clear_errors()
+        return {"ok": True}
+    except Exception as exc:
+        _logger.error("Observability errors clear failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/observability/export")
+def export_observability(payload: ObservabilityExportRequest):
+    global _last_observability_export_path
+    try:
+        health_snapshot = plc_service.get_health()
+        stats_snapshot = observability_service.get_stats()
+        errors_snapshot = observability_service.get_errors(200) if payload.include_errors else []
+        front_errors_payload: list[dict[str, Any]] = []
+        if payload.front_errors:
+            for item in payload.front_errors:
+                data = item.dict()
+                ts_value = data.get("time")
+                ts_sec: float | None = None
+                ts_ms: int | None = None
+                if isinstance(ts_value, (int, float)):
+                    ts_sec = float(ts_value)
+                    if ts_sec > 1_000_000_000_000:
+                        ts_ms = int(ts_sec)
+                        ts_sec = ts_sec / 1000.0
+                    else:
+                        ts_ms = int(ts_sec * 1000)
+                    data["time"] = ts_sec
+                    data["time_ms"] = ts_ms
+                    data["time_iso"] = datetime.fromtimestamp(ts_sec, tz=timezone.utc).isoformat(
+                        timespec="seconds"
+                    )
+                front_errors_payload.append(data)
+        snapshot = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "health": health_snapshot,
+            "stats": stats_snapshot,
+            "errors": errors_snapshot,
+            "front_errors": front_errors_payload,
+            "front_error_count": len(front_errors_payload),
         }
-    uptime_sec = int(time.time() - _app_start_time)
+        log_dir = _resolve_log_dir()
+        filename = f"observability_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        path = log_dir / filename
+        path.write_text(json.dumps(snapshot, ensure_ascii=True, indent=2), encoding="utf-8")
+        _last_observability_export_path = path
+        _persist_observability_export_state(path)
+        return {"ok": True, "path": str(path), "size": path.stat().st_size}
+    except Exception as exc:
+        _logger.error("Observability export failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/observability/export/open-file")
+def open_observability_export_file():
+    try:
+        path, _ = _resolve_last_observability_export()
+        if not path or not path.exists():
+            raise HTTPException(status_code=404, detail="Export file missing")
+        _open_path(path)
+        return {"ok": True, "path": str(path)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Open export file failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/observability/export/open-folder")
+def open_observability_export_folder():
+    try:
+        path, _ = _resolve_last_observability_export()
+        if not path or not path.exists():
+            raise HTTPException(status_code=404, detail="Export file missing")
+        _open_path(path.parent)
+        return {"ok": True, "path": str(path.parent)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Open export folder failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.get("/api/observability/export/latest")
+def get_observability_export_latest():
+    path, updated_at = _resolve_last_observability_export()
     return {
-        "uptime_sec": uptime_sec,
-        "total_requests": total,
-        "avg_latency_ms": round(avg_latency_ms, 2) if avg_latency_ms is not None else None,
-        "error_count": error_count,
-        "last": last,
+        "path": str(path) if path else None,
+        "updated_at": updated_at,
     }
 
 @app.get("/api/logs/comm-metrics")
@@ -716,6 +907,30 @@ def restore_config_backup():
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as exc:
         _logger.error("Restore backup failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/config/pending/apply")
+def apply_pending():
+    try:
+        return apply_pending_config()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Pending config apply failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/config/pending/clear")
+def clear_pending():
+    try:
+        return clear_pending_config()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Pending config clear failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @app.get("/api/layout")
@@ -952,6 +1167,40 @@ def spot_focus(steps: int = 0):
         return spot_control.move_focus(steps)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/control/shutdown")
+def shutdown(payload: ShutdownRequest):
+    def _shutdown() -> None:
+        try:
+            _logger.info("Shutdown requested: %s", payload.reason)
+        except Exception:
+            pass
+        try:
+            plc_service.stop()
+        except Exception:
+            pass
+        try:
+            logger_service.stop()
+        except Exception:
+            pass
+        try:
+            comm_metrics_logger_service.stop()
+        except Exception:
+            pass
+        try:
+            config_sync_agent.stop()
+        except Exception:
+            pass
+        try:
+            config_watch_service.stop()
+        except Exception:
+            pass
+        time.sleep(0.2)
+        os._exit(0)
+
+    threading.Thread(target=_shutdown, daemon=True).start()
+    return {"ok": True}
 
 if __name__ == "__main__":
     uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=False)

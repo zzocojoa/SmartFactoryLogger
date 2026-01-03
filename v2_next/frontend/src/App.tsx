@@ -41,7 +41,15 @@ const ALERT_HOLD_MS = 2000;
 const ALERT_HOLD_LONG_MS = 5000;
 const STATUS_WARN_MS = 2000;
 const STATUS_OFFLINE_MS = 5000;
+const STATUS_ERROR_RATE_WARN = 0.2;
+const STATUS_P95_WARN_MS = 800;
+const STATUS_RECENT_ERROR_MS = 60000;
 const SETTINGS_AUTO_REFRESH_MS = 4000;
+const OBSERVABILITY_REFRESH_MS = 10000;
+const OBSERVABILITY_ERROR_LIMIT = 50;
+const FRONT_ERROR_STORAGE_KEY = 'sfl_front_errors';
+const FRONT_ERROR_MAX = 50;
+const EXPORT_PATH_STORAGE_KEY = 'sfl_observability_export_path';
 
 const APPLY_KEY_LABELS: Record<string, string> = {
   'settings.logpath': '로그 경로',
@@ -124,6 +132,11 @@ type CommChannelMetrics = {
   last_error_time?: number | null;
   last_success_time?: number | null;
   last_recovery_sec?: number | null;
+  recovery_count?: number;
+  total_downtime_sec?: number;
+  current_downtime_sec?: number;
+  last_disconnect_time?: number | null;
+  last_recovery_at?: number | null;
   merge_blocks?: boolean;
   merge_failures?: number;
 };
@@ -174,6 +187,58 @@ type StatsSnapshot = {
     status: number | null;
     timestamp: number | null;
   };
+  window?: {
+    window_sec: number;
+    request_count: number;
+    error_count: number;
+    error_rate: number | null;
+    avg_latency_ms: number | null;
+    p95_latency_ms: number | null;
+    requests_per_sec?: number;
+    top_paths?: Array<{
+      path: string;
+      count: number;
+      error_rate: number | null;
+      avg_latency_ms: number | null;
+    }>;
+  };
+  errors?: {
+    queue_size: number;
+    last_error_at?: number | null;
+    last_error_source?: string | null;
+    last_error_message?: string | null;
+    last_error_repeat?: number | null;
+  };
+};
+
+type ObservabilityErrorItem = {
+  time: number;
+  time_iso?: string;
+  source: string;
+  message: string;
+  detail?: string | null;
+  path?: string | null;
+  level?: string | null;
+  repeat?: number;
+};
+
+type ObservabilityErrorsResponse = {
+  items: ObservabilityErrorItem[];
+  summary: {
+    queue_size: number;
+    last_error_at?: number | null;
+    last_error_source?: string | null;
+    last_error_message?: string | null;
+    last_error_repeat?: number | null;
+  };
+};
+
+type FrontendErrorEntry = {
+  time: number;
+  type: 'error' | 'unhandledrejection';
+  message: string;
+  detail?: string;
+  stack?: string;
 };
 
 type NotificationLevel = 'info' | 'warn' | 'error';
@@ -193,6 +258,12 @@ type ConfigSnapshot = {
   encoding: string | null;
   config_writable?: boolean;
   restart_required: boolean;
+  pending?: {
+    path?: string;
+    created_at?: string;
+    source?: string;
+    reason?: string;
+  } | null;
   apply?: {
     applied?: string[];
     pending?: string[];
@@ -705,6 +776,11 @@ const buildCommBadge = (
   const hasError = Boolean(metrics.last_error_time || failures > 0);
   const state: CommBadge['state'] = connected ? 'ok' : hasError ? 'error' : 'warn';
   const backoff = metrics.backoff_sec ?? 0;
+  const recoveryCount = metrics.recovery_count ?? 0;
+  const totalDowntime = metrics.total_downtime_sec ?? null;
+  const currentDowntime = metrics.current_downtime_sec ?? null;
+  const lastDisconnect = metrics.last_disconnect_time ?? null;
+  const lastRecoveryAt = metrics.last_recovery_at ?? null;
   const mergeState = metrics.merge_blocks === undefined ? '' : `Merge ${metrics.merge_blocks ? 'ON' : 'OFF'}`;
   const titleParts = [
     `${key} ${connected ? '연결됨' : '끊김'}`,
@@ -712,6 +788,10 @@ const buildCommBadge = (
     `백오프 ${backoff}s`,
     `마지막 오류 ${formatTimeFromSec(metrics.last_error_time)}`,
     `오류 후 경과 ${formatAgeSec(metrics.last_error_time ?? null, nowMs ?? null)}`,
+    `복구횟수 ${recoveryCount}`,
+    `다운타임 ${formatOptionalSeconds(currentDowntime)} / 누적 ${formatOptionalSeconds(totalDowntime)}`,
+    `최근 끊김 ${formatTimeFromSec(lastDisconnect)}`,
+    `최근 복구 ${formatTimeFromSec(lastRecoveryAt)}`,
   ];
   if (metrics.last_recovery_sec !== null && metrics.last_recovery_sec !== undefined) {
     titleParts.push(`복구시간 ${Math.round(metrics.last_recovery_sec)}s`);
@@ -901,6 +981,17 @@ const isThresholdHit = (thresholds: ThresholdState, key: ThresholdKey, value: nu
     return false;
   }
   return value >= entry.value;
+};
+
+const getThresholdValue = (thresholds: ThresholdState, key: ThresholdKey) => {
+  if (!thresholds.masterOn) {
+    return null;
+  }
+  const entry = thresholds.entries[key];
+  if (!entry?.enabled || entry.value === null) {
+    return null;
+  }
+  return entry.value;
 };
 
 const THRESHOLD_LABELS: Record<ThresholdKey, string> = {
@@ -1169,10 +1260,15 @@ function App() {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
   const [stats, setStats] = useState<StatsSnapshot | null>(null);
+  const [observabilityErrors, setObservabilityErrors] = useState<ObservabilityErrorsResponse | null>(null);
+  const [observabilityLoading, setObservabilityLoading] = useState(false);
+  const [lastExportPath, setLastExportPath] = useState<string | null>(null);
+  const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
   const [centralSyncBusy, setCentralSyncBusy] = useState(false);
   const [reconnectBusy, setReconnectBusy] = useState(false);
   const [diagnosisBusy, setDiagnosisBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -1188,6 +1284,8 @@ function App() {
   const [thresholdConfig, setThresholdConfig] = useState<ThresholdState>(() => buildThresholdStateFromConfig());
   const [settingsRestartRequired, setSettingsRestartRequired] = useState(false);
   const [settingsApplyResult, setSettingsApplyResult] = useState<ConfigApplyResult | null>(null);
+  const [settingsPending, setSettingsPending] = useState<ConfigSnapshot['pending'] | null>(null);
+  const [settingsPendingBusy, setSettingsPendingBusy] = useState(false);
   const [externalConfigPending, setExternalConfigPending] = useState<ConfigSnapshot | null>(null);
   const [externalConfigPendingAt, setExternalConfigPendingAt] = useState<number | null>(null);
   const [settingsToast, setSettingsToast] = useState<{ message: string; level: 'ok' | 'warn' | 'error' } | null>(null);
@@ -1239,6 +1337,82 @@ function App() {
     ALERT_HOLD_MS
   );
   const spotAlertActive = data?.Computed?.spot_warning ?? spotAlertFallback;
+  const loadFrontErrors = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return [] as FrontendErrorEntry[];
+    }
+    try {
+      const raw = window.localStorage.getItem(FRONT_ERROR_STORAGE_KEY);
+      if (!raw) {
+        return [];
+      }
+      const parsed = JSON.parse(raw) as FrontendErrorEntry[];
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed;
+    } catch (error) {
+      console.error('Front error load failed', error);
+      return [];
+    }
+  }, []);
+  const persistFrontErrors = useCallback((items: FrontendErrorEntry[]) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      window.localStorage.setItem(FRONT_ERROR_STORAGE_KEY, JSON.stringify(items));
+    } catch (error) {
+      console.error('Front error save failed', error);
+    }
+  }, []);
+  const pushFrontError = useCallback(
+    (entry: FrontendErrorEntry) => {
+      setFrontErrors((prev) => {
+        const next = [entry, ...prev].slice(0, FRONT_ERROR_MAX);
+        persistFrontErrors(next);
+        return next;
+      });
+    },
+    [persistFrontErrors]
+  );
+  const clearFrontErrors = useCallback(() => {
+    setFrontErrors([]);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(FRONT_ERROR_STORAGE_KEY);
+      } catch (error) {
+        console.error('Front error clear failed', error);
+      }
+    }
+  }, []);
+  const loadExportPath = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem(EXPORT_PATH_STORAGE_KEY);
+      if (stored) {
+        setLastExportPath(stored);
+      }
+    } catch (error) {
+      console.error('Export path load failed', error);
+    }
+  }, []);
+  const persistExportPath = useCallback((path: string | null) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      if (path) {
+        window.localStorage.setItem(EXPORT_PATH_STORAGE_KEY, path);
+      } else {
+        window.localStorage.removeItem(EXPORT_PATH_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('Export path save failed', error);
+    }
+  }, []);
   const thresholdState = useMemo(() => {
     if (settingsOpen && settingsForm) {
       return buildThresholdStateFromForm(settingsForm);
@@ -1250,6 +1424,7 @@ function App() {
       { id: 'settings-summary', label: '요약' },
       { id: 'settings-central', label: '중앙 설정' },
       { id: 'settings-comm', label: '통신 설정' },
+      { id: 'settings-observability', label: '운영/관측성' },
       { id: 'settings-spot', label: 'SPOT 카메라' },
       { id: 'settings-storage', label: '저장 설정' },
       { id: 'settings-logging', label: '로그 회전' },
@@ -1258,6 +1433,49 @@ function App() {
     ],
     []
   );
+
+  useEffect(() => {
+    setFrontErrors(loadFrontErrors());
+  }, [loadFrontErrors]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const handleError = (event: ErrorEvent) => {
+      pushFrontError({
+        time: Date.now(),
+        type: 'error',
+        message: event.message || 'Unknown error',
+        detail: event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : undefined,
+        stack: event.error?.stack,
+      });
+    };
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      let message = 'Unhandled rejection';
+      let stack: string | undefined;
+      if (reason instanceof Error) {
+        message = reason.message;
+        stack = reason.stack;
+      } else if (reason !== undefined) {
+        message = String(reason);
+      }
+      pushFrontError({
+        time: Date.now(),
+        type: 'unhandledrejection',
+        message,
+        detail: 'Promise rejection',
+        stack,
+      });
+    };
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
+  }, [pushFrontError]);
   const connectionTestTargets = useMemo(
     () => [
       { key: 'extruder' as const, label: 'Extruder' },
@@ -1534,6 +1752,39 @@ function App() {
     }
   };
 
+  const loadObservabilityErrors = useCallback(
+    async (limit: number = OBSERVABILITY_ERROR_LIMIT) => {
+      setObservabilityLoading(true);
+      try {
+        const res = await axios.get<ObservabilityErrorsResponse>(`${API_BASE}/api/observability/errors`, {
+          params: { limit },
+        });
+        setObservabilityErrors(res.data);
+      } catch (error) {
+        console.error('Observability errors load failed', error);
+      } finally {
+        setObservabilityLoading(false);
+      }
+    },
+    []
+  );
+
+  const fetchLatestExportPath = useCallback(async () => {
+    try {
+      const res = await axios.get<{ path: string | null }>(`${API_BASE}/api/observability/export/latest`);
+      const path = res.data?.path ?? null;
+      if (path) {
+        setLastExportPath(path);
+        persistExportPath(path);
+      } else {
+        setLastExportPath(null);
+        persistExportPath(null);
+      }
+    } catch (error) {
+      console.error('Export path fetch failed', error);
+    }
+  }, [persistExportPath]);
+
   const fetchCentralStatus = async () => {
     try {
       const res = await axios.get<CentralStatus>(`${API_BASE}/api/config/central-status`);
@@ -1598,14 +1849,25 @@ function App() {
     setDiagnosisBusy(true);
     try {
       const snapshot = await fetchHealth();
+      const statsSnapshot = await fetchStats().catch(() => null);
       const lastUpdate = snapshot.last_update
         ? new Date(snapshot.last_update * 1000).toLocaleString()
         : 'n/a';
+      const windowStats = statsSnapshot?.window;
+      const errorSummary = statsSnapshot?.errors;
+      const windowLine = windowStats
+        ? `Window ${windowStats.window_sec}s: req ${windowStats.request_count}, err ${windowStats.error_count}, p95 ${formatOptionalNumber(windowStats.p95_latency_ms)}ms`
+        : 'Window: n/a';
+      const errorLine = errorSummary
+        ? `ErrorQ ${errorSummary.queue_size}, Last ${formatTimeFromSec(errorSummary.last_error_at)}`
+        : 'ErrorQ: n/a';
       const detail = [
         `Mode: ${snapshot.mode}`,
         `Driver: ${snapshot.driver_connected ? 'OK' : 'Down'}`,
         `Thread: ${snapshot.thread_alive ? 'Alive' : 'Stopped'}`,
         `Last Update: ${lastUpdate}`,
+        windowLine,
+        errorLine,
       ].join('\n');
       window.alert(detail);
     } catch (error) {
@@ -1613,6 +1875,79 @@ function App() {
       window.alert('Diagnosis failed.');
     } finally {
       setDiagnosisBusy(false);
+    }
+  };
+
+  const handleExportObservability = async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    try {
+      const res = await axios.post<{ path?: string }>(`${API_BASE}/api/observability/export`, {
+        include_errors: true,
+        front_errors: frontErrors,
+      });
+      const path = res.data?.path ?? null;
+      if (!path) {
+        throw new Error('Export path missing');
+      }
+      setLastExportPath(path);
+      persistExportPath(path);
+      window.alert(`지표 내보내기 완료:\n${path}`);
+    } catch (error) {
+      console.error('Observability export failed', error);
+      window.alert('지표 내보내기 실패.');
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const handleOpenObservabilityExportFile = async () => {
+    if (!lastExportPath) {
+      return;
+    }
+    try {
+      await axios.post(`${API_BASE}/api/observability/export/open-file`);
+    } catch (error) {
+      console.error('Open export file failed', error);
+      window.alert('내보낸 파일 열기 실패.');
+    }
+  };
+
+  const handleOpenObservabilityExportFolder = async () => {
+    if (!lastExportPath) {
+      return;
+    }
+    try {
+      await axios.post(`${API_BASE}/api/observability/export/open-folder`);
+    } catch (error) {
+      console.error('Open export folder failed', error);
+      window.alert('내보낸 폴더 열기 실패.');
+    }
+  };
+
+  const handleCopyObservabilityExportPath = async () => {
+    if (!lastExportPath) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(lastExportPath);
+      window.alert('내보낸 경로를 복사했습니다.');
+    } catch (error) {
+      console.error('Copy export path failed', error);
+      window.alert('경로 복사 실패');
+    }
+  };
+
+  const handleClearObservabilityErrors = async () => {
+    if (!window.confirm('에러 큐를 비우면 복구할 수 없습니다. 비우시겠습니까?')) {
+      return;
+    }
+    try {
+      await axios.post(`${API_BASE}/api/observability/errors/clear`);
+      await loadObservabilityErrors();
+    } catch (error) {
+      console.error('Observability clear failed', error);
+      window.alert('에러 큐 비우기 실패.');
     }
   };
 
@@ -1731,6 +2066,7 @@ function App() {
       setConfigWritable(snapshot.config_writable ?? null);
       setSettingsRestartRequired(Boolean(snapshot.restart_required));
       setSettingsApplyResult(snapshot.apply ?? null);
+      setSettingsPending(snapshot.pending ?? null);
       setOverrideEnabled(Boolean(snapshot.meta?.override_enabled));
       setOverrideMeta(snapshot.meta ?? null);
     },
@@ -1744,6 +2080,7 @@ function App() {
     setConfigWritable(null);
     setSettingsBaseline(null);
     setSettingsRestartRequired(false);
+    setSettingsPending(null);
     setPathHealth({});
     try {
       const res = await axios.get<ConfigSnapshot>(`${API_BASE}/api/config`);
@@ -1791,6 +2128,19 @@ function App() {
       }
     })();
   }, [settingsOpen, loadSettings]);
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
+    loadExportPath();
+    fetchLatestExportPath();
+    loadObservabilityErrors();
+    const interval = window.setInterval(() => {
+      loadObservabilityErrors();
+    }, OBSERVABILITY_REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [settingsOpen, loadObservabilityErrors, loadExportPath, fetchLatestExportPath]);
 
   useEffect(() => {
     if (!settingsOpen) {
@@ -2224,6 +2574,7 @@ function App() {
       }
       setSettingsRestartRequired(Boolean(res.data?.restart_required));
       setSettingsApplyResult(applyInfo);
+      setSettingsPending(null);
       setSettingsBaseline({
         ...settingsForm,
         password: '',
@@ -2313,6 +2664,66 @@ function App() {
       showSettingsToast('백업 복원 실패', 'error');
     } finally {
       setSettingsLoading(false);
+    }
+  };
+
+  const handlePendingApply = async () => {
+    if (settingsLoading || settingsPendingBusy) {
+      return;
+    }
+    if (!settingsPending) {
+      setSettingsError('보류된 설정이 없습니다.');
+      return;
+    }
+    if (configReadOnly) {
+      setSettingsError('설정 파일이 읽기 전용입니다. 관리자 권한 또는 파일 속성을 확인하세요.');
+      return;
+    }
+    if (!overrideEnabled) {
+      setSettingsError('로컬 오버라이드가 OFF 상태입니다.');
+      return;
+    }
+    if (!window.confirm('보류된 설정을 다시 적용하시겠습니까?')) {
+      return;
+    }
+    setSettingsPendingBusy(true);
+    setSettingsError(null);
+    try {
+      await axios.post(`${API_BASE}/api/config/pending/apply`);
+      await loadSettings();
+      showSettingsToast('보류된 설정을 적용했습니다.', 'ok');
+    } catch (error) {
+      console.error('Pending apply failed', error);
+      setSettingsError('보류된 설정 적용에 실패했습니다.');
+      showSettingsToast('보류된 설정 적용 실패', 'error');
+    } finally {
+      setSettingsPendingBusy(false);
+    }
+  };
+
+  const handlePendingClear = async () => {
+    if (settingsLoading || settingsPendingBusy) {
+      return;
+    }
+    if (!settingsPending) {
+      setSettingsError('보류된 설정이 없습니다.');
+      return;
+    }
+    if (!window.confirm('보류된 설정을 삭제하시겠습니까?')) {
+      return;
+    }
+    setSettingsPendingBusy(true);
+    setSettingsError(null);
+    try {
+      await axios.post(`${API_BASE}/api/config/pending/clear`);
+      await loadSettings();
+      showSettingsToast('보류된 설정을 삭제했습니다.', 'ok');
+    } catch (error) {
+      console.error('Pending clear failed', error);
+      setSettingsError('보류된 설정 삭제에 실패했습니다.');
+      showSettingsToast('보류된 설정 삭제 실패', 'error');
+    } finally {
+      setSettingsPendingBusy(false);
     }
   };
 
@@ -2662,6 +3073,7 @@ function App() {
         'lsIp',
         'lsPort',
       ],
+      'settings-observability': [],
       'settings-spot': ['spotIp', 'spotRefreshInterval'],
       'settings-storage': ['logPath', 'snapshotPath', 'autoSave'],
       'settings-logging': ['rotationEnabled', 'rotationMode', 'cycleIdleTime', 'cycleThresholdPress'],
@@ -2997,7 +3409,24 @@ function App() {
     }
     const grid = scene.state.body;
     if (grid instanceof SceneGridLayout) {
-      layoutRef.current = buildLayoutMap(grid.state.children);
+      // layoutRef.current = buildLayoutMap(grid.state.children);
+      // Inline implementation to support 24->60 scaling
+      const SCENE_TO_USER = 60 / 24;
+      const nextLayout: LayoutMap = {};
+      grid.state.children.forEach((child) => {
+        if (!child.state) return;
+        const key = child.state.key;
+        if (!key) return;
+        
+        // Scale from 24-col scene to 60-col user grid
+        nextLayout[key] = {
+           x: Math.round((child.state.x ?? 0) * SCENE_TO_USER),
+           y: child.state.y ?? 0,
+           width: Math.round((child.state.width ?? 1) * SCENE_TO_USER),
+           height: child.state.height ?? 1,
+        };
+      });
+      layoutRef.current = nextLayout;
     }
     if (Object.keys(layoutRef.current).length === 0) {
       setLayoutSaveError('레이아웃 정보를 찾을 수 없습니다.');
@@ -3098,6 +3527,36 @@ function App() {
   const lastUpdateMs = health?.last_update ? health.last_update * 1000 : null;
   const healthAgeMs = lastUpdateMs ? Math.max(0, nowTick - lastUpdateMs) : null;
   const effectiveAgeMs = healthAgeMs ?? ageMs;
+  const statsWindow = stats?.window;
+  const windowRequestCount = statsWindow?.request_count ?? 0;
+  const windowErrorRate = statsWindow?.error_rate ?? null;
+  const windowErrorCount = statsWindow?.error_count ?? null;
+  const windowP95 = statsWindow?.p95_latency_ms ?? null;
+  const errorQueueSize = stats?.errors?.queue_size ?? null;
+  const lastErrorAt = stats?.errors?.last_error_at ?? null;
+  const lastErrorAgeMs = lastErrorAt ? Math.max(0, nowTick - lastErrorAt * 1000) : null;
+  const hasRecentError =
+    lastErrorAgeMs !== null && lastErrorAgeMs <= STATUS_RECENT_ERROR_MS;
+  const hasWindowIssue =
+    windowRequestCount >= 5 &&
+    ((windowErrorRate !== null && windowErrorRate >= STATUS_ERROR_RATE_WARN) ||
+      (windowP95 !== null && windowP95 >= STATUS_P95_WARN_MS) ||
+      (windowErrorCount !== null && windowErrorCount >= 3));
+  const commSeverity = (() => {
+    const comm = health?.comm;
+    if (!comm) {
+      return 'idle';
+    }
+    const refreshMs = spotConfig ? Math.max(500, Math.round(spotConfig.refresh_interval * 1000)) : null;
+    const states = [
+      buildCommBadge('EX', comm.extruder, nowTick).state,
+      buildCommBadge('LS', comm.ls_plc, nowTick).state,
+      buildSpotCommBadge('SPOT', comm.spot, nowTick, refreshMs).state,
+    ];
+    if (states.includes('error')) return 'error';
+    if (states.includes('warn')) return 'warn';
+    return 'ok';
+  })();
   let statusLabel = 'Offline';
   let statusClass = 'status-offline';
   if (effectiveAgeMs !== null) {
@@ -3118,6 +3577,11 @@ function App() {
   } else if (health && !health.driver_connected && statusLabel === 'Running') {
     statusLabel = 'Warning';
     statusClass = 'status-warn';
+  } else if (statusLabel === 'Running') {
+    if (commSeverity === 'error' || commSeverity === 'warn' || hasWindowIssue || hasRecentError) {
+      statusLabel = 'Warning';
+      statusClass = 'status-warn';
+    }
   }
   const latencyText = latencyMs === null ? '--' : `${latencyMs}ms`;
   const ageText = ageMs === null ? '--' : `${Math.round(ageMs)}ms`;
@@ -3126,10 +3590,18 @@ function App() {
       ? '--'
       : `${Math.round(stats.avg_latency_ms)}ms`;
   const errorCountText = stats ? `${stats.error_count}` : '--';
+  const windowP95Text = windowP95 === null || windowP95 === undefined ? '--' : `${Math.round(windowP95)}ms`;
+  const errorQueueText = errorQueueSize === null ? '--' : `${errorQueueSize}`;
   const lastUpdateText = lastUpdateMs ? formatTime(lastUpdateMs) : '--:--:--';
+  const windowSummaryText = statsWindow
+    ? `Win ${statsWindow.window_sec}s req ${statsWindow.request_count}, err ${statsWindow.error_count}, p95 ${windowP95Text}`
+    : 'Win --';
+  const errorSummaryText = lastErrorAt
+    ? `ErrQ ${errorQueueText}, last ${formatTimeFromSec(lastErrorAt)}`
+    : `ErrQ ${errorQueueText}`;
   const statusTitle = health
-    ? `Mode ${health.mode} | Driver ${health.driver_connected ? 'OK' : 'Down'} | Thread ${health.thread_alive ? 'Alive' : 'Stopped'} | Last ${lastUpdateText} | Avg ${avgLatencyText} | Errors ${errorCountText} | Latency ${latencyText} | Age ${ageText}`
-    : `Last ${lastUpdateText} | Avg ${avgLatencyText} | Errors ${errorCountText} | Latency ${latencyText} | Age ${ageText}`;
+    ? `Mode ${health.mode} | Driver ${health.driver_connected ? 'OK' : 'Down'} | Thread ${health.thread_alive ? 'Alive' : 'Stopped'} | Last ${lastUpdateText} | Avg ${avgLatencyText} | Errors ${errorCountText} | Latency ${latencyText} | Age ${ageText} | ${windowSummaryText} | ${errorSummaryText}`
+    : `Last ${lastUpdateText} | Avg ${avgLatencyText} | Errors ${errorCountText} | Latency ${latencyText} | Age ${ageText} | ${windowSummaryText} | ${errorSummaryText}`;
   const commSnapshot = health?.comm;
   const commBadges = useMemo(() => {
     const comm = commSnapshot;
@@ -3169,11 +3641,18 @@ function App() {
     ];
     return list.map((item) => {
       const recoverySec = calcRecoverySec(item.metrics);
+      const channelMetrics =
+        item.metrics && 'backoff_sec' in item.metrics ? (item.metrics as CommChannelMetrics) : undefined;
       return {
         ...item,
         lastError: formatTimeFromSec(item.metrics?.last_error_time ?? null),
         lastOk: formatTimeFromSec(item.metrics?.last_success_time ?? null),
         recovery: formatOptionalSeconds(recoverySec),
+        recoveryCount: formatOptionalNumber(channelMetrics?.recovery_count),
+        totalDowntime: formatOptionalSeconds(channelMetrics?.total_downtime_sec ?? null),
+        currentDowntime: formatOptionalSeconds(channelMetrics?.current_downtime_sec ?? null),
+        lastDisconnect: formatTimeFromSec(channelMetrics?.last_disconnect_time ?? null),
+        lastRecoveryAt: formatTimeFromSec(channelMetrics?.last_recovery_at ?? null),
       };
     });
   }, [commDetail]);
@@ -3254,6 +3733,10 @@ function App() {
                 <span className="status-meta-item">
                   <span className="status-meta-label">Errors</span>
                   <span className="status-meta-value">{errorCountText}</span>
+                </span>
+                <span className="status-meta-item">
+                  <span className="status-meta-label">ErrQ</span>
+                  <span className="status-meta-value">{errorQueueText}</span>
                 </span>
               </div>
               {commBadges.length > 0 && (
@@ -3583,6 +4066,40 @@ function App() {
                           </div>
                         </div>
                       </div>
+                      {settingsPending && (
+                        <div className="settings-pending-card">
+                          <div className="settings-pending-header">
+                            <span className="settings-pending-title">보류된 설정 저장</span>
+                            <span className="settings-pending-badge">보류</span>
+                          </div>
+                          <div className="settings-pending-meta">
+                            <span>생성: {formatMetaTime(settingsPending.created_at)}</span>
+                            <span>출처: {settingsPending.source ?? 'local'}</span>
+                            <span>사유: {settingsPending.reason ?? '저장 실패'}</span>
+                            <span>경로: {settingsPending.path ?? '-'}</span>
+                          </div>
+                          <div className="settings-pending-actions">
+                            <button
+                              type="button"
+                              className="settings-action warn"
+                              onClick={handlePendingApply}
+                              disabled={settingsPendingBusy}
+                              aria-disabled={settingsPendingBusy}
+                            >
+                              보류 적용
+                            </button>
+                            <button
+                              type="button"
+                              className="settings-action ghost"
+                              onClick={handlePendingClear}
+                              disabled={settingsPendingBusy}
+                              aria-disabled={settingsPendingBusy}
+                            >
+                              보류 삭제
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <div className="settings-summary-meta">
                         <span>설정 경로: {settingsConfigPath ?? '확인 중'}</span>
                         <span>백업: config.ini.bak 자동 생성</span>
@@ -3800,16 +4317,30 @@ function App() {
                                           className="settings-comm-summary-value"
                                           title={formatOptionalText(item.metrics?.last_error)}
                                         >
-                                          {item.lastError}
+                                          {item.lastDisconnect !== '--' ? item.lastDisconnect : item.lastError}
                                         </span>
                                       </div>
                                       <div className="settings-comm-summary-row">
                                         <span className="settings-comm-summary-label">최근 복구</span>
-                                        <span className="settings-comm-summary-value">{item.lastOk}</span>
+                                        <span className="settings-comm-summary-value">
+                                          {item.lastRecoveryAt !== '--' ? item.lastRecoveryAt : item.lastOk}
+                                        </span>
                                       </div>
                                       <div className="settings-comm-summary-row">
                                         <span className="settings-comm-summary-label">복구 시간</span>
                                         <span className="settings-comm-summary-value">{item.recovery}</span>
+                                      </div>
+                                      <div className="settings-comm-summary-row">
+                                        <span className="settings-comm-summary-label">복구 횟수</span>
+                                        <span className="settings-comm-summary-value">{item.recoveryCount}</span>
+                                      </div>
+                                      <div className="settings-comm-summary-row">
+                                        <span className="settings-comm-summary-label">현재 다운타임</span>
+                                        <span className="settings-comm-summary-value">{item.currentDowntime}</span>
+                                      </div>
+                                      <div className="settings-comm-summary-row">
+                                        <span className="settings-comm-summary-label">누적 다운타임</span>
+                                        <span className="settings-comm-summary-value">{item.totalDowntime}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -3893,6 +4424,36 @@ function App() {
                                       <span className="settings-comm-label">복구 시간</span>
                                       <span className="settings-comm-value">
                                         {formatOptionalSeconds(metrics?.last_recovery_sec ?? null)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">복구 횟수</span>
+                                      <span className="settings-comm-value">
+                                        {formatOptionalNumber(metrics?.recovery_count)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">현재 다운타임</span>
+                                      <span className="settings-comm-value">
+                                        {formatOptionalSeconds(metrics?.current_downtime_sec ?? null)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">누적 다운타임</span>
+                                      <span className="settings-comm-value">
+                                        {formatOptionalSeconds(metrics?.total_downtime_sec ?? null)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">최근 끊김</span>
+                                      <span className="settings-comm-value">
+                                        {formatTimeFromSec(metrics?.last_disconnect_time ?? null)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">최근 복구</span>
+                                      <span className="settings-comm-value">
+                                        {formatTimeFromSec(metrics?.last_recovery_at ?? null)}
                                       </span>
                                     </div>
                                     <div className="settings-comm-row">
@@ -3983,6 +4544,36 @@ function App() {
                                         {formatOptionalSeconds(metrics?.last_recovery_sec ?? null)}
                                       </span>
                                     </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">복구 횟수</span>
+                                      <span className="settings-comm-value">
+                                        {formatOptionalNumber(metrics?.recovery_count)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">현재 다운타임</span>
+                                      <span className="settings-comm-value">
+                                        {formatOptionalSeconds(metrics?.current_downtime_sec ?? null)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">누적 다운타임</span>
+                                      <span className="settings-comm-value">
+                                        {formatOptionalSeconds(metrics?.total_downtime_sec ?? null)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">최근 끊김</span>
+                                      <span className="settings-comm-value">
+                                        {formatTimeFromSec(metrics?.last_disconnect_time ?? null)}
+                                      </span>
+                                    </div>
+                                    <div className="settings-comm-row">
+                                      <span className="settings-comm-label">최근 복구</span>
+                                      <span className="settings-comm-value">
+                                        {formatTimeFromSec(metrics?.last_recovery_at ?? null)}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -4051,6 +4642,191 @@ function App() {
                         )}
                       </div>
                     </div>
+
+    <div
+      className="settings-section"
+      id="settings-observability"
+      ref={registerSettingsSection('settings-observability')}
+    >
+      <div className="settings-section-title">운영/관측성</div>
+      <div className="settings-test-grid settings-observability-grid">
+        <div className="settings-test-item">
+          <div className="settings-test-header">
+            <span className="settings-test-title">지표 내보내기</span>
+            <span className={`settings-test-badge ${lastExportPath ? 'ok' : 'warn'}`}>
+              {lastExportPath ? '준비됨' : '없음'}
+            </span>
+          </div>
+          <div className="settings-comm-log">
+            <div className="settings-comm-log-actions">
+              <button
+                type="button"
+                className="settings-comm-log-button"
+                onClick={handleExportObservability}
+                disabled={exportBusy}
+                aria-disabled={exportBusy}
+              >
+                {exportBusy ? '내보내는 중...' : '내보내기'}
+              </button>
+              <button
+                type="button"
+                className="settings-comm-log-button"
+                onClick={handleCopyObservabilityExportPath}
+                disabled={!lastExportPath}
+                aria-disabled={!lastExportPath}
+              >
+                경로 복사
+              </button>
+              <button
+                type="button"
+                className="settings-comm-log-button"
+                onClick={handleOpenObservabilityExportFolder}
+                disabled={!lastExportPath}
+                aria-disabled={!lastExportPath}
+              >
+                폴더 열기
+              </button>
+              <button
+                type="button"
+                className="settings-comm-log-button"
+                onClick={handleOpenObservabilityExportFile}
+                disabled={!lastExportPath}
+                aria-disabled={!lastExportPath}
+              >
+                파일 열기
+              </button>
+            </div>
+            <span className="settings-comm-log-value">{lastExportPath ?? '--'}</span>
+          </div>
+        </div>
+        <div className="settings-test-item">
+          <div className="settings-test-header">
+            <span className="settings-test-title">윈도 지표</span>
+            <span className={`settings-test-badge ${hasWindowIssue ? 'error' : 'ok'}`}>
+              {hasWindowIssue ? '주의' : '정상'}
+            </span>
+          </div>
+          <div className="settings-test-meta">
+            <span>윈도: {statsWindow?.window_sec ?? '--'}s</span>
+            <span>
+              요청: {statsWindow?.request_count ?? '--'} / 에러: {statsWindow?.error_count ?? '--'}
+            </span>
+            <span>
+              에러율: {windowErrorRate === null ? '--' : `${Math.round(windowErrorRate * 100)}%`}
+            </span>
+            <span>P95: {windowP95Text}</span>
+            <span>RPS: {statsWindow?.requests_per_sec ?? '--'}</span>
+          </div>
+          {statsWindow?.top_paths?.length ? (
+            <div className="settings-test-message">
+              Top: {statsWindow.top_paths.map((item) => item.path).join(', ')}
+            </div>
+          ) : (
+            <div className="settings-test-message">Top: --</div>
+          )}
+        </div>
+        <div className="settings-test-item">
+          <div className="settings-test-header">
+            <span className="settings-test-title">에러 큐</span>
+            <span className={`settings-test-badge ${errorQueueSize ? 'error' : 'ok'}`}>
+              {errorQueueSize ? '발생' : '정상'}
+            </span>
+          </div>
+          <div className="settings-test-meta">
+            <span>대기: {errorQueueText}</span>
+            <span>최근: {formatTimeFromSec(lastErrorAt)}</span>
+            <span>소스: {stats?.errors?.last_error_source ?? '--'}</span>
+          </div>
+          <div className="settings-test-message">
+            메시지: {stats?.errors?.last_error_message ?? '--'}
+          </div>
+          <div className="settings-observability-actions">
+            <button
+              type="button"
+              className="settings-test-button"
+              onClick={() => loadObservabilityErrors()}
+              disabled={observabilityLoading}
+              aria-disabled={observabilityLoading}
+            >
+              {observabilityLoading ? '불러오는 중...' : '새로고침'}
+            </button>
+            <button
+              type="button"
+              className="settings-test-button"
+              onClick={handleClearObservabilityErrors}
+              disabled={!errorQueueSize}
+              aria-disabled={!errorQueueSize}
+            >
+              비우기
+            </button>
+          </div>
+        </div>
+      </div>
+      <div className="settings-observability-errors">
+        <div className="settings-comm-log-header">
+          <span className="settings-comm-log-label">에러 큐 상세</span>
+          <span className="settings-observability-count">
+            {observabilityErrors?.summary?.queue_size ?? 0}건
+          </span>
+        </div>
+        {observabilityLoading ? (
+          <div className="settings-error-empty">불러오는 중...</div>
+        ) : observabilityErrors?.items?.length ? (
+          <div className="settings-error-list">
+            {observabilityErrors.items.map((item, index) => (
+              <div key={`${item.source}-${item.time}-${index}`} className="settings-error-item">
+                <div className="settings-error-head">
+                  <span className="settings-error-source">{item.source}</span>
+                  <span className="settings-error-time">
+                    {item.time_iso ?? new Date(item.time * 1000).toLocaleString()}
+                  </span>
+                  {item.repeat && item.repeat > 1 && (
+                    <span className="settings-error-repeat">x{item.repeat}</span>
+                  )}
+                </div>
+                <div className="settings-error-message">{item.message}</div>
+                {item.detail && <div className="settings-error-detail">{item.detail}</div>}
+                {item.path && <div className="settings-error-detail">{item.path}</div>}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="settings-error-empty">에러 없음</div>
+        )}
+      </div>
+      <div className="settings-observability-errors">
+        <div className="settings-comm-log-header">
+          <span className="settings-comm-log-label">브라우저 오류</span>
+          <div className="settings-comm-log-actions">
+            <button
+              type="button"
+              className="settings-comm-log-button"
+              onClick={clearFrontErrors}
+              disabled={frontErrors.length === 0}
+              aria-disabled={frontErrors.length === 0}
+            >
+              지우기
+            </button>
+          </div>
+        </div>
+        {frontErrors.length ? (
+          <div className="settings-error-list">
+            {frontErrors.slice(0, 5).map((item, index) => (
+              <div key={`${item.type}-${item.time}-${index}`} className="settings-error-item">
+                <div className="settings-error-head">
+                  <span className="settings-error-source">{item.type}</span>
+                  <span className="settings-error-time">{formatTime(item.time)}</span>
+                </div>
+                <div className="settings-error-message">{item.message}</div>
+                {item.detail && <div className="settings-error-detail">{item.detail}</div>}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="settings-error-empty">브라우저 오류 없음</div>
+        )}
+      </div>
+    </div>
 
     <div
       className="settings-section"
@@ -4579,17 +5355,28 @@ const SpotComponent = () => {
   const computed = data?.Computed;
   const spotState = mapSpotLevel(computed?.spot_level) ?? getSpotState(spotDisplayValue, spotAlertActive);
   const spotThresholdHit = computed?.thresholds?.spot ?? isThresholdHit(thresholds, 'spot', spotValue);
+  const spotConfigThreshold = getThresholdValue(thresholds, 'spot');
     const spotPercent = calcPercent(spotDisplayValue, SPOT_MAX_TEMP);
+    const sparklineThresholds = useMemo(() => {
+      const list = [SPOT_NORMAL_MIN, SPOT_HIGH_MIN, SPOT_WARN_TEMP];
+      if (typeof spotConfigThreshold === 'number' && Number.isFinite(spotConfigThreshold)) {
+        const exists = list.some((value) => Math.abs(value - spotConfigThreshold) < 0.01);
+        if (!exists) {
+          list.push(spotConfigThreshold);
+        }
+      }
+      return list;
+    }, [spotConfigThreshold]);
     const { linePath, areaPath, points, thresholdLines } = useMemo(
       () =>
         buildSparklinePaths(
           sparklineValues,
           100,
           60,
-          [SPOT_NORMAL_MIN, SPOT_HIGH_MIN, SPOT_WARN_TEMP],
+          sparklineThresholds,
           { min: SPOT_NORMAL_MIN, max: SPOT_WARN_TEMP }
         ),
-      [sparklineValues]
+      [sparklineValues, sparklineThresholds]
     );
 
     useEffect(() => {
@@ -4656,7 +5443,23 @@ const SpotComponent = () => {
             {thresholdLines.map((line) => (
               <line
                 key={`thr-${line.value}`}
-                className={`sparkline-threshold ${line.value === SPOT_WARN_TEMP ? 'sparkline-threshold-warn' : line.value === SPOT_HIGH_MIN ? 'sparkline-threshold-high' : line.value === SPOT_NORMAL_MIN ? 'sparkline-threshold-normal' : ''}`}
+                className={[
+                  'sparkline-threshold',
+                  line.value === SPOT_WARN_TEMP
+                    ? 'sparkline-threshold-warn'
+                    : line.value === SPOT_HIGH_MIN
+                      ? 'sparkline-threshold-high'
+                      : line.value === SPOT_NORMAL_MIN
+                        ? 'sparkline-threshold-normal'
+                        : '',
+                  typeof spotConfigThreshold === 'number' &&
+                  Number.isFinite(spotConfigThreshold) &&
+                  Math.abs(line.value - spotConfigThreshold) < 0.01
+                    ? 'sparkline-threshold-config'
+                    : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
                 x1={0}
                 y1={line.y}
                 x2={100}

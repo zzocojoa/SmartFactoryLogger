@@ -4,6 +4,7 @@ import configparser
 from datetime import datetime
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from typing import List, Tuple, Optional
@@ -60,6 +61,11 @@ def _resolve_config_path() -> Optional[Path]:
     if env_path:
         return Path(env_path)
 
+    standard_dir = _get_user_data_dir()
+    standard_path = standard_dir / "config.ini"
+    if standard_path.is_file():
+        return standard_path
+
     here = Path(__file__).resolve()
     candidates = [
         Path.cwd() / "config.ini",
@@ -68,9 +74,20 @@ def _resolve_config_path() -> Optional[Path]:
         here.parents[1] / "config" / "config.ini",
         here.parents[2] / "config" / "config.ini",
     ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
+    legacy_path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if legacy_path:
+        try:
+            standard_dir.mkdir(parents=True, exist_ok=True)
+            if not standard_path.exists():
+                shutil.copy2(legacy_path, standard_path)
+                backup_path = standard_path.with_suffix(".bak")
+                if not backup_path.exists():
+                    shutil.copy2(standard_path, backup_path)
+                _config_log("INFO", f"Config migrated: {legacy_path} -> {standard_path}")
+            return standard_path
+        except Exception as exc:
+            _config_log("ERROR", f"Config migration failed: {exc}")
+            return legacy_path
     return None
 
 

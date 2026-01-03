@@ -9,6 +9,7 @@ from .base_driver import BasePLCDriver
 from ..models.data_model import FactoryData
 from .. import config
 from .logic_processor import LogicProcessor
+from .observability_service import observability_service
 
 
 class RealPLCDriver(BasePLCDriver):
@@ -39,6 +40,10 @@ class RealPLCDriver(BasePLCDriver):
         self.ext_last_error_time: Optional[float] = None
         self.ext_last_success_time: Optional[float] = None
         self.ext_last_recovery_sec: Optional[float] = None
+        self.ext_recovery_count = 0
+        self.ext_total_downtime_sec = 0.0
+        self.ext_last_disconnect_time: Optional[float] = None
+        self.ext_last_recovery_at: Optional[float] = None
         self.ext_error_started: Optional[float] = None
         self.ext_in_error = False
 
@@ -57,6 +62,10 @@ class RealPLCDriver(BasePLCDriver):
         self.ls_last_error_time: Optional[float] = None
         self.ls_last_success_time: Optional[float] = None
         self.ls_last_recovery_sec: Optional[float] = None
+        self.ls_recovery_count = 0
+        self.ls_total_downtime_sec = 0.0
+        self.ls_last_disconnect_time: Optional[float] = None
+        self.ls_last_recovery_at: Optional[float] = None
         self.ls_error_started: Optional[float] = None
         self.ls_in_error = False
 
@@ -81,17 +90,30 @@ class RealPLCDriver(BasePLCDriver):
         now = time.time()
         if not self.ext_in_error:
             self.ext_error_started = now
+            self.ext_last_disconnect_time = now
         self.ext_in_error = True
         self.ext_last_error = message
         self.ext_last_error_time = now
         if count_read_failure:
             self.ext_read_failures += 1
+        try:
+            observability_service.record_error(
+                "extruder",
+                message,
+                detail=f"{config.EXTRUDER_IP}:{config.EXTRUDER_PORT}",
+            )
+        except Exception:
+            pass
 
     def _mark_ext_success(self) -> None:
         now = time.time()
         self.ext_last_success_time = now
         if self.ext_in_error and self.ext_error_started is not None:
-            self.ext_last_recovery_sec = now - self.ext_error_started
+            recovery_sec = now - self.ext_error_started
+            self.ext_last_recovery_sec = recovery_sec
+            self.ext_last_recovery_at = now
+            self.ext_recovery_count += 1
+            self.ext_total_downtime_sec += recovery_sec
         self.ext_in_error = False
         self.ext_error_started = None
 
@@ -99,23 +121,45 @@ class RealPLCDriver(BasePLCDriver):
         now = time.time()
         if not self.ls_in_error:
             self.ls_error_started = now
+            self.ls_last_disconnect_time = now
         self.ls_in_error = True
         self.ls_last_error = message
         self.ls_last_error_time = now
         if count_read_failure:
             self.ls_read_failures += 1
+        try:
+            observability_service.record_error(
+                "ls_plc",
+                message,
+                detail=f"{config.LS_IP}:{config.LS_PORT}",
+            )
+        except Exception:
+            pass
 
     def _mark_ls_success(self) -> None:
         now = time.time()
         self.ls_last_success_time = now
         if self.ls_in_error and self.ls_error_started is not None:
-            self.ls_last_recovery_sec = now - self.ls_error_started
+            recovery_sec = now - self.ls_error_started
+            self.ls_last_recovery_sec = recovery_sec
+            self.ls_last_recovery_at = now
+            self.ls_recovery_count += 1
+            self.ls_total_downtime_sec += recovery_sec
         self.ls_in_error = False
         self.ls_error_started = None
 
-    def _mark_spot_error(self) -> None:
+    def _mark_spot_error(self, message: str | None = None) -> None:
         self.spot_read_failures += 1
-        self.spot_last_error_time = time.time()
+        now = time.time()
+        self.spot_last_error_time = now
+        try:
+            observability_service.record_error(
+                "spot",
+                message or "SPOT read error",
+                detail=config.SPOT_URL,
+            )
+        except Exception:
+            pass
 
     def _mark_spot_success(self) -> None:
         self.spot_last_success_time = time.time()
@@ -273,8 +317,8 @@ class RealPLCDriver(BasePLCDriver):
                     value = float(raw)
                     self._mark_spot_success()
                     return value
-        except Exception:
-            self._mark_spot_error()
+        except Exception as exc:
+            self._mark_spot_error(str(exc))
             return None
         return None
 
@@ -566,6 +610,13 @@ class RealPLCDriver(BasePLCDriver):
         return values
 
     def get_comm_metrics(self) -> Dict[str, Dict[str, object]]:
+        now = time.time()
+        ext_current_downtime_sec = 0.0
+        if self.ext_in_error and self.ext_error_started is not None:
+            ext_current_downtime_sec = max(0.0, now - self.ext_error_started)
+        ls_current_downtime_sec = 0.0
+        if self.ls_in_error and self.ls_error_started is not None:
+            ls_current_downtime_sec = max(0.0, now - self.ls_error_started)
         return {
             "extruder": {
                 "connected": self.sock_ext is not None,
@@ -581,6 +632,11 @@ class RealPLCDriver(BasePLCDriver):
                 "last_error_time": self.ext_last_error_time,
                 "last_success_time": self.ext_last_success_time,
                 "last_recovery_sec": self.ext_last_recovery_sec,
+                "recovery_count": self.ext_recovery_count,
+                "total_downtime_sec": self.ext_total_downtime_sec,
+                "current_downtime_sec": ext_current_downtime_sec,
+                "last_disconnect_time": self.ext_last_disconnect_time,
+                "last_recovery_at": self.ext_last_recovery_at,
                 "merge_blocks": self.ext_merge_blocks,
                 "merge_failures": self.ext_merge_failures,
             },
@@ -597,6 +653,11 @@ class RealPLCDriver(BasePLCDriver):
                 "last_error_time": self.ls_last_error_time,
                 "last_success_time": self.ls_last_success_time,
                 "last_recovery_sec": self.ls_last_recovery_sec,
+                "recovery_count": self.ls_recovery_count,
+                "total_downtime_sec": self.ls_total_downtime_sec,
+                "current_downtime_sec": ls_current_downtime_sec,
+                "last_disconnect_time": self.ls_last_disconnect_time,
+                "last_recovery_at": self.ls_last_recovery_at,
             },
             "spot": {
                 "last_value": self.last_spot,

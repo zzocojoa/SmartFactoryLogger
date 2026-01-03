@@ -129,6 +129,11 @@ class CommMetricsLoggerService:
         last_err_time = _format_ts(metrics.get("last_error_time"))
         last_ok = _format_ts(metrics.get("last_success_time"))
         recovery = _format_seconds(metrics.get("last_recovery_sec"))
+        recovery_count = int(metrics.get("recovery_count", 0))
+        total_downtime = _format_seconds(metrics.get("total_downtime_sec"))
+        current_downtime = _format_seconds(metrics.get("current_downtime_sec"))
+        last_disconnect = _format_ts(metrics.get("last_disconnect_time"))
+        last_recovery_at = _format_ts(metrics.get("last_recovery_at"))
         merge = metrics.get("merge_blocks")
         merge_state = "-" if merge is None else ("ON" if merge else "OFF")
         merge_fail = int(metrics.get("merge_failures", 0))
@@ -144,6 +149,11 @@ class CommMetricsLoggerService:
             f" last_ok={last_ok}"
             f" last_err={last_err_time}"
             f" recovery={recovery}"
+            f" recov_cnt={recovery_count}"
+            f" down_total={total_downtime}"
+            f" down_now={current_downtime}"
+            f" last_disc={last_disconnect}"
+            f" last_rec={last_recovery_at}"
             f" merge={merge_state}"
             f" mfail={merge_fail}"
             f" err='{last_err}'"
@@ -160,6 +170,11 @@ class CommMetricsLoggerService:
         last_err_time = _format_ts(metrics.get("last_error_time"))
         last_ok = _format_ts(metrics.get("last_success_time"))
         recovery = _format_seconds(metrics.get("last_recovery_sec"))
+        recovery_count = int(metrics.get("recovery_count", 0))
+        total_downtime = _format_seconds(metrics.get("total_downtime_sec"))
+        current_downtime = _format_seconds(metrics.get("current_downtime_sec"))
+        last_disconnect = _format_ts(metrics.get("last_disconnect_time"))
+        last_recovery_at = _format_ts(metrics.get("last_recovery_at"))
         last_err = _short_text(metrics.get("last_error"))
         return (
             "LS"
@@ -171,6 +186,11 @@ class CommMetricsLoggerService:
             f" last_ok={last_ok}"
             f" last_err={last_err_time}"
             f" recovery={recovery}"
+            f" recov_cnt={recovery_count}"
+            f" down_total={total_downtime}"
+            f" down_now={current_downtime}"
+            f" last_disc={last_disconnect}"
+            f" last_rec={last_recovery_at}"
             f" err='{last_err}'"
         )
 
@@ -205,16 +225,19 @@ class CommMetricsLoggerService:
             elif ex_connected != self._last_ex_connected:
                 if ex_connected:
                     self.logger.info(
-                        "COMM_EVENT EX_RECOVERED recovery=%s last_ok=%s",
+                        "COMM_EVENT EX_RECOVERED recovery=%s count=%s down_total=%s last_ok=%s",
                         _format_seconds(extruder.get("last_recovery_sec")),
+                        int(extruder.get("recovery_count", 0)),
+                        _format_seconds(extruder.get("total_downtime_sec")),
                         _format_ts(extruder.get("last_success_time")),
                     )
                 else:
                     failures = int(extruder.get("connect_failures", 0)) + int(extruder.get("read_failures", 0))
                     self.logger.warning(
-                        "COMM_EVENT EX_DISCONNECTED fail=%s backoff=%s err='%s'",
+                        "COMM_EVENT EX_DISCONNECTED fail=%s backoff=%s down_now=%s err='%s'",
                         failures,
                         _format_seconds(extruder.get("backoff_sec")),
+                        _format_seconds(extruder.get("current_downtime_sec")),
                         _short_text(extruder.get("last_error")),
                     )
                 self._last_ex_connected = ex_connected
@@ -225,16 +248,19 @@ class CommMetricsLoggerService:
             elif ls_connected != self._last_ls_connected:
                 if ls_connected:
                     self.logger.info(
-                        "COMM_EVENT LS_RECOVERED recovery=%s last_ok=%s",
+                        "COMM_EVENT LS_RECOVERED recovery=%s count=%s down_total=%s last_ok=%s",
                         _format_seconds(ls_plc.get("last_recovery_sec")),
+                        int(ls_plc.get("recovery_count", 0)),
+                        _format_seconds(ls_plc.get("total_downtime_sec")),
                         _format_ts(ls_plc.get("last_success_time")),
                     )
                 else:
                     failures = int(ls_plc.get("connect_failures", 0)) + int(ls_plc.get("read_failures", 0))
                     self.logger.warning(
-                        "COMM_EVENT LS_DISCONNECTED fail=%s backoff=%s err='%s'",
+                        "COMM_EVENT LS_DISCONNECTED fail=%s backoff=%s down_now=%s err='%s'",
                         failures,
                         _format_seconds(ls_plc.get("backoff_sec")),
+                        _format_seconds(ls_plc.get("current_downtime_sec")),
                         _short_text(ls_plc.get("last_error")),
                     )
                 self._last_ls_connected = ls_connected

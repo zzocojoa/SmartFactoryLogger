@@ -42,8 +42,8 @@ const patchFile = (filePath) => {
     next = next.replace(pattern, value);
   }
   if (next === original) {
-    console.warn(`[patch] no changes: ${filePath}`);
-    return { updated: false, skipped: false };
+    console.log(`[patch] already patched: ${filePath}`);
+    return { updated: false, skipped: false, unchanged: true };
   }
   fs.writeFileSync(filePath, next, 'utf8');
   console.log(`[patch] updated: ${filePath}`);
@@ -52,6 +52,7 @@ const patchFile = (filePath) => {
 
 let updatedCount = 0;
 let skippedCount = 0;
+let unchangedCount = 0;
 
 for (const filePath of targets) {
   const result = patchFile(filePath);
@@ -61,9 +62,12 @@ for (const filePath of targets) {
   if (result.skipped) {
     skippedCount += 1;
   }
+  if (result.unchanged) {
+    unchangedCount += 1;
+  }
 }
 
-if (updatedCount === 0 && skippedCount === 0) {
+if (updatedCount === 0 && skippedCount === 0 && unchangedCount === 0) {
   console.error('[patch] failed to update any files');
   process.exit(1);
 }
