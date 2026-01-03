@@ -1,24 +1,550 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
+import atexit
+from datetime import datetime
+import base64
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+from pathlib import Path
+import socket
+import sys
+import subprocess
+import tempfile
+import threading
+import traceback
+import time
 import uvicorn
+from urllib.request import Request, urlopen
 
 # Import Service Layer
 from .services.plc_service import plc_service
+from .services.logger_service import logger_service
+from .services.comm_metrics_logger import comm_metrics_logger_service
+from .services.layout_service import (
+    delete_layout_slot,
+    get_active_layout,
+    get_layout_meta,
+    list_layouts,
+    restore_layout_backup,
+    restore_layout_slot,
+    save_layout_slot,
+)
+from .services.config_service import (
+    get_config_snapshot,
+    set_override_enabled,
+    update_config,
+    restore_defaults,
+    restore_backup,
+)
+from .services.config_sync import config_sync_agent
+from .services.config_watch import config_watch_service
+from .models.config_model import ConfigUpdate, OverrideToggle
 from .services import spot_control
 from .models.data_model import FactoryData
+from .services.verification_service import compare_with_reference
 from . import config
+
+class ConnectionTarget(BaseModel):
+    ip: str | None = None
+    port: int | None = None
+    url: str | None = None
+
+
+class ConnectionTestPayload(BaseModel):
+    extruder: ConnectionTarget | None = None
+    ls_plc: ConnectionTarget | None = None
+    spot: ConnectionTarget | None = None
+
+
+class PathCheckItem(BaseModel):
+    key: str
+    path: str
+
+
+class PathHealthRequest(BaseModel):
+    paths: list[PathCheckItem]
+
+
+class PathCreateRequest(BaseModel):
+    path: str
+
+
+class VerificationCompareRequest(BaseModel):
+    reference_csv_path: str
+    sample_count: int = 50
+    interval_sec: float | None = None
+    tolerance_abs: dict[str, float] | None = None
+    tolerance_pct: dict[str, float] | None = None
+
+
+class SnapshotRequest(BaseModel):
+    image_base64: str
+    name: str | None = None
+    format: str | None = None
+
+
+class LayoutSaveRequest(BaseModel):
+    layout: dict[str, dict[str, int | float]]
+    cols: str | int | None = None
+    version: str | None = None
+
+
+class LayoutSlotSaveRequest(BaseModel):
+    name: str
+    layout: dict[str, dict[str, int | float]]
+    cols: str | int | None = None
+    version: str | None = None
+    slot_id: str | None = None
+
+
+class LayoutSlotRestoreRequest(BaseModel):
+    slot_id: str
+
+
+class LayoutSlotDeleteRequest(BaseModel):
+    slot_id: str
+
+
+_lock_fd = None
+_lock_path: Path | None = None
+_log_dir: Path | None = None
+_app_start_time = time.time()
+_stats_lock = threading.Lock()
+_stats_total_requests = 0
+_stats_total_latency_ms = 0.0
+_stats_last_latency_ms: int | None = None
+_stats_last_path: str | None = None
+_stats_last_status: int | None = None
+_stats_last_time: float | None = None
+_stats_error_count = 0
+
+_INVALID_PATH_CHARS = set('<>:"|?*')
+_NETWORK_WARN_MS = 200
+
+
+def _is_valid_segment(segment: str) -> bool:
+    if not segment:
+        return False
+    return not any(ch in _INVALID_PATH_CHARS for ch in segment)
+
+
+def _is_valid_path(path_str: str) -> bool:
+    if not path_str:
+        return False
+    if path_str.startswith("\\\\"):
+        parts = [part for part in path_str.split("\\") if part]
+        if len(parts) < 2:
+            return False
+        return all(_is_valid_segment(part) for part in parts)
+    if len(path_str) >= 3 and path_str[1] == ":" and path_str[2] == "\\" and path_str[0].isalpha():
+        tail = path_str[3:]
+        if not tail:
+            return True
+        return all(_is_valid_segment(part) for part in tail.split("\\") if part)
+    return False
+
+
+def _is_nas_drive(path_str: str) -> bool:
+    return len(path_str) >= 2 and path_str[1] == ":" and path_str[0].upper() == "Z"
+
+
+def _is_network_path(path_str: str) -> bool:
+    return path_str.startswith("\\\\") or _is_nas_drive(path_str)
+
+
+def _ensure_dir(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_log_dir() -> Path:
+    global _log_dir
+    if _log_dir:
+        return _log_dir
+    base_dir = config.CONFIG_PATH.parent if config.CONFIG_PATH else None
+    if base_dir is None:
+        appdata = os.getenv("APPDATA")
+        base_dir = Path(appdata) / "SmartFactoryLogger" if appdata else Path.cwd()
+    candidates = [
+        base_dir / "logs",
+        Path(tempfile.gettempdir()) / "SmartFactoryLogger" / "logs",
+        Path.cwd() / "logs",
+    ]
+    for candidate in candidates:
+        if _ensure_dir(candidate):
+            _log_dir = candidate
+            return candidate
+    _log_dir = Path.cwd()
+    return _log_dir
+
+
+def _test_tcp(ip: str | None, port: int | None, timeout: float = 1.5) -> dict:
+    if not ip or not port:
+        return {"ok": False, "latency_ms": None, "message": "IP/Port missing"}
+    start = time.perf_counter()
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            pass
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        return {"ok": True, "latency_ms": latency_ms, "message": "connected"}
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        return {"ok": False, "latency_ms": latency_ms, "message": str(exc)}
+
+
+def _test_http(url: str | None, timeout: float = 1.5) -> dict:
+    if not url:
+        return {"ok": False, "latency_ms": None, "message": "URL missing"}
+    start = time.perf_counter()
+    try:
+        request = Request(url, method="HEAD")
+        with urlopen(request, timeout=timeout) as resp:
+            status = getattr(resp, "status", 200)
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        if status >= 400:
+            return {"ok": False, "latency_ms": latency_ms, "message": f"HTTP {status}"}
+        return {"ok": True, "latency_ms": latency_ms, "message": f"HTTP {status}"}
+    except Exception:
+        try:
+            with urlopen(url, timeout=timeout) as resp:
+                status = getattr(resp, "status", 200)
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            if status >= 400:
+                return {"ok": False, "latency_ms": latency_ms, "message": f"HTTP {status}"}
+            return {"ok": True, "latency_ms": latency_ms, "message": f"HTTP {status}"}
+        except Exception as exc:
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            return {"ok": False, "latency_ms": latency_ms, "message": str(exc)}
+
+
+def _check_path(path_str: str) -> dict:
+    start = time.perf_counter()
+    try:
+        normalized = path_str.strip()
+        is_network = _is_network_path(normalized)
+        if not _is_valid_path(normalized):
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            return {
+                "status": "ERROR",
+                "exists": False,
+                "writable": False,
+                "is_dir": False,
+                "is_network": is_network,
+                "latency_ms": latency_ms,
+                "message": "Invalid path format",
+            }
+        if _is_nas_drive(normalized) and not Path("Z:\\").exists():
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            return {
+                "status": "ERROR",
+                "exists": False,
+                "writable": False,
+                "is_dir": False,
+                "is_network": True,
+                "latency_ms": latency_ms,
+                "message": "Network drive unavailable",
+            }
+        path = Path(normalized)
+        exists = path.exists()
+        is_dir = path.is_dir() if exists else False
+        if not exists:
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            return {
+                "status": "WARN",
+                "exists": False,
+                "writable": False,
+                "is_dir": False,
+                "is_network": is_network,
+                "latency_ms": latency_ms,
+                "message": "Path not found (creatable)",
+            }
+        if not is_dir:
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            return {
+                "status": "ERROR",
+                "exists": True,
+                "writable": False,
+                "is_dir": False,
+                "is_network": is_network,
+                "latency_ms": latency_ms,
+                "message": "Not a directory",
+            }
+        writable = False
+        test_file = path / f".sfl_write_test_{os.getpid()}"
+        try:
+            test_file.write_text("", encoding="utf-8")
+            writable = True
+        except Exception:
+            writable = False
+        finally:
+            try:
+                if test_file.exists():
+                    test_file.unlink()
+            except Exception:
+                pass
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        if writable:
+            if is_network and latency_ms >= _NETWORK_WARN_MS:
+                return {
+                    "status": "WARN",
+                    "exists": True,
+                    "writable": True,
+                    "is_dir": True,
+                    "is_network": is_network,
+                    "latency_ms": latency_ms,
+                    "message": "Network path latency",
+                }
+            return {
+                "status": "OK",
+                "exists": True,
+                "writable": True,
+                "is_dir": True,
+                "is_network": is_network,
+                "latency_ms": latency_ms,
+                "message": "OK",
+            }
+        return {
+            "status": "ERROR",
+            "exists": True,
+            "writable": False,
+            "is_dir": True,
+            "is_network": is_network,
+            "latency_ms": latency_ms,
+            "message": "Write permission denied",
+        }
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        return {
+            "status": "ERROR",
+            "exists": False,
+            "writable": False,
+            "is_dir": False,
+            "is_network": _is_network_path(path_str.strip()),
+            "latency_ms": latency_ms,
+            "message": str(exc),
+        }
+
+
+def _decode_snapshot_payload(payload: str) -> tuple[bytes, str]:
+    raw = payload.strip()
+    if raw.startswith("data:"):
+        header, encoded = raw.split(",", 1)
+        content_type = header.split(";")[0]
+        ext = content_type.split("/")[-1] if "/" in content_type else "png"
+        data = base64.b64decode(encoded)
+        return data, ext
+    data = base64.b64decode(raw)
+    return data, "png"
+
+
+def _open_path(path: Path) -> None:
+    if sys.platform.startswith("win"):
+        os.startfile(path)  # type: ignore[attr-defined]
+        return
+    if sys.platform == "darwin":
+        subprocess.run(["open", str(path)], check=False)
+        return
+    subprocess.run(["xdg-open", str(path)], check=False)
+
+
+def _setup_logging() -> tuple[logging.Logger, logging.Logger]:
+    log_dir = _resolve_log_dir()
+    formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    logger = logging.getLogger("SmartFactoryLoggerV2")
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        system_log = log_dir / "system.log"
+        file_handler = RotatingFileHandler(
+            system_log,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.ERROR)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+    crash_logger = logging.getLogger("SmartFactoryLoggerV2.Crash")
+    if not crash_logger.handlers:
+        crash_logger.setLevel(logging.ERROR)
+        crash_log = log_dir / "crash.log"
+        crash_handler = RotatingFileHandler(
+            crash_log,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        crash_handler.setFormatter(formatter)
+        crash_logger.addHandler(crash_handler)
+
+    return logger, crash_logger
+
+
+_logger, _crash_logger = _setup_logging()
+
+
+def _write_crash_log(title: str, exc_type, exc_value, tb) -> None:
+    if _crash_logger:
+        _crash_logger.error(title, exc_info=(exc_type, exc_value, tb))
+        return
+    log_dir = _resolve_log_dir()
+    crash_log = log_dir / "crash.log"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with crash_log.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n{'=' * 40}\n[{timestamp}] {title}\n{'=' * 40}\n")
+            handle.write("".join(traceback.format_exception(exc_type, exc_value, tb)))
+            handle.write("-" * 80 + "\n")
+    except Exception as exc:
+        print(f"[Main] Failed to write crash log: {exc}", file=sys.stderr)
+
+
+def _exception_hook(exc_type, exc_value, tb) -> None:
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, tb)
+        return
+    _write_crash_log("UNHANDLED EXCEPTION", exc_type, exc_value, tb)
+    sys.__excepthook__(exc_type, exc_value, tb)
+
+
+def _thread_exception_hook(args: threading.ExceptHookArgs) -> None:
+    _write_crash_log(
+        f"UNHANDLED THREAD EXCEPTION: {getattr(args.thread, 'name', 'unknown')}",
+        args.exc_type,
+        args.exc_value,
+        args.exc_traceback,
+    )
+    if hasattr(threading, "__excepthook__"):
+        threading.__excepthook__(args)
+    else:
+        sys.__excepthook__(args.exc_type, args.exc_value, args.exc_traceback)
+
+
+sys.excepthook = _exception_hook
+threading.excepthook = _thread_exception_hook
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+    return True
+
+
+def _get_lock_path() -> Path:
+    global _lock_path
+    if _lock_path:
+        return _lock_path
+    base_dir = None
+    if config.CONFIG_PATH and config.CONFIG_PATH.parent:
+        base_dir = config.CONFIG_PATH.parent
+    if base_dir is None:
+        appdata = os.getenv("APPDATA")
+        base_dir = Path(appdata) / "SmartFactoryLogger" if appdata else Path.cwd()
+    _lock_path = base_dir / "sfl_v2.lock"
+    return _lock_path
+
+
+def release_single_instance_lock() -> None:
+    global _lock_fd
+    lock_path = _get_lock_path()
+    try:
+        if _lock_fd is not None:
+            os.close(_lock_fd)
+            _lock_fd = None
+    except Exception:
+        pass
+    try:
+        if lock_path.exists():
+            lock_path.unlink()
+    except Exception:
+        pass
+
+
+def acquire_single_instance_lock() -> bool:
+    global _lock_fd
+    lock_path = _get_lock_path()
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    try:
+        _lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(_lock_fd, str(os.getpid()).encode("ascii", errors="ignore"))
+        atexit.register(release_single_instance_lock)
+        return True
+    except FileExistsError:
+        existing_pid = 0
+        try:
+            raw = lock_path.read_text(encoding="ascii", errors="ignore").strip()
+            if raw.isdigit():
+                existing_pid = int(raw)
+        except Exception:
+            existing_pid = 0
+
+        if existing_pid and _pid_is_alive(existing_pid):
+            print(f"[Main] Another instance is already running (pid={existing_pid}).")
+            return False
+
+        try:
+            lock_path.unlink()
+        except Exception:
+            print("[Main] Stale lock detected but could not remove it.")
+            return False
+        return acquire_single_instance_lock()
+    except Exception as exc:
+        print(f"[Main] Failed to acquire single instance lock: {exc}")
+        return True
 
 # Lifecycle Manager (Startup/Shutdown)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    if not acquire_single_instance_lock():
+        raise RuntimeError("Instance already running")
+    print("[Main] Starting CSV Logger...")
+    logger_service.start()
+    print("[Main] Starting Config Sync Agent...")
+    config_sync_agent.start()
+    print("[Main] Starting Config Watcher...")
+    config_watch_service.start()
     print("[Main] Starting PLC Service...")
     plc_service.start()
-    yield
-    # Shutdown
-    print("[Main] Stopping PLC Service...")
-    plc_service.stop()
+    print("[Main] Starting Comm Metrics Logger...")
+    comm_metrics_logger_service.start()
+    try:
+        yield
+    finally:
+        # Shutdown
+        print("[Main] Stopping Comm Metrics Logger...")
+        comm_metrics_logger_service.stop()
+        print("[Main] Stopping PLC Service...")
+        plc_service.stop()
+        print("[Main] Stopping Config Sync Agent...")
+        config_sync_agent.stop()
+        print("[Main] Stopping Config Watcher...")
+        config_watch_service.stop()
+        print("[Main] Stopping CSV Logger...")
+        logger_service.stop()
+        release_single_instance_lock()
 
 # --- App Definition ---
 app = FastAPI(
@@ -37,6 +563,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def record_request_stats(request: Request, call_next):
+    global _stats_total_requests
+    global _stats_total_latency_ms
+    global _stats_last_latency_ms
+    global _stats_last_path
+    global _stats_last_status
+    global _stats_last_time
+    global _stats_error_count
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        with _stats_lock:
+            _stats_total_requests += 1
+            _stats_total_latency_ms += elapsed_ms
+            _stats_last_latency_ms = int(elapsed_ms)
+            _stats_last_path = request.url.path
+            _stats_last_status = status_code
+            _stats_last_time = time.time()
+            if status_code >= 400:
+                _stats_error_count += 1
+
 @app.get("/")
 def read_root():
     return {
@@ -53,6 +606,328 @@ def get_data():
 @app.get("/health")
 def health():
     return plc_service.get_health()
+
+@app.get("/stats")
+def stats():
+    with _stats_lock:
+        total = _stats_total_requests
+        avg_latency_ms = (_stats_total_latency_ms / total) if total else None
+        error_count = _stats_error_count
+        last = {
+            "latency_ms": _stats_last_latency_ms,
+            "path": _stats_last_path,
+            "status": _stats_last_status,
+            "timestamp": _stats_last_time,
+        }
+    uptime_sec = int(time.time() - _app_start_time)
+    return {
+        "uptime_sec": uptime_sec,
+        "total_requests": total,
+        "avg_latency_ms": round(avg_latency_ms, 2) if avg_latency_ms is not None else None,
+        "error_count": error_count,
+        "last": last,
+    }
+
+@app.get("/api/logs/comm-metrics")
+def comm_metrics_log_info():
+    try:
+        return {"path": comm_metrics_logger_service.get_log_path()}
+    except Exception as exc:
+        _logger.error("Comm metrics log path failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/logs/comm-metrics/open")
+def open_comm_metrics_log():
+    try:
+        log_path = comm_metrics_logger_service.get_log_path()
+        if not log_path:
+            raise HTTPException(status_code=404, detail="Comm metrics log not available")
+        target = Path(log_path).parent
+        _open_path(target)
+        return {"ok": True, "path": str(target)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Open comm metrics log failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/logs/comm-metrics/open-file")
+def open_comm_metrics_log_file():
+    try:
+        log_path = comm_metrics_logger_service.get_log_path()
+        if not log_path:
+            raise HTTPException(status_code=404, detail="Comm metrics log not available")
+        target = Path(log_path)
+        _open_path(target)
+        return {"ok": True, "path": str(target)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Open comm metrics log file failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.get("/api/config")
+def get_config():
+    try:
+        return get_config_snapshot()
+    except Exception as exc:
+        _logger.error("Config load failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Config load failed") from exc
+
+@app.post("/api/config")
+def save_config(payload: ConfigUpdate):
+    try:
+        return update_config(payload, source="local")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Config save failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/config/override")
+def update_override(payload: OverrideToggle):
+    try:
+        return set_override_enabled(payload.enabled, payload.password, payload.actor)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Override update failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/config/restore-defaults")
+def restore_config_defaults():
+    try:
+        return restore_defaults()
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Restore defaults failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/config/restore-backup")
+def restore_config_backup():
+    try:
+        return restore_backup()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Restore backup failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.get("/api/layout")
+def get_layout():
+    try:
+        data = get_active_layout()
+        if not data:
+            raise HTTPException(status_code=404, detail="Layout not found")
+        return data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Layout load failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/layout/meta")
+def layout_meta():
+    try:
+        return get_layout_meta()
+    except Exception as exc:
+        _logger.error("Layout meta failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/layouts")
+def get_layouts():
+    try:
+        return list_layouts()
+    except Exception as exc:
+        _logger.error("Layout list failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/layouts")
+def save_layout_slot_api(payload: LayoutSlotSaveRequest):
+    try:
+        return save_layout_slot(payload.name, payload.layout, payload.cols, payload.version, payload.slot_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Layout slot save failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/layouts/restore")
+def restore_layout_slot_api(payload: LayoutSlotRestoreRequest):
+    try:
+        return restore_layout_slot(payload.slot_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Layout slot restore failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/layouts/delete")
+def delete_layout_slot_api(payload: LayoutSlotDeleteRequest):
+    try:
+        return delete_layout_slot(payload.slot_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Layout slot delete failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/layout")
+def save_layout_api(payload: LayoutSaveRequest):
+    try:
+        return save_layout_slot("레이아웃", payload.layout, payload.cols, payload.version, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Layout save failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/layout/restore")
+def restore_layout_api():
+    try:
+        return restore_layout_backup()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Layout restore failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.get("/api/config/central-status")
+def central_status():
+    try:
+        return config_sync_agent.get_status()
+    except Exception as exc:
+        _logger.error("Central status failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/config/sync")
+def sync_central_config():
+    try:
+        return config_sync_agent.sync_now()
+    except Exception as exc:
+        _logger.error("Central sync failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/control/reconnect")
+def reconnect():
+    try:
+        plc_service.stop()
+        plc_service.start()
+        return {"ok": True, "running": plc_service.running}
+    except Exception as exc:
+        _logger.error("Reconnect failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/control/test-connection")
+def test_connection(payload: ConnectionTestPayload):
+    try:
+        results: dict[str, dict] = {}
+        if payload.extruder is not None:
+            results["extruder"] = _test_tcp(payload.extruder.ip, payload.extruder.port)
+        if payload.ls_plc is not None:
+            results["ls_plc"] = _test_tcp(payload.ls_plc.ip, payload.ls_plc.port)
+        if payload.spot is not None:
+            results["spot"] = _test_http(payload.spot.url)
+        if not results:
+            raise HTTPException(status_code=400, detail="No targets provided")
+        return {"results": results}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Connection test failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/control/path-health")
+def path_health(payload: PathHealthRequest):
+    try:
+        results: dict[str, dict] = {}
+        for item in payload.paths:
+            results[item.key] = _check_path(item.path)
+        return {"results": results}
+    except Exception as exc:
+        _logger.error("Path health failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/control/path-create")
+def path_create(payload: PathCreateRequest):
+    try:
+        path = Path(payload.path)
+        path.mkdir(parents=True, exist_ok=True)
+        return {"ok": True, "message": "created"}
+    except Exception as exc:
+        _logger.error("Path create failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/control/snapshot")
+def save_snapshot(payload: SnapshotRequest):
+    try:
+        snapshot_dir = Path(config.SNAPSHOT_PATH)
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        data, ext = _decode_snapshot_payload(payload.image_base64)
+        ext_value = (payload.format or ext or "png").lower().strip(".")
+        if ext_value not in {"png", "jpg", "jpeg"}:
+            ext_value = "png"
+        base_name = (payload.name or "snapshot").strip()
+        safe_name = "".join(ch for ch in base_name if ch.isalnum() or ch in {"-", "_"}).strip("_-")
+        if not safe_name:
+            safe_name = "snapshot"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{safe_name}_{ts}.{ext_value}"
+        file_path = snapshot_dir / filename
+        file_path.write_bytes(data)
+        return {"ok": True, "path": str(file_path), "filename": filename}
+    except Exception as exc:
+        _logger.error("Snapshot save failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+@app.post("/api/verify/compare")
+def verify_compare(payload: VerificationCompareRequest):
+    try:
+        sample_count = max(int(payload.sample_count), 1)
+        interval_sec = payload.interval_sec
+        if interval_sec is None or interval_sec <= 0:
+            interval_sec = config.INTERVAL_SEC
+        return compare_with_reference(
+            payload.reference_csv_path,
+            sample_count,
+            float(interval_sec),
+            payload.tolerance_abs,
+            payload.tolerance_pct,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Verify compare failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @app.get("/api/spot/config")
 def spot_config():

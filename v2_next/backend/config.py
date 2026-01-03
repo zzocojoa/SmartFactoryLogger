@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import configparser
+from datetime import datetime
 import os
 from pathlib import Path
+import sys
+import tempfile
 from typing import List, Tuple, Optional
 
 # Fixed collection interval (policy: must stay at 0.2s)
@@ -27,6 +30,17 @@ DEFAULT_SPOT_FOCUS_STEP = 50
 DEFAULT_SPOT_ACTUATOR_STEP = 5
 DEFAULT_SPOT_WIDGET_WIDTH = 512
 DEFAULT_SPOT_WIDGET_HEIGHT = 288
+DEFAULT_LOG_PATH = "logs"
+DEFAULT_SNAPSHOT_PATH = "snapshots"
+DEFAULT_AUTO_SAVE = True
+DEFAULT_ROTATION_ENABLED = True
+DEFAULT_ROTATION_MODE = "BILLET"
+DEFAULT_CYCLE_IDLE_TIME = 30
+DEFAULT_CYCLE_THRESHOLD_PRESS = 20.0
+DEFAULT_CSV_HEADER = (
+    "Date,Time,Temperature,MainPress,BilletLength,Temp_F,Temp_B,Count,Speed,EndPos,"
+    "Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp,DIE_ID,Billet_CycleID"
+)
 DEFAULT_LS_TARGETS: List[Tuple[str, str]] = [
     ("%DW250", "Mold1"),
     ("%DW256", "Mold2"),
@@ -112,6 +126,71 @@ def _env_float(name: str, fallback: float) -> float:
     val = os.getenv(name)
     if val is None:
         return fallback
+
+
+def _get_bool(parser: configparser.ConfigParser, section: str, option: str, fallback: bool) -> bool:
+    val = _get(parser, section, option, None)
+    if val is None:
+        return fallback
+    lowered = val.strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    return fallback
+
+
+def _get_user_data_dir() -> Path:
+    if sys.platform == "win32":
+        base = os.getenv("APPDATA") or str(Path.home())
+        return Path(base) / "SmartFactoryLogger"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "SmartFactoryLogger"
+    return Path.home() / ".config" / "SmartFactoryLogger"
+
+
+def _ensure_writable_dir(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return False
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix=".perm_", dir=str(path))
+        os.close(fd)
+        Path(tmp_path).unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def _config_log(level: str, message: str) -> None:
+    try:
+        base_dir = APP_DATA_DIR if "APP_DATA_DIR" in globals() else _get_user_data_dir()
+        log_dir = base_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "system.log"
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{ts}] [{level}] [Config] {message}\n")
+    except Exception:
+        pass
+
+
+def resolve_storage_path(path_value: Optional[str], default_subdir: str, label: str) -> Path:
+    raw_value = path_value or default_subdir
+    candidate = Path(raw_value)
+    if not candidate.is_absolute():
+        candidate = APP_DATA_DIR / raw_value
+    if _ensure_writable_dir(candidate):
+        return candidate
+    fallback = APP_DATA_DIR / default_subdir
+    _ensure_writable_dir(fallback)
+    _config_log(
+        "WARNING",
+        f"{label} path not usable: {candidate}. "
+        f"Check permissions or run as administrator. Using fallback: {fallback}",
+    )
+    return fallback
     try:
         return float(val)
     except ValueError:
@@ -120,6 +199,7 @@ def _env_float(name: str, fallback: float) -> float:
 
 CONFIG_PATH = _resolve_config_path()
 CONFIG, CONFIG_ENCODING = _load_config(CONFIG_PATH)
+APP_DATA_DIR = _get_user_data_dir()
 
 # EXTRUDER
 EXTRUDER_IP = os.getenv("EXTRUDER_IP", _get(CONFIG, "EXTRUDER", "ip", DEFAULT_EXTRUDER_IP) or DEFAULT_EXTRUDER_IP)
@@ -193,3 +273,17 @@ SPOT_WIDGET_WIDTH = _get_int(CONFIG, "SPOT", "widgetwidth", DEFAULT_SPOT_WIDGET_
 SPOT_WIDGET_WIDTH = _env_int("SPOT_WIDGET_WIDTH", SPOT_WIDGET_WIDTH)
 SPOT_WIDGET_HEIGHT = _get_int(CONFIG, "SPOT", "widgetheight", DEFAULT_SPOT_WIDGET_HEIGHT)
 SPOT_WIDGET_HEIGHT = _env_int("SPOT_WIDGET_HEIGHT", SPOT_WIDGET_HEIGHT)
+
+# SETTINGS / LOGGING
+LOG_PATH = resolve_storage_path(_get(CONFIG, "SETTINGS", "logpath", DEFAULT_LOG_PATH), "logs", "LogPath")
+AUTO_SAVE = _get_bool(CONFIG, "SETTINGS", "autosave", DEFAULT_AUTO_SAVE)
+ROTATION_ENABLED = _get_bool(CONFIG, "LOGGING", "rotationenabled", DEFAULT_ROTATION_ENABLED)
+ROTATION_MODE = (_get(CONFIG, "LOGGING", "rotationmode", DEFAULT_ROTATION_MODE) or DEFAULT_ROTATION_MODE).upper()
+CYCLE_IDLE_TIME = _get_int(CONFIG, "LOGGING", "cycleidletime", DEFAULT_CYCLE_IDLE_TIME)
+CYCLE_THRESHOLD_PRESS = _get_float(CONFIG, "LOGGING", "cyclethresholdpress", DEFAULT_CYCLE_THRESHOLD_PRESS)
+CSV_HEADER = _get(CONFIG, "HEADERS", "csv", DEFAULT_CSV_HEADER) or DEFAULT_CSV_HEADER
+SNAPSHOT_PATH = resolve_storage_path(
+    _get(CONFIG, "SETTINGS", "snapshotpath", DEFAULT_SNAPSHOT_PATH),
+    "snapshots",
+    "SnapshotPath",
+)

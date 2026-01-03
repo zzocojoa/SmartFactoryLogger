@@ -3,12 +3,21 @@ import time
 from datetime import datetime
 from .base_driver import BasePLCDriver
 from ..models.data_model import FactoryData
+from .logic_processor import LogicProcessor
 
 class MockPLCDriver(BasePLCDriver):
+    def __init__(self):
+        super().__init__()
+        self.logic = LogicProcessor()
+
     def connect(self) -> bool:
         print("[MockDriver] Connected to Virtual Factory.")
         self.connected = True
         return True
+
+    def apply_connection_config(self) -> None:
+        # Mock driver has no remote connection; keep connected flag.
+        self.connected = True
         
     def read_data(self) -> FactoryData:
         # Simulate realistic factory data
@@ -22,6 +31,13 @@ class MockPLCDriver(BasePLCDriver):
         # Cycle Count (increment every 10s logic handled by caller or here?)
         # Let's keep it simple here, return snapshot
         
+        die_id, billet_cycle_id = self.logic.update(
+            1000 + int(now.timestamp() / 10) % 100,
+            press,
+            speed,
+            now,
+        )
+
         return FactoryData(
             Time=now.isoformat(),
             Status="Running",
@@ -30,6 +46,8 @@ class MockPLCDriver(BasePLCDriver):
             Count=1000 + int(now.timestamp() / 10) % 100, # Mock increment
             EndPos=15.0,
             Billet_Length=600.0,
+            Die_ID=die_id,
+            Billet_Cycle_ID=billet_cycle_id,
             Spot=spot,
             Temp_F=450.0,
             Temp_B=440.0,

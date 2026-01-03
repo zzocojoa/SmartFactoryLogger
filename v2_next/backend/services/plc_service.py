@@ -6,6 +6,9 @@ from .base_driver import BasePLCDriver
 from .mock_driver import MockPLCDriver
 from .real_driver import RealPLCDriver
 from .. import config
+from .logger_service import logger_service
+from .config_manager import config_manager
+from .status_service import StatusEvaluator
 
 class PLCService:
     def __init__(self, use_mock: bool = True):
@@ -22,7 +25,10 @@ class PLCService:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.lock = threading.Lock()
+        self.interval_lock = threading.Lock()
         self.last_update: Optional[float] = None
+        self.interval_sec = float(config.INTERVAL_SEC)
+        self.status_evaluator = StatusEvaluator()
         
         # Global State (Thread Safe?)
         self.current_data: FactoryData = FactoryData(
@@ -46,20 +52,48 @@ class PLCService:
         if self.thread:
             self.thread.join(timeout=1.0)
         self.driver.close()
+
+    def apply_interval(self, interval_sec: float) -> float:
+        # Policy: interval is fixed at config.INTERVAL_SEC (0.2s).
+        fixed = float(config.INTERVAL_SEC)
+        with self.interval_lock:
+            self.interval_sec = fixed
+        return fixed
+
+    def apply_connection_config(self) -> bool:
+        try:
+            if hasattr(self.driver, "apply_connection_config"):
+                self.driver.apply_connection_config()
+            return True
+        except Exception:
+            return False
         
     def _loop(self):
         while self.running:
             try:
                 # 1. Read from Driver
                 new_data = self.driver.read_data()
+                snapshot = config_manager.get_snapshot()
+                values = snapshot.get("values", {})
+                thresholds_cfg = values.get("thresholds", {})
+                logging_cfg = values.get("logging", {})
+                press_threshold = logging_cfg.get(
+                    "cycle_threshold_press", config.DEFAULT_CYCLE_THRESHOLD_PRESS
+                )
+                computed = self.status_evaluator.evaluate(new_data, thresholds_cfg, float(press_threshold))
+                new_data = new_data.model_copy(update={"Computed": computed})
                 
                 # 2. Update State
                 with self.lock:
                     self.current_data = new_data
                     self.last_update = time.time()
+
+                logger_service.enqueue(new_data)
                     
                 # 3. Rate Limit (fixed at 0.2s)
-                time.sleep(config.INTERVAL_SEC)
+                with self.interval_lock:
+                    interval = self.interval_sec
+                time.sleep(interval)
                 
             except Exception as e:
                 print(f"[PLCService] Error: {e}")
@@ -72,12 +106,18 @@ class PLCService:
     def get_health(self) -> Dict[str, Any]:
         with self.lock:
             last_update = self.last_update
+        comm_metrics: Dict[str, Any] = {}
+        try:
+            comm_metrics = self.driver.get_comm_metrics()
+        except Exception:
+            comm_metrics = {}
         return {
             "running": self.running,
             "thread_alive": self.thread.is_alive() if self.thread else False,
             "last_update": last_update,
             "driver_connected": getattr(self.driver, "connected", False),
             "mode": self.mode,
+            "comm": comm_metrics,
         }
 
 # Singleton Instance (Initialized by main.py)

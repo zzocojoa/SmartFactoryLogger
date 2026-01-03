@@ -28,3 +28,6 @@ class BasePLCDriver(ABC):
     def close(self):
         """Close connection."""
         pass
+
+    def get_comm_metrics(self) -> dict:
+        return {}

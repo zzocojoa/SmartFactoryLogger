@@ -26,8 +26,8 @@
 - 대비는 5~8% 수준으로 낮게 적용.
 
 ### 2.4 배치 저장/복원
-- onLayoutChange로 layouts 저장.
-- 저장 위치: localStorage 또는 서버.
+- onLayoutChange로 layouts 캐시 후 저장 버튼에서 서버/파일 저장.
+- 저장 위치: 서버/파일(`layout.json`).
 - 재접속 시 마지막 배치 복원.
 - 기본 레이아웃 복원 버튼 제공.
 

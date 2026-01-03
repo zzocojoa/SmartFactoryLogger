@@ -6,106 +6,24 @@ import {
 import { ReactWidget } from './ReactWidgetObject';
 import React from 'react';
 
-type SavedLayoutItem = {
+export type SavedLayoutItem = {
   x?: number;
   y?: number;
   width?: number;
   height?: number;
 };
 
-type SavedLayoutMap = Record<string, SavedLayoutItem>;
+export type SavedLayoutMap = Record<string, SavedLayoutItem>;
 
-const GRID_COLUMNS = 60;
-const LEGACY_GRID_COLUMNS = 24;
-const GRID_SCALE = GRID_COLUMNS / LEGACY_GRID_COLUMNS;
-const LAYOUT_STORAGE_KEY = 'grafana_scene_layout_v1';
-const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
-const LAYOUT_BACKUP_KEY = 'grafana_scene_layout_v1_backup';
-
-const scaleLayoutMap = (layout: SavedLayoutMap, scale: number): SavedLayoutMap => {
-  const scaled: SavedLayoutMap = {};
-  Object.entries(layout).forEach(([key, item]) => {
-    if (!item) {
-      return;
-    }
-    scaled[key] = {
-      ...item,
-      x: item.x === undefined ? item.x : Math.max(0, Math.round(item.x * scale)),
-      width: item.width === undefined ? item.width : Math.max(1, Math.round(item.width * scale)),
-    };
-  });
-  return scaled;
-};
-
-const getLayoutMaxExtent = (layout: SavedLayoutMap): number => {
-  let maxExtent = 0;
-  Object.values(layout).forEach((item) => {
-    if (!item) {
-      return;
-    }
-    const x = item.x ?? 0;
-    const width = item.width ?? 0;
-    if (x + width > maxExtent) {
-      maxExtent = x + width;
-    }
-  });
-  return maxExtent;
-};
-
-const normalizeSavedLayout = (layout: SavedLayoutMap): SavedLayoutMap => {
-  const rawCols = localStorage.getItem(LAYOUT_COLS_KEY);
-  const savedCols = rawCols ? Number(rawCols) : Number.NaN;
-  const maxExtent = getLayoutMaxExtent(layout);
-  const isLegacy = maxExtent > 0 && maxExtent <= LEGACY_GRID_COLUMNS;
-
-  if (savedCols === GRID_COLUMNS) {
-    return layout;
-  }
-
-  if (savedCols === LEGACY_GRID_COLUMNS || (!Number.isFinite(savedCols) && isLegacy)) {
-    if (!localStorage.getItem(LAYOUT_BACKUP_KEY)) {
-      localStorage.setItem(LAYOUT_BACKUP_KEY, JSON.stringify(layout));
-    }
-    const scaled = scaleLayoutMap(layout, GRID_SCALE);
-    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(scaled));
-    localStorage.setItem(LAYOUT_COLS_KEY, String(GRID_COLUMNS));
-    return scaled;
-  }
-
-  if (!Number.isFinite(savedCols) && maxExtent > 0) {
-    localStorage.setItem(LAYOUT_COLS_KEY, String(GRID_COLUMNS));
-  }
-
-  return layout;
-};
-
-const loadSavedLayout = (defaults: Array<{ key: string }>): SavedLayoutMap => {
-  const savedLayoutJson = localStorage.getItem(LAYOUT_STORAGE_KEY);
-  if (!savedLayoutJson) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(savedLayoutJson) as SavedLayoutMap | SavedLayoutItem[];
-    if (Array.isArray(parsed)) {
-      const legacyMap: SavedLayoutMap = {};
-      defaults.forEach((item, index) => {
-        if (parsed[index]) {
-          legacyMap[item.key] = parsed[index];
-        }
-      });
-      return normalizeSavedLayout(legacyMap);
-    }
-
-    if (parsed && typeof parsed === 'object') {
-      return normalizeSavedLayout(parsed as SavedLayoutMap);
-    }
-  } catch (e) {
-    console.error('Failed to parse saved layout', e);
-  }
-
-  return {};
-};
+export const DASHBOARD_LAYOUT_KEYS = [
+  'kpi',
+  'spot',
+  'temps',
+  'camera',
+  'molds',
+  'env',
+  'notice',
+] as const;
 
 export function getDashboardScene(
   renderKpi: () => React.ReactNode,
@@ -114,7 +32,8 @@ export function getDashboardScene(
   renderMolds: () => React.ReactNode,
   renderEnv: () => React.ReactNode,
   renderCamera: () => React.ReactNode,
-  renderNotice: () => React.ReactNode
+  renderNotice: () => React.ReactNode,
+  savedLayout?: SavedLayoutMap | null
 ) {
   const defaultChildren = [
     { key: 'kpi', x: 0, y: 0, width: 15, height: 18, body: new ReactWidget({ title: '공정 KPI', renderWidget: renderKpi }) },
@@ -126,11 +45,11 @@ export function getDashboardScene(
     { key: 'notice', x: 40, y: 12, width: 20, height: 6, body: new ReactWidget({ title: '작업자 확인', renderWidget: renderNotice }) },
   ];
 
-  const savedLayout = loadSavedLayout(defaultChildren);
+  const savedMap = savedLayout ?? {};
 
   // Merge saved layout
   const children = defaultChildren.map((item) => {
-    const saved = savedLayout[item.key];
+    const saved = savedMap[item.key];
     if (saved) {
       return new SceneGridItem({
         ...item,
