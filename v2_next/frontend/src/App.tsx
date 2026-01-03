@@ -17,8 +17,13 @@ import {
   SPOT_UNIT,
 } from './constants/uiText';
 
+// Initialize Scenes Runtime (guarded for HMR)
 if (typeof window !== 'undefined') {
-  // Ensure Grafana runtime is ready before Scenes are created.
+  if (!(window as any).__SCENES_INIT__) {
+    initScenesRuntime();
+    (window as any).__SCENES_INIT__ = true;
+  }
+} else {
   initScenesRuntime();
 }
 
@@ -550,13 +555,28 @@ const normalizeLayoutMap = (layout: LayoutMap, colsValue?: string | number | nul
 
 const buildLayoutMap = (children: SceneGridItemLike[]): LayoutMap => {
   const next: LayoutMap = {};
+  // Scale from 24-col scene to 60-col user grid
+  const SCENE_TO_USER = 60 / 24;
+
   children.forEach((child) => {
-    const key = child.state.key;
-    const { x, y, width, height } = child.state;
-    if (!key || x === undefined || y === undefined || width === undefined || height === undefined) {
-      return;
-    }
-    next[key] = { x, y, width, height };
+    const state = child.state as any;
+    if (!state) return;
+    
+    const key = state.key;
+    if (!key) return;
+
+    // Use safe defaults and round for integer coordinates
+    const sx = state.x ?? 0;
+    const sy = state.y ?? 0;
+    const sw = state.width ?? 1;
+    const sh = state.height ?? 1;
+
+    next[key] = {
+      x: Math.round(sx * SCENE_TO_USER),
+      y: sy,
+      width: Math.round(sw * SCENE_TO_USER),
+      height: sh,
+    };
   });
   return next;
 };
@@ -2565,6 +2585,7 @@ function App() {
     try {
       const res = await axios.post<ConfigUpdateResponse>(`${API_BASE}/api/config`, payload);
       const applyInfo = res.data?.apply ?? null;
+      const nextMeta = res.data?.meta ?? null;
       const pendingCount = applyInfo?.pending?.length ?? 0;
       const appliedCount = applyInfo?.applied?.length ?? 0;
       if (pendingCount > 0) {
@@ -2577,6 +2598,9 @@ function App() {
       setSettingsRestartRequired(Boolean(res.data?.restart_required));
       setSettingsApplyResult(applyInfo);
       setSettingsPending(null);
+      if (nextMeta) {
+        setOverrideMeta(nextMeta);
+      }
       setSettingsBaseline({
         ...settingsForm,
         password: '',
@@ -2883,8 +2907,9 @@ function App() {
         const res = await axios.post(`${API_BASE}/api/control/path-health`, { paths: payload });
         const results = res.data?.results ?? {};
         const merged: PathHealthState = { ...localResults };
-        Object.entries(results).forEach(([key, value]) => {
+        Object.entries(results).forEach(([key, val]) => {
           if (key === 'log' || key === 'snapshot') {
+            const value = val as PathHealthResult;
             merged[key] = {
               status: value.status ?? 'UNKNOWN',
               exists: Boolean(value.exists),
@@ -3115,7 +3140,7 @@ function App() {
         result[sectionId] = hasSettingsChanges;
         return;
       }
-      result[sectionId] = fields.some((field) => isSettingsFieldDirty(field));
+      result[sectionId] = fields.some((field) => isSettingsFieldDirty(field as keyof SettingsFormState));
     });
     return result;
   }, [settingsSectionFieldMap, isSettingsFieldDirty, hasSettingsChanges]);
@@ -3128,6 +3153,7 @@ function App() {
     const pendingCount = settingsApplyResult?.pending?.length ?? 0;
     const applyStatus =
       pendingCount > 0 ? '재시작 필요' : appliedCount > 0 ? '즉시 반영' : '저장 전';
+    const lastSavedText = formatMetaTime(overrideMeta?.last_sync);
     return [
       {
         title: '통신 요약',
@@ -3155,11 +3181,12 @@ function App() {
         items: [
           `즉시 적용: ${appliedCount}건`,
           `재시작 필요: ${pendingCount}건`,
+          `최근 저장: ${lastSavedText}`,
           `상태: ${applyStatus}`,
         ],
       },
     ];
-  }, [settingsForm, settingsApplyResult]);
+  }, [settingsForm, settingsApplyResult, overrideMeta]);
   const registerSettingsSection = useCallback(
     (id: string) => (element: HTMLDivElement | null) => {
       settingsSectionRefs.current[id] = element;
@@ -3415,24 +3442,7 @@ function App() {
     }
     const grid = scene.state.body;
     if (grid instanceof SceneGridLayout) {
-      // layoutRef.current = buildLayoutMap(grid.state.children);
-      // Inline implementation to support 24->60 scaling
-      const SCENE_TO_USER = 60 / 24;
-      const nextLayout: LayoutMap = {};
-      grid.state.children.forEach((child) => {
-        if (!child.state) return;
-        const key = child.state.key;
-        if (!key) return;
-        
-        // Scale from 24-col scene to 60-col user grid
-        nextLayout[key] = {
-           x: Math.round((child.state.x ?? 0) * SCENE_TO_USER),
-           y: child.state.y ?? 0,
-           width: Math.round((child.state.width ?? 1) * SCENE_TO_USER),
-           height: child.state.height ?? 1,
-        };
-      });
-      layoutRef.current = nextLayout;
+      layoutRef.current = buildLayoutMap(grid.state.children);
     }
     if (Object.keys(layoutRef.current).length === 0) {
       setLayoutSaveError('레이아웃 정보를 찾을 수 없습니다.');
@@ -3444,6 +3454,7 @@ function App() {
     const name = window.prompt('레이아웃 이름을 입력하세요', defaultName);
     if (!name) {
       setLayoutSaveError('저장 취소');
+      pushNotification('레이아웃 저장', '저장이 취소되었습니다.', 'warn');
       return;
     }
     try {
@@ -3456,6 +3467,7 @@ function App() {
       await loadLayoutSnapshot();
       setLayoutSaveError(null);
       setLayoutSaveMessage('저장됨');
+      pushNotification('레이아웃 저장', `저장 완료: ${name}`, 'info');
     } catch (error) {
       console.error('Layout save failed', error);
       const message =
@@ -3463,6 +3475,7 @@ function App() {
           ? '레이아웃은 최대 3개까지 저장할 수 있습니다.'
           : '저장 실패';
       setLayoutSaveError(message);
+      pushNotification('레이아웃 저장 실패', message, 'error');
       return;
     }
     if (saveMessageTimerRef.current !== null) {
@@ -5119,7 +5132,12 @@ function App() {
                       id="settings-security"
                       ref={registerSettingsSection('settings-security')}
                     >
-                      <div className="settings-section-title">보안</div>
+                      <div className="settings-section-title">
+                        <span>보안</span>
+                        <span className={`settings-test-badge ${settingsForm.passwordSet ? 'ok' : 'warn'}`}>
+                          {settingsForm.passwordSet ? '설정됨' : '미설정'}
+                        </span>
+                      </div>
                       <div className="settings-grid">
                         <label className={`settings-field ${isSettingsFieldDirty('password') ? 'changed' : ''}`}>
                           설정 비밀번호
@@ -5159,7 +5177,7 @@ function App() {
                 </button>
                 <button
                   className="settings-action secondary"
-                  onClick={handleRestoreBackup}
+                  onClick={() => handleRestoreBackup()}
                   disabled={settingsLoading || configReadOnly || !overrideEnabled}
                   aria-disabled={settingsLoading || configReadOnly || !overrideEnabled}
                 >
@@ -5302,7 +5320,7 @@ const KpiComponent = () => {
           </div>
         </div>
         <div className="kpi-value-row">
-          <span className="kpi-value">{formatNumber(data.Speed, 1)}</span>
+          <span className="kpi-value">{formatNumber(data.Speed ?? NaN, 1)}</span>
           <span className="kpi-unit">mm/s</span>
         </div>
         <div className="kpi-bar">
@@ -5319,7 +5337,7 @@ const KpiComponent = () => {
           </div>
         </div>
         <div className="kpi-value-row">
-          <span className="kpi-value">{formatNumber(data.Press, 1)}</span>
+          <span className="kpi-value">{formatNumber(data.Press ?? NaN, 1)}</span>
           <span className="kpi-unit">bar</span>
         </div>
         <div className="kpi-bar">
@@ -5333,7 +5351,7 @@ const KpiComponent = () => {
             <span className="kpi-mini-label">카운트</span>
             {countThresholdHit && <span className="threshold-badge">임계</span>}
           </div>
-          <span className="kpi-mini-value">{formatInteger(data.Count)}</span>
+          <span className="kpi-mini-value">{formatInteger(data.Count ?? 0)}</span>
         </div>
         <div className={`kpi-mini ${endPosThresholdHit ? 'kpi-mini-threshold' : ''}`}>
           <div className="kpi-mini-header">
@@ -5341,7 +5359,7 @@ const KpiComponent = () => {
             {endPosThresholdHit && <span className="threshold-badge">임계</span>}
           </div>
           <div className="kpi-mini-value-row">
-            <span className="kpi-mini-value">{formatNumber(data.EndPos, 1)}</span>
+            <span className="kpi-mini-value">{formatNumber(data.EndPos ?? NaN, 1)}</span>
             <span className="kpi-mini-unit">mm</span>
           </div>
         </div>
@@ -5548,7 +5566,7 @@ const TempsComponent = () => {
               {tempFThresholdHit && <span className="threshold-badge">임계</span>}
             </div>
             <div className="temp-value-row">
-              <span className="temp-value">{formatNumber(data.Temp_F, 1)}</span>
+              <span className="temp-value">{formatNumber(data.Temp_F ?? NaN, 1)}</span>
               <span className="temp-unit">{SPOT_UNIT}</span>
             </div>
           </div>
@@ -5558,7 +5576,7 @@ const TempsComponent = () => {
               {tempBThresholdHit && <span className="threshold-badge">임계</span>}
             </div>
             <div className="temp-value-row">
-              <span className="temp-value">{formatNumber(data.Temp_B, 1)}</span>
+              <span className="temp-value">{formatNumber(data.Temp_B ?? NaN, 1)}</span>
               <span className="temp-unit">{SPOT_UNIT}</span>
             </div>
           </div>
@@ -5568,7 +5586,7 @@ const TempsComponent = () => {
               {billetTempThresholdHit && <span className="threshold-badge">임계</span>}
             </div>
             <div className="temp-value-row">
-              <span className="temp-value">{formatNumber(data.Billet_Temp, 1)}</span>
+              <span className="temp-value">{formatNumber(data.Billet_Temp ?? NaN, 1)}</span>
               <span className="temp-unit">{SPOT_UNIT}</span>
             </div>
           </div>
@@ -5578,7 +5596,7 @@ const TempsComponent = () => {
               {billetLengthThresholdHit && <span className="threshold-badge">임계</span>}
             </div>
             <div className="temp-value-row">
-              <span className="temp-value">{formatNumber(data.Billet_Length, 1)}</span>
+              <span className="temp-value">{formatNumber(data.Billet_Length ?? NaN, 1)}</span>
               <span className="temp-unit">mm</span>
             </div>
           </div>
@@ -5614,27 +5632,27 @@ const MoldsComponent = () => {
         <div className="mold-grid">
             <div className={`mold-tile ${mold1}`}>
             <span className="mold-label">Mold 1</span>
-            <span className="mold-value">{formatNumber(data.Mold1, 1)}</span>
+            <span className="mold-value">{formatNumber(data.Mold1 ?? NaN, 1)}</span>
           </div>
             <div className={`mold-tile ${mold2}`}>
             <span className="mold-label">Mold 2</span>
-            <span className="mold-value">{formatNumber(data.Mold2, 1)}</span>
+            <span className="mold-value">{formatNumber(data.Mold2 ?? NaN, 1)}</span>
           </div>
             <div className={`mold-tile ${mold3}`}>
             <span className="mold-label">Mold 3</span>
-            <span className="mold-value">{formatNumber(data.Mold3, 1)}</span>
+            <span className="mold-value">{formatNumber(data.Mold3 ?? NaN, 1)}</span>
           </div>
             <div className={`mold-tile ${mold4}`}>
             <span className="mold-label">Mold 4</span>
-            <span className="mold-value">{formatNumber(data.Mold4, 1)}</span>
+            <span className="mold-value">{formatNumber(data.Mold4 ?? NaN, 1)}</span>
           </div>
             <div className={`mold-tile ${mold5}`}>
             <span className="mold-label">Mold 5</span>
-            <span className="mold-value">{formatNumber(data.Mold5, 1)}</span>
+            <span className="mold-value">{formatNumber(data.Mold5 ?? NaN, 1)}</span>
           </div>
             <div className={`mold-tile ${mold6}`}>
             <span className="mold-label">Mold 6</span>
-            <span className="mold-value">{formatNumber(data.Mold6, 1)}</span>
+            <span className="mold-value">{formatNumber(data.Mold6 ?? NaN, 1)}</span>
           </div>
         </div>
         {missing && (
@@ -5671,7 +5689,7 @@ const EnvComponent = () => {
               {tempThresholdHit && <span className="threshold-badge">임계</span>}
             </div>
             <div className="env-value-row">
-              <span className="env-value">{formatNumber(tempDisplay, 1)}</span>
+              <span className="env-value">{formatNumber(tempDisplay ?? NaN, 1)}</span>
               <span className="env-unit">{SPOT_UNIT}</span>
             </div>
             <span className={`env-badge ${tempState.className}`}>{tempState.label}</span>
@@ -5682,7 +5700,7 @@ const EnvComponent = () => {
               {humidityThresholdHit && <span className="threshold-badge">임계</span>}
             </div>
             <div className="env-value-row">
-              <span className="env-value">{formatNumber(humidityDisplay, 1)}</span>
+              <span className="env-value">{formatNumber(humidityDisplay ?? NaN, 1)}</span>
               <span className="env-unit">%</span>
             </div>
             <span className={`env-badge ${humidityState.className}`}>{humidityState.label}</span>
