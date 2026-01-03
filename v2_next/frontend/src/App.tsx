@@ -2437,6 +2437,8 @@ function App() {
     showSettingsToast,
   ]);
 
+
+
   const handleSaveSettings = async () => {
     if (!settingsForm) {
       return;
@@ -3275,31 +3277,34 @@ function App() {
       return;
     }
     const updateActiveSection = () => {
-      const containerTop = container.getBoundingClientRect().top;
-      const topOffset = containerTop + 140;
+      const containerRect = container.getBoundingClientRect();
+      const triggerY = 100; // Adjusted visual trigger point
       let currentId = settingsSections[0]?.id ?? '';
+
       settingsSections.forEach(({ id }) => {
         const section = settingsSectionRefs.current[id];
-        if (!section) {
-          return;
-        }
+        if (!section) return;
+        
         const rect = section.getBoundingClientRect();
-        if (rect.top <= topOffset) {
+        const relativeTop = rect.top - containerRect.top;
+        
+        if (relativeTop <= triggerY) {
           currentId = id;
         }
       });
+      
       if (currentId) {
         setActiveSettingsSection((prev) => (prev !== currentId ? currentId : prev));
       }
     };
     updateActiveSection();
-    container.addEventListener('scroll', updateActiveSection);
+    container.addEventListener('scroll', updateActiveSection, { passive: true });
     window.addEventListener('resize', updateActiveSection);
     return () => {
       container.removeEventListener('scroll', updateActiveSection);
       window.removeEventListener('resize', updateActiveSection);
     };
-  }, [settingsOpen, settingsSections]);
+  }, [settingsOpen, settingsSections, settingsForm]);
 
 
   useEffect(() => {
@@ -3355,6 +3360,7 @@ function App() {
       await axios.post(`${API_BASE}/api/spot/focus`, null, { params: { steps } });
     } catch (err) {
       console.error('SPOT focus error', err);
+      pushNotification('초점 조절 실패', 'SPOT 액추에이터 제어 중 오류가 발생했습니다.', 'error');
     } finally {
       setFocusBusy(false);
     }
@@ -3909,7 +3915,7 @@ function App() {
       </div>
       {settingsOpen && (
         <div className="settings-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div className="settings-modal" onClick={(event) => event.stopPropagation()} ref={settingsScrollRef}>
+          <div className="settings-modal" onClick={(event) => event.stopPropagation()}>
             <div className="settings-header">
               <span>설정</span>
               <button className="settings-close" onClick={() => setSettingsOpen(false)}>
@@ -3985,58 +3991,61 @@ function App() {
                 </div>
               </div>
             )}
-            {settingsForm && (
-              <div className="settings-body">
-                <div className="settings-nav-select">
-                  <label>
-                    섹션 선택
-                    <select
-                      value={activeSettingsSection}
-                      onChange={(event) => scrollToSettingsSection(event.target.value)}
-                    >
-                      {settingsSections.map((section) => (
-                        <option key={section.id} value={section.id}>
-                          {section.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="settings-nav">
-                  <span className="settings-nav-title">섹션</span>
-                  {settingsSections.map((section) => (
-                    <button
-                      key={section.id}
-                      type="button"
-                      className={`settings-nav-item ${activeSettingsSection === section.id ? 'active' : ''}`}
-                      onClick={() => scrollToSettingsSection(section.id)}
-                      aria-current={activeSettingsSection === section.id}
-                    >
-                      <span>{section.label}</span>
-                      {settingsSectionHasChanges[section.id] && <span className="settings-nav-dot" />}
-                    </button>
-                  ))}
-                </div>
-                <div className="settings-content">
-                  <div className="settings-form">
-                    <div
-                      className="settings-section settings-summary"
-                      id="settings-summary"
-                      ref={registerSettingsSection('settings-summary')}
-                    >
-                      <div className="settings-section-title">요약</div>
-                      <div className="settings-summary-grid">
-                        {buildSettingsSummaryCards().map((card) => (
-                          <div key={card.title} className="settings-summary-card">
-                            <div className="settings-summary-title">{card.title}</div>
-                            <ul className="settings-summary-list">
-                              {card.items.map((item) => (
-                                <li key={item}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ))}
-                      </div>
+            {settingsForm && (<>
+                  <div className="settings-content-wrapper">
+                  <div className="settings-nav">
+                    <span className="settings-nav-title">Menu</span>
+                    {settingsSections.map((section) => (
+                      <button
+                        key={section.id}
+                        type="button"
+                        className={`settings-nav-item ${activeSettingsSection === section.id ? 'active' : ''}`}
+                        onClick={() => scrollToSettingsSection(section.id)}
+                        aria-current={activeSettingsSection === section.id}
+                      >
+                        <span>{section.label}</span>
+                        {settingsSectionHasChanges[section.id] && <span className="settings-nav-dot" />}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="settings-content" ref={settingsScrollRef}>
+                    <div className="settings-form">
+                      {/* Summary Section */}
+                      <div
+                        className="settings-section settings-summary"
+                        id="settings-summary"
+                        ref={registerSettingsSection('settings-summary')}
+                      >
+                        <div className="settings-section-title">요약 정보</div>
+                        <div className="settings-summary-grid">
+                          {buildSettingsSummaryCards()
+                            .sort((a, b) => {
+                              const order = ['통신 요약', '저장 요약', 'SPOT 요약'];
+                              const ia = order.indexOf(a.title);
+                              const ib = order.indexOf(b.title);
+                              // Put known items first in order, unknowns last
+                              if (ia === -1 && ib === -1) return 0;
+                              if (ia === -1) return 1;
+                              if (ib === -1) return -1;
+                              return ia - ib;
+                            })
+                            .map((card) => {
+                            const isWide = ['통신 요약', '저장 요약'].includes(card.title);
+                            return (
+                              <div key={card.title} className={`settings-summary-card ${isWide ? 'wide' : ''}`}>
+                              <div className="settings-summary-title">{card.title}</div>
+                              <ul className="settings-summary-list">
+                                {card.items.map((item) => (
+                                  <li key={item}>
+                                    <div className="settings-summary-value" title={item}>
+                                      {item}
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ); })}
+                        </div>
                       <div className="settings-apply-details">
                         <div className="settings-apply-title">적용 상세</div>
                         <div className="settings-apply-grid">
@@ -5129,7 +5138,6 @@ function App() {
                   </div>
                 </div>
               </div>
-            )}
             <div className="settings-footer">
               <span className="settings-footer-note">
                 {configReadOnly
@@ -5184,6 +5192,8 @@ function App() {
                 </button>
               </div>
             </div>
+            </>
+            )}
           </div>
         </div>
       )}
