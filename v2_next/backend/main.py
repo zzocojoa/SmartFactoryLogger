@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import atexit
@@ -1201,6 +1203,26 @@ def shutdown(payload: ShutdownRequest):
 
     threading.Thread(target=_shutdown, daemon=True).start()
     return {"ok": True}
+
+# --- Static File Serving (Frontend) ---
+# Must be defined last to avoid overriding API routes
+frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+
+if frontend_dist.exists():
+    # Mount assets folder explicitly
+    assets_dir = frontend_dist / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    # Catch-all for SPA routing (serve index.html for unknown paths)
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # Check if specific file exists (e.g. favicon.ico, manifestation.json)
+        file_path = frontend_dist / full_path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
+        # Fallback to index.html for client-side routing
+        return FileResponse(frontend_dist / "index.html")
 
 if __name__ == "__main__":
     uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=False)

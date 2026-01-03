@@ -253,14 +253,47 @@ body {
   border: 1px solid #3a3f46;
   border-radius: 6px;
   padding: 4px 8px;
-  font-size: 0.75rem;
+  font-size: 0.75rem; /* ~12px */
   font-weight: 600;
   cursor: pointer;
+  min-width: 50px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
 }
 
 .status-action:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.status-action:hover {
+  background: #323842;
+  border-color: #555;
+}
+
+.status-action.active {
+  background: rgba(78, 201, 176, 0.15);
+  border-color: rgba(78, 201, 176, 0.5);
+  color: var(--state-ok);
+}
+
+.status-action.warn {
+  background: rgba(242, 201, 76, 0.4) !important;
+  border-color: rgba(242, 201, 76, 1.0) !important;
+  color: var(--state-warn) !important;
+  font-weight: 800 !important;
+  box-shadow: 0 0 8px rgba(242, 201, 76, 0.4);
+}
+
+.status-action.warn:hover {
+    background: rgba(242, 201, 76, 0.5) !important;
+}
+
+.status-action.warn:hover {
+    background: rgba(242, 201, 76, 0.25) !important;
 }
 
 .notify-bell {
@@ -799,7 +832,7 @@ body {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 16px;
-  padding: 24px;
+  padding: 10px;
 }
 
 .settings-grid {
@@ -3462,4 +3495,37 @@ body {
 }
 .settings-sync-item:first-child::before {
   display: none;
+}
+
+/* Time Series Control Group */
+.series-group {
+    display: flex;
+    gap: 2px;
+    background: #2b2f36;
+    border-radius: 6px;
+    padding: 2px;
+    border: 1px solid #3a3f46;
+    align-items: center;
+}
+
+.series-group button {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 4px;
+    margin: 0;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.series-group button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.series-group button.active {
+    background: #4a515c;
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }

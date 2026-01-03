@@ -14,10 +14,21 @@ from .observability_service import observability_service
 class PLCService:
     def __init__(self, use_mock: bool = True):
         # Select Driver based on flag
+        # Select Driver based on flag
         if use_mock:
-            print("[PLCService] Mode: MOCK (Simulation)")
-            self.driver: BasePLCDriver = MockPLCDriver()
-            self.mode = "MOCK"
+            # Check environment for CSV Mode
+            import os
+            mode_env = os.getenv("V2_MODE", "MOCK").upper()
+            if mode_env == "CSV":
+                print("[PLCService] Mode: CSV (Replay)")
+                from .csv_driver import CsvReplayDriver
+                csv_path = os.getenv("V2_CSV_PATH", "data.csv")
+                self.driver: BasePLCDriver = CsvReplayDriver(csv_path)
+                self.mode = "CSV"
+            else:
+                print("[PLCService] Mode: MOCK (Simulation)")
+                self.driver: BasePLCDriver = MockPLCDriver()
+                self.mode = "MOCK"
         else:
             print("[PLCService] Mode: REAL (Hardware Connection)")
             self.driver: BasePLCDriver = RealPLCDriver()
@@ -74,6 +85,7 @@ class PLCService:
             try:
                 # 1. Read from Driver
                 new_data = self.driver.read_data()
+                
                 snapshot = config_manager.get_snapshot()
                 values = snapshot.get("values", {})
                 thresholds_cfg = values.get("thresholds", {})

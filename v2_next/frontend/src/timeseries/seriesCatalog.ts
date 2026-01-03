@@ -1,0 +1,212 @@
+import { FactoryData } from '../types';
+
+export type TimeSeriesKey = Exclude<
+  keyof FactoryData,
+  'Time' | 'Status' | 'Computed' | 'Die_ID' | 'Billet_Cycle_ID'
+>;
+
+export type SeriesSource = 'SPOT' | 'Extruder' | 'LS_PLC';
+export type SeriesAxisGroup = 'process' | 'temperature' | 'environment';
+export type SeriesUnit = 'C' | 'bar' | 'mm/s' | 'mm' | '%' | 'ea';
+
+export type TimeSeriesMeta = {
+  key: TimeSeriesKey;
+  label: string;
+  source: SeriesSource;
+  axis: SeriesAxisGroup;
+  group: SeriesAxisGroup;
+  unit: SeriesUnit;
+  visibleByDefault: boolean;
+  decimals?: number;
+  legacyKey?: string;
+};
+
+export const TIME_SERIES_CATALOG: TimeSeriesMeta[] = [
+  {
+    key: 'Spot',
+    label: 'SPOT 온도',
+    source: 'SPOT',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: true,
+    decimals: 1,
+    legacyKey: 'Temperature',
+  },
+  {
+    key: 'Press',
+    label: '메인 압력',
+    source: 'Extruder',
+    axis: 'process',
+    group: 'process',
+    unit: 'bar',
+    visibleByDefault: true,
+    decimals: 1,
+    legacyKey: 'Press',
+  },
+  {
+    key: 'Temp_F',
+    label: '컨테이너 온도(앞)',
+    source: 'Extruder',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Temp_F',
+  },
+  {
+    key: 'Temp_B',
+    label: '컨테이너 온도(뒤)',
+    source: 'Extruder',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Temp_B',
+  },
+  {
+    key: 'Speed',
+    label: '압출 속도',
+    source: 'Extruder',
+    axis: 'process',
+    group: 'process',
+    unit: 'mm/s',
+    visibleByDefault: true,
+    decimals: 1,
+    legacyKey: 'Speed',
+  },
+  {
+    key: 'EndPos',
+    label: '압출 종료 위치',
+    source: 'Extruder',
+    axis: 'process',
+    group: 'process',
+    unit: 'mm',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'EndPos',
+  },
+  {
+    key: 'Count',
+    label: '생산 카운트',
+    source: 'Extruder',
+    axis: 'process',
+    group: 'process',
+    unit: 'ea',
+    visibleByDefault: true,
+    decimals: 0,
+    legacyKey: 'Count',
+  },
+  {
+    key: 'Billet_Length',
+    label: '빌렛 길이',
+    source: 'Extruder',
+    axis: 'process',
+    group: 'process',
+    unit: 'mm',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Billet',
+  },
+  {
+    key: 'Mold1',
+    label: '몰드 온도 1',
+    source: 'LS_PLC',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Mold1',
+  },
+  {
+    key: 'Mold2',
+    label: '몰드 온도 2',
+    source: 'LS_PLC',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Mold2',
+  },
+  {
+    key: 'Mold3',
+    label: '몰드 온도 3',
+    source: 'LS_PLC',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Mold3',
+  },
+  {
+    key: 'Mold4',
+    label: '몰드 온도 4',
+    source: 'LS_PLC',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Mold4',
+  },
+  {
+    key: 'Mold5',
+    label: '몰드 온도 5',
+    source: 'LS_PLC',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Mold5',
+  },
+  {
+    key: 'Mold6',
+    label: '몰드 온도 6',
+    source: 'LS_PLC',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Mold6',
+  },
+  {
+    key: 'Billet_Temp',
+    label: '빌렛 온도',
+    source: 'LS_PLC',
+    axis: 'temperature',
+    group: 'temperature',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'Billet_Temp',
+  },
+  {
+    key: 'At_Temp',
+    label: '환경 온도',
+    source: 'LS_PLC',
+    axis: 'environment',
+    group: 'environment',
+    unit: 'C',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'At_Temp',
+  },
+  {
+    key: 'At_Pre',
+    label: '환경 습도',
+    source: 'LS_PLC',
+    axis: 'environment',
+    group: 'environment',
+    unit: '%',
+    visibleByDefault: false,
+    decimals: 1,
+    legacyKey: 'At_Pre',
+  },
+];

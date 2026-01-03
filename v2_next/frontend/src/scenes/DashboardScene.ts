@@ -2,6 +2,8 @@ import {
   EmbeddedScene,
   SceneGridLayout,
   SceneGridItem,
+  PanelBuilders,
+  SceneDataNode,
 } from '@grafana/scenes';
 import { ReactWidget } from './ReactWidgetObject';
 import React from 'react';
@@ -23,6 +25,7 @@ export const DASHBOARD_LAYOUT_KEYS = [
   'molds',
   'env',
   'notice',
+  'timeseries',
 ] as const;
 
 export function getDashboardScene(
@@ -33,8 +36,16 @@ export function getDashboardScene(
   renderEnv: () => React.ReactNode,
   renderCamera: () => React.ReactNode,
   renderNotice: () => React.ReactNode,
+  renderTimeSeries: () => React.ReactNode,
   savedLayout?: SavedLayoutMap | null
 ) {
+  // Use ReactWidget instead of PanelBuilder
+  // This bypasses the need for the broken timeseries plugin
+  const timeSeriesPanel = new ReactWidget({
+     title: '타임 시리즈',
+     renderWidget: renderTimeSeries
+  });
+
   const defaultChildren = [
     { key: 'kpi', x: 0, y: 0, width: 15, height: 18, body: new ReactWidget({ title: '공정 KPI', renderWidget: renderKpi }) },
     { key: 'spot', x: 15, y: 0, width: 25, height: 4, body: new ReactWidget({ title: 'SPOT 온도', renderWidget: renderSpot }) },
@@ -43,6 +54,7 @@ export function getDashboardScene(
     { key: 'molds', x: 40, y: 0, width: 20, height: 8, body: new ReactWidget({ title: '몰드 존', renderWidget: renderMolds }) },
     { key: 'env', x: 40, y: 8, width: 20, height: 4, body: new ReactWidget({ title: '환경', renderWidget: renderEnv }) },
     { key: 'notice', x: 40, y: 12, width: 20, height: 6, body: new ReactWidget({ title: '작업자 확인', renderWidget: renderNotice }) },
+    { key: 'timeseries', x: 0, y: 18, width: 60, height: 8, body: timeSeriesPanel },
   ];
 
   const savedMap = savedLayout ?? {};

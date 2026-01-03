@@ -1,6 +1,7 @@
 ﻿# SmartFactoryLogger V2 (v2_next)
 
-이 문서는 v2_next 폴더를 현장 이식 PC로 복사(Z:)하여 실행하는 기본 절차를 정리합니다.
+이 문서는 v2_next 폴더를 현장 이식 PC로 복사(Z:)하여 실행하는 기본 절차를
+정리합니다.
 
 ## 1) Z: 드라이브로 복사
 
@@ -20,7 +21,8 @@ robocopy C:\Users\user\Documents\GitHub\SmartFactoryLogger\v2_next\frontend Z:\v
 ## 1-1) NAS(Z:) -> Desktop 복사 (이식 PC)
 
 Z: 드라이브가 NAS일 때는 **작은 파일이 많으면 복사가 매우 느립니다**.
-`node_modules` 등 불필요 폴더를 제외하고 Desktop으로 복사한 뒤, 필요한 의존성은 로컬에서 다시 설치하는 방식을 권장합니다.
+`node_modules` 등 불필요 폴더를 제외하고 Desktop으로 복사한 뒤, 필요한 의존성은
+로컬에서 다시 설치하는 방식을 권장합니다.
 
 ```powershell
 # 백엔드만 빠르게 복사
@@ -54,7 +56,8 @@ $env:V2_MODE="REAL"
 
 ## 3) 백엔드 실행 (이식 PC)
 
-반드시 `v2_next` 루트에서 실행해야 합니다. (`backend` 폴더 안에서 실행하면 import 오류가 발생합니다.)
+반드시 `v2_next` 루트에서 실행해야 합니다. (`backend` 폴더 안에서 실행하면
+import 오류가 발생합니다.)
 
 ```powershell
 # Z:에서 실행할 때
@@ -86,3 +89,5 @@ npm start
 
 - `config.ini`는 **이식 PC의 경로**를 사용해야 합니다.
 - SPOT 카메라/포커스 관련 값은 `[SPOT]` 섹션을 사용합니다.
+
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000

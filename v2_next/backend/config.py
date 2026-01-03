@@ -8,6 +8,10 @@ import shutil
 import sys
 import tempfile
 from typing import List, Tuple, Optional
+from dotenv import load_dotenv
+
+# Load .env file (if present)
+load_dotenv()
 
 # Fixed collection interval (policy: must stay at 0.2s)
 INTERVAL_SEC = 0.2

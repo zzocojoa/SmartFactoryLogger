@@ -4,9 +4,27 @@ import 'react-resizable/css/styles.css';
 import axios from 'axios';
 import { FactoryData, SpotConfig } from './types';
 import './App.css';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  ReferenceLine,
+} from 'recharts';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { DASHBOARD_LAYOUT_KEYS, getDashboardScene } from './scenes/DashboardScene';
-import { SceneGridItemLike, SceneGridLayout } from '@grafana/scenes';
+import { SceneDataNode, SceneGridItemLike, SceneGridLayout } from '@grafana/scenes';
+import html2canvas from 'html2canvas';
+import { buildSeriesSample } from './timeseries/seriesSampling';
+import { SeriesBuffer } from './timeseries/seriesBuffer';
+import { buildGroupedFrames, buildTimeSeriesFrame, SeriesFrame } from './timeseries/seriesDataFrames';
+import { TIME_SERIES_CATALOG } from './timeseries/seriesCatalog';
+import { buildPanelData } from './timeseries/seriesPanelData';
+import { buildSeriesThresholds } from './timeseries/seriesThresholds';
 import {
   APP_TITLE,
   NOTICE_BODY_PREFIX,
@@ -38,6 +56,10 @@ const LAYOUT_STORAGE_KEY = 'grafana_scene_layout_v1';
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LAYOUT_BACKUP_KEY = 'grafana_scene_layout_v1_backup';
 const LEGACY_LAYOUT_COLS = 24;
+const SERIES_WINDOW_MINUTES = 30;
+const SERIES_SAMPLES_PER_SEC = 5;
+const SERIES_WINDOW_MS = SERIES_WINDOW_MINUTES * 60 * 1000;
+const SERIES_MAX_POINTS = SERIES_WINDOW_MINUTES * 60 * SERIES_SAMPLES_PER_SEC;
 const CURRENT_LAYOUT_COLS = 60;
 const SPEED_MAX = 8;
 const PRESS_MAX = 180;
@@ -1278,6 +1300,8 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const seriesBufferRef = useRef(new SeriesBuffer(SERIES_WINDOW_MS, SERIES_MAX_POINTS));
+  const timeSeriesDataNode = useMemo(() => new SceneDataNode(), []);
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
   const [stats, setStats] = useState<StatsSnapshot | null>(null);
   const [observabilityErrors, setObservabilityErrors] = useState<ObservabilityErrorsResponse | null>(null);
@@ -1285,6 +1309,11 @@ function App() {
   const [lastExportPath, setLastExportPath] = useState<string | null>(null);
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
+  
+  // Time Series States
+  const [seriesWindowMin, setSeriesWindowMin] = useState(30);
+  const [seriesPaused, setSeriesPaused] = useState(false);
+  const [showThresholds, setShowThresholds] = useState(true);
   const [centralSyncBusy, setCentralSyncBusy] = useState(false);
   const [reconnectBusy, setReconnectBusy] = useState(false);
   const [diagnosisBusy, setDiagnosisBusy] = useState(false);
@@ -1302,6 +1331,9 @@ function App() {
   const [settingsConfigPath, setSettingsConfigPath] = useState<string | null>(null);
   const [configWritable, setConfigWritable] = useState<boolean | null>(null);
   const [thresholdConfig, setThresholdConfig] = useState<ThresholdState>(() => buildThresholdStateFromConfig());
+  const timeSeriesThresholds = useMemo(() => 
+    showThresholds ? buildSeriesThresholds(thresholdConfig) : undefined
+  , [thresholdConfig, showThresholds]);
   const [settingsRestartRequired, setSettingsRestartRequired] = useState(false);
   const [settingsApplyResult, setSettingsApplyResult] = useState<ConfigApplyResult | null>(null);
   const [settingsPending, setSettingsPending] = useState<ConfigSnapshot['pending'] | null>(null);
@@ -1338,7 +1370,7 @@ function App() {
   const [, setLayoutLoadError] = useState<string | null>(null);
   const [layoutSlots, setLayoutSlots] = useState<LayoutSlotSummary[]>([]);
   const [layoutActiveId, setLayoutActiveId] = useState<string | null>(null);
-
+  
   const spotHasImage = useRef(false);
   const saveMessageTimerRef = useRef<number | null>(null);
   const restoreMessageTimerRef = useRef<number | null>(null);
@@ -1731,9 +1763,11 @@ function App() {
       const start = performance.now();
       try {
         const res = await axios.get<FactoryData>(`${API_BASE}/api/data`);
+        const sampleTimestamp = Date.now();
         setData(res.data);
         setConnected(true);
-        setLastDataAt(Date.now());
+        setLastDataAt(sampleTimestamp);
+        seriesBufferRef.current.append(buildSeriesSample(res.data, sampleTimestamp));
         setLatencyMs(Math.round(performance.now() - start));
       } catch (err) {
         console.error('API Error', err);
@@ -1744,6 +1778,35 @@ function App() {
     const interval = setInterval(fetchData, 500);
     return () => clearInterval(interval);
   }, []);
+
+  const timeSeriesFrames = useMemo<Record<string, SeriesFrame> | null>(() => {
+    const samples = seriesBufferRef.current.getSamples();
+    if (!samples.length) {
+      return null;
+    }
+    return buildGroupedFrames(samples, TIME_SERIES_CATALOG, timeSeriesThresholds);
+  }, [data, timeSeriesThresholds]);
+
+  const timeSeriesAllFrame = useMemo<SeriesFrame | null>(() => {
+    const samples = seriesBufferRef.current.getSamples();
+    if (!samples.length) {
+      return null;
+    }
+    return buildTimeSeriesFrame(samples, TIME_SERIES_CATALOG, timeSeriesThresholds);
+  }, [data, timeSeriesThresholds]);
+
+  useEffect(() => {
+    if (!timeSeriesAllFrame) {
+      return;
+    }
+    if (seriesPaused) {
+      return;
+    }
+    const samples = seriesBufferRef.current.getSamples();
+    const windowMs = seriesWindowMin * 60 * 1000;
+    const panelData = buildPanelData(timeSeriesAllFrame, samples, windowMs);
+    timeSeriesDataNode.setState({ data: panelData });
+  }, [timeSeriesAllFrame, timeSeriesDataNode, seriesPaused, seriesWindowMin]);
 
   useEffect(() => {
     const tick = window.setInterval(() => setNowTick(Date.now()), 500);
@@ -1848,6 +1911,8 @@ function App() {
       setCentralSyncBusy(false);
     }
   };
+
+
 
   const handleReconnect = async () => {
     if (reconnectBusy) return;
@@ -1987,6 +2052,45 @@ function App() {
     },
     [notificationsOpen]
   );
+
+  const handleSnapshot = useCallback(async () => {
+    try {
+      pushNotification('스냅샷', '스냅샷 생성 중...', 'info');
+      const element = document.getElementById('root') || document.body;
+      const scrollHeight = document.documentElement.scrollHeight;
+      
+      const canvas = await html2canvas(element, {
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#1E1E1E',
+        imageTimeout: 5000,
+        height: scrollHeight,
+        windowHeight: scrollHeight,
+        scrollY: -window.scrollY, // Correct offset if scrolled
+      } as any);
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          pushNotification('스냅샷 실패', '이미지 생성 실패', 'error');
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.download = `SFL_Snapshot_${timestamp}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        pushNotification('스냅샷 저장', '화면을 저장했습니다.', 'info');
+      }, 'image/png');
+    } catch (error) {
+      console.error('Snapshot failed', error);
+      pushNotification('스냅샷 실패', '저장 중 오류가 발생했습니다.', 'error');
+    }
+  }, [pushNotification]);
 
   const clearNotifications = () => {
     setNotifications([]);
@@ -3405,9 +3509,10 @@ function App() {
          () => <EnvComponent />,
          () => <CameraComponent />,
          () => <NoticeComponent />,
+         () => <TimeSeriesWidget />,
          layoutSnapshot?.layout ?? null
       );
-  }, [layoutSnapshot]); 
+  }, [layoutSnapshot, timeSeriesDataNode]); // timeSeriesDataNode dep might need removal if unused 
 
   const layoutRef = useRef<LayoutMap>({});
   const lastRestoreSlotIdRef = useRef<string | null>(null);
@@ -3514,6 +3619,8 @@ function App() {
       setLayoutRestoreError('복구 실패');
     }
   };
+
+
 
   const deleteLayoutSlot = async (slotId?: string | null) => {
     const targetId = slotId ?? null;
@@ -3771,6 +3878,18 @@ function App() {
                   ))}
                 </div>
               )}
+              </div>
+              
+              <div style={{ marginLeft: '16px', paddingLeft: '16px', borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
+                 <button
+                    className="status-action"
+                    onClick={handleSnapshot}
+                    title={settingsForm?.snapshotPath ? `Save to: ${settingsForm.snapshotPath}` : 'Snapshot'}
+                  >
+                    Snapshot
+                  </button>
+              </div>
+
               <div className="status-actions">
                 <button
                   className="status-action"
@@ -3789,7 +3908,9 @@ function App() {
                   Diagnosis
                 </button>
               </div>
-            </div>
+
+            
+            {/* Removed Series Controls from Header */}
             <button
               className="notify-bell"
               onClick={() => setNotificationsOpen((prev) => !prev)}
@@ -4337,7 +4458,7 @@ function App() {
                                         <span className="settings-comm-summary-label">최근 끊김</span>
                                         <span
                                           className="settings-comm-summary-value"
-                                          title={formatOptionalText(item.metrics?.last_error)}
+                                          title={formatOptionalText((item.metrics as any)?.last_error)}
                                         >
                                           {item.lastDisconnect !== '--' ? item.lastDisconnect : item.lastError}
                                         </span>
@@ -5231,9 +5352,18 @@ function App() {
             spotLastSuccessAt,
             spotAlertActive,
             lastDataAt,
+            timeSeriesFrames,
             onSpotImageLoaded: handleSpotImageLoaded,
             onSpotImageError: handleSpotImageError,
             requestFocus,
+            seriesWindowMin,
+            seriesPaused,
+            showThresholds,
+            setSeriesWindowMin,
+            setSeriesPaused,
+            setShowThresholds,
+            handleSnapshot,
+            nowTick,
           }}
         >
            <scene.Component model={scene} />
@@ -5248,6 +5378,7 @@ function App() {
 type DataContextValue = {
   data: FactoryData | null;
   thresholds: ThresholdState;
+  timeSeriesFrames: Record<string, SeriesFrame> | null;
   spotConfig: SpotConfig | null;
   spotImageUrl: string;
   spotImageLoading: boolean;
@@ -5258,11 +5389,21 @@ type DataContextValue = {
   onSpotImageLoaded: () => void;
   onSpotImageError: (message?: string) => void;
   requestFocus: (steps: number) => void;
+  // Time Series Control
+  seriesWindowMin: number;
+  seriesPaused: boolean;
+  showThresholds: boolean;
+  setSeriesWindowMin: (min: number) => void;
+  setSeriesPaused: React.Dispatch<React.SetStateAction<boolean>>;
+  setShowThresholds: (show: boolean) => void;
+  handleSnapshot: () => void;
+  nowTick: number; // For XAxis domain sync
 };
 
 const DataContext = React.createContext<DataContextValue>({
   data: null,
   thresholds: buildThresholdStateFromConfig(),
+  timeSeriesFrames: null,
   spotConfig: null,
   spotImageUrl: '',
   spotImageLoading: false,
@@ -5273,6 +5414,14 @@ const DataContext = React.createContext<DataContextValue>({
   onSpotImageLoaded: () => undefined,
   onSpotImageError: () => undefined,
   requestFocus: () => undefined,
+  seriesWindowMin: 30,
+  seriesPaused: false,
+  showThresholds: true,
+  setSeriesWindowMin: () => undefined,
+  setSeriesPaused: () => undefined,
+  setShowThresholds: () => undefined,
+  handleSnapshot: () => undefined,
+  nowTick: Date.now(),
 });
 
 const KpiComponent = () => {
@@ -5891,6 +6040,166 @@ const CameraComponent = () => {
            <button onClick={() => requestFocus(-10)}>FOCUS -</button>
            <button onClick={() => requestFocus(10)}>FOCUS +</button>
         </div>
+      </div>
+    );
+};
+
+const TimeSeriesWidget = () => {
+    const { 
+      timeSeriesFrames, 
+      seriesWindowMin, 
+      setSeriesWindowMin, 
+      seriesPaused, 
+      setSeriesPaused, 
+      showThresholds, 
+      setShowThresholds,
+      handleSnapshot,
+      nowTick
+    } = React.useContext(DataContext);
+    
+    // Convert frames to Recharts data
+    // Optimizing: Only rebuild when frames update
+    // Use a ref to store the last valid data for freezing
+    const lastChartDataRef = useRef<any[]>([]);
+
+    const chartData = useMemo(() => {
+      // If paused, return the last known data to "freeze" the chart
+      if (seriesPaused && lastChartDataRef.current.length > 0) {
+        return lastChartDataRef.current;
+      }
+
+      if (!timeSeriesFrames) return [];
+      
+      // Use 'process' frame as master for time, as it contains Speed/Press (always present)
+      const master = timeSeriesFrames['process']; 
+      if (!master) return [];
+
+      const times = master.fields[0].values; // Time column
+      const length = master.length;
+      
+      const data = [];
+      for (let i = 0; i < length; i++) {
+         const time = times[i];
+         const item: any = { time };
+         
+         // Iterate all groups (frames)
+         Object.values(timeSeriesFrames).forEach((frame) => {
+            // Check length alignment
+            if (i >= frame.length) return;
+            
+            // Iterate all fields in the frame (skip time at index 0)
+            for (let j = 1; j < frame.fields.length; j++) {
+                const field = frame.fields[j];
+                item[field.name] = field.values[i];
+            }
+         });
+         data.push(item);
+      }
+      
+      lastChartDataRef.current = data;
+      return data;
+    }, [timeSeriesFrames, seriesPaused]);
+    
+    if (!timeSeriesFrames) return <div style={{color: 'white', padding: '16px'}}>Loading data...</div>;
+
+    return (
+      <div className="card timeseries-card" style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
+         {/* Controls Header within the Widget */}
+         <div className="timeseries-controls" style={{ 
+            display: 'flex', 
+            justifyContent: 'flex-end', 
+            alignItems: 'center', 
+            gap: '8px', 
+            padding: '4px 8px', 
+            borderBottom: '1px solid #333',
+            background: 'rgba(0,0,0,0.2)'
+         }}>
+             <div className="series-group">
+                {[1, 5, 10, 30, 60].map((min) => (
+                  <button
+                    key={min}
+                    className={`status-action ${seriesWindowMin === min ? 'active' : ''}`}
+                    style={{ minWidth: '32px', padding: '0 4px', opacity: seriesWindowMin === min ? 1 : 0.5, fontSize: '11px', height: '24px' }}
+                    onClick={() => setSeriesWindowMin(min)}
+                  >
+                    {min}m
+                  </button>
+                ))}
+            </div>
+            <div style={{width: '1px', height: '16px', background: '#444', margin: '0 4px'}}></div>
+            <button
+                className={`status-action ${seriesPaused ? 'warn' : ''}`}
+                onClick={() => setSeriesPaused((prev) => !prev)}
+             >
+                {seriesPaused ? 'Pause' : 'Live'}
+             </button>
+             <label style={{ display: 'flex', alignItems: 'center', fontSize: '11px', cursor: 'pointer', gap: '4px', userSelect: 'none', color: '#aaa' }}>
+                <input
+                  type="checkbox"
+                  checked={showThresholds}
+                  onChange={(e) => setShowThresholds(e.target.checked)}
+                />
+                임계값
+             </label>
+             <div style={{width: '1px', height: '16px', background: '#444', margin: '0 4px'}}></div>
+             <button
+                 className="status-action"
+                 onClick={handleSnapshot}
+                 title="Save Snapshot"
+             >
+                 Save
+             </button>
+         </div>
+
+         <div style={{ flexGrow: 1, minHeight: 0 }}>
+             <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData}>
+                   <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                   <XAxis 
+                     dataKey="time" 
+                     type="number" 
+                     domain={['dataMin', (min: number) => min + seriesWindowMin * 60 * 1000]} 
+                     allowDataOverflow={true}
+                     tickFormatter={(unixTime) => new Date(unixTime).toLocaleTimeString()}
+                     stroke="#888"
+                     height={30}
+                   />
+                   <YAxis stroke="#888" width={40} />
+                   <Tooltip 
+                     labelFormatter={(label) => new Date(label).toLocaleTimeString()}
+                     contentStyle={{ backgroundColor: '#222', borderColor: '#444', color: '#fff' }}
+                   />
+                   <Legend verticalAlign="top" height={36}/>
+                   
+                   {/* Defined Lines - Primary Process */}
+                   <Line type="monotone" dataKey="Speed" stroke="#00FF00" dot={false} strokeWidth={2} name="속도" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Press" stroke="#FF0000" dot={false} strokeWidth={2} name="압력" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Spot" stroke="#FFFF00" dot={false} strokeWidth={2} name="SPOT" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Temp_F" stroke="#00BFFF" dot={false} strokeWidth={1} name="온도(F)" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Temp_B" stroke="#1E90FF" dot={false} strokeWidth={1} name="온도(B)" isAnimationActive={false} />
+                   
+                   {/* Additional Process Data */}
+                   <Line type="monotone" dataKey="Billet_Length" stroke="#DA70D6" dot={false} strokeWidth={1} name="빌렛 길이" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Count" stroke="#FFFFFF" dot={false} strokeWidth={1} name="생산 수량" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="EndPos" stroke="#FFA500" dot={false} strokeWidth={1} name="종료 위치" isAnimationActive={false} />
+
+
+
+                   {/* Other Temperatures & Environment */}
+                   <Line type="monotone" dataKey="Billet_Temp" stroke="#FF1493" dot={false} strokeWidth={1} name="빌렛 온도" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="At_Temp" stroke="#00FA9A" dot={false} strokeWidth={1} name="환경 온도" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="At_Pre" stroke="#9370DB" dot={false} strokeWidth={1} name="환경 습도" isAnimationActive={false} />
+                   
+                   {showThresholds && (
+                      <>
+                        <ReferenceLine y={SPEED_MAX} label="Max Speed" stroke="red" strokeDasharray="3 3" />
+                         {/* Add more reference lines if needed based on thresholds context */}
+                      </>
+                   )}
+
+                </LineChart>
+             </ResponsiveContainer>
+         </div>
       </div>
     );
 };
