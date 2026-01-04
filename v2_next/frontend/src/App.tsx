@@ -402,6 +402,8 @@ type ConfigUpdateResponse = {
   ok: boolean;
   restart_required: boolean;
   apply?: ConfigApplyResult;
+  meta?: any;
+  config?: any;
 };
 
 type ThresholdKey =
@@ -2563,57 +2565,107 @@ function App() {
 
 
 
-  const handleSaveSettings = async () => {
+  // --- Auto Save & Master Toggle Logic ---
+
+  const handleMasterToggle = (checked: boolean) => {
+    setSettingsForm((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, thresholdMasterOn: checked };
+      const fields: (keyof SettingsFormState)[] = [
+        'thresholdSpeedEnabled', 'thresholdPressEnabled', 'thresholdSpotEnabled',
+        'thresholdTempFEnabled', 'thresholdTempBEnabled',
+        'thresholdBilletEnabled', 'thresholdBilletTempEnabled',
+        'thresholdAtTempEnabled', 'thresholdAtPreEnabled',
+        'thresholdCountEnabled', 'thresholdEndPosEnabled'
+      ];
+      fields.forEach((field) => {
+        (next as any)[field] = checked;
+      });
+      return next;
+    });
+  };
+
+  const autoSaveTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const autoSaveEnabled = settingsForm?.autoSave;
+    
+    if (!autoSaveEnabled || !hasSettingsChanges || settingsLoading || !settingsForm) {
+      return;
+    }
+
+    if (autoSaveTimerRef.current) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      handleSaveSettings({ auto: true });
+    }, 1000); // 1 second debounce
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [settingsForm, hasSettingsChanges, settingsLoading, settingsForm?.autoSave]);
+
+  const handleSaveSettings = async (options?: { auto?: boolean }) => {
+    const isAuto = options?.auto;
     if (!settingsForm) {
       return;
     }
     if (configReadOnly) {
-      setSettingsError('설정 파일이 읽기 전용입니다. 관리자 권한 또는 파일 속성을 확인하세요.');
+      if (!isAuto) setSettingsError('설정 파일이 읽기 전용입니다. 관리자 권한 또는 파일 속성을 확인하세요.');
       return;
     }
     if (hasValidationError) {
-      setSettingsError('입력값 형식을 확인하세요.');
+      if (!isAuto) setSettingsError('입력값 형식을 확인하세요.');
       return;
     }
     if (!overrideEnabled && hasSettingsChanges) {
-      setSettingsError('로컬 오버라이드가 비활성화되어 저장할 수 없습니다.');
+      if (!isAuto) setSettingsError('로컬 오버라이드가 비활성화되어 저장할 수 없습니다.');
       return;
     }
     if (pathCheckBusy) {
-      setSettingsError('경로 검증이 진행 중입니다.');
+      if (!isAuto) setSettingsError('경로 검증이 진행 중입니다.');
       return;
     }
     if (!pathHealth.log || !pathHealth.snapshot) {
-      setSettingsError('경로 검증이 필요합니다. 검사 버튼을 눌러주세요.');
-      runPathHealthCheck();
+      if (!isAuto) {
+        setSettingsError('경로 검증이 필요합니다. 검사 버튼을 눌러주세요.');
+        runPathHealthCheck();
+      }
       return;
     }
     if (hasPathError) {
-      setSettingsError('저장 경로에 오류가 있습니다. 경로를 수정하세요.');
+      if (!isAuto) setSettingsError('저장 경로에 오류가 있습니다. 경로를 수정하세요.');
       return;
     }
     if (!hasSettingsChanges) {
-      setSettingsInfo('변경 사항이 없습니다.');
+      if (!isAuto) setSettingsInfo('변경 사항이 없습니다.');
       return;
     }
-    const summary = buildSettingsChangeSummary();
-    if (hasPathWarn) {
-      summary.unshift('경로 상태 경고가 포함되어 있습니다.');
-    }
-    if (summary.length > 0) {
-      const maxItems = 8;
-      const shown = summary.slice(0, maxItems);
-      const rest = summary.length - shown.length;
-      const lines = rest > 0 ? [...shown, `외 ${rest}건`] : shown;
-      const confirmMessage = [
-        '다음 변경 사항을 저장할까요?',
-        '',
-        ...lines,
-        '',
-        '저장 후 재시작이 필요할 수 있습니다.',
-      ].join('\n');
-      if (!window.confirm(confirmMessage)) {
-        return;
+
+    if (!isAuto) {
+      const summary = buildSettingsChangeSummary();
+      if (hasPathWarn) {
+        summary.unshift('경로 상태 경고가 포함되어 있습니다.');
+      }
+      if (summary.length > 0) {
+        const maxItems = 8;
+        const shown = summary.slice(0, maxItems);
+        const rest = summary.length - shown.length;
+        const lines = rest > 0 ? [...shown, `외 ${rest}건`] : shown;
+        const confirmMessage = [
+          '다음 변경 사항을 저장할까요?',
+          '',
+          ...lines,
+          '',
+          '저장 후 재시작이 필요할 수 있습니다.',
+        ].join('\n');
+        if (!window.confirm(confirmMessage)) {
+          return;
+        }
       }
     }
     setSettingsLoading(true);
@@ -2693,11 +2745,11 @@ function App() {
       const pendingCount = applyInfo?.pending?.length ?? 0;
       const appliedCount = applyInfo?.applied?.length ?? 0;
       if (pendingCount > 0) {
-        setSettingsInfo('일부 설정은 재시작 후 적용됩니다.');
+        if (!isAuto) setSettingsInfo('일부 설정은 재시작 후 적용됩니다.');
       } else if (appliedCount > 0) {
-        setSettingsInfo('설정이 저장되었습니다. 재시작 없이 적용되었습니다.');
+        if (!isAuto) setSettingsInfo('설정이 저장되었습니다. 재시작 없이 적용되었습니다.');
       } else {
-        setSettingsInfo('설정이 저장되었습니다.');
+        if (!isAuto) setSettingsInfo('설정이 저장되었습니다.');
       }
       setSettingsRestartRequired(Boolean(res.data?.restart_required));
       setSettingsApplyResult(applyInfo);
@@ -2718,16 +2770,34 @@ function App() {
           : appliedCount > 0
             ? '설정 저장 완료. 즉시 적용됨.'
             : '설정 저장 완료.';
-      pushNotification('설정 저장', notificationMessage, pendingCount > 0 ? 'warn' : 'info');
-      showSettingsToast(notificationMessage, pendingCount > 0 ? 'warn' : 'ok');
+      
+      if (!isAuto) {
+        pushNotification('설정 저장', notificationMessage, pendingCount > 0 ? 'warn' : 'info');
+        showSettingsToast(notificationMessage, pendingCount > 0 ? 'warn' : 'ok');
+      }
       setExternalConfigPending(null);
       setExternalConfigPendingAt(null);
+      
+      // Fetch the latest config snapshot to get the authoritative fingerprint
+      // This ensures the polling loop doesn't see our own save as an external change
+      try {
+        const snapshotRes = await axios.get<ConfigSnapshot>(`${API_BASE}/api/config`);
+        const newFingerprint = buildSettingsFingerprint(snapshotRes.data);
+        settingsFingerprintRef.current = newFingerprint;
+      } catch (ignore) {
+        // If snapshot fetch fails, we just risk an extra notification, which is acceptable
+      }
+
       settingsExternalNotifyRef.current = null;
     } catch (error) {
       console.error('Config save failed', error);
-      setSettingsError('설정 저장에 실패했습니다.');
-      pushNotification('설정 저장 실패', '설정 저장에 실패했습니다.', 'error');
-      showSettingsToast('설정 저장 실패', 'error');
+      if (!isAuto) {
+        setSettingsError('설정 저장에 실패했습니다.');
+        pushNotification('설정 저장 실패', '설정 저장에 실패했습니다.', 'error');
+        showSettingsToast('설정 저장 실패', 'error');
+      } else {
+        console.error('[AutoSave] Save failed', error);
+      }
     } finally {
       setSettingsLoading(false);
     }
@@ -4098,7 +4168,7 @@ function App() {
                 소스: {overrideMeta?.source ?? '--'}
               </span>
             </div>
-            {settingsLoading && <div className="settings-status">설정 불러오는 중...</div>}
+
             {settingsError && <div className="settings-error">{settingsError}</div>}
             {configReadOnly && (
               <div className="settings-warning">설정 파일이 읽기 전용입니다. 관리자 권한 또는 파일 속성을 확인하세요.</div>
@@ -5198,14 +5268,17 @@ function App() {
                       <div className="settings-section-title">알림/임계값</div>
                       <div className="settings-grid">
                         <label
-                          className={`settings-field settings-checkbox ${isSettingsFieldDirty('thresholdMasterOn') ? 'changed' : ''}`}
+                          className={`settings-field settings-toggle-field ${isSettingsFieldDirty('thresholdMasterOn') ? 'changed' : ''}`}
                         >
-                          <input
-                            type="checkbox"
-                            checked={settingsForm.thresholdMasterOn}
-                            onChange={(e) => updateSettingsField('thresholdMasterOn', e.target.checked)}
-                          />
-                          전체 알림 사용
+                          <span className="settings-toggle-label">전체 알림 사용</span>
+                          <button
+                            type="button"
+                            className="settings-toggle"
+                            aria-pressed={settingsForm.thresholdMasterOn}
+                            onClick={() => handleMasterToggle(!settingsForm.thresholdMasterOn)}
+                          >
+                            <span className="settings-toggle-text">{settingsForm.thresholdMasterOn ? 'ON' : 'OFF'}</span>
+                          </button>
                         </label>
                       </div>
                       <div className="settings-thresholds">
@@ -5222,11 +5295,12 @@ function App() {
                           return (
                             <div key={item.key} className="settings-threshold-row">
                               <span className="settings-threshold-label">{item.label}</span>
-                              <label className="settings-threshold-toggle">
+                              <label className="settings-threshold-toggle" style={{ pointerEvents: 'auto', zIndex: 10 }}>
                                 <input
                                   type="checkbox"
                                   checked={Boolean(enabled)}
                                   onChange={(e) => updateSettingsField(item.enableField, e.target.checked)}
+                                  style={{ cursor: 'pointer' }}
                                 />
                                 <span>사용</span>
                               </label>
@@ -5309,7 +5383,7 @@ function App() {
                 </button>
                 <button
                   className="settings-action primary"
-                  onClick={handleSaveSettings}
+                  onClick={() => handleSaveSettings()}
                   disabled={
                     settingsLoading ||
                     pathCheckBusy ||

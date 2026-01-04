@@ -1,4 +1,4 @@
-export const APP_TITLE = '창녕 2호기 (Grafana Scenes)';
+export const APP_TITLE = '창녕 2호기';
 
 export const NOTICE_TITLE = '작업자 주의사항';
 export const NOTICE_TEMP_THRESHOLD = '580°C';
