@@ -723,7 +723,6 @@ body {
 .settings-close:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
-  transform: rotate(90deg);
 }
 
 .settings-content-wrapper {
@@ -1120,31 +1119,176 @@ body {
   color: var(--text-secondary);
 }
 
+@keyframes rotate-gradient {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+.status-action.loading {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 72.67px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid transparent !important;
+  background: transparent !important; /* REVEAL pseudo-elements behind */
+  color: var(--text-primary) !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  cursor: wait !important;
+  z-index: 1;
+  contain: strict !important;
+  transition: none !important;
+}
+
+/* Specific size for 'Save' button in Time Series to prevent layout shift */
+.timeseries-controls .status-action.loading {
+  width: 50px !important;
+}
+
+.status-action.loading::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 150px;
+  height: 150px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0%,
+    #34d399 25%,
+    #22d3ee 50%,
+    transparent 75%
+  );
+  animation: rotate-gradient 1.5s linear infinite; /* Match keyframe name */
+  z-index: -2;
+  pointer-events: none;
+}
+
+.status-action.loading::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: #2b2f36;
+  border-radius: 5px;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.spinner-small {
+  display: none; /* Removed from TSX, cleaning up CSS too */
+}
+
+/* Premium Settings Toast */
 .settings-toast {
   align-self: flex-end;
-  padding: 6px 10px;
+  padding: 8px 14px;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 600;
   border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 .settings-toast.ok {
-  color: var(--state-ok);
-  background: rgba(78, 201, 176, 0.12);
-  border-color: rgba(78, 201, 176, 0.4);
+  color: #34d399; /* Emerald 400 */
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.1);
 }
 
 .settings-toast.warn {
-  color: var(--state-warn);
-  background: rgba(242, 201, 76, 0.12);
-  border-color: rgba(242, 201, 76, 0.4);
+  color: #fbbf24; /* Amber 400 */
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.3);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1);
 }
 
 .settings-toast.error {
-  color: var(--state-danger);
-  background: rgba(246, 107, 107, 0.12);
-  border-color: rgba(246, 107, 107, 0.4);
+  color: #f87171; /* Red 400 */
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.1);
+}
+
+/* Missing Settings Alerts (Block Level) */
+.settings-error, .settings-warning, .settings-info, .settings-external {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  animation: fadeIn 0.3s ease;
+}
+
+.settings-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
+.settings-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #fcd34d;
+}
+
+.settings-info {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #93c5fd;
+}
+
+.settings-external {
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-external-title {
+  font-weight: 700;
+  color: #c7d2fe;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-external-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+  padding-left: 4px;
+  border-left: 2px solid rgba(99, 102, 241, 0.3);
+}
+
+.settings-external-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .settings-form {

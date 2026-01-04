@@ -159,16 +159,25 @@ def _is_valid_segment(segment: str) -> bool:
 def _is_valid_path(path_str: str) -> bool:
     if not path_str:
         return False
+    # Absolute UNC path
     if path_str.startswith("\\\\"):
         parts = [part for part in path_str.split("\\") if part]
         if len(parts) < 2:
             return False
         return all(_is_valid_segment(part) for part in parts)
-    if len(path_str) >= 3 and path_str[1] == ":" and path_str[2] == "\\" and path_str[0].isalpha():
+    # Absolute Windows path
+    if len(path_str) >= 3 and path_str[1] == ":" and (path_str[2] == "\\" or path_str[2] == "/") and path_str[0].isalpha():
         tail = path_str[3:]
         if not tail:
             return True
-        return all(_is_valid_segment(part) for part in tail.split("\\") if part)
+        # Handle both separators
+        segments = [s for s in tail.replace("/", "\\").split("\\") if s]
+        return all(_is_valid_segment(part) for part in segments)
+    # Relative path (e.g. "logs", "./data")
+    if not path_str.startswith("/") and not path_str.startswith("\\"):
+        segments = [s for s in path_str.replace("/", "\\").split("\\") if s]
+        return all(_is_valid_segment(part) for part in segments)
+    
     return False
 
 
@@ -192,10 +201,7 @@ def _resolve_log_dir() -> Path:
     global _log_dir
     if _log_dir:
         return _log_dir
-    base_dir = config.CONFIG_PATH.parent if config.CONFIG_PATH else None
-    if base_dir is None:
-        appdata = os.getenv("APPDATA")
-        base_dir = Path(appdata) / "SmartFactoryLogger" if appdata else Path.cwd()
+    base_dir = config.APP_DATA_DIR
     candidates = [
         base_dir / "logs",
         Path(tempfile.gettempdir()) / "SmartFactoryLogger" / "logs",
@@ -312,6 +318,8 @@ def _check_path(path_str: str) -> dict:
     try:
         normalized = path_str.strip()
         is_network = _is_network_path(normalized)
+        
+        # Validation of format
         if not _is_valid_path(normalized):
             latency_ms = int((time.perf_counter() - start) * 1000)
             return {
@@ -323,6 +331,12 @@ def _check_path(path_str: str) -> dict:
                 "latency_ms": latency_ms,
                 "message": "Invalid path format",
             }
+            
+        # Resolve path - if relative, use APP_DATA_DIR
+        path = Path(normalized)
+        if not path.is_absolute():
+            path = config.APP_DATA_DIR / normalized
+            
         if _is_nas_drive(normalized) and not Path("Z:\\").exists():
             latency_ms = int((time.perf_counter() - start) * 1000)
             return {
@@ -334,7 +348,7 @@ def _check_path(path_str: str) -> dict:
                 "latency_ms": latency_ms,
                 "message": "Network drive unavailable",
             }
-        path = Path(normalized)
+
         exists = path.exists()
         is_dir = path.is_dir() if exists else False
         if not exists:

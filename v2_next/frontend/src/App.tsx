@@ -1372,6 +1372,7 @@ function App() {
   const [, setLayoutLoadError] = useState<string | null>(null);
   const [layoutSlots, setLayoutSlots] = useState<LayoutSlotSummary[]>([]);
   const [layoutActiveId, setLayoutActiveId] = useState<string | null>(null);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
   
   const spotHasImage = useRef(false);
   const saveMessageTimerRef = useRef<number | null>(null);
@@ -2056,8 +2057,10 @@ function App() {
   );
 
   const handleSnapshot = useCallback(async () => {
+    if (snapshotLoading) return;
     try {
-      pushNotification('스냅샷', '스냅샷 생성 중...', 'info');
+      setSnapshotLoading(true);
+      pushNotification('스냅샷', '스냅샷 생성 및 서버 저장 중...', 'info');
       const element = document.getElementById('root') || document.body;
       const scrollHeight = document.documentElement.scrollHeight;
       
@@ -2068,31 +2071,29 @@ function App() {
         imageTimeout: 5000,
         height: scrollHeight,
         windowHeight: scrollHeight,
-        scrollY: -window.scrollY, // Correct offset if scrolled
+        scrollY: -window.scrollY, 
       } as any);
 
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          pushNotification('스냅샷 실패', '이미지 생성 실패', 'error');
-          return;
-        }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        a.download = `SFL_Snapshot_${timestamp}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        
-        pushNotification('스냅샷 저장', '화면을 저장했습니다.', 'info');
-      }, 'image/png');
+      const base64Data = canvas.toDataURL('image/png');
+      
+      try {
+        await axios.post(`${API_BASE}/api/control/snapshot`, {
+          image_base64: base64Data,
+          name: 'snapshot',
+          format: 'png'
+        });
+        pushNotification('스냅샷 성공', '서버 설정 폴더에 저장되었습니다.', 'info');
+      } catch (apiError) {
+        console.error('Snapshot API failed', apiError);
+        pushNotification('스냅샷 실패', '서버 저장 중 오류가 발생했습니다.', 'error');
+      }
     } catch (error) {
-      console.error('Snapshot failed', error);
-      pushNotification('스냅샷 실패', '저장 중 오류가 발생했습니다.', 'error');
+      console.error('Snapshot capture failed', error);
+      pushNotification('스냅샷 실패', '화면 캡처 중 오류가 발생했습니다.', 'error');
+    } finally {
+      setSnapshotLoading(false);
     }
-  }, [pushNotification]);
+  }, [pushNotification, snapshotLoading]);
 
   const clearNotifications = () => {
     setNotifications([]);
@@ -2454,7 +2455,7 @@ function App() {
     setExternalConfigPending(null);
     setExternalConfigPendingAt(null);
     setSettingsError(null);
-    setSettingsInfo('외부 변경 내용을 반영했습니다.');
+    // setSettingsInfo('외부 변경 내용을 반영했습니다.'); // Silent mode
     showSettingsToast('외부 변경을 반영했습니다.', 'ok');
   }, [
     externalConfigPending,
@@ -2546,7 +2547,6 @@ function App() {
         settingsExternalNotifyRef.current = null;
         setExternalConfigPending(null);
         setExternalConfigPendingAt(null);
-        showSettingsToast('설정 파일 변경을 감지하여 화면을 갱신했습니다.', 'ok');
       } catch (error) {
         console.error('Settings auto-refresh failed', error);
       }
@@ -2566,6 +2566,16 @@ function App() {
 
 
   // --- Auto Save & Master Toggle Logic ---
+
+  // Auto-dismiss settingsInfo
+  useEffect(() => {
+    if (settingsInfo) {
+      const timer = setTimeout(() => {
+        setSettingsInfo(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [settingsInfo]);
 
   const handleMasterToggle = (checked: boolean) => {
     setSettingsForm((prev) => {
@@ -3028,7 +3038,6 @@ function App() {
       const meta = res.data?.meta ?? null;
       setOverrideEnabled(nextEnabled);
       setOverrideMeta(meta);
-      setSettingsInfo(`로컬 오버라이드가 ${nextEnabled ? '활성화' : '비활성화'}되었습니다.`);
     } catch (error) {
       console.error('Override toggle failed', error);
       setSettingsError('로컬 오버라이드 변경에 실패했습니다.');
@@ -3952,8 +3961,10 @@ function App() {
               
               <div style={{ marginLeft: '16px', paddingLeft: '16px', borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
                  <button
-                    className="status-action"
+                    className={`status-action ${snapshotLoading ? 'loading' : ''}`}
                     onClick={handleSnapshot}
+                    disabled={snapshotLoading}
+                    aria-disabled={snapshotLoading}
                     title={settingsForm?.snapshotPath ? `Save to: ${settingsForm.snapshotPath}` : 'Snapshot'}
                   >
                     Snapshot
@@ -5437,6 +5448,7 @@ function App() {
             setSeriesPaused,
             setShowThresholds,
             handleSnapshot,
+            snapshotLoading,
             nowTick,
           }}
         >
@@ -5471,6 +5483,7 @@ type DataContextValue = {
   setSeriesPaused: React.Dispatch<React.SetStateAction<boolean>>;
   setShowThresholds: (show: boolean) => void;
   handleSnapshot: () => void;
+  snapshotLoading: boolean;
   nowTick: number; // For XAxis domain sync
 };
 
@@ -5495,6 +5508,7 @@ const DataContext = React.createContext<DataContextValue>({
   setSeriesPaused: () => undefined,
   setShowThresholds: () => undefined,
   handleSnapshot: () => undefined,
+  snapshotLoading: false,
   nowTick: Date.now(),
 });
 
@@ -6128,6 +6142,7 @@ const TimeSeriesWidget = () => {
       showThresholds, 
       setShowThresholds,
       handleSnapshot,
+      snapshotLoading,
       nowTick
     } = React.useContext(DataContext);
     
@@ -6217,8 +6232,9 @@ const TimeSeriesWidget = () => {
              </label>
              <div style={{width: '1px', height: '16px', background: '#444', margin: '0 4px'}}></div>
              <button
-                 className="status-action"
+                 className={`status-action ${snapshotLoading ? 'loading' : ''}`}
                  onClick={handleSnapshot}
+                 disabled={snapshotLoading}
                  title="Save Snapshot"
              >
                  Save
