@@ -12,7 +12,7 @@ if str(project_root) not in sys.path:
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import atexit
@@ -636,6 +636,15 @@ async def lifespan(app: FastAPI):
     plc_service.start()
     print("[Main] Starting Comm Metrics Logger...")
     comm_metrics_logger_service.start()
+    
+    # Log local IPs for debugging remote connectivity
+    try:
+        hostname = socket.gethostname()
+        local_ips = socket.gethostbyname_ex(hostname)[2]
+        _logger.info(f"[Main] Backend started. Accessible at: {', '.join([f'http://{ip}:8000' for ip in local_ips])}")
+    except Exception as exc:
+        _logger.warning(f"[Main] Failed to log local IPs: {exc}")
+
     try:
         yield
     finally:
@@ -680,7 +689,11 @@ async def record_request_stats(request: Request, call_next):
     global _stats_error_count
     start = time.perf_counter()
     status_code = 500
+    client_host = request.client.host if request.client else "unknown"
     try:
+        # Log incoming request for external visibility
+        _logger.info(f"[Access] INCOMING: {client_host} -> {request.method} {request.url.path}")
+        
         response = await call_next(request)
         status_code = response.status_code
         if status_code >= 500:
@@ -705,6 +718,9 @@ async def record_request_stats(request: Request, call_next):
         raise
     finally:
         elapsed_ms = (time.perf_counter() - start) * 1000
+        # Log completion
+        _logger.info(f"[Access] DONE: {client_host} -> {request.url.path} (Status: {status_code}, {elapsed_ms:.1f}ms)")
+        
         try:
             observability_service.record_request(request.url.path, status_code, elapsed_ms)
         except Exception:
@@ -1195,6 +1211,19 @@ def spot_focus(steps: int = 0):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+@app.get("/api/spot/proxy_image")
+def proxy_spot_image():
+    """Proxy the SPOT camera image for remote clients."""
+    try:
+        if not config.SPOT_IMAGE_URL:
+            raise HTTPException(status_code=404, detail="SPOT URL not configured")
+            
+        with urlopen(config.SPOT_IMAGE_URL, timeout=config.SPOT_TIMEOUT or 2.0) as conn:
+            data = conn.read()
+            return Response(content=data, media_type="image/jpeg")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch upstream image: {exc}")
 
 @app.post("/api/control/shutdown")
 def shutdown(payload: ShutdownRequest):

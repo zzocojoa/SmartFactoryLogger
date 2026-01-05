@@ -45,7 +45,7 @@ if (typeof window !== 'undefined') {
   initScenesRuntime();
 }
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = window.location.protocol.startsWith('file') ? 'http://localhost:8000' : '';
 
 const SPOT_WARN_TEMP = 580;
 const SPOT_NORMAL_MIN = 480;
@@ -3560,7 +3560,7 @@ function App() {
     const updateImage = () => {
       const separator = spotConfig.image_url.includes('?') ? '&' : '?';
       if (!spotHasImage.current) setSpotImageLoading(true);
-      setSpotImageUrl(`${spotConfig.image_url}${separator}t=${Date.now()}`);
+      setSpotImageUrl(`${API_BASE}/api/spot/proxy_image?t=${Date.now()}`);
     };
     updateImage();
     const timer = setInterval(updateImage, refreshMs);

@@ -20,6 +20,8 @@ hidden_imports += [
     'typing_extensions',
     'pydantic', 
 ]
+hidden_imports += collect_submodules('pydantic')
+
 
 datas = collect_data_files('backend')
 

@@ -10,8 +10,11 @@ if str(project_root) not in sys.path:
 
 import uvicorn
 # Import the app factor or app object from app.py
-from backend.app import app
+try:
+    from backend.app import app
+except ImportError:
+    from app import app
 
 if __name__ == "__main__":
     # Host and port are hardcoded for production convenience
-    uvicorn.run(app, host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
