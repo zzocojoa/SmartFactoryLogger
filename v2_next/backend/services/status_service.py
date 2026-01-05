@@ -127,7 +127,9 @@ class StatusEvaluator:
 
         # Speed level
         if _is_finite(speed):
-            if speed >= 8:
+            if abs(speed) < 0.05:
+                speed_level = "idle"
+            elif speed >= 8:
                 speed_level = "very_fast"
             elif speed >= 6:
                 speed_level = "fast"
@@ -138,22 +140,26 @@ class StatusEvaluator:
             else:
                 speed_level = "very_slow"
         else:
-            speed_level = "very_slow"
+            speed_level = "idle"
 
         # Press level
         if _is_finite(press):
-            if press >= 180:
+            if abs(press) < 0.1:
+                press_level = "idle"
+            elif press >= 180:
                 press_level = "high"
             elif press >= 126:
                 press_level = "normal"
             else:
                 press_level = "low"
         else:
-            press_level = "low"
+            press_level = "idle"
 
         # Spot level
         if _is_finite(spot):
-            if spot >= SPOT_WARN_TEMP and self._spot_warning:
+            if abs(spot) < 0.1:
+                spot_level = "idle"
+            elif spot >= SPOT_WARN_TEMP and self._spot_warning:
                 spot_level = "warning"
             elif spot >= SPOT_HIGH_MIN:
                 spot_level = "high"
@@ -162,7 +168,7 @@ class StatusEvaluator:
             else:
                 spot_level = "low"
         else:
-            spot_level = "low"
+            spot_level = "idle"
 
         # Environment
         if _is_finite(at_temp):

@@ -41,6 +41,7 @@
   --state-press-high: var(--state-warn);
   --state-press-normal: var(--state-ok);
   --state-press-low: var(--state-cool);
+  --state-idle: var(--text-muted);
   --header-height: 60px;
 }
 
@@ -704,6 +705,7 @@ body {
   letter-spacing: -0.02em;
   background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -2748,6 +2750,12 @@ body {
   background: rgba(123, 135, 148, 0.12);
 }
 
+.speed-idle {
+  color: var(--state-idle);
+  border-color: rgba(123, 135, 148, 0.4);
+  background: rgba(123, 135, 148, 0.08);
+}
+
 .press-high {
   color: var(--state-press-high);
   border-color: rgba(242, 201, 76, 0.6);
@@ -2764,6 +2772,12 @@ body {
   color: var(--state-press-low);
   border-color: rgba(86, 166, 220, 0.6);
   background: rgba(86, 166, 220, 0.12);
+}
+
+.press-idle {
+  color: var(--state-idle);
+  border-color: rgba(123, 135, 148, 0.4);
+  background: rgba(123, 135, 148, 0.08);
 }
 
 .kpi-bar-fill.speed-very-fast {
@@ -2786,6 +2800,10 @@ body {
   background: var(--state-speed-very-slow);
 }
 
+.kpi-bar-fill.speed-idle {
+  background: var(--state-idle);
+}
+
 .kpi-bar-fill.press-high {
   background: var(--state-press-high);
 }
@@ -2796,6 +2814,10 @@ body {
 
 .kpi-bar-fill.press-low {
   background: var(--state-press-low);
+}
+
+.kpi-bar-fill.press-idle {
+  background: var(--state-idle);
 }
 
 /* SPOT Card */
@@ -2939,6 +2961,18 @@ body {
   color: var(--danger-color);
   border-color: rgba(241, 76, 76, 0.6);
   background: rgba(241, 76, 76, 0.12);
+}
+
+.spot-status-idle {
+  color: var(--state-idle);
+  border-color: rgba(123, 135, 148, 0.4);
+  background: rgba(123, 135, 148, 0.08);
+}
+.spot-fill-idle {
+  stroke: var(--state-idle);
+}
+.sparkline-idle {
+  --sparkline-color: var(--state-idle);
 }
 
 .spot-alert-icon {

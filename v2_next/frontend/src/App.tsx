@@ -50,7 +50,7 @@ const API_BASE = 'http://localhost:8000';
 const SPOT_WARN_TEMP = 580;
 const SPOT_NORMAL_MIN = 480;
 const SPOT_HIGH_MIN = 540;
-const SPOT_MAX_TEMP = 600;
+const SPOT_MAX_TEMP = 650;
 const SPARKLINE_POINTS = 10;
 const LAYOUT_STORAGE_KEY = 'grafana_scene_layout_v1';
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
@@ -61,8 +61,8 @@ const SERIES_SAMPLES_PER_SEC = 5;
 const SERIES_WINDOW_MS = SERIES_WINDOW_MINUTES * 60 * 1000;
 const SERIES_MAX_POINTS = SERIES_WINDOW_MINUTES * 60 * SERIES_SAMPLES_PER_SEC;
 const CURRENT_LAYOUT_COLS = 60;
-const SPEED_MAX = 8;
-const PRESS_MAX = 180;
+const SPEED_MAX = 15;
+const PRESS_MAX = 250;
 const PRESS_RUNNING_THRESHOLD = 20;
 const ALERT_HOLD_MS = 2000;
 const ALERT_HOLD_LONG_MS = 5000;
@@ -1053,6 +1053,9 @@ const THRESHOLD_LABELS: Record<ThresholdKey, string> = {
 };
 
 const getSpeedState = (speed: number) => {
+  if (speed === 0) {
+    return { label: '대기', className: 'speed-idle' };
+  }
   if (speed >= 8) {
     return { label: '매우빠름', className: 'speed-very-fast' };
   }
@@ -1069,6 +1072,9 @@ const getSpeedState = (speed: number) => {
 };
 
 const getPressState = (press: number) => {
+  if (press === 0) {
+    return { label: '대기', className: 'press-idle' };
+  }
   if (press >= 180) {
     return { label: '높음', className: 'press-high' };
   }
@@ -1084,12 +1090,14 @@ const SPEED_LEVEL_MAP: Record<string, { label: string; className: string }> = {
   normal: { label: '보통', className: 'speed-normal' },
   slow: { label: '저속', className: 'speed-slow' },
   very_slow: { label: '매우저속', className: 'speed-very-slow' },
+  idle: { label: '대기', className: 'speed-idle' },
 };
 
 const PRESS_LEVEL_MAP: Record<string, { label: string; className: string }> = {
   high: { label: '높음', className: 'press-high' },
   normal: { label: '보통', className: 'press-normal' },
   low: { label: '낮음', className: 'press-low' },
+  idle: { label: '대기', className: 'press-idle' },
 };
 
 const mapSpeedLevel = (level?: string) => {
@@ -1139,6 +1147,13 @@ const SPOT_LEVEL_MAP: Record<string, SpotState> = {
     warning: true,
     sparkClass: 'sparkline-warning',
   },
+  idle: {
+    label: '대기',
+    statusClass: 'spot-status-idle',
+    fillClass: 'spot-fill-idle',
+    warning: false,
+    sparkClass: 'sparkline-idle',
+  },
 };
 
 const mapSpotLevel = (level?: string) => {
@@ -1147,13 +1162,13 @@ const mapSpotLevel = (level?: string) => {
 };
 
 const getSpotState = (temp: number, warningActive: boolean): SpotState => {
-  if (!Number.isFinite(temp)) {
+  if (!Number.isFinite(temp) || temp === 0) {
     return {
-      label: '저온',
-      statusClass: 'spot-status-low',
-      fillClass: 'spot-fill-low',
+      label: '대기',
+      statusClass: 'spot-status-idle',
+      fillClass: 'spot-fill-idle',
       warning: false,
-      sparkClass: 'sparkline-low',
+      sparkClass: 'sparkline-idle',
     };
   }
   if (temp >= SPOT_WARN_TEMP && warningActive) {
@@ -4089,7 +4104,7 @@ function App() {
                 {layoutEditing && layoutRestoreError && (
                   <div className="menu-error">
                     <span>{layoutRestoreError}</span>
-                    <button onClick={restoreLayout} className="retry-button">
+                    <button onClick={() => restoreLayout()} className="retry-button">
                       재시도
                     </button>
                   </div>
@@ -5858,12 +5873,12 @@ const MoldsComponent = () => {
       !Number.isFinite(data.Mold5) ||
       !Number.isFinite(data.Mold6);
   const moldLevels = data?.Computed?.mold_levels;
-  const mold1 = mapMoldLevel(moldLevels?.Mold1) ?? getMoldState(data.Mold1).className;
-  const mold2 = mapMoldLevel(moldLevels?.Mold2) ?? getMoldState(data.Mold2).className;
-  const mold3 = mapMoldLevel(moldLevels?.Mold3) ?? getMoldState(data.Mold3).className;
-  const mold4 = mapMoldLevel(moldLevels?.Mold4) ?? getMoldState(data.Mold4).className;
-  const mold5 = mapMoldLevel(moldLevels?.Mold5) ?? getMoldState(data.Mold5).className;
-  const mold6 = mapMoldLevel(moldLevels?.Mold6) ?? getMoldState(data.Mold6).className;
+  const mold1 = mapMoldLevel(moldLevels?.Mold1) ?? getMoldState(data.Mold1 ?? 0).className;
+  const mold2 = mapMoldLevel(moldLevels?.Mold2) ?? getMoldState(data.Mold2 ?? 0).className;
+  const mold3 = mapMoldLevel(moldLevels?.Mold3) ?? getMoldState(data.Mold3 ?? 0).className;
+  const mold4 = mapMoldLevel(moldLevels?.Mold4) ?? getMoldState(data.Mold4 ?? 0).className;
+  const mold5 = mapMoldLevel(moldLevels?.Mold5) ?? getMoldState(data.Mold5 ?? 0).className;
+  const mold6 = mapMoldLevel(moldLevels?.Mold6) ?? getMoldState(data.Mold6 ?? 0).className;
     return (
       <div className="card" style={{ height: '100%' }}>
         <div className="mold-grid">
