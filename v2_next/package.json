@@ -1,0 +1,39 @@
+{
+  "name": "smart-factory-logger-v2",
+  "version": "1.0.0",
+  "description": "Smart Factory Logger V2 Dashboard",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "tree-kill": "^1.2.2"
+  },
+  "build": {
+    "appId": "com.smartfactory.logger",
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "backend/dist/backend_server",
+        "to": "backend"
+      },
+      {
+        "from": "frontend/dist",
+        "to": "frontend/dist"
+      }
+    ]
+  }
+}

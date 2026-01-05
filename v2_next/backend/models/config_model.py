@@ -10,6 +10,7 @@ class NetConfig(BaseModel):
 class SpotConfig(BaseModel):
     ip: Optional[str] = None
     refresh_interval: Optional[float] = None
+    timeout: Optional[float] = None
 
 
 class SettingsConfig(BaseModel):

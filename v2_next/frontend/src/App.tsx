@@ -3055,7 +3055,8 @@ function App() {
       setOverrideMeta(meta);
     } catch (error) {
       console.error('Override toggle failed', error);
-      setSettingsError('로컬 오버라이드 변경에 실패했습니다.');
+      const message = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message) : String(error);
+      setSettingsError(`오버라이드 변경 실패: ${message}`);
     } finally {
       setOverrideBusy(false);
     }
@@ -6140,8 +6141,8 @@ const CameraComponent = () => {
           )}
         </div>
         <div className="camera-controls" style={{marginTop: '4px'}}>
-           <button onClick={() => requestFocus(-10)}>FOCUS -</button>
-           <button onClick={() => requestFocus(10)}>FOCUS +</button>
+           <button onClick={() => requestFocus(1)}>&lt;-Focus</button>
+           <button onClick={() => requestFocus(-1)}>Focus-&gt;</button>
         </div>
       </div>
     );

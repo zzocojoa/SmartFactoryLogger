@@ -91,3 +91,5 @@ npm start
 - SPOT 카메라/포커스 관련 값은 `[SPOT]` 섹션을 사용합니다.
 
 python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+
+cd frontend; npm run build; cd ..; npm run dist

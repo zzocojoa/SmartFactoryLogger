@@ -116,7 +116,9 @@ def get_config_snapshot() -> dict:
     spot = {
         "ip": spot_ip,
         "refresh_interval": _get_float(parser, "SPOT", "refreshinterval", config.DEFAULT_SPOT_REFRESH_INTERVAL),
+        "timeout": _get_float(parser, "SPOT", "timeout", 0.5),
     }
+
     settings = {
         "logpath": _get(parser, "SETTINGS", "logpath", config.DEFAULT_LOG_PATH),
         "snapshotpath": _get(parser, "SETTINGS", "snapshotpath", config.DEFAULT_SNAPSHOT_PATH),
@@ -400,6 +402,8 @@ def update_config(
                 parser.set("SPOT", "focusurl", f"http://{payload.spot.ip}/control?p=focus")
         if payload.spot.refresh_interval is not None:
             parser.set("SPOT", "refreshinterval", str(payload.spot.refresh_interval))
+        if payload.spot.timeout is not None:
+            parser.set("SPOT", "timeout", str(payload.spot.timeout))
 
     if payload.settings:
         if payload.settings.logpath is not None:

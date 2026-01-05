@@ -138,7 +138,6 @@ class PLCService:
         }
 
 # Singleton Instance (Initialized by main.py)
-import os
-# Default to MOCK for safety, set V2_MODE=REAL to use Hardware
-mode = os.getenv("V2_MODE", "MOCK").upper()
+# Default to config.MODE (REAL if frozen, MOCK if dev)
+mode = config.MODE
 plc_service = PLCService(use_mock=(mode != 'REAL'))

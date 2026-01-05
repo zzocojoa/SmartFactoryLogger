@@ -69,7 +69,7 @@ class RealPLCDriver(BasePLCDriver):
         self.ls_error_started: Optional[float] = None
         self.ls_in_error = False
 
-        self.spot_timeout = 0.2
+        self.spot_timeout = config.SPOT_TIMEOUT
         self.last_spot: Optional[float] = None
         self.spot_read_failures = 0
         self.spot_last_error_time: Optional[float] = None

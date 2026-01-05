@@ -1,3 +1,14 @@
+import sys
+import os
+from pathlib import Path
+
+# Important: Add the directory containing the 'backend' folder to sys.path
+# This ensures that 'from backend.services...' works in all environments.
+current_dir = Path(__file__).resolve().parent
+project_root = current_dir.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -10,10 +21,7 @@ import base64
 import json
 import logging
 from logging.handlers import RotatingFileHandler
-import os
-from pathlib import Path
 import socket
-import sys
 import subprocess
 import tempfile
 import threading
@@ -23,21 +31,21 @@ import uvicorn
 from urllib.request import Request, urlopen
 from typing import Any
 
-# Import Service Layer
-from .services.plc_service import plc_service
-from .services.logger_service import logger_service
-from .services.comm_metrics_logger import comm_metrics_logger_service
-from .services.observability_service import observability_service
-from .services.layout_service import (
+# Import Service Layer using absolute imports
+from backend.services.plc_service import plc_service
+from backend.services.logger_service import logger_service
+from backend.services.comm_metrics_logger import comm_metrics_logger_service
+from backend.services.observability_service import observability_service
+from backend.services.layout_service import (
     delete_layout_slot,
     get_active_layout,
     get_layout_meta,
     list_layouts,
     restore_layout_backup,
     restore_layout_slot,
-    save_layout_slot,
+    save_layout_slot
 )
-from .services.config_service import (
+from backend.services.config_service import (
     apply_pending_config,
     clear_pending_config,
     get_config_snapshot,
@@ -46,13 +54,13 @@ from .services.config_service import (
     restore_defaults,
     restore_backup,
 )
-from .services.config_sync import config_sync_agent
-from .services.config_watch import config_watch_service
-from .models.config_model import ConfigUpdate, OverrideToggle
-from .services import spot_control
-from .models.data_model import FactoryData
-from .services.verification_service import compare_with_reference
-from . import config
+from backend.services.config_sync import config_sync_agent
+from backend.services.config_watch import config_watch_service
+from backend.models.config_model import ConfigUpdate, OverrideToggle
+from backend.services import spot_control
+from backend.models.data_model import FactoryData
+from backend.services.verification_service import compare_with_reference
+from backend import config
 
 class ConnectionTarget(BaseModel):
     ip: str | None = None
@@ -713,10 +721,13 @@ async def record_request_stats(request: Request, call_next):
 
 @app.get("/")
 def read_root():
+    # UX Improvement: Serve Dashboard directly at root
+    if frontend_dist.exists() and (frontend_dist / "index.html").exists():
+        return FileResponse(frontend_dist / "index.html")
     return {
         "system": "Smart Factory Logger V2",
         "status": "Online",
-        "backend": "FastAPI with Service Layer"
+        "backend": "FastAPI with Service Layer (Frontend missing)"
     }
 
 @app.get("/api/data", response_model=FactoryData)
@@ -1219,25 +1230,31 @@ def shutdown(payload: ShutdownRequest):
     return {"ok": True}
 
 # --- Static File Serving (Frontend) ---
-# Must be defined last to avoid overriding API routes
-frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+# Check common locations for frontend dist
+if getattr(sys, 'frozen', False):
+    # If running from backend_server.exe in resources/backend/
+    # resources/backend/backend_server.exe -> parent is backend/ -> parent is resources/
+    base_dir = Path(sys.executable).parent.parent
+else:
+    # Development mode
+    base_dir = Path(__file__).parent.parent
+
+frontend_dist = base_dir / "frontend" / "dist"
 
 if frontend_dist.exists():
-    # Mount assets folder explicitly
     assets_dir = frontend_dist / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-    # Catch-all for SPA routing (serve index.html for unknown paths)
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # Check if specific file exists (e.g. favicon.ico, manifestation.json)
         file_path = frontend_dist / full_path
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)
-        # Fallback to index.html for client-side routing
         return FileResponse(frontend_dist / "index.html")
 
-if __name__ == "__main__":
-    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=False)
+
+if __name__ == "backend.app" or __name__ == "app":
+    # Ensure app is defined if imported
+    pass
 
