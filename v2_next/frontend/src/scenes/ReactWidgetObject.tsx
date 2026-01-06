@@ -79,7 +79,7 @@ export class ReactWidget extends SceneObjectBase<ReactWidgetState> {
             </div>
           )
         )}
-        <div className="panel-content">
+        <div className="panel-content" style={{ flex: 1, position: 'relative', overflow: 'visible' }}>
           {renderWidget()}
         </div>
       </div>

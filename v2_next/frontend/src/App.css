@@ -3763,3 +3763,53 @@ body {
     font-weight: 600;
     box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
+
+/* Widget Header Controls (Edit/Delete) */
+.widget-header-controls {
+  position: absolute;
+  top: -26px;
+  right: 4px;
+  display: flex;
+  gap: 4px;
+  z-index: 20;
+}
+
+.widget-control-btn {
+  background: #2b2f36;
+  border: 1px solid #3a3f46;
+  color: #b0bac4;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+  height: 22px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.widget-control-btn:hover {
+  background: #323842;
+  border-color: #555;
+  color: #e6edf3;
+  transform: translateY(-1px);
+}
+
+.widget-edit-btn {
+  padding: 0 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.widget-delete-btn {
+  width: 22px;
+  font-size: 13px;
+  color: #ff6b6b;
+  border-color: rgba(246, 107, 107, 0.4);
+}
+
+.widget-delete-btn:hover {
+  background: rgba(246, 107, 107, 0.15);
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+}

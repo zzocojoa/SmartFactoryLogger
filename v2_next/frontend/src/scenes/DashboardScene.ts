@@ -64,10 +64,11 @@ export function getDashboardScene(
 ) {
   const savedMap = savedLayout ?? {};
   
-  // Create a merged list of items
-  // We use DEFAULT_DASHBOARD_ITEMS as a base, but if savedMap has extra keys, we should ideally support them too (dynamic widgets)
-  
-  const allKeys = Array.from(new Set([...DEFAULT_DASHBOARD_ITEMS.map(i => i.key), ...Object.keys(savedMap)]));
+  // If a saved layout exists, we use it as the source of truth for which widgets to display.
+  // We do NOT automatically merge defaults, otherwise a user cannot delete a default widget.
+  const allKeys = savedLayout 
+    ? Object.keys(savedMap) 
+    : DEFAULT_DASHBOARD_ITEMS.map(i => i.key);
   
   // Scale factor: 60 (User) -> 24 (Scene) = 0.4
   const SCALE_TO_SCENE = 24 / 60;

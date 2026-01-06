@@ -63,39 +63,41 @@ const LEGACY_LAYOUT_COLS = 24;
 const SERIES_WINDOW_MINUTES = 30;
 
 const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
-  const { customNotice, setCustomNotice, layoutEditing } = React.useContext(DataContext);
+  const { layoutEditing } = React.useContext(DataContext);
+  const { updateWidget, deleteWidget } = React.useContext(LayoutEditContext);
   const [editing, setEditing] = useState(false);
-  const [editValue, setEditValue] = useState(customNotice);
-  const [titleValue, setTitleValue] = useState(item.title);
+  const [editValue, setEditValue] = useState(item.properties?.content || '');
 
   useEffect(() => {
-    setEditValue(customNotice);
-  }, [customNotice]);
+    setEditValue(item.properties?.content || '');
+  }, [item.properties?.content]);
 
-  const handleSave = async () => {
-    try {
-      await axios.post(`${API_BASE}/api/config/notice`, { content: editValue });
-      setCustomNotice(editValue);
-      setEditing(false);
-    } catch (error) {
-      console.error('Failed to save markdown content', error);
-      window.alert('저장에 실패했습니다.');
-    }
+  const handleSave = () => {
+    updateWidget(item.key, { properties: { ...item.properties, content: editValue } });
+    setEditing(false);
   };
 
   return (
-    <div className="card notice-card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div className="notice-header">
-
-        {layoutEditing && (
-          <button
-            className="notice-edit-toggle"
-            onClick={() => setEditing(!editing)}
-          >
-            {editing ? '보기' : '편집'}
-          </button>
-        )}
-      </div>
+    <div className="card notice-card" style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'visible' }}>
+      {layoutEditing && (
+        <>
+          <div className="widget-header-controls">
+            <button
+              className="widget-control-btn widget-edit-btn"
+              onClick={() => setEditing(!editing)}
+            >
+              {editing ? '보기' : '편집'}
+            </button>
+            <button
+              className="widget-control-btn widget-delete-btn"
+              onClick={() => deleteWidget(item.key)}
+              title="위젯 삭제"
+            >
+              ✕
+            </button>
+          </div>
+        </>
+      )}
       <div className="notice-body" style={{ flex: 1, overflow: 'auto' }}>
         {editing ? (
           <div className="notice-editor-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -109,7 +111,7 @@ const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
           </div>
         ) : (
           <div className="notice-content markdown-body">
-            <ReactMarkdown>{customNotice || ''}</ReactMarkdown>
+            <ReactMarkdown>{item.properties?.content || ''}</ReactMarkdown>
           </div>
         )}
       </div>
@@ -117,8 +119,9 @@ const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
   );
 };
 
-const NoticeComponent = () => {
+const NoticeComponent = ({ item }: { item?: any }) => {
   const { customNotice, setCustomNotice, layoutEditing } = React.useContext(DataContext);
+  const { deleteWidget } = React.useContext(LayoutEditContext);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(customNotice);
 
@@ -139,37 +142,66 @@ const NoticeComponent = () => {
   };
 
   return (
-    <div className="card notice-card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div className="notice-header">
+    <div className="card notice-card" style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'visible' }}>
+      
+      {layoutEditing && (
+        <>
+          <div className="widget-header-controls">
+            <button
+              className="widget-control-btn widget-edit-btn"
+              onClick={() => setEditing(!editing)}
+            >
+              {editing ? '보기' : '편집'}
+            </button>
+            {item && (
+              <button
+                className="widget-control-btn widget-delete-btn"
+                onClick={() => deleteWidget(item.key)}
+                title="위젯 삭제"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
-        {layoutEditing && (
-          <button
-            className="notice-edit-toggle"
-            onClick={() => setEditing(!editing)}
-          >
-            {editing ? '보기' : '편집'}
-          </button>
-        )}
-      </div>
-      <div className="notice-body" style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+      <div className="notice-body" style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {editing ? (
           <div className="notice-editor-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <textarea
               className="notice-textarea"
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
-              style={{ flex: 1, width: '100%', background: '#252526', color: '#fff', border: 'none', padding: '10px', resize: 'none' }}
+              style={{ 
+                flex: 1, 
+                width: '100%', 
+                background: '#1e1e1e', 
+                color: '#d4d4d4', 
+                border: 'none', 
+                padding: '8px', 
+                resize: 'none',
+                outline: 'none',
+                fontFamily: 'Consolas, monospace',
+                fontSize: '14px',
+                lineHeight: '1.5'
+              }}
             />
-            <button className="notice-save-btn" onClick={handleSave} style={{ margin: '5px' }}>저장</button>
+            <button className="notice-save-btn" onClick={handleSave} style={{ 
+              width: '100%', 
+              padding: '8px', 
+              background: '#007acc', 
+              color: 'white', 
+              border: 'none', 
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}>저장</button>
           </div>
         ) : (
-          <div className="notice-content markdown-body">
+          <div className="notice-content markdown-body" style={{ height: '100%', overflow: 'auto', padding: '10px' }}>
             <ReactMarkdown>{customNotice || ''}</ReactMarkdown>
           </div>
         )}
-      </div>
-      <div className="notice-footer">
-        {NOTICE_FOOTER}
       </div>
     </div>
   );
@@ -1053,7 +1085,6 @@ const formatMetaTime = (value?: string | null) => {
     return value;
   }
   const formatted = date.toLocaleString();
-  console.log('formatMetaTime', value, formatted);
   return formatted;
 };
 
@@ -3747,7 +3778,7 @@ function App() {
        molds: () => <MoldsComponent />,
        env: () => <EnvComponent />,
        camera: () => <CameraComponent />,
-       notice: () => <NoticeComponent />,
+       notice: (item) => <NoticeComponent item={item} />,
        timeseries: () => <TimeSeriesWidget />,
        markdown: (item) => <MarkdownWidget item={item} />,
      };
@@ -3871,11 +3902,11 @@ function App() {
           ...prev.layout,
           [newKey]: {
             x: 0,
-            y: 100, // Put way at bottom
+            y: 0, // Put at top
             width: 20,
             height: 6,
             type,
-            title: type === 'markdown' ? '작업자 확인' : '새 위젯',
+            title: type === 'markdown' ? 'New Memo' : '새 위젯',
           },
         },
       };
@@ -3908,6 +3939,43 @@ function App() {
       console.error('Layout delete failed', error);
       setLayoutRestoreError('삭제 실패');
     }
+  };
+
+  const handleRemoveWidget = (key: string) => {
+    // if (!window.confirm('위젯을 삭제하시겠습니까?')) return;
+    setLayoutSnapshot((prev) => {
+        if (!prev) return prev;
+        const newLayout = { ...prev.layout };
+        if (key in newLayout) {
+             delete newLayout[key];
+        }
+        return { ...prev, layout: newLayout };
+    });
+  };
+
+  const handleUpdateWidget = (key: string, updates: any) => {
+    // Capture current visual state (positions) to prevent reset
+    const currentPositions = layoutRef.current;
+
+    setLayoutSnapshot((prev) => {
+      if (!prev) return prev;
+      const newLayout = { ...prev.layout };
+      
+      // Update items with current visual positions
+      if (currentPositions && Object.keys(currentPositions).length > 0) {
+        Object.keys(newLayout).forEach((k) => {
+           if (currentPositions[k]) {
+             newLayout[k] = { ...newLayout[k], ...currentPositions[k] };
+           }
+        });
+      }
+
+      // Apply the specific update
+      if (newLayout[key]) {
+          newLayout[key] = { ...newLayout[key], ...updates };
+      }
+      return { ...prev, layout: newLayout };
+    });
   };
 
   const ageMs = lastDataAt ? Math.max(0, nowTick - lastDataAt) : null;
@@ -4255,7 +4323,7 @@ function App() {
                         className="menu-item"
                         onClick={() => handleAddWidget('markdown')}
                       >
-                        작업자 확인
+                        New Memo
                       </button>
                     </div>
                   </>
@@ -5648,7 +5716,7 @@ function App() {
             setLayoutEditing,
           }}
         >
-        <LayoutEditContext.Provider value={{ isEditing: layoutEditing }}>
+        <LayoutEditContext.Provider value={{ isEditing: layoutEditing, deleteWidget: handleRemoveWidget, updateWidget: handleUpdateWidget }}>
            <scene.Component model={scene} />
         </LayoutEditContext.Provider>
         </DataContext.Provider>
