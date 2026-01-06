@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from .. import config
+from .. import constants
 
 
 class LogicProcessor:
@@ -88,7 +89,7 @@ class LogicProcessor:
         self.last_counter = current_count
 
         cycle_id_output = ""
-        if current_speed > 0.1:
+        if current_speed > constants.CYCLE_SPEED_THRESHOLD:
             if self.billet_cycle_id != current_count:
                 self.billet_cycle_id = current_count
                 self._save_state()

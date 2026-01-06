@@ -7,89 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from ..models.data_model import FactoryData
-from .. import config
+from .. import constants
 from .plc_service import plc_service
 
-FIELD_KEYS = [
-    "Speed",
-    "Press",
-    "Spot",
-    "Temp_F",
-    "Temp_B",
-    "Billet_Temp",
-    "Billet_Length",
-    "Count",
-    "EndPos",
-    "At_Temp",
-    "At_Pre",
-    "Mold1",
-    "Mold2",
-    "Mold3",
-    "Mold4",
-    "Mold5",
-    "Mold6",
-]
 
-DEFAULT_ABS_TOLERANCE: Dict[str, float] = {
-    "Speed": 0.2,
-    "Press": 2.0,
-    "Spot": 3.0,
-    "Temp_F": 3.0,
-    "Temp_B": 3.0,
-    "Billet_Temp": 3.0,
-    "Billet_Length": 1.0,
-    "Count": 1.0,
-    "EndPos": 1.0,
-    "At_Temp": 1.0,
-    "At_Pre": 2.0,
-    "Mold1": 3.0,
-    "Mold2": 3.0,
-    "Mold3": 3.0,
-    "Mold4": 3.0,
-    "Mold5": 3.0,
-    "Mold6": 3.0,
-}
-
-DEFAULT_PCT_TOLERANCE = 0.0
-
-
-def _normalize_header(name: str) -> str:
-    return name.strip().lower().replace(" ", "").replace("_", "")
-
-
-HEADER_ALIASES = {
-    "temperature": "Spot",
-    "spot": "Spot",
-    "spottemp": "Spot",
-    "spottemperature": "Spot",
-    "mainpress": "Press",
-    "press": "Press",
-    "speed": "Speed",
-    "count": "Count",
-    "endpos": "EndPos",
-    "billetlength": "Billet_Length",
-    "billettemp": "Billet_Temp",
-    "tempf": "Temp_F",
-    "tempb": "Temp_B",
-    "attemp": "At_Temp",
-    "atpre": "At_Pre",
-    "mold1": "Mold1",
-    "mold2": "Mold2",
-    "mold3": "Mold3",
-    "mold4": "Mold4",
-    "mold5": "Mold5",
-    "mold6": "Mold6",
-    "메인압력": "Press",
-    "현재속도": "Speed",
-    "생산카운터": "Count",
-    "압출종료위치": "EndPos",
-    "빌렛길이": "Billet_Length",
-    "빌렛온도": "Billet_Temp",
-    "콘테이너온도앞쪽": "Temp_F",
-    "콘테이너온도뒷쪽": "Temp_B",
-    "환경온도": "At_Temp",
-    "환경습도": "At_Pre",
-}
 
 
 def _parse_float(value: Any) -> Optional[float]:
@@ -129,7 +50,7 @@ def _build_header_map(header: list[str]) -> Dict[int, str]:
         normalized = _normalize_header(name)
         if not normalized:
             continue
-        key = HEADER_ALIASES.get(normalized)
+        key = constants.HEADER_ALIASES.get(normalized)
         if key:
             mapping[idx] = key
     return mapping
@@ -165,7 +86,7 @@ def _collect_live_samples(sample_count: int, interval_sec: float) -> list[Dict[s
     for _ in range(sample_count):
         snapshot = plc_service.get_latest_data()
         row: Dict[str, float] = {}
-        for key in FIELD_KEYS:
+        for key in constants.FIELD_KEYS:
             value = getattr(snapshot, key, None)
             value = _parse_float(value)
             if value is None or not math.isfinite(value):
@@ -179,7 +100,7 @@ def _collect_live_samples(sample_count: int, interval_sec: float) -> list[Dict[s
 
 def _calc_stats(rows: Iterable[Dict[str, float]]) -> Dict[str, Dict[str, float]]:
     stats: Dict[str, Dict[str, float]] = {}
-    buckets: Dict[str, List[float]] = {key: [] for key in FIELD_KEYS}
+    buckets: Dict[str, List[float]] = {key: [] for key in constants.FIELD_KEYS}
     for row in rows:
         for key, value in row.items():
             if key not in buckets:
@@ -212,17 +133,17 @@ def compare_with_reference(
     ref_stats = _calc_stats(reference_rows)
     live_stats = _calc_stats(live_rows)
 
-    abs_tol = DEFAULT_ABS_TOLERANCE.copy()
+    abs_tol = constants.DEFAULT_ABS_TOLERANCE.copy()
     if tolerance_abs:
         abs_tol.update({k: float(v) for k, v in tolerance_abs.items()})
-    pct_tol = {key: DEFAULT_PCT_TOLERANCE for key in FIELD_KEYS}
+    pct_tol = {key: constants.DEFAULT_PCT_TOLERANCE for key in constants.FIELD_KEYS}
     if tolerance_pct:
         pct_tol.update({k: float(v) for k, v in tolerance_pct.items()})
 
     results: Dict[str, Any] = {}
     pass_count = 0
     fail_count = 0
-    for key in FIELD_KEYS:
+    for key in constants.FIELD_KEYS:
         ref = ref_stats.get(key)
         live = live_stats.get(key)
         if not ref or not live:

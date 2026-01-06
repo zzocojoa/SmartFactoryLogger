@@ -35,7 +35,13 @@ import {
   NOTICE_TEMP_THRESHOLD,
   NOTICE_TITLE,
   SPOT_UNIT,
+  LABELS,
+  MESSAGES,
+  STATUS,
+  CONFIG_LABELS,
 } from './constants/uiText';
+import * as LOGIC from './constants/logic';
+import * as THEME from './constants/theme';
 import { useModal } from './GlobalModalContext';
 import { useTheme } from './ThemeContext';
 
@@ -51,18 +57,25 @@ if (typeof window !== 'undefined') {
   initScenesRuntime();
 }
 
+
+
+// ... (existing imports)
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.protocol.startsWith('file') ? 'http://localhost:8000' : '');
 
-const SPOT_WARN_TEMP = 580;
-const SPOT_NORMAL_MIN = 480;
-const SPOT_HIGH_MIN = 540;
-const SPOT_MAX_TEMP = 650;
-const SPARKLINE_POINTS = 10;
-const LAYOUT_STORAGE_KEY = 'grafana_scene_layout_v1';
+const {
+  SPOT_WARN_TEMP,
+  SPOT_NORMAL_MIN,
+  SPOT_HIGH_MIN,
+  SPOT_MAX_TEMP,
+  SPARKLINE_POINTS,
+  LAYOUT_STORAGE_KEY,
+  LAYOUT_BACKUP_KEY,
+  SERIES_WINDOW_MINUTES,
+} = LOGIC;
+
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
-const LAYOUT_BACKUP_KEY = 'grafana_scene_layout_v1_backup';
 const LEGACY_LAYOUT_COLS = 24;
-const SERIES_WINDOW_MINUTES = 30;
 
 const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
   const { layoutEditing } = React.useContext(DataContext);
@@ -88,7 +101,7 @@ const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
               className="widget-control-btn widget-edit-btn"
               onClick={() => setEditing(!editing)}
             >
-              {editing ? '보기' : '편집'}
+              {editing ? LABELS.VIEW : LABELS.EDIT}
             </button>
             <button
               className="widget-control-btn widget-delete-btn"
@@ -109,7 +122,7 @@ const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
               onChange={(e) => setEditValue(e.target.value)}
               style={{ flex: 1 }}
             />
-            <button className="notice-save-btn" onClick={handleSave} style={{ marginTop: '10px' }}>저장</button>
+            <button className="notice-save-btn" onClick={handleSave} style={{ marginTop: '10px' }}>{LABELS.SAVE}</button>
           </div>
         ) : (
           <div className="notice-content markdown-body">
@@ -140,7 +153,7 @@ const NoticeComponent = ({ item }: { item?: any }) => {
       setEditing(false);
     } catch (error) {
       console.error('Failed to save notice', error);
-      await modal.alert('공지 저장에 실패했습니다.');
+      await modal.alert(MESSAGES.NOTICE_SAVE_FAILURE);
     }
   };
 
@@ -154,13 +167,13 @@ const NoticeComponent = ({ item }: { item?: any }) => {
               className="widget-control-btn widget-edit-btn"
               onClick={() => setEditing(!editing)}
             >
-              {editing ? '보기' : '편집'}
+              {editing ? LABELS.VIEW : LABELS.EDIT}
             </button>
             {item && (
               <button
                 className="widget-control-btn widget-delete-btn"
                 onClick={() => deleteWidget(item.key)}
-                title="위젯 삭제"
+                title={LABELS.DELETE}
               >
                 ✕
               </button>
@@ -177,7 +190,7 @@ const NoticeComponent = ({ item }: { item?: any }) => {
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
             />
-            <button className="notice-save-btn" onClick={handleSave}>저장</button>
+            <button className="notice-save-btn" onClick={handleSave}>{LABELS.SAVE}</button>
           </div>
         ) : (
           <div className="notice-content markdown-body" style={{ height: '100%', overflow: 'auto', padding: '10px' }}>
@@ -190,42 +203,42 @@ const NoticeComponent = ({ item }: { item?: any }) => {
 };
 
 
-const SERIES_SAMPLES_PER_SEC = 5;
-const SERIES_WINDOW_MS = SERIES_WINDOW_MINUTES * 60 * 1000;
-const SERIES_MAX_POINTS = SERIES_WINDOW_MINUTES * 60 * SERIES_SAMPLES_PER_SEC;
-const CURRENT_LAYOUT_COLS = 60;
-const SPEED_MAX = 15;
-const PRESS_MAX = 250;
-const PRESS_RUNNING_THRESHOLD = 20;
-const ALERT_HOLD_MS = 2000;
-const ALERT_HOLD_LONG_MS = 5000;
-const STATUS_WARN_MS = 2000;
-const STATUS_OFFLINE_MS = 5000;
-const STATUS_ERROR_RATE_WARN = 0.2;
-const STATUS_P95_WARN_MS = 800;
-const STATUS_RECENT_ERROR_MS = 60000;
-const SETTINGS_AUTO_REFRESH_MS = 4000;
-const OBSERVABILITY_REFRESH_MS = 10000;
-const OBSERVABILITY_ERROR_LIMIT = 50;
-const FRONT_ERROR_STORAGE_KEY = 'sfl_front_errors';
-const FRONT_ERROR_MAX = 50;
-const EXPORT_PATH_STORAGE_KEY = 'sfl_observability_export_path';
+const {
+  SERIES_SAMPLES_PER_SEC,
+  SERIES_WINDOW_MS,
+  SERIES_MAX_POINTS,
+  CURRENT_LAYOUT_COLS,
+  SPEED_MAX,
+  PRESS_MAX,
+  PRESS_RUNNING_THRESHOLD,
+  ALERT_HOLD_MS,
+  ALERT_HOLD_LONG_MS,
+  STATUS_WARN_MS,
+  STATUS_OFFLINE_MS,
+  STATUS_ERROR_RATE_WARN,
+  STATUS_P95_WARN_MS,
+  STATUS_RECENT_ERROR_MS,
+  SETTINGS_AUTO_REFRESH_MS,
+  OBSERVABILITY_REFRESH_MS,
+  FRONT_ERROR_STORAGE_KEY,
+  EXPORT_PATH_STORAGE_KEY,
+} = LOGIC;
 
 const APPLY_KEY_LABELS: Record<string, string> = {
-  'settings.logpath': '로그 경로',
-  'settings.snapshotpath': '스냅샷 경로',
-  'settings.autosave': '자동 저장',
-  'settings.password_set': '비밀번호 설정',
-  'logging.rotation_enabled': '로그 회전 사용',
-  'logging.rotation_mode': '회전 모드',
-  'logging.cycle_idle_time': '사이클 유휴 시간',
-  'logging.cycle_threshold_press': '사이클 압력 임계값',
+  'settings.logpath': CONFIG_LABELS.LOG_PATH,
+  'settings.snapshotpath': CONFIG_LABELS.SNAPSHOT_PATH,
+  'settings.autosave': CONFIG_LABELS.AUTO_SAVE,
+  'settings.password_set': CONFIG_LABELS.PASSWORD_SET,
+  'logging.rotation_enabled': '로그 회전 사용', // TODO: Add to CONFIG_LABELS
+  'logging.rotation_mode': CONFIG_LABELS.ROTATION_MODE,
+  'logging.cycle_idle_time': CONFIG_LABELS.CYCLE_IDLE,
+  'logging.cycle_threshold_press': CONFIG_LABELS.CYCLE_PRESS,
   'logging.csv_header': 'CSV 헤더',
-  'system.intervalsec': '수집 주기',
-  'spot.ip': 'SPOT IP',
-  'spot.url': 'SPOT URL',
-  'spot.image_url': 'SPOT 이미지 URL',
-  'spot.refresh_interval': 'SPOT 갱신 주기',
+  'system.intervalsec': CONFIG_LABELS.COLLECT_INTERVAL,
+  'spot.ip': CONFIG_LABELS.SPOT_IP,
+  'spot.url': CONFIG_LABELS.SPOT_URL,
+  'spot.image_url': CONFIG_LABELS.SPOT_IMG_URL,
+  'spot.refresh_interval': CONFIG_LABELS.SPOT_REFRESH,
   'spot.crosshair_x': 'SPOT 크로스헤어 X',
   'spot.crosshair_y': 'SPOT 크로스헤어 Y',
   'spot.crosshair_color': 'SPOT 크로스헤어 색상',
@@ -1591,7 +1604,7 @@ function App() {
   const pushFrontError = useCallback(
     (entry: FrontendErrorEntry) => {
       setFrontErrors((prev) => {
-        const next = [entry, ...prev].slice(0, FRONT_ERROR_MAX);
+        const next = [entry, ...prev].slice(0, LOGIC.FRONT_ERROR_MAX);
         persistFrontErrors(next);
         return next;
       });
@@ -1643,15 +1656,15 @@ function App() {
   }, [settingsOpen, settingsForm, thresholdConfig]);
   const settingsSections = useMemo(
     () => [
-      { id: 'settings-summary', label: '요약' },
-      { id: 'settings-central', label: '중앙 설정' },
-      { id: 'settings-comm', label: '통신 설정' },
-      { id: 'settings-observability', label: '운영/관측성' },
-      { id: 'settings-spot', label: 'SPOT 카메라' },
-      { id: 'settings-storage', label: '저장 설정' },
-      { id: 'settings-logging', label: '로그 회전' },
-      { id: 'settings-alerts', label: '알림/임계값' },
-      { id: 'settings-security', label: '보안' },
+      { id: 'settings-summary', label: LABELS.SUMMARY },
+      { id: 'settings-central', label: LABELS.CENTRAL_CONFIG },
+      { id: 'settings-comm', label: LABELS.COMM_CONFIG },
+      { id: 'settings-observability', label: LABELS.OPER_OBSERVABILITY },
+      { id: 'settings-spot', label: LABELS.SPOT_CAMERA },
+      { id: 'settings-storage', label: LABELS.STORAGE_CONFIG },
+      { id: 'settings-logging', label: LABELS.LOG_ROTATION },
+      { id: 'settings-alerts', label: LABELS.ALERTS_THRESHOLDS },
+      { id: 'settings-security', label: LABELS.SECURITY },
     ],
     []
   );
@@ -1700,9 +1713,9 @@ function App() {
   }, [pushFrontError]);
   const connectionTestTargets = useMemo(
     () => [
-      { key: 'extruder' as const, label: 'Extruder' },
-      { key: 'ls_plc' as const, label: 'LS PLC' },
-      { key: 'spot' as const, label: 'SPOT Camera' },
+      { key: 'extruder' as const, label: CONFIG_LABELS.EXTRUDER },
+      { key: 'ls_plc' as const, label: CONFIG_LABELS.LS_PLC },
+      { key: 'spot' as const, label: LABELS.SPOT_CAMERA },
     ],
     []
   );
@@ -1710,77 +1723,77 @@ function App() {
     () => [
       {
         key: 'speed',
-        label: '속도',
+        label: LABELS.SPEED,
         unit: 'mm/s',
         enableField: 'thresholdSpeedEnabled',
         valueField: 'thresholdSpeedValue',
       },
       {
         key: 'press',
-        label: '압력',
+        label: LABELS.PRESS,
         unit: 'bar',
         enableField: 'thresholdPressEnabled',
         valueField: 'thresholdPressValue',
       },
       {
         key: 'spot',
-        label: 'SPOT',
+        label: LABELS.SPOT,
         unit: '℃',
         enableField: 'thresholdSpotEnabled',
         valueField: 'thresholdSpotValue',
       },
       {
         key: 'temp_f',
-        label: '컨테이너 앞',
+        label: LABELS.CONTAINER_FRONT,
         unit: '℃',
         enableField: 'thresholdTempFEnabled',
         valueField: 'thresholdTempFValue',
       },
       {
         key: 'temp_b',
-        label: '컨테이너 뒤',
+        label: LABELS.CONTAINER_BACK,
         unit: '℃',
         enableField: 'thresholdTempBEnabled',
         valueField: 'thresholdTempBValue',
       },
       {
         key: 'billet',
-        label: '빌렛 길이',
+        label: LABELS.BILLET_LEN,
         unit: 'mm',
         enableField: 'thresholdBilletEnabled',
         valueField: 'thresholdBilletValue',
       },
       {
         key: 'billet_temp',
-        label: '빌렛 온도',
+        label: LABELS.BILLET_TEMP,
         unit: '℃',
         enableField: 'thresholdBilletTempEnabled',
         valueField: 'thresholdBilletTempValue',
       },
       {
         key: 'at_temp',
-        label: '환경 온도',
+        label: LABELS.ENV_TEMP,
         unit: '℃',
         enableField: 'thresholdAtTempEnabled',
         valueField: 'thresholdAtTempValue',
       },
       {
         key: 'at_pre',
-        label: '환경 습도',
+        label: LABELS.ENV_HUMID,
         unit: '%',
         enableField: 'thresholdAtPreEnabled',
         valueField: 'thresholdAtPreValue',
       },
       {
         key: 'count',
-        label: '카운트',
+        label: LABELS.COUNT,
         unit: 'ea',
         enableField: 'thresholdCountEnabled',
         valueField: 'thresholdCountValue',
       },
       {
         key: 'endpos',
-        label: '종료 위치',
+        label: LABELS.END_POS,
         unit: 'mm',
         enableField: 'thresholdEndPosEnabled',
         valueField: 'thresholdEndPosValue',
@@ -2006,7 +2019,7 @@ function App() {
   };
 
   const loadObservabilityErrors = useCallback(
-    async (limit: number = OBSERVABILITY_ERROR_LIMIT) => {
+    async (limit: number = LOGIC.OBSERVABILITY_ERROR_LIMIT) => {
       setObservabilityLoading(true);
       try {
         const res = await axios.get<ObservabilityErrorsResponse>(`${API_BASE}/api/observability/errors`, {
@@ -2061,14 +2074,14 @@ function App() {
       const status = res.data?.status ?? 'UNKNOWN';
       const message =
         status === 'APPLIED'
-          ? '중앙 설정이 적용되었습니다.'
+          ? MESSAGES.SYNC_SUCCESS
           : status === 'NO_CHANGE'
-            ? '중앙 설정 변경 없음.'
+            ? MESSAGES.SYNC_NO_CHANGE
             : status === 'SKIPPED'
-              ? '로컬 오버라이드로 인해 적용이 보류되었습니다.'
+              ? MESSAGES.SYNC_SKIPPED
               : status === 'DISABLED'
-                ? '중앙 설정이 설정되지 않았습니다.'
-                : '중앙 설정 동기화 실패.';
+                ? MESSAGES.SYNC_DISABLED
+                : MESSAGES.SYNC_FAILURE;
       setSettingsInfo(message);
       await fetchCentralStatus();
       if (settingsOpen) {
@@ -2076,7 +2089,7 @@ function App() {
       }
     } catch (error) {
       console.error('Central sync failed', error);
-      setSettingsError('중앙 설정 동기화에 실패했습니다.');
+      setSettingsError(MESSAGES.SYNC_FAILURE_DETAIL);
     } finally {
       setCentralSyncBusy(false);
     }
@@ -4505,7 +4518,7 @@ function App() {
                         id="settings-summary"
                         ref={registerSettingsSection('settings-summary')}
                       >
-                        <div className="settings-section-title">요약 정보</div>
+                        <div className="settings-section-title">{LABELS.SUMMARY_INFO}</div>
                         <div className="settings-summary-grid">
                           {buildSettingsSummaryCards()
                             .sort((a, b) => {
@@ -4536,10 +4549,10 @@ function App() {
                           ); })}
                         </div>
                       <div className="settings-apply-details">
-                        <div className="settings-apply-title">적용 상세</div>
+                        <div className="settings-apply-title">{LABELS.APPLY_DETAIL}</div>
                         <div className="settings-apply-grid">
                           <div className="settings-apply-column">
-                            <span className="settings-apply-label">즉시 적용</span>
+                            <span className="settings-apply-label">{LABELS.IMMEDIATE_APPLY}</span>
                             {applyDetails.applied.length > 0 ? (
                               <ul className="settings-apply-list">
                                 {applyDetails.applied.map((item, index) => (
@@ -4547,11 +4560,11 @@ function App() {
                                 ))}
                               </ul>
                             ) : (
-                              <span className="settings-apply-empty">없음</span>
+                              <span className="settings-apply-empty">{LABELS.NONE}</span>
                             )}
                           </div>
                           <div className="settings-apply-column pending">
-                            <span className="settings-apply-label">재시작 필요</span>
+                            <span className="settings-apply-label">{LABELS.RESTART_REQUIRED}</span>
                             {applyDetails.pending.length > 0 ? (
                               <ul className="settings-apply-list">
                                 {applyDetails.pending.map((item, index) => (
@@ -4559,7 +4572,7 @@ function App() {
                                 ))}
                               </ul>
                             ) : (
-                              <span className="settings-apply-empty">없음</span>
+                              <span className="settings-apply-empty">{LABELS.NONE}</span>
                             )}
                           </div>
                         </div>
@@ -4567,14 +4580,14 @@ function App() {
                       {settingsPending && (
                         <div className="settings-pending-card">
                           <div className="settings-pending-header">
-                            <span className="settings-pending-title">보류된 설정 저장</span>
-                            <span className="settings-pending-badge">보류</span>
+                            <span className="settings-pending-title">{LABELS.PENDING_SAVE}</span>
+                            <span className="settings-pending-badge">{LABELS.PENDING}</span>
                           </div>
                           <div className="settings-pending-meta">
-                            <span>생성: {formatMetaTime(settingsPending.created_at)}</span>
-                            <span>출처: {settingsPending.source ?? 'local'}</span>
-                            <span>사유: {settingsPending.reason ?? '저장 실패'}</span>
-                            <span>경로: {settingsPending.path ?? '-'}</span>
+                            <span>{LABELS.CREATED}: {formatMetaTime(settingsPending.created_at)}</span>
+                            <span>{LABELS.SOURCE}: {settingsPending.source ?? 'local'}</span>
+                            <span>{LABELS.REASON}: {settingsPending.reason ?? '저장 실패'}</span>
+                            <span>{LABELS.PATH}: {settingsPending.path ?? '-'}</span>
                           </div>
                           <div className="settings-pending-actions">
                             <button
@@ -4584,7 +4597,7 @@ function App() {
                               disabled={settingsPendingBusy}
                               aria-disabled={settingsPendingBusy}
                             >
-                              보류 적용
+                              {LABELS.APPLY_PENDING}
                             </button>
                             <button
                               type="button"
@@ -4593,13 +4606,13 @@ function App() {
                               disabled={settingsPendingBusy}
                               aria-disabled={settingsPendingBusy}
                             >
-                              보류 삭제
+                              {LABELS.DELETE_PENDING}
                             </button>
                           </div>
                         </div>
                       )}
                       <div className="settings-summary-meta">
-                        <span>설정 경로: {settingsConfigPath ?? '확인 중'}</span>
+                        <span>{LABELS.CONFIG_PATH}: {settingsConfigPath ?? LABELS.SYNCING}</span>
                         <span>백업: config.ini.bak 자동 생성</span>
                       </div>
                     </div>
@@ -4622,11 +4635,11 @@ function App() {
                                 <span className={`settings-test-badge ${badge.className}`}>{badge.label}</span>
                               </div>
                               <div className="settings-test-meta">
-                                <span>연동: {centralStatus?.configured ? '설정됨' : '미설정'}</span>
-                                <span>서버: {centralStatus?.server ?? '--'}</span>
-                                <span>디바이스: {centralStatus?.device_id ?? '--'}</span>
-                                <span>마지막 실행: {formatCentralTime(result)}</span>
-                                <span>메시지: {statusMessage}</span>
+                                <span>{LABELS.CENTRAL_CONFIG}: {centralStatus?.configured ? STATUS.SET : STATUS.NOT_SET}</span>
+                                <span>{LABELS.SERVER}: {centralStatus?.server ?? '--'}</span>
+                                <span>{LABELS.DEVICE}: {centralStatus?.device_id ?? '--'}</span>
+                                <span>{LABELS.LAST_RUN}: {formatCentralTime(result)}</span>
+                                <span>{LABELS.MESSAGE}: {statusMessage}</span>
                               </div>
                               <button
                                 type="button"
@@ -4635,7 +4648,7 @@ function App() {
                                 disabled={!centralStatus?.configured || centralSyncBusy}
                                 aria-disabled={!centralStatus?.configured || centralSyncBusy}
                               >
-                                {centralSyncBusy ? '동기화 중...' : '동기화 실행'}
+                                {centralSyncBusy ? LABELS.SYNCING : LABELS.SYNC_RUN}
                               </button>
                             </div>
                           );
@@ -5136,7 +5149,7 @@ function App() {
                           </div>
                           </>
                         ) : (
-                          <div className="settings-comm-empty">통신 메트릭 수집 대기 중입니다.</div>
+                          <div className="settings-comm-empty">{MESSAGES.WAITING_COMM_METRICS}</div>
                         )}
                       </div>
                     </div>
@@ -5146,13 +5159,13 @@ function App() {
       id="settings-observability"
       ref={registerSettingsSection('settings-observability')}
     >
-      <div className="settings-section-title">운영/관측성</div>
+      <div className="settings-section-title">{LABELS.OPER_OBSERVABILITY}</div>
       <div className="settings-test-grid settings-observability-grid">
         <div className="settings-test-item">
           <div className="settings-test-header">
             <span className="settings-test-title">지표 내보내기</span>
             <span className={`settings-test-badge ${lastExportPath ? 'ok' : 'warn'}`}>
-              {lastExportPath ? '준비됨' : '없음'}
+              {lastExportPath ? LABELS.READY : LABELS.NONE}
             </span>
           </div>
           <div className="settings-comm-log">
@@ -5164,7 +5177,7 @@ function App() {
                 disabled={exportBusy}
                 aria-disabled={exportBusy}
               >
-                {exportBusy ? '내보내는 중...' : '내보내기'}
+                {exportBusy ? LABELS.EXPORTING : LABELS.EXPORT}
               </button>
               <button
                 type="button"
@@ -5173,7 +5186,7 @@ function App() {
                 disabled={!lastExportPath}
                 aria-disabled={!lastExportPath}
               >
-                경로 복사
+                {LABELS.COPY_PATH}
               </button>
               <button
                 type="button"
@@ -5182,7 +5195,7 @@ function App() {
                 disabled={!lastExportPath}
                 aria-disabled={!lastExportPath}
               >
-                폴더 열기
+                {LABELS.OPEN_FOLDER}
               </button>
               <button
                 type="button"
@@ -5191,7 +5204,7 @@ function App() {
                 disabled={!lastExportPath}
                 aria-disabled={!lastExportPath}
               >
-                파일 열기
+                {LABELS.OPEN_FILE}
               </button>
             </div>
             <span className="settings-comm-log-value">{lastExportPath ?? '--'}</span>
@@ -5201,7 +5214,7 @@ function App() {
           <div className="settings-test-header">
             <span className="settings-test-title">윈도 지표</span>
             <span className={`settings-test-badge ${hasWindowIssue ? 'error' : 'ok'}`}>
-              {hasWindowIssue ? '주의' : '정상'}
+              {hasWindowIssue ? LABELS.WARNING : LABELS.NORMAL}
             </span>
           </div>
           <div className="settings-test-meta">
@@ -5227,7 +5240,7 @@ function App() {
           <div className="settings-test-header">
             <span className="settings-test-title">에러 큐</span>
             <span className={`settings-test-badge ${errorQueueSize ? 'error' : 'ok'}`}>
-              {errorQueueSize ? '발생' : '정상'}
+              {errorQueueSize ? LABELS.OCCURRED : LABELS.NORMAL}
             </span>
           </div>
           <div className="settings-test-meta">
@@ -5255,7 +5268,7 @@ function App() {
               disabled={!errorQueueSize}
               aria-disabled={!errorQueueSize}
             >
-              비우기
+              {LABELS.CLEAR}
             </button>
           </div>
         </div>
@@ -5264,7 +5277,7 @@ function App() {
         <div className="settings-comm-log-header">
           <span className="settings-comm-log-label">에러 큐 상세</span>
           <span className="settings-observability-count">
-            {observabilityErrors?.summary?.queue_size ?? 0}건
+            {observabilityErrors?.summary?.queue_size ?? 0}{LABELS.UNIT_CASES}
           </span>
         </div>
         {observabilityLoading ? (
@@ -5289,7 +5302,7 @@ function App() {
             ))}
           </div>
         ) : (
-          <div className="settings-error-empty">에러 없음</div>
+          <div className="settings-error-empty">{LABELS.NO_ERROR}</div>
         )}
       </div>
       <div className="settings-observability-errors">
@@ -5303,7 +5316,7 @@ function App() {
               disabled={frontErrors.length === 0}
               aria-disabled={frontErrors.length === 0}
             >
-              지우기
+              {LABELS.CLEAR}
             </button>
           </div>
         </div>
@@ -5321,7 +5334,7 @@ function App() {
             ))}
           </div>
         ) : (
-          <div className="settings-error-empty">브라우저 오류 없음</div>
+          <div className="settings-error-empty">{LABELS.NO_BROWSER_ERROR}</div>
         )}
       </div>
     </div>
@@ -5368,19 +5381,19 @@ function App() {
                 spotLastSuccessAt,
               });
               if (!status) {
-                return <span className="settings-spot-badge ok">정상</span>;
+                return <span className="settings-spot-badge ok">{LABELS.NORMAL}</span>;
               }
               if (status.type === 'loading') {
-                return <span className="settings-spot-badge warn">연결 중</span>;
+                return <span className="settings-spot-badge warn">{LABELS.CONNECTING}</span>;
               }
               if (status.type === 'warn') {
-                return <span className="settings-spot-badge warn">지연</span>;
+                return <span className="settings-spot-badge warn">{LABELS.DELAYED}</span>;
               }
-              return <span className="settings-spot-badge error">오류</span>;
+              return <span className="settings-spot-badge error">{STATUS.ERROR}</span>;
             })()}
           </div>
           <div className="settings-spot-meta">
-            <span>마지막 수신: {spotLastSuccessAt ? new Date(spotLastSuccessAt).toLocaleTimeString() : '미수신'}</span>
+            <span>{LABELS.LAST_RECEIVE}: {spotLastSuccessAt ? new Date(spotLastSuccessAt).toLocaleTimeString() : LABELS.NOT_RECEIVED}</span>
             <span>URL: {spotConfig?.image_url ?? (settingsForm.spotIp ? `http://${settingsForm.spotIp}/image.jpg` : '-')}</span>
           </div>
         </div>
@@ -5388,10 +5401,10 @@ function App() {
           {spotImageUrl ? (
             <img src={spotImageUrl} alt="SPOT preview" />
           ) : (
-            <div className="settings-spot-empty">미리보기 없음</div>
+            <div className="settings-spot-empty">{LABELS.NO_PREVIEW}</div>
           )}
           {spotImageLoading && (
-            <div className="settings-spot-overlay">이미지 로딩 중...</div>
+            <div className="settings-spot-overlay">{LABELS.LOADING_IMAGE}</div>
           )}
         </div>
       </div>
@@ -5425,7 +5438,7 @@ function App() {
                         <label
                           className={`settings-field settings-toggle-field ${isSettingsFieldDirty('autoSave') ? 'changed' : ''}`}
                         >
-                          <span className="settings-toggle-label">자동 저장 사용</span>
+                          <span className="settings-toggle-label">{LABELS.AUTO_SAVE_USE}</span>
                           <button
                             type="button"
                             className="settings-toggle"
@@ -5466,7 +5479,7 @@ function App() {
                                   disabled={pathCheckBusy}
                                   aria-disabled={pathCheckBusy}
                                 >
-                                  {pathCheckBusy ? '검사 중...' : '검사'}
+                                  {pathCheckBusy ? LABELS.CHECKING : LABELS.CHECK}
                                 </button>
                                 {result?.status === 'WARN' && (
                                   <button
@@ -5474,7 +5487,7 @@ function App() {
                                     className="settings-path-button secondary"
                                     onClick={() => createPath(pathValue)}
                                   >
-                                    폴더 생성
+                                    {LABELS.CREATE_FOLDER}
                                   </button>
                                 )}
                               </div>
@@ -6087,8 +6100,8 @@ function TempsComponent() {
         <div className="temp-grid">
           <div className={`temp-tile ${tempFClass}`}>
             <div className="temp-header">
-              <span className="temp-label">콘테이너 앞</span>
-              {tempFThresholdHit && <span className="threshold-badge">임계</span>}
+              <span className="temp-label">{LABELS.CONTAINER_FRONT}</span>
+              {tempFThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
             </div>
             <div className="temp-value-row">
               <span className="temp-value">{formatNumber(data.Temp_F ?? NaN, 1)}</span>
@@ -6097,8 +6110,8 @@ function TempsComponent() {
           </div>
           <div className={`temp-tile ${tempBClass}`}>
             <div className="temp-header">
-              <span className="temp-label">콘테이너 뒤</span>
-              {tempBThresholdHit && <span className="threshold-badge">임계</span>}
+              <span className="temp-label">{LABELS.CONTAINER_BACK}</span>
+              {tempBThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
             </div>
             <div className="temp-value-row">
               <span className="temp-value">{formatNumber(data.Temp_B ?? NaN, 1)}</span>
@@ -6107,8 +6120,8 @@ function TempsComponent() {
           </div>
           <div className={`temp-tile ${billetTempClass}`}>
             <div className="temp-header">
-              <span className="temp-label">빌렛 온도</span>
-              {billetTempThresholdHit && <span className="threshold-badge">임계</span>}
+              <span className="temp-label">{LABELS.BILLET_TEMP}</span>
+              {billetTempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
             </div>
             <div className="temp-value-row">
               <span className="temp-value">{formatNumber(data.Billet_Temp ?? NaN, 1)}</span>
@@ -6117,8 +6130,8 @@ function TempsComponent() {
           </div>
           <div className={`temp-tile ${billetLengthClass}`}>
             <div className="temp-header">
-              <span className="temp-label">빌렛 길이</span>
-              {billetLengthThresholdHit && <span className="threshold-badge">임계</span>}
+              <span className="temp-label">{LABELS.BILLET_LEN}</span>
+              {billetLengthThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
             </div>
             <div className="temp-value-row">
               <span className="temp-value">{formatNumber(data.Billet_Length ?? NaN, 1)}</span>
@@ -6210,8 +6223,8 @@ function EnvComponent() {
         <div className="env-grid">
           <div className={`env-tile ${tempThresholdHit ? 'env-threshold' : ''}`}>
             <div className="env-header">
-              <span className="env-label">환경 온도</span>
-              {tempThresholdHit && <span className="threshold-badge">임계</span>}
+              <span className="env-label">{LABELS.ENV_TEMP}</span>
+              {tempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
             </div>
             <div className="env-value-row">
               <span className="env-value">{formatNumber(tempDisplay ?? NaN, 1)}</span>
@@ -6221,8 +6234,8 @@ function EnvComponent() {
           </div>
           <div className={`env-tile ${humidityThresholdHit ? 'env-threshold' : ''}`}>
             <div className="env-header">
-              <span className="env-label">환경 습도</span>
-              {humidityThresholdHit && <span className="threshold-badge">임계</span>}
+              <span className="env-label">{LABELS.ENV_HUMID}</span>
+              {humidityThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
             </div>
             <div className="env-value-row">
               <span className="env-value">{formatNumber(humidityDisplay ?? NaN, 1)}</span>
@@ -6285,7 +6298,7 @@ function CameraComponent() {
             <img
               className="camera-image"
               src={spotImageUrl}
-              alt="SPOT Camera"
+              alt={LABELS.SPOT_CAMERA}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               onLoad={onSpotImageLoaded}
               onError={() => onSpotImageError()}
@@ -6415,16 +6428,16 @@ function TimeSeriesWidget() {
                   checked={showThresholds}
                   onChange={(e) => setShowThresholds(e.target.checked)}
                 />
-                임계값
+                {LABELS.THRESHOLDS}
              </label>
              <div style={{width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px'}}></div>
              <button
                  className={`status-action ${snapshotLoading ? 'loading' : ''}`}
                  onClick={handleSnapshot}
                  disabled={snapshotLoading}
-                 title="Save Snapshot"
+                 title={LABELS.SAVE_SNAPSHOT}
              >
-                 Save
+                 {LABELS.SAVE}
              </button>
          </div>
 

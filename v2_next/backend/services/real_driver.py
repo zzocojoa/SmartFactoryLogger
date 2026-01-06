@@ -10,6 +10,7 @@ from ..models.data_model import FactoryData
 from .. import config
 from .logic_processor import LogicProcessor
 from .observability_service import observability_service
+from .. import constants
 
 
 class RealPLCDriver(BasePLCDriver):
@@ -17,16 +18,16 @@ class RealPLCDriver(BasePLCDriver):
         super().__init__()
         # Extruder (Melsec) Socket
         self.sock_ext: Optional[socket.socket] = None
-        self.ext_retry_interval = 1.0
-        self.ext_retry_max = 8.0
+        self.ext_retry_interval = constants.DRIVER_RETRY_INTERVAL
+        self.ext_retry_max = constants.DRIVER_RETRY_MAX
         self.ext_next_retry = 0.0
-        self.ext_timeout = 0.5
+        self.ext_timeout = constants.DRIVER_TIMEOUT
         self.ext_merge_blocks = True
         self.ext_merge_failures = 0
-        self.ext_merge_fail_threshold = 3
-        self.ext_merge_retry_successes = 300
+        self.ext_merge_fail_threshold = constants.DRIVER_MERGE_FAIL_THRESHOLD
+        self.ext_merge_retry_successes = constants.DRIVER_MERGE_RETRY_SUCCESSES
         self.ext_merge_retry_current = self.ext_merge_retry_successes
-        self.ext_merge_retry_growth = 2
+        self.ext_merge_retry_growth = constants.DRIVER_MERGE_RETRY_GROWTH
         self.ext_merge_retry_pending = False
         self.ext_split_success_count = 0
         self.ext_skip_counter = 0
@@ -49,10 +50,10 @@ class RealPLCDriver(BasePLCDriver):
 
         # LS (Temp) Socket
         self.sock_ls: Optional[socket.socket] = None
-        self.ls_retry_interval = 1.0
-        self.ls_retry_max = 8.0
+        self.ls_retry_interval = constants.DRIVER_RETRY_INTERVAL
+        self.ls_retry_max = constants.DRIVER_RETRY_MAX
         self.ls_next_retry = 0.0
-        self.ls_timeout = 0.5
+        self.ls_timeout = constants.DRIVER_TIMEOUT
         self.ls_connect_attempts = 0
         self.ls_connect_failures = 0
         self.ls_read_failures = 0

@@ -6,19 +6,7 @@ from typing import Any, Dict, Optional
 
 from ..models.data_model import FactoryData
 
-ALERT_HOLD_SEC = 2.0
-ALERT_HOLD_LONG_SEC = 5.0
-
-SPOT_WARN_TEMP = 580.0
-SPOT_HIGH_MIN = 540.0
-SPOT_NORMAL_MIN = 480.0
-
-MOLD_ALERT_THRESHOLD = 100.0
-
-ENV_TEMP_HOT = 28.0
-ENV_TEMP_COLD = 10.0
-ENV_HUMID_HIGH = 60.0
-ENV_HUMID_LOW = 30.0
+from .. import constants
 
 
 def _is_finite(value: Optional[float]) -> bool:
@@ -110,8 +98,8 @@ class StatusEvaluator:
             if self._jam_since is None:
                 self._jam_since = time.monotonic()
             elapsed = time.monotonic() - self._jam_since
-            jam_warn = elapsed >= ALERT_HOLD_SEC
-            jam_danger = elapsed >= ALERT_HOLD_LONG_SEC
+            jam_warn = elapsed >= constants.ALERT_HOLD_SEC
+            jam_danger = elapsed >= constants.ALERT_HOLD_LONG_SEC
         else:
             self._jam_since = None
             jam_warn = False
@@ -120,22 +108,22 @@ class StatusEvaluator:
         jam_level = "danger" if jam_danger else "warn" if jam_warn else "none"
 
         # Spot warning (sustained)
-        spot_condition = _is_finite(spot) and spot >= SPOT_WARN_TEMP
+        spot_condition = _is_finite(spot) and spot >= constants.SPOT_WARN_TEMP
         self._spot_since, self._spot_warning = self._update_sustained(
-            spot_condition, ALERT_HOLD_SEC, self._spot_since
+            spot_condition, constants.ALERT_HOLD_SEC, self._spot_since
         )
 
         # Speed level
         if _is_finite(speed):
-            if abs(speed) < 0.05:
+            if abs(speed) < constants.SPEED_IDLE_MAX:
                 speed_level = "idle"
-            elif speed >= 8:
+            elif speed >= constants.SPEED_VERY_FAST_MIN:
                 speed_level = "very_fast"
-            elif speed >= 6:
+            elif speed >= constants.SPEED_FAST_MIN:
                 speed_level = "fast"
-            elif speed >= 4:
+            elif speed >= constants.SPEED_NORMAL_MIN:
                 speed_level = "normal"
-            elif speed >= 2:
+            elif speed >= constants.SPEED_SLOW_MIN:
                 speed_level = "slow"
             else:
                 speed_level = "very_slow"
@@ -144,11 +132,11 @@ class StatusEvaluator:
 
         # Press level
         if _is_finite(press):
-            if abs(press) < 0.1:
+            if abs(press) < constants.PRESS_IDLE_MAX:
                 press_level = "idle"
-            elif press >= 180:
+            elif press >= constants.PRESS_HIGH_MIN:
                 press_level = "high"
-            elif press >= 126:
+            elif press >= constants.PRESS_NORMAL_MIN:
                 press_level = "normal"
             else:
                 press_level = "low"
@@ -159,11 +147,11 @@ class StatusEvaluator:
         if _is_finite(spot):
             if abs(spot) < 0.1:
                 spot_level = "idle"
-            elif spot >= SPOT_WARN_TEMP and self._spot_warning:
+            elif spot >= constants.SPOT_WARN_TEMP and self._spot_warning:
                 spot_level = "warning"
-            elif spot >= SPOT_HIGH_MIN:
+            elif spot >= constants.SPOT_HIGH_MIN:
                 spot_level = "high"
-            elif spot >= SPOT_NORMAL_MIN:
+            elif spot >= constants.SPOT_NORMAL_MIN:
                 spot_level = "normal"
             else:
                 spot_level = "low"
@@ -172,9 +160,9 @@ class StatusEvaluator:
 
         # Environment
         if _is_finite(at_temp):
-            if at_temp >= ENV_TEMP_HOT:
+            if at_temp >= constants.ENV_TEMP_HOT:
                 env_temp_level = "hot"
-            elif at_temp < ENV_TEMP_COLD:
+            elif at_temp < constants.ENV_TEMP_COLD:
                 env_temp_level = "cold"
             else:
                 env_temp_level = "comfort"
@@ -182,9 +170,9 @@ class StatusEvaluator:
             env_temp_level = "unknown"
 
         if _is_finite(at_pre):
-            if at_pre >= ENV_HUMID_HIGH:
+            if at_pre >= constants.ENV_HUMID_HIGH:
                 env_pre_level = "humid"
-            elif at_pre < ENV_HUMID_LOW:
+            elif at_pre < constants.ENV_HUMID_LOW:
                 env_pre_level = "dry"
             else:
                 env_pre_level = "comfort"
@@ -194,7 +182,7 @@ class StatusEvaluator:
         def mold_level(value: Optional[float]) -> str:
             if not _is_finite(value):
                 return "muted"
-            return "alert" if value >= MOLD_ALERT_THRESHOLD else "normal"
+            return "alert" if value >= constants.MOLD_ALERT_THRESHOLD else "normal"
 
         computed_thresholds = {
             "speed": self._threshold_hit("speed", speed, thresholds),
