@@ -189,37 +189,6 @@ const NoticeComponent = ({ item }: { item?: any }) => {
   );
 };
 
-const ThemeSelector: React.FC = () => {
-  const { mode, activeCycle, setMode } = useTheme();
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      <div style={{ display: 'flex', gap: '8px', fontSize: '0.9rem', color: '#b0bac4' }}>
-        <button
-          className={`custom-modal-btn ${mode === 'auto' ? 'confirm' : 'cancel'}`}
-          onClick={() => setMode('auto')}
-        >
-          Auto
-        </button>
-        <button
-          className={`custom-modal-btn ${mode === 'light' ? 'confirm' : 'cancel'}`}
-          onClick={() => setMode('light')}
-        >
-          Light
-        </button>
-        <button
-          className={`custom-modal-btn ${mode === 'dark' ? 'confirm' : 'cancel'}`}
-          onClick={() => setMode('dark')}
-        >
-          Dark
-        </button>
-      </div>
-      <div style={{ fontSize: '0.8rem', color: '#7b8794' }}>
-        현재 상태: {mode === 'auto' ? `자동 (${activeCycle === 'day' ? '주간' : activeCycle === 'sunset' ? '일몰' : '야간'})` : mode === 'light' ? '항상 밝게' : '항상 어둡게'}
-      </div>
-    </div>
-  );
-};
 
 const SERIES_SAMPLES_PER_SEC = 5;
 const SERIES_WINDOW_MS = SERIES_WINDOW_MINUTES * 60 * 1000;
@@ -4437,7 +4406,7 @@ function App() {
         <div className="settings-backdrop" onClick={() => setSettingsOpen(false)}>
           <div className="settings-modal" onClick={(event) => event.stopPropagation()}>
             <div className="settings-header">
-              <span>설정</span>
+              <span className="settings-header-title">설정</span>
               <button className="settings-close" onClick={() => setSettingsOpen(false)}>
                 닫기
               </button>
@@ -4531,12 +4500,6 @@ function App() {
                   <div className="settings-content" ref={settingsScrollRef}>
                     <div className="settings-form">
                       {/* Summary Section */}
-                      <div className="settings-section" id="settings-theme">
-                        <div className="settings-section-title">테마 설정</div>
-                        <div className="settings-theme-control">
-                          <ThemeSelector />
-                        </div>
-                      </div>
                       <div
                         className="settings-section settings-summary"
                         id="settings-summary"
