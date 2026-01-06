@@ -1,5 +1,0 @@
-Keys: ['Date', 'Time', 'Temperature', '메인압력', '빌렛길이', '콘테이너온도 앞쪽', '콘테이너온도 뒷쪽', '생산카운터', '현재속도', '압출종료 위치', 'Mold1', 'Mold2', 'Mold3', 'Mold4', 'Mold5', 'Mold6', 'Billet_Temp', 'At_Pre', 'At_Temp', 'DIE_ID', 'Billet_CycleID']
-First Row: {'Date': '2025-12-31', 'Time': '00:00:00.757', 'Temperature': '531.6', '메인압력': '149.7', '빌렛길이': '0', '콘테이너온도 앞쪽': '429.0', '콘테이너온도 뒷쪽': '430.0', '생산카운터': '42', '현재속도': '5.5', '압출종료 위치': '1015.0', 'Mold1': '477', 'Mold2': '479', 'Mold3': '479', 'Mold4': '478', 'Mold5': '478', 'Mold6': '478', 'Billet_Temp': '255', 'At_Pre': '12.2', 'At_Temp': '26.2', 'DIE_ID': '20251230_05', 'Billet_CycleID': '42'}
-Current Speed Val: 5.5
-Main Press Val: 149.7
-Spot Temp Val: 531.6

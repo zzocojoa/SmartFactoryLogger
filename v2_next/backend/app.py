@@ -643,7 +643,7 @@ async def lifespan(app: FastAPI):
     try:
         hostname = socket.gethostname()
         local_ips = socket.gethostbyname_ex(hostname)[2]
-        _logger.info(f"[Main] Backend started. Accessible at: {', '.join([f'http://{ip}:8000' for ip in local_ips])}")
+        _logger.info(f"[Main] Backend started. Accessible at: {', '.join([f'http://{ip}:{config.BACKEND_PORT}' for ip in local_ips])}")
     except Exception as exc:
         _logger.warning(f"[Main] Failed to log local IPs: {exc}")
 

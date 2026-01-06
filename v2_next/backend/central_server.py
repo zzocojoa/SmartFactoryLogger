@@ -666,4 +666,4 @@ def health():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("backend.central_server:app", host="127.0.0.1", port=9000, reload=False)
+    uvicorn.run("backend.central_server:app", host="127.0.0.1", port=config.CENTRAL_PORT, reload=False)

@@ -223,6 +223,10 @@ CONFIG_PATH = _resolve_config_path()
 CONFIG, CONFIG_ENCODING = _load_config(CONFIG_PATH)
 APP_DATA_DIR = _get_user_data_dir()
 
+# Distributed Settings (Environment & Ports)
+BACKEND_PORT = _env_int("BACKEND_PORT", 8000)
+CENTRAL_PORT = _env_int("CENTRAL_PORT", 9000)
+
 # EXTRUDER
 EXTRUDER_IP = os.getenv("EXTRUDER_IP", _get(CONFIG, "EXTRUDER", "ip", DEFAULT_EXTRUDER_IP) or DEFAULT_EXTRUDER_IP)
 EXTRUDER_PORT = _get_int(CONFIG, "EXTRUDER", "port", DEFAULT_EXTRUDER_PORT)

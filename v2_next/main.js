@@ -87,7 +87,8 @@ function startBackend() {
     backendPath = path.join(process.resourcesPath, 'backend', 'backend_server.exe');
   } else {
     backendPath = 'python';
-    args = ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', '8000'];
+    const backendPort = process.env.BACKEND_PORT || '8000';
+    args = ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', backendPort];
   }
 
   log(`Target backend path: ${backendPath}`);
