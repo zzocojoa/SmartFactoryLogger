@@ -37,6 +37,7 @@ import {
   SPOT_UNIT,
 } from './constants/uiText';
 import { useModal } from './GlobalModalContext';
+import { useTheme } from './ThemeContext';
 
 import { LayoutEditContext } from './LayoutEditContext';
 
@@ -175,29 +176,8 @@ const NoticeComponent = ({ item }: { item?: any }) => {
               className="notice-textarea"
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
-              style={{ 
-                flex: 1, 
-                width: '100%', 
-                background: '#1e1e1e', 
-                color: '#d4d4d4', 
-                border: 'none', 
-                padding: '8px', 
-                resize: 'none',
-                outline: 'none',
-                fontFamily: 'Consolas, monospace',
-                fontSize: '14px',
-                lineHeight: '1.5'
-              }}
             />
-            <button className="notice-save-btn" onClick={handleSave} style={{ 
-              width: '100%', 
-              padding: '8px', 
-              background: '#007acc', 
-              color: 'white', 
-              border: 'none', 
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}>저장</button>
+            <button className="notice-save-btn" onClick={handleSave}>저장</button>
           </div>
         ) : (
           <div className="notice-content markdown-body" style={{ height: '100%', overflow: 'auto', padding: '10px' }}>
@@ -208,6 +188,39 @@ const NoticeComponent = ({ item }: { item?: any }) => {
     </div>
   );
 };
+
+const ThemeSelector: React.FC = () => {
+  const { mode, activeCycle, setMode } = useTheme();
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ display: 'flex', gap: '8px', fontSize: '0.9rem', color: '#b0bac4' }}>
+        <button
+          className={`custom-modal-btn ${mode === 'auto' ? 'confirm' : 'cancel'}`}
+          onClick={() => setMode('auto')}
+        >
+          Auto
+        </button>
+        <button
+          className={`custom-modal-btn ${mode === 'light' ? 'confirm' : 'cancel'}`}
+          onClick={() => setMode('light')}
+        >
+          Light
+        </button>
+        <button
+          className={`custom-modal-btn ${mode === 'dark' ? 'confirm' : 'cancel'}`}
+          onClick={() => setMode('dark')}
+        >
+          Dark
+        </button>
+      </div>
+      <div style={{ fontSize: '0.8rem', color: '#7b8794' }}>
+        현재 상태: {mode === 'auto' ? `자동 (${activeCycle === 'day' ? '주간' : activeCycle === 'sunset' ? '일몰' : '야간'})` : mode === 'light' ? '항상 밝게' : '항상 어둡게'}
+      </div>
+    </div>
+  );
+};
+
 const SERIES_SAMPLES_PER_SEC = 5;
 const SERIES_WINDOW_MS = SERIES_WINDOW_MINUTES * 60 * 1000;
 const SERIES_MAX_POINTS = SERIES_WINDOW_MINUTES * 60 * SERIES_SAMPLES_PER_SEC;
@@ -1480,6 +1493,7 @@ const getCameraStatus = (params: {
 };
 
 function App() {
+  const { mode, setMode } = useTheme();
   const modal = useModal();
   const [data, setData] = useState<FactoryData | null>(null);
   const [connected, setConnected] = useState(false);
@@ -4214,7 +4228,7 @@ function App() {
               )}
               </div>
               
-              <div style={{ marginLeft: '16px', paddingLeft: '16px', borderLeft: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ marginLeft: '16px', paddingLeft: '16px', borderLeft: '1px solid var(--border-muted)' }}>
                  <button
                     className={`status-action ${snapshotLoading ? 'loading' : ''}`}
                     onClick={handleSnapshot}
@@ -4359,6 +4373,32 @@ function App() {
                     </button>
                   </div>
                 )}
+                
+                <div style={{ margin: '8px 0', borderBottom: '1px solid var(--border-muted)' }} />
+                <div className="menu-section-title" style={{ padding: '4px 12px', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>테마 설정</div>
+                <div style={{ padding: '0 12px 12px 12px', display: 'flex', gap: '8px' }}>
+                  <button
+                    className={`custom-modal-btn ${mode === 'light' ? 'confirm' : 'cancel'}`}
+                    onClick={() => setMode('light')}
+                    style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
+                  >
+                    Light
+                  </button>
+                  <button
+                    className={`custom-modal-btn ${mode === 'dark' ? 'confirm' : 'cancel'}`}
+                    onClick={() => setMode('dark')}
+                    style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
+                  >
+                    Dark
+                  </button>
+                  <button
+                    className={`custom-modal-btn ${mode === 'auto' ? 'confirm' : 'cancel'}`}
+                    onClick={() => setMode('auto')}
+                    style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
+                  >
+                    Auto
+                  </button>
+                </div>
               </div>
             </div>
          </div>
@@ -4491,6 +4531,12 @@ function App() {
                   <div className="settings-content" ref={settingsScrollRef}>
                     <div className="settings-form">
                       {/* Summary Section */}
+                      <div className="settings-section" id="settings-theme">
+                        <div className="settings-section-title">테마 설정</div>
+                        <div className="settings-theme-control">
+                          <ThemeSelector />
+                        </div>
+                      </div>
                       <div
                         className="settings-section settings-summary"
                         id="settings-summary"
@@ -5791,7 +5837,7 @@ const DataContext = React.createContext<DataContextValue>({
   setLayoutEditing: () => undefined,
 });
 
-const KpiComponent = () => {
+function KpiComponent() {
   const { data, lastDataAt, thresholds } = React.useContext(DataContext);
   const speedValue = useLastValidNumber(data?.Speed);
   const pressValue = useLastValidNumber(data?.Press);
@@ -5889,7 +5935,7 @@ const KpiComponent = () => {
   );
 };
 
-const SpotComponent = () => {
+function SpotComponent() {
     const { data, spotAlertActive, lastDataAt, thresholds } = React.useContext(DataContext);
     const [sparklineValues, setSparklineValues] = useState<number[]>([]);
     const spotValue = useLastValidNumber(data?.Spot);
@@ -6031,7 +6077,7 @@ const SpotComponent = () => {
     );
 };
 
-const TempsComponent = () => {
+function TempsComponent() {
     const { data, lastDataAt, thresholds } = React.useContext(DataContext);
     const missing =
       !Number.isFinite(data?.Temp_F) ||
@@ -6126,7 +6172,7 @@ const TempsComponent = () => {
     );
 };
 
-const MoldsComponent = () => {
+function MoldsComponent() {
     const { data, lastDataAt } = React.useContext(DataContext);
     if (!data) return <div>Loading...</div>;
     const missing =
@@ -6180,7 +6226,7 @@ const MoldsComponent = () => {
     );
 };
 
-const EnvComponent = () => {
+function EnvComponent() {
     const { data, lastDataAt, thresholds } = React.useContext(DataContext);
     const envTempValue = useLastValidNumber(data?.At_Temp);
     const envHumidityValue = useLastValidNumber(data?.At_Pre);
@@ -6232,7 +6278,7 @@ const EnvComponent = () => {
 };
 
 
-const CameraComponent = () => {
+function CameraComponent() {
     const {
       spotConfig,
       spotImageUrl,
@@ -6310,7 +6356,7 @@ const CameraComponent = () => {
     );
 };
 
-const TimeSeriesWidget = () => {
+function TimeSeriesWidget() {
     const { 
       timeSeriesFrames, 
       seriesWindowMin, 
@@ -6378,8 +6424,8 @@ const TimeSeriesWidget = () => {
             alignItems: 'center', 
             gap: '8px', 
             padding: '4px 8px', 
-            borderBottom: '1px solid #333',
-            background: 'rgba(0,0,0,0.2)'
+            borderBottom: '1px solid var(--border-muted)',
+            background: 'var(--bg-header)'
          }}>
              <div className="series-group">
                 {[1, 5, 10, 30, 60].map((min) => (
@@ -6393,14 +6439,14 @@ const TimeSeriesWidget = () => {
                   </button>
                 ))}
             </div>
-            <div style={{width: '1px', height: '16px', background: '#444', margin: '0 4px'}}></div>
+            <div style={{width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px'}}></div>
             <button
                 className={`status-action ${seriesPaused ? 'warn' : ''}`}
                 onClick={() => setSeriesPaused((prev) => !prev)}
              >
                 {seriesPaused ? 'Pause' : 'Live'}
              </button>
-             <label style={{ display: 'flex', alignItems: 'center', fontSize: '11px', cursor: 'pointer', gap: '4px', userSelect: 'none', color: '#aaa' }}>
+             <label style={{ display: 'flex', alignItems: 'center', fontSize: '11px', cursor: 'pointer', gap: '4px', userSelect: 'none', color: 'var(--text-secondary)' }}>
                 <input
                   type="checkbox"
                   checked={showThresholds}
@@ -6408,7 +6454,7 @@ const TimeSeriesWidget = () => {
                 />
                 임계값
              </label>
-             <div style={{width: '1px', height: '16px', background: '#444', margin: '0 4px'}}></div>
+             <div style={{width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px'}}></div>
              <button
                  className={`status-action ${snapshotLoading ? 'loading' : ''}`}
                  onClick={handleSnapshot}
@@ -6422,45 +6468,45 @@ const TimeSeriesWidget = () => {
          <div style={{ flexGrow: 1, minHeight: 0 }}>
              <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData}>
-                   <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-muted)" />
                    <XAxis 
                      dataKey="time" 
                      type="number" 
                      domain={['dataMin', (min: number) => min + seriesWindowMin * 60 * 1000]} 
                      allowDataOverflow={true}
                      tickFormatter={(unixTime) => new Date(unixTime).toLocaleTimeString()}
-                     stroke="#888"
+                     stroke="var(--text-muted)"
                      height={30}
                    />
-                   <YAxis stroke="#888" width={40} />
+                   <YAxis stroke="var(--text-muted)" width={40} />
                    <Tooltip 
                      labelFormatter={(label) => new Date(label).toLocaleTimeString()}
-                     contentStyle={{ backgroundColor: '#222', borderColor: '#444', color: '#fff' }}
+                     contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-main)', color: 'var(--text-primary)' }}
                    />
                    <Legend verticalAlign="top" height={36}/>
                    
                    {/* Defined Lines - Primary Process */}
-                   <Line type="monotone" dataKey="Speed" stroke="#00FF00" dot={false} strokeWidth={2} name="속도" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Press" stroke="#FF0000" dot={false} strokeWidth={2} name="압력" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Spot" stroke="#FFFF00" dot={false} strokeWidth={2} name="SPOT" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Temp_F" stroke="#00BFFF" dot={false} strokeWidth={1} name="온도(F)" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Temp_B" stroke="#1E90FF" dot={false} strokeWidth={1} name="온도(B)" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Speed" stroke="var(--color-speed)" dot={false} strokeWidth={2} name="속도" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Press" stroke="var(--color-press)" dot={false} strokeWidth={2} name="압력" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Spot" stroke="var(--color-spot)" dot={false} strokeWidth={2} name="SPOT" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Temp_F" stroke="var(--color-temp-f)" dot={false} strokeWidth={1} name="온도(F)" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Temp_B" stroke="var(--color-temp-b)" dot={false} strokeWidth={1} name="온도(B)" isAnimationActive={false} />
                    
                    {/* Additional Process Data */}
-                   <Line type="monotone" dataKey="Billet_Length" stroke="#DA70D6" dot={false} strokeWidth={1} name="빌렛 길이" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Count" stroke="#FFFFFF" dot={false} strokeWidth={1} name="생산 수량" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="EndPos" stroke="#FFA500" dot={false} strokeWidth={1} name="종료 위치" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Billet_Length" stroke="var(--color-billet-len)" dot={false} strokeWidth={1} name="빌렛 길이" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Count" stroke="var(--color-count)" dot={false} strokeWidth={1} name="생산 수량" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="EndPos" stroke="var(--color-endpos)" dot={false} strokeWidth={1} name="종료 위치" isAnimationActive={false} />
 
 
 
                    {/* Other Temperatures & Environment */}
-                   <Line type="monotone" dataKey="Billet_Temp" stroke="#FF1493" dot={false} strokeWidth={1} name="빌렛 온도" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="At_Temp" stroke="#00FA9A" dot={false} strokeWidth={1} name="환경 온도" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="At_Pre" stroke="#9370DB" dot={false} strokeWidth={1} name="환경 습도" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="Billet_Temp" stroke="var(--color-billet-temp)" dot={false} strokeWidth={1} name="빌렛 온도" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="At_Temp" stroke="var(--color-env-temp)" dot={false} strokeWidth={1} name="환경 온도" isAnimationActive={false} />
+                   <Line type="monotone" dataKey="At_Pre" stroke="var(--color-env-pre)" dot={false} strokeWidth={1} name="환경 습도" isAnimationActive={false} />
                    
                    {showThresholds && (
                       <>
-                        <ReferenceLine y={SPEED_MAX} label="Max Speed" stroke="red" strokeDasharray="3 3" />
+                        <ReferenceLine y={SPEED_MAX} label="Max Speed" stroke="var(--state-danger)" strokeDasharray="3 3" />
                          {/* Add more reference lines if needed based on thresholds context */}
                       </>
                    )}

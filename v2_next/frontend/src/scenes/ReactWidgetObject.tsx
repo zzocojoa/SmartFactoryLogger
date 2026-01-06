@@ -60,9 +60,9 @@ export class ReactWidget extends SceneObjectBase<ReactWidgetState> {
                autoFocus
                style={{
                  width: '100%',
-                 background: '#222',
-                 border: '1px solid #444',
-                 color: '#fff',
+                 background: 'var(--bg-input)',
+                 border: '1px solid var(--border-main)',
+                 color: 'var(--text-primary)',
                  padding: '4px 8px',
                  fontSize: '14px',
                  height: '32px'
@@ -72,7 +72,7 @@ export class ReactWidget extends SceneObjectBase<ReactWidgetState> {
             <div 
               className="panel-header grid-drag-handle-dashboard-grid"
               onClick={handleTitleClick}
-              style={{ cursor: isEditing ? 'pointer' : 'default', border: isEditing ? '1px dashed #444' : 'none' }}
+              style={{ cursor: isEditing ? 'pointer' : 'default', border: isEditing ? '1px dashed var(--text-secondary)' : 'none' }}
               title={isEditing ? "Click to edit title" : ""}
             >
                {title}

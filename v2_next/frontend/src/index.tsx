@@ -6,6 +6,7 @@ import reportWebVitals from './reportWebVitals';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { GlobalModalProvider } from './GlobalModalContext';
 import { CustomDialog } from './components/CustomDialog';
+import { ThemeProvider } from './ThemeContext';
 
 console.log("Index.tsx: Booting...");
 
@@ -20,8 +21,10 @@ console.log("Index.tsx: Rendering App...");
 root.render(
   <React.StrictMode>
     <GlobalModalProvider>
-      <App />
-      <CustomDialog />
+      <ThemeProvider>
+        <App />
+        <CustomDialog />
+      </ThemeProvider>
     </GlobalModalProvider>
   </React.StrictMode>
 );
