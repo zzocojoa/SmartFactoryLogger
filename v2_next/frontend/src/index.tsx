@@ -4,6 +4,8 @@ import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
+import { GlobalModalProvider } from './GlobalModalContext';
+import { CustomDialog } from './components/CustomDialog';
 
 console.log("Index.tsx: Booting...");
 
@@ -17,7 +19,10 @@ const root = ReactDOM.createRoot(
 console.log("Index.tsx: Rendering App...");
 root.render(
   <React.StrictMode>
-    <App />
+    <GlobalModalProvider>
+      <App />
+      <CustomDialog />
+    </GlobalModalProvider>
   </React.StrictMode>
 );
 

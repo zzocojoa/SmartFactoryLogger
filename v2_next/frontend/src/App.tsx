@@ -36,6 +36,7 @@ import {
   NOTICE_TITLE,
   SPOT_UNIT,
 } from './constants/uiText';
+import { useModal } from './GlobalModalContext';
 
 import { LayoutEditContext } from './LayoutEditContext';
 
@@ -122,6 +123,7 @@ const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
 const NoticeComponent = ({ item }: { item?: any }) => {
   const { customNotice, setCustomNotice, layoutEditing } = React.useContext(DataContext);
   const { deleteWidget } = React.useContext(LayoutEditContext);
+  const modal = useModal();
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(customNotice);
 
@@ -137,7 +139,7 @@ const NoticeComponent = ({ item }: { item?: any }) => {
       setEditing(false);
     } catch (error) {
       console.error('Failed to save notice', error);
-      window.alert('공지 저장에 실패했습니다.');
+      await modal.alert('공지 저장에 실패했습니다.');
     }
   };
 
@@ -1478,6 +1480,7 @@ const getCameraStatus = (params: {
 };
 
 function App() {
+  const modal = useModal();
   const [data, setData] = useState<FactoryData | null>(null);
   const [connected, setConnected] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
@@ -2104,10 +2107,10 @@ function App() {
     try {
       await axios.post(`${API_BASE}/api/control/reconnect`);
       await fetchHealth();
-      window.alert('Reconnect requested. Check status badge.');
+      await modal.alert('Reconnect requested. Check status badge.');
     } catch (error) {
       console.error('Reconnect failed', error);
-      window.alert('Reconnect failed.');
+      await modal.alert('Reconnect failed.');
     } finally {
       setReconnectBusy(false);
     }
@@ -2138,10 +2141,10 @@ function App() {
         windowLine,
         errorLine,
       ].join('\n');
-      window.alert(detail);
+      await modal.alert(detail);
     } catch (error) {
       console.error('Diagnosis failed', error);
-      window.alert('Diagnosis failed.');
+      await modal.alert('Diagnosis failed.');
     } finally {
       setDiagnosisBusy(false);
     }
@@ -2161,10 +2164,10 @@ function App() {
       }
       setLastExportPath(path);
       persistExportPath(path);
-      window.alert(`지표 내보내기 완료:\n${path}`);
+      await modal.alert(`지표 내보내기 완료:\n${path}`);
     } catch (error) {
       console.error('Observability export failed', error);
-      window.alert('지표 내보내기 실패.');
+      await modal.alert('지표 내보내기 실패.');
     } finally {
       setExportBusy(false);
     }
@@ -2178,7 +2181,7 @@ function App() {
       await axios.post(`${API_BASE}/api/observability/export/open-file`);
     } catch (error) {
       console.error('Open export file failed', error);
-      window.alert('내보낸 파일 열기 실패.');
+      await modal.alert('내보낸 파일 열기 실패.');
     }
   };
 
@@ -2190,7 +2193,7 @@ function App() {
       await axios.post(`${API_BASE}/api/observability/export/open-folder`);
     } catch (error) {
       console.error('Open export folder failed', error);
-      window.alert('내보낸 폴더 열기 실패.');
+      await modal.alert('내보낸 폴더 열기 실패.');
     }
   };
 
@@ -2200,15 +2203,15 @@ function App() {
     }
     try {
       await navigator.clipboard.writeText(lastExportPath);
-      window.alert('내보낸 경로를 복사했습니다.');
+      await modal.alert('내보낸 경로를 복사했습니다.');
     } catch (error) {
       console.error('Copy export path failed', error);
-      window.alert('경로 복사 실패');
+      await modal.alert('경로 복사 실패');
     }
   };
 
   const handleClearObservabilityErrors = async () => {
-    if (!window.confirm('에러 큐를 비우면 복구할 수 없습니다. 비우시겠습니까?')) {
+    if (!await modal.confirm('에러 큐를 비우면 복구할 수 없습니다. 비우시겠습니까?')) {
       return;
     }
     try {
@@ -2216,7 +2219,7 @@ function App() {
       await loadObservabilityErrors();
     } catch (error) {
       console.error('Observability clear failed', error);
-      window.alert('에러 큐 비우기 실패.');
+      await modal.alert('에러 큐 비우기 실패.');
     }
   };
 
@@ -2626,12 +2629,14 @@ function App() {
     }, 2500);
   }, []);
 
-  const handleExternalRefresh = useCallback(() => {
+  const handleExternalRefresh = useCallback(async () => {
     if (!externalConfigPending) {
       return;
     }
     if (hasSettingsChanges) {
-      const ok = window.confirm('외부 변경 내용을 불러오면 현재 입력 중인 값이 사라집니다. 계속할까요?');
+      const ok = await modal.confirm('외부 변경 내용을 불러오면 현재 입력 중인 값이 사라집니다. 계속할까요?', {
+        variant: 'warning'
+      });
       if (!ok) {
         return;
       }
@@ -3014,7 +3019,7 @@ function App() {
       setSettingsError('로컬 오버라이드가 OFF 상태입니다.');
       return;
     }
-    if (!window.confirm('기본값으로 복원하시겠습니까?')) {
+    if (!await modal.confirm('기본값으로 복원하시겠습니까?', { variant: 'warning' })) {
       return;
     }
     setSettingsLoading(true);
@@ -3046,7 +3051,7 @@ function App() {
       setSettingsError('로컬 오버라이드가 OFF 상태입니다.');
       return;
     }
-    if (!window.confirm('백업 파일(config.ini.bak)로 복원하시겠습니까?')) {
+    if (!await modal.confirm('백업 파일(config.ini.bak)로 복원하시겠습니까?', { variant: 'warning' })) {
       return;
     }
     setSettingsLoading(true);
@@ -3082,7 +3087,7 @@ function App() {
       setSettingsError('로컬 오버라이드가 OFF 상태입니다.');
       return;
     }
-    if (!window.confirm('보류된 설정을 다시 적용하시겠습니까?')) {
+    if (!await modal.confirm('보류된 설정을 다시 적용하시겠습니까?')) {
       return;
     }
     setSettingsPendingBusy(true);
@@ -3108,7 +3113,7 @@ function App() {
       setSettingsError('보류된 설정이 없습니다.');
       return;
     }
-    if (!window.confirm('보류된 설정을 삭제하시겠습니까?')) {
+    if (!await modal.confirm('보류된 설정을 삭제하시겠습니까?', { variant: 'warning' })) {
       return;
     }
     setSettingsPendingBusy(true);
@@ -3210,7 +3215,7 @@ function App() {
     const nextEnabled = !overrideEnabled;
     let password: string | undefined;
     if (settingsForm.passwordSet) {
-      const input = window.prompt('로컬 오버라이드 변경을 위해 비밀번호를 입력하세요.');
+      const input = await modal.prompt('로컬 오버라이드 변경을 위해 비밀번호를 입력하세요.', undefined, { variant: 'warning' });
       if (input === null) {
         return;
       }
@@ -3828,7 +3833,7 @@ function App() {
     const defaultName =
       layoutSlots.find((slot) => slot.id === layoutActiveId)?.name ??
       `레이아웃 ${Math.min(layoutSlots.length + 1, 3)}`;
-    const name = window.prompt('레이아웃 이름을 입력하세요', defaultName);
+    const name = await modal.prompt('레이아웃 이름을 입력하세요', defaultName);
     if (!name) {
       setLayoutSaveError('저장 취소');
       pushNotification('레이아웃 저장', '저장이 취소되었습니다.', 'warn');
@@ -3871,7 +3876,7 @@ function App() {
       return;
     }
     lastRestoreSlotIdRef.current = targetId;
-    if (!window.confirm('선택한 레이아웃으로 복구하면 현재 배치가 사라집니다. 복구하시겠습니까?')) {
+    if (!await modal.confirm('선택한 레이아웃으로 복구하면 현재 배치가 사라집니다. 복구하시겠습니까?', { variant: 'warning' })) {
       return;
     }
     try {
@@ -3920,7 +3925,7 @@ function App() {
       setLayoutRestoreError('삭제 대상 없음');
       return;
     }
-    if (!window.confirm('선택한 레이아웃을 삭제하면 되돌릴 수 없습니다. 삭제하시겠습니까?')) {
+    if (!await modal.confirm('선택한 레이아웃을 삭제하면 되돌릴 수 없습니다. 삭제하시겠습니까?', { variant: 'error' })) {
       return;
     }
     try {
