@@ -124,6 +124,7 @@ def get_config_snapshot() -> dict:
         "snapshotpath": _get(parser, "SETTINGS", "snapshotpath", config.DEFAULT_SNAPSHOT_PATH),
         "autosave": _get_bool(parser, "SETTINGS", "autosave", config.DEFAULT_AUTO_SAVE),
         "password_set": bool(_get(parser, "SETTINGS", "password", "")),
+        "custom_notice": _get(parser, "SETTINGS", "custom_notice", config.DEFAULT_CUSTOM_NOTICE).replace("\\n", "\n"),
     }
     logging_cfg = {
         "rotation_enabled": _get_bool(parser, "LOGGING", "rotationenabled", config.DEFAULT_ROTATION_ENABLED),
@@ -414,6 +415,8 @@ def update_config(
             parser.set("SETTINGS", "autosave", str(payload.settings.autosave))
         if payload.settings.password:
             parser.set("SETTINGS", "password", payload.settings.password)
+        if payload.settings.custom_notice is not None:
+            parser.set("SETTINGS", "custom_notice", payload.settings.custom_notice.replace("\n", "\\n"))
 
     if payload.logging:
         if payload.logging.rotation_enabled is not None:

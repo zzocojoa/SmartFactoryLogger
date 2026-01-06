@@ -2,6 +2,7 @@
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import axios from 'axios';
+import ReactMarkdown from 'react-markdown';
 import { FactoryData, SpotConfig } from './types';
 import './App.css';
 import {
@@ -16,8 +17,9 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
-import { DASHBOARD_LAYOUT_KEYS, getDashboardScene } from './scenes/DashboardScene';
-import { SceneDataNode, SceneGridItemLike, SceneGridLayout } from '@grafana/scenes';
+import { getDashboardScene, WidgetType, WidgetRegistry, DashboardItem, DASHBOARD_LAYOUT_KEYS } from './scenes/DashboardScene';
+import { SceneDataNode, SceneGridItemLike, SceneGridLayout, SceneGridItem, SceneObjectBase } from '@grafana/scenes';
+import { ReactWidget } from './scenes/ReactWidgetObject';
 import html2canvas from 'html2canvas';
 import { buildSeriesSample } from './timeseries/seriesSampling';
 import { SeriesBuffer } from './timeseries/seriesBuffer';
@@ -34,6 +36,8 @@ import {
   NOTICE_TITLE,
   SPOT_UNIT,
 } from './constants/uiText';
+
+import { LayoutEditContext } from './LayoutEditContext';
 
 // Initialize Scenes Runtime (guarded for HMR)
 if (typeof window !== 'undefined') {
@@ -57,6 +61,119 @@ const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LAYOUT_BACKUP_KEY = 'grafana_scene_layout_v1_backup';
 const LEGACY_LAYOUT_COLS = 24;
 const SERIES_WINDOW_MINUTES = 30;
+
+const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
+  const { customNotice, setCustomNotice, layoutEditing } = React.useContext(DataContext);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(customNotice);
+  const [titleValue, setTitleValue] = useState(item.title);
+
+  useEffect(() => {
+    setEditValue(customNotice);
+  }, [customNotice]);
+
+  const handleSave = async () => {
+    try {
+      await axios.post(`${API_BASE}/api/config/notice`, { content: editValue });
+      setCustomNotice(editValue);
+      setEditing(false);
+    } catch (error) {
+      console.error('Failed to save markdown content', error);
+      window.alert('저장에 실패했습니다.');
+    }
+  };
+
+  return (
+    <div className="card notice-card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div className="notice-header">
+
+        {layoutEditing && (
+          <button
+            className="notice-edit-toggle"
+            onClick={() => setEditing(!editing)}
+          >
+            {editing ? '보기' : '편집'}
+          </button>
+        )}
+      </div>
+      <div className="notice-body" style={{ flex: 1, overflow: 'auto' }}>
+        {editing ? (
+          <div className="notice-editor-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <textarea
+              className="notice-textarea"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <button className="notice-save-btn" onClick={handleSave} style={{ marginTop: '10px' }}>저장</button>
+          </div>
+        ) : (
+          <div className="notice-content markdown-body">
+            <ReactMarkdown>{customNotice || ''}</ReactMarkdown>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const NoticeComponent = () => {
+  const { customNotice, setCustomNotice, layoutEditing } = React.useContext(DataContext);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(customNotice);
+
+
+  useEffect(() => {
+    setEditValue(customNotice);
+  }, [customNotice]);
+
+  const handleSave = async () => {
+    try {
+      await axios.post(`${API_BASE}/api/config/notice`, { content: editValue });
+      setCustomNotice(editValue);
+      setEditing(false);
+    } catch (error) {
+      console.error('Failed to save notice', error);
+      window.alert('공지 저장에 실패했습니다.');
+    }
+  };
+
+  return (
+    <div className="card notice-card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div className="notice-header">
+
+        {layoutEditing && (
+          <button
+            className="notice-edit-toggle"
+            onClick={() => setEditing(!editing)}
+          >
+            {editing ? '보기' : '편집'}
+          </button>
+        )}
+      </div>
+      <div className="notice-body" style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+        {editing ? (
+          <div className="notice-editor-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <textarea
+              className="notice-textarea"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              style={{ flex: 1, width: '100%', background: '#252526', color: '#fff', border: 'none', padding: '10px', resize: 'none' }}
+            />
+            <button className="notice-save-btn" onClick={handleSave} style={{ margin: '5px' }}>저장</button>
+          </div>
+        ) : (
+          <div className="notice-content markdown-body">
+            <ReactMarkdown>{customNotice || ''}</ReactMarkdown>
+          </div>
+        )}
+      </div>
+      <div className="notice-footer">
+        {NOTICE_FOOTER}
+      </div>
+    </div>
+  );
+};
 const SERIES_SAMPLES_PER_SEC = 5;
 const SERIES_WINDOW_MS = SERIES_WINDOW_MINUTES * 60 * 1000;
 const SERIES_MAX_POINTS = SERIES_WINDOW_MINUTES * 60 * SERIES_SAMPLES_PER_SEC;
@@ -342,6 +459,7 @@ type ConfigSnapshot = {
       snapshotpath: string;
       autosave: boolean;
       password_set: boolean;
+      custom_notice?: string;
     };
     logging: {
       rotation_enabled?: boolean;
@@ -391,6 +509,7 @@ type SettingsFormState = {
   cycleThresholdPress: string;
   password: string;
   passwordSet: boolean;
+  customNotice: string;
 };
 
 type ConfigApplyResult = {
@@ -470,6 +589,9 @@ type LayoutEntry = {
   y: number;
   width: number;
   height: number;
+  type?: WidgetType;
+  title?: string;
+  properties?: any;
 };
 
 type LayoutMap = Record<string, LayoutEntry>;
@@ -498,21 +620,20 @@ const coerceLayoutEntry = (entry: unknown): LayoutEntry | null => {
     return null;
   }
   const raw = entry as Record<string, unknown>;
-  const width = raw.width ?? raw.w;
-  const height = raw.height ?? raw.h;
-  const x = Number(raw.x);
-  const y = Number(raw.y);
-  const w = Number(width);
-  const h = Number(height);
-  if (![x, y, w, h].every((value) => Number.isFinite(value))) {
-    return null;
-  }
-  return { x, y, width: w, height: h };
+  return {
+    x: typeof raw.x === 'number' ? raw.x : 0,
+    y: typeof raw.y === 'number' ? raw.y : 0,
+    width: typeof raw.width === 'number' ? raw.width : 4,
+    height: typeof raw.height === 'number' ? raw.height : 4,
+    type: typeof raw.type === 'string' ? raw.type as WidgetType : undefined,
+    title: typeof raw.title === 'string' ? raw.title : undefined,
+    properties: raw.properties,
+  };
 };
 
 const buildLayoutMapFromArray = (items: unknown[]): LayoutMap => {
   const layout: LayoutMap = {};
-  DASHBOARD_LAYOUT_KEYS.forEach((key, index) => {
+  (DASHBOARD_LAYOUT_KEYS as unknown as string[]).forEach((key, index) => {
     const entry = coerceLayoutEntry(items[index]);
     if (entry) {
       layout[key] = entry;
@@ -577,29 +698,40 @@ const normalizeLayoutMap = (layout: LayoutMap, colsValue?: string | number | nul
   };
 };
 
-const buildLayoutMap = (children: SceneGridItemLike[]): LayoutMap => {
+const buildLayoutMap = (children: (SceneGridItemLike | SceneObjectBase)[] | undefined): LayoutMap => {
   const next: LayoutMap = {};
-  // Scale from 24-col scene to 60-col user grid
   const SCENE_TO_USER = 60 / 24;
 
+  if (!children || !Array.isArray(children)) {
+    console.warn('buildLayoutMap: Invalid children', children);
+    return next;
+  }
+
   children.forEach((child) => {
-    const state = child.state as any;
+    // Duck typing check for SceneGridItem-like state
+    const state = (child as any).state;
     if (!state) return;
-    
-    const key = state.key;
+
+    const { x, y, width, height, body, key } = state;
     if (!key) return;
 
-    // Use safe defaults and round for integer coordinates
-    const sx = state.x ?? 0;
-    const sy = state.y ?? 0;
-    const sw = state.width ?? 1;
-    const sh = state.height ?? 1;
+    const metadata: { type?: WidgetType; title?: string; properties?: any } = {};
+    
+    // Check body state for metadata (ReactWidget)
+    if (body && body.state) {
+        // We look for our specific fields
+        const bodyState = body.state;
+        if (bodyState.type) metadata.type = bodyState.type as WidgetType;
+        if (bodyState.title) metadata.title = bodyState.title;
+        if (bodyState.properties) metadata.properties = bodyState.properties;
+    }
 
     next[key] = {
-      x: Math.round(sx * SCENE_TO_USER),
-      y: sy,
-      width: Math.round(sw * SCENE_TO_USER),
-      height: sh,
+      x: Math.round((x ?? 0) * SCENE_TO_USER),
+      y: y ?? 0,
+      width: Math.round((width ?? 1) * SCENE_TO_USER),
+      height: height ?? 1,
+      ...metadata,
     };
   });
   return next;
@@ -920,7 +1052,9 @@ const formatMetaTime = (value?: string | null) => {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString();
+  const formatted = date.toLocaleString();
+  console.log('formatMetaTime', value, formatted);
+  return formatted;
 };
 
 const isValidIp = (value: string) => {
@@ -1379,6 +1513,7 @@ function App() {
   const [spotLastSuccessAt, setSpotLastSuccessAt] = useState<number | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
   const [layoutEditing, setLayoutEditing] = useState(false);
+  const [customNotice, setCustomNotice] = useState('');
   const [layoutSaveMessage, setLayoutSaveMessage] = useState<string | null>(null);
   const [layoutSaveError, setLayoutSaveError] = useState<string | null>(null);
   const [layoutRestoreMessage, setLayoutRestoreMessage] = useState<string | null>(null);
@@ -2194,6 +2329,7 @@ function App() {
       cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
       password: '',
       passwordSet: Boolean(values.settings.password_set),
+      customNotice: values.settings.custom_notice ?? '',
     };
     return { form: nextForm, thresholds: nextThresholdState };
   }, []);
@@ -2211,6 +2347,9 @@ function App() {
       setSettingsPending(snapshot.pending ?? null);
       setOverrideEnabled(Boolean(snapshot.meta?.override_enabled));
       setOverrideMeta(snapshot.meta ?? null);
+      if (snapshot.values.settings.custom_notice !== undefined) {
+        setCustomNotice(snapshot.values.settings.custom_notice);
+      }
     },
     [buildSettingsFormFromSnapshot]
   );
@@ -2339,6 +2478,9 @@ function App() {
         errors[field] = '숫자만 입력하세요.';
       }
     });
+    if (!settingsForm.customNotice) {
+      // errors.customNotice = '내용을 입력하세요.'; // Optional: adding validation for customNotice
+    }
     return errors;
   }, [settingsForm]);
   const hasValidationError = Object.keys(validationErrors).length > 0;
@@ -2754,6 +2896,7 @@ function App() {
         snapshotpath: settingsForm.snapshotPath.trim() || undefined,
         autosave: settingsForm.autoSave,
         password: settingsForm.password.trim() || undefined,
+        custom_notice: settingsForm.customNotice,
       },
       logging: {
         rotation_enabled: settingsForm.rotationEnabled,
@@ -3447,6 +3590,7 @@ function App() {
       cycleThresholdPress: 'Cycle Threshold Press',
       password: '설정 비밀번호',
       passwordSet: '비밀번호 설정 상태',
+      customNotice: '작업자 공지사항',
     };
 
     const formatValue = (value: string | boolean) => {
@@ -3596,18 +3740,20 @@ function App() {
   // --- Scene Creation ---
   // Scene is created once; widget data is read from DataContext.
   const scene = useMemo(() => {
-      return getDashboardScene(
-         () => <KpiComponent />,
-         () => <SpotComponent />,
-         () => <TempsComponent />,
-         () => <MoldsComponent />,
-         () => <EnvComponent />,
-         () => <CameraComponent />,
-         () => <NoticeComponent />,
-         () => <TimeSeriesWidget />,
-         layoutSnapshot?.layout ?? null
-      );
-  }, [layoutSnapshot, timeSeriesDataNode]); // timeSeriesDataNode dep might need removal if unused 
+     const registry: WidgetRegistry = {
+       kpi: () => <KpiComponent />,
+       spot: () => <SpotComponent />,
+       temps: () => <TempsComponent />,
+       molds: () => <MoldsComponent />,
+       env: () => <EnvComponent />,
+       camera: () => <CameraComponent />,
+       notice: () => <NoticeComponent />,
+       timeseries: () => <TimeSeriesWidget />,
+       markdown: (item) => <MarkdownWidget item={item} />,
+     };
+     return getDashboardScene(registry, layoutSnapshot?.layout ?? null);
+  }, [layoutSnapshot, timeSeriesDataNode, customNotice]);
+ // timeSeriesDataNode dep might need removal if unused 
 
   const layoutRef = useRef<LayoutMap>({});
   const lastRestoreSlotIdRef = useRef<string | null>(null);
@@ -3715,10 +3861,30 @@ function App() {
     }
   };
 
+  const handleAddWidget = (type: WidgetType) => {
+    const newKey = `${type}-${Date.now()}`;
+    setLayoutSnapshot((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        layout: {
+          ...prev.layout,
+          [newKey]: {
+            x: 0,
+            y: 100, // Put way at bottom
+            width: 20,
+            height: 6,
+            type,
+            title: type === 'markdown' ? '작업자 확인' : '새 위젯',
+          },
+        },
+      };
+    });
+    setMenuOpen(false);
+  };
 
-
-  const deleteLayoutSlot = async (slotId?: string | null) => {
-    const targetId = slotId ?? null;
+  const deleteLayoutSlot = async (slotId: string) => {
+    const targetId = slotId;
     if (!targetId) {
       setLayoutRestoreError('삭제 대상 없음');
       return;
@@ -4081,6 +4247,16 @@ function App() {
                       {layoutRestoreMessage && (
                         <div className="menu-layout-message">{layoutRestoreMessage}</div>
                       )}
+                    </div>
+                    <div className="menu-divider" />
+                    <div className="menu-dropdown-section">
+                      <div className="menu-section-title">위젯 추가</div>
+                      <button
+                        className="menu-item"
+                        onClick={() => handleAddWidget('markdown')}
+                      >
+                        작업자 확인
+                      </button>
                     </div>
                   </>
                 ) : null}
@@ -5466,9 +5642,15 @@ function App() {
             handleSnapshot,
             snapshotLoading,
             nowTick,
+            customNotice,
+            setCustomNotice,
+            layoutEditing,
+            setLayoutEditing,
           }}
         >
+        <LayoutEditContext.Provider value={{ isEditing: layoutEditing }}>
            <scene.Component model={scene} />
+        </LayoutEditContext.Provider>
         </DataContext.Provider>
       </div>
     </div>
@@ -5501,6 +5683,10 @@ type DataContextValue = {
   handleSnapshot: () => void;
   snapshotLoading: boolean;
   nowTick: number; // For XAxis domain sync
+  customNotice: string;
+  setCustomNotice: (notice: string) => void;
+  layoutEditing: boolean;
+  setLayoutEditing: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
 const DataContext = React.createContext<DataContextValue>({
@@ -5526,6 +5712,10 @@ const DataContext = React.createContext<DataContextValue>({
   handleSnapshot: () => undefined,
   snapshotLoading: false,
   nowTick: Date.now(),
+  customNotice: '',
+  setCustomNotice: () => undefined,
+  layoutEditing: false,
+  setLayoutEditing: () => undefined,
 });
 
 const KpiComponent = () => {
@@ -5968,107 +6158,6 @@ const EnvComponent = () => {
     );
 };
 
-const NoticeComponent = () => {
-    const {
-      data,
-      thresholds,
-      spotConfig,
-      spotImageUrl,
-      spotImageLoading,
-      spotImageError,
-      spotLastSuccessAt,
-      spotAlertActive,
-    } = React.useContext(DataContext);
-
-    const speedValue = useLastValidNumber(data?.Speed);
-    const pressValue = useLastValidNumber(data?.Press);
-    const spotValue = useLastValidNumber(data?.Spot);
-    const tempFValue = useLastValidNumber(data?.Temp_F);
-    const tempBValue = useLastValidNumber(data?.Temp_B);
-    const billetValue = useLastValidNumber(data?.Billet_Length);
-    const billetTempValue = useLastValidNumber(data?.Billet_Temp);
-    const envTempValue = useLastValidNumber(data?.At_Temp);
-    const envHumValue = useLastValidNumber(data?.At_Pre);
-    const countValue = useLastValidNumber(data?.Count);
-    const endPosValue = useLastValidNumber(data?.EndPos);
-
-    const cameraStatus = getCameraStatus({
-      spotConfig,
-      spotImageUrl,
-      spotImageLoading,
-      spotImageError,
-      spotLastSuccessAt,
-    });
-
-    let noticeLevel: 'normal' | 'warning' | 'danger' = 'normal';
-    if (spotAlertActive || cameraStatus?.type === 'danger' || cameraStatus?.type === 'error') {
-      noticeLevel = 'danger';
-    } else if (cameraStatus?.type === 'warn' || cameraStatus?.type === 'loading') {
-      noticeLevel = 'warning';
-    }
-
-    const noticeMessages: string[] = [];
-    const thresholdMessages: string[] = [];
-
-    if (spotAlertActive) {
-      noticeMessages.push(`SPOT 온도 ${SPOT_WARN_TEMP}${SPOT_UNIT} 이상 감지`);
-    }
-    if (cameraStatus) {
-      const detail = cameraStatus.detail ? ` (${cameraStatus.detail})` : '';
-      noticeMessages.push(`SPOT 카메라 ${cameraStatus.title}${detail}`);
-    }
-    const computedThresholds = data?.Computed?.thresholds;
-    const thresholdHit = (key: ThresholdKey, value: number | null | undefined) => {
-      if (computedThresholds && computedThresholds[key] !== undefined) {
-        return computedThresholds[key];
-      }
-      return isThresholdHit(thresholds, key, value);
-    };
-    if (thresholdHit('speed', speedValue)) thresholdMessages.push(THRESHOLD_LABELS.speed);
-    if (thresholdHit('press', pressValue)) thresholdMessages.push(THRESHOLD_LABELS.press);
-    if (thresholdHit('spot', spotValue)) thresholdMessages.push(THRESHOLD_LABELS.spot);
-    if (thresholdHit('temp_f', tempFValue)) thresholdMessages.push(THRESHOLD_LABELS.temp_f);
-    if (thresholdHit('temp_b', tempBValue)) thresholdMessages.push(THRESHOLD_LABELS.temp_b);
-    if (thresholdHit('billet', billetValue)) thresholdMessages.push(THRESHOLD_LABELS.billet);
-    if (thresholdHit('billet_temp', billetTempValue)) thresholdMessages.push(THRESHOLD_LABELS.billet_temp);
-    if (thresholdHit('at_temp', envTempValue)) thresholdMessages.push(THRESHOLD_LABELS.at_temp);
-    if (thresholdHit('at_pre', envHumValue)) thresholdMessages.push(THRESHOLD_LABELS.at_pre);
-    if (thresholdHit('count', countValue)) thresholdMessages.push(THRESHOLD_LABELS.count);
-    if (thresholdHit('endpos', endPosValue)) thresholdMessages.push(THRESHOLD_LABELS.endpos);
-    if (thresholdMessages.length > 0) {
-      noticeMessages.push(`임계값 초과: ${thresholdMessages.join(', ')}`);
-    }
-    if (thresholdMessages.length > 0 && noticeLevel === 'normal') {
-      noticeLevel = 'warning';
-    }
-    const noticeClass = noticeLevel === 'danger' ? 'card-danger' : noticeLevel === 'warning' ? 'card-warning' : '';
-
-    return (
-      <div className={`card notice-card ${noticeClass}`} style={{ height: '100%' }}>
-        <div className="notice-header">
-          <span className="notice-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M12 3L2 21h20L12 3zm0 5.5c.6 0 1 .4 1 1v5c0 .6-.4 1-1 1s-1-.4-1-1v-5c0-.6.4-1 1-1zm0 9c.7 0 1.3.6 1.3 1.3S12.7 20 12 20s-1.3-.6-1.3-1.3S11.3 17.5 12 17.5z" />
-            </svg>
-          </span>
-          <span className="notice-title">{NOTICE_TITLE}</span>
-        </div>
-        <div className="notice-body">
-          {noticeMessages.length > 0 && (
-            <ul className="notice-list">
-              {noticeMessages.map((message) => (
-                <li key={message}>{message}</li>
-              ))}
-            </ul>
-          )}
-          <p className="notice-line">
-            {NOTICE_BODY_PREFIX}<b>{NOTICE_TEMP_THRESHOLD}</b>{NOTICE_BODY_SUFFIX}
-          </p>
-          <p className="notice-line">{NOTICE_FOOTER}</p>
-        </div>
-      </div>
-    );
-};
 
 const CameraComponent = () => {
     const {

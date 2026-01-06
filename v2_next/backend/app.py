@@ -56,7 +56,7 @@ from backend.services.config_service import (
 )
 from backend.services.config_sync import config_sync_agent
 from backend.services.config_watch import config_watch_service
-from backend.models.config_model import ConfigUpdate, OverrideToggle
+from backend.models.config_model import ConfigUpdate, OverrideToggle, SettingsConfig
 from backend.services import spot_control
 from backend.models.data_model import FactoryData
 from backend.services.verification_service import compare_with_reference
@@ -119,14 +119,14 @@ class SnapshotRequest(BaseModel):
 
 
 class LayoutSaveRequest(BaseModel):
-    layout: dict[str, dict[str, int | float]]
+    layout: dict[str, dict[str, Any]]
     cols: str | int | None = None
     version: str | None = None
 
 
 class LayoutSlotSaveRequest(BaseModel):
     name: str
-    layout: dict[str, dict[str, int | float]]
+    layout: dict[str, dict[str, Any]]
     cols: str | int | None = None
     version: str | None = None
     slot_id: str | None = None
@@ -136,8 +136,10 @@ class LayoutSlotRestoreRequest(BaseModel):
     slot_id: str
 
 
+
 class LayoutSlotDeleteRequest(BaseModel):
     slot_id: str
+
 
 
 _lock_fd = None
@@ -908,14 +910,24 @@ def get_config():
         _logger.error("Config load failed: %s", exc)
         raise HTTPException(status_code=500, detail="Config load failed") from exc
 
-@app.post("/api/config")
-def save_config(payload: ConfigUpdate):
+class NoticeUpdateRequest(BaseModel):
+    content: str
+
+
+@app.get("/api/config/notice")
+async def get_notice():
+    return {"content": config.CUSTOM_NOTICE}
+
+
+@app.post("/api/config/notice")
+async def save_notice(payload: NoticeUpdateRequest):
     try:
-        return update_config(payload, source="local")
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        config.CUSTOM_NOTICE = payload.content
+        update_payload = ConfigUpdate(settings=SettingsConfig(custom_notice=payload.content))
+        update_config(update_payload, source="notice_widget")
+        return {"status": "ok"}
     except Exception as exc:
-        _logger.error("Config save failed: %s", exc)
+        _logger.error("Notice save failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

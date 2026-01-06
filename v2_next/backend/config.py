@@ -42,6 +42,7 @@ DEFAULT_ROTATION_ENABLED = True
 DEFAULT_ROTATION_MODE = "BILLET"
 DEFAULT_CYCLE_IDLE_TIME = 30
 DEFAULT_CYCLE_THRESHOLD_PRESS = 20.0
+DEFAULT_CUSTOM_NOTICE = "작업 상황 및 주의사항을 여기에 입력하세요.\n(마크다운 형식을 지원합니다)"
 DEFAULT_CSV_HEADER = (
     "Date,Time,Temperature,MainPress,BilletLength,Temp_F,Temp_B,Count,Speed,EndPos,"
     "Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp,DIE_ID,Billet_CycleID"
@@ -301,6 +302,7 @@ SPOT_WIDGET_HEIGHT = _env_int("SPOT_WIDGET_HEIGHT", SPOT_WIDGET_HEIGHT)
 # SETTINGS / LOGGING
 LOG_PATH = resolve_storage_path(_get(CONFIG, "SETTINGS", "logpath", DEFAULT_LOG_PATH), "logs", "LogPath")
 AUTO_SAVE = _get_bool(CONFIG, "SETTINGS", "autosave", DEFAULT_AUTO_SAVE)
+CUSTOM_NOTICE = _get(CONFIG, "SETTINGS", "custom_notice", DEFAULT_CUSTOM_NOTICE) or DEFAULT_CUSTOM_NOTICE
 ROTATION_ENABLED = _get_bool(CONFIG, "LOGGING", "rotationenabled", DEFAULT_ROTATION_ENABLED)
 ROTATION_MODE = (_get(CONFIG, "LOGGING", "rotationmode", DEFAULT_ROTATION_MODE) or DEFAULT_ROTATION_MODE).upper()
 

@@ -90,6 +90,6 @@ npm start
 - `config.ini`는 **이식 PC의 경로**를 사용해야 합니다.
 - SPOT 카메라/포커스 관련 값은 `[SPOT]` 섹션을 사용합니다.
 
-python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 cd frontend; npm run build; cd ..; npm run dist

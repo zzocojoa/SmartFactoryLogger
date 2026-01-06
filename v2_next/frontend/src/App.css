@@ -3440,95 +3440,151 @@ body {
 
 
 /* Notice */
+/* Notice & Operator Check */
 .notice-card {
-  border: 1px solid #2f3338;
-  gap: var(--space-2);
-}
-
-.missing-note {
-  margin-top: auto;
-  font-size: clamp(9px, calc(var(--cq) * 1.2), 12px);
-  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, rgba(36, 42, 48, 0.8), rgba(27, 31, 36, 0.9));
   display: flex;
-  justify-content: flex-end;
-  gap: var(--space-1);
+  flex-direction: column;
+  gap: var(--space-2);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
 }
 
 .notice-header {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-}
-
-.notice-icon {
-  width: var(--icon-1);
-  height: var(--icon-1);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: rgba(123, 135, 148, 0.15);
-}
-
-.notice-icon svg {
-  width: var(--icon-2);
-  height: var(--icon-2);
-  fill: var(--text-muted);
-}
-
-.notice-title {
-  font-size: clamp(14px, calc(var(--cq) * 5), 48px);
-  font-weight: 700;
-  color: var(--text-secondary);
-}
-
-.notice-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.notice-list {
-  margin: 0;
-  padding-left: var(--space-3);
-  color: var(--text-primary);
-  font-size: clamp(12px, calc(var(--cq) * 4.5), 36px);
-  line-height: 1.4;
-}
-
-.notice-list li {
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   margin-bottom: 4px;
 }
 
-.notice-line {
-  font-size: clamp(12px, calc(var(--cq) * 5), 42px);
-  color: var(--text-dim);
+.notice-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.notice-title:hover {
+  color: var(--state-ok);
+}
+
+.notice-title-input {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(78, 201, 176, 0.3);
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  width: 180px;
+  outline: none;
+}
+
+.notice-edit-toggle {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.notice-edit-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.notice-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.notice-editor-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notice-textarea {
+  flex: 1;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.15);
+  color: #e6edf3;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 0.95rem;
   line-height: 1.6;
-  margin: 0;
+  resize: none;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
 }
 
-.notice-card.card-warning .notice-title {
-  color: var(--state-warn);
+.notice-textarea:focus {
+  border-color: var(--state-ok);
+  background: rgba(0, 0, 0, 0.25);
 }
 
-.notice-card.card-warning .notice-icon {
-  background: rgba(242, 201, 76, 0.18);
+.notice-save-btn {
+  background: var(--state-ok);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(37, 196, 154, 0.2);
 }
 
-.notice-card.card-warning .notice-icon svg {
-  fill: var(--state-warn);
+.notice-save-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(37, 196, 154, 0.3);
+  filter: brightness(1.1);
 }
 
-.notice-card.card-danger .notice-title {
-  color: var(--state-danger);
+.notice-content.markdown-body {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--text-primary);
 }
 
-.notice-card.card-danger .notice-icon {
-  background: rgba(246, 107, 107, 0.2);
+.markdown-body p { margin-bottom: 14px; }
+.markdown-body ul, .markdown-body ol { padding-left: 20px; margin-bottom: 14px; }
+.markdown-body li { margin-bottom: 6px; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { 
+  margin-top: 20px; 
+  margin-bottom: 10px; 
+  font-weight: 700; 
+  color: var(--text-primary);
+}
+.markdown-body code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.9em;
 }
 
-.notice-card.card-danger .notice-icon svg {
-  fill: var(--state-danger);
+.notice-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .loading {
