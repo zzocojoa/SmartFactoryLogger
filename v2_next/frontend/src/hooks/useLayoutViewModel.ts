@@ -7,6 +7,7 @@ import {
   LayoutSlotsResponse,
   LayoutEntry
 } from '../types';
+import { DEFAULT_DASHBOARD_ITEMS } from '../scenes/DashboardScene';
 import {
   buildLayoutMapFromArray,
   buildLayoutMapFromObject,
@@ -237,6 +238,12 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
   const addWidget = useCallback((type: string, title?: string) => {
     const newKey = `${type}-${Date.now()}`;
+    // Find default properties if available
+    const defaultItem = DEFAULT_DASHBOARD_ITEMS.find(item => item.key === type);
+    const defaultTitle = defaultItem?.title ?? (type === 'markdown' ? 'New Memo' : '새 위젯');
+    const defaultWidth = defaultItem?.width ?? 20;
+    const defaultHeight = defaultItem?.height ?? 6;
+
     setLayoutSnapshot((prev) => {
       if (!prev) return prev;
       return {
@@ -246,10 +253,10 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
           [newKey]: {
             x: 0,
             y: 0,
-            width: 20,
-            height: 6,
+            width: defaultWidth,
+            height: defaultHeight,
             type: type as LayoutEntry['type'],
-            title: title ?? (type === 'markdown' ? 'New Memo' : '새 위젯'),
+            title: title ?? defaultTitle,
           },
         },
       };

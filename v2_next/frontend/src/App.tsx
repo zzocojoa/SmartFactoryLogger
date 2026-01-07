@@ -132,7 +132,7 @@ const MarkdownWidget = ({ item, model }: { item: DashboardItem; model: ReactWidg
   };
 
   return (
-    <div className="notice-body scrollable">
+    <div className="scene-react-widget card" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {editing ? (
         <div className="notice-editor-container">
           <textarea
@@ -143,7 +143,7 @@ const MarkdownWidget = ({ item, model }: { item: DashboardItem; model: ReactWidg
           <button className="notice-save-btn" onClick={handleSave}>{LABELS.SAVE}</button>
         </div>
       ) : (
-        <div className="notice-content markdown-body">
+        <div className="notice-content markdown-body" style={{ flex: 1, overflow: 'auto' }}>
           <ReactMarkdown>{item.properties?.content || ''}</ReactMarkdown>
         </div>
       )}
@@ -2843,6 +2843,48 @@ function App() {
                       >
                         New Memo
                       </button>
+                      <button
+                        className="menu-item"
+                        onClick={() => handleAddWidget('timeseries')}
+                      >
+                        Time Series
+                      </button>
+                      <button
+                        className="menu-item"
+                        onClick={() => handleAddWidget('kpi')}
+                      >
+                        KPI
+                      </button>
+                      <button
+                        className="menu-item"
+                        onClick={() => handleAddWidget('spot')}
+                      >
+                        SPOT Temp
+                      </button>
+                      <button
+                        className="menu-item"
+                        onClick={() => handleAddWidget('camera')}
+                      >
+                        SPOT Camera
+                      </button>
+                      <button
+                        className="menu-item"
+                        onClick={() => handleAddWidget('temps')}
+                      >
+                        Temps
+                      </button>
+                      <button
+                        className="menu-item"
+                        onClick={() => handleAddWidget('molds')}
+                      >
+                        Molds
+                      </button>
+                      <button
+                        className="menu-item"
+                        onClick={() => handleAddWidget('env')}
+                      >
+                        Env
+                      </button>
                     </div>
                   </>
                 ) : null}
@@ -4947,7 +4989,7 @@ function TimeSeriesWidget() {
                  disabled={snapshotLoading}
                  title={LABELS.SAVE_SNAPSHOT}
              >
-                 {LABELS.SAVE}
+                 스냅샷
              </button>
          </div>
 
