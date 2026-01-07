@@ -30,11 +30,15 @@ import {
   CommChannelMetrics,
   CommSpotMetrics,
   ObservabilityErrorItem,
-  PathHealthResult
+  PathHealthResult,
+  LayoutSnapshot,
+  LayoutSlotSummary,
+  LayoutMap
 } from './types';
 import { useSystemViewModel } from './hooks/useSystemViewModel';
 import { useSpotViewModel } from './hooks/useSpotViewModel';
 import { useConfigViewModel } from './hooks/useConfigViewModel';
+import { useLayoutViewModel } from './hooks/useLayoutViewModel';
 import './App.css';
 import {
   LineChart,
@@ -322,158 +326,9 @@ const APPLY_KEY_LABELS: Record<string, string> = {
 
 
 
-type LayoutEntry = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  type?: WidgetType;
-  title?: string;
-  properties?: any;
-};
 
-type LayoutMap = Record<string, LayoutEntry>;
 
-type LayoutSnapshot = {
-  layout: LayoutMap;
-  cols?: string | number | null;
-  version?: string | null;
-  updated_at?: string | null;
-};
-
-type LayoutSlotSummary = {
-  id: string;
-  name: string;
-  updated_at?: string | null;
-  cols?: string | number | null;
-};
-
-type LayoutSlotsResponse = {
-  active_id?: string | null;
-  slots: LayoutSlotSummary[];
-};
-
-const coerceLayoutEntry = (entry: unknown): LayoutEntry | null => {
-  if (!entry || typeof entry !== 'object') {
-    return null;
-  }
-  const raw = entry as Record<string, unknown>;
-  return {
-    x: typeof raw.x === 'number' ? raw.x : 0,
-    y: typeof raw.y === 'number' ? raw.y : 0,
-    width: typeof raw.width === 'number' ? raw.width : 4,
-    height: typeof raw.height === 'number' ? raw.height : 4,
-    type: typeof raw.type === 'string' ? raw.type as WidgetType : undefined,
-    title: typeof raw.title === 'string' ? raw.title : undefined,
-    properties: raw.properties,
-  };
-};
-
-const buildLayoutMapFromArray = (items: unknown[]): LayoutMap => {
-  const layout: LayoutMap = {};
-  (DASHBOARD_LAYOUT_KEYS as unknown as string[]).forEach((key, index) => {
-    const entry = coerceLayoutEntry(items[index]);
-    if (entry) {
-      layout[key] = entry;
-    }
-  });
-  return layout;
-};
-
-const buildLayoutMapFromObject = (value: Record<string, unknown>): LayoutMap => {
-  const layout: LayoutMap = {};
-  Object.entries(value).forEach(([key, entry]) => {
-    const parsed = coerceLayoutEntry(entry);
-    if (parsed) {
-      layout[key] = parsed;
-    }
-  });
-  return layout;
-};
-
-const getLayoutMaxExtent = (layout: LayoutMap): number => {
-  let maxExtent = 0;
-  Object.values(layout).forEach((item) => {
-    const x = item.x ?? 0;
-    const width = item.width ?? 0;
-    if (x + width > maxExtent) {
-      maxExtent = x + width;
-    }
-  });
-  return maxExtent;
-};
-
-const scaleLayoutMap = (layout: LayoutMap, scale: number): LayoutMap => {
-  const scaled: LayoutMap = {};
-  Object.entries(layout).forEach(([key, item]) => {
-    scaled[key] = {
-      ...item,
-      x: Math.max(0, Math.round(item.x * scale)),
-      width: Math.max(1, Math.round(item.width * scale)),
-    };
-  });
-  return scaled;
-};
-
-const normalizeLayoutMap = (layout: LayoutMap, colsValue?: string | number | null) => {
-  const savedCols =
-    colsValue === undefined || colsValue === null || `${colsValue}`.trim() === ''
-      ? Number.NaN
-      : Number(colsValue);
-  const maxExtent = getLayoutMaxExtent(layout);
-  const isLegacy = maxExtent > 0 && maxExtent <= LEGACY_LAYOUT_COLS;
-  if (savedCols === LEGACY_LAYOUT_COLS || (!Number.isFinite(savedCols) && isLegacy)) {
-    return {
-      layout: scaleLayoutMap(layout, CURRENT_LAYOUT_COLS / LEGACY_LAYOUT_COLS),
-      cols: CURRENT_LAYOUT_COLS,
-      scaled: true,
-    };
-  }
-  return {
-    layout,
-    cols: Number.isFinite(savedCols) ? savedCols : CURRENT_LAYOUT_COLS,
-    scaled: false,
-  };
-};
-
-const buildLayoutMap = (children: (SceneGridItemLike | SceneObjectBase)[] | undefined): LayoutMap => {
-  const next: LayoutMap = {};
-  const SCENE_TO_USER = 60 / 24;
-
-  if (!children || !Array.isArray(children)) {
-    console.warn('buildLayoutMap: Invalid children', children);
-    return next;
-  }
-
-  children.forEach((child) => {
-    // Duck typing check for SceneGridItem-like state
-    const state = (child as any).state;
-    if (!state) return;
-
-    const { x, y, width, height, body, key } = state;
-    if (!key) return;
-
-    const metadata: { type?: WidgetType; title?: string; properties?: any } = {};
-    
-    // Check body state for metadata (ReactWidget)
-    if (body && body.state) {
-        // We look for our specific fields
-        const bodyState = body.state;
-        if (bodyState.type) metadata.type = bodyState.type as WidgetType;
-        if (bodyState.title) metadata.title = bodyState.title;
-        if (bodyState.properties) metadata.properties = bodyState.properties;
-    }
-
-    next[key] = {
-      x: Math.round((x ?? 0) * SCENE_TO_USER),
-      y: y ?? 0,
-      width: Math.round((width ?? 1) * SCENE_TO_USER),
-      height: height ?? 1,
-      ...metadata,
-    };
-  });
-  return next;
-};
+import { buildLayoutMap } from './utils/layoutUtils';
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -1283,6 +1138,25 @@ function App() {
     externalConfigPendingAt,
     overrideBusy
   } = useConfigViewModel();
+
+  const {
+    layoutSnapshot,
+    layoutSlots,
+    layoutActiveId,
+    layoutEditing,
+    layoutLoadError,
+    layoutSaveMessage,
+    layoutSaveError,
+    setLayoutEditing,
+    loadLayoutSnapshot,
+    handleSaveLayout,
+    handleRestoreLayout,
+    handleDeleteLayout,
+    updateWidget,
+    deleteWidget,
+    addWidget,
+    fetchLayoutSlots
+  } = useLayoutViewModel();
   
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   // const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
@@ -1328,17 +1202,12 @@ function App() {
   const [spotLastSuccessAt, setSpotLastSuccessAt] = useState<number | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
   */
-  const [layoutEditing, setLayoutEditing] = useState(false);
+  /* Layout state moved to useLayoutViewModel */
+  
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [customNotice, setCustomNotice] = useState('');
-  const [layoutSaveMessage, setLayoutSaveMessage] = useState<string | null>(null);
-  const [layoutSaveError, setLayoutSaveError] = useState<string | null>(null);
   const [layoutRestoreMessage, setLayoutRestoreMessage] = useState<string | null>(null);
   const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
-  const [layoutSnapshot, setLayoutSnapshot] = useState<LayoutSnapshot | null>(null);
-  const [, setLayoutLoadError] = useState<string | null>(null);
-  const [layoutSlots, setLayoutSlots] = useState<LayoutSlotSummary[]>([]);
-  const [layoutActiveId, setLayoutActiveId] = useState<string | null>(null);
-  const [snapshotLoading, setSnapshotLoading] = useState(false);
   
   // const spotHasImage = useRef(false);
   const saveMessageTimerRef = useRef<number | null>(null);
@@ -1577,126 +1446,12 @@ function App() {
     };
   }, []);
 
-  const fetchLayoutSlots = useCallback(async () => {
-    try {
-      const data = await layoutService.getLayouts();
-      setLayoutSlots(data?.slots ?? []);
-      setLayoutActiveId(data?.active_id ?? null);
-    } catch (error) {
-      console.error('Layout slots load failed', error);
-      setLayoutSlots([]);
-      setLayoutActiveId(null);
-    }
-  }, []);
-
-  const readLegacyLayoutSnapshot = useCallback((): LayoutSnapshot | null => {
-    try {
-      const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (!raw) {
-        return null;
-      }
-      const parsed = JSON.parse(raw);
-      let layout: LayoutMap = {};
-      if (Array.isArray(parsed)) {
-        layout = buildLayoutMapFromArray(parsed);
-      } else if (parsed && typeof parsed === 'object') {
-        layout = buildLayoutMapFromObject(parsed as Record<string, unknown>);
-      }
-      if (Object.keys(layout).length === 0) {
-        return null;
-      }
-      const cols = localStorage.getItem(LAYOUT_COLS_KEY);
-      return {
-        layout,
-        cols,
-        version: 'v1',
-      };
-    } catch (error) {
-      console.error('Legacy layout parse failed', error);
-      return null;
-    }
-  }, []);
-
-  const migrateLegacyLayout = useCallback(async () => {
-    const legacy = readLegacyLayoutSnapshot();
-    if (!legacy) {
-      return null;
-    }
-    const normalized = normalizeLayoutMap(legacy.layout, legacy.cols ?? null);
-    const payload = {
-      name: '이전 레이아웃',
-      layout: normalized.layout,
-      cols: normalized.cols ?? CURRENT_LAYOUT_COLS,
-      version: 'v2',
-    };
-    try {
-      const data = await layoutService.saveLayout(payload);
-      localStorage.removeItem(LAYOUT_STORAGE_KEY);
-      localStorage.removeItem(LAYOUT_COLS_KEY);
-      localStorage.removeItem(LAYOUT_BACKUP_KEY);
-      return {
-        layout: payload.layout,
-        cols: payload.cols,
-        version: payload.version,
-        updated_at: data?.updated_at ?? null,
-      } as LayoutSnapshot;
-    } catch (error) {
-      console.error('Legacy layout migration failed', error);
-      return {
-        layout: payload.layout,
-        cols: payload.cols,
-        version: payload.version,
-      } as LayoutSnapshot;
-    }
-  }, [readLegacyLayoutSnapshot]);
-
-  const loadLayoutSnapshot = useCallback(async () => {
-    setLayoutLoadError(null);
-    try {
-      const snapshot = await layoutService.getLayoutSnapshot();
-      // const snapshot = res.data; // service returns data directly
-      if (snapshot && snapshot.layout) {
-        const normalized = normalizeLayoutMap(snapshot.layout, snapshot.cols ?? null);
-        setLayoutSnapshot({
-          ...snapshot,
-          layout: normalized.layout,
-          cols: normalized.cols,
-        });
-      } else {
-        setLayoutSnapshot(null);
-      }
-
-    } catch (error) {
-      const status = (error as any)?.response?.status;
-      if (status === 404) {
-        const migrated = await migrateLegacyLayout();
-        setLayoutSnapshot(migrated);
-      } else {
-        console.error('Layout load failed', error);
-        setLayoutLoadError('레이아웃 로드 실패');
-      }
-    } finally {
-      await fetchLayoutSlots();
-    }
-  }, [fetchLayoutSlots, migrateLegacyLayout]);
-
   useEffect(() => {
-    loadLayoutSnapshot();
-  }, [loadLayoutSnapshot]);
-
-  useEffect(() => {
-    if (!layoutEditing) {
+    if (!layoutEditing && !menuOpen) {
       return;
     }
     fetchLayoutSlots();
-  }, [layoutEditing, fetchLayoutSlots]);
-
-  useEffect(() => {
-    if (!menuOpen) {
-      return;
-    }
-    fetchLayoutSlots();
-  }, [menuOpen, fetchLayoutSlots]);
+  }, [layoutEditing, menuOpen, fetchLayoutSlots]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -2759,7 +2514,7 @@ function App() {
     grid.setState({ isDraggable: layoutEditing, isResizable: layoutEditing });
   }, [scene, layoutEditing]);
 
-  // --- Layout Persistence ---
+  // --- Layout Persistence (using ViewModel) ---
   const saveLayout = async () => {
     if (!layoutEditing) {
       return;
@@ -2769,7 +2524,7 @@ function App() {
       layoutRef.current = buildLayoutMap(grid.state.children);
     }
     if (Object.keys(layoutRef.current).length === 0) {
-      setLayoutSaveError('레이아웃 정보를 찾을 수 없습니다.');
+      pushNotification('레이아웃 저장', '레이아웃 정보를 찾을 수 없습니다.', 'error');
       return;
     }
     const defaultName =
@@ -2777,40 +2532,16 @@ function App() {
       `레이아웃 ${Math.min(layoutSlots.length + 1, 3)}`;
     const name = await modal.prompt('레이아웃 이름을 입력하세요', defaultName);
     if (!name) {
-      setLayoutSaveError('저장 취소');
       pushNotification('레이아웃 저장', '저장이 취소되었습니다.', 'warn');
       return;
     }
     try {
-      await layoutService.saveLayout({
-        name,
-        layout: layoutRef.current,
-        cols: CURRENT_LAYOUT_COLS,
-        version: 'v2',
-      });
-      await loadLayoutSnapshot();
-      setLayoutSaveError(null);
-      setLayoutSaveMessage('저장됨');
+      await handleSaveLayout(name);
       pushNotification('레이아웃 저장', `저장 완료: ${name}`, 'info');
     } catch (error) {
       console.error('Layout save failed', error);
-      // Rough check for 400 without axios dependency, assuming api service throws with response
-      const errAny = error as any;
-      const message =
-        (errAny.response?.status === 400)
-          ? '레이아웃은 최대 3개까지 저장할 수 있습니다.'
-          : '저장 실패';
-      setLayoutSaveError(message);
-      pushNotification('레이아웃 저장 실패', message, 'error');
-      return;
+      pushNotification('레이아웃 저장 실패', '저장 실패', 'error');
     }
-    if (saveMessageTimerRef.current !== null) {
-      window.clearTimeout(saveMessageTimerRef.current);
-    }
-    saveMessageTimerRef.current = window.setTimeout(() => {
-      setLayoutSaveMessage(null);
-      saveMessageTimerRef.current = null;
-    }, 2000);
   };
 
   const restoreLayout = async (slotId?: string | null) => {
@@ -2824,8 +2555,7 @@ function App() {
       return;
     }
     try {
-      await layoutService.restoreLayout(targetId);
-      await loadLayoutSnapshot();
+      await handleRestoreLayout(targetId);
       setLayoutRestoreError(null);
       setLayoutRestoreMessage('복구됨');
       if (restoreMessageTimerRef.current !== null) {
@@ -2842,30 +2572,12 @@ function App() {
   };
 
   const handleAddWidget = (type: WidgetType) => {
-    const newKey = `${type}-${Date.now()}`;
-    setLayoutSnapshot((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        layout: {
-          ...prev.layout,
-          [newKey]: {
-            x: 0,
-            y: 0, // Put at top
-            width: 20,
-            height: 6,
-            type,
-            title: type === 'markdown' ? 'New Memo' : '새 위젯',
-          },
-        },
-      };
-    });
+    addWidget(type);
     setMenuOpen(false);
   };
 
   const deleteLayoutSlot = async (slotId: string) => {
-    const targetId = slotId;
-    if (!targetId) {
+    if (!slotId) {
       setLayoutRestoreError('삭제 대상 없음');
       return;
     }
@@ -2873,8 +2585,7 @@ function App() {
       return;
     }
     try {
-      await layoutService.deleteLayout(targetId);
-      await loadLayoutSnapshot();
+      await handleDeleteLayout(slotId);
       setLayoutRestoreError(null);
       setLayoutRestoreMessage('삭제됨');
       if (restoreMessageTimerRef.current !== null) {
@@ -2891,40 +2602,11 @@ function App() {
   };
 
   const handleRemoveWidget = (key: string) => {
-    // if (!window.confirm('위젯을 삭제하시겠습니까?')) return;
-    setLayoutSnapshot((prev) => {
-        if (!prev) return prev;
-        const newLayout = { ...prev.layout };
-        if (key in newLayout) {
-             delete newLayout[key];
-        }
-        return { ...prev, layout: newLayout };
-    });
+    deleteWidget(key);
   };
 
   const handleUpdateWidget = (key: string, updates: any) => {
-    // Capture current visual state (positions) to prevent reset
-    const currentPositions = layoutRef.current;
-
-    setLayoutSnapshot((prev) => {
-      if (!prev) return prev;
-      const newLayout = { ...prev.layout };
-      
-      // Update items with current visual positions
-      if (currentPositions && Object.keys(currentPositions).length > 0) {
-        Object.keys(newLayout).forEach((k) => {
-           if (currentPositions[k]) {
-             newLayout[k] = { ...newLayout[k], ...currentPositions[k] };
-           }
-        });
-      }
-
-      // Apply the specific update
-      if (newLayout[key]) {
-          newLayout[key] = { ...newLayout[key], ...updates };
-      }
-      return { ...prev, layout: newLayout };
-    });
+    updateWidget(key, updates);
   };
 
   const ageMs = lastDataAt ? Math.max(0, nowTick - lastDataAt) : null;
@@ -3211,7 +2893,7 @@ function App() {
                 <button
                   className="menu-item"
                   onClick={() => {
-                    setLayoutEditing((prev) => !prev);
+                    setLayoutEditing(!layoutEditing);
                   }}
                 >
                   {layoutEditing ? '편집 완료' : '편집 모드'}
@@ -4728,7 +4410,7 @@ type DataContextValue = {
   customNotice: string;
   setCustomNotice: (notice: string) => void;
   layoutEditing: boolean;
-  setLayoutEditing: React.Dispatch<React.SetStateAction<boolean>>;
+  setLayoutEditing: (editing: boolean) => void;
 };
 
 const DataContext = React.createContext<DataContextValue>({

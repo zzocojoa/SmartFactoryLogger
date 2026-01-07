@@ -1,3 +1,5 @@
+import { WidgetType } from './scenes/DashboardScene';
+
 export interface FactoryData {
     // System
     Time: string;
@@ -403,4 +405,35 @@ export interface PathHealthResult {
 }
 
 export type PathHealthState = Partial<Record<'log' | 'snapshot', PathHealthResult>>;
+
+export interface LayoutEntry {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  type?: WidgetType;
+  title?: string;
+  properties?: any;
+}
+
+export type LayoutMap = Record<string, LayoutEntry>;
+
+export interface LayoutSnapshot {
+  layout: LayoutMap;
+  cols?: string | number | null;
+  version?: string | null;
+  updated_at?: string | null;
+}
+
+export interface LayoutSlotSummary {
+  id: string;
+  name: string;
+  updated_at?: string | null;
+  cols?: string | number | null;
+}
+
+export interface LayoutSlotsResponse {
+  active_id?: string | null;
+  slots: LayoutSlotSummary[];
+}
 
