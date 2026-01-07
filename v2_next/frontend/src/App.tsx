@@ -950,58 +950,58 @@ const getCameraStatus = (params: {
 function App() {
   const { mode, setMode } = useTheme();
   const modal = useModal();
-  
+
   // Time Series States (UI Control - stays in App)
   const [seriesWindowMin, setSeriesWindowMin] = useState(30);
   const [seriesPaused, setSeriesPaused] = useState(false);
   const [showThresholds, setShowThresholds] = useState(true);
-  
+
   // timeSeriesDataNode stays in App for minimal change approach
   const timeSeriesDataNode = useMemo(() => new SceneDataNode(), []);
-  
+
   const {
-      health,
-      stats,
-      observabilityErrors,
-      observabilityLoading,
-      pathHealth,
-      reconnectBusy,
-      pathCheckBusy,
-      lastExportPath,
-      commLogInfo,
-      fetchHealth,
-      fetchStats,
-      loadObservabilityErrors,
-      clearObservabilityErrors,
-      reconnect,
-      runConnectionTest,
-      checkPathHealth,
-      checkPathsHealth,
-      createPath,
-      setPathHealth,
-      setPathCheckBusy,
-      fetchLatestExportPath,
-      exportObservability,
-      openExportFolder,
-      openExportFile,
-      fetchCommLogInfo,
-      openCommLogPath,
-      openCommLogFile,
-      saveSnapshot,
-      connectionTest
+    health,
+    stats,
+    observabilityErrors,
+    observabilityLoading,
+    pathHealth,
+    reconnectBusy,
+    pathCheckBusy,
+    lastExportPath,
+    commLogInfo,
+    fetchHealth,
+    fetchStats,
+    loadObservabilityErrors,
+    clearObservabilityErrors,
+    reconnect,
+    runConnectionTest,
+    checkPathHealth,
+    checkPathsHealth,
+    createPath,
+    setPathHealth,
+    setPathCheckBusy,
+    fetchLatestExportPath,
+    exportObservability,
+    openExportFolder,
+    openExportFile,
+    fetchCommLogInfo,
+    openCommLogPath,
+    openCommLogFile,
+    saveSnapshot,
+    connectionTest
   } = useSystemViewModel();
 
   const {
-      config: spotConfig,
-      imageUrl: spotImageUrl,
-      imageError: spotImageError,
-      imageLoading: spotImageLoading,
-      lastSuccessAt: spotLastSuccessAt,
-      focusBusy,
-      refreshConfig: fetchSpotConfig,
-      handleImageLoad: handleSpotImageLoaded,
-      handleImageError: handleSpotImageError,
-      controlFocus: requestFocus
+    config: spotConfig,
+    imageUrl: spotImageUrl,
+    imageError: spotImageError,
+    imageLoading: spotImageLoading,
+    lastSuccessAt: spotLastSuccessAt,
+    focusBusy,
+    refreshConfig: fetchSpotConfig,
+    handleImageLoad: handleSpotImageLoaded,
+    handleImageError: handleSpotImageError,
+    controlFocus: requestFocus
   } = useSpotViewModel();
 
   const {
@@ -1027,7 +1027,7 @@ function App() {
     validationErrors,
     hasValidationError,
     activeThresholds: thresholdState,
-    
+
     setSettingsOpen,
     loadSettings,
     updateSettingsField,
@@ -1084,11 +1084,11 @@ function App() {
     showThresholds,
     thresholdConfig
   });
-  
+
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   // const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
   const [connectionTestBusy, setConnectionTestBusy] = useState<Record<string, boolean>>({});
-  
+
   /* Time Series UI Control States already declared at top of App */
   /* centralSyncBusy moved to useConfigViewModel */
 
@@ -1107,15 +1107,15 @@ function App() {
 
   // Time Series States
   // Moved thresholdConfig to hook. But we need it for buildSeriesThresholds
-  const timeSeriesThresholds = useMemo(() => 
+  const timeSeriesThresholds = useMemo(() =>
     showThresholds ? buildSeriesThresholds(thresholdConfig) : undefined
-  , [thresholdConfig, showThresholds]);
+    , [thresholdConfig, showThresholds]);
 
   /*
   const [settingsRestartRequired, setSettingsRestartRequired] = useState(false);
   ...
   */
-  
+
   const [menuOpen, setMenuOpen] = useState(false);
   // Spot State moved to useSpotViewModel
   /*
@@ -1127,12 +1127,12 @@ function App() {
   const [focusBusy, setFocusBusy] = useState(false);
   */
   /* Layout state moved to useLayoutViewModel */
-  
+
   const [snapshotLoading, setSnapshotLoading] = useState(false);
 
   const [layoutRestoreMessage, setLayoutRestoreMessage] = useState<string | null>(null);
   const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
-  
+
   // const spotHasImage = useRef(false);
   const saveMessageTimerRef = useRef<number | null>(null);
   const restoreMessageTimerRef = useRef<number | null>(null);
@@ -1420,7 +1420,7 @@ function App() {
     try {
       const snapshot = await fetchHealth();
       const statsSnapshot = await fetchStats().catch(() => null);
-      
+
       if (!snapshot) {
         await modal.alert('Failed to fetch health data.');
         return;
@@ -1544,7 +1544,7 @@ function App() {
       pushNotification('스냅샷', '스냅샷 생성 및 서버 저장 중...', 'info');
       const element = document.getElementById('root') || document.body;
       const scrollHeight = document.documentElement.scrollHeight;
-      
+
       const canvas = await html2canvas(element, {
         useCORS: true,
         logging: false,
@@ -1552,11 +1552,11 @@ function App() {
         imageTimeout: 5000,
         height: scrollHeight,
         windowHeight: scrollHeight,
-        scrollY: -window.scrollY, 
+        scrollY: -window.scrollY,
       } as any);
 
       const base64Data = canvas.toDataURL('image/png');
-      
+
       try {
         await saveSnapshot({
           image_base64: base64Data,
@@ -2316,15 +2316,15 @@ function App() {
       settingsSections.forEach(({ id }) => {
         const section = settingsSectionRefs.current[id];
         if (!section) return;
-        
+
         const rect = section.getBoundingClientRect();
         const relativeTop = rect.top - containerRect.top;
-        
+
         if (relativeTop <= triggerY) {
           currentId = id;
         }
       });
-      
+
       if (currentId) {
         setActiveSettingsSection((prev) => (prev !== currentId ? currentId : prev));
       }
@@ -2361,19 +2361,19 @@ function App() {
   // --- Scene Creation ---
   // Scene is created once; widget data is read from DataContext.
   const scene = useMemo(() => {
-     const registry: WidgetRegistry = {
-       kpi: () => <KpiComponent />,
-       spot: () => <SpotComponent />,
-       temps: () => <TempsComponent />,
-       molds: () => <MoldsComponent />,
-       env: () => <EnvComponent />,
-       camera: () => <CameraComponent />,
-       timeseries: () => <TimeSeriesWidget />,
-       markdown: (item, model) => <MarkdownWidget item={item} model={model} />,
-     };
-     return getDashboardScene(registry, layoutSnapshot?.layout ?? null);
+    const registry: WidgetRegistry = {
+      kpi: () => <KpiComponent />,
+      spot: () => <SpotComponent />,
+      temps: () => <TempsComponent />,
+      molds: () => <MoldsComponent />,
+      env: () => <EnvComponent />,
+      camera: () => <CameraComponent />,
+      timeseries: () => <TimeSeriesWidget />,
+      markdown: (item, model) => <MarkdownWidget item={item} model={model} />,
+    };
+    return getDashboardScene(registry, layoutSnapshot?.layout ?? null);
   }, [layoutSnapshot, timeSeriesDataNode]);
- // timeSeriesDataNode dep might need removal if unused 
+  // timeSeriesDataNode dep might need removal if unused 
 
   const layoutRef = useRef<LayoutMap>({});
   const lastRestoreSlotIdRef = useRef<string | null>(null);
@@ -2691,258 +2691,258 @@ function App() {
     <div className={`App ${layoutEditing ? 'layout-editing' : ''}`} style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header className="app-header">
         <h1>{APP_TITLE}</h1>
-         <div className="header-controls">
-            <div className="status-panel" title={statusTitle}>
-              <div className={`status-badge ${statusClass}`}>{statusLabel}</div>
-              <div className="status-meta">
-                <span className="status-meta-item">
-                  <span className="status-meta-label">Last</span>
-                  <span className="status-meta-value">{lastUpdateText}</span>
-                </span>
-                <span className="status-meta-item">
-                  <span className="status-meta-label">Avg</span>
-                  <span className="status-meta-value">{avgLatencyText}</span>
-                </span>
-                <span className="status-meta-item">
-                  <span className="status-meta-label">Errors</span>
-                  <span className="status-meta-value">{errorCountText}</span>
-                </span>
-                <span className="status-meta-item">
-                  <span className="status-meta-label">ErrQ</span>
-                  <span className="status-meta-value">{errorQueueText}</span>
-                </span>
+        <div className="header-controls">
+          <div className="status-panel" title={statusTitle}>
+            <div className={`status-badge ${statusClass}`}>{statusLabel}</div>
+            <div className="status-meta">
+              <span className="status-meta-item">
+                <span className="status-meta-label">Last</span>
+                <span className="status-meta-value">{lastUpdateText}</span>
+              </span>
+              <span className="status-meta-item">
+                <span className="status-meta-label">Avg</span>
+                <span className="status-meta-value">{avgLatencyText}</span>
+              </span>
+              <span className="status-meta-item">
+                <span className="status-meta-label">Errors</span>
+                <span className="status-meta-value">{errorCountText}</span>
+              </span>
+              <span className="status-meta-item">
+                <span className="status-meta-label">ErrQ</span>
+                <span className="status-meta-value">{errorQueueText}</span>
+              </span>
+            </div>
+            {commBadges.length > 0 && (
+              <div className="status-comm">
+                {commBadges.map((badge) => (
+                  <span
+                    key={badge.key}
+                    className={`status-comm-item ${badge.state}`}
+                    title={badge.title}
+                  >
+                    {badge.text}
+                  </span>
+                ))}
               </div>
-              {commBadges.length > 0 && (
-                <div className="status-comm">
-                  {commBadges.map((badge) => (
-                    <span
-                      key={badge.key}
-                      className={`status-comm-item ${badge.state}`}
-                      title={badge.title}
+            )}
+          </div>
+
+          <div style={{ marginLeft: '16px', paddingLeft: '16px', borderLeft: '1px solid var(--border-muted)' }}>
+            <button
+              className={`status-action ${snapshotLoading ? 'loading' : ''}`}
+              onClick={handleSnapshot}
+              disabled={snapshotLoading}
+              aria-disabled={snapshotLoading}
+              title={settingsForm?.snapshotPath ? `Save to: ${settingsForm.snapshotPath}` : 'Snapshot'}
+            >
+              Snapshot
+            </button>
+          </div>
+
+          <div className="status-actions">
+            <button
+              className="status-action"
+              onClick={handleReconnect}
+              disabled={reconnectBusy}
+              aria-disabled={reconnectBusy}
+            >
+              Reconnect
+            </button>
+            <button
+              className="status-action"
+              onClick={handleDiagnosis}
+              disabled={diagnosisBusy}
+              aria-disabled={diagnosisBusy}
+            >
+              Diagnosis
+            </button>
+          </div>
+
+
+          {/* Removed Series Controls from Header */}
+          <button
+            className="notify-bell"
+            onClick={() => setNotificationsOpen((prev) => !prev)}
+            aria-pressed={notificationsOpen}
+          >
+            알림
+            {unreadCount > 0 && <span className="notify-badge">{unreadCount}</span>}
+          </button>
+          <div className="menu-wrapper" ref={menuRef}>
+            <button
+              className="menu-toggle"
+              onClick={() => setMenuOpen((prev) => !prev)}
+              aria-pressed={menuOpen}
+            >
+              MENU
+            </button>
+            <div className={`menu-dropdown ${menuOpen ? 'open' : ''}`}>
+              <button
+                className="menu-item"
+                onClick={() => {
+                  setLayoutEditing(!layoutEditing);
+                }}
+              >
+                {layoutEditing ? '편집 완료' : '편집 모드'}
+              </button>
+              {layoutEditing ? (
+                <>
+                  <button
+                    onClick={() => {
+                      saveLayout();
+                      setMenuOpen(false);
+                    }}
+                    className="menu-item"
+                  >
+                    {layoutSaveMessage ?? '레이아웃 저장'}
+                  </button>
+                  <div className="menu-layout-list">
+                    <div className="menu-section-title">저장된 레이아웃</div>
+                    {layoutSlots.length > 0 ? (
+                      layoutSlots.map((slot) => (
+                        <div
+                          key={slot.id}
+                          className={`menu-layout-row ${slot.id === layoutActiveId ? 'active' : ''}`}
+                        >
+                          <button
+                            className="menu-item menu-layout-button"
+                            onClick={() => restoreLayout(slot.id)}
+                          >
+                            복구
+                          </button>
+                          <button
+                            className="menu-item menu-layout-button menu-layout-delete"
+                            onClick={() => deleteLayoutSlot(slot.id)}
+                          >
+                            삭제
+                          </button>
+                          <div className="menu-layout-meta">
+                            <div className="menu-layout-title">
+                              <span className="menu-layout-name">{slot.name}</span>
+                              {slot.id === layoutActiveId && (
+                                <span className="menu-layout-active">현재</span>
+                              )}
+                            </div>
+                            <span className="menu-layout-time">{formatMetaTime(slot.updated_at)}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="menu-layout-empty">저장된 레이아웃이 없습니다.</div>
+                    )}
+                    {layoutRestoreMessage && (
+                      <div className="menu-layout-message">{layoutRestoreMessage}</div>
+                    )}
+                  </div>
+                  <div className="menu-divider" />
+                  <div className="menu-dropdown-section">
+                    <div className="menu-section-title">위젯 추가</div>
+                    <button
+                      className="menu-item"
+                      onClick={() => handleAddWidget('markdown')}
                     >
-                      {badge.text}
-                    </span>
-                  ))}
+                      New Memo
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => handleAddWidget('timeseries')}
+                    >
+                      Time Series
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => handleAddWidget('kpi')}
+                    >
+                      KPI
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => handleAddWidget('spot')}
+                    >
+                      SPOT Temp
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => handleAddWidget('camera')}
+                    >
+                      SPOT Camera
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => handleAddWidget('temps')}
+                    >
+                      Temps
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => handleAddWidget('molds')}
+                    >
+                      Molds
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => handleAddWidget('env')}
+                    >
+                      Env
+                    </button>
+                  </div>
+                </>
+              ) : null}
+              <div className="menu-divider" />
+              <button
+                className="menu-item"
+                onClick={() => {
+                  setSettingsOpen(true);
+                  setMenuOpen(false);
+                }}
+              >
+                설정
+              </button>
+              {layoutEditing && layoutSaveError && (
+                <div className="menu-error">
+                  <span>{layoutSaveError}</span>
+                  <button onClick={saveLayout} className="retry-button">
+                    재시도
+                  </button>
                 </div>
               )}
-              </div>
-              
-              <div style={{ marginLeft: '16px', paddingLeft: '16px', borderLeft: '1px solid var(--border-muted)' }}>
-                 <button
-                    className={`status-action ${snapshotLoading ? 'loading' : ''}`}
-                    onClick={handleSnapshot}
-                    disabled={snapshotLoading}
-                    aria-disabled={snapshotLoading}
-                    title={settingsForm?.snapshotPath ? `Save to: ${settingsForm.snapshotPath}` : 'Snapshot'}
-                  >
-                    Snapshot
-                  </button>
-              </div>
-
-              <div className="status-actions">
-                <button
-                  className="status-action"
-                  onClick={handleReconnect}
-                  disabled={reconnectBusy}
-                  aria-disabled={reconnectBusy}
-                >
-                  Reconnect
-                </button>
-                <button
-                  className="status-action"
-                  onClick={handleDiagnosis}
-                  disabled={diagnosisBusy}
-                  aria-disabled={diagnosisBusy}
-                >
-                  Diagnosis
-                </button>
-              </div>
-
-            
-            {/* Removed Series Controls from Header */}
-            <button
-              className="notify-bell"
-              onClick={() => setNotificationsOpen((prev) => !prev)}
-              aria-pressed={notificationsOpen}
-            >
-              알림
-              {unreadCount > 0 && <span className="notify-badge">{unreadCount}</span>}
-            </button>
-            <div className="menu-wrapper" ref={menuRef}>
-              <button
-                className="menu-toggle"
-                onClick={() => setMenuOpen((prev) => !prev)}
-                aria-pressed={menuOpen}
-              >
-                MENU
-              </button>
-              <div className={`menu-dropdown ${menuOpen ? 'open' : ''}`}>
-                <button
-                  className="menu-item"
-                  onClick={() => {
-                    setLayoutEditing(!layoutEditing);
-                  }}
-                >
-                  {layoutEditing ? '편집 완료' : '편집 모드'}
-                </button>
-                {layoutEditing ? (
-                  <>
-                    <button
-                      onClick={() => {
-                        saveLayout();
-                        setMenuOpen(false);
-                      }}
-                      className="menu-item"
-                    >
-                      {layoutSaveMessage ?? '레이아웃 저장'}
-                    </button>
-                    <div className="menu-layout-list">
-                      <div className="menu-section-title">저장된 레이아웃</div>
-                      {layoutSlots.length > 0 ? (
-                        layoutSlots.map((slot) => (
-                          <div
-                            key={slot.id}
-                            className={`menu-layout-row ${slot.id === layoutActiveId ? 'active' : ''}`}
-                          >
-                            <button
-                              className="menu-item menu-layout-button"
-                              onClick={() => restoreLayout(slot.id)}
-                            >
-                              복구
-                            </button>
-                            <button
-                              className="menu-item menu-layout-button menu-layout-delete"
-                              onClick={() => deleteLayoutSlot(slot.id)}
-                            >
-                              삭제
-                            </button>
-                            <div className="menu-layout-meta">
-                              <div className="menu-layout-title">
-                                <span className="menu-layout-name">{slot.name}</span>
-                                {slot.id === layoutActiveId && (
-                                  <span className="menu-layout-active">현재</span>
-                                )}
-                              </div>
-                              <span className="menu-layout-time">{formatMetaTime(slot.updated_at)}</span>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="menu-layout-empty">저장된 레이아웃이 없습니다.</div>
-                      )}
-                      {layoutRestoreMessage && (
-                        <div className="menu-layout-message">{layoutRestoreMessage}</div>
-                      )}
-                    </div>
-                    <div className="menu-divider" />
-                    <div className="menu-dropdown-section">
-                      <div className="menu-section-title">위젯 추가</div>
-                      <button
-                        className="menu-item"
-                        onClick={() => handleAddWidget('markdown')}
-                      >
-                        New Memo
-                      </button>
-                      <button
-                        className="menu-item"
-                        onClick={() => handleAddWidget('timeseries')}
-                      >
-                        Time Series
-                      </button>
-                      <button
-                        className="menu-item"
-                        onClick={() => handleAddWidget('kpi')}
-                      >
-                        KPI
-                      </button>
-                      <button
-                        className="menu-item"
-                        onClick={() => handleAddWidget('spot')}
-                      >
-                        SPOT Temp
-                      </button>
-                      <button
-                        className="menu-item"
-                        onClick={() => handleAddWidget('camera')}
-                      >
-                        SPOT Camera
-                      </button>
-                      <button
-                        className="menu-item"
-                        onClick={() => handleAddWidget('temps')}
-                      >
-                        Temps
-                      </button>
-                      <button
-                        className="menu-item"
-                        onClick={() => handleAddWidget('molds')}
-                      >
-                        Molds
-                      </button>
-                      <button
-                        className="menu-item"
-                        onClick={() => handleAddWidget('env')}
-                      >
-                        Env
-                      </button>
-                    </div>
-                  </>
-                ) : null}
-                <div className="menu-divider" />
-                <button
-                  className="menu-item"
-                  onClick={() => {
-                    setSettingsOpen(true);
-                    setMenuOpen(false);
-                  }}
-                >
-                  설정
-                </button>
-                {layoutEditing && layoutSaveError && (
-                  <div className="menu-error">
-                    <span>{layoutSaveError}</span>
-                    <button onClick={saveLayout} className="retry-button">
-                      재시도
-                    </button>
-                  </div>
-                )}
-                {layoutEditing && layoutRestoreError && (
-                  <div className="menu-error">
-                    <span>{layoutRestoreError}</span>
-                    <button onClick={() => restoreLayout()} className="retry-button">
-                      재시도
-                    </button>
-                  </div>
-                )}
-                
-                <div style={{ margin: '8px 0', borderBottom: '1px solid var(--border-muted)' }} />
-                <div className="menu-section-title" style={{ padding: '4px 12px', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>테마 설정</div>
-                <div style={{ padding: '0 12px 12px 12px', display: 'flex', gap: '8px' }}>
-                  <button
-                    className={`custom-modal-btn ${mode === 'light' ? 'confirm' : 'cancel'}`}
-                    onClick={() => setMode('light')}
-                    style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
-                  >
-                    Light
-                  </button>
-                  <button
-                    className={`custom-modal-btn ${mode === 'dark' ? 'confirm' : 'cancel'}`}
-                    onClick={() => setMode('dark')}
-                    style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
-                  >
-                    Dark
-                  </button>
-                  <button
-                    className={`custom-modal-btn ${mode === 'auto' ? 'confirm' : 'cancel'}`}
-                    onClick={() => setMode('auto')}
-                    style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
-                  >
-                    Auto
+              {layoutEditing && layoutRestoreError && (
+                <div className="menu-error">
+                  <span>{layoutRestoreError}</span>
+                  <button onClick={() => restoreLayout()} className="retry-button">
+                    재시도
                   </button>
                 </div>
+              )}
+
+              <div style={{ margin: '8px 0', borderBottom: '1px solid var(--border-muted)' }} />
+              <div className="menu-section-title" style={{ padding: '4px 12px', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>테마 설정</div>
+              <div style={{ padding: '0 12px 12px 12px', display: 'flex', gap: '8px' }}>
+                <button
+                  className={`custom-modal-btn ${mode === 'light' ? 'confirm' : 'cancel'}`}
+                  onClick={() => setMode('light')}
+                  style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
+                >
+                  Light
+                </button>
+                <button
+                  className={`custom-modal-btn ${mode === 'dark' ? 'confirm' : 'cancel'}`}
+                  onClick={() => setMode('dark')}
+                  style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
+                >
+                  Dark
+                </button>
+                <button
+                  className={`custom-modal-btn ${mode === 'auto' ? 'confirm' : 'cancel'}`}
+                  onClick={() => setMode('auto')}
+                  style={{ flex: 1, padding: '6px 0', fontSize: '0.8rem', justifyContent: 'center' }}
+                >
+                  Auto
+                </button>
               </div>
             </div>
-         </div>
+          </div>
+        </div>
       </header>
       <div className={`notification-drawer ${notificationsOpen ? 'open' : ''}`}>
         <div className="notification-header">
@@ -3053,60 +3053,61 @@ function App() {
               </div>
             )}
             {settingsForm && (<>
-                  <div className="settings-content-wrapper">
-                  <div className="settings-nav">
-                    <span className="settings-nav-title">Menu</span>
-                    {settingsSections.map((section) => (
-                      <button
-                        key={section.id}
-                        type="button"
-                        className={`settings-nav-item ${activeSettingsSection === section.id ? 'active' : ''}`}
-                        onClick={() => scrollToSettingsSection(section.id)}
-                        aria-current={activeSettingsSection === section.id}
-                      >
-                        <span>{section.label}</span>
-                        {settingsSectionHasChanges[section.id] && <span className="settings-nav-dot" />}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="settings-content" ref={settingsScrollRef}>
-                    <div className="settings-form">
-                      {/* Summary Section */}
-                      <div
-                        className="settings-section settings-summary"
-                        id="settings-summary"
-                        ref={registerSettingsSection('settings-summary')}
-                      >
-                        <div className="settings-section-title">{LABELS.SUMMARY_INFO}</div>
-                        <div className="settings-summary-grid">
-                          {buildSettingsSummaryCards()
-                            .sort((a, b) => {
-                              const order = ['통신 요약', '저장 요약', 'SPOT 요약'];
-                              const ia = order.indexOf(a.title);
-                              const ib = order.indexOf(b.title);
-                              // Put known items first in order, unknowns last
-                              if (ia === -1 && ib === -1) return 0;
-                              if (ia === -1) return 1;
-                              if (ib === -1) return -1;
-                              return ia - ib;
-                            })
-                            .map((card) => {
+              <div className="settings-content-wrapper">
+                <div className="settings-nav">
+                  <span className="settings-nav-title">Menu</span>
+                  {settingsSections.map((section) => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      className={`settings-nav-item ${activeSettingsSection === section.id ? 'active' : ''}`}
+                      onClick={() => scrollToSettingsSection(section.id)}
+                      aria-current={activeSettingsSection === section.id}
+                    >
+                      <span>{section.label}</span>
+                      {settingsSectionHasChanges[section.id] && <span className="settings-nav-dot" />}
+                    </button>
+                  ))}
+                </div>
+                <div className="settings-content" ref={settingsScrollRef}>
+                  <div className="settings-form">
+                    {/* Summary Section */}
+                    <div
+                      className="settings-section settings-summary"
+                      id="settings-summary"
+                      ref={registerSettingsSection('settings-summary')}
+                    >
+                      <div className="settings-section-title">{LABELS.SUMMARY_INFO}</div>
+                      <div className="settings-summary-grid">
+                        {buildSettingsSummaryCards()
+                          .sort((a, b) => {
+                            const order = ['통신 요약', '저장 요약', 'SPOT 요약'];
+                            const ia = order.indexOf(a.title);
+                            const ib = order.indexOf(b.title);
+                            // Put known items first in order, unknowns last
+                            if (ia === -1 && ib === -1) return 0;
+                            if (ia === -1) return 1;
+                            if (ib === -1) return -1;
+                            return ia - ib;
+                          })
+                          .map((card) => {
                             const isWide = ['통신 요약', '저장 요약'].includes(card.title);
                             return (
                               <div key={card.title} className={`settings-summary-card ${isWide ? 'wide' : ''}`}>
-                              <div className="settings-summary-title">{card.title}</div>
-                              <ul className="settings-summary-list">
-                                {card.items.map((item) => (
-                                  <li key={item}>
-                                    <div className="settings-summary-value" title={item}>
-                                      {item}
-                                    </div>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ); })}
-                        </div>
+                                <div className="settings-summary-title">{card.title}</div>
+                                <ul className="settings-summary-list">
+                                  {card.items.map((item) => (
+                                    <li key={item}>
+                                      <div className="settings-summary-value" title={item}>
+                                        {item}
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            );
+                          })}
+                      </div>
                       <div className="settings-apply-details">
                         <div className="settings-apply-title">{LABELS.APPLY_DETAIL}</div>
                         <div className="settings-apply-grid">
@@ -3295,40 +3296,40 @@ function App() {
                         {connectionTestTargets
                           .filter((target) => target.key !== 'spot')
                           .map((target) => {
-                          const result = connectionTest[target.key];
-                          const badge = getTestBadge(result);
-                          const targetHasError =
-                            target.key === 'extruder'
-                              ? Boolean(validationErrors.extruderIp || validationErrors.extruderPort)
-                              : Boolean(validationErrors.lsIp || validationErrors.lsPort);
-                          return (
-                            <div key={target.key} className="settings-test-item">
-                              <div className="settings-test-header">
-                                <span className="settings-test-title">{target.label}</span>
-                                <span className={`settings-test-badge ${badge.className}`}>
-                                  {badge.label}
-                                </span>
+                            const result = connectionTest[target.key];
+                            const badge = getTestBadge(result);
+                            const targetHasError =
+                              target.key === 'extruder'
+                                ? Boolean(validationErrors.extruderIp || validationErrors.extruderPort)
+                                : Boolean(validationErrors.lsIp || validationErrors.lsPort);
+                            return (
+                              <div key={target.key} className="settings-test-item">
+                                <div className="settings-test-header">
+                                  <span className="settings-test-title">{target.label}</span>
+                                  <span className={`settings-test-badge ${badge.className}`}>
+                                    {badge.label}
+                                  </span>
+                                </div>
+                                <div className="settings-test-meta">
+                                  <span>최근 테스트: {formatTestTime(result)}</span>
+                                  {result?.latency_ms !== null && result?.latency_ms !== undefined && (
+                                    <span>Latency {result.latency_ms}ms</span>
+                                  )}
+                                </div>
+                                {result?.message && <div className="settings-test-message">{result.message}</div>}
+                                <button
+                                  type="button"
+                                  className="settings-test-button"
+                                  onClick={() => handleConnectionTest(target.key)}
+                                  disabled={connectionTestBusy[target.key] || targetHasError}
+                                  aria-disabled={connectionTestBusy[target.key] || targetHasError}
+                                >
+                                  {connectionTestBusy[target.key] ? '테스트 중...' : '연결 테스트'}
+                                </button>
+                                {targetHasError && <div className="settings-test-message">IP/Port 형식을 확인하세요.</div>}
                               </div>
-                              <div className="settings-test-meta">
-                                <span>최근 테스트: {formatTestTime(result)}</span>
-                                {result?.latency_ms !== null && result?.latency_ms !== undefined && (
-                                  <span>Latency {result.latency_ms}ms</span>
-                                )}
-                              </div>
-                              {result?.message && <div className="settings-test-message">{result.message}</div>}
-              <button
-                type="button"
-                className="settings-test-button"
-                onClick={() => handleConnectionTest(target.key)}
-                disabled={connectionTestBusy[target.key] || targetHasError}
-                aria-disabled={connectionTestBusy[target.key] || targetHasError}
-              >
-                {connectionTestBusy[target.key] ? '테스트 중...' : '연결 테스트'}
-              </button>
-              {targetHasError && <div className="settings-test-message">IP/Port 형식을 확인하세요.</div>}
-            </div>
-                          );
-                        })}
+                            );
+                          })}
                       </div>
                       <div className="settings-comm-metrics">
                         <div className="settings-comm-title">통신 메트릭</div>
@@ -3418,294 +3419,294 @@ function App() {
                               </div>
                             </div>
                             <div className="settings-comm-grid">
-                            {(() => {
-                              const metrics = commDetail.extruder.metrics;
-                              const badge = commDetail.extruder.badge;
-                              const failureCount =
-                                (metrics?.connect_failures ?? 0) + (metrics?.read_failures ?? 0);
-                              return (
-                                <div className="settings-comm-card">
-                                  <div className="settings-comm-header">
-                                    <span className="settings-comm-device">Extruder</span>
-                                    <span className={`settings-comm-badge ${badge.state}`}>{badge.text}</span>
-                                  </div>
-                                  <div className="settings-comm-body">
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">연결</span>
-                                      <span className="settings-comm-value">
-                                        {metrics?.connected ? '연결됨' : '끊김'}
-                                      </span>
+                              {(() => {
+                                const metrics = commDetail.extruder.metrics;
+                                const badge = commDetail.extruder.badge;
+                                const failureCount =
+                                  (metrics?.connect_failures ?? 0) + (metrics?.read_failures ?? 0);
+                                return (
+                                  <div className="settings-comm-card">
+                                    <div className="settings-comm-header">
+                                      <span className="settings-comm-device">Extruder</span>
+                                      <span className={`settings-comm-badge ${badge.state}`}>{badge.text}</span>
                                     </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">연결 실패</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.connect_failures)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">읽기 실패</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.read_failures)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">무효 응답</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.invalid_responses)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">스킵</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.skipped_reads)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">실패 합계</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(failureCount)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">백오프</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.backoff_sec)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">다음 재시도</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.next_retry_at ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 성공</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.last_success_time ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 오류</span>
-                                      <span className="settings-comm-value" title={formatOptionalText(metrics?.last_error)}>
-                                        {formatTimeFromSec(metrics?.last_error_time ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">복구 시간</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics ? metrics.last_recovery_sec : undefined)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">복구 횟수</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.recovery_count)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">현재 다운타임</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.current_downtime_sec ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">누적 다운타임</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.total_downtime_sec ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 끊김</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.last_disconnect_time ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 복구</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.last_recovery_at ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">블록 병합</span>
-                                      <span className="settings-comm-value">
-                                        {metrics?.merge_blocks === undefined ? '--' : metrics.merge_blocks ? 'ON' : 'OFF'}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">병합 실패</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.merge_failures)}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-                            {(() => {
-                              const metrics = commDetail.ls_plc.metrics;
-                              const badge = commDetail.ls_plc.badge;
-                              const failureCount =
-                                (metrics?.connect_failures ?? 0) + (metrics?.read_failures ?? 0);
-                              return (
-                                <div className="settings-comm-card">
-                                  <div className="settings-comm-header">
-                                    <span className="settings-comm-device">LS PLC</span>
-                                    <span className={`settings-comm-badge ${badge.state}`}>{badge.text}</span>
-                                  </div>
-                                  <div className="settings-comm-body">
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">연결</span>
-                                      <span className="settings-comm-value">
-                                        {metrics?.connected ? '연결됨' : '끊김'}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">연결 실패</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.connect_failures)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">읽기 실패</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.read_failures)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">무효 응답</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.invalid_responses)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">실패 합계</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(failureCount)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">백오프</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.backoff_sec)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">다음 재시도</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.next_retry_at ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 성공</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.last_success_time ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 오류</span>
-                                      <span className="settings-comm-value" title={formatOptionalText(metrics?.last_error)}>
-                                        {formatTimeFromSec(metrics?.last_error_time ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">복구 시간</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics ? metrics.last_recovery_sec : undefined)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">복구 횟수</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.recovery_count)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">현재 다운타임</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.current_downtime_sec ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">누적 다운타임</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.total_downtime_sec ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 끊김</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.last_disconnect_time ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 복구</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.last_recovery_at ?? null)}
-                                      </span>
+                                    <div className="settings-comm-body">
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">연결</span>
+                                        <span className="settings-comm-value">
+                                          {metrics?.connected ? '연결됨' : '끊김'}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">연결 실패</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.connect_failures)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">읽기 실패</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.read_failures)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">무효 응답</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.invalid_responses)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">스킵</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.skipped_reads)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">실패 합계</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(failureCount)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">백오프</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics?.backoff_sec)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">다음 재시도</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.next_retry_at ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 성공</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.last_success_time ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 오류</span>
+                                        <span className="settings-comm-value" title={formatOptionalText(metrics?.last_error)}>
+                                          {formatTimeFromSec(metrics?.last_error_time ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">복구 시간</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics ? metrics.last_recovery_sec : undefined)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">복구 횟수</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.recovery_count)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">현재 다운타임</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics?.current_downtime_sec ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">누적 다운타임</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics?.total_downtime_sec ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 끊김</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.last_disconnect_time ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 복구</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.last_recovery_at ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">블록 병합</span>
+                                        <span className="settings-comm-value">
+                                          {metrics?.merge_blocks === undefined ? '--' : metrics.merge_blocks ? 'ON' : 'OFF'}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">병합 실패</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.merge_failures)}
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              );
-                            })()}
-                            {(() => {
-                              const metrics = commDetail.spot.metrics;
-                              const badge = commDetail.spot.badge;
-                              const refreshMs = commDetail.spot.refreshMs;
-                              return (
-                                <div className="settings-comm-card">
-                                  <div className="settings-comm-header">
-                                    <span className="settings-comm-device">SPOT</span>
-                                    <span className={`settings-comm-badge ${badge.state}`}>{badge.text}</span>
+                                );
+                              })()}
+                              {(() => {
+                                const metrics = commDetail.ls_plc.metrics;
+                                const badge = commDetail.ls_plc.badge;
+                                const failureCount =
+                                  (metrics?.connect_failures ?? 0) + (metrics?.read_failures ?? 0);
+                                return (
+                                  <div className="settings-comm-card">
+                                    <div className="settings-comm-header">
+                                      <span className="settings-comm-device">LS PLC</span>
+                                      <span className={`settings-comm-badge ${badge.state}`}>{badge.text}</span>
+                                    </div>
+                                    <div className="settings-comm-body">
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">연결</span>
+                                        <span className="settings-comm-value">
+                                          {metrics?.connected ? '연결됨' : '끊김'}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">연결 실패</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.connect_failures)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">읽기 실패</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.read_failures)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">무효 응답</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.invalid_responses)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">실패 합계</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(failureCount)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">백오프</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics?.backoff_sec)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">다음 재시도</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.next_retry_at ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 성공</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.last_success_time ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 오류</span>
+                                        <span className="settings-comm-value" title={formatOptionalText(metrics?.last_error)}>
+                                          {formatTimeFromSec(metrics?.last_error_time ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">복구 시간</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics ? metrics.last_recovery_sec : undefined)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">복구 횟수</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.recovery_count)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">현재 다운타임</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics?.current_downtime_sec ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">누적 다운타임</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics?.total_downtime_sec ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 끊김</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.last_disconnect_time ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 복구</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.last_recovery_at ?? null)}
+                                        </span>
+                                      </div>
+                                    </div>
                                   </div>
-                                  <div className="settings-comm-body">
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 값</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.last_value, 1)}
-                                      </span>
+                                );
+                              })()}
+                              {(() => {
+                                const metrics = commDetail.spot.metrics;
+                                const badge = commDetail.spot.badge;
+                                const refreshMs = commDetail.spot.refreshMs;
+                                return (
+                                  <div className="settings-comm-card">
+                                    <div className="settings-comm-header">
+                                      <span className="settings-comm-device">SPOT</span>
+                                      <span className={`settings-comm-badge ${badge.state}`}>{badge.text}</span>
                                     </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">실패</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalNumber(metrics?.read_failures)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 성공</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.last_success_time ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">최근 오류</span>
-                                      <span className="settings-comm-value">
-                                        {formatTimeFromSec(metrics?.last_error_time ?? null)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">오류 경과</span>
-                                      <span className="settings-comm-value">
-                                        {formatAgeSec(metrics?.last_error_time ?? null, nowTick)}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">갱신 주기</span>
-                                      <span className="settings-comm-value">
-                                        {typeof refreshMs === 'number' ? `${Math.round(refreshMs / 1000)}s` : '--'}
-                                      </span>
-                                    </div>
-                                    <div className="settings-comm-row">
-                                      <span className="settings-comm-label">타임아웃</span>
-                                      <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.timeout_sec ?? null)}
-                                      </span>
+                                    <div className="settings-comm-body">
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 값</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.last_value, 1)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">실패</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalNumber(metrics?.read_failures)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 성공</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.last_success_time ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">최근 오류</span>
+                                        <span className="settings-comm-value">
+                                          {formatTimeFromSec(metrics?.last_error_time ?? null)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">오류 경과</span>
+                                        <span className="settings-comm-value">
+                                          {formatAgeSec(metrics?.last_error_time ?? null, nowTick)}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">갱신 주기</span>
+                                        <span className="settings-comm-value">
+                                          {typeof refreshMs === 'number' ? `${Math.round(refreshMs / 1000)}s` : '--'}
+                                        </span>
+                                      </div>
+                                      <div className="settings-comm-row">
+                                        <span className="settings-comm-label">타임아웃</span>
+                                        <span className="settings-comm-value">
+                                          {formatOptionalSeconds(metrics?.timeout_sec ?? null)}
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              );
-                            })()}
-                          </div>
+                                );
+                              })()}
+                            </div>
                           </>
                         ) : (
                           <div className="settings-comm-empty">{MESSAGES.WAITING_COMM_METRICS}</div>
@@ -3713,267 +3714,267 @@ function App() {
                       </div>
                     </div>
 
-    <div
-      className="settings-section"
-      id="settings-observability"
-      ref={registerSettingsSection('settings-observability')}
-    >
-      <div className="settings-section-title">{LABELS.OPER_OBSERVABILITY}</div>
-      <div className="settings-test-grid settings-observability-grid">
-        <div className="settings-test-item">
-          <div className="settings-test-header">
-            <span className="settings-test-title">지표 내보내기</span>
-            <span className={`settings-test-badge ${lastExportPath ? 'ok' : 'warn'}`}>
-              {lastExportPath ? LABELS.READY : LABELS.NONE}
-            </span>
-          </div>
-          <div className="settings-comm-log">
-            <div className="settings-comm-log-actions">
-              <button
-                type="button"
-                className="settings-comm-log-button"
-                onClick={handleExportObservability}
-                disabled={exportBusy}
-                aria-disabled={exportBusy}
-              >
-                {exportBusy ? LABELS.EXPORTING : LABELS.EXPORT}
-              </button>
-              <button
-                type="button"
-                className="settings-comm-log-button"
-                onClick={handleCopyObservabilityExportPath}
-                disabled={!lastExportPath}
-                aria-disabled={!lastExportPath}
-              >
-                {LABELS.COPY_PATH}
-              </button>
-              <button
-                type="button"
-                className="settings-comm-log-button"
-                onClick={handleOpenObservabilityExportFolder}
-                disabled={!lastExportPath}
-                aria-disabled={!lastExportPath}
-              >
-                {LABELS.OPEN_FOLDER}
-              </button>
-              <button
-                type="button"
-                className="settings-comm-log-button"
-                onClick={handleOpenObservabilityExportFile}
-                disabled={!lastExportPath}
-                aria-disabled={!lastExportPath}
-              >
-                {LABELS.OPEN_FILE}
-              </button>
-            </div>
-            <span className="settings-comm-log-value">{lastExportPath ?? '--'}</span>
-          </div>
-        </div>
-        <div className="settings-test-item">
-          <div className="settings-test-header">
-            <span className="settings-test-title">윈도 지표</span>
-            <span className={`settings-test-badge ${hasWindowIssue ? 'error' : 'ok'}`}>
-              {hasWindowIssue ? LABELS.WARNING : LABELS.NORMAL}
-            </span>
-          </div>
-          <div className="settings-test-meta">
-            <span>윈도: {statsWindow?.window_sec ?? '--'}s</span>
-            <span>
-              요청: {statsWindow?.request_count ?? '--'} / 에러: {statsWindow?.error_count ?? '--'}
-            </span>
-            <span>
-              에러율: {windowErrorRate === null ? '--' : `${Math.round(windowErrorRate * 100)}%`}
-            </span>
-            <span>P95: {windowP95Text}</span>
-            <span>RPS: {statsWindow?.requests_per_sec ?? '--'}</span>
-          </div>
-          {statsWindow?.top_paths?.length ? (
-            <div className="settings-test-message">
-              Top: {statsWindow.top_paths.map((item) => item.path).join(', ')}
-            </div>
-          ) : (
-            <div className="settings-test-message">Top: --</div>
-          )}
-        </div>
-        <div className="settings-test-item">
-          <div className="settings-test-header">
-            <span className="settings-test-title">에러 큐</span>
-            <span className={`settings-test-badge ${errorQueueSize ? 'error' : 'ok'}`}>
-              {errorQueueSize ? LABELS.OCCURRED : LABELS.NORMAL}
-            </span>
-          </div>
-          <div className="settings-test-meta">
-            <span>대기: {errorQueueText}</span>
-            <span>최근: {formatTimeFromSec(lastErrorAt)}</span>
-            <span>소스: {stats?.errors?.last_error_source ?? '--'}</span>
-          </div>
-          <div className="settings-test-message">
-            메시지: {stats?.errors?.last_error_message ?? '--'}
-          </div>
-          <div className="settings-observability-actions">
-            <button
-              type="button"
-              className="settings-test-button"
-              onClick={() => loadObservabilityErrors()}
-              disabled={observabilityLoading}
-              aria-disabled={observabilityLoading}
-            >
-              {observabilityLoading ? '불러오는 중...' : '새로고침'}
-            </button>
-            <button
-              type="button"
-              className="settings-test-button"
-              onClick={handleClearObservabilityErrors}
-              disabled={!errorQueueSize}
-              aria-disabled={!errorQueueSize}
-            >
-              {LABELS.CLEAR}
-            </button>
-          </div>
-        </div>
-      </div>
-      <div className="settings-observability-errors">
-        <div className="settings-comm-log-header">
-          <span className="settings-comm-log-label">에러 큐 상세</span>
-          <span className="settings-observability-count">
-            {observabilityErrors?.summary?.queue_size ?? 0}{LABELS.UNIT_CASES}
-          </span>
-        </div>
-        {observabilityLoading ? (
-          <div className="settings-error-empty">불러오는 중...</div>
-        ) : observabilityErrors?.items?.length ? (
-          <div className="settings-error-list">
-            {observabilityErrors.items.map((item, index) => (
-              <div key={`${item.source}-${item.time}-${index}`} className="settings-error-item">
-                <div className="settings-error-head">
-                  <span className="settings-error-source">{item.source}</span>
-                  <span className="settings-error-time">
-                    {item.time_iso ?? new Date(item.time * 1000).toLocaleString()}
-                  </span>
-                  {item.repeat && item.repeat > 1 && (
-                    <span className="settings-error-repeat">x{item.repeat}</span>
-                  )}
-                </div>
-                <div className="settings-error-message">{item.message}</div>
-                {item.detail && <div className="settings-error-detail">{item.detail}</div>}
-                {item.path && <div className="settings-error-detail">{item.path}</div>}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="settings-error-empty">{LABELS.NO_ERROR}</div>
-        )}
-      </div>
-      <div className="settings-observability-errors">
-        <div className="settings-comm-log-header">
-          <span className="settings-comm-log-label">브라우저 오류</span>
-          <div className="settings-comm-log-actions">
-            <button
-              type="button"
-              className="settings-comm-log-button"
-              onClick={clearFrontErrors}
-              disabled={frontErrors.length === 0}
-              aria-disabled={frontErrors.length === 0}
-            >
-              {LABELS.CLEAR}
-            </button>
-          </div>
-        </div>
-        {frontErrors.length ? (
-          <div className="settings-error-list">
-            {frontErrors.slice(0, 5).map((item, index) => (
-              <div key={`${item.type}-${item.time}-${index}`} className="settings-error-item">
-                <div className="settings-error-head">
-                  <span className="settings-error-source">{item.type}</span>
-                  <span className="settings-error-time">{formatTime(item.time)}</span>
-                </div>
-                <div className="settings-error-message">{item.message}</div>
-                {item.detail && <div className="settings-error-detail">{item.detail}</div>}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="settings-error-empty">{LABELS.NO_BROWSER_ERROR}</div>
-        )}
-      </div>
-    </div>
+                    <div
+                      className="settings-section"
+                      id="settings-observability"
+                      ref={registerSettingsSection('settings-observability')}
+                    >
+                      <div className="settings-section-title">{LABELS.OPER_OBSERVABILITY}</div>
+                      <div className="settings-test-grid settings-observability-grid">
+                        <div className="settings-test-item">
+                          <div className="settings-test-header">
+                            <span className="settings-test-title">지표 내보내기</span>
+                            <span className={`settings-test-badge ${lastExportPath ? 'ok' : 'warn'}`}>
+                              {lastExportPath ? LABELS.READY : LABELS.NONE}
+                            </span>
+                          </div>
+                          <div className="settings-comm-log">
+                            <div className="settings-comm-log-actions">
+                              <button
+                                type="button"
+                                className="settings-comm-log-button"
+                                onClick={handleExportObservability}
+                                disabled={exportBusy}
+                                aria-disabled={exportBusy}
+                              >
+                                {exportBusy ? LABELS.EXPORTING : LABELS.EXPORT}
+                              </button>
+                              <button
+                                type="button"
+                                className="settings-comm-log-button"
+                                onClick={handleCopyObservabilityExportPath}
+                                disabled={!lastExportPath}
+                                aria-disabled={!lastExportPath}
+                              >
+                                {LABELS.COPY_PATH}
+                              </button>
+                              <button
+                                type="button"
+                                className="settings-comm-log-button"
+                                onClick={handleOpenObservabilityExportFolder}
+                                disabled={!lastExportPath}
+                                aria-disabled={!lastExportPath}
+                              >
+                                {LABELS.OPEN_FOLDER}
+                              </button>
+                              <button
+                                type="button"
+                                className="settings-comm-log-button"
+                                onClick={handleOpenObservabilityExportFile}
+                                disabled={!lastExportPath}
+                                aria-disabled={!lastExportPath}
+                              >
+                                {LABELS.OPEN_FILE}
+                              </button>
+                            </div>
+                            <span className="settings-comm-log-value">{lastExportPath ?? '--'}</span>
+                          </div>
+                        </div>
+                        <div className="settings-test-item">
+                          <div className="settings-test-header">
+                            <span className="settings-test-title">윈도 지표</span>
+                            <span className={`settings-test-badge ${hasWindowIssue ? 'error' : 'ok'}`}>
+                              {hasWindowIssue ? LABELS.WARNING : LABELS.NORMAL}
+                            </span>
+                          </div>
+                          <div className="settings-test-meta">
+                            <span>윈도: {statsWindow?.window_sec ?? '--'}s</span>
+                            <span>
+                              요청: {statsWindow?.request_count ?? '--'} / 에러: {statsWindow?.error_count ?? '--'}
+                            </span>
+                            <span>
+                              에러율: {windowErrorRate === null ? '--' : `${Math.round(windowErrorRate * 100)}%`}
+                            </span>
+                            <span>P95: {windowP95Text}</span>
+                            <span>RPS: {statsWindow?.requests_per_sec ?? '--'}</span>
+                          </div>
+                          {statsWindow?.top_paths?.length ? (
+                            <div className="settings-test-message">
+                              Top: {statsWindow.top_paths.map((item) => item.path).join(', ')}
+                            </div>
+                          ) : (
+                            <div className="settings-test-message">Top: --</div>
+                          )}
+                        </div>
+                        <div className="settings-test-item">
+                          <div className="settings-test-header">
+                            <span className="settings-test-title">에러 큐</span>
+                            <span className={`settings-test-badge ${errorQueueSize ? 'error' : 'ok'}`}>
+                              {errorQueueSize ? LABELS.OCCURRED : LABELS.NORMAL}
+                            </span>
+                          </div>
+                          <div className="settings-test-meta">
+                            <span>대기: {errorQueueText}</span>
+                            <span>최근: {formatTimeFromSec(lastErrorAt)}</span>
+                            <span>소스: {stats?.errors?.last_error_source ?? '--'}</span>
+                          </div>
+                          <div className="settings-test-message">
+                            메시지: {stats?.errors?.last_error_message ?? '--'}
+                          </div>
+                          <div className="settings-observability-actions">
+                            <button
+                              type="button"
+                              className="settings-test-button"
+                              onClick={() => loadObservabilityErrors()}
+                              disabled={observabilityLoading}
+                              aria-disabled={observabilityLoading}
+                            >
+                              {observabilityLoading ? '불러오는 중...' : '새로고침'}
+                            </button>
+                            <button
+                              type="button"
+                              className="settings-test-button"
+                              onClick={handleClearObservabilityErrors}
+                              disabled={!errorQueueSize}
+                              aria-disabled={!errorQueueSize}
+                            >
+                              {LABELS.CLEAR}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="settings-observability-errors">
+                        <div className="settings-comm-log-header">
+                          <span className="settings-comm-log-label">에러 큐 상세</span>
+                          <span className="settings-observability-count">
+                            {observabilityErrors?.summary?.queue_size ?? 0}{LABELS.UNIT_CASES}
+                          </span>
+                        </div>
+                        {observabilityLoading ? (
+                          <div className="settings-error-empty">불러오는 중...</div>
+                        ) : observabilityErrors?.items?.length ? (
+                          <div className="settings-error-list">
+                            {observabilityErrors.items.map((item, index) => (
+                              <div key={`${item.source}-${item.time}-${index}`} className="settings-error-item">
+                                <div className="settings-error-head">
+                                  <span className="settings-error-source">{item.source}</span>
+                                  <span className="settings-error-time">
+                                    {item.time_iso ?? new Date(item.time * 1000).toLocaleString()}
+                                  </span>
+                                  {item.repeat && item.repeat > 1 && (
+                                    <span className="settings-error-repeat">x{item.repeat}</span>
+                                  )}
+                                </div>
+                                <div className="settings-error-message">{item.message}</div>
+                                {item.detail && <div className="settings-error-detail">{item.detail}</div>}
+                                {item.path && <div className="settings-error-detail">{item.path}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="settings-error-empty">{LABELS.NO_ERROR}</div>
+                        )}
+                      </div>
+                      <div className="settings-observability-errors">
+                        <div className="settings-comm-log-header">
+                          <span className="settings-comm-log-label">브라우저 오류</span>
+                          <div className="settings-comm-log-actions">
+                            <button
+                              type="button"
+                              className="settings-comm-log-button"
+                              onClick={clearFrontErrors}
+                              disabled={frontErrors.length === 0}
+                              aria-disabled={frontErrors.length === 0}
+                            >
+                              {LABELS.CLEAR}
+                            </button>
+                          </div>
+                        </div>
+                        {frontErrors.length ? (
+                          <div className="settings-error-list">
+                            {frontErrors.slice(0, 5).map((item, index) => (
+                              <div key={`${item.type}-${item.time}-${index}`} className="settings-error-item">
+                                <div className="settings-error-head">
+                                  <span className="settings-error-source">{item.type}</span>
+                                  <span className="settings-error-time">{formatTime(item.time)}</span>
+                                </div>
+                                <div className="settings-error-message">{item.message}</div>
+                                {item.detail && <div className="settings-error-detail">{item.detail}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="settings-error-empty">{LABELS.NO_BROWSER_ERROR}</div>
+                        )}
+                      </div>
+                    </div>
 
-    <div
-      className="settings-section"
-      id="settings-spot"
-      ref={registerSettingsSection('settings-spot')}
-    >
-      <div className="settings-section-title">SPOT 카메라</div>
-      <div className="settings-grid">
-        <label
-          className={`settings-field ${isSettingsFieldDirty('spotIp') ? 'changed' : ''} ${validationErrors.spotIp ? 'error' : ''}`}
-        >
-          SPOT IP
-          <input
-            value={settingsForm.spotIp}
-            onChange={(e) => updateSettingsField('spotIp', e.target.value)}
-          />
-          {validationErrors.spotIp && (
-            <span className="settings-field-help error">{validationErrors.spotIp}</span>
-          )}
-        </label>
-        <label
-          className={`settings-field ${isSettingsFieldDirty('spotRefreshInterval') ? 'changed' : ''}`}
-        >
-          SPOT Refresh (sec)
-          <input
-            value={settingsForm.spotRefreshInterval}
-            onChange={(e) => updateSettingsField('spotRefreshInterval', e.target.value)}
-          />
-        </label>
-      </div>
-      <div className="settings-spot-preview">
-        <div className="settings-spot-status">
-          <div className="settings-spot-title">이미지 상태</div>
-          <div className="settings-spot-badges">
-            {(() => {
-              const status = getCameraStatus({
-                spotConfig,
-                spotImageUrl,
-                spotImageLoading,
-                spotImageError,
-                spotLastSuccessAt,
-              });
-              if (!status) {
-                return <span className="settings-spot-badge ok">{LABELS.NORMAL}</span>;
-              }
-              if (status.type === 'loading') {
-                return <span className="settings-spot-badge warn">{LABELS.CONNECTING}</span>;
-              }
-              if (status.type === 'warn') {
-                return <span className="settings-spot-badge warn">{LABELS.DELAYED}</span>;
-              }
-              return <span className="settings-spot-badge error">{STATUS.ERROR}</span>;
-            })()}
-          </div>
-          <div className="settings-spot-meta">
-            <span>{LABELS.LAST_RECEIVE}: {spotLastSuccessAt ? new Date(spotLastSuccessAt).toLocaleTimeString() : LABELS.NOT_RECEIVED}</span>
-            <span>URL: {spotConfig?.image_url ?? (settingsForm.spotIp ? `http://${settingsForm.spotIp}/image.jpg` : '-')}</span>
-          </div>
-        </div>
-        <div className="settings-spot-frame">
-          {spotImageUrl ? (
-            <img src={spotImageUrl} alt="SPOT preview" />
-          ) : (
-            <div className="settings-spot-empty">{LABELS.NO_PREVIEW}</div>
-          )}
-          {spotImageLoading && (
-            <div className="settings-spot-overlay">{LABELS.LOADING_IMAGE}</div>
-          )}
-        </div>
-      </div>
-    </div>
+                    <div
+                      className="settings-section"
+                      id="settings-spot"
+                      ref={registerSettingsSection('settings-spot')}
+                    >
+                      <div className="settings-section-title">SPOT 카메라</div>
+                      <div className="settings-grid">
+                        <label
+                          className={`settings-field ${isSettingsFieldDirty('spotIp') ? 'changed' : ''} ${validationErrors.spotIp ? 'error' : ''}`}
+                        >
+                          SPOT IP
+                          <input
+                            value={settingsForm.spotIp}
+                            onChange={(e) => updateSettingsField('spotIp', e.target.value)}
+                          />
+                          {validationErrors.spotIp && (
+                            <span className="settings-field-help error">{validationErrors.spotIp}</span>
+                          )}
+                        </label>
+                        <label
+                          className={`settings-field ${isSettingsFieldDirty('spotRefreshInterval') ? 'changed' : ''}`}
+                        >
+                          SPOT Refresh (sec)
+                          <input
+                            value={settingsForm.spotRefreshInterval}
+                            onChange={(e) => updateSettingsField('spotRefreshInterval', e.target.value)}
+                          />
+                        </label>
+                      </div>
+                      <div className="settings-spot-preview">
+                        <div className="settings-spot-status">
+                          <div className="settings-spot-title">이미지 상태</div>
+                          <div className="settings-spot-badges">
+                            {(() => {
+                              const status = getCameraStatus({
+                                spotConfig,
+                                spotImageUrl,
+                                spotImageLoading,
+                                spotImageError,
+                                spotLastSuccessAt,
+                              });
+                              if (!status) {
+                                return <span className="settings-spot-badge ok">{LABELS.NORMAL}</span>;
+                              }
+                              if (status.type === 'loading') {
+                                return <span className="settings-spot-badge warn">{LABELS.CONNECTING}</span>;
+                              }
+                              if (status.type === 'warn') {
+                                return <span className="settings-spot-badge warn">{LABELS.DELAYED}</span>;
+                              }
+                              return <span className="settings-spot-badge error">{STATUS.ERROR}</span>;
+                            })()}
+                          </div>
+                          <div className="settings-spot-meta">
+                            <span>{LABELS.LAST_RECEIVE}: {spotLastSuccessAt ? new Date(spotLastSuccessAt).toLocaleTimeString() : LABELS.NOT_RECEIVED}</span>
+                            <span>URL: {spotConfig?.image_url ?? (settingsForm.spotIp ? `http://${settingsForm.spotIp}/image.jpg` : '-')}</span>
+                          </div>
+                        </div>
+                        <div className="settings-spot-frame">
+                          {spotImageUrl ? (
+                            <img src={spotImageUrl} alt="SPOT preview" />
+                          ) : (
+                            <div className="settings-spot-empty">{LABELS.NO_PREVIEW}</div>
+                          )}
+                          {spotImageLoading && (
+                            <div className="settings-spot-overlay">{LABELS.LOADING_IMAGE}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
-    <div
-      className="settings-section"
-      id="settings-storage"
-      ref={registerSettingsSection('settings-storage')}
-    >
+                    <div
+                      className="settings-section"
+                      id="settings-storage"
+                      ref={registerSettingsSection('settings-storage')}
+                    >
                       <div className="settings-section-title">저장 설정</div>
                       <div className="settings-grid">
                         <label
@@ -4207,60 +4208,60 @@ function App() {
                   </div>
                 </div>
               </div>
-            <div className="settings-footer">
-              <span className="settings-footer-note">
-                {configReadOnly
-                  ? '설정 파일이 읽기 전용입니다. 관리자 권한/속성을 확인하세요.'
-                  : hasValidationError
-                    ? '입력값 형식을 확인하세요.'
-                    : !overrideEnabled && hasSettingsChanges
-                      ? '로컬 오버라이드가 OFF 상태입니다. 저장하려면 먼저 활성화하세요.'
-                      : '변경 사항은 재시작 후 적용됩니다.'}
-              </span>
-              <div className="settings-footer-actions">
-                <button
-                  className="settings-action secondary"
-                  onClick={handleRestoreDefaults}
-                  disabled={settingsLoading || configReadOnly || !overrideEnabled}
-                  aria-disabled={settingsLoading || configReadOnly || !overrideEnabled}
-                >
-                  기본값 복원
-                </button>
-                <button
-                  className="settings-action secondary"
-                  onClick={() => handleRestoreBackup()}
-                  disabled={settingsLoading || configReadOnly || !overrideEnabled}
-                  aria-disabled={settingsLoading || configReadOnly || !overrideEnabled}
-                >
-                  백업 복원
-                </button>
-                <button className="settings-action secondary" onClick={() => setSettingsOpen(false)}>
-                  닫기
-                </button>
-                <button
-                  className="settings-action primary"
-                  onClick={() => handleSaveSettings()}
-                  disabled={
-                    settingsLoading ||
-                    pathCheckBusy ||
-                    hasPathError ||
-                    hasValidationError ||
-                    configReadOnly ||
-                    (!overrideEnabled && hasSettingsChanges)
-                  }
-                  aria-disabled={
-                    settingsLoading ||
-                    pathCheckBusy ||
-                    hasPathError ||
-                    hasValidationError ||
-                    configReadOnly ||
-                    (!overrideEnabled && hasSettingsChanges)
-                  }
-                >
-                  저장
-                </button>
+              <div className="settings-footer">
+                <span className="settings-footer-note">
+                  {configReadOnly
+                    ? '설정 파일이 읽기 전용입니다. 관리자 권한/속성을 확인하세요.'
+                    : hasValidationError
+                      ? '입력값 형식을 확인하세요.'
+                      : !overrideEnabled && hasSettingsChanges
+                        ? '로컬 오버라이드가 OFF 상태입니다. 저장하려면 먼저 활성화하세요.'
+                        : '변경 사항은 재시작 후 적용됩니다.'}
+                </span>
+                <div className="settings-footer-actions">
+                  <button
+                    className="settings-action secondary"
+                    onClick={handleRestoreDefaults}
+                    disabled={settingsLoading || configReadOnly || !overrideEnabled}
+                    aria-disabled={settingsLoading || configReadOnly || !overrideEnabled}
+                  >
+                    기본값 복원
+                  </button>
+                  <button
+                    className="settings-action secondary"
+                    onClick={() => handleRestoreBackup()}
+                    disabled={settingsLoading || configReadOnly || !overrideEnabled}
+                    aria-disabled={settingsLoading || configReadOnly || !overrideEnabled}
+                  >
+                    백업 복원
+                  </button>
+                  <button className="settings-action secondary" onClick={() => setSettingsOpen(false)}>
+                    닫기
+                  </button>
+                  <button
+                    className="settings-action primary"
+                    onClick={() => handleSaveSettings()}
+                    disabled={
+                      settingsLoading ||
+                      pathCheckBusy ||
+                      hasPathError ||
+                      hasValidationError ||
+                      configReadOnly ||
+                      (!overrideEnabled && hasSettingsChanges)
+                    }
+                    aria-disabled={
+                      settingsLoading ||
+                      pathCheckBusy ||
+                      hasPathError ||
+                      hasValidationError ||
+                      configReadOnly ||
+                      (!overrideEnabled && hasSettingsChanges)
+                    }
+                  >
+                    저장
+                  </button>
+                </div>
               </div>
-            </div>
             </>
             )}
           </div>
@@ -4299,9 +4300,9 @@ function App() {
             setLayoutEditing,
           }}
         >
-        <LayoutEditContext.Provider value={{ isEditing: layoutEditing, deleteWidget: handleRemoveWidget, updateWidget: handleUpdateWidget }}>
-           <scene.Component model={scene} />
-        </LayoutEditContext.Provider>
+          <LayoutEditContext.Provider value={{ isEditing: layoutEditing, deleteWidget: handleRemoveWidget, updateWidget: handleUpdateWidget }}>
+            <scene.Component model={scene} />
+          </LayoutEditContext.Provider>
         </DataContext.Provider>
       </div>
     </div>
@@ -4362,7 +4363,7 @@ const DataContext = React.createContext<DataContextValue>({
   snapshotLoading: false,
   nowTick: Date.now(),
   layoutEditing: false,
-  setLayoutEditing: () => {},
+  setLayoutEditing: () => { },
 });
 
 function KpiComponent() {
@@ -4371,7 +4372,7 @@ function KpiComponent() {
   const pressValue = useLastValidNumber(data?.Press);
   const countValue = useLastValidNumber(data?.Count);
   const endPosValue = useLastValidNumber(data?.EndPos);
-  
+
   const missing = !Number.isFinite(data?.Speed) || !Number.isFinite(data?.Press);
   const speedForLogic = speedValue ?? data?.Speed;
   const pressForLogic = pressValue ?? data?.Press;
@@ -4464,161 +4465,161 @@ function KpiComponent() {
 };
 
 function SpotComponent() {
-    const { data, spotAlertActive, lastDataAt, thresholds } = React.useContext(DataContext);
-    const [sparklineValues, setSparklineValues] = useState<number[]>([]);
-    const spotValue = useLastValidNumber(data?.Spot);
-    
-    const missing = !Number.isFinite(data?.Spot);
-    const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : (data?.Spot ?? NaN);
+  const { data, spotAlertActive, lastDataAt, thresholds } = React.useContext(DataContext);
+  const [sparklineValues, setSparklineValues] = useState<number[]>([]);
+  const spotValue = useLastValidNumber(data?.Spot);
+
+  const missing = !Number.isFinite(data?.Spot);
+  const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : (data?.Spot ?? NaN);
   const computed = data?.Computed;
   const spotState = mapSpotLevel(computed?.spot_level) ?? getSpotState(spotDisplayValue, spotAlertActive);
   const spotThresholdHit = computed?.thresholds?.spot ?? isThresholdHit(thresholds, 'spot', spotValue);
   const spotConfigThreshold = getThresholdValue(thresholds, 'spot');
-    const spotPercent = calcPercent(spotDisplayValue, SPOT_MAX_TEMP);
-    const sparklineThresholds = useMemo(() => {
-      const list = [SPOT_NORMAL_MIN, SPOT_HIGH_MIN, SPOT_WARN_TEMP];
-      if (typeof spotConfigThreshold === 'number' && Number.isFinite(spotConfigThreshold)) {
-        const exists = list.some((value) => Math.abs(value - spotConfigThreshold) < 0.01);
-        if (!exists) {
-          list.push(spotConfigThreshold);
-        }
+  const spotPercent = calcPercent(spotDisplayValue, SPOT_MAX_TEMP);
+  const sparklineThresholds = useMemo(() => {
+    const list = [SPOT_NORMAL_MIN, SPOT_HIGH_MIN, SPOT_WARN_TEMP];
+    if (typeof spotConfigThreshold === 'number' && Number.isFinite(spotConfigThreshold)) {
+      const exists = list.some((value) => Math.abs(value - spotConfigThreshold) < 0.01);
+      if (!exists) {
+        list.push(spotConfigThreshold);
       }
-      return list;
-    }, [spotConfigThreshold]);
-    const { linePath, areaPath, points, thresholdLines } = useMemo(
-      () =>
-        buildSparklinePaths(
-          sparklineValues,
-          100,
-          60,
-          sparklineThresholds,
-          { min: SPOT_NORMAL_MIN, max: SPOT_WARN_TEMP }
-        ),
-      [sparklineValues, sparklineThresholds]
-    );
+    }
+    return list;
+  }, [spotConfigThreshold]);
+  const { linePath, areaPath, points, thresholdLines } = useMemo(
+    () =>
+      buildSparklinePaths(
+        sparklineValues,
+        100,
+        60,
+        sparklineThresholds,
+        { min: SPOT_NORMAL_MIN, max: SPOT_WARN_TEMP }
+      ),
+    [sparklineValues, sparklineThresholds]
+  );
 
-    useEffect(() => {
-      if (!Number.isFinite(spotDisplayValue)) {
-        return;
+  useEffect(() => {
+    if (!Number.isFinite(spotDisplayValue)) {
+      return;
+    }
+    setSparklineValues((prev) => {
+      const next = [...prev, spotDisplayValue];
+      if (next.length > SPARKLINE_POINTS) {
+        next.splice(0, next.length - SPARKLINE_POINTS);
       }
-      setSparklineValues((prev) => {
-        const next = [...prev, spotDisplayValue];
-        if (next.length > SPARKLINE_POINTS) {
-          next.splice(0, next.length - SPARKLINE_POINTS);
-        }
-        return next;
-      });
-    }, [spotDisplayValue]);
+      return next;
+    });
+  }, [spotDisplayValue]);
 
-    if (!data) return <div>Loading...</div>;
+  if (!data) return <div>Loading...</div>;
 
-    return (
-      <div
-        className={`card spot-card ${spotState.warning ? 'spot-danger' : spotThresholdHit ? 'spot-threshold' : 'spot-normal'}`}
-        style={{ height: '100%' }}
-      >
-        <div className="spot-gauge">
-          <svg viewBox="0 0 200 120" className="spot-gauge-svg" aria-hidden="true">
-            <path
-              className="spot-gauge-track"
-              d="M20 100 A80 80 0 0 1 180 100"
-              pathLength={100}
-            />
-            <path
-              className={`spot-gauge-fill ${spotState.fillClass}`}
-              d="M20 100 A80 80 0 0 1 180 100"
-              pathLength={100}
-              strokeDasharray={`${spotPercent} 100`}
-            />
-          </svg>
-          <div className="spot-value">
-            <span className="spot-value-number">{formatNumber(spotDisplayValue, 1)}</span>
-            <span className="spot-unit">{SPOT_UNIT}</span>
-          </div>
+  return (
+    <div
+      className={`card spot-card ${spotState.warning ? 'spot-danger' : spotThresholdHit ? 'spot-threshold' : 'spot-normal'}`}
+      style={{ height: '100%' }}
+    >
+      <div className="spot-gauge">
+        <svg viewBox="0 0 200 120" className="spot-gauge-svg" aria-hidden="true">
+          <path
+            className="spot-gauge-track"
+            d="M20 100 A80 80 0 0 1 180 100"
+            pathLength={100}
+          />
+          <path
+            className={`spot-gauge-fill ${spotState.fillClass}`}
+            d="M20 100 A80 80 0 0 1 180 100"
+            pathLength={100}
+            strokeDasharray={`${spotPercent} 100`}
+          />
+        </svg>
+        <div className="spot-value">
+          <span className="spot-value-number">{formatNumber(spotDisplayValue, 1)}</span>
+          <span className="spot-unit">{SPOT_UNIT}</span>
         </div>
-        <div className="spot-status-row">
-          <span className={`spot-status ${spotState.statusClass}`}>
-            {spotState.label}
+      </div>
+      <div className="spot-status-row">
+        <span className={`spot-status ${spotState.statusClass}`}>
+          {spotState.label}
+        </span>
+        {spotThresholdHit && <span className="threshold-badge">임계</span>}
+        {spotState.warning && (
+          <span className="spot-alert-icon" aria-label="SPOT 경고">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3L2 21h20L12 3zm0 5.5c.6 0 1 .4 1 1v5c0 .6-.4 1-1 1s-1-.4-1-1v-5c0-.6.4-1 1-1zm0 9c.7 0 1.3.6 1.3 1.3S12.7 20 12 20s-1.3-.6-1.3-1.3S11.3 17.5 12 17.5z" />
+            </svg>
           </span>
-          {spotThresholdHit && <span className="threshold-badge">임계</span>}
-          {spotState.warning && (
-            <span className="spot-alert-icon" aria-label="SPOT 경고">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 3L2 21h20L12 3zm0 5.5c.6 0 1 .4 1 1v5c0 .6-.4 1-1 1s-1-.4-1-1v-5c0-.6.4-1 1-1zm0 9c.7 0 1.3.6 1.3 1.3S12.7 20 12 20s-1.3-.6-1.3-1.3S11.3 17.5 12 17.5z" />
-              </svg>
-            </span>
-          )}
-        </div>
-        <div className={`sparkline ${spotState.sparkClass}`}>
-          <svg viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <linearGradient id="spot-sparkline-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor="var(--sparkline-color)" stopOpacity="0.35" />
-                <stop offset="100%" stopColor="var(--sparkline-color)" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-            {areaPath && <path className="sparkline-area" d={areaPath} />}
-            {thresholdLines.map((line) => (
-              <line
-                key={`thr-${line.value}`}
-                className={[
-                  'sparkline-threshold',
-                  line.value === SPOT_WARN_TEMP
-                    ? 'sparkline-threshold-warn'
-                    : line.value === SPOT_HIGH_MIN
-                      ? 'sparkline-threshold-high'
-                      : line.value === SPOT_NORMAL_MIN
-                        ? 'sparkline-threshold-normal'
-                        : '',
-                  typeof spotConfigThreshold === 'number' &&
-                  Number.isFinite(spotConfigThreshold) &&
-                  Math.abs(line.value - spotConfigThreshold) < 0.01
-                    ? 'sparkline-threshold-config'
-                    : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                x1={0}
-                y1={line.y}
-                x2={100}
-                y2={line.y}
-              />
-            ))}
-            {linePath && <path className="sparkline-path" d={linePath} />}
-            {points.map((point, index) => (
-              <circle
-                key={`${point.x}-${point.y}-${index}`}
-                className={`sparkline-dot ${index === points.length - 1 ? 'sparkline-dot-last' : ''}`}
-                cx={point.x}
-                cy={point.y}
-                r={index === points.length - 1 ? 3 : 2}
-              />
-            ))}
-          </svg>
-        </div>
-        {missing && (
-          <div className="missing-note">
-            마지막 갱신 {formatTime(lastDataAt)}
-          </div>
         )}
       </div>
-    );
+      <div className={`sparkline ${spotState.sparkClass}`}>
+        <svg viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="spot-sparkline-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="var(--sparkline-color)" stopOpacity="0.35" />
+              <stop offset="100%" stopColor="var(--sparkline-color)" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {areaPath && <path className="sparkline-area" d={areaPath} />}
+          {thresholdLines.map((line) => (
+            <line
+              key={`thr-${line.value}`}
+              className={[
+                'sparkline-threshold',
+                line.value === SPOT_WARN_TEMP
+                  ? 'sparkline-threshold-warn'
+                  : line.value === SPOT_HIGH_MIN
+                    ? 'sparkline-threshold-high'
+                    : line.value === SPOT_NORMAL_MIN
+                      ? 'sparkline-threshold-normal'
+                      : '',
+                typeof spotConfigThreshold === 'number' &&
+                  Number.isFinite(spotConfigThreshold) &&
+                  Math.abs(line.value - spotConfigThreshold) < 0.01
+                  ? 'sparkline-threshold-config'
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              x1={0}
+              y1={line.y}
+              x2={100}
+              y2={line.y}
+            />
+          ))}
+          {linePath && <path className="sparkline-path" d={linePath} />}
+          {points.map((point, index) => (
+            <circle
+              key={`${point.x}-${point.y}-${index}`}
+              className={`sparkline-dot ${index === points.length - 1 ? 'sparkline-dot-last' : ''}`}
+              cx={point.x}
+              cy={point.y}
+              r={index === points.length - 1 ? 3 : 2}
+            />
+          ))}
+        </svg>
+      </div>
+      {missing && (
+        <div className="missing-note">
+          마지막 갱신 {formatTime(lastDataAt)}
+        </div>
+      )}
+    </div>
+  );
 };
 
 function TempsComponent() {
-    const { data, lastDataAt, thresholds } = React.useContext(DataContext);
-    const missing =
-      !Number.isFinite(data?.Temp_F) ||
-      !Number.isFinite(data?.Temp_B) ||
-      !Number.isFinite(data?.Billet_Temp) ||
-      !Number.isFinite(data?.Billet_Length);
-    const tempFValue = useLastValidNumber(data?.Temp_F);
-    const tempBValue = useLastValidNumber(data?.Temp_B);
-    const billetTempValue = useLastValidNumber(data?.Billet_Temp);
-    const billetLengthValue = useLastValidNumber(data?.Billet_Length);
-    const tempFLevel = useThresholdLevel(tempFValue ?? NaN, 350, 450, ALERT_HOLD_MS);
-    const tempBLevel = useThresholdLevel(tempBValue ?? NaN, 350, 450, ALERT_HOLD_MS);
-    const billetTempLevel = useThresholdLevel(billetTempValue ?? NaN, 440, 480, ALERT_HOLD_MS);
+  const { data, lastDataAt, thresholds } = React.useContext(DataContext);
+  const missing =
+    !Number.isFinite(data?.Temp_F) ||
+    !Number.isFinite(data?.Temp_B) ||
+    !Number.isFinite(data?.Billet_Temp) ||
+    !Number.isFinite(data?.Billet_Length);
+  const tempFValue = useLastValidNumber(data?.Temp_F);
+  const tempBValue = useLastValidNumber(data?.Temp_B);
+  const billetTempValue = useLastValidNumber(data?.Billet_Temp);
+  const billetLengthValue = useLastValidNumber(data?.Billet_Length);
+  const tempFLevel = useThresholdLevel(tempFValue ?? NaN, 350, 450, ALERT_HOLD_MS);
+  const tempBLevel = useThresholdLevel(tempBValue ?? NaN, 350, 450, ALERT_HOLD_MS);
+  const billetTempLevel = useThresholdLevel(billetTempValue ?? NaN, 440, 480, ALERT_HOLD_MS);
   const computedThresholds = data?.Computed?.thresholds;
   const tempFThresholdHit = computedThresholds?.temp_f ?? isThresholdHit(thresholds, 'temp_f', tempFValue);
   const tempBThresholdHit = computedThresholds?.temp_b ?? isThresholdHit(thresholds, 'temp_b', tempBValue);
@@ -4626,90 +4627,90 @@ function TempsComponent() {
     computedThresholds?.billet_temp ?? isThresholdHit(thresholds, 'billet_temp', billetTempValue);
   const billetLengthThresholdHit =
     computedThresholds?.billet ?? isThresholdHit(thresholds, 'billet', billetLengthValue);
-    
-    if (!data) return <div>Loading...</div>;
-    const tempFClass = [
-      tempFLevel === 'danger' ? 'temp-danger' : tempFLevel === 'warn' ? 'temp-warn' : '',
-      tempFThresholdHit ? 'temp-threshold' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const tempBClass = [
-      tempBLevel === 'danger' ? 'temp-danger' : tempBLevel === 'warn' ? 'temp-warn' : '',
-      tempBThresholdHit ? 'temp-threshold' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const billetTempClass = [
-      billetTempLevel === 'danger' ? 'temp-danger' : billetTempLevel === 'warn' ? 'temp-warn' : '',
-      billetTempThresholdHit ? 'temp-threshold' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const billetLengthClass = billetLengthThresholdHit ? 'temp-threshold' : '';
-    return (
-      <div className="card" style={{ height: '100%' }}>
-        <div className="temp-grid">
-          <div className={`temp-tile ${tempFClass}`}>
-            <div className="temp-header">
-              <span className="temp-label">{LABELS.CONTAINER_FRONT}</span>
-              {tempFThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-            </div>
-            <div className="temp-value-row">
-              <span className="temp-value">{formatNumber(data.Temp_F ?? NaN, 1)}</span>
-              <span className="temp-unit">{SPOT_UNIT}</span>
-            </div>
+
+  if (!data) return <div>Loading...</div>;
+  const tempFClass = [
+    tempFLevel === 'danger' ? 'temp-danger' : tempFLevel === 'warn' ? 'temp-warn' : '',
+    tempFThresholdHit ? 'temp-threshold' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const tempBClass = [
+    tempBLevel === 'danger' ? 'temp-danger' : tempBLevel === 'warn' ? 'temp-warn' : '',
+    tempBThresholdHit ? 'temp-threshold' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const billetTempClass = [
+    billetTempLevel === 'danger' ? 'temp-danger' : billetTempLevel === 'warn' ? 'temp-warn' : '',
+    billetTempThresholdHit ? 'temp-threshold' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const billetLengthClass = billetLengthThresholdHit ? 'temp-threshold' : '';
+  return (
+    <div className="card" style={{ height: '100%' }}>
+      <div className="temp-grid">
+        <div className={`temp-tile ${tempFClass}`}>
+          <div className="temp-header">
+            <span className="temp-label">{LABELS.CONTAINER_FRONT}</span>
+            {tempFThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
           </div>
-          <div className={`temp-tile ${tempBClass}`}>
-            <div className="temp-header">
-              <span className="temp-label">{LABELS.CONTAINER_BACK}</span>
-              {tempBThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-            </div>
-            <div className="temp-value-row">
-              <span className="temp-value">{formatNumber(data.Temp_B ?? NaN, 1)}</span>
-              <span className="temp-unit">{SPOT_UNIT}</span>
-            </div>
-          </div>
-          <div className={`temp-tile ${billetTempClass}`}>
-            <div className="temp-header">
-              <span className="temp-label">{LABELS.BILLET_TEMP}</span>
-              {billetTempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-            </div>
-            <div className="temp-value-row">
-              <span className="temp-value">{formatNumber(data.Billet_Temp ?? NaN, 1)}</span>
-              <span className="temp-unit">{SPOT_UNIT}</span>
-            </div>
-          </div>
-          <div className={`temp-tile ${billetLengthClass}`}>
-            <div className="temp-header">
-              <span className="temp-label">{LABELS.BILLET_LEN}</span>
-              {billetLengthThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-            </div>
-            <div className="temp-value-row">
-              <span className="temp-value">{formatNumber(data.Billet_Length ?? NaN, 1)}</span>
-              <span className="temp-unit">mm</span>
-            </div>
+          <div className="temp-value-row">
+            <span className="temp-value">{formatNumber(data.Temp_F ?? NaN, 1)}</span>
+            <span className="temp-unit">{SPOT_UNIT}</span>
           </div>
         </div>
-        {missing && (
-          <div className="missing-note">
-            마지막 갱신 {formatTime(lastDataAt)}
+        <div className={`temp-tile ${tempBClass}`}>
+          <div className="temp-header">
+            <span className="temp-label">{LABELS.CONTAINER_BACK}</span>
+            {tempBThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
           </div>
-        )}
+          <div className="temp-value-row">
+            <span className="temp-value">{formatNumber(data.Temp_B ?? NaN, 1)}</span>
+            <span className="temp-unit">{SPOT_UNIT}</span>
+          </div>
+        </div>
+        <div className={`temp-tile ${billetTempClass}`}>
+          <div className="temp-header">
+            <span className="temp-label">{LABELS.BILLET_TEMP}</span>
+            {billetTempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
+          </div>
+          <div className="temp-value-row">
+            <span className="temp-value">{formatNumber(data.Billet_Temp ?? NaN, 1)}</span>
+            <span className="temp-unit">{SPOT_UNIT}</span>
+          </div>
+        </div>
+        <div className={`temp-tile ${billetLengthClass}`}>
+          <div className="temp-header">
+            <span className="temp-label">{LABELS.BILLET_LEN}</span>
+            {billetLengthThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
+          </div>
+          <div className="temp-value-row">
+            <span className="temp-value">{formatNumber(data.Billet_Length ?? NaN, 1)}</span>
+            <span className="temp-unit">mm</span>
+          </div>
+        </div>
       </div>
-    );
+      {missing && (
+        <div className="missing-note">
+          마지막 갱신 {formatTime(lastDataAt)}
+        </div>
+      )}
+    </div>
+  );
 };
 
 function MoldsComponent() {
-    const { data, lastDataAt } = React.useContext(DataContext);
-    if (!data) return <div>Loading...</div>;
-    const missing =
-      !Number.isFinite(data.Mold1) ||
-      !Number.isFinite(data.Mold2) ||
-      !Number.isFinite(data.Mold3) ||
-      !Number.isFinite(data.Mold4) ||
-      !Number.isFinite(data.Mold5) ||
-      !Number.isFinite(data.Mold6);
+  const { data, lastDataAt } = React.useContext(DataContext);
+  if (!data) return <div>Loading...</div>;
+  const missing =
+    !Number.isFinite(data.Mold1) ||
+    !Number.isFinite(data.Mold2) ||
+    !Number.isFinite(data.Mold3) ||
+    !Number.isFinite(data.Mold4) ||
+    !Number.isFinite(data.Mold5) ||
+    !Number.isFinite(data.Mold6);
   const moldLevels = data?.Computed?.mold_levels;
   const mold1 = mapMoldLevel(moldLevels?.Mold1) ?? getMoldState(data.Mold1 ?? 0).className;
   const mold2 = mapMoldLevel(moldLevels?.Mold2) ?? getMoldState(data.Mold2 ?? 0).className;
@@ -4717,52 +4718,52 @@ function MoldsComponent() {
   const mold4 = mapMoldLevel(moldLevels?.Mold4) ?? getMoldState(data.Mold4 ?? 0).className;
   const mold5 = mapMoldLevel(moldLevels?.Mold5) ?? getMoldState(data.Mold5 ?? 0).className;
   const mold6 = mapMoldLevel(moldLevels?.Mold6) ?? getMoldState(data.Mold6 ?? 0).className;
-    return (
-      <div className="card" style={{ height: '100%' }}>
-        <div className="mold-grid">
-            <div className={`mold-tile ${mold1}`}>
-            <span className="mold-label">Mold 1</span>
-            <span className="mold-value">{formatNumber(data.Mold1 ?? NaN, 1)}</span>
-          </div>
-            <div className={`mold-tile ${mold2}`}>
-            <span className="mold-label">Mold 2</span>
-            <span className="mold-value">{formatNumber(data.Mold2 ?? NaN, 1)}</span>
-          </div>
-            <div className={`mold-tile ${mold3}`}>
-            <span className="mold-label">Mold 3</span>
-            <span className="mold-value">{formatNumber(data.Mold3 ?? NaN, 1)}</span>
-          </div>
-            <div className={`mold-tile ${mold4}`}>
-            <span className="mold-label">Mold 4</span>
-            <span className="mold-value">{formatNumber(data.Mold4 ?? NaN, 1)}</span>
-          </div>
-            <div className={`mold-tile ${mold5}`}>
-            <span className="mold-label">Mold 5</span>
-            <span className="mold-value">{formatNumber(data.Mold5 ?? NaN, 1)}</span>
-          </div>
-            <div className={`mold-tile ${mold6}`}>
-            <span className="mold-label">Mold 6</span>
-            <span className="mold-value">{formatNumber(data.Mold6 ?? NaN, 1)}</span>
-          </div>
+  return (
+    <div className="card" style={{ height: '100%' }}>
+      <div className="mold-grid">
+        <div className={`mold-tile ${mold1}`}>
+          <span className="mold-label">Mold 1</span>
+          <span className="mold-value">{formatNumber(data.Mold1 ?? NaN, 1)}</span>
         </div>
-        {missing && (
-          <div className="missing-note">
-            마지막 갱신 {formatTime(lastDataAt)}
-          </div>
-        )}
+        <div className={`mold-tile ${mold2}`}>
+          <span className="mold-label">Mold 2</span>
+          <span className="mold-value">{formatNumber(data.Mold2 ?? NaN, 1)}</span>
+        </div>
+        <div className={`mold-tile ${mold3}`}>
+          <span className="mold-label">Mold 3</span>
+          <span className="mold-value">{formatNumber(data.Mold3 ?? NaN, 1)}</span>
+        </div>
+        <div className={`mold-tile ${mold4}`}>
+          <span className="mold-label">Mold 4</span>
+          <span className="mold-value">{formatNumber(data.Mold4 ?? NaN, 1)}</span>
+        </div>
+        <div className={`mold-tile ${mold5}`}>
+          <span className="mold-label">Mold 5</span>
+          <span className="mold-value">{formatNumber(data.Mold5 ?? NaN, 1)}</span>
+        </div>
+        <div className={`mold-tile ${mold6}`}>
+          <span className="mold-label">Mold 6</span>
+          <span className="mold-value">{formatNumber(data.Mold6 ?? NaN, 1)}</span>
+        </div>
       </div>
-    );
+      {missing && (
+        <div className="missing-note">
+          마지막 갱신 {formatTime(lastDataAt)}
+        </div>
+      )}
+    </div>
+  );
 };
 
 function EnvComponent() {
-    const { data, lastDataAt, thresholds } = React.useContext(DataContext);
-    const envTempValue = useLastValidNumber(data?.At_Temp);
-    const envHumidityValue = useLastValidNumber(data?.At_Pre);
-    const tempRaw = data?.At_Temp;
-    const humidityRaw = data?.At_Pre;
-    const tempDisplay = envTempValue ?? tempRaw ?? NaN;
-    const humidityDisplay = envHumidityValue ?? humidityRaw ?? NaN;
-    const missing = !Number.isFinite(tempRaw) || !Number.isFinite(humidityRaw);
+  const { data, lastDataAt, thresholds } = React.useContext(DataContext);
+  const envTempValue = useLastValidNumber(data?.At_Temp);
+  const envHumidityValue = useLastValidNumber(data?.At_Pre);
+  const tempRaw = data?.At_Temp;
+  const humidityRaw = data?.At_Pre;
+  const tempDisplay = envTempValue ?? tempRaw ?? NaN;
+  const humidityDisplay = envHumidityValue ?? humidityRaw ?? NaN;
+  const missing = !Number.isFinite(tempRaw) || !Number.isFinite(humidityRaw);
   const computed = data?.Computed;
   const tempState = mapEnvTempLevel(computed?.env_temp_level) ?? getEnvTempState(tempDisplay);
   const humidityState = mapEnvPreLevel(computed?.env_pre_level) ?? getEnvHumidityState(humidityDisplay);
@@ -4770,280 +4771,280 @@ function EnvComponent() {
   const tempThresholdHit = computedThresholds?.at_temp ?? isThresholdHit(thresholds, 'at_temp', envTempValue);
   const humidityThresholdHit =
     computedThresholds?.at_pre ?? isThresholdHit(thresholds, 'at_pre', envHumidityValue);
-    return (
-      <div className="card env-card" style={{ height: '100%' }}>
-        <div className="env-grid">
-          <div className={`env-tile ${tempThresholdHit ? 'env-threshold' : ''}`}>
-            <div className="env-header">
-              <span className="env-label">{LABELS.ENV_TEMP}</span>
-              {tempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-            </div>
-            <div className="env-value-row">
-              <span className="env-value">{formatNumber(tempDisplay ?? NaN, 1)}</span>
-              <span className="env-unit">{SPOT_UNIT}</span>
-            </div>
-            <span className={`env-badge ${tempState.className}`}>{tempState.label}</span>
+  return (
+    <div className="card env-card" style={{ height: '100%' }}>
+      <div className="env-grid">
+        <div className={`env-tile ${tempThresholdHit ? 'env-threshold' : ''}`}>
+          <div className="env-header">
+            <span className="env-label">{LABELS.ENV_TEMP}</span>
+            {tempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
           </div>
-          <div className={`env-tile ${humidityThresholdHit ? 'env-threshold' : ''}`}>
-            <div className="env-header">
-              <span className="env-label">{LABELS.ENV_HUMID}</span>
-              {humidityThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-            </div>
-            <div className="env-value-row">
-              <span className="env-value">{formatNumber(humidityDisplay ?? NaN, 1)}</span>
-              <span className="env-unit">%</span>
-            </div>
-            <span className={`env-badge ${humidityState.className}`}>{humidityState.label}</span>
+          <div className="env-value-row">
+            <span className="env-value">{formatNumber(tempDisplay ?? NaN, 1)}</span>
+            <span className="env-unit">{SPOT_UNIT}</span>
           </div>
+          <span className={`env-badge ${tempState.className}`}>{tempState.label}</span>
         </div>
-        {missing && (
-          <div className="missing-note">
-            마지막 갱신 {formatTime(lastDataAt)}
+        <div className={`env-tile ${humidityThresholdHit ? 'env-threshold' : ''}`}>
+          <div className="env-header">
+            <span className="env-label">{LABELS.ENV_HUMID}</span>
+            {humidityThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
           </div>
-        )}
+          <div className="env-value-row">
+            <span className="env-value">{formatNumber(humidityDisplay ?? NaN, 1)}</span>
+            <span className="env-unit">%</span>
+          </div>
+          <span className={`env-badge ${humidityState.className}`}>{humidityState.label}</span>
+        </div>
       </div>
-    );
+      {missing && (
+        <div className="missing-note">
+          마지막 갱신 {formatTime(lastDataAt)}
+        </div>
+      )}
+    </div>
+  );
 };
 
 
 function CameraComponent() {
-    const {
-      spotConfig,
-      spotImageUrl,
-      spotImageLoading,
-      spotImageError,
-      spotLastSuccessAt,
-      onSpotImageLoaded,
-      onSpotImageError,
-      requestFocus,
-    } = React.useContext(DataContext);
-    if (!spotConfig) return <div>Loading Config...</div>;
-    
-    // Crosshair logic
-    const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
-    const cx = clamp(spotConfig.crosshair_x, 0, 1) * spotConfig.widget_width;
-    const cy = clamp(spotConfig.crosshair_y, 0, 1) * spotConfig.widget_height;
-    const arm = Math.max(1, spotConfig.crosshair_size);
-    const gap = Math.max(0, spotConfig.crosshair_gap);
-    const thick = Math.max(1, spotConfig.crosshair_thickness);
-    const color = spotConfig.crosshair_color || 'lime';
+  const {
+    spotConfig,
+    spotImageUrl,
+    spotImageLoading,
+    spotImageError,
+    spotLastSuccessAt,
+    onSpotImageLoaded,
+    onSpotImageError,
+    requestFocus,
+  } = React.useContext(DataContext);
+  if (!spotConfig) return <div>Loading Config...</div>;
 
-    const lines = [
-      { x1: cx - gap, y1: cy, x2: cx - arm, y2: cy },
-      { x1: cx + gap, y1: cy, x2: cx + arm, y2: cy },
-      { x1: cx, y1: cy - gap, x2: cx, y2: cy - arm },
-      { x1: cx, y1: cy + gap, x2: cx, y2: cy + arm },
-    ];
+  // Crosshair logic
+  const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
+  const cx = clamp(spotConfig.crosshair_x, 0, 1) * spotConfig.widget_width;
+  const cy = clamp(spotConfig.crosshair_y, 0, 1) * spotConfig.widget_height;
+  const arm = Math.max(1, spotConfig.crosshair_size);
+  const gap = Math.max(0, spotConfig.crosshair_gap);
+  const thick = Math.max(1, spotConfig.crosshair_thickness);
+  const color = spotConfig.crosshair_color || 'lime';
 
-    const cameraStatus = getCameraStatus({
-      spotConfig,
-      spotImageUrl,
-      spotImageLoading,
-      spotImageError,
-      spotLastSuccessAt,
-    });
-    
-    return (
-      <div className="card camera-card" style={{ height: '100%', position: 'relative' }}>
-        <div className="camera-frame">
-          {spotImageUrl && (
-            <img
-              className="camera-image"
-              src={spotImageUrl}
-              alt={LABELS.SPOT_CAMERA}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              onLoad={onSpotImageLoaded}
-              onError={() => onSpotImageError()}
-            />
-          )}
-          <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="none" style={{position:'absolute', top:0, left:0, width:'100%', height:'100%' }}>
-            {lines.map((line, idx) => (
-              <g key={idx}>
-                <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="black" strokeWidth={thick + 2} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-                <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke={color} strokeWidth={thick} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-              </g>
-            ))}
-            <circle cx={cx} cy={cy} r={3} stroke="black" strokeWidth={3} fill="none" vectorEffect="non-scaling-stroke" />
-            <circle cx={cx} cy={cy} r={3} stroke={color} strokeWidth={1} fill="none" vectorEffect="non-scaling-stroke" />
-          </svg>
-          {cameraStatus && (
-            <div className={`camera-overlay ${cameraStatus.type}`}>
-              {cameraStatus.type === 'loading' && <span className="camera-spinner" aria-hidden="true" />}
-              <div className="camera-status-text">
-                <div className="camera-status-title">{cameraStatus.title}</div>
-                {cameraStatus.detail && <div className="camera-status-detail">{cameraStatus.detail}</div>}
-              </div>
+  const lines = [
+    { x1: cx - gap, y1: cy, x2: cx - arm, y2: cy },
+    { x1: cx + gap, y1: cy, x2: cx + arm, y2: cy },
+    { x1: cx, y1: cy - gap, x2: cx, y2: cy - arm },
+    { x1: cx, y1: cy + gap, x2: cx, y2: cy + arm },
+  ];
+
+  const cameraStatus = getCameraStatus({
+    spotConfig,
+    spotImageUrl,
+    spotImageLoading,
+    spotImageError,
+    spotLastSuccessAt,
+  });
+
+  return (
+    <div className="card camera-card" style={{ height: '100%', position: 'relative' }}>
+      <div className="camera-frame">
+        {spotImageUrl && (
+          <img
+            className="camera-image"
+            src={spotImageUrl}
+            alt={LABELS.SPOT_CAMERA}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            onLoad={onSpotImageLoaded}
+            onError={() => onSpotImageError()}
+          />
+        )}
+        <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="none" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+          {lines.map((line, idx) => (
+            <g key={idx}>
+              <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="black" strokeWidth={thick + 2} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+              <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke={color} strokeWidth={thick} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+            </g>
+          ))}
+          <circle cx={cx} cy={cy} r={3} stroke="black" strokeWidth={3} fill="none" vectorEffect="non-scaling-stroke" />
+          <circle cx={cx} cy={cy} r={3} stroke={color} strokeWidth={1} fill="none" vectorEffect="non-scaling-stroke" />
+        </svg>
+        {cameraStatus && (
+          <div className={`camera-overlay ${cameraStatus.type}`}>
+            {cameraStatus.type === 'loading' && <span className="camera-spinner" aria-hidden="true" />}
+            <div className="camera-status-text">
+              <div className="camera-status-title">{cameraStatus.title}</div>
+              {cameraStatus.detail && <div className="camera-status-detail">{cameraStatus.detail}</div>}
             </div>
-          )}
-        </div>
-        <div className="camera-controls" style={{marginTop: '4px'}}>
-           <button onClick={() => requestFocus(1)}>&lt;-Focus</button>
-           <button onClick={() => requestFocus(-1)}>Focus-&gt;</button>
-        </div>
+          </div>
+        )}
       </div>
-    );
+      <div className="camera-controls" style={{ marginTop: '4px' }}>
+        <button onClick={() => requestFocus(1)}>&lt;-Focus</button>
+        <button onClick={() => requestFocus(-1)}>Focus-&gt;</button>
+      </div>
+    </div>
+  );
 };
 
 function TimeSeriesWidget() {
-    const { 
-      timeSeriesFrames, 
-      seriesWindowMin, 
-      setSeriesWindowMin, 
-      seriesPaused, 
-      setSeriesPaused, 
-      showThresholds, 
-      setShowThresholds,
-      handleSnapshot,
-      snapshotLoading,
-      nowTick
-    } = React.useContext(DataContext);
-    
-    // Convert frames to Recharts data
-    // Optimizing: Only rebuild when frames update
-    // Use a ref to store the last valid data for freezing
-    const lastChartDataRef = useRef<any[]>([]);
+  const {
+    timeSeriesFrames,
+    seriesWindowMin,
+    setSeriesWindowMin,
+    seriesPaused,
+    setSeriesPaused,
+    showThresholds,
+    setShowThresholds,
+    handleSnapshot,
+    snapshotLoading,
+    nowTick
+  } = React.useContext(DataContext);
 
-    const chartData = useMemo(() => {
-      // If paused, return the last known data to "freeze" the chart
-      if (seriesPaused && lastChartDataRef.current.length > 0) {
-        return lastChartDataRef.current;
-      }
+  // Convert frames to Recharts data
+  // Optimizing: Only rebuild when frames update
+  // Use a ref to store the last valid data for freezing
+  const lastChartDataRef = useRef<any[]>([]);
 
-      if (!timeSeriesFrames) return [];
-      
-      // Use 'process' frame as master for time, as it contains Speed/Press (always present)
-      const master = timeSeriesFrames['process']; 
-      if (!master) return [];
+  const chartData = useMemo(() => {
+    // If paused, return the last known data to "freeze" the chart
+    if (seriesPaused && lastChartDataRef.current.length > 0) {
+      return lastChartDataRef.current;
+    }
 
-      const times = master.fields[0].values; // Time column
-      const length = master.length;
-      
-      const data = [];
-      for (let i = 0; i < length; i++) {
-         const time = times[i];
-         const item: any = { time };
-         
-         // Iterate all groups (frames)
-         Object.values(timeSeriesFrames).forEach((frame) => {
-            // Check length alignment
-            if (i >= frame.length) return;
-            
-            // Iterate all fields in the frame (skip time at index 0)
-            for (let j = 1; j < frame.fields.length; j++) {
-                const field = frame.fields[j];
-                item[field.name] = field.values[i];
-            }
-         });
-         data.push(item);
-      }
-      
-      lastChartDataRef.current = data;
-      return data;
-    }, [timeSeriesFrames, seriesPaused]);
-    
-    if (!timeSeriesFrames) return <div style={{color: 'white', padding: '16px'}}>Loading data...</div>;
+    if (!timeSeriesFrames) return [];
 
-    return (
-      <div className="card timeseries-card" style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
-         {/* Controls Header within the Widget */}
-         <div className="timeseries-controls" style={{ 
-            display: 'flex', 
-            justifyContent: 'flex-end', 
-            alignItems: 'center', 
-            gap: '8px', 
-            padding: '4px 8px', 
-            borderBottom: '1px solid var(--border-muted)',
-            background: 'var(--bg-header)'
-         }}>
-             <div className="series-group">
-                {[1, 5, 10, 30, 60].map((min) => (
-                  <button
-                    key={min}
-                    className={`status-action ${seriesWindowMin === min ? 'active' : ''}`}
-                    style={{ minWidth: '32px', padding: '0 4px', opacity: seriesWindowMin === min ? 1 : 0.5, fontSize: '11px', height: '24px' }}
-                    onClick={() => setSeriesWindowMin(min)}
-                  >
-                    {min}m
-                  </button>
-                ))}
-            </div>
-            <div style={{width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px'}}></div>
+    // Use 'process' frame as master for time, as it contains Speed/Press (always present)
+    const master = timeSeriesFrames['process'];
+    if (!master) return [];
+
+    const times = master.fields[0].values; // Time column
+    const length = master.length;
+
+    const data = [];
+    for (let i = 0; i < length; i++) {
+      const time = times[i];
+      const item: any = { time };
+
+      // Iterate all groups (frames)
+      Object.values(timeSeriesFrames).forEach((frame) => {
+        // Check length alignment
+        if (i >= frame.length) return;
+
+        // Iterate all fields in the frame (skip time at index 0)
+        for (let j = 1; j < frame.fields.length; j++) {
+          const field = frame.fields[j];
+          item[field.name] = field.values[i];
+        }
+      });
+      data.push(item);
+    }
+
+    lastChartDataRef.current = data;
+    return data;
+  }, [timeSeriesFrames, seriesPaused]);
+
+  if (!timeSeriesFrames) return <div style={{ color: 'white', padding: '16px' }}>Loading data...</div>;
+
+  return (
+    <div className="card timeseries-card" style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Controls Header within the Widget */}
+      <div className="timeseries-controls" style={{
+        display: 'flex',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '4px 8px',
+        borderBottom: '1px solid var(--border-muted)',
+        background: 'var(--bg-header)'
+      }}>
+        <div className="series-group">
+          {[1, 5, 10, 30, 60].map((min) => (
             <button
-                className={`status-action ${seriesPaused ? 'warn' : ''}`}
-                onClick={() => setSeriesPaused((prev) => !prev)}
-             >
-                {seriesPaused ? 'Pause' : 'Live'}
-             </button>
-             <label style={{ display: 'flex', alignItems: 'center', fontSize: '11px', cursor: 'pointer', gap: '4px', userSelect: 'none', color: 'var(--text-secondary)' }}>
-                <input
-                  type="checkbox"
-                  checked={showThresholds}
-                  onChange={(e) => setShowThresholds(e.target.checked)}
-                />
-                {LABELS.THRESHOLDS}
-             </label>
-             <div style={{width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px'}}></div>
-             <button
-                 className={`status-action ${snapshotLoading ? 'loading' : ''}`}
-                 onClick={handleSnapshot}
-                 disabled={snapshotLoading}
-                 title={LABELS.SAVE_SNAPSHOT}
-             >
-                 스냅샷
-             </button>
-         </div>
-
-         <div style={{ flexGrow: 1, minHeight: 0 }}>
-             <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
-                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-muted)" />
-                   <XAxis 
-                     dataKey="time" 
-                     type="number" 
-                     domain={['dataMin', (min: number) => min + seriesWindowMin * 60 * 1000]} 
-                     allowDataOverflow={true}
-                     tickFormatter={(unixTime) => new Date(unixTime).toLocaleTimeString()}
-                     stroke="var(--text-muted)"
-                     height={30}
-                   />
-                   <YAxis stroke="var(--text-muted)" width={40} />
-                   <Tooltip 
-                     labelFormatter={(label) => new Date(label).toLocaleTimeString()}
-                     contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-main)', color: 'var(--text-primary)' }}
-                   />
-                   <Legend verticalAlign="top" height={36}/>
-                   
-                   {/* Defined Lines - Primary Process */}
-                   <Line type="monotone" dataKey="Speed" stroke="var(--color-speed)" dot={false} strokeWidth={2} name="속도" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Press" stroke="var(--color-press)" dot={false} strokeWidth={2} name="압력" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Spot" stroke="var(--color-spot)" dot={false} strokeWidth={2} name="SPOT" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Temp_F" stroke="var(--color-temp-f)" dot={false} strokeWidth={1} name="온도(F)" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Temp_B" stroke="var(--color-temp-b)" dot={false} strokeWidth={1} name="온도(B)" isAnimationActive={false} />
-                   
-                   {/* Additional Process Data */}
-                   <Line type="monotone" dataKey="Billet_Length" stroke="var(--color-billet-len)" dot={false} strokeWidth={1} name="빌렛 길이" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="Count" stroke="var(--color-count)" dot={false} strokeWidth={1} name="생산 수량" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="EndPos" stroke="var(--color-endpos)" dot={false} strokeWidth={1} name="종료 위치" isAnimationActive={false} />
-
-
-
-                   {/* Other Temperatures & Environment */}
-                   <Line type="monotone" dataKey="Billet_Temp" stroke="var(--color-billet-temp)" dot={false} strokeWidth={1} name="빌렛 온도" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="At_Temp" stroke="var(--color-env-temp)" dot={false} strokeWidth={1} name="환경 온도" isAnimationActive={false} />
-                   <Line type="monotone" dataKey="At_Pre" stroke="var(--color-env-pre)" dot={false} strokeWidth={1} name="환경 습도" isAnimationActive={false} />
-                   
-                   {showThresholds && (
-                      <>
-                        <ReferenceLine y={SPEED_MAX} label="Max Speed" stroke="var(--state-danger)" strokeDasharray="3 3" />
-                         {/* Add more reference lines if needed based on thresholds context */}
-                      </>
-                   )}
-
-                </LineChart>
-             </ResponsiveContainer>
-         </div>
+              key={min}
+              className={`status-action ${seriesWindowMin === min ? 'active' : ''}`}
+              style={{ minWidth: '32px', padding: '0 4px', opacity: seriesWindowMin === min ? 1 : 0.5, fontSize: '11px', height: '24px' }}
+              onClick={() => setSeriesWindowMin(min)}
+            >
+              {min}m
+            </button>
+          ))}
+        </div>
+        <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
+        <button
+          className={`status-action ${seriesPaused ? 'warn' : ''}`}
+          onClick={() => setSeriesPaused((prev) => !prev)}
+        >
+          {seriesPaused ? 'Pause' : 'Live'}
+        </button>
+        <label style={{ display: 'flex', alignItems: 'center', fontSize: '11px', cursor: 'pointer', gap: '4px', userSelect: 'none', color: 'var(--text-secondary)' }}>
+          <input
+            type="checkbox"
+            checked={showThresholds}
+            onChange={(e) => setShowThresholds(e.target.checked)}
+          />
+          {LABELS.THRESHOLDS}
+        </label>
+        <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
+        <button
+          className={`status-action ${snapshotLoading ? 'loading' : ''}`}
+          onClick={handleSnapshot}
+          disabled={snapshotLoading}
+          title={LABELS.SAVE_SNAPSHOT}
+        >
+          스냅샷
+        </button>
       </div>
-    );
+
+      <div style={{ flexGrow: 1, minHeight: 0 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-muted)" />
+            <XAxis
+              dataKey="time"
+              type="number"
+              domain={['dataMin', (min: number) => min + seriesWindowMin * 60 * 1000]}
+              allowDataOverflow={true}
+              tickFormatter={(unixTime) => new Date(unixTime).toLocaleTimeString()}
+              stroke="var(--text-muted)"
+              height={30}
+            />
+            <YAxis stroke="var(--text-muted)" width={40} />
+            <Tooltip
+              labelFormatter={(label) => new Date(label).toLocaleTimeString()}
+              contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-main)', color: 'var(--text-primary)' }}
+            />
+            <Legend verticalAlign="top" height={36} />
+
+            {/* Defined Lines - Primary Process */}
+            <Line type="monotone" dataKey="Speed" stroke="var(--color-speed)" dot={false} strokeWidth={2} name="속도" isAnimationActive={false} />
+            <Line type="monotone" dataKey="Press" stroke="var(--color-press)" dot={false} strokeWidth={2} name="압력" isAnimationActive={false} />
+            <Line type="monotone" dataKey="Spot" stroke="var(--color-spot)" dot={false} strokeWidth={2} name="SPOT" isAnimationActive={false} />
+            <Line type="monotone" dataKey="Temp_F" stroke="var(--color-temp-f)" dot={false} strokeWidth={1} name="온도(F)" isAnimationActive={false} />
+            <Line type="monotone" dataKey="Temp_B" stroke="var(--color-temp-b)" dot={false} strokeWidth={1} name="온도(B)" isAnimationActive={false} />
+
+            {/* Additional Process Data */}
+            <Line type="monotone" dataKey="Billet_Length" stroke="var(--color-billet-len)" dot={false} strokeWidth={1} name="빌렛 길이" isAnimationActive={false} />
+            <Line type="monotone" dataKey="Count" stroke="var(--color-count)" dot={false} strokeWidth={1} name="생산 수량" isAnimationActive={false} />
+            <Line type="monotone" dataKey="EndPos" stroke="var(--color-endpos)" dot={false} strokeWidth={1} name="종료 위치" isAnimationActive={false} />
+
+
+
+            {/* Other Temperatures & Environment */}
+            <Line type="monotone" dataKey="Billet_Temp" stroke="var(--color-billet-temp)" dot={false} strokeWidth={1} name="빌렛 온도" isAnimationActive={false} />
+            <Line type="monotone" dataKey="At_Temp" stroke="var(--color-env-temp)" dot={false} strokeWidth={1} name="환경 온도" isAnimationActive={false} />
+            <Line type="monotone" dataKey="At_Pre" stroke="var(--color-env-pre)" dot={false} strokeWidth={1} name="환경 습도" isAnimationActive={false} />
+
+            {showThresholds && (
+              <>
+                <ReferenceLine y={SPEED_MAX} label="Max Speed" stroke="var(--state-danger)" strokeDasharray="3 3" />
+                {/* Add more reference lines if needed based on thresholds context */}
+              </>
+            )}
+
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
 };
 
 export default App;

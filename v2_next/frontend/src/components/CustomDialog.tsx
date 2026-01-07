@@ -108,7 +108,7 @@ export const CustomDialog: React.FC = () => {
           {state.type === 'prompt' && (
             <input
               ref={inputRef}
-              type="text"
+              type={state.inputType || 'text'}
               className="custom-modal-input"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}

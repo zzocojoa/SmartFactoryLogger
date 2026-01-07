@@ -6,6 +6,7 @@ interface ModalOptions {
   title?: string;
   defaultValue?: string;
   variant?: 'info' | 'warning' | 'error' | 'success';
+  inputType?: 'text' | 'password';
 }
 
 interface ModalContextType {
@@ -23,6 +24,7 @@ interface ModalState {
   title?: string;
   defaultValue?: string;
   variant?: 'info' | 'warning' | 'error' | 'success';
+  inputType?: 'text' | 'password';
 }
 
 const ModalContext = createContext<ModalContextType | null>(null);
@@ -52,6 +54,7 @@ export const GlobalModalProvider: React.FC<{ children: React.ReactNode }> = ({ c
       title: options.title,
       defaultValue: options.defaultValue,
       variant: options.variant,
+      inputType: options.inputType,
     });
 
     return new Promise<any>((resolve) => {

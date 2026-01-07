@@ -27,6 +27,7 @@
   /* Semantic Borders */
   --border-main: #30363d;
   --border-muted: #21262d;
+  --border-input: #30363d;
 
   /* Data Series Colors (Dark Mode Defaults) */
   --color-speed: #00FF00;
@@ -62,6 +63,7 @@
   
   --border-main: #d0d7de;
   --border-muted: #d8dee4;
+  --border-input: #d0d7de;
 
   /* Data Series Colors (Light Mode Overrides) */
   --color-speed: #009900;
@@ -97,6 +99,7 @@
   
   --border-main: #e6dfd6;
   --border-muted: #efe9e1;
+  --border-input: #e6dfd6;
 }
 
 /* Night Mode (20:00 - 08:00) - Deep Dark with Adaptive Palette */

@@ -714,19 +714,21 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     // Check if password required? 
     // For now we just implement the toggle call
     
-    const confirmed = await modal.confirm(`${actionName} 하시겠습니까?`);
-    if (!confirmed) return;
+    // Ask for password
+    const password = await modal.prompt(
+      `${actionName}를 위해 관리자 비밀번호를 입력하세요.`,
+      '',
+      { inputType: 'password', title: '관리자 인증' }
+    );
+    
+    if (password === null) return; // Cancelled
 
     setOverrideBusy(true);
     setSettingsError(null);
     try {
-      // Prompt for password if enabling? 
-      // For MVP we send empty password or implement prompt later if checked in App.tsx
-      // Let's assume 'admin' or prompt from user
-      
       const payload = {
          enabled: nextState,
-         password: '', // TODO: password prompt support if needed
+         password: password,
          actor: 'user' 
       };
       
