@@ -34,6 +34,7 @@ import {
 } from './types';
 import { useSystemViewModel } from './hooks/useSystemViewModel';
 import { useSpotViewModel } from './hooks/useSpotViewModel';
+import { useConfigViewModel } from './hooks/useConfigViewModel';
 import './App.css';
 import {
   LineChart,
@@ -1235,15 +1236,63 @@ function App() {
       handleImageError: handleSpotImageError,
       controlFocus: requestFocus
   } = useSpotViewModel();
+
+  const {
+    settingsOpen,
+    settingsLoading,
+    settingsError,
+    settingsInfo,
+    settingsForm,
+    settingsBaseline,
+    settingsRestartRequired,
+    settingsApplyResult,
+    settingsPending,
+    settingsPendingBusy,
+    settingsConfigPath,
+    configWritable,
+    overrideEnabled,
+    overrideMeta,
+    centralStatus,
+    centralSyncBusy,
+    thresholdConfig,
+    settingsToast,
+    hasSettingsChanges,
+    validationErrors,
+    hasValidationError,
+    activeThresholds: thresholdState,
+    
+    setSettingsOpen,
+    loadSettings,
+    updateSettingsField,
+    handleSaveSettings,
+    handleRestoreDefaults,
+    handleRestoreBackup,
+    handlePendingApply,
+    handlePendingClear,
+    handleMasterToggle,
+    handleOverrideToggle,
+    handleExternalRefresh,
+    handleExternalIgnore,
+    handleCentralSync,
+    showSettingsToast,
+    setSettingsError,
+    setSettingsInfo,
+    fetchCentralStatus,
+    isSettingsFieldDirty,
+    externalConfigPending,
+    externalConfigPendingAt,
+    overrideBusy
+  } = useConfigViewModel();
   
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
-  const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
+  // const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
+  const [connectionTestBusy, setConnectionTestBusy] = useState<Record<string, boolean>>({});
   
   // Time Series States
   const [seriesWindowMin, setSeriesWindowMin] = useState(30);
   const [seriesPaused, setSeriesPaused] = useState(false);
   const [showThresholds, setShowThresholds] = useState(true);
-  const [centralSyncBusy, setCentralSyncBusy] = useState(false);
+  /* centralSyncBusy moved to useConfigViewModel */
 
   const [diagnosisBusy, setDiagnosisBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -1251,34 +1300,24 @@ function App() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // Settings State moved to useConfigViewModel
+  /*
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsLoading, setSettingsLoading] = useState(false);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [settingsInfo, setSettingsInfo] = useState<string | null>(null);
-  const [settingsForm, setSettingsForm] = useState<SettingsFormState | null>(null);
-  const [settingsBaseline, setSettingsBaseline] = useState<SettingsFormState | null>(null);
-  const [settingsConfigPath, setSettingsConfigPath] = useState<string | null>(null);
-  const [configWritable, setConfigWritable] = useState<boolean | null>(null);
-  const [thresholdConfig, setThresholdConfig] = useState<ThresholdState>(() => buildThresholdStateFromConfig());
+  ...
+  */
+
+  // Time Series States
+  // Moved thresholdConfig to hook. But we need it for buildSeriesThresholds
   const timeSeriesThresholds = useMemo(() => 
     showThresholds ? buildSeriesThresholds(thresholdConfig) : undefined
   , [thresholdConfig, showThresholds]);
-  const [settingsRestartRequired, setSettingsRestartRequired] = useState(false);
-  const [settingsApplyResult, setSettingsApplyResult] = useState<ConfigApplyResult | null>(null);
-  const [settingsPending, setSettingsPending] = useState<ConfigSnapshot['pending'] | null>(null);
-  const [settingsPendingBusy, setSettingsPendingBusy] = useState(false);
-  const [externalConfigPending, setExternalConfigPending] = useState<ConfigSnapshot | null>(null);
-  const [externalConfigPendingAt, setExternalConfigPendingAt] = useState<number | null>(null);
-  const [settingsToast, setSettingsToast] = useState<{ message: string; level: 'ok' | 'warn' | 'error' } | null>(null);
-  const [overrideEnabled, setOverrideEnabled] = useState(false);
-  const [overrideMeta, setOverrideMeta] = useState<ConfigSnapshot["meta"] | null>(null);
-  const [overrideBusy, setOverrideBusy] = useState(false);
-  const [connectionTestBusy, setConnectionTestBusy] = useState<Record<ConnectionTargetKey, boolean>>({
-    extruder: false,
-    ls_plc: false,
-    spot: false,
-  });
 
+  /*
+  const [settingsRestartRequired, setSettingsRestartRequired] = useState(false);
+  ...
+  */
+  
   const [menuOpen, setMenuOpen] = useState(false);
   // Spot State moved to useSpotViewModel
   /*
@@ -1370,12 +1409,7 @@ function App() {
   }, []);
 
 
-  const thresholdState = useMemo(() => {
-    if (settingsOpen && settingsForm) {
-      return buildThresholdStateFromForm(settingsForm);
-    }
-    return thresholdConfig;
-  }, [settingsOpen, settingsForm, thresholdConfig]);
+
   const settingsSections = useMemo(
     () => [
       { id: 'settings-summary', label: LABELS.SUMMARY },
@@ -1721,49 +1755,7 @@ function App() {
 
 
 
-  const fetchCentralStatus = async () => {
-    try {
-      const data = await configService.getCentralStatus();
-      setCentralStatus(data);
-      return data;
-    } catch (error) {
-      setCentralStatus(null);
-      throw error;
-    }
-  };
 
-  const handleCentralSync = async () => {
-    if (centralSyncBusy) {
-      return;
-    }
-    setCentralSyncBusy(true);
-    setSettingsError(null);
-    setSettingsInfo(null);
-    try {
-      const data = await configService.syncCentral();
-      const status = data?.status ?? 'UNKNOWN';
-      const message =
-        status === 'APPLIED'
-          ? MESSAGES.SYNC_SUCCESS
-          : status === 'NO_CHANGE'
-            ? MESSAGES.SYNC_NO_CHANGE
-            : status === 'SKIPPED'
-              ? MESSAGES.SYNC_SKIPPED
-              : status === 'DISABLED'
-                ? MESSAGES.SYNC_DISABLED
-                : MESSAGES.SYNC_FAILURE;
-      setSettingsInfo(message);
-      await fetchCentralStatus();
-      if (settingsOpen) {
-        await loadSettings();
-      }
-    } catch (error) {
-      console.error('Central sync failed', error);
-      setSettingsError(MESSAGES.SYNC_FAILURE_DETAIL);
-    } finally {
-      setCentralSyncBusy(false);
-    }
-  };
 
 
 
@@ -2029,147 +2021,22 @@ function App() {
     return { form: nextForm, thresholds: nextThresholdState };
   }, []);
 
-  const applySettingsSnapshot = useCallback(
-    (snapshot: ConfigSnapshot) => {
-      const { form, thresholds } = buildSettingsFormFromSnapshot(snapshot);
-      setSettingsForm(form);
-      setSettingsBaseline(form);
-      setThresholdConfig(thresholds);
-      setSettingsConfigPath(snapshot.config_path ?? null);
-      setConfigWritable(snapshot.config_writable ?? null);
-      setSettingsRestartRequired(Boolean(snapshot.restart_required));
-      setSettingsApplyResult(snapshot.apply ?? null);
-      setSettingsPending(snapshot.pending ?? null);
-      setOverrideEnabled(Boolean(snapshot.meta?.override_enabled));
-      setOverrideMeta(snapshot.meta ?? null);
-      if (snapshot.values.settings.custom_notice !== undefined) {
-        setCustomNotice(snapshot.values.settings.custom_notice);
-      }
-    },
-    [buildSettingsFormFromSnapshot]
-  );
-
-  const loadSettings = useCallback(async () => {
-    setSettingsLoading(true);
-    setSettingsError(null);
-    setSettingsConfigPath(null);
-    setConfigWritable(null);
-    setSettingsBaseline(null);
-    setSettingsRestartRequired(false);
-    setSettingsPending(null);
-    setPathHealth({});
-    try {
-      const data = await configService.getConfig();
-      applySettingsSnapshot(data);
-      const fingerprint = buildSettingsFingerprint(data);
-      settingsFingerprintRef.current = fingerprint;
-      settingsExternalNotifyRef.current = null;
-      setExternalConfigPending(null);
-      setExternalConfigPendingAt(null);
-    } catch (error) {
-      console.error('Config load failed', error);
-      setSettingsError('설정을 불러오지 못했습니다.');
-    } finally {
-      setSettingsLoading(false);
-    }
-  }, [applySettingsSnapshot, buildSettingsFingerprint]);
-
-  const loadThresholdConfig = useCallback(async () => {
-    try {
-      const data = await configService.getConfig();
-      setThresholdConfig(buildThresholdStateFromConfig(data.values?.thresholds));
-    } catch (error) {
-      console.error('Threshold config load failed', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadThresholdConfig();
-  }, [loadThresholdConfig]);
-
-  useEffect(() => {
-    if (!settingsOpen) {
-      return;
-    }
-    setSettingsInfo(null);
-    loadSettings();
-    fetchCentralStatus().catch(() => null);
-    (async () => {
-      fetchCommLogInfo();
-    })();
-  }, [settingsOpen, loadSettings, fetchCommLogInfo]);
-
-  useEffect(() => {
-    if (!settingsOpen) {
-      return;
-    }
-    fetchLatestExportPath();
-    loadObservabilityErrors();
-    const interval = window.setInterval(() => {
-      loadObservabilityErrors();
-    }, OBSERVABILITY_REFRESH_MS);
-    return () => window.clearInterval(interval);
-  }, [settingsOpen, loadObservabilityErrors, fetchLatestExportPath]);
-
-  useEffect(() => {
-    if (!settingsOpen) {
-      settingsFingerprintRef.current = null;
-      settingsExternalNotifyRef.current = null;
-      setExternalConfigPending(null);
-      setExternalConfigPendingAt(null);
-    }
-  }, [settingsOpen]);
+  // Config Logic moved to useConfigViewModel
+  /*
+  const applySettingsSnapshot = ...
+  const loadSettings = ...
+  const loadThresholdConfig = ...
+  useEffect(() => { loadThresholdConfig() }, ...);
+  useEffect(() => { if (!settingsOpen) ... }, ...);
+  */
 
   const logPathValue = settingsForm?.logPath ?? '';
   const snapshotPathValue = settingsForm?.snapshotPath ?? '';
   const settingsReady = settingsForm !== null;
   const configReadOnly = configWritable === false;
 
-  const validationErrors = useMemo(() => {
-    if (!settingsForm) {
-      return {} as Partial<Record<keyof SettingsFormState, string>>;
-    }
-    const errors: Partial<Record<keyof SettingsFormState, string>> = {};
-    if (!isValidIp(settingsForm.extruderIp)) {
-      errors.extruderIp = 'IPv4 형식이 아닙니다.';
-    }
-    if (!isValidPort(settingsForm.extruderPort)) {
-      errors.extruderPort = '1-65535 범위를 입력하세요.';
-    }
-    if (!isValidIp(settingsForm.lsIp)) {
-      errors.lsIp = 'IPv4 형식이 아닙니다.';
-    }
-    if (!isValidPort(settingsForm.lsPort)) {
-      errors.lsPort = '1-65535 범위를 입력하세요.';
-    }
-    if (!isValidIp(settingsForm.spotIp)) {
-      errors.spotIp = 'IPv4 형식이 아닙니다.';
-    }
-    const thresholdValueFields: Array<keyof SettingsFormState> = [
-      'thresholdSpeedValue',
-      'thresholdPressValue',
-      'thresholdSpotValue',
-      'thresholdTempFValue',
-      'thresholdTempBValue',
-      'thresholdBilletValue',
-      'thresholdBilletTempValue',
-      'thresholdAtTempValue',
-      'thresholdAtPreValue',
-      'thresholdCountValue',
-      'thresholdEndPosValue',
-    ];
-    thresholdValueFields.forEach((field) => {
-      const value = settingsForm[field] as string;
-      if (!isValidNumberInput(value)) {
-        errors[field] = '숫자만 입력하세요.';
-      }
-    });
-    if (!settingsForm.customNotice) {
-      // errors.customNotice = '내용을 입력하세요.'; // Optional: adding validation for customNotice
-    }
-    return errors;
-  }, [settingsForm]);
-  const hasValidationError = Object.keys(validationErrors).length > 0;
+  // validationErrors defined in hook
+  // const hasValidationError = Object.keys(validationErrors).length > 0;
 
 
 
@@ -2252,74 +2119,10 @@ function App() {
       return String(current ?? '').trim() !== String(baseline ?? '').trim() ? count + 1 : count;
     }, 0);
   }, [settingsForm, settingsBaseline]);
-  const hasSettingsChanges = settingsDirtyCount > 0;
-  const updateSettingsField = (field: keyof SettingsFormState, value: string | boolean) => {
-    setSettingsForm((prev) => {
-      if (!prev) return prev;
-      return { ...prev, [field]: value };
-    });
-  };
-
-  useEffect(() => {
-    const poll = async () => {
-      await fetchHealth().catch(() => null);
-      await fetchStats().catch(() => null);
-    };
-    poll();
-    const interval = window.setInterval(poll, 5000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  const showSettingsToast = useCallback((message: string, level: 'ok' | 'warn' | 'error') => {
-    setSettingsToast({ message, level });
-    if (settingsToastTimerRef.current !== null) {
-      window.clearTimeout(settingsToastTimerRef.current);
-    }
-    settingsToastTimerRef.current = window.setTimeout(() => {
-      setSettingsToast(null);
-      settingsToastTimerRef.current = null;
-    }, 2500);
-  }, []);
-
-  const handleExternalRefresh = useCallback(async () => {
-    if (!externalConfigPending) {
-      return;
-    }
-    if (hasSettingsChanges) {
-      const ok = await modal.confirm('외부 변경 내용을 불러오면 현재 입력 중인 값이 사라집니다. 계속할까요?', {
-        variant: 'warning'
-      });
-      if (!ok) {
-        return;
-      }
-    }
-    applySettingsSnapshot(externalConfigPending);
-    const fingerprint = buildSettingsFingerprint(externalConfigPending);
-    settingsFingerprintRef.current = fingerprint;
-    settingsExternalNotifyRef.current = null;
-    setExternalConfigPending(null);
-    setExternalConfigPendingAt(null);
-    setSettingsError(null);
-    // setSettingsInfo('외부 변경 내용을 반영했습니다.'); // Silent mode
-    showSettingsToast('외부 변경을 반영했습니다.', 'ok');
-  }, [
-    externalConfigPending,
-    hasSettingsChanges,
-    applySettingsSnapshot,
-    buildSettingsFingerprint,
-    showSettingsToast,
-  ]);
-
-  const handleExternalIgnore = useCallback(() => {
-    if (!externalConfigPending) {
-      return;
-    }
-    const fingerprint = buildSettingsFingerprint(externalConfigPending);
-    settingsExternalNotifyRef.current = fingerprint;
-    setExternalConfigPending(null);
-    setExternalConfigPendingAt(null);
-    showSettingsToast('외부 변경 알림을 보류했습니다.', 'warn');
-  }, [externalConfigPending, buildSettingsFingerprint, showSettingsToast]);
+  /*
+  const handleExternalRefresh = ...
+  const handleExternalIgnore = ...
+  */
 
   const handleCopyCommLogPath = useCallback(async () => {
     if (!commLogInfo.path) {
@@ -2360,428 +2163,30 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    if (!settingsOpen) {
-      return;
-    }
-    const poll = async () => {
-      if (settingsLoading) {
-        return;
-      }
-      try {
-        const data = await configService.getConfig();
-        const fingerprint = buildSettingsFingerprint(data);
-        if (!settingsFingerprintRef.current) {
-          settingsFingerprintRef.current = fingerprint;
-          return;
-        }
-        if (fingerprint === settingsFingerprintRef.current) {
-          return;
-        }
-        if (hasSettingsChanges) {
-          if (settingsExternalNotifyRef.current !== fingerprint) {
-            showSettingsToast('설정 파일이 외부에서 변경되었습니다. 편집 중이어서 자동 갱신을 보류합니다.', 'warn');
-            settingsExternalNotifyRef.current = fingerprint;
-            setExternalConfigPending(data);
-            setExternalConfigPendingAt(Date.now());
-          }
-          return;
-        }
-        applySettingsSnapshot(data);
-        settingsFingerprintRef.current = fingerprint;
-        settingsExternalNotifyRef.current = null;
-        setExternalConfigPending(null);
-        setExternalConfigPendingAt(null);
-      } catch (error) {
-        console.error('Settings auto-refresh failed', error);
-      }
-    };
-    poll();
-    const interval = window.setInterval(poll, SETTINGS_AUTO_REFRESH_MS);
-    return () => window.clearInterval(interval);
-  }, [
-    settingsOpen,
-    settingsLoading,
-    hasSettingsChanges,
-    applySettingsSnapshot,
-    buildSettingsFingerprint,
-    showSettingsToast,
-  ]);
+  /* Settings polling moved to useConfigViewModel */
 
 
 
   // --- Auto Save & Master Toggle Logic ---
 
   // Auto-dismiss settingsInfo
+  /* Auto-dismiss settingsInfo moved to useConfigViewModel */
+
+  // Restore system polling
   useEffect(() => {
-    if (settingsInfo) {
-      const timer = setTimeout(() => {
-        setSettingsInfo(null);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [settingsInfo]);
-
-  const handleMasterToggle = (checked: boolean) => {
-    setSettingsForm((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, thresholdMasterOn: checked };
-      const fields: (keyof SettingsFormState)[] = [
-        'thresholdSpeedEnabled', 'thresholdPressEnabled', 'thresholdSpotEnabled',
-        'thresholdTempFEnabled', 'thresholdTempBEnabled',
-        'thresholdBilletEnabled', 'thresholdBilletTempEnabled',
-        'thresholdAtTempEnabled', 'thresholdAtPreEnabled',
-        'thresholdCountEnabled', 'thresholdEndPosEnabled'
-      ];
-      fields.forEach((field) => {
-        (next as any)[field] = checked;
-      });
-      return next;
-    });
-  };
-
-  const autoSaveTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const autoSaveEnabled = settingsForm?.autoSave;
-    
-    if (!autoSaveEnabled || !hasSettingsChanges || settingsLoading || !settingsForm) {
-      return;
-    }
-
-    if (autoSaveTimerRef.current) {
-      window.clearTimeout(autoSaveTimerRef.current);
-    }
-
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      handleSaveSettings({ auto: true });
-    }, 1000); // 1 second debounce
-
-    return () => {
-      if (autoSaveTimerRef.current) {
-        window.clearTimeout(autoSaveTimerRef.current);
-      }
+    const poll = async () => {
+      await fetchHealth().catch(() => null);
+      await fetchStats().catch(() => null);
     };
-  }, [settingsForm, hasSettingsChanges, settingsLoading, settingsForm?.autoSave]);
+    poll();
+    const interval = window.setInterval(poll, 5000);
+    return () => window.clearInterval(interval);
+  }, []);
 
-  const handleSaveSettings = async (options?: { auto?: boolean }) => {
-    const isAuto = options?.auto;
-    if (!settingsForm) {
-      return;
-    }
-    if (configReadOnly) {
-      if (!isAuto) setSettingsError('설정 파일이 읽기 전용입니다. 관리자 권한 또는 파일 속성을 확인하세요.');
-      return;
-    }
-    if (hasValidationError) {
-      if (!isAuto) setSettingsError('입력값 형식을 확인하세요.');
-      return;
-    }
-    if (!overrideEnabled && hasSettingsChanges) {
-      if (!isAuto) setSettingsError('로컬 오버라이드가 비활성화되어 저장할 수 없습니다.');
-      return;
-    }
-    if (pathCheckBusy) {
-      if (!isAuto) setSettingsError('경로 검증이 진행 중입니다.');
-      return;
-    }
-    if (!pathHealth.log || !pathHealth.snapshot) {
-      if (!isAuto) {
-        setSettingsError('경로 검증이 필요합니다. 검사 버튼을 눌러주세요.');
-        runPathHealthCheck();
-      }
-      return;
-    }
-    if (hasPathError) {
-      if (!isAuto) setSettingsError('저장 경로에 오류가 있습니다. 경로를 수정하세요.');
-      return;
-    }
-    if (!hasSettingsChanges) {
-      if (!isAuto) setSettingsInfo('변경 사항이 없습니다.');
-      return;
-    }
+  /* handleMasterToggle moved to useConfigViewModel */
 
-    if (!isAuto) {
-      const summary = buildSettingsChangeSummary();
-      if (hasPathWarn) {
-        summary.unshift('경로 상태 경고가 포함되어 있습니다.');
-      }
-      if (summary.length > 0) {
-        const maxItems = 8;
-        const shown = summary.slice(0, maxItems);
-        const rest = summary.length - shown.length;
-        const lines = rest > 0 ? [...shown, `외 ${rest}건`] : shown;
-        const confirmMessage = [
-          '다음 변경 사항을 저장할까요?',
-          '',
-          ...lines,
-          '',
-          '저장 후 재시작이 필요할 수 있습니다.',
-        ].join('\n');
-        if (!window.confirm(confirmMessage)) {
-          return;
-        }
-      }
-    }
-    setSettingsLoading(true);
-    setSettingsError(null);
-    setSettingsInfo(null);
-
-    const toInt = (value: string) => {
-      const parsed = Number.parseInt(value, 10);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    };
-    const toFloat = (value: string) => {
-      const parsed = Number.parseFloat(value);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    };
-    const toThresholdValue = (value: string) => value.trim();
-
-    const payload = {
-      extruder: {
-        ip: settingsForm.extruderIp.trim() || undefined,
-        port: toInt(settingsForm.extruderPort),
-      },
-      ls_plc: {
-        ip: settingsForm.lsIp.trim() || undefined,
-        port: toInt(settingsForm.lsPort),
-      },
-      spot: {
-        ip: settingsForm.spotIp.trim() || undefined,
-        refresh_interval: toFloat(settingsForm.spotRefreshInterval),
-      },
-      thresholds: {
-        enable: {
-          master_on: settingsForm.thresholdMasterOn,
-          speed: settingsForm.thresholdSpeedEnabled,
-          press: settingsForm.thresholdPressEnabled,
-          spot: settingsForm.thresholdSpotEnabled,
-          temp_f: settingsForm.thresholdTempFEnabled,
-          temp_b: settingsForm.thresholdTempBEnabled,
-          billet: settingsForm.thresholdBilletEnabled,
-          billet_temp: settingsForm.thresholdBilletTempEnabled,
-          at_temp: settingsForm.thresholdAtTempEnabled,
-          at_pre: settingsForm.thresholdAtPreEnabled,
-          count: settingsForm.thresholdCountEnabled,
-          endpos: settingsForm.thresholdEndPosEnabled,
-        },
-        values: {
-          speed: toThresholdValue(settingsForm.thresholdSpeedValue),
-          press: toThresholdValue(settingsForm.thresholdPressValue),
-          spot: toThresholdValue(settingsForm.thresholdSpotValue),
-          temp_f: toThresholdValue(settingsForm.thresholdTempFValue),
-          temp_b: toThresholdValue(settingsForm.thresholdTempBValue),
-          billet: toThresholdValue(settingsForm.thresholdBilletValue),
-          billet_temp: toThresholdValue(settingsForm.thresholdBilletTempValue),
-          at_temp: toThresholdValue(settingsForm.thresholdAtTempValue),
-          at_pre: toThresholdValue(settingsForm.thresholdAtPreValue),
-          count: toThresholdValue(settingsForm.thresholdCountValue),
-          endpos: toThresholdValue(settingsForm.thresholdEndPosValue),
-        },
-      },
-      settings: {
-        logpath: settingsForm.logPath.trim() || undefined,
-        snapshotpath: settingsForm.snapshotPath.trim() || undefined,
-        autosave: settingsForm.autoSave,
-        password: settingsForm.password.trim() || undefined,
-        custom_notice: settingsForm.customNotice,
-      },
-      logging: {
-        rotation_enabled: settingsForm.rotationEnabled,
-        rotation_mode: settingsForm.rotationMode,
-        cycle_idle_time: toFloat(settingsForm.cycleIdleTime),
-        cycle_threshold_press: toFloat(settingsForm.cycleThresholdPress),
-      },
-    };
-
-    try {
-      const data = await configService.saveConfig(payload);
-      const applyInfo = data?.apply ?? null;
-      const nextMeta = data?.meta ?? null;
-      const pendingCount = applyInfo?.pending?.length ?? 0;
-      const appliedCount = applyInfo?.applied?.length ?? 0;
-      if (pendingCount > 0) {
-        if (!isAuto) setSettingsInfo('일부 설정은 재시작 후 적용됩니다.');
-      } else if (appliedCount > 0) {
-        if (!isAuto) setSettingsInfo('설정이 저장되었습니다. 재시작 없이 적용되었습니다.');
-      } else {
-        if (!isAuto) setSettingsInfo('설정이 저장되었습니다.');
-      }
-      setSettingsRestartRequired(Boolean(data?.restart_required));
-      setSettingsApplyResult(applyInfo);
-      setSettingsPending(null);
-      if (nextMeta) {
-        setOverrideMeta(nextMeta);
-      }
-      setSettingsBaseline({
-        ...settingsForm,
-        password: '',
-        passwordSet: settingsForm.passwordSet || settingsForm.password.trim().length > 0,
-      });
-      setThresholdConfig(buildThresholdStateFromForm(settingsForm));
-      updateSettingsField('password', '');
-      const notificationMessage =
-        pendingCount > 0
-          ? `설정 저장 완료. 재시작 필요 항목 ${pendingCount}건.`
-          : appliedCount > 0
-            ? '설정 저장 완료. 즉시 적용됨.'
-            : '설정 저장 완료.';
-      
-      if (!isAuto) {
-        pushNotification('설정 저장', notificationMessage, pendingCount > 0 ? 'warn' : 'info');
-        showSettingsToast(notificationMessage, pendingCount > 0 ? 'warn' : 'ok');
-      }
-      setExternalConfigPending(null);
-      setExternalConfigPendingAt(null);
-      
-      // Fetch the latest config snapshot to get the authoritative fingerprint
-      // This ensures the polling loop doesn't see our own save as an external change
-      try {
-        const snapshotData = await configService.getConfig();
-        const newFingerprint = buildSettingsFingerprint(snapshotData);
-        settingsFingerprintRef.current = newFingerprint;
-      } catch (ignore) {
-        // If snapshot fetch fails, we just risk an extra notification, which is acceptable
-      }
-
-      settingsExternalNotifyRef.current = null;
-    } catch (error) {
-      console.error('Config save failed', error);
-      if (!isAuto) {
-        setSettingsError('설정 저장에 실패했습니다.');
-        pushNotification('설정 저장 실패', '설정 저장에 실패했습니다.', 'error');
-        showSettingsToast('설정 저장 실패', 'error');
-      } else {
-        console.error('[AutoSave] Save failed', error);
-      }
-    } finally {
-      setSettingsLoading(false);
-    }
-  };
-
-  const handleRestoreDefaults = async () => {
-    if (settingsLoading) {
-      return;
-    }
-    if (configReadOnly) {
-      setSettingsError('설정 파일이 읽기 전용입니다. 관리자 권한 또는 파일 속성을 확인하세요.');
-      return;
-    }
-    if (!overrideEnabled) {
-      setSettingsError('로컬 오버라이드가 OFF 상태입니다.');
-      return;
-    }
-    if (!await modal.confirm('기본값으로 복원하시겠습니까?', { variant: 'warning' })) {
-      return;
-    }
-    setSettingsLoading(true);
-    setSettingsError(null);
-    try {
-      await configService.restoreDefaults();
-      setSettingsRestartRequired(true);
-      setSettingsApplyResult(null);
-      await loadSettings();
-      showSettingsToast('기본값으로 복원했습니다.', 'ok');
-    } catch (error) {
-      console.error('Restore defaults failed', error);
-      setSettingsError('기본값 복원에 실패했습니다.');
-      showSettingsToast('기본값 복원 실패', 'error');
-    } finally {
-      setSettingsLoading(false);
-    }
-  };
-
-  const handleRestoreBackup = async () => {
-    if (settingsLoading) {
-      return;
-    }
-    if (configReadOnly) {
-      setSettingsError('설정 파일이 읽기 전용입니다. 관리자 권한 또는 파일 속성을 확인하세요.');
-      return;
-    }
-    if (!overrideEnabled) {
-      setSettingsError('로컬 오버라이드가 OFF 상태입니다.');
-      return;
-    }
-    if (!await modal.confirm('백업 파일(config.ini.bak)로 복원하시겠습니까?', { variant: 'warning' })) {
-      return;
-    }
-    setSettingsLoading(true);
-    setSettingsError(null);
-    try {
-      await configService.restoreBackup();
-      setSettingsRestartRequired(true);
-      setSettingsApplyResult(null);
-      await loadSettings();
-      showSettingsToast('백업으로 복원했습니다.', 'ok');
-    } catch (error) {
-      console.error('Restore backup failed', error);
-      setSettingsError('백업 복원에 실패했습니다. 백업 파일을 확인하세요.');
-      showSettingsToast('백업 복원 실패', 'error');
-    } finally {
-      setSettingsLoading(false);
-    }
-  };
-
-  const handlePendingApply = async () => {
-    if (settingsLoading || settingsPendingBusy) {
-      return;
-    }
-    if (!settingsPending) {
-      setSettingsError('보류된 설정이 없습니다.');
-      return;
-    }
-    if (configReadOnly) {
-      setSettingsError('설정 파일이 읽기 전용입니다. 관리자 권한 또는 파일 속성을 확인하세요.');
-      return;
-    }
-    if (!overrideEnabled) {
-      setSettingsError('로컬 오버라이드가 OFF 상태입니다.');
-      return;
-    }
-    if (!await modal.confirm('보류된 설정을 다시 적용하시겠습니까?')) {
-      return;
-    }
-    setSettingsPendingBusy(true);
-    setSettingsError(null);
-    try {
-      await configService.applyPending();
-      await loadSettings();
-      showSettingsToast('보류된 설정을 적용했습니다.', 'ok');
-    } catch (error) {
-      console.error('Pending apply failed', error);
-      setSettingsError('보류된 설정 적용에 실패했습니다.');
-      showSettingsToast('보류된 설정 적용 실패', 'error');
-    } finally {
-      setSettingsPendingBusy(false);
-    }
-  };
-
-  const handlePendingClear = async () => {
-    if (settingsLoading || settingsPendingBusy) {
-      return;
-    }
-    if (!settingsPending) {
-      setSettingsError('보류된 설정이 없습니다.');
-      return;
-    }
-    if (!await modal.confirm('보류된 설정을 삭제하시겠습니까?', { variant: 'warning' })) {
-      return;
-    }
-    setSettingsPendingBusy(true);
-    setSettingsError(null);
-    try {
-      await configService.clearPending();
-      await loadSettings();
-      showSettingsToast('보류된 설정을 삭제했습니다.', 'ok');
-    } catch (error) {
-      console.error('Pending clear failed', error);
-      setSettingsError('보류된 설정 삭제에 실패했습니다.');
-      showSettingsToast('보류된 설정 삭제 실패', 'error');
-    } finally {
-      setSettingsPendingBusy(false);
-    }
-  };
+  /* autoSaveTimerRef moved to useConfigViewModel */
+  /* Garbage removed (auto-save and partial header) */
 
   const handleConnectionTest = async (target: ConnectionTargetKey) => {
     if (!settingsForm) {
@@ -2833,38 +2238,7 @@ function App() {
   };
 
 
-  const toggleOverride = async () => {
-    if (overrideBusy || !settingsForm) {
-      return;
-    }
-    const nextEnabled = !overrideEnabled;
-    let password: string | undefined;
-    if (settingsForm.passwordSet) {
-      const input = await modal.prompt('로컬 오버라이드 변경을 위해 비밀번호를 입력하세요.', undefined, { variant: 'warning' });
-      if (input === null) {
-        return;
-      }
-      password = input;
-    }
-    setOverrideBusy(true);
-    setSettingsError(null);
-    try {
-      const data = await configService.toggleOverride({
-        enabled: nextEnabled,
-        password,
-        actor: 'local',
-      });
-      const meta = data?.meta ?? null;
-      setOverrideEnabled(nextEnabled);
-      setOverrideMeta(meta);
-    } catch (error) {
-      console.error('Override toggle failed', error);
-      const message = String(error);
-      setSettingsError(`오버라이드 변경 실패: ${message}`);
-    } finally {
-      setOverrideBusy(false);
-    }
-  };
+  /* toggleOverride moved to useConfigViewModel (handleOverrideToggle) */
 
   const runPathHealthCheck = useCallback(
     async (paths?: Array<{ key: 'log' | 'snapshot'; path: string }>) => {
@@ -3076,23 +2450,7 @@ function App() {
     return formatTime(result.at * 1000);
   };
 
-  const isSettingsFieldDirty = useCallback(
-    (field: keyof SettingsFormState) => {
-      if (!settingsForm || !settingsBaseline) {
-        return false;
-      }
-      if (field === 'password') {
-        return settingsForm.password.trim().length > 0;
-      }
-      const current = settingsForm[field];
-      const baseline = settingsBaseline[field];
-      if (typeof current === 'boolean' || typeof baseline === 'boolean') {
-        return current !== baseline;
-      }
-      return String(current ?? '').trim() !== String(baseline ?? '').trim();
-    },
-    [settingsForm, settingsBaseline]
-  );
+  /* isSettingsFieldDirty handled by useConfigViewModel (removed local def) */
   const settingsSectionFieldMap = useMemo(
     () => ({
       'settings-summary': [],
@@ -4038,7 +3396,7 @@ function App() {
               <button
                 type="button"
                 className="settings-override-toggle"
-                onClick={toggleOverride}
+                onClick={handleOverrideToggle}
                 disabled={overrideBusy}
                 aria-disabled={overrideBusy}
               >
@@ -4524,7 +3882,7 @@ function App() {
                                     <div className="settings-comm-row">
                                       <span className="settings-comm-label">복구 시간</span>
                                       <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.last_recovery_sec ?? null)}
+                                        {formatOptionalSeconds(metrics ? metrics.last_recovery_sec : undefined)}
                                       </span>
                                     </div>
                                     <div className="settings-comm-row">
@@ -4642,7 +4000,7 @@ function App() {
                                     <div className="settings-comm-row">
                                       <span className="settings-comm-label">복구 시간</span>
                                       <span className="settings-comm-value">
-                                        {formatOptionalSeconds(metrics?.last_recovery_sec ?? null)}
+                                        {formatOptionalSeconds(metrics ? metrics.last_recovery_sec : undefined)}
                                       </span>
                                     </div>
                                     <div className="settings-comm-row">
@@ -4723,7 +4081,7 @@ function App() {
                                     <div className="settings-comm-row">
                                       <span className="settings-comm-label">갱신 주기</span>
                                       <span className="settings-comm-value">
-                                        {refreshMs ? `${Math.round(refreshMs / 1000)}s` : '--'}
+                                        {typeof refreshMs === 'number' ? `${Math.round(refreshMs / 1000)}s` : '--'}
                                       </span>
                                     </div>
                                     <div className="settings-comm-row">
