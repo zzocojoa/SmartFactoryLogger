@@ -12,8 +12,10 @@ import uvicorn
 # Import the app factor or app object from app.py
 try:
     from backend.app import app
+    from backend import config
 except ImportError:
     from app import app
+    import config
 
 if __name__ == "__main__":
     # Host and port are hardcoded for production convenience

@@ -322,3 +322,59 @@ SNAPSHOT_PATH = resolve_storage_path(
     "snapshots",
     "SnapshotPath",
 )
+
+# Validation Logic
+def validate_config() -> List[str]:
+    """
+    Validates the current configuration and returns a list of warning/error messages.
+    """
+    issues = []
+    
+    def _is_valid_port(port: int) -> bool:
+        return 1 <= port <= 65535
+
+    def _is_valid_ip(ip: str) -> bool:
+        parts = ip.split(".")
+        if len(parts) != 4:
+            return False
+        for part in parts:
+            if not part.isdigit():
+                return False
+            if not 0 <= int(part) <= 255:
+                return False
+        return True
+
+    # Validate Ports
+    if not _is_valid_port(BACKEND_PORT):
+        issues.append(f"Invalid BACKEND_PORT: {BACKEND_PORT}")
+    if not _is_valid_port(CENTRAL_PORT):
+        issues.append(f"Invalid CENTRAL_PORT: {CENTRAL_PORT}")
+    if not _is_valid_port(EXTRUDER_PORT):
+        issues.append(f"Invalid EXTRUDER_PORT: {EXTRUDER_PORT}")
+    if not _is_valid_port(LS_PORT):
+        issues.append(f"Invalid LS_PORT: {LS_PORT}")
+        
+    # Validate IPs (Basic check)
+    if not _is_valid_ip(EXTRUDER_IP):
+        issues.append(f"Invalid EXTRUDER_IP format: {EXTRUDER_IP}")
+    if not _is_valid_ip(LS_IP):
+        issues.append(f"Invalid LS_IP format: {LS_IP}")
+    if not _is_valid_ip(SPOT_IP):
+        issues.append(f"Invalid SPOT_IP format: {SPOT_IP}")
+        
+    # Validate Mode
+    if MODE not in ("REAL", "MOCK", "CSV"):
+         issues.append(f"Unknown MODE: {MODE}. Expected REAL, MOCK, or CSV.")
+
+    # Log issues
+    if issues:
+        for issue in issues:
+            _config_log("WARNING", f"Config Validation Issue: {issue}")
+            print(f"[CONFIG WARNING] {issue}", file=sys.stderr)
+    else:
+        _config_log("INFO", "Configuration validation passed.")
+
+    return issues
+
+# Run validation on load
+validate_config()

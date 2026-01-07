@@ -93,7 +93,7 @@ const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
   };
 
   return (
-    <div className="card notice-card" style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'visible' }}>
+    <div className="card notice-card">
       {layoutEditing && (
         <>
           <div className="widget-header-controls">
@@ -113,16 +113,15 @@ const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
           </div>
         </>
       )}
-      <div className="notice-body" style={{ flex: 1, overflow: 'auto' }}>
+      <div className="notice-body scrollable">
         {editing ? (
-          <div className="notice-editor-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div className="notice-editor-container">
             <textarea
               className="notice-textarea"
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}
-              style={{ flex: 1 }}
             />
-            <button className="notice-save-btn" onClick={handleSave} style={{ marginTop: '10px' }}>{LABELS.SAVE}</button>
+            <button className="notice-save-btn" onClick={handleSave}>{LABELS.SAVE}</button>
           </div>
         ) : (
           <div className="notice-content markdown-body">
@@ -158,7 +157,7 @@ const NoticeComponent = ({ item }: { item?: any }) => {
   };
 
   return (
-    <div className="card notice-card" style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'visible' }}>
+    <div className="card notice-card">
       
       {layoutEditing && (
         <>
@@ -182,9 +181,9 @@ const NoticeComponent = ({ item }: { item?: any }) => {
         </>
       )}
 
-      <div className="notice-body" style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+      <div className="notice-body">
         {editing ? (
-          <div className="notice-editor-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div className="notice-editor-container">
             <textarea
               className="notice-textarea"
               value={editValue}
@@ -193,7 +192,7 @@ const NoticeComponent = ({ item }: { item?: any }) => {
             <button className="notice-save-btn" onClick={handleSave}>{LABELS.SAVE}</button>
           </div>
         ) : (
-          <div className="notice-content markdown-body" style={{ height: '100%', overflow: 'auto', padding: '10px' }}>
+          <div className="notice-content markdown-body">
             <ReactMarkdown>{customNotice || ''}</ReactMarkdown>
           </div>
         )}
@@ -229,57 +228,57 @@ const APPLY_KEY_LABELS: Record<string, string> = {
   'settings.snapshotpath': CONFIG_LABELS.SNAPSHOT_PATH,
   'settings.autosave': CONFIG_LABELS.AUTO_SAVE,
   'settings.password_set': CONFIG_LABELS.PASSWORD_SET,
-  'logging.rotation_enabled': '로그 회전 사용', // TODO: Add to CONFIG_LABELS
+  'logging.rotation_enabled': CONFIG_LABELS.ROTATION_ENABLED,
   'logging.rotation_mode': CONFIG_LABELS.ROTATION_MODE,
   'logging.cycle_idle_time': CONFIG_LABELS.CYCLE_IDLE,
   'logging.cycle_threshold_press': CONFIG_LABELS.CYCLE_PRESS,
-  'logging.csv_header': 'CSV 헤더',
+  'logging.csv_header': CONFIG_LABELS.CSV_HEADER,
   'system.intervalsec': CONFIG_LABELS.COLLECT_INTERVAL,
   'spot.ip': CONFIG_LABELS.SPOT_IP,
   'spot.url': CONFIG_LABELS.SPOT_URL,
   'spot.image_url': CONFIG_LABELS.SPOT_IMG_URL,
   'spot.refresh_interval': CONFIG_LABELS.SPOT_REFRESH,
-  'spot.crosshair_x': 'SPOT 크로스헤어 X',
-  'spot.crosshair_y': 'SPOT 크로스헤어 Y',
-  'spot.crosshair_color': 'SPOT 크로스헤어 색상',
-  'spot.crosshair_thickness': 'SPOT 크로스헤어 두께',
-  'spot.crosshair_size': 'SPOT 크로스헤어 크기',
-  'spot.crosshair_gap': 'SPOT 크로스헤어 간격',
-  'spot.focus_url': 'SPOT 포커스 URL',
-  'spot.focus_step': 'SPOT 포커스 스텝',
-  'spot.actuator_ip': 'SPOT 액추에이터 IP',
-  'spot.actuator_step': 'SPOT 액추에이터 스텝',
-  'spot.actuator_url': 'SPOT 액추에이터 URL',
-  'spot.widget_width': 'SPOT 위젯 너비',
-  'spot.widget_height': 'SPOT 위젯 높이',
-  'extruder.ip': 'Extruder IP',
-  'extruder.port': 'Extruder Port',
-  'ls_plc.ip': 'LS PLC IP',
-  'ls_plc.port': 'LS PLC Port',
-  'ls_plc.targets': 'LS PLC 타깃 매핑',
-  'thresholds.enable.master_on': '임계값 사용(마스터)',
-  'thresholds.enable.speed': '임계값 사용(속도)',
-  'thresholds.enable.press': '임계값 사용(압력)',
-  'thresholds.enable.spot': '임계값 사용(SPOT)',
-  'thresholds.enable.temp_f': '임계값 사용(온도 앞)',
-  'thresholds.enable.temp_b': '임계값 사용(온도 뒤)',
-  'thresholds.enable.billet': '임계값 사용(빌렛 길이)',
-  'thresholds.enable.billet_temp': '임계값 사용(빌렛 온도)',
-  'thresholds.enable.at_temp': '임계값 사용(환경 온도)',
-  'thresholds.enable.at_pre': '임계값 사용(환경 습도)',
-  'thresholds.enable.count': '임계값 사용(카운트)',
-  'thresholds.enable.endpos': '임계값 사용(종료 위치)',
-  'thresholds.values.speed': '임계값 값(속도)',
-  'thresholds.values.press': '임계값 값(압력)',
-  'thresholds.values.spot': '임계값 값(SPOT)',
-  'thresholds.values.temp_f': '임계값 값(온도 앞)',
-  'thresholds.values.temp_b': '임계값 값(온도 뒤)',
-  'thresholds.values.billet': '임계값 값(빌렛 길이)',
-  'thresholds.values.billet_temp': '임계값 값(빌렛 온도)',
-  'thresholds.values.at_temp': '임계값 값(환경 온도)',
-  'thresholds.values.at_pre': '임계값 값(환경 습도)',
-  'thresholds.values.count': '임계값 값(카운트)',
-  'thresholds.values.endpos': '임계값 값(종료 위치)',
+  'spot.crosshair_x': CONFIG_LABELS.SPOT_CROSSHAIR_X,
+  'spot.crosshair_y': CONFIG_LABELS.SPOT_CROSSHAIR_Y,
+  'spot.crosshair_color': CONFIG_LABELS.SPOT_CROSSHAIR_COLOR,
+  'spot.crosshair_thickness': CONFIG_LABELS.SPOT_CROSSHAIR_THICKNESS,
+  'spot.crosshair_size': CONFIG_LABELS.SPOT_CROSSHAIR_SIZE,
+  'spot.crosshair_gap': CONFIG_LABELS.SPOT_CROSSHAIR_GAP,
+  'spot.focus_url': CONFIG_LABELS.SPOT_FOCUS_URL,
+  'spot.focus_step': CONFIG_LABELS.SPOT_FOCUS_STEP,
+  'spot.actuator_ip': CONFIG_LABELS.SPOT_ACTUATOR_IP,
+  'spot.actuator_step': CONFIG_LABELS.SPOT_ACTUATOR_STEP,
+  'spot.actuator_url': CONFIG_LABELS.SPOT_ACTUATOR_URL,
+  'spot.widget_width': CONFIG_LABELS.SPOT_WIDGET_WIDTH,
+  'spot.widget_height': CONFIG_LABELS.SPOT_WIDGET_HEIGHT,
+  'extruder.ip': CONFIG_LABELS.EXTRUDER_IP,
+  'extruder.port': CONFIG_LABELS.EXTRUDER_PORT,
+  'ls_plc.ip': CONFIG_LABELS.LS_PLC_IP,
+  'ls_plc.port': CONFIG_LABELS.LS_PLC_PORT,
+  'ls_plc.targets': CONFIG_LABELS.LS_PLC_TARGETS,
+  'thresholds.enable.master_on': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(마스터)`,
+  'thresholds.enable.speed': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.SPEED})`,
+  'thresholds.enable.press': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.PRESS})`,
+  'thresholds.enable.spot': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.SPOT})`,
+  'thresholds.enable.temp_f': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.TEMP_F})`,
+  'thresholds.enable.temp_b': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.TEMP_B})`,
+  'thresholds.enable.billet': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.BILLET_LEN})`,
+  'thresholds.enable.billet_temp': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.BILLET_TEMP})`,
+  'thresholds.enable.at_temp': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.ENV_TEMP})`,
+  'thresholds.enable.at_pre': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.ENV_HUMID})`,
+  'thresholds.enable.count': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.COUNT})`,
+  'thresholds.enable.endpos': `${CONFIG_LABELS.THRESHOLD_ENABLE_PREFIX}(${LABELS.END_POS})`,
+  'thresholds.values.speed': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.SPEED})`,
+  'thresholds.values.press': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.PRESS})`,
+  'thresholds.values.spot': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.SPOT})`,
+  'thresholds.values.temp_f': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.TEMP_F})`,
+  'thresholds.values.temp_b': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.TEMP_B})`,
+  'thresholds.values.billet': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.BILLET_LEN})`,
+  'thresholds.values.billet_temp': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.BILLET_TEMP})`,
+  'thresholds.values.at_temp': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.ENV_TEMP})`,
+  'thresholds.values.at_pre': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.ENV_HUMID})`,
+  'thresholds.values.count': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.COUNT})`,
+  'thresholds.values.endpos': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.END_POS})`,
 };
 
 type HealthSnapshot = {
@@ -1201,17 +1200,17 @@ const getThresholdValue = (thresholds: ThresholdState, key: ThresholdKey) => {
 };
 
 const THRESHOLD_LABELS: Record<ThresholdKey, string> = {
-  speed: '속도',
-  press: '압력',
-  spot: 'SPOT',
-  temp_f: '컨테이너 앞',
-  temp_b: '컨테이너 뒤',
-  billet: '빌렛 길이',
-  billet_temp: '빌렛 온도',
-  at_temp: '환경 온도',
-  at_pre: '환경 습도',
-  count: '카운트',
-  endpos: '종료 위치',
+  speed: LABELS.SPEED,
+  press: LABELS.PRESS,
+  spot: LABELS.SPOT,
+  temp_f: LABELS.CONTAINER_FRONT,
+  temp_b: LABELS.CONTAINER_BACK,
+  billet: LABELS.BILLET_LEN,
+  billet_temp: LABELS.BILLET_TEMP,
+  at_temp: LABELS.ENV_TEMP,
+  at_pre: LABELS.ENV_HUMID,
+  count: LABELS.COUNT,
+  endpos: LABELS.END_POS,
 };
 
 const getSpeedState = (speed: number) => {
@@ -5593,12 +5592,11 @@ function App() {
                           return (
                             <div key={item.key} className="settings-threshold-row">
                               <span className="settings-threshold-label">{item.label}</span>
-                              <label className="settings-threshold-toggle" style={{ pointerEvents: 'auto', zIndex: 10 }}>
+                              <label className="settings-threshold-toggle">
                                 <input
                                   type="checkbox"
                                   checked={Boolean(enabled)}
                                   onChange={(e) => updateSettingsField(item.enableField, e.target.checked)}
-                                  style={{ cursor: 'pointer' }}
                                 />
                                 <span>사용</span>
                               </label>

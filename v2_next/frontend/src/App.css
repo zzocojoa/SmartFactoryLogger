@@ -797,6 +797,74 @@ body {
   to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
+/* Markdown & Notice Widget Styles */
+.notice-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: visible;
+}
+
+.notice-body {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.notice-body.scrollable {
+  overflow: auto;
+}
+
+.notice-editor-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.notice-textarea {
+  flex: 1;
+  width: 100%;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-main);
+  padding: 10px;
+  resize: none;
+}
+
+.notice-save-btn {
+  margin-top: 10px;
+  background: var(--bg-button);
+  color: var(--text-primary);
+  border: 1px solid var(--border-main);
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.notice-content {
+  height: 100%;
+  overflow: auto;
+  padding: 10px;
+}
+
+/* Main App Layout */
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  position: relative;
+}
+
+.dashboard-grid {
+  margin-top: 10px;
+}
 .settings-header {
   display: flex;
   align-items: center;
@@ -4153,4 +4221,20 @@ body {
 
 .notice-save-btn:active {
   transform: translateY(0);
+}
+
+/* Extended Settings Styles */
+.settings-threshold-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  pointer-events: auto;
+  z-index: 10;
+  cursor: pointer;
+}
+
+.settings-threshold-toggle input {
+  cursor: pointer;
 }
