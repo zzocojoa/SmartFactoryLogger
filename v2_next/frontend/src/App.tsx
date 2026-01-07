@@ -39,6 +39,7 @@ import { useSystemViewModel } from './hooks/useSystemViewModel';
 import { useSpotViewModel } from './hooks/useSpotViewModel';
 import { useConfigViewModel } from './hooks/useConfigViewModel';
 import { useLayoutViewModel } from './hooks/useLayoutViewModel';
+import { useMetricsViewModel } from './hooks/useMetricsViewModel';
 import './App.css';
 import {
   LineChart,
@@ -1041,12 +1042,15 @@ const getCameraStatus = (params: {
 function App() {
   const { mode, setMode } = useTheme();
   const modal = useModal();
-  const [data, setData] = useState<FactoryData | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [lastDataAt, setLastDataAt] = useState<number | null>(null);
-  const [latencyMs, setLatencyMs] = useState<number | null>(null);
-  const seriesBufferRef = useRef(new SeriesBuffer(SERIES_WINDOW_MS, SERIES_MAX_POINTS));
+  
+  // Time Series States (UI Control - stays in App)
+  const [seriesWindowMin, setSeriesWindowMin] = useState(30);
+  const [seriesPaused, setSeriesPaused] = useState(false);
+  const [showThresholds, setShowThresholds] = useState(true);
+  
+  // timeSeriesDataNode stays in App for minimal change approach
   const timeSeriesDataNode = useMemo(() => new SceneDataNode(), []);
+  
   const {
       health,
       stats,
@@ -1157,15 +1161,27 @@ function App() {
     addWidget,
     fetchLayoutSlots
   } = useLayoutViewModel();
+
+  const {
+    data,
+    connected,
+    lastDataAt,
+    latencyMs,
+    timeSeriesFrames,
+    timeSeriesAllFrame,
+    getSeriesSamples
+  } = useMetricsViewModel({
+    seriesPaused,
+    seriesWindowMin,
+    showThresholds,
+    thresholdConfig
+  });
   
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   // const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
   const [connectionTestBusy, setConnectionTestBusy] = useState<Record<string, boolean>>({});
   
-  // Time Series States
-  const [seriesWindowMin, setSeriesWindowMin] = useState(30);
-  const [seriesPaused, setSeriesPaused] = useState(false);
-  const [showThresholds, setShowThresholds] = useState(true);
+  /* Time Series UI Control States already declared at top of App */
   /* centralSyncBusy moved to useConfigViewModel */
 
   const [diagnosisBusy, setDiagnosisBusy] = useState(false);
@@ -1453,42 +1469,7 @@ function App() {
     fetchLayoutSlots();
   }, [layoutEditing, menuOpen, fetchLayoutSlots]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      const start = performance.now();
-      try {
-        const data = await metricService.getLatest();
-        const sampleTimestamp = Date.now();
-        setData(data);
-        setConnected(true);
-        setLastDataAt(sampleTimestamp);
-        seriesBufferRef.current.append(buildSeriesSample(data, sampleTimestamp));
-        setLatencyMs(Math.round(performance.now() - start));
-      } catch (err) {
-        console.error('API Error', err);
-        setConnected(false);
-        setLatencyMs(null);
-      }
-    };
-    const interval = setInterval(fetchData, 500);
-    return () => clearInterval(interval);
-  }, []);
-
-  const timeSeriesFrames = useMemo<Record<string, SeriesFrame> | null>(() => {
-    const samples = seriesBufferRef.current.getSamples();
-    if (!samples.length) {
-      return null;
-    }
-    return buildGroupedFrames(samples, TIME_SERIES_CATALOG, timeSeriesThresholds);
-  }, [data, timeSeriesThresholds]);
-
-  const timeSeriesAllFrame = useMemo<SeriesFrame | null>(() => {
-    const samples = seriesBufferRef.current.getSamples();
-    if (!samples.length) {
-      return null;
-    }
-    return buildTimeSeriesFrame(samples, TIME_SERIES_CATALOG, timeSeriesThresholds);
-  }, [data, timeSeriesThresholds]);
+  /* Polling and timeSeriesFrames/timeSeriesAllFrame computation moved to useMetricsViewModel */
 
   useEffect(() => {
     if (!timeSeriesAllFrame) {
@@ -1497,11 +1478,11 @@ function App() {
     if (seriesPaused) {
       return;
     }
-    const samples = seriesBufferRef.current.getSamples();
+    const samples = getSeriesSamples();
     const windowMs = seriesWindowMin * 60 * 1000;
     const panelData = buildPanelData(timeSeriesAllFrame, samples, windowMs);
     timeSeriesDataNode.setState({ data: panelData });
-  }, [timeSeriesAllFrame, timeSeriesDataNode, seriesPaused, seriesWindowMin]);
+  }, [timeSeriesAllFrame, timeSeriesDataNode, seriesPaused, seriesWindowMin, getSeriesSamples]);
 
   useEffect(() => {
     const tick = window.setInterval(() => setNowTick(Date.now()), 500);
