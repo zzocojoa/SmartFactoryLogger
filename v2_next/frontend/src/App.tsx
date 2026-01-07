@@ -2,7 +2,38 @@
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import ReactMarkdown from 'react-markdown';
-import { FactoryData, SpotConfig } from './types';
+import {
+  FactoryData,
+  SpotConfig,
+  HealthSnapshot,
+  StatsSnapshot,
+  ObservabilityErrorsResponse,
+  PathHealthState,
+  ConnectionTestState,
+  ConfigSnapshot,
+  SettingsFormState,
+  ConfigApplyResult,
+  ConfigUpdateResponse,
+  ThresholdKey,
+  ThresholdEntry,
+  ThresholdState,
+  ConnectionTargetKey,
+  ThresholdItem,
+  ConnectionTestResult,
+  FrontendErrorEntry,
+  NotificationLevel,
+  NotificationItem,
+  CommLogInfo,
+  CentralStatus,
+  CentralSyncResult,
+  CommMetrics,
+  CommChannelMetrics,
+  CommSpotMetrics,
+  ObservabilityErrorItem,
+  PathHealthResult
+} from './types';
+import { useSystemViewModel } from './hooks/useSystemViewModel';
+import { useSpotViewModel } from './hooks/useSpotViewModel';
 import './App.css';
 import {
   LineChart,
@@ -44,6 +75,8 @@ import * as THEME from './constants/theme';
 import { useModal } from './GlobalModalContext';
 import { useTheme } from './ThemeContext';
 
+const MAX_NOTIFICATIONS = 50;
+
 import { LayoutEditContext } from './LayoutEditContext';
 
 // Initialize Scenes Runtime (guarded for HMR)
@@ -64,7 +97,7 @@ import { apiClient, API_BASE } from './api/client';
 import { metricService } from './api/metricService';
 import { configService } from './api/configService';
 import { spotService } from './api/spotService';
-import { systemService } from './api/systemService';
+
 import { layoutService } from './api/layoutService';
 // API_BASE is now imported from api/client
 
@@ -286,336 +319,7 @@ const APPLY_KEY_LABELS: Record<string, string> = {
   'thresholds.values.endpos': `${CONFIG_LABELS.THRESHOLD_VALUE_PREFIX}(${LABELS.END_POS})`,
 };
 
-type HealthSnapshot = {
-  running: boolean;
-  thread_alive: boolean;
-  last_update: number | null;
-  driver_connected: boolean;
-  mode: string;
-  comm?: CommMetrics;
-};
 
-type CommChannelMetrics = {
-  connected?: boolean;
-  connect_attempts?: number;
-  connect_failures?: number;
-  read_failures?: number;
-  invalid_responses?: number;
-  skipped_reads?: number;
-  backoff_count?: number;
-  backoff_sec?: number;
-  next_retry_at?: number;
-  last_error?: string | null;
-  last_error_time?: number | null;
-  last_success_time?: number | null;
-  last_recovery_sec?: number | null;
-  recovery_count?: number;
-  total_downtime_sec?: number;
-  current_downtime_sec?: number;
-  last_disconnect_time?: number | null;
-  last_recovery_at?: number | null;
-  merge_blocks?: boolean;
-  merge_failures?: number;
-};
-
-type CommSpotMetrics = {
-  last_value?: number | null;
-  read_failures?: number;
-  last_error_time?: number | null;
-  last_success_time?: number | null;
-  timeout_sec?: number;
-};
-
-type CommMetrics = {
-  extruder?: CommChannelMetrics;
-  ls_plc?: CommChannelMetrics;
-  spot?: CommSpotMetrics;
-};
-
-type CentralSyncResult = {
-  status: string;
-  message: string;
-  version: string | null;
-  at?: number | null;
-};
-
-type CentralStatus = {
-  configured: boolean;
-  running: boolean;
-  server: string | null;
-  device_id: string | null;
-  backoff_sec: number;
-  last_result: CentralSyncResult;
-  meta?: ConfigSnapshot['meta'];
-};
-
-type CommLogInfo = {
-  path: string | null;
-};
-
-type StatsSnapshot = {
-  uptime_sec: number;
-  total_requests: number;
-  avg_latency_ms: number | null;
-  error_count: number;
-  last: {
-    latency_ms: number | null;
-    path: string | null;
-    status: number | null;
-    timestamp: number | null;
-  };
-  window?: {
-    window_sec: number;
-    request_count: number;
-    error_count: number;
-    error_rate: number | null;
-    avg_latency_ms: number | null;
-    p95_latency_ms: number | null;
-    requests_per_sec?: number;
-    top_paths?: Array<{
-      path: string;
-      count: number;
-      error_rate: number | null;
-      avg_latency_ms: number | null;
-    }>;
-  };
-  errors?: {
-    queue_size: number;
-    last_error_at?: number | null;
-    last_error_source?: string | null;
-    last_error_message?: string | null;
-    last_error_repeat?: number | null;
-  };
-};
-
-type ObservabilityErrorItem = {
-  time: number;
-  time_iso?: string;
-  source: string;
-  message: string;
-  detail?: string | null;
-  path?: string | null;
-  level?: string | null;
-  repeat?: number;
-};
-
-type ObservabilityErrorsResponse = {
-  items: ObservabilityErrorItem[];
-  summary: {
-    queue_size: number;
-    last_error_at?: number | null;
-    last_error_source?: string | null;
-    last_error_message?: string | null;
-    last_error_repeat?: number | null;
-  };
-};
-
-type FrontendErrorEntry = {
-  time: number;
-  type: 'error' | 'unhandledrejection';
-  message: string;
-  detail?: string;
-  stack?: string;
-};
-
-type NotificationLevel = 'info' | 'warn' | 'error';
-
-type NotificationItem = {
-  id: string;
-  time: number;
-  title: string;
-  message: string;
-  level: NotificationLevel;
-};
-
-const MAX_NOTIFICATIONS = 50;
-
-type ConfigSnapshot = {
-  config_path: string;
-  encoding: string | null;
-  config_writable?: boolean;
-  restart_required: boolean;
-  pending?: {
-    path?: string;
-    created_at?: string;
-    source?: string;
-    reason?: string;
-  } | null;
-  apply?: {
-    applied?: string[];
-    pending?: string[];
-  };
-  meta?: {
-    device_id?: string | null;
-    version?: string | null;
-    last_sync?: string | null;
-    source?: string | null;
-    override_enabled?: boolean;
-    override_by?: string | null;
-    override_at?: string | null;
-  };
-  values: {
-    extruder: { ip: string; port: number };
-    ls_plc: { ip: string; port: number };
-    spot: { ip: string; refresh_interval: number };
-    thresholds?: {
-      values?: {
-        speed?: string;
-        press?: string;
-        spot?: string;
-        temp_f?: string;
-        temp_b?: string;
-        billet?: string;
-        billet_temp?: string;
-        at_temp?: string;
-        at_pre?: string;
-        count?: string;
-        endpos?: string;
-      };
-      enable?: {
-        master_on?: boolean;
-        speed?: boolean;
-        press?: boolean;
-        spot?: boolean;
-        temp_f?: boolean;
-        temp_b?: boolean;
-        billet?: boolean;
-        billet_temp?: boolean;
-        at_temp?: boolean;
-        at_pre?: boolean;
-        count?: boolean;
-        endpos?: boolean;
-      };
-    };
-    settings: {
-      logpath: string;
-      snapshotpath: string;
-      autosave: boolean;
-      password_set: boolean;
-      custom_notice?: string;
-    };
-    logging: {
-      rotation_enabled?: boolean;
-      rotation_mode: string;
-      cycle_idle_time: number;
-      cycle_threshold_press: number;
-    };
-  };
-};
-
-type SettingsFormState = {
-  extruderIp: string;
-  extruderPort: string;
-  lsIp: string;
-  lsPort: string;
-  spotIp: string;
-  spotRefreshInterval: string;
-  thresholdMasterOn: boolean;
-  thresholdSpeedEnabled: boolean;
-  thresholdSpeedValue: string;
-  thresholdPressEnabled: boolean;
-  thresholdPressValue: string;
-  thresholdSpotEnabled: boolean;
-  thresholdSpotValue: string;
-  thresholdTempFEnabled: boolean;
-  thresholdTempFValue: string;
-  thresholdTempBEnabled: boolean;
-  thresholdTempBValue: string;
-  thresholdBilletEnabled: boolean;
-  thresholdBilletValue: string;
-  thresholdBilletTempEnabled: boolean;
-  thresholdBilletTempValue: string;
-  thresholdAtTempEnabled: boolean;
-  thresholdAtTempValue: string;
-  thresholdAtPreEnabled: boolean;
-  thresholdAtPreValue: string;
-  thresholdCountEnabled: boolean;
-  thresholdCountValue: string;
-  thresholdEndPosEnabled: boolean;
-  thresholdEndPosValue: string;
-  logPath: string;
-  snapshotPath: string;
-  autoSave: boolean;
-  rotationEnabled: boolean;
-  rotationMode: string;
-  cycleIdleTime: string;
-  cycleThresholdPress: string;
-  password: string;
-  passwordSet: boolean;
-  customNotice: string;
-};
-
-type ConfigApplyResult = {
-  applied?: string[];
-  pending?: string[];
-};
-
-type ConfigUpdateResponse = {
-  ok: boolean;
-  restart_required: boolean;
-  apply?: ConfigApplyResult;
-  meta?: any;
-  config?: any;
-};
-
-type ThresholdKey =
-  | 'speed'
-  | 'press'
-  | 'spot'
-  | 'temp_f'
-  | 'temp_b'
-  | 'billet'
-  | 'billet_temp'
-  | 'at_temp'
-  | 'at_pre'
-  | 'count'
-  | 'endpos';
-
-type ThresholdEntry = {
-  enabled: boolean;
-  value: number | null;
-};
-
-type ThresholdState = {
-  masterOn: boolean;
-  entries: Record<ThresholdKey, ThresholdEntry>;
-};
-
-type ConnectionTargetKey = 'extruder' | 'ls_plc' | 'spot';
-
-type ThresholdItem = {
-  key: ThresholdKey;
-  label: string;
-  unit: string;
-  enableField: keyof SettingsFormState;
-  valueField: keyof SettingsFormState;
-};
-
-type ConnectionTestResult = {
-  ok: boolean;
-  latency_ms: number | null;
-  message: string;
-  tested_at: number;
-};
-
-type ConnectionTestState = Partial<Record<ConnectionTargetKey, ConnectionTestResult>>;
-
-type ConnectionTestResponse = {
-  results: Record<string, { ok: boolean; latency_ms?: number; message?: string }>;
-};
-
-type PathHealthResult = {
-  status: 'OK' | 'WARN' | 'ERROR' | 'UNKNOWN';
-  exists: boolean;
-  writable: boolean;
-  is_dir: boolean;
-  is_network: boolean;
-  latency_ms: number | null;
-  message: string;
-  checked_at: number;
-};
-
-type PathHealthState = Partial<Record<'log' | 'snapshot', PathHealthResult>>;
 
 type LayoutEntry = {
   x: number;
@@ -1487,11 +1191,51 @@ function App() {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const seriesBufferRef = useRef(new SeriesBuffer(SERIES_WINDOW_MS, SERIES_MAX_POINTS));
   const timeSeriesDataNode = useMemo(() => new SceneDataNode(), []);
-  const [health, setHealth] = useState<HealthSnapshot | null>(null);
-  const [stats, setStats] = useState<StatsSnapshot | null>(null);
-  const [observabilityErrors, setObservabilityErrors] = useState<ObservabilityErrorsResponse | null>(null);
-  const [observabilityLoading, setObservabilityLoading] = useState(false);
-  const [lastExportPath, setLastExportPath] = useState<string | null>(null);
+  const {
+      health,
+      stats,
+      observabilityErrors,
+      observabilityLoading,
+      pathHealth,
+      reconnectBusy,
+      pathCheckBusy,
+      lastExportPath,
+      commLogInfo,
+      fetchHealth,
+      fetchStats,
+      loadObservabilityErrors,
+      clearObservabilityErrors,
+      reconnect,
+      runConnectionTest,
+      checkPathHealth,
+      checkPathsHealth,
+      createPath,
+      setPathHealth,
+      setPathCheckBusy,
+      fetchLatestExportPath,
+      exportObservability,
+      openExportFolder,
+      openExportFile,
+      fetchCommLogInfo,
+      openCommLogPath,
+      openCommLogFile,
+      saveSnapshot,
+      connectionTest
+  } = useSystemViewModel();
+
+  const {
+      config: spotConfig,
+      imageUrl: spotImageUrl,
+      imageError: spotImageError,
+      imageLoading: spotImageLoading,
+      lastSuccessAt: spotLastSuccessAt,
+      focusBusy,
+      refreshConfig: fetchSpotConfig,
+      handleImageLoad: handleSpotImageLoaded,
+      handleImageError: handleSpotImageError,
+      controlFocus: requestFocus
+  } = useSpotViewModel();
+  
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
   
@@ -1500,7 +1244,7 @@ function App() {
   const [seriesPaused, setSeriesPaused] = useState(false);
   const [showThresholds, setShowThresholds] = useState(true);
   const [centralSyncBusy, setCentralSyncBusy] = useState(false);
-  const [reconnectBusy, setReconnectBusy] = useState(false);
+
   const [diagnosisBusy, setDiagnosisBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -1529,23 +1273,22 @@ function App() {
   const [overrideEnabled, setOverrideEnabled] = useState(false);
   const [overrideMeta, setOverrideMeta] = useState<ConfigSnapshot["meta"] | null>(null);
   const [overrideBusy, setOverrideBusy] = useState(false);
-  const [connectionTests, setConnectionTests] = useState<ConnectionTestState>({});
   const [connectionTestBusy, setConnectionTestBusy] = useState<Record<ConnectionTargetKey, boolean>>({
     extruder: false,
     ls_plc: false,
     spot: false,
   });
-  const [pathHealth, setPathHealth] = useState<PathHealthState>({});
-  const [pathCheckBusy, setPathCheckBusy] = useState(false);
-  const [commLogPath, setCommLogPath] = useState<string | null>(null);
-  const [commLogInfoError, setCommLogInfoError] = useState<string | null>(null);
+
   const [menuOpen, setMenuOpen] = useState(false);
+  // Spot State moved to useSpotViewModel
+  /*
   const [spotConfig, setSpotConfig] = useState<SpotConfig | null>(null);
   const [spotImageUrl, setSpotImageUrl] = useState('');
   const [spotImageError, setSpotImageError] = useState<string | null>(null);
   const [spotImageLoading, setSpotImageLoading] = useState(false);
   const [spotLastSuccessAt, setSpotLastSuccessAt] = useState<number | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
+  */
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [customNotice, setCustomNotice] = useState('');
   const [layoutSaveMessage, setLayoutSaveMessage] = useState<string | null>(null);
@@ -1558,7 +1301,7 @@ function App() {
   const [layoutActiveId, setLayoutActiveId] = useState<string | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   
-  const spotHasImage = useRef(false);
+  // const spotHasImage = useRef(false);
   const saveMessageTimerRef = useRef<number | null>(null);
   const restoreMessageTimerRef = useRef<number | null>(null);
   const settingsToastTimerRef = useRef<number | null>(null);
@@ -1625,33 +1368,8 @@ function App() {
       }
     }
   }, []);
-  const loadExportPath = useCallback(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    try {
-      const stored = window.localStorage.getItem(EXPORT_PATH_STORAGE_KEY);
-      if (stored) {
-        setLastExportPath(stored);
-      }
-    } catch (error) {
-      console.error('Export path load failed', error);
-    }
-  }, []);
-  const persistExportPath = useCallback((path: string | null) => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    try {
-      if (path) {
-        window.localStorage.setItem(EXPORT_PATH_STORAGE_KEY, path);
-      } else {
-        window.localStorage.removeItem(EXPORT_PATH_STORAGE_KEY);
-      }
-    } catch (error) {
-      console.error('Export path save failed', error);
-    }
-  }, []);
+
+
   const thresholdState = useMemo(() => {
     if (settingsOpen && settingsForm) {
       return buildThresholdStateFromForm(settingsForm);
@@ -2001,58 +1719,7 @@ function App() {
     return () => window.clearInterval(tick);
   }, []);
 
-  const fetchHealth = async () => {
-    try {
-      const data = await systemService.getHealth();
-      setHealth(data);
-      return data;
-    } catch (error) {
-      setHealth(null);
-      throw error;
-    }
-  };
 
-  const fetchStats = async () => {
-    try {
-      const data = await systemService.getStats();
-      setStats(data);
-      return data;
-    } catch (error) {
-      setStats(null);
-      throw error;
-    }
-  };
-
-  const loadObservabilityErrors = useCallback(
-    async (limit: number = LOGIC.OBSERVABILITY_ERROR_LIMIT) => {
-      setObservabilityLoading(true);
-      try {
-        const data = await systemService.getObservabilityErrors(limit);
-        setObservabilityErrors(data);
-      } catch (error) {
-        console.error('Observability errors load failed', error);
-      } finally {
-        setObservabilityLoading(false);
-      }
-    },
-    []
-  );
-
-  const fetchLatestExportPath = useCallback(async () => {
-    try {
-      const data = await systemService.getLatestExportPath();
-      const path = data?.path ?? null;
-      if (path) {
-        setLastExportPath(path);
-        persistExportPath(path);
-      } else {
-        setLastExportPath(null);
-        persistExportPath(null);
-      }
-    } catch (error) {
-      console.error('Export path fetch failed', error);
-    }
-  }, [persistExportPath]);
 
   const fetchCentralStatus = async () => {
     try {
@@ -2101,17 +1768,13 @@ function App() {
 
 
   const handleReconnect = async () => {
-    if (reconnectBusy) return;
-    setReconnectBusy(true);
-    try {
-      await systemService.reconnect();
+    // Busy check is handled in hook, but UI disabling is via reconnectBusy from hook
+    const success = await reconnect();
+    if (success) {
       await fetchHealth();
       await modal.alert('Reconnect requested. Check status badge.');
-    } catch (error) {
-      console.error('Reconnect failed', error);
+    } else {
       await modal.alert('Reconnect failed.');
-    } finally {
-      setReconnectBusy(false);
     }
   };
 
@@ -2121,6 +1784,12 @@ function App() {
     try {
       const snapshot = await fetchHealth();
       const statsSnapshot = await fetchStats().catch(() => null);
+      
+      if (!snapshot) {
+        await modal.alert('Failed to fetch health data.');
+        return;
+      }
+
       const lastUpdate = snapshot.last_update
         ? new Date(snapshot.last_update * 1000).toLocaleString()
         : 'n/a';
@@ -2153,16 +1822,10 @@ function App() {
     if (exportBusy) return;
     setExportBusy(true);
     try {
-      const data = await systemService.exportObservability({
-        include_errors: true,
-        front_errors: frontErrors,
-      });
-      const path = data?.path ?? null;
+      const path = await exportObservability(true);
       if (!path) {
         throw new Error('Export path missing');
       }
-      setLastExportPath(path);
-      persistExportPath(path);
       await modal.alert(`지표 내보내기 완료:\n${path}`);
     } catch (error) {
       console.error('Observability export failed', error);
@@ -2177,7 +1840,7 @@ function App() {
       return;
     }
     try {
-      await systemService.openExportFile();
+      await openExportFile();
     } catch (error) {
       console.error('Open export file failed', error);
       await modal.alert('내보낸 파일 열기 실패.');
@@ -2189,7 +1852,7 @@ function App() {
       return;
     }
     try {
-      await systemService.openExportFolder();
+      await openExportFolder();
     } catch (error) {
       console.error('Open export folder failed', error);
       await modal.alert('내보낸 폴더 열기 실패.');
@@ -2214,8 +1877,7 @@ function App() {
       return;
     }
     try {
-      await systemService.clearObservabilityErrors();
-      await loadObservabilityErrors();
+      await clearObservabilityErrors();
     } catch (error) {
       console.error('Observability clear failed', error);
       await modal.alert('에러 큐 비우기 실패.');
@@ -2260,7 +1922,7 @@ function App() {
       const base64Data = canvas.toDataURL('image/png');
       
       try {
-        await systemService.createSnapshot({
+        await saveSnapshot({
           image_base64: base64Data,
           name: 'snapshot',
           format: 'png'
@@ -2433,28 +2095,21 @@ function App() {
     loadSettings();
     fetchCentralStatus().catch(() => null);
     (async () => {
-      try {
-        const data = await systemService.getCommLogInfo();
-        setCommLogPath(data?.path ?? null);
-        setCommLogInfoError(null);
-      } catch (error) {
-        setCommLogInfoError('통신 로그 경로를 불러오지 못했습니다.');
-      }
+      fetchCommLogInfo();
     })();
-  }, [settingsOpen, loadSettings]);
+  }, [settingsOpen, loadSettings, fetchCommLogInfo]);
 
   useEffect(() => {
     if (!settingsOpen) {
       return;
     }
-    loadExportPath();
     fetchLatestExportPath();
     loadObservabilityErrors();
     const interval = window.setInterval(() => {
       loadObservabilityErrors();
     }, OBSERVABILITY_REFRESH_MS);
     return () => window.clearInterval(interval);
-  }, [settingsOpen, loadObservabilityErrors, loadExportPath, fetchLatestExportPath]);
+  }, [settingsOpen, loadObservabilityErrors, fetchLatestExportPath]);
 
   useEffect(() => {
     if (!settingsOpen) {
@@ -2462,8 +2117,6 @@ function App() {
       settingsExternalNotifyRef.current = null;
       setExternalConfigPending(null);
       setExternalConfigPendingAt(null);
-      setCommLogPath(null);
-      setCommLogInfoError(null);
     }
   }, [settingsOpen]);
 
@@ -2669,43 +2322,43 @@ function App() {
   }, [externalConfigPending, buildSettingsFingerprint, showSettingsToast]);
 
   const handleCopyCommLogPath = useCallback(async () => {
-    if (!commLogPath) {
+    if (!commLogInfo.path) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(commLogPath);
+      await navigator.clipboard.writeText(commLogInfo.path);
       showSettingsToast('통신 로그 경로를 복사했습니다.', 'ok');
     } catch (error) {
       console.error('Clipboard copy failed', error);
       showSettingsToast('복사에 실패했습니다.', 'error');
     }
-  }, [commLogPath, showSettingsToast]);
+  }, [commLogInfo.path, showSettingsToast]);
 
-  const handleOpenCommLogPath = useCallback(async () => {
-    if (!commLogPath) {
+  const handleOpenCommLogPath = async () => {
+    if (!commLogInfo.path) {
       return;
     }
     try {
-      await systemService.openCommLogPath();
+      await openCommLogPath();
       showSettingsToast('통신 로그 폴더를 열었습니다.', 'ok');
     } catch (error) {
       console.error('Open comm log path failed', error);
       showSettingsToast('폴더 열기에 실패했습니다.', 'error');
     }
-  }, [commLogPath, showSettingsToast]);
+  };
 
-  const handleOpenCommLogFile = useCallback(async () => {
-    if (!commLogPath) {
+  const handleOpenCommLogFile = async () => {
+    if (!commLogInfo.path) {
       return;
     }
     try {
-      await systemService.openCommLogFile();
+      await openCommLogFile();
       showSettingsToast('통신 로그 파일을 열었습니다.', 'ok');
     } catch (error) {
       console.error('Open comm log file failed', error);
       showSettingsToast('파일 열기에 실패했습니다.', 'error');
     }
-  }, [commLogPath, showSettingsToast]);
+  };
 
   useEffect(() => {
     if (!settingsOpen) {
@@ -3130,7 +2783,7 @@ function App() {
     }
   };
 
-  const runConnectionTest = async (target: ConnectionTargetKey) => {
+  const handleConnectionTest = async (target: ConnectionTargetKey) => {
     if (!settingsForm) {
       return;
     }
@@ -3171,33 +2824,9 @@ function App() {
 
     setConnectionTestBusy((prev) => ({ ...prev, [target]: true }));
     try {
-      const data = await systemService.runConnectionTest(payload);
-      const results = data?.results ?? {};
-      setConnectionTests((prev) => {
-        const next = { ...prev };
-        Object.entries(results).forEach(([key, value]) => {
-          if (key === 'extruder' || key === 'ls_plc' || key === 'spot') {
-            next[key] = {
-              ok: Boolean(value.ok),
-              latency_ms: value.latency_ms ?? null,
-              message: value.message ?? '',
-              tested_at: Date.now(),
-            };
-          }
-        });
-        return next;
-      });
+      await runConnectionTest(payload);
     } catch (error) {
       console.error('Connection test failed', error);
-      setConnectionTests((prev) => ({
-        ...prev,
-        [target]: {
-          ok: false,
-          latency_ms: null,
-          message: '연결 테스트 실패',
-          tested_at: Date.now(),
-        },
-      }));
     } finally {
       setConnectionTestBusy((prev) => ({ ...prev, [target]: false }));
     }
@@ -3278,7 +2907,7 @@ function App() {
 
       setPathCheckBusy(true);
       try {
-        const data = await systemService.checkPathHealth(payload);
+        const data = await checkPathsHealth(payload);
         const results = data?.results ?? {};
         const merged: PathHealthState = { ...localResults };
         Object.entries(results).forEach(([key, val]) => {
@@ -3339,7 +2968,7 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [settingsOpen, settingsReady, logPathValue, snapshotPathValue, runPathHealthCheck]);
 
-  const createPath = useCallback(
+  const handleCreatePath = useCallback(
     async (path: string) => {
       const trimmed = path.trim();
       if (!trimmed) {
@@ -3347,7 +2976,7 @@ function App() {
         return;
       }
       try {
-        await systemService.createPath(trimmed);
+        await createPath(trimmed);
         await runPathHealthCheck();
       } catch (error) {
         console.error('Path create failed', error);
@@ -3709,64 +3338,23 @@ function App() {
   }, [settingsOpen, settingsSections, settingsForm]);
 
 
+  // Spot Logic moved to useSpotViewModel
+  /* 
   useEffect(() => {
-    const fetchSpotConfig = async () => {
-      try {
-        const data = await spotService.getConfig();
-        setSpotConfig(data);
-      } catch (err) {
-        console.error('SPOT config error', err);
-      }
-    };
+    const fetchSpotConfig = async () => { ... };
     fetchSpotConfig();
   }, []);
 
-  useEffect(() => {
-    if (!spotConfig?.image_url) {
-      return;
-    }
-    spotHasImage.current = false;
-    setSpotLastSuccessAt(null);
-    setSpotImageError(null);
-  }, [spotConfig?.image_url]);
+  useEffect(() => { ... }, [spotConfig?.image_url]);
 
-  useEffect(() => {
-    if (!spotConfig || !spotConfig.image_url) return;
-    const refreshMs = Math.max(500, Math.round(spotConfig.refresh_interval * 1000));
-    const updateImage = () => {
-      const separator = spotConfig.image_url.includes('?') ? '&' : '?';
-      if (!spotHasImage.current) setSpotImageLoading(true);
-      setSpotImageUrl(`${API_BASE}/api/spot/proxy_image?t=${Date.now()}`);
-    };
-    updateImage();
-    const timer = setInterval(updateImage, refreshMs);
-    return () => clearInterval(timer);
-  }, [spotConfig]);
+  useEffect(() => { ... }, [spotConfig]);
 
-  const handleSpotImageLoaded = () => {
-    spotHasImage.current = true;
-    setSpotImageLoading(false);
-    setSpotImageError(null);
-    setSpotLastSuccessAt(Date.now());
-  };
+  const handleSpotImageLoaded = () => { ... };
 
-  const handleSpotImageError = (message = '이미지 수신 실패') => {
-    setSpotImageLoading(false);
-    setSpotImageError(message);
-  };
+  const handleSpotImageError = (message = '이미지 수신 실패') => { ... };
 
-  const requestFocus = async (steps: number) => {
-    if (!spotConfig?.focus_enabled || focusBusy) return;
-    setFocusBusy(true);
-    try {
-      await spotService.focus(steps);
-    } catch (err) {
-      console.error('SPOT focus error', err);
-      pushNotification('초점 조절 실패', 'SPOT 액추에이터 제어 중 오류가 발생했습니다.', 'error');
-    } finally {
-      setFocusBusy(false);
-    }
-  };
+  const requestFocus = async (steps: number) => { ... };
+  */
 
   // --- Widget Renderers ---
   // --- Scene Creation ---
@@ -3836,7 +3424,7 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_BASE}/api/layouts`, {
+      await layoutService.saveLayout({
         name,
         layout: layoutRef.current,
         cols: CURRENT_LAYOUT_COLS,
@@ -3848,8 +3436,10 @@ function App() {
       pushNotification('레이아웃 저장', `저장 완료: ${name}`, 'info');
     } catch (error) {
       console.error('Layout save failed', error);
+      // Rough check for 400 without axios dependency, assuming api service throws with response
+      const errAny = error as any;
       const message =
-        axios.isAxiosError(error) && error.response?.status === 400
+        (errAny.response?.status === 400)
           ? '레이아웃은 최대 3개까지 저장할 수 있습니다.'
           : '저장 실패';
       setLayoutSaveError(message);
@@ -3876,7 +3466,7 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_BASE}/api/layouts/restore`, { slot_id: targetId });
+      await layoutService.restoreLayout(targetId);
       await loadLayoutSnapshot();
       setLayoutRestoreError(null);
       setLayoutRestoreMessage('복구됨');
@@ -3925,7 +3515,7 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_BASE}/api/layouts/delete`, { slot_id: targetId });
+      await layoutService.deleteLayout(targetId);
       await loadLayoutSnapshot();
       setLayoutRestoreError(null);
       setLayoutRestoreMessage('삭제됨');
@@ -4736,7 +4326,7 @@ function App() {
                         {connectionTestTargets
                           .filter((target) => target.key !== 'spot')
                           .map((target) => {
-                          const result = connectionTests[target.key];
+                          const result = connectionTest[target.key];
                           const badge = getTestBadge(result);
                           const targetHasError =
                             target.key === 'extruder'
@@ -4760,7 +4350,7 @@ function App() {
               <button
                 type="button"
                 className="settings-test-button"
-                onClick={() => runConnectionTest(target.key)}
+                onClick={() => handleConnectionTest(target.key)}
                 disabled={connectionTestBusy[target.key] || targetHasError}
                 aria-disabled={connectionTestBusy[target.key] || targetHasError}
               >
@@ -4781,8 +4371,8 @@ function App() {
                                 type="button"
                                 className="settings-comm-log-button"
                                 onClick={handleCopyCommLogPath}
-                                disabled={!commLogPath}
-                                aria-disabled={!commLogPath}
+                                disabled={!commLogInfo.path}
+                                aria-disabled={!commLogInfo.path}
                               >
                                 경로 복사
                               </button>
@@ -4790,8 +4380,8 @@ function App() {
                                 type="button"
                                 className="settings-comm-log-button"
                                 onClick={handleOpenCommLogPath}
-                                disabled={!commLogPath}
-                                aria-disabled={!commLogPath}
+                                disabled={!commLogInfo.path}
+                                aria-disabled={!commLogInfo.path}
                               >
                                 폴더 열기
                               </button>
@@ -4799,15 +4389,15 @@ function App() {
                                 type="button"
                                 className="settings-comm-log-button"
                                 onClick={handleOpenCommLogFile}
-                                disabled={!commLogPath}
-                                aria-disabled={!commLogPath}
+                                disabled={!commLogInfo.path}
+                                aria-disabled={!commLogInfo.path}
                               >
                                 파일 열기
                               </button>
                             </div>
                           </div>
                           <span className="settings-comm-log-value">
-                            {commLogPath ?? commLogInfoError ?? '--'}
+                            {commLogInfo.path ?? '--'}
                           </span>
                         </div>
                         {commSnapshot ? (
@@ -5485,7 +5075,7 @@ function App() {
                                   <button
                                     type="button"
                                     className="settings-path-button secondary"
-                                    onClick={() => createPath(pathValue)}
+                                    onClick={() => handleCreatePath(pathValue)}
                                   >
                                     {LABELS.CREATE_FOLDER}
                                   </button>

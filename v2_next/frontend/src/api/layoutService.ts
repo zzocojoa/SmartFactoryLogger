@@ -14,5 +14,15 @@ export const layoutService = {
   getLayoutSnapshot: async () => {
     const response = await apiClient.get('/api/layout');
     return response.data;
+  },
+
+  restoreLayout: async (slotId: string) => {
+    const response = await apiClient.post('/api/layouts/restore', { slot_id: slotId });
+    return response.data;
+  },
+
+  deleteLayout: async (slotId: string) => {
+    const response = await apiClient.post('/api/layouts/delete', { slot_id: slotId });
+    return response.data;
   }
 };

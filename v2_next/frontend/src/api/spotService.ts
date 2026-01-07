@@ -1,11 +1,14 @@
-import { apiClient } from './client';
+import { apiClient, API_BASE } from './client';
 
 export const spotService = {
   getImageUrl: () => {
-    // This returns the URL string, not the image data itself, usually.
-    // Based on App.tsx usage, it might be constructed or fetched.
-    // If App.tsx does: axios.get('/api/spot/image'), then:
-    return '/api/spot/image'; 
+    // Return the full URL for the image proxy
+    // App.tsx uses: ${API_BASE}/api/spot/proxy_image
+    // We assume API_BASE is handled by the caller or we should return the full path if needed.
+    // Since App.tsx prepends API_BASE, we should probably return the path relative to API_BASE 
+    // OR return the full URL if we import API_BASE.
+    // Let's import API_BASE to be self-contained.
+    return `${API_BASE}/api/spot/proxy_image`; 
   },
   
   getConfig: async () => {
