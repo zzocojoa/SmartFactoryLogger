@@ -1,7 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import { FactoryData, SpotConfig } from './types';
 import './App.css';
@@ -61,7 +60,13 @@ if (typeof window !== 'undefined') {
 
 // ... (existing imports)
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.protocol.startsWith('file') ? 'http://localhost:8000' : '');
+import { apiClient, API_BASE } from './api/client';
+import { metricService } from './api/metricService';
+import { configService } from './api/configService';
+import { spotService } from './api/spotService';
+import { systemService } from './api/systemService';
+import { layoutService } from './api/layoutService';
+// API_BASE is now imported from api/client
 
 const {
   SPOT_WARN_TEMP,
@@ -147,7 +152,7 @@ const NoticeComponent = ({ item }: { item?: any }) => {
 
   const handleSave = async () => {
     try {
-      await axios.post(`${API_BASE}/api/config/notice`, { content: editValue });
+      await configService.saveNotice(editValue);
       setCustomNotice(editValue);
       setEditing(false);
     } catch (error) {
@@ -1822,9 +1827,9 @@ function App() {
 
   const fetchLayoutSlots = useCallback(async () => {
     try {
-      const res = await axios.get<LayoutSlotsResponse>(`${API_BASE}/api/layouts`);
-      setLayoutSlots(res.data?.slots ?? []);
-      setLayoutActiveId(res.data?.active_id ?? null);
+      const data = await layoutService.getLayouts();
+      setLayoutSlots(data?.slots ?? []);
+      setLayoutActiveId(data?.active_id ?? null);
     } catch (error) {
       console.error('Layout slots load failed', error);
       setLayoutSlots([]);
@@ -1873,7 +1878,7 @@ function App() {
       version: 'v2',
     };
     try {
-      const res = await axios.post(`${API_BASE}/api/layouts`, payload);
+      const data = await layoutService.saveLayout(payload);
       localStorage.removeItem(LAYOUT_STORAGE_KEY);
       localStorage.removeItem(LAYOUT_COLS_KEY);
       localStorage.removeItem(LAYOUT_BACKUP_KEY);
@@ -1881,7 +1886,7 @@ function App() {
         layout: payload.layout,
         cols: payload.cols,
         version: payload.version,
-        updated_at: res.data?.updated_at ?? null,
+        updated_at: data?.updated_at ?? null,
       } as LayoutSnapshot;
     } catch (error) {
       console.error('Legacy layout migration failed', error);
@@ -1896,8 +1901,8 @@ function App() {
   const loadLayoutSnapshot = useCallback(async () => {
     setLayoutLoadError(null);
     try {
-      const res = await axios.get<LayoutSnapshot>(`${API_BASE}/api/layout`);
-      const snapshot = res.data;
+      const snapshot = await layoutService.getLayoutSnapshot();
+      // const snapshot = res.data; // service returns data directly
       if (snapshot && snapshot.layout) {
         const normalized = normalizeLayoutMap(snapshot.layout, snapshot.cols ?? null);
         setLayoutSnapshot({
@@ -1908,8 +1913,9 @@ function App() {
       } else {
         setLayoutSnapshot(null);
       }
+
     } catch (error) {
-      const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+      const status = (error as any)?.response?.status;
       if (status === 404) {
         const migrated = await migrateLegacyLayout();
         setLayoutSnapshot(migrated);
@@ -1944,12 +1950,12 @@ function App() {
     const fetchData = async () => {
       const start = performance.now();
       try {
-        const res = await axios.get<FactoryData>(`${API_BASE}/api/data`);
+        const data = await metricService.getLatest();
         const sampleTimestamp = Date.now();
-        setData(res.data);
+        setData(data);
         setConnected(true);
         setLastDataAt(sampleTimestamp);
-        seriesBufferRef.current.append(buildSeriesSample(res.data, sampleTimestamp));
+        seriesBufferRef.current.append(buildSeriesSample(data, sampleTimestamp));
         setLatencyMs(Math.round(performance.now() - start));
       } catch (err) {
         console.error('API Error', err);
@@ -1997,9 +2003,9 @@ function App() {
 
   const fetchHealth = async () => {
     try {
-      const res = await axios.get<HealthSnapshot>(`${API_BASE}/health`);
-      setHealth(res.data);
-      return res.data;
+      const data = await systemService.getHealth();
+      setHealth(data);
+      return data;
     } catch (error) {
       setHealth(null);
       throw error;
@@ -2008,9 +2014,9 @@ function App() {
 
   const fetchStats = async () => {
     try {
-      const res = await axios.get<StatsSnapshot>(`${API_BASE}/stats`);
-      setStats(res.data);
-      return res.data;
+      const data = await systemService.getStats();
+      setStats(data);
+      return data;
     } catch (error) {
       setStats(null);
       throw error;
@@ -2021,10 +2027,8 @@ function App() {
     async (limit: number = LOGIC.OBSERVABILITY_ERROR_LIMIT) => {
       setObservabilityLoading(true);
       try {
-        const res = await axios.get<ObservabilityErrorsResponse>(`${API_BASE}/api/observability/errors`, {
-          params: { limit },
-        });
-        setObservabilityErrors(res.data);
+        const data = await systemService.getObservabilityErrors(limit);
+        setObservabilityErrors(data);
       } catch (error) {
         console.error('Observability errors load failed', error);
       } finally {
@@ -2036,8 +2040,8 @@ function App() {
 
   const fetchLatestExportPath = useCallback(async () => {
     try {
-      const res = await axios.get<{ path: string | null }>(`${API_BASE}/api/observability/export/latest`);
-      const path = res.data?.path ?? null;
+      const data = await systemService.getLatestExportPath();
+      const path = data?.path ?? null;
       if (path) {
         setLastExportPath(path);
         persistExportPath(path);
@@ -2052,9 +2056,9 @@ function App() {
 
   const fetchCentralStatus = async () => {
     try {
-      const res = await axios.get<CentralStatus>(`${API_BASE}/api/config/central-status`);
-      setCentralStatus(res.data);
-      return res.data;
+      const data = await configService.getCentralStatus();
+      setCentralStatus(data);
+      return data;
     } catch (error) {
       setCentralStatus(null);
       throw error;
@@ -2069,8 +2073,8 @@ function App() {
     setSettingsError(null);
     setSettingsInfo(null);
     try {
-      const res = await axios.post<CentralSyncResult>(`${API_BASE}/api/config/sync`);
-      const status = res.data?.status ?? 'UNKNOWN';
+      const data = await configService.syncCentral();
+      const status = data?.status ?? 'UNKNOWN';
       const message =
         status === 'APPLIED'
           ? MESSAGES.SYNC_SUCCESS
@@ -2100,7 +2104,7 @@ function App() {
     if (reconnectBusy) return;
     setReconnectBusy(true);
     try {
-      await axios.post(`${API_BASE}/api/control/reconnect`);
+      await systemService.reconnect();
       await fetchHealth();
       await modal.alert('Reconnect requested. Check status badge.');
     } catch (error) {
@@ -2149,11 +2153,11 @@ function App() {
     if (exportBusy) return;
     setExportBusy(true);
     try {
-      const res = await axios.post<{ path?: string }>(`${API_BASE}/api/observability/export`, {
+      const data = await systemService.exportObservability({
         include_errors: true,
         front_errors: frontErrors,
       });
-      const path = res.data?.path ?? null;
+      const path = data?.path ?? null;
       if (!path) {
         throw new Error('Export path missing');
       }
@@ -2173,7 +2177,7 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_BASE}/api/observability/export/open-file`);
+      await systemService.openExportFile();
     } catch (error) {
       console.error('Open export file failed', error);
       await modal.alert('내보낸 파일 열기 실패.');
@@ -2185,7 +2189,7 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_BASE}/api/observability/export/open-folder`);
+      await systemService.openExportFolder();
     } catch (error) {
       console.error('Open export folder failed', error);
       await modal.alert('내보낸 폴더 열기 실패.');
@@ -2210,7 +2214,7 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_BASE}/api/observability/errors/clear`);
+      await systemService.clearObservabilityErrors();
       await loadObservabilityErrors();
     } catch (error) {
       console.error('Observability clear failed', error);
@@ -2256,7 +2260,7 @@ function App() {
       const base64Data = canvas.toDataURL('image/png');
       
       try {
-        await axios.post(`${API_BASE}/api/control/snapshot`, {
+        await systemService.createSnapshot({
           image_base64: base64Data,
           name: 'snapshot',
           format: 'png'
@@ -2393,9 +2397,9 @@ function App() {
     setSettingsPending(null);
     setPathHealth({});
     try {
-      const res = await axios.get<ConfigSnapshot>(`${API_BASE}/api/config`);
-      applySettingsSnapshot(res.data);
-      const fingerprint = buildSettingsFingerprint(res.data);
+      const data = await configService.getConfig();
+      applySettingsSnapshot(data);
+      const fingerprint = buildSettingsFingerprint(data);
       settingsFingerprintRef.current = fingerprint;
       settingsExternalNotifyRef.current = null;
       setExternalConfigPending(null);
@@ -2410,8 +2414,8 @@ function App() {
 
   const loadThresholdConfig = useCallback(async () => {
     try {
-      const res = await axios.get<ConfigSnapshot>(`${API_BASE}/api/config`);
-      setThresholdConfig(buildThresholdStateFromConfig(res.data.values?.thresholds));
+      const data = await configService.getConfig();
+      setThresholdConfig(buildThresholdStateFromConfig(data.values?.thresholds));
     } catch (error) {
       console.error('Threshold config load failed', error);
     }
@@ -2430,8 +2434,8 @@ function App() {
     fetchCentralStatus().catch(() => null);
     (async () => {
       try {
-        const res = await axios.get<CommLogInfo>(`${API_BASE}/api/logs/comm-metrics`);
-        setCommLogPath(res.data?.path ?? null);
+        const data = await systemService.getCommLogInfo();
+        setCommLogPath(data?.path ?? null);
         setCommLogInfoError(null);
       } catch (error) {
         setCommLogInfoError('통신 로그 경로를 불러오지 못했습니다.');
@@ -2682,7 +2686,7 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_BASE}/api/logs/comm-metrics/open`);
+      await systemService.openCommLogPath();
       showSettingsToast('통신 로그 폴더를 열었습니다.', 'ok');
     } catch (error) {
       console.error('Open comm log path failed', error);
@@ -2695,7 +2699,7 @@ function App() {
       return;
     }
     try {
-      await axios.post(`${API_BASE}/api/logs/comm-metrics/open-file`);
+      await systemService.openCommLogFile();
       showSettingsToast('통신 로그 파일을 열었습니다.', 'ok');
     } catch (error) {
       console.error('Open comm log file failed', error);
@@ -2712,8 +2716,8 @@ function App() {
         return;
       }
       try {
-        const res = await axios.get<ConfigSnapshot>(`${API_BASE}/api/config`);
-        const fingerprint = buildSettingsFingerprint(res.data);
+        const data = await configService.getConfig();
+        const fingerprint = buildSettingsFingerprint(data);
         if (!settingsFingerprintRef.current) {
           settingsFingerprintRef.current = fingerprint;
           return;
@@ -2725,12 +2729,12 @@ function App() {
           if (settingsExternalNotifyRef.current !== fingerprint) {
             showSettingsToast('설정 파일이 외부에서 변경되었습니다. 편집 중이어서 자동 갱신을 보류합니다.', 'warn');
             settingsExternalNotifyRef.current = fingerprint;
-            setExternalConfigPending(res.data);
+            setExternalConfigPending(data);
             setExternalConfigPendingAt(Date.now());
           }
           return;
         }
-        applySettingsSnapshot(res.data);
+        applySettingsSnapshot(data);
         settingsFingerprintRef.current = fingerprint;
         settingsExternalNotifyRef.current = null;
         setExternalConfigPending(null);
@@ -2938,9 +2942,9 @@ function App() {
     };
 
     try {
-      const res = await axios.post<ConfigUpdateResponse>(`${API_BASE}/api/config`, payload);
-      const applyInfo = res.data?.apply ?? null;
-      const nextMeta = res.data?.meta ?? null;
+      const data = await configService.saveConfig(payload);
+      const applyInfo = data?.apply ?? null;
+      const nextMeta = data?.meta ?? null;
       const pendingCount = applyInfo?.pending?.length ?? 0;
       const appliedCount = applyInfo?.applied?.length ?? 0;
       if (pendingCount > 0) {
@@ -2950,7 +2954,7 @@ function App() {
       } else {
         if (!isAuto) setSettingsInfo('설정이 저장되었습니다.');
       }
-      setSettingsRestartRequired(Boolean(res.data?.restart_required));
+      setSettingsRestartRequired(Boolean(data?.restart_required));
       setSettingsApplyResult(applyInfo);
       setSettingsPending(null);
       if (nextMeta) {
@@ -2980,8 +2984,8 @@ function App() {
       // Fetch the latest config snapshot to get the authoritative fingerprint
       // This ensures the polling loop doesn't see our own save as an external change
       try {
-        const snapshotRes = await axios.get<ConfigSnapshot>(`${API_BASE}/api/config`);
-        const newFingerprint = buildSettingsFingerprint(snapshotRes.data);
+        const snapshotData = await configService.getConfig();
+        const newFingerprint = buildSettingsFingerprint(snapshotData);
         settingsFingerprintRef.current = newFingerprint;
       } catch (ignore) {
         // If snapshot fetch fails, we just risk an extra notification, which is acceptable
@@ -3020,7 +3024,7 @@ function App() {
     setSettingsLoading(true);
     setSettingsError(null);
     try {
-      await axios.post(`${API_BASE}/api/config/restore-defaults`);
+      await configService.restoreDefaults();
       setSettingsRestartRequired(true);
       setSettingsApplyResult(null);
       await loadSettings();
@@ -3052,7 +3056,7 @@ function App() {
     setSettingsLoading(true);
     setSettingsError(null);
     try {
-      await axios.post(`${API_BASE}/api/config/restore-backup`);
+      await configService.restoreBackup();
       setSettingsRestartRequired(true);
       setSettingsApplyResult(null);
       await loadSettings();
@@ -3088,7 +3092,7 @@ function App() {
     setSettingsPendingBusy(true);
     setSettingsError(null);
     try {
-      await axios.post(`${API_BASE}/api/config/pending/apply`);
+      await configService.applyPending();
       await loadSettings();
       showSettingsToast('보류된 설정을 적용했습니다.', 'ok');
     } catch (error) {
@@ -3114,7 +3118,7 @@ function App() {
     setSettingsPendingBusy(true);
     setSettingsError(null);
     try {
-      await axios.post(`${API_BASE}/api/config/pending/clear`);
+      await configService.clearPending();
       await loadSettings();
       showSettingsToast('보류된 설정을 삭제했습니다.', 'ok');
     } catch (error) {
@@ -3167,11 +3171,8 @@ function App() {
 
     setConnectionTestBusy((prev) => ({ ...prev, [target]: true }));
     try {
-      const res = await axios.post<ConnectionTestResponse>(
-        `${API_BASE}/api/control/test-connection`,
-        payload
-      );
-      const results = res.data?.results ?? {};
+      const data = await systemService.runConnectionTest(payload);
+      const results = data?.results ?? {};
       setConnectionTests((prev) => {
         const next = { ...prev };
         Object.entries(results).forEach(([key, value]) => {
@@ -3219,17 +3220,17 @@ function App() {
     setOverrideBusy(true);
     setSettingsError(null);
     try {
-      const res = await axios.post(`${API_BASE}/api/config/override`, {
+      const data = await configService.toggleOverride({
         enabled: nextEnabled,
         password,
         actor: 'local',
       });
-      const meta = res.data?.meta ?? null;
+      const meta = data?.meta ?? null;
       setOverrideEnabled(nextEnabled);
       setOverrideMeta(meta);
     } catch (error) {
       console.error('Override toggle failed', error);
-      const message = axios.isAxiosError(error) ? (error.response?.data?.detail || error.message) : String(error);
+      const message = String(error);
       setSettingsError(`오버라이드 변경 실패: ${message}`);
     } finally {
       setOverrideBusy(false);
@@ -3277,8 +3278,8 @@ function App() {
 
       setPathCheckBusy(true);
       try {
-        const res = await axios.post(`${API_BASE}/api/control/path-health`, { paths: payload });
-        const results = res.data?.results ?? {};
+        const data = await systemService.checkPathHealth(payload);
+        const results = data?.results ?? {};
         const merged: PathHealthState = { ...localResults };
         Object.entries(results).forEach(([key, val]) => {
           if (key === 'log' || key === 'snapshot') {
@@ -3346,7 +3347,7 @@ function App() {
         return;
       }
       try {
-        await axios.post(`${API_BASE}/api/control/path-create`, { path: trimmed });
+        await systemService.createPath(trimmed);
         await runPathHealthCheck();
       } catch (error) {
         console.error('Path create failed', error);
@@ -3711,8 +3712,8 @@ function App() {
   useEffect(() => {
     const fetchSpotConfig = async () => {
       try {
-        const res = await axios.get<SpotConfig>(`${API_BASE}/api/spot/config`);
-        setSpotConfig(res.data);
+        const data = await spotService.getConfig();
+        setSpotConfig(data);
       } catch (err) {
         console.error('SPOT config error', err);
       }
@@ -3758,7 +3759,7 @@ function App() {
     if (!spotConfig?.focus_enabled || focusBusy) return;
     setFocusBusy(true);
     try {
-      await axios.post(`${API_BASE}/api/spot/focus`, null, { params: { steps } });
+      await spotService.focus(steps);
     } catch (err) {
       console.error('SPOT focus error', err);
       pushNotification('초점 조절 실패', 'SPOT 액추에이터 제어 중 오류가 발생했습니다.', 'error');
