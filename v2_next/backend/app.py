@@ -1272,10 +1272,15 @@ def shutdown(payload: ShutdownRequest):
 
 # --- Static File Serving (Frontend) ---
 # Check common locations for frontend dist
+# Check common locations for frontend dist
 if getattr(sys, 'frozen', False):
-    # If running from backend_server.exe in resources/backend/
-    # resources/backend/backend_server.exe -> parent is backend/ -> parent is resources/
-    base_dir = Path(sys.executable).parent.parent
+    # If running as a one-file exe, PyInstaller extracts to sys._MEIPASS
+    if hasattr(sys, '_MEIPASS'):
+        base_dir = Path(sys._MEIPASS)
+    else:
+        # Fallback for one-dir mode (legacy support just in case)
+        # resources/backend/backend_server.exe -> parent is backend/ -> parent is resources/
+        base_dir = Path(sys.executable).parent.parent
 else:
     # Development mode
     base_dir = Path(__file__).parent.parent
