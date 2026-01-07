@@ -100,12 +100,8 @@ if (typeof window !== 'undefined') {
 // ... (existing imports)
 
 import { apiClient, API_BASE } from './api/client';
-import { metricService } from './api/metricService';
 import { configService } from './api/configService';
-import { spotService } from './api/spotService';
-
-import { layoutService } from './api/layoutService';
-// API_BASE is now imported from api/client
+// metricService, spotService, layoutService moved to hooks
 
 const {
   SPOT_WARN_TEMP,

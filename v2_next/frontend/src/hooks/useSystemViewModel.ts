@@ -31,7 +31,7 @@ export interface UseSystemViewModel {
   loadObservabilityErrors: () => Promise<void>;
   clearObservabilityErrors: () => Promise<void>;
   reconnect: () => Promise<boolean>;
-  runConnectionTest: (payload?: any) => Promise<void>;
+  runConnectionTest: (payload?: Record<string, unknown>) => Promise<void>;
   
   // Path Health
   checkPathHealth: (pathType: 'log' | 'snapshot', path: string) => Promise<void>;
@@ -135,7 +135,7 @@ export const useSystemViewModel = (): UseSystemViewModel => {
     setReconnectBusy(true);
     try {
       const res = await systemService.reconnect();
-      return (res as any).ok; 
+      return res.ok; 
     } catch (error) {
       console.error('Reconnect failed', error);
       return false;
@@ -144,10 +144,10 @@ export const useSystemViewModel = (): UseSystemViewModel => {
     }
   }, [reconnectBusy]);
 
-  const runConnectionTest = useCallback(async (payload: any = {}) => {
+  const runConnectionTest = useCallback(async (payload: Record<string, unknown> = {}) => {
       try {
           const res = await systemService.runConnectionTest(payload);
-          setConnectionTest(res.results as any);
+          setConnectionTest(res.results);
       } catch (error) {
           console.error('Connection test failed', error);
       }
@@ -190,7 +190,7 @@ export const useSystemViewModel = (): UseSystemViewModel => {
   const createPath = useCallback(async (path: string) => {
       try {
           const res = await systemService.createPath(path);
-          return (res && (res as any).ok);
+          return res?.ok;
       } catch (error) {
           console.error('Create path failed', error);
           throw error;

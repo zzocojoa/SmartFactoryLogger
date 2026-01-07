@@ -26,7 +26,7 @@ export const systemService = {
     return response.data;
   },
 
-  exportObservability: async (params: { include_errors: boolean; front_errors: any[] }) => {
+  exportObservability: async (params: { include_errors: boolean; front_errors: { type: string; message: string; source?: string; timestamp?: number }[] }) => {
     const response = await apiClient.post<{ path?: string }>('/api/observability/export', params);
     return response.data;
   },
@@ -39,8 +39,9 @@ export const systemService = {
     return await apiClient.post('/api/observability/export/open-folder');
   },
   
-  reconnect: async () => {
-    return await apiClient.post('/api/control/reconnect');
+  reconnect: async (): Promise<{ ok: boolean }> => {
+    const response = await apiClient.post<{ ok: boolean }>('/api/control/reconnect');
+    return response.data;
   },
   
   createSnapshot: async (params: { image_base64: string; name: string; format: string }) => {
@@ -60,8 +61,8 @@ export const systemService = {
     return await apiClient.post('/api/logs/comm-metrics/open-file');
   },
 
-  runConnectionTest: async (payload: any) => {
-    const response = await apiClient.post('/api/control/test-connection', payload);
+  runConnectionTest: async (payload: Record<string, unknown> = {}): Promise<{ results: Record<string, { ok: boolean; message?: string }> }> => {
+    const response = await apiClient.post<{ results: Record<string, { ok: boolean; message?: string }> }>('/api/control/test-connection', payload);
     return response.data;
   },
 
@@ -70,7 +71,8 @@ export const systemService = {
     return response.data;
   },
 
-  createPath: async (path: string) => {
-    return await apiClient.post('/api/control/path-create', { path });
+  createPath: async (path: string): Promise<{ ok: boolean }> => {
+    const response = await apiClient.post<{ ok: boolean }>('/api/control/path-create', { path });
+    return response.data;
   }
 };

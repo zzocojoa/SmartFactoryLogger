@@ -1,11 +1,11 @@
-
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { layoutService } from '../api/layoutService';
 import {
   LayoutSnapshot,
   LayoutSlotSummary,
   LayoutMap,
-  LayoutSlotsResponse
+  LayoutSlotsResponse,
+  LayoutEntry
 } from '../types';
 import {
   buildLayoutMapFromArray,
@@ -35,7 +35,7 @@ export interface UseLayoutViewModel {
   handleSaveLayout: (name: string) => Promise<void>;
   handleRestoreLayout: (slotId: string) => Promise<void>;
   handleDeleteLayout: (slotId: string) => Promise<void>;
-  updateWidget: (key: string, updates: any) => void;
+  updateWidget: (key: string, updates: Partial<LayoutEntry>) => void;
   deleteWidget: (key: string) => void;
   addWidget: (type: string, title?: string) => void;
   fetchLayoutSlots: () => Promise<void>;
@@ -142,7 +142,7 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
         setLayoutSnapshot(null);
       }
     } catch (error) {
-      const status = (error as any)?.response?.status;
+      const status = (error as { response?: { status?: number } })?.response?.status;
       if (status === 404) {
         const migrated = await migrateLegacyLayout();
         setLayoutSnapshot(migrated);
@@ -201,7 +201,7 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
       }
   };
 
-  const updateWidget = useCallback((key: string, updates: any) => {
+  const updateWidget = useCallback((key: string, updates: Partial<LayoutEntry>) => {
     setLayoutSnapshot((prev) => {
       if (!prev) return null;
       const nextLayout = { ...prev.layout };
@@ -240,7 +240,7 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
             y: 0,
             width: 20,
             height: 6,
-            type: type as any,
+            type: type as LayoutEntry['type'],
             title: title ?? (type === 'markdown' ? 'New Memo' : '새 위젯'),
           },
         },

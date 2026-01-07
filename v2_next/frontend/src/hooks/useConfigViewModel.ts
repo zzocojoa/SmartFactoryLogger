@@ -697,7 +697,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         'thresholdCountEnabled', 'thresholdEndPosEnabled'
       ];
       fields.forEach((field) => {
-        (next as any)[field] = checked;
+        (next as Record<string, boolean | string | number | null>)[field] = checked;
       });
       return next;
     });
