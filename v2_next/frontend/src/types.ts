@@ -281,7 +281,6 @@ export interface ConfigSnapshot {
       snapshotpath: string;
       autosave: boolean;
       password_set: boolean;
-      custom_notice?: string;
     };
     logging: {
       rotation_enabled?: boolean;
@@ -331,7 +330,6 @@ export interface SettingsFormState {
   cycleThresholdPress: string;
   password: string;
   passwordSet: boolean;
-  customNotice: string;
 }
 
 export interface ConfigApplyResult {

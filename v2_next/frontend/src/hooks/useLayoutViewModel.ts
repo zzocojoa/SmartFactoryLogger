@@ -32,7 +32,7 @@ export interface UseLayoutViewModel {
 
   setLayoutEditing: (editing: boolean) => void;
   loadLayoutSnapshot: () => Promise<void>;
-  handleSaveLayout: (name: string) => Promise<void>;
+  handleSaveLayout: (name: string, newLayout?: LayoutMap) => Promise<void>;
   handleRestoreLayout: (slotId: string) => Promise<void>;
   handleDeleteLayout: (slotId: string) => Promise<void>;
   updateWidget: (key: string, updates: Partial<LayoutEntry>) => void;
@@ -155,21 +155,29 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
     }
   }, [fetchLayoutSlots, migrateLegacyLayout]);
 
-  const handleSaveLayout = async (name: string) => {
-    if (!layoutSnapshot) return;
+  const handleSaveLayout = async (name: string, newLayout?: LayoutMap) => {
+    const layoutToSave = newLayout ?? layoutSnapshot?.layout;
+    if (!layoutToSave) return;
+
     setLayoutSaveError(null);
     setLayoutSaveMessage(null);
     
-    // Ensure we send current snapshot state
-    // We assume layoutSnapshot is up to date with editing changes
     try {
         const payload = {
             name,
-            layout: layoutSnapshot.layout,
-            cols: layoutSnapshot.cols ?? CURRENT_LAYOUT_COLS,
-            version: layoutSnapshot.version ?? CURRENT_LAYOUT_VERSION
+            layout: layoutToSave,
+            cols: layoutSnapshot?.cols ?? CURRENT_LAYOUT_COLS,
+            version: layoutSnapshot?.version ?? CURRENT_LAYOUT_VERSION
         };
         await layoutService.saveLayout(payload);
+
+        // Update local snapshot so the UI/model are in sync with what was just saved
+        setLayoutSnapshot((prev) => prev ? { ...prev, layout: layoutToSave } : {
+             layout: layoutToSave,
+             cols: CURRENT_LAYOUT_COLS.toString(),
+             version: CURRENT_LAYOUT_VERSION,
+        });
+
         setLayoutSaveMessage(`레이아웃 '${name}' 저장 완료`);
         await fetchLayoutSlots();
     } catch (err) {

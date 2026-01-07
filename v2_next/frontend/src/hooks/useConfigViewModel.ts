@@ -259,7 +259,6 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
       password: '',
       passwordSet: Boolean(values.settings.password_set),
-      customNotice: values.settings.custom_notice ?? '',
     };
     return { form: nextForm, thresholds: nextThresholdState };
   }, []);
@@ -479,7 +478,6 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         snapshotpath: settingsForm.snapshotPath.trim() || undefined,
         autosave: settingsForm.autoSave,
         password: settingsForm.password.trim() || undefined,
-        custom_notice: settingsForm.customNotice,
       },
       logging: {
         rotation_enabled: settingsForm.rotationEnabled,

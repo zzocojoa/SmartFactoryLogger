@@ -21,7 +21,7 @@ export interface DashboardItem {
   properties?: any;
 }
 
-export type WidgetRenderer = (item: DashboardItem) => React.ReactNode;
+export type WidgetRenderer = (item: DashboardItem, model: ReactWidget) => React.ReactNode;
 export type WidgetRegistry = Record<string, WidgetRenderer>;
 
 export type SavedLayoutItem = {
@@ -43,7 +43,6 @@ export const DEFAULT_DASHBOARD_ITEMS: DashboardItem[] = [
   { key: 'camera', type: 'camera', title: 'SPOT 카메라', x: 15, y: 8, width: 25, height: 10 },
   { key: 'molds', type: 'molds', title: '몰드 존', x: 40, y: 0, width: 20, height: 8 },
   { key: 'env', type: 'env', title: '환경', x: 40, y: 8, width: 20, height: 4 },
-  { key: 'notice', type: 'notice', title: '작업자 확인', x: 40, y: 12, width: 20, height: 6 },
   { key: 'timeseries', type: 'timeseries', title: '타임 시리즈', x: 0, y: 18, width: 60, height: 8 },
 ];
 
@@ -54,7 +53,6 @@ export const DASHBOARD_LAYOUT_KEYS = [
   'camera',
   'molds',
   'env',
-  'notice',
   'timeseries',
 ] as const;
 
@@ -66,9 +64,9 @@ export function getDashboardScene(
   
   // If a saved layout exists, we use it as the source of truth for which widgets to display.
   // We do NOT automatically merge defaults, otherwise a user cannot delete a default widget.
-  const allKeys = savedLayout 
+  const allKeys = (savedLayout 
     ? Object.keys(savedMap) 
-    : DEFAULT_DASHBOARD_ITEMS.map(i => i.key);
+    : DEFAULT_DASHBOARD_ITEMS.map(i => i.key)).filter(k => k !== 'notice');
   
   // Scale factor: 60 (User) -> 24 (Scene) = 0.4
   const SCALE_TO_SCENE = 24 / 60;
@@ -95,7 +93,7 @@ export function getDashboardScene(
        key, type, title, x: xBase, y, width: wBase, height: h, properties
     };
 
-    const render = registry[type] || registry['markdown'] || (() => React.createElement('div', null, `Unknown widget type: ${type}`));
+    const render = registry[type] || registry['markdown'] || ((_item: DashboardItem, _model: ReactWidget) => React.createElement('div', null, `Unknown widget type: ${type}`));
 
     return new SceneGridItem({
       key,
@@ -104,10 +102,11 @@ export function getDashboardScene(
       width,
       height: h,
       body: new ReactWidget({
+        key,
         title,
         type,
         properties,
-        renderWidget: () => render(item)
+        renderWidget: (m) => render(item, m)
       })
     });
   }).filter(Boolean) as SceneGridItem[];

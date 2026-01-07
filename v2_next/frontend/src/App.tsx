@@ -117,10 +117,9 @@ const {
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LEGACY_LAYOUT_COLS = 24;
 
-const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
-  const { layoutEditing } = React.useContext(DataContext);
-  const { updateWidget, deleteWidget } = React.useContext(LayoutEditContext);
-  const [editing, setEditing] = useState(false);
+const MarkdownWidget = ({ item, model }: { item: DashboardItem; model: ReactWidget }) => {
+  const { updateWidget } = React.useContext(LayoutEditContext);
+  const { isContentEditing: editing } = model.useState();
   const [editValue, setEditValue] = useState(item.properties?.content || '');
 
   useEffect(() => {
@@ -129,117 +128,30 @@ const MarkdownWidget = ({ item }: { item: DashboardItem }) => {
 
   const handleSave = () => {
     updateWidget(item.key, { properties: { ...item.properties, content: editValue } });
-    setEditing(false);
+    model.setState({ isContentEditing: false });
   };
 
   return (
-    <div className="card notice-card">
-      {layoutEditing && (
-        <>
-          <div className="widget-header-controls">
-            <button
-              className="widget-control-btn widget-edit-btn"
-              onClick={() => setEditing(!editing)}
-            >
-              {editing ? LABELS.VIEW : LABELS.EDIT}
-            </button>
-            <button
-              className="widget-control-btn widget-delete-btn"
-              onClick={() => deleteWidget(item.key)}
-              title="위젯 삭제"
-            >
-              ✕
-            </button>
-          </div>
-        </>
+    <div className="notice-body scrollable">
+      {editing ? (
+        <div className="notice-editor-container">
+          <textarea
+            className="notice-textarea"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+          />
+          <button className="notice-save-btn" onClick={handleSave}>{LABELS.SAVE}</button>
+        </div>
+      ) : (
+        <div className="notice-content markdown-body">
+          <ReactMarkdown>{item.properties?.content || ''}</ReactMarkdown>
+        </div>
       )}
-      <div className="notice-body scrollable">
-        {editing ? (
-          <div className="notice-editor-container">
-            <textarea
-              className="notice-textarea"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-            />
-            <button className="notice-save-btn" onClick={handleSave}>{LABELS.SAVE}</button>
-          </div>
-        ) : (
-          <div className="notice-content markdown-body">
-            <ReactMarkdown>{item.properties?.content || ''}</ReactMarkdown>
-          </div>
-        )}
-      </div>
     </div>
   );
 };
 
-const NoticeComponent = ({ item }: { item?: any }) => {
-  const { customNotice, setCustomNotice, layoutEditing } = React.useContext(DataContext);
-  const { deleteWidget } = React.useContext(LayoutEditContext);
-  const modal = useModal();
-  const [editing, setEditing] = useState(false);
-  const [editValue, setEditValue] = useState(customNotice);
 
-
-  useEffect(() => {
-    setEditValue(customNotice);
-  }, [customNotice]);
-
-  const handleSave = async () => {
-    try {
-      await configService.saveNotice(editValue);
-      setCustomNotice(editValue);
-      setEditing(false);
-    } catch (error) {
-      console.error('Failed to save notice', error);
-      await modal.alert(MESSAGES.NOTICE_SAVE_FAILURE);
-    }
-  };
-
-  return (
-    <div className="card notice-card">
-      
-      {layoutEditing && (
-        <>
-          <div className="widget-header-controls">
-            <button
-              className="widget-control-btn widget-edit-btn"
-              onClick={() => setEditing(!editing)}
-            >
-              {editing ? LABELS.VIEW : LABELS.EDIT}
-            </button>
-            {item && (
-              <button
-                className="widget-control-btn widget-delete-btn"
-                onClick={() => deleteWidget(item.key)}
-                title={LABELS.DELETE}
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        </>
-      )}
-
-      <div className="notice-body">
-        {editing ? (
-          <div className="notice-editor-container">
-            <textarea
-              className="notice-textarea"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-            />
-            <button className="notice-save-btn" onClick={handleSave}>{LABELS.SAVE}</button>
-          </div>
-        ) : (
-          <div className="notice-content markdown-body">
-            <ReactMarkdown>{customNotice || ''}</ReactMarkdown>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 
 const {
@@ -1217,7 +1129,7 @@ function App() {
   /* Layout state moved to useLayoutViewModel */
   
   const [snapshotLoading, setSnapshotLoading] = useState(false);
-  const [customNotice, setCustomNotice] = useState('');
+
   const [layoutRestoreMessage, setLayoutRestoreMessage] = useState<string | null>(null);
   const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
   
@@ -1748,7 +1660,6 @@ function App() {
       cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
       password: '',
       passwordSet: Boolean(values.settings.password_set),
-      customNotice: values.settings.custom_notice ?? '',
     };
     return { form: nextForm, thresholds: nextThresholdState };
   }, []);
@@ -2341,7 +2252,7 @@ function App() {
       cycleThresholdPress: 'Cycle Threshold Press',
       password: '설정 비밀번호',
       passwordSet: '비밀번호 설정 상태',
-      customNotice: '작업자 공지사항',
+
     };
 
     const formatValue = (value: string | boolean) => {
@@ -2457,12 +2368,11 @@ function App() {
        molds: () => <MoldsComponent />,
        env: () => <EnvComponent />,
        camera: () => <CameraComponent />,
-       notice: (item) => <NoticeComponent item={item} />,
        timeseries: () => <TimeSeriesWidget />,
-       markdown: (item) => <MarkdownWidget item={item} />,
+       markdown: (item, model) => <MarkdownWidget item={item} model={model} />,
      };
      return getDashboardScene(registry, layoutSnapshot?.layout ?? null);
-  }, [layoutSnapshot, timeSeriesDataNode, customNotice]);
+  }, [layoutSnapshot, timeSeriesDataNode]);
  // timeSeriesDataNode dep might need removal if unused 
 
   const layoutRef = useRef<LayoutMap>({});
@@ -2513,7 +2423,7 @@ function App() {
       return;
     }
     try {
-      await handleSaveLayout(name);
+      await handleSaveLayout(name, layoutRef.current);
       pushNotification('레이아웃 저장', `저장 완료: ${name}`, 'info');
     } catch (error) {
       console.error('Layout save failed', error);
@@ -4343,8 +4253,6 @@ function App() {
             handleSnapshot,
             snapshotLoading,
             nowTick,
-            customNotice,
-            setCustomNotice,
             layoutEditing,
             setLayoutEditing,
           }}
@@ -4384,8 +4292,6 @@ type DataContextValue = {
   handleSnapshot: () => void;
   snapshotLoading: boolean;
   nowTick: number; // For XAxis domain sync
-  customNotice: string;
-  setCustomNotice: (notice: string) => void;
   layoutEditing: boolean;
   setLayoutEditing: (editing: boolean) => void;
 };
@@ -4413,10 +4319,8 @@ const DataContext = React.createContext<DataContextValue>({
   handleSnapshot: () => undefined,
   snapshotLoading: false,
   nowTick: Date.now(),
-  customNotice: '',
-  setCustomNotice: () => undefined,
   layoutEditing: false,
-  setLayoutEditing: () => undefined,
+  setLayoutEditing: () => {},
 });
 
 function KpiComponent() {

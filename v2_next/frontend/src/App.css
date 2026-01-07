@@ -3690,6 +3690,7 @@ body {
 .notice-body {
   flex: 1;
   overflow-y: auto;
+  padding: 0 var(--space-3);
   padding-right: 4px;
 }
 
@@ -3956,12 +3957,10 @@ body {
 
 /* Widget Header Controls (Edit/Delete) */
 .widget-header-controls {
-  position: absolute;
-  top: -26px;
-  right: 4px;
   display: flex;
-  gap: 4px;
-  z-index: 20;
+  gap: 6px;
+  z-index: 100;
+  align-items: center;
 }
 
 .widget-control-btn {
@@ -3974,35 +3973,37 @@ body {
   justify-content: center;
   transition: all 0.2s ease;
   border-radius: 4px;
-  height: 22px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  height: 24px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  font-family: var(--font-ui);
 }
 
 .widget-control-btn:hover {
-  background: #323842;
-  border-color: #555;
-  color: #e6edf3;
+  background: var(--bg-button-hover);
+  border-color: var(--border-main);
+  color: var(--text-primary);
   transform: translateY(-1px);
 }
 
 .widget-edit-btn {
-  padding: 0 8px;
-  font-size: 0.7rem;
-  font-weight: 600;
+  padding: 0 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .widget-delete-btn {
-  width: 22px;
-  font-size: 13px;
-  color: #ff6b6b;
-  border-color: rgba(246, 107, 107, 0.4);
+  width: 24px;
+  font-size: 14px;
+  color: var(--state-danger);
+  border-color: color-mix(in srgb, var(--state-danger) 40%, transparent);
 }
 
 .widget-delete-btn:hover {
-  background: rgba(246, 107, 107, 0.15);
-  border-color: #ff6b6b;
-  color: #ff6b6b;
+  background: color-mix(in srgb, var(--state-danger) 10%, transparent);
+  border-color: var(--state-danger);
+  color: var(--state-danger);
 }
+
 
 .menu-dropdown-section {
   display: flex;
