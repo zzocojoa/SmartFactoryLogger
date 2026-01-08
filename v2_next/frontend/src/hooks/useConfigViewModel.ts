@@ -407,7 +407,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       if (!isAuto) setSettingsError('로컬 오버라이드가 비활성화되어 저장할 수 없습니다.');
       return;
     }
-    if (!hasSettingsChanges) {
+    if (!hasSettingsChanges && !settingsRestartRequired) {
       if (!isAuto) setSettingsInfo('변경 사항이 없습니다.');
       return;
     }

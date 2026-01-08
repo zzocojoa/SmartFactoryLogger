@@ -18,6 +18,14 @@ DEFAULT_INTERVAL_SEC = 0.2
 MIN_INTERVAL_SEC = 0.1
 MAX_INTERVAL_SEC = 2.0
 
+# Versioning
+try:
+    from backend.version import __version__ as APP_VERSION
+except ImportError:
+    APP_VERSION = "0.0.0-dev"
+
+print(f"[Config] Loading SmartFactoryLogger v{APP_VERSION}")
+
 # Defaults (used when config.ini is missing or invalid)
 DEFAULT_EXTRUDER_IP = "192.168.10.10"
 DEFAULT_EXTRUDER_PORT = 12289

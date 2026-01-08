@@ -16,6 +16,19 @@ Set-Location "backend"
 # Remove old dist if exists
 if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
 
+# Extract Version from package.json
+Write-Host ">>> Extracting Version from frontend/package.json..." -ForegroundColor Yellow
+$PackageJson = Get-Content -Raw -Path "../frontend/package.json" | ConvertFrom-Json
+$Version = $PackageJson.version
+Write-Host "    Detected Version: $Version" -ForegroundColor Cyan
+
+# Generate backend/version.py
+$VersionFile = "version.py"
+Write-Host ">>> Generating $VersionFile..." -ForegroundColor Yellow
+$VersionContent = "__version__ = `"$Version`""
+Set-Content -Path $VersionFile -Value $VersionContent
+Write-Host "    $VersionFile updated to $Version" -ForegroundColor Green
+
 # One-file mode with bundled frontend
 # Windows separator for add-data is ';'
 # Use python -m PyInstaller to ensure we use the current virtualenv context

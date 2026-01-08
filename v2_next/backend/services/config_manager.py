@@ -297,6 +297,10 @@ class ConfigManager:
             }
             flat = _flatten(values)
             changes = _diff_flat(self._flat, flat)
+            if changes:
+                print(f"[DEBUG] Config Changes Detected: {list(changes.keys())}")
+                for k, v in changes.items():
+                    print(f"  - {k}: {v['old']} -> {v['new']}")
             self._snapshot = snapshot
             self._flat = flat
             return changes
@@ -306,6 +310,12 @@ class ConfigManager:
             return deepcopy(self._snapshot)
 
     def apply_changes(self, changes: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        if not changes:
+            with self._lock:
+                self._pending_keys = set()
+                self._last_apply = {"applied": [], "pending": []}
+            return {"applied": [], "pending": []}
+
         applied: list[str] = []
         pending: list[str] = []
         values = self._snapshot.get("values", {})

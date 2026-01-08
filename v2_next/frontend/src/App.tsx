@@ -41,6 +41,7 @@ import { useConfigViewModel } from './hooks/useConfigViewModel';
 import { useLayoutViewModel } from './hooks/useLayoutViewModel';
 import { useMetricsViewModel } from './hooks/useMetricsViewModel';
 import './App.css';
+import packageJson from '../package.json';
 import {
   LineChart,
   Line,
@@ -2999,7 +3000,7 @@ function App() {
         <div className="settings-backdrop" onClick={() => setSettingsOpen(false)}>
           <div className="settings-modal" onClick={(event) => event.stopPropagation()}>
             <div className="settings-header">
-              <span className="settings-header-title">설정</span>
+              <span className="settings-header-title">설정 (v{packageJson.version})</span>
               <button className="settings-close" onClick={() => setSettingsOpen(false)}>
                 닫기
               </button>
@@ -3037,7 +3038,7 @@ function App() {
             </div>
             <div className="settings-sync-row">
               <span className="settings-sync-item">
-                버전: {overrideMeta?.version ?? '--'}
+                설정 버전: {overrideMeta?.version ?? '--'}
               </span>
               <span className="settings-sync-item">
                 마지막 동기화: {formatMetaTime(overrideMeta?.last_sync)}
@@ -4391,7 +4392,7 @@ function App() {
           </LayoutEditContext.Provider>
         </DataContext.Provider>
         <footer className="app-footer">
-          Copyright © HOIHOU. All Rights Reserved.
+          Copyright © HOIHOU. All Rights Reserved. v{packageJson.version}
         </footer>
       </div>
     </div>
@@ -4991,6 +4992,7 @@ function CameraComponent() {
 
 function TimeSeriesWidget() {
   const {
+    data: factoryData,
     timeSeriesFrames,
     seriesWindowMin,
     setSeriesWindowMin,
@@ -5133,24 +5135,28 @@ function TimeSeriesWidget() {
               labelFormatter={(label) => new Date(label).toLocaleTimeString()}
               contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-main)', color: 'var(--text-primary)' }}
             />
-            <Legend verticalAlign="top" height={36} />
+            <Legend
+              verticalAlign="top"
+              height={36}
+              formatter={(value, entry: any) => {
+                const { color, dataKey } = entry;
+                const rawVal = factoryData ? (factoryData as any)[dataKey] : null;
+                const valStr = rawVal !== null && rawVal !== undefined ? rawVal : '--';
+                return <span style={{ color, marginRight: '10px', fontWeight: 600 }}>{value} {valStr}</span>;
+              }}
+            />
 
-            {/* Defined Lines - Primary Process */}
+            {/* Defined Lines - Reordered as requested */}
+            {/* Order: SPOT, Speed, Press, Temp_F, Temp_B, Billet_Temp, Billet_Length, Count, EndPos, At_Temp, At_Pre */}
+            <Line type="monotone" dataKey="Spot" stroke="var(--color-spot)" dot={false} strokeWidth={2} name="SPOT" isAnimationActive={false} />
             <Line type="monotone" dataKey="Speed" stroke="var(--color-speed)" dot={false} strokeWidth={2} name="속도" isAnimationActive={false} />
             <Line type="monotone" dataKey="Press" stroke="var(--color-press)" dot={false} strokeWidth={2} name="압력" isAnimationActive={false} />
-            <Line type="monotone" dataKey="Spot" stroke="var(--color-spot)" dot={false} strokeWidth={2} name="SPOT" isAnimationActive={false} />
             <Line type="monotone" dataKey="Temp_F" stroke="var(--color-temp-f)" dot={false} strokeWidth={1} name="온도(F)" isAnimationActive={false} />
             <Line type="monotone" dataKey="Temp_B" stroke="var(--color-temp-b)" dot={false} strokeWidth={1} name="온도(B)" isAnimationActive={false} />
-
-            {/* Additional Process Data */}
+            <Line type="monotone" dataKey="Billet_Temp" stroke="var(--color-billet-temp)" dot={false} strokeWidth={1} name="빌렛 온도" isAnimationActive={false} />
             <Line type="monotone" dataKey="Billet_Length" stroke="var(--color-billet-len)" dot={false} strokeWidth={1} name="빌렛 길이" isAnimationActive={false} />
             <Line type="monotone" dataKey="Count" stroke="var(--color-count)" dot={false} strokeWidth={1} name="생산 수량" isAnimationActive={false} />
             <Line type="monotone" dataKey="EndPos" stroke="var(--color-endpos)" dot={false} strokeWidth={1} name="종료 위치" isAnimationActive={false} />
-
-
-
-            {/* Other Temperatures & Environment */}
-            <Line type="monotone" dataKey="Billet_Temp" stroke="var(--color-billet-temp)" dot={false} strokeWidth={1} name="빌렛 온도" isAnimationActive={false} />
             <Line type="monotone" dataKey="At_Temp" stroke="var(--color-env-temp)" dot={false} strokeWidth={1} name="환경 온도" isAnimationActive={false} />
             <Line type="monotone" dataKey="At_Pre" stroke="var(--color-env-pre)" dot={false} strokeWidth={1} name="환경 습도" isAnimationActive={false} />
 
