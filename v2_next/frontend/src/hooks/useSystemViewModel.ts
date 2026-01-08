@@ -37,6 +37,7 @@ export interface UseSystemViewModel {
   checkPathHealth: (pathType: 'log' | 'snapshot', path: string) => Promise<void>;
   checkPathsHealth: (items: { key: string; path: string }[]) => Promise<any>;
   createPath: (path: string) => Promise<boolean>;
+  browseFolder: (params?: { initial_dir?: string; title?: string }) => Promise<string | null>;
   setPathHealth: React.Dispatch<React.SetStateAction<PathHealthState>>; // Expose setter for complex merge logic in View
   setPathCheckBusy: React.Dispatch<React.SetStateAction<boolean>>;
   
@@ -197,6 +198,19 @@ export const useSystemViewModel = (): UseSystemViewModel => {
       }
   }, []);
 
+  const browseFolder = useCallback(async (params?: { initial_dir?: string; title?: string }) => {
+    try {
+      const res = await systemService.browseFolder(params);
+      if (res.ok && res.path) {
+        return res.path;
+      }
+      return null;
+    } catch (error) {
+      console.error('Browse folder failed', error);
+      return null;
+    }
+  }, []);
+
   const fetchLatestExportPath = useCallback(async () => {
       try {
           const res = await systemService.getLatestExportPath();
@@ -281,6 +295,7 @@ export const useSystemViewModel = (): UseSystemViewModel => {
     checkPathHealth,
     checkPathsHealth,
     createPath,
+    browseFolder,
     setPathHealth,
     setPathCheckBusy,
     

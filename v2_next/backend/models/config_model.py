@@ -62,6 +62,10 @@ class ThresholdsConfig(BaseModel):
     enable: Optional[ThresholdsEnable] = None
 
 
+class SystemConfig(BaseModel):
+    interval_sec: Optional[float] = None
+
+
 class ConfigUpdate(BaseModel):
     extruder: Optional[NetConfig] = None
     ls_plc: Optional[NetConfig] = None
@@ -69,6 +73,7 @@ class ConfigUpdate(BaseModel):
     settings: Optional[SettingsConfig] = None
     logging: Optional[LoggingConfig] = None
     thresholds: Optional[ThresholdsConfig] = None
+    system: Optional[SystemConfig] = None
 
 
 class OverrideToggle(BaseModel):

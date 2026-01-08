@@ -952,7 +952,14 @@ function App() {
   const modal = useModal();
 
   // Time Series States (UI Control - stays in App)
-  const [seriesWindowMin, setSeriesWindowMin] = useState(30);
+  const [seriesWindowMin, setSeriesWindowMinState] = useState(() => {
+    const saved = localStorage.getItem('seriesWindowMin');
+    return saved ? parseInt(saved, 10) : 30;
+  });
+  const setSeriesWindowMin = useCallback((min: number) => {
+    setSeriesWindowMinState(min);
+    localStorage.setItem('seriesWindowMin', String(min));
+  }, []);
   const [seriesPaused, setSeriesPaused] = useState(false);
   const [showThresholds, setShowThresholds] = useState(true);
 
@@ -978,6 +985,7 @@ function App() {
     checkPathHealth,
     checkPathsHealth,
     createPath,
+    browseFolder,
     setPathHealth,
     setPathCheckBusy,
     fetchLatestExportPath,
@@ -1658,6 +1666,7 @@ function App() {
       rotationMode: values.logging.rotation_mode ?? 'BILLET',
       cycleIdleTime: values.logging.cycle_idle_time?.toString() ?? '',
       cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
+      intervalSec: values.system?.interval_sec?.toString() ?? '0.2',
       password: '',
       passwordSet: Boolean(values.settings.password_set),
     };
@@ -2250,6 +2259,7 @@ function App() {
       rotationMode: 'Rotation Mode',
       cycleIdleTime: 'Cycle Idle Time (sec)',
       cycleThresholdPress: 'Cycle Threshold Press',
+      intervalSec: '수집 간격 (초)',
       password: '설정 비밀번호',
       passwordSet: '비밀번호 설정 상태',
 
@@ -3977,24 +3987,48 @@ function App() {
                     >
                       <div className="settings-section-title">저장 설정</div>
                       <div className="settings-grid">
-                        <label
+                        <div
                           className={`settings-field ${logPathFieldState} ${isSettingsFieldDirty('logPath') ? 'changed' : ''}`}
                         >
-                          Log Path
-                          <input
-                            value={settingsForm.logPath}
-                            onChange={(e) => updateSettingsField('logPath', e.target.value)}
-                          />
-                        </label>
-                        <label
+                          <label>Log Path</label>
+                          <div className="settings-path-input-row">
+                            <input
+                              value={settingsForm.logPath}
+                              onChange={(e) => updateSettingsField('logPath', e.target.value)}
+                            />
+                            <button
+                              type="button"
+                              className="settings-browse-btn"
+                              onClick={async () => {
+                                const selected = await browseFolder({ initial_dir: settingsForm.logPath, title: 'Log 폴더 선택' });
+                                if (selected) updateSettingsField('logPath', selected);
+                              }}
+                            >
+                              📁
+                            </button>
+                          </div>
+                        </div>
+                        <div
                           className={`settings-field ${snapshotPathFieldState} ${isSettingsFieldDirty('snapshotPath') ? 'changed' : ''}`}
                         >
-                          Snapshot Path
-                          <input
-                            value={settingsForm.snapshotPath}
-                            onChange={(e) => updateSettingsField('snapshotPath', e.target.value)}
-                          />
-                        </label>
+                          <label>Snapshot Path</label>
+                          <div className="settings-path-input-row">
+                            <input
+                              value={settingsForm.snapshotPath}
+                              onChange={(e) => updateSettingsField('snapshotPath', e.target.value)}
+                            />
+                            <button
+                              type="button"
+                              className="settings-browse-btn"
+                              onClick={async () => {
+                                const selected = await browseFolder({ initial_dir: settingsForm.snapshotPath, title: 'Snapshot 폴더 선택' });
+                                if (selected) updateSettingsField('snapshotPath', selected);
+                              }}
+                            >
+                              📁
+                            </button>
+                          </div>
+                        </div>
                         <label
                           className={`settings-field settings-toggle-field ${isSettingsFieldDirty('autoSave') ? 'changed' : ''}`}
                         >
@@ -4008,6 +4042,46 @@ function App() {
                             <span className="settings-toggle-text">{settingsForm.autoSave ? 'ON' : 'OFF'}</span>
                           </button>
                         </label>
+                        
+                        {/* Interval Collection Settings */}
+                        <div className={`settings-field settings-interval-field ${isSettingsFieldDirty('intervalSec') ? 'changed' : ''}`}>
+                          <label>수집 간격 (초)</label>
+                          <div className="settings-interval-row">
+                            <div className="settings-interval-presets">
+                              {[0.1, 0.2, 0.5, 1.0].map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  className={`settings-preset-btn ${parseFloat(settingsForm.intervalSec) === preset ? 'active' : ''}`}
+                                  onClick={() => updateSettingsField('intervalSec', preset.toString())}
+                                >
+                                  {preset}s
+                                </button>
+                              ))}
+                            </div>
+                            <input
+                              type="number"
+                              min="0.1"
+                              max="2.0"
+                              step="0.1"
+                              value={settingsForm.intervalSec}
+                              onChange={(e) => updateSettingsField('intervalSec', e.target.value)}
+                              className="settings-interval-input"
+                            />
+                          </div>
+                          <div className="settings-interval-preview">
+                            {(() => {
+                              const interval = parseFloat(settingsForm.intervalSec) || 0.2;
+                              const pointsPerHour = Math.round(3600 / interval);
+                              const mbPerHour = (pointsPerHour * 150 / 1024 / 1024).toFixed(1);
+                              return (
+                                <span className="settings-interval-hint">
+                                  📊 예상: {pointsPerHour.toLocaleString()}포인트/h • ~{mbPerHour}MB/h
+                                </span>
+                              );
+                            })()}
+                          </div>
+                        </div>
                       </div>
                       <div className="settings-path-health">
                         {(['log', 'snapshot'] as const).map((key) => {
@@ -4298,6 +4372,7 @@ function App() {
             nowTick,
             layoutEditing,
             setLayoutEditing,
+            intervalSec: parseFloat(settingsForm?.intervalSec ?? '0.2') || 0.2,
           }}
         >
           <LayoutEditContext.Provider value={{ isEditing: layoutEditing, deleteWidget: handleRemoveWidget, updateWidget: handleUpdateWidget }}>
@@ -4337,6 +4412,7 @@ type DataContextValue = {
   nowTick: number; // For XAxis domain sync
   layoutEditing: boolean;
   setLayoutEditing: (editing: boolean) => void;
+  intervalSec: number;
 };
 
 const DataContext = React.createContext<DataContextValue>({
@@ -4364,6 +4440,7 @@ const DataContext = React.createContext<DataContextValue>({
   nowTick: Date.now(),
   layoutEditing: false,
   setLayoutEditing: () => { },
+  intervalSec: 0.2,
 });
 
 function KpiComponent() {
@@ -4896,7 +4973,8 @@ function TimeSeriesWidget() {
     setShowThresholds,
     handleSnapshot,
     snapshotLoading,
-    nowTick
+    nowTick,
+    intervalSec
   } = React.useContext(DataContext);
 
   // Convert frames to Recharts data
@@ -4968,6 +5046,21 @@ function TimeSeriesWidget() {
             </button>
           ))}
         </div>
+        <span
+          className="series-density-badge"
+          title="현재 수집 간격 기준 데이터 밀도"
+          style={{
+            fontSize: '10px',
+            padding: '2px 8px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '10px',
+            color: 'var(--text-muted)',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          📊 {(1 / intervalSec).toFixed(0)}pt/s
+        </span>
         <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
         <button
           className={`status-action ${seriesPaused ? 'warn' : ''}`}

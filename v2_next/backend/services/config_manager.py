@@ -253,7 +253,7 @@ class ConfigManager:
 
         return {
             "system": {
-                "intervalsec": float(config.INTERVAL_SEC),
+                "interval_sec": float(config.INTERVAL_SEC),
             },
             "extruder": {"ip": extruder_ip, "port": extruder_port},
             "ls_plc": {"ip": ls_ip, "port": ls_port, "targets": _load_ls_targets(parser)},
@@ -405,12 +405,13 @@ class ConfigManager:
             applied.extend(sorted(snapshot_changed))
 
         if system_changed:
-            interval_sec = system_cfg.get("intervalsec", config.INTERVAL_SEC)
-            config.INTERVAL_SEC = float(config.INTERVAL_SEC)
+            interval_sec = system_cfg.get("interval_sec", config.DEFAULT_INTERVAL_SEC)
+            clamped = max(config.MIN_INTERVAL_SEC, min(config.MAX_INTERVAL_SEC, float(interval_sec)))
+            config.INTERVAL_SEC = clamped
             try:
                 from .plc_service import plc_service
 
-                plc_service.apply_interval(float(interval_sec))
+                plc_service.apply_interval(clamped)
                 applied.extend(sorted(system_changed))
             except Exception:
                 pending.extend(sorted(system_changed))

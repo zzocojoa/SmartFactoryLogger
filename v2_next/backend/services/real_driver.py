@@ -310,7 +310,8 @@ class RealPLCDriver(BasePLCDriver):
         )
 
     # --- SPOT Logic ---
-    def _read_spot(self) -> Optional[float]:
+    def _read_spot(self) -> float:
+        """Read SPOT temperature. Returns 0.0 on failure (V1 compatible)."""
         try:
             with urlopen(config.SPOT_URL, timeout=self.spot_timeout) as resp:
                 raw = resp.read().decode("ascii", errors="ignore").strip()
@@ -320,8 +321,8 @@ class RealPLCDriver(BasePLCDriver):
                     return value
         except Exception as exc:
             self._mark_spot_error(str(exc))
-            return None
-        return None
+            return 0.0  # V1 compatible: show 0 on failure
+        return 0.0
 
     # --- Melsec Logic ---
     def _read_extruder(self) -> Dict[str, float]:

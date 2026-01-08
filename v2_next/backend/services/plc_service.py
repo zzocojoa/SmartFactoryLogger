@@ -66,11 +66,11 @@ class PLCService:
         self.driver.close()
 
     def apply_interval(self, interval_sec: float) -> float:
-        # Policy: interval is fixed at config.INTERVAL_SEC (0.2s).
-        fixed = float(config.INTERVAL_SEC)
+        # Clamp interval to valid range and apply
+        clamped = max(config.MIN_INTERVAL_SEC, min(config.MAX_INTERVAL_SEC, interval_sec))
         with self.interval_lock:
-            self.interval_sec = fixed
-        return fixed
+            self.interval_sec = clamped
+        return clamped
 
     def apply_connection_config(self) -> bool:
         try:

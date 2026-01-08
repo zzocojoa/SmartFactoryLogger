@@ -288,6 +288,9 @@ export interface ConfigSnapshot {
       cycle_idle_time: number;
       cycle_threshold_press: number;
     };
+    system?: {
+      interval_sec?: number;
+    };
   };
 }
 
@@ -328,6 +331,7 @@ export interface SettingsFormState {
   rotationMode: string;
   cycleIdleTime: string;
   cycleThresholdPress: string;
+  intervalSec: string;
   password: string;
   passwordSet: boolean;
 }

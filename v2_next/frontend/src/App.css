@@ -4090,6 +4090,7 @@ body {
   font-size: 0.95rem;
   white-space: pre-wrap;
   line-height: 1.5;
+  word-break: break-all;
 }
 
 .custom-modal-input {
@@ -4270,4 +4271,109 @@ body {
 
 .settings-threshold-toggle input {
   cursor: pointer;
+}
+
+/* Path Input with Browse Button */
+.settings-path-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.settings-path-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-browse-btn {
+  background: var(--bg-button);
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.settings-browse-btn:hover {
+  background: var(--bg-button-hover);
+  border-color: var(--accent-main);
+}
+
+.settings-browse-btn:active {
+  transform: translateY(1px);
+}
+
+/* Interval Settings */
+.settings-interval-field {
+  grid-column: 1 / -1;
+}
+
+.settings-interval-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.settings-interval-presets {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-preset-btn {
+  background: var(--bg-button);
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  color: var(--text-secondary);
+}
+
+.settings-preset-btn:hover {
+  background: var(--bg-button-hover);
+  border-color: var(--accent-main);
+  color: var(--text-primary);
+}
+
+.settings-preset-btn.active {
+  background: var(--accent-main);
+  border-color: var(--accent-main);
+  color: white;
+}
+
+.settings-interval-input {
+  width: 80px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.settings-interval-input:focus {
+  border-color: var(--accent-main);
+  outline: none;
+}
+
+.settings-interval-preview {
+  margin-top: 8px;
+}
+
+.settings-interval-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bg-card);
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
 }

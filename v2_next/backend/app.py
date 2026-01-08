@@ -87,6 +87,11 @@ class PathCreateRequest(BaseModel):
     path: str
 
 
+class FolderBrowseRequest(BaseModel):
+    initial_dir: str | None = None
+    title: str | None = None
+
+
 class VerificationCompareRequest(BaseModel):
     reference_csv_path: str
     sample_count: int = 50
@@ -910,6 +915,19 @@ def get_config():
         _logger.error("Config load failed: %s", exc)
         raise HTTPException(status_code=500, detail="Config load failed") from exc
 
+
+@app.post("/api/config")
+def save_config(payload: ConfigUpdate):
+    """Save configuration settings. Requires override enabled for local changes."""
+    try:
+        return update_config(payload, source="local")
+    except PermissionError as exc:
+        _logger.warning("Config save permission error: %s", exc)
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        _logger.error("Config save failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Config save failed") from exc
+
 class NoticeUpdateRequest(BaseModel):
     content: str
 
@@ -1155,6 +1173,37 @@ def path_create(payload: PathCreateRequest):
         return {"ok": True, "message": "created"}
     except Exception as exc:
         _logger.error("Path create failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/control/folder-browse")
+def folder_browse(payload: FolderBrowseRequest):
+    """Open Windows folder browser dialog and return selected path."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        root.attributes('-topmost', True)  # Bring to front
+        
+        initial = payload.initial_dir if payload.initial_dir and Path(payload.initial_dir).exists() else None
+        title = payload.title or "폴더 선택"
+        
+        selected = filedialog.askdirectory(
+            parent=root,
+            initialdir=initial,
+            title=title
+        )
+        
+        root.destroy()
+        
+        if selected:
+            return {"ok": True, "path": selected}
+        else:
+            return {"ok": False, "path": None, "message": "cancelled"}
+    except Exception as exc:
+        _logger.error("Folder browse failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @app.post("/api/control/snapshot")

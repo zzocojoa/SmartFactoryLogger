@@ -13,8 +13,10 @@ from dotenv import load_dotenv
 # Load .env file (if present)
 load_dotenv()
 
-# Fixed collection interval (policy: must stay at 0.2s)
-INTERVAL_SEC = 0.2
+# Default collection interval (can be changed via config.ini)
+DEFAULT_INTERVAL_SEC = 0.2
+MIN_INTERVAL_SEC = 0.1
+MAX_INTERVAL_SEC = 2.0
 
 # Defaults (used when config.ini is missing or invalid)
 DEFAULT_EXTRUDER_IP = "192.168.10.10"
@@ -322,6 +324,12 @@ SNAPSHOT_PATH = resolve_storage_path(
     "snapshots",
     "SnapshotPath",
 )
+
+# SYSTEM / Polling Interval
+_interval_raw = _get_float(CONFIG, "SYSTEM", "intervalsec", DEFAULT_INTERVAL_SEC)
+_interval_raw = _env_float("INTERVAL_SEC", _interval_raw)
+INTERVAL_SEC = max(MIN_INTERVAL_SEC, min(MAX_INTERVAL_SEC, _interval_raw))
+
 
 # Validation Logic
 def validate_config() -> List[str]:

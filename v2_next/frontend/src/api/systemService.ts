@@ -74,5 +74,10 @@ export const systemService = {
   createPath: async (path: string): Promise<{ ok: boolean }> => {
     const response = await apiClient.post<{ ok: boolean }>('/api/control/path-create', { path });
     return response.data;
+  },
+
+  browseFolder: async (params?: { initial_dir?: string; title?: string }): Promise<{ ok: boolean; path: string | null }> => {
+    const response = await apiClient.post<{ ok: boolean; path: string | null }>('/api/control/folder-browse', params || {});
+    return response.data;
   }
 };

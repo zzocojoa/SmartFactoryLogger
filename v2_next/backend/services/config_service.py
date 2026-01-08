@@ -137,6 +137,9 @@ def get_config_snapshot() -> dict:
     thresholds_value = {key: _get_text(parser, "THRESHOLDS_VALUE", key) for key in _THRESHOLD_KEYS}
     thresholds_enable = {key: _get_bool(parser, "THRESHOLDS_ENABLE", key, False) for key in _THRESHOLD_KEYS}
     thresholds_enable["master_on"] = _get_bool(parser, "THRESHOLDS_ENABLE", "master_on", False)
+    system_cfg = {
+        "interval_sec": _get_float(parser, "SYSTEM", "intervalsec", config.DEFAULT_INTERVAL_SEC),
+    }
 
     pending_info = None
     pending_path = _pending_path(path)
@@ -169,6 +172,7 @@ def get_config_snapshot() -> dict:
                 "values": thresholds_value,
                 "enable": thresholds_enable,
             },
+            "system": system_cfg,
         },
         "restart_required": config_manager.get_restart_required(),
     }
@@ -442,6 +446,13 @@ def update_config(
                 enabled = getattr(payload.thresholds.enable, key, None)
                 if enabled is not None:
                     parser.set("THRESHOLDS_ENABLE", key, str(enabled))
+
+    if payload.system:
+        _ensure_section(parser, "SYSTEM")
+        if payload.system.interval_sec is not None:
+            # Clamp to valid range
+            clamped = max(config.MIN_INTERVAL_SEC, min(config.MAX_INTERVAL_SEC, payload.system.interval_sec))
+            parser.set("SYSTEM", "intervalsec", str(clamped))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     write_encoding = "utf-8-sig"

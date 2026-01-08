@@ -257,6 +257,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       rotationMode: values.logging.rotation_mode ?? 'BILLET',
       cycleIdleTime: values.logging.cycle_idle_time?.toString() ?? '',
       cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
+      intervalSec: values.system?.interval_sec?.toString() ?? '0.2',
       password: '',
       passwordSet: Boolean(values.settings.password_set),
     };
@@ -484,6 +485,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         rotation_mode: settingsForm.rotationMode,
         cycle_idle_time: toFloat(settingsForm.cycleIdleTime),
         cycle_threshold_press: toFloat(settingsForm.cycleThresholdPress),
+      },
+      system: {
+        interval_sec: toFloat(settingsForm.intervalSec),
       },
     };
 
