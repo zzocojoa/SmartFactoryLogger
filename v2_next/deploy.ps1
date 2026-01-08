@@ -30,10 +30,8 @@ Set-Content -Path $VersionFile -Value $VersionContent
 Write-Host "    $VersionFile updated to $Version" -ForegroundColor Green
 
 # One-file mode with bundled frontend
-# Windows separator for add-data is ';'
-# Use python -m PyInstaller to ensure we use the current virtualenv context
-# Use --collect-all to force full inclusion of Pydantic v2 binaries/data
-python -m PyInstaller --noconfirm --onefile --name SmartFactoryBackend --clean --add-data "../frontend/dist;frontend/dist" --collect-all "pydantic" --collect-all "pydantic_core" server_entry.py
+# Use python -m PyInstaller with the spec file to ensure all configs (assets, icon, noconsole) are applied
+python -m PyInstaller --noconfirm --clean SmartFactoryBackend.spec
 
 if ($LASTEXITCODE -ne 0) { Write-Error "Backend Packaging Failed"; exit 1 }
 
