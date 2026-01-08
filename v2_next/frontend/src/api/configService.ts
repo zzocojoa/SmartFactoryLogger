@@ -55,5 +55,10 @@ export const configService = {
   toggleOverride: async (params: { enabled: boolean; password?: string; actor: string }) => {
     const response = await apiClient.post('/api/config/override', params);
     return response.data;
+  },
+
+  verifyPassword: async (password: string) => {
+    const response = await apiClient.post('/api/config/verify-password', { password });
+    return response.data;
   }
 };

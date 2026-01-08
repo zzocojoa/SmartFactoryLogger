@@ -1130,6 +1130,14 @@ function App() {
   */
 
   const [menuOpen, setMenuOpen] = useState(false);
+  
+  // Password UI states
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  
   // Spot State moved to useSpotViewModel
   /*
   const [spotConfig, setSpotConfig] = useState<SpotConfig | null>(null);
@@ -1593,6 +1601,49 @@ function App() {
     setNotifications([]);
     setUnreadCount(0);
   };
+
+  const handleOpenSettings = useCallback(async () => {
+    try {
+      // Check if password is required
+      const checkResult = await configService.verifyPassword('');
+      if (checkResult.ok) {
+        // No password set, open directly
+        setSettingsOpen(true);
+        setMenuOpen(false);
+        return;
+      }
+    } catch (err: any) {
+      if (err?.response?.status !== 403) {
+        // Non-password error, open anyway
+        setSettingsOpen(true);
+        setMenuOpen(false);
+        return;
+      }
+    }
+    
+    // Password is required, prompt user
+    const password = await modal.prompt(
+      '설정 화면에 접근하려면 관리자 비밀번호를 입력하세요.',
+      '',
+      { inputType: 'password', title: '관리자 인증' }
+    );
+    
+    if (password === null) {
+      // User cancelled
+      return;
+    }
+    
+    try {
+      const result = await configService.verifyPassword(password);
+      if (result.ok) {
+        setSettingsOpen(true);
+        setMenuOpen(false);
+      }
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.detail || '비밀번호 확인에 실패했습니다.';
+      await modal.alert(errMsg);
+    }
+  }, [modal]);
 
   useEffect(() => {
     if (notificationsOpen) {
@@ -2913,10 +2964,7 @@ function App() {
               <div className="menu-divider" />
               <button
                 className="menu-item"
-                onClick={() => {
-                  setSettingsOpen(true);
-                  setMenuOpen(false);
-                }}
+                onClick={handleOpenSettings}
               >
                 설정
               </button>
@@ -4276,18 +4324,175 @@ function App() {
                           {settingsForm.passwordSet ? '설정됨' : '미설정'}
                         </span>
                       </div>
+                      
+                      {/* Warning Banner when password not set */}
+                      {!settingsForm.passwordSet && (
+                        <div className="settings-warning" style={{ marginBottom: '12px', backgroundColor: 'rgba(255, 193, 7, 0.15)', border: '1px solid rgba(255, 193, 7, 0.4)', borderRadius: '6px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+                          <span>보안을 위해 설정 비밀번호를 등록하세요. 미설정 시 누구나 설정에 접근할 수 있습니다.</span>
+                        </div>
+                      )}
+                      
                       <div className="settings-grid">
+                        {/* Current Password (shown first when password is already set) */}
+                        {settingsForm.passwordSet && (
+                          <label className="settings-field">
+                            현재 비밀번호
+                            <div style={{ position: 'relative' }}>
+                              <input
+                                type={showCurrentPassword ? 'text' : 'password'}
+                                placeholder="현재 비밀번호 입력"
+                                value={currentPassword}
+                                onChange={(e) => setCurrentPassword(e.target.value)}
+                                style={{ paddingRight: '40px' }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                                style={{
+                                  position: 'absolute',
+                                  right: '8px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)',
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  padding: '4px',
+                                  opacity: 0.7,
+                                  fontSize: '1rem'
+                                }}
+                                title={showCurrentPassword ? '숨기기' : '표시'}
+                              >
+                                {showCurrentPassword ? '🙈' : '👁️'}
+                              </button>
+                            </div>
+                            <span className="settings-field-help">비밀번호를 변경하려면 현재 비밀번호를 먼저 입력하세요.</span>
+                          </label>
+                        )}
+                        
+                        {/* New Password - only enable input when current password is provided (if password was set) */}
                         <label className={`settings-field ${isSettingsFieldDirty('password') ? 'changed' : ''}`}>
-                          설정 비밀번호
-                          <input
-                            type="password"
-                            placeholder={settingsForm.passwordSet ? '설정됨' : '미설정'}
-                            value={settingsForm.password}
-                            onChange={(e) => updateSettingsField('password', e.target.value)}
-                          />
+                          {settingsForm.passwordSet ? '새 비밀번호' : '설정 비밀번호'}
+                          <div style={{ position: 'relative' }}>
+                            <input
+                              type={showNewPassword ? 'text' : 'password'}
+                              placeholder={settingsForm.passwordSet ? '새 비밀번호 입력 (변경 시에만)' : '비밀번호 입력'}
+                              value={settingsForm.password}
+                              onChange={(e) => updateSettingsField('password', e.target.value)}
+                              disabled={settingsForm.passwordSet && currentPassword.trim().length === 0}
+                              style={{ 
+                                paddingRight: '40px',
+                                opacity: settingsForm.passwordSet && currentPassword.trim().length === 0 ? 0.6 : 1
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowNewPassword(!showNewPassword)}
+                              style={{
+                                position: 'absolute',
+                                right: '8px',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: '4px',
+                                opacity: 0.7,
+                                fontSize: '1rem'
+                              }}
+                              title={showNewPassword ? '숨기기' : '표시'}
+                            >
+                              {showNewPassword ? '🙈' : '👁️'}
+                            </button>
+                          </div>
+                          
+                          {/* Password Strength Indicator */}
+                          {settingsForm.password.trim().length > 0 && (
+                            <div style={{ marginTop: '6px' }}>
+                              <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+                                {[1, 2, 3].map((level) => {
+                                  const strength = (() => {
+                                    const pw = settingsForm.password.trim();
+                                    if (pw.length < 4) return 1;
+                                    if (pw.length < 8) return 2;
+                                    return 3;
+                                  })();
+                                  const active = level <= strength;
+                                  const colors = ['#ef4444', '#f59e0b', '#22c55e'];
+                                  return (
+                                    <div
+                                      key={level}
+                                      style={{
+                                        flex: 1,
+                                        height: '4px',
+                                        borderRadius: '2px',
+                                        backgroundColor: active ? colors[strength - 1] : 'var(--border-muted)',
+                                        transition: 'background-color 0.2s'
+                                      }}
+                                    />
+                                  );
+                                })}
+                              </div>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                {(() => {
+                                  const pw = settingsForm.password.trim();
+                                  if (pw.length < 4) return '강도: 약함 (4자 이상 권장)';
+                                  if (pw.length < 8) return '강도: 보통 (8자 이상 권장)';
+                                  return '강도: 강함';
+                                })()}
+                              </span>
+                            </div>
+                          )}
                         </label>
+                        
+                        {/* Password Confirmation */}
+                        {settingsForm.password.trim().length > 0 && (
+                          <label className="settings-field">
+                            비밀번호 확인
+                            <div style={{ position: 'relative' }}>
+                              <input
+                                type={showConfirmPassword ? 'text' : 'password'}
+                                placeholder="비밀번호 재입력"
+                                value={passwordConfirm}
+                                onChange={(e) => setPasswordConfirm(e.target.value)}
+                                style={{ 
+                                  paddingRight: '40px',
+                                  borderColor: passwordConfirm.length > 0 && passwordConfirm !== settingsForm.password ? '#ef4444' : undefined
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                style={{
+                                  position: 'absolute',
+                                  right: '8px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)',
+                                  background: 'none',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  padding: '4px',
+                                  opacity: 0.7,
+                                  fontSize: '1rem'
+                                }}
+                                title={showConfirmPassword ? '숨기기' : '표시'}
+                              >
+                                {showConfirmPassword ? '🙈' : '👁️'}
+                              </button>
+                            </div>
+                            {passwordConfirm.length > 0 && passwordConfirm !== settingsForm.password && (
+                              <span className="settings-field-help error">비밀번호가 일치하지 않습니다.</span>
+                            )}
+                            {passwordConfirm.length > 0 && passwordConfirm === settingsForm.password && (
+                              <span className="settings-field-help" style={{ color: '#22c55e' }}>✓ 비밀번호 일치</span>
+                            )}
+                          </label>
+                        )}
+                        
                         <div className="settings-hint">
-                          비워두면 기존 비밀번호를 유지합니다.
+                          {settingsForm.passwordSet 
+                            ? '비밀번호를 변경하려면 현재 비밀번호 입력 후 새 비밀번호를 입력하세요. 비워두면 기존 비밀번호를 유지합니다.'
+                            : '설정에 접근할 때 사용할 비밀번호를 설정하세요.'}
                         </div>
                       </div>
                     </div>

@@ -978,6 +978,53 @@ def update_override(payload: OverrideToggle):
         _logger.error("Override update failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+
+class PasswordVerifyRequest(BaseModel):
+    password: str
+
+
+@app.post("/api/config/verify-password")
+def verify_password(payload: PasswordVerifyRequest):
+    """Verify the settings access password."""
+    import configparser
+
+    try:
+        # Check if password is set using the already-imported get_config_snapshot
+        snapshot = get_config_snapshot()
+        password_set = snapshot.get("values", {}).get("settings", {}).get("password_set", False)
+        
+        if not password_set:
+            # No password set, allow access
+            return {"ok": True, "message": "비밀번호가 설정되지 않았습니다."}
+        
+        # Read actual password from config file
+        config_path_str = snapshot.get("config_path", "")
+        config_path = Path(config_path_str) if config_path_str else None
+        
+        if not config_path or not config_path.exists():
+            return {"ok": True, "message": "설정 파일이 없습니다."}
+        
+        parser = configparser.ConfigParser()
+        parser.optionxform = str
+        parser.read(str(config_path), encoding="utf-8-sig")
+        
+        stored_password = ""
+        if parser.has_option("SETTINGS", "password"):
+            stored_password = parser.get("SETTINGS", "password").strip()
+        
+        if not stored_password:
+            return {"ok": True, "message": "비밀번호가 설정되지 않았습니다."}
+        
+        if payload.password == stored_password:
+            return {"ok": True, "message": "인증 성공"}
+        else:
+            raise HTTPException(status_code=403, detail="비밀번호가 일치하지 않습니다.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Password verification failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 @app.post("/api/config/restore-defaults")
 def restore_config_defaults():
     try:

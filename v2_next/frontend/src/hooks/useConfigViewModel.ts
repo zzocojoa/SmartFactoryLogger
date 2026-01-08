@@ -267,7 +267,35 @@ export const useConfigViewModel = (): UseConfigViewModel => {
   const applySettingsSnapshot = useCallback(
     (snapshot: ConfigSnapshot) => {
       const { form, thresholds } = buildSettingsFormFromSnapshot(snapshot);
-      setSettingsForm(form);
+      
+      // Preserve password field during auto-refresh to prevent resetting user input
+      // Also preserve if user has started editing any field
+      setSettingsForm((prev) => {
+        if (!prev) return form;
+        
+        // Check if user is editing the password field
+        if (prev.password.length > 0) {
+          return { ...form, password: prev.password };
+        }
+        
+        // Check if user has any unsaved changes - if so, don't overwrite the entire form
+        const hasAnyChanges = Object.keys(prev).some((k) => {
+          const key = k as keyof SettingsFormState;
+          // Skip password since baseline always has empty password
+          if (key === 'password') return prev.password.length > 0;
+          if (key === 'passwordSet') return false; // Read-only field
+          // Compare with what would be the new baseline
+          return prev[key] !== form[key];
+        });
+        
+        if (hasAnyChanges) {
+          // User has unsaved changes, don't overwrite
+          return prev;
+        }
+        
+        return form;
+      });
+      
       setSettingsBaseline(form);
       setThresholdConfig(thresholds);
       setSettingsConfigPath(snapshot.config_path ?? null);
@@ -805,7 +833,20 @@ export const useConfigViewModel = (): UseConfigViewModel => {
   useEffect(() => {
     const autoSaveEnabled = settingsForm?.autoSave;
     
-    if (!autoSaveEnabled || !hasSettingsChanges || settingsLoading || !settingsForm) {
+    if (!autoSaveEnabled || !hasSettingsChanges || settingsLoading || !settingsForm || !settingsBaseline) {
+      return;
+    }
+
+    // Check if the ONLY change is the password field - if so, skip auto-save
+    // Password changes should only be saved manually by the user
+    const nonPasswordChanges = Object.keys(settingsForm).some((k) => {
+      const key = k as keyof SettingsFormState;
+      if (key === 'password' || key === 'passwordSet') return false; // Skip password fields
+      return settingsForm[key] !== settingsBaseline[key];
+    });
+    
+    if (!nonPasswordChanges) {
+      // Only password has changed, don't auto-save
       return;
     }
 
@@ -822,7 +863,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         window.clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [settingsForm, hasSettingsChanges, settingsLoading]);
+  }, [settingsForm, settingsBaseline, hasSettingsChanges, settingsLoading]);
 
   return {
     settingsOpen,
