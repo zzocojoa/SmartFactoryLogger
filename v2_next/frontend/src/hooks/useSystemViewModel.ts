@@ -71,7 +71,12 @@ export const useSystemViewModel = (): UseSystemViewModel => {
   const [reconnectBusy, setReconnectBusy] = useState(false);
   const [pathCheckBusy, setPathCheckBusy] = useState(false);
   
-  const [lastExportPath, setLastExportPath] = useState<string | null>(null);
+  const [lastExportPath, setLastExportPath] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return window.localStorage.getItem(EXPORT_PATH_STORAGE_KEY);
+    }
+    return null;
+  });
   const [commLogInfo, setCommLogInfo] = useState<{ path: string | null }>({ path: null });
 
   // Persistence Helper

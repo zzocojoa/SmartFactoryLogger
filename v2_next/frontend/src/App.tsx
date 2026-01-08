@@ -948,7 +948,7 @@ const getCameraStatus = (params: {
 };
 
 function App() {
-  const { mode, setMode } = useTheme();
+  const { mode, activeCycle, setMode } = useTheme();
   const modal = useModal();
 
   // Time Series States (UI Control - stays in App)
@@ -998,6 +998,10 @@ function App() {
     saveSnapshot,
     connectionTest
   } = useSystemViewModel();
+  
+  useEffect(() => {
+    fetchCommLogInfo();
+  }, [fetchCommLogInfo]);
 
   const {
     config: spotConfig,
@@ -2700,7 +2704,14 @@ function App() {
   return (
     <div className={`App ${layoutEditing ? 'layout-editing' : ''}`} style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header className="app-header">
-        <h1>{APP_TITLE}</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <img
+            src={activeCycle === 'day' || activeCycle === 'sunset' ? '/assets/logo_color.png' : '/assets/logo_white.png'}
+            alt="Company Logo"
+            style={{ height: '32px', objectFit: 'contain' }}
+          />
+          <h1>{APP_TITLE}</h1>
+        </div>
         <div className="header-controls">
           <div className="status-panel" title={statusTitle}>
             <div className={`status-badge ${statusClass}`}>{statusLabel}</div>
