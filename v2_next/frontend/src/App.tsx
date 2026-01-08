@@ -4379,6 +4379,9 @@ function App() {
             <scene.Component model={scene} />
           </LayoutEditContext.Provider>
         </DataContext.Provider>
+        <footer className="app-footer">
+          Copyright © HOIHOU. All Rights Reserved.
+        </footer>
       </div>
     </div>
   );
@@ -4962,6 +4965,19 @@ function CameraComponent() {
   );
 };
 
+  /* Chart Colors for Threshold Lines */
+  const THRESHOLD_LINE_COLORS: Partial<Record<ThresholdKey, string>> = {
+    speed: 'var(--color-speed)',
+    press: 'var(--color-press)',
+    spot: 'var(--color-spot)',
+    temp_f: 'var(--color-temp-f)',
+    temp_b: 'var(--color-temp-b)',
+    billet: 'var(--color-billet-len)',
+    billet_temp: 'var(--color-billet-temp)',
+    at_temp: 'var(--color-env-temp)',
+    at_pre: 'var(--color-env-pre)',
+  };
+
 function TimeSeriesWidget() {
   const {
     timeSeriesFrames,
@@ -4974,7 +4990,8 @@ function TimeSeriesWidget() {
     handleSnapshot,
     snapshotLoading,
     nowTick,
-    intervalSec
+    intervalSec,
+    thresholds
   } = React.useContext(DataContext);
 
   // Convert frames to Recharts data
@@ -5126,12 +5143,26 @@ function TimeSeriesWidget() {
             <Line type="monotone" dataKey="At_Temp" stroke="var(--color-env-temp)" dot={false} strokeWidth={1} name="환경 온도" isAnimationActive={false} />
             <Line type="monotone" dataKey="At_Pre" stroke="var(--color-env-pre)" dot={false} strokeWidth={1} name="환경 습도" isAnimationActive={false} />
 
-            {showThresholds && (
-              <>
-                <ReferenceLine y={SPEED_MAX} label="Max Speed" stroke="var(--state-danger)" strokeDasharray="3 3" />
-                {/* Add more reference lines if needed based on thresholds context */}
-              </>
-            )}
+            {showThresholds && thresholds.masterOn && (Object.keys(thresholds.entries) as ThresholdKey[]).map((key) => {
+              const entry = thresholds.entries[key];
+              const color = THRESHOLD_LINE_COLORS[key];
+              if (!entry.enabled || entry.value === null || !color) return null;
+              return (
+                <ReferenceLine
+                  key={key}
+                  y={entry.value}
+                  label={{ 
+                    value: THRESHOLD_LABELS[key], 
+                    fill: color, 
+                    fontSize: 10, 
+                    position: 'insideTopRight',
+                    dy: -10 
+                  }}
+                  stroke={color}
+                  strokeDasharray="3 3"
+                />
+              );
+            })}
 
           </LineChart>
         </ResponsiveContainer>
