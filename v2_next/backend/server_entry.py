@@ -6,8 +6,9 @@ import threading
 import webbrowser
 import time
 import traceback
-from PIL import Image
+from PIL import Image, ImageTk
 import pystray
+import tkinter as tk
 
 # Explicitly import pydantic dependencies
 import pydantic
@@ -102,6 +103,77 @@ def resource_path(relative_path):
         base_path = str(Path(__file__).parent)
     return os.path.join(base_path, relative_path)
 
+# --- SPLASH SCREEN ---
+_splash_window = None
+_splash_closed = threading.Event()
+
+def show_splash():
+    """Display a splash screen while application loads."""
+    global _splash_window
+    try:
+        splash_path = resource_path(os.path.join("backend", "assets", "splash.png"))
+        if not os.path.exists(splash_path):
+            splash_path = resource_path(os.path.join("assets", "splash.png"))
+        
+        if not os.path.exists(splash_path):
+            print("[Splash] Splash image not found, skipping splash screen.")
+            _splash_closed.set()
+            return
+        
+        print(f"[Splash] Loading splash from {splash_path}")
+        
+        root = tk.Tk()
+        _splash_window = root
+        
+        # Configure splash window
+        root.overrideredirect(True)  # No window decorations
+        root.attributes("-topmost", True)  # Always on top
+        root.configure(bg='#1a1a2e')
+        
+        # Load and display image
+        img = Image.open(splash_path)
+        
+        # Resize image to a reasonable splash size (max 400x400)
+        max_size = 400
+        if img.width > max_size or img.height > max_size:
+            ratio = min(max_size / img.width, max_size / img.height)
+            new_width = int(img.width * ratio)
+            new_height = int(img.height * ratio)
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        photo = ImageTk.PhotoImage(img)
+        
+        # Center on screen
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        x = (screen_width - img.width) // 2
+        y = (screen_height - img.height) // 2
+        root.geometry(f"{img.width}x{img.height}+{x}+{y}")
+        
+        label = tk.Label(root, image=photo, bg='#1a1a2e')
+        label.image = photo  # Keep reference
+        label.pack()
+        
+        print("[Splash] Splash window displayed.")
+        root.mainloop()
+        
+    except Exception as e:
+        print(f"[Splash] Failed to show splash: {e}")
+        traceback.print_exc()
+    finally:
+        _splash_closed.set()
+
+def close_splash():
+    """Close the splash screen from another thread."""
+    global _splash_window
+    try:
+        if _splash_window:
+            print("[Splash] Closing splash window...")
+            _splash_window.after(0, _splash_window.destroy)
+            _splash_window = None
+    except Exception as e:
+        print(f"[Splash] Failed to close splash: {e}")
+
 def open_browser(icon=None, item=None):
     try:
         target_url = f"http://127.0.0.1:{config.BACKEND_PORT}"
@@ -124,12 +196,26 @@ def run_server():
 
 if __name__ == "__main__":
     try:
+        # Start Splash Screen in separate thread (GUI must run in main for some OSes, but we'll try)
+        splash_thread = threading.Thread(target=show_splash, daemon=True)
+        splash_thread.start()
+        
+        # Give splash a moment to appear
+        time.sleep(0.3)
+        
         # Start Server thread
         server_thread = threading.Thread(target=run_server, daemon=True)
         server_thread.start()
 
-        # optional: Give server a moment to init before UI logic
-        time.sleep(0.5)
+        # Wait for server to initialize (give it a moment)
+        time.sleep(2.0)
+        
+        # Close splash and open browser
+        close_splash()
+        time.sleep(0.3)
+
+        # Auto-open browser
+        threading.Timer(0.5, open_browser).start()
 
         # Setup System Tray
         icon_path = resource_path(os.path.join("backend", "assets", "icon.png"))
