@@ -40,47 +40,38 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
   
   const seriesBufferRef = useRef<SeriesBuffer>(new SeriesBuffer(SERIES_WINDOW_MS, SERIES_MAX_POINTS));
 
-  // Polling Effect
+  // Web Worker Polling Effect
   useEffect(() => {
-    let timer: number | null = null;
-    let cancelled = false;
-    let inFlight = false;
-
-    const tick = async () => {
-      if (cancelled || inFlight) return;
-      inFlight = true;
-
-      const t0 = performance.now();
-      try {
-        const latest = await metricService.getLatest();
-        const t1 = performance.now();
-
-        if (cancelled) return;
-
-        const sampleTimestamp = Date.now();
-        setData(latest);
-        setConnected(true);
-        setLastDataAt(sampleTimestamp);
-        setLatencyMs(Math.round(t1 - t0));
-
-        seriesBufferRef.current.append(buildSeriesSample(latest, sampleTimestamp));
-      } catch (err) {
-        if (!cancelled) {
-          console.error('API Error', err);
-          setConnected(false);
-          setLatencyMs(null);
+    // Create worker instance (Vite syntax)
+    const worker = new Worker(new URL('../workers/polling.worker.ts', import.meta.url), { type: 'module' });
+    
+    worker.onmessage = (e) => {
+        const { type, payload } = e.data;
+        if (type === 'DATA') {
+            const { data: newData, timestamp, latency } = payload;
+            
+            // Batch updates
+            setData(newData);
+            setConnected(true);
+            setLastDataAt(timestamp);
+            setLatencyMs(Math.round(latency));
+            
+            // Append to series buffer
+            seriesBufferRef.current.append(buildSeriesSample(newData, timestamp));
+        } else if (type === 'ERROR') {
+            console.error('API Error (Worker)', payload.message);
+            setConnected(false);
+            setLatencyMs(null);
         }
-      } finally {
-        inFlight = false;
-      }
     };
 
-    tick();
-    timer = window.setInterval(tick, POLL_INTERVAL_MS);
+    // Start polling
+    worker.postMessage({ type: 'START', payload: { interval: POLL_INTERVAL_MS } });
 
+    // Cleanup
     return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
+        worker.postMessage({ type: 'STOP' });
+        worker.terminate();
     };
   }, []);
 

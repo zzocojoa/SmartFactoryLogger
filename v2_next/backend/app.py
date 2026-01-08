@@ -754,22 +754,22 @@ def read_root():
     }
 
 @app.get("/api/data", response_model=FactoryData)
-def get_data():
+async def get_data():
     """Get latest snapshot from PLC Service (Memory)"""
     return plc_service.get_latest_data()
 
 @app.get("/health")
-def health():
+async def health():
     return plc_service.get_health()
 
 @app.get("/stats")
-def stats():
+async def stats():
     data = observability_service.get_stats()
     data["uptime_sec"] = int(time.time() - _app_start_time)
     return data
 
 @app.get("/api/observability/errors")
-def list_observability_errors(limit: int = 50):
+async def list_observability_errors(limit: int = 50):
     try:
         items = observability_service.get_errors(limit)
         summary = observability_service.get_error_summary()
@@ -908,7 +908,7 @@ def open_comm_metrics_log_file():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @app.get("/api/config")
-def get_config():
+async def get_config():
     try:
         return get_config_snapshot()
     except Exception as exc:
