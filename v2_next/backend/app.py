@@ -21,6 +21,25 @@ import base64
 import json
 import logging
 from logging.handlers import RotatingFileHandler
+import time
+
+class SafeRotatingFileHandler(RotatingFileHandler):
+    """
+    RotatingFileHandler that catches PermissionError/OSError during rollover (common on Windows)
+    and continues logging to the same file instead of crashing.
+    """
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except (PermissionError, OSError) as e:
+            # If rotation fails (file locked), reopen the current file and continue
+            # The file will grow larger than maxBytes, but we avoid a crash.
+            # We can log a localized error to stderr or just ignore it.
+            try:
+                if self.stream is None:
+                    self.stream = self._open()
+            except Exception:
+                pass
 import socket
 import subprocess
 import tempfile
@@ -474,7 +493,7 @@ def _setup_logging() -> tuple[logging.Logger, logging.Logger]:
     if not logger.handlers:
         logger.setLevel(logging.INFO)
         system_log = log_dir / "system.log"
-        file_handler = RotatingFileHandler(
+        file_handler = SafeRotatingFileHandler(
             system_log,
             maxBytes=10 * 1024 * 1024,
             backupCount=5,
@@ -492,7 +511,7 @@ def _setup_logging() -> tuple[logging.Logger, logging.Logger]:
     if not crash_logger.handlers:
         crash_logger.setLevel(logging.ERROR)
         crash_log = log_dir / "crash.log"
-        crash_handler = RotatingFileHandler(
+        crash_handler = SafeRotatingFileHandler(
             crash_log,
             maxBytes=10 * 1024 * 1024,
             backupCount=5,
