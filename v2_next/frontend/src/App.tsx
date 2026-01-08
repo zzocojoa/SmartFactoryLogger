@@ -1563,31 +1563,91 @@ function App() {
     try {
       setSnapshotLoading(true);
       pushNotification('스냅샷', '스냅샷 생성 및 서버 저장 중...', 'info');
+      
       const element = document.getElementById('root') || document.body;
       const scrollHeight = document.documentElement.scrollHeight;
 
-      const canvas = await html2canvas(element, {
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#1E1E1E',
-        imageTimeout: 5000,
-        height: scrollHeight,
-        windowHeight: scrollHeight,
-        scrollY: -window.scrollY,
-      } as any);
-
-      const base64Data = canvas.toDataURL('image/png');
+      // Scan and selectively patch stylesheets/styles that contain unsupported color() or color-mix() functions
+      const allStyleSheets: Array<{ sheet: CSSStyleSheet; disabled: boolean }> = [];
+      const allStyleElements: Array<{ el: HTMLStyleElement; originalText: string }> = [];
 
       try {
-        await saveSnapshot({
-          image_base64: base64Data,
-          name: 'snapshot',
-          format: 'png'
+        // 1. Process external stylesheets - disable only problematic ones
+        Array.from(document.styleSheets).forEach((sheet) => {
+          if (sheet && sheet.href) {
+             if (sheet.href.includes('grafana') || sheet.href.includes('blob:')) {
+                allStyleSheets.push({ sheet, disabled: sheet.disabled });
+                sheet.disabled = true;
+             }
+          }
         });
-        pushNotification('스냅샷 성공', '서버 설정 폴더에 저장되었습니다.', 'info');
-      } catch (apiError) {
-        console.error('Snapshot API failed', apiError);
-        pushNotification('스냅샷 실패', '서버 저장 중 오류가 발생했습니다.', 'error');
+
+        // 2. Process inline <style> tags content
+        // Instead of clearing, we replace color-mix() with a fallback color to preserve layout
+        const styleTags = Array.from(document.querySelectorAll('style'));
+        styleTags.forEach((el) => {
+          const content = el.textContent || '';
+          if (content.includes('color(') || content.includes('color-mix(')) {
+            allStyleElements.push({ el, originalText: content });
+            
+            // Regex to replace color-mix(in srgb, COLOR PERCENT, ...) -> COLOR
+            // This preserves the main color component so background/text colors remain visible
+            // Simplified regex to capture the first color argument
+            let newContent = content.replace(/color-mix\(in\s+[a-z]+,\s*([^, ]+)[^)]*\)/gi, '$1');
+            
+            // Also handle standard color() function if present -> fallback to #000 or inherit
+            // Since we can't easily parse color() arguments without a library, we replace it with a safe hex
+            // But based on analysis, color-mix is the main culprit
+            newContent = newContent.replace(/color\([^)]+\)/gi, '#1e1e1e'); 
+            
+            el.textContent = newContent;
+          }
+        });
+      } catch (e) {
+        console.warn('Error processing styles for snapshot', e);
+      }
+
+      try {
+        const canvas = await html2canvas(element, {
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#1E1E1E', // Standard dark background
+          imageTimeout: 5000,
+          height: scrollHeight,
+          windowHeight: scrollHeight,
+          scrollY: -window.scrollY,
+          ignoreElements: (el: Element) => {
+            const className = el.className?.toString() || '';
+            if (className.includes('scene-tooltip')) return true;
+            return false;
+          }
+        } as any);
+
+        const base64Data = canvas.toDataURL('image/png');
+
+        try {
+          await saveSnapshot({
+            image_base64: base64Data,
+            name: 'snapshot',
+            format: 'png'
+          });
+          pushNotification('스냅샷 성공', '서버 설정 폴더에 저장되었습니다.', 'info');
+        } catch (apiError) {
+          console.error('Snapshot API failed', apiError);
+          pushNotification('스냅샷 실패', '서버 저장 중 오류가 발생했습니다.', 'error');
+        }
+      } finally {
+        // Restore stylesheets
+        allStyleSheets.forEach(({ sheet, disabled }) => {
+          try {
+            sheet.disabled = disabled;
+          } catch (e) { /* ignore */ }
+        });
+        
+        // Restore inline style content
+        allStyleElements.forEach(({ el, originalText }) => {
+          el.textContent = originalText;
+        });
       }
     } catch (error) {
       console.error('Snapshot capture failed', error);
