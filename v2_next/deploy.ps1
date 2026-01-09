@@ -33,10 +33,24 @@ Write-Host "    $VersionFile updated to $Version" -ForegroundColor Green
 # Use python -m PyInstaller with the spec file to ensure all configs (assets, icon, noconsole) are applied
 python -m PyInstaller --noconfirm --clean SmartFactoryBackend.spec
 
+
 if ($LASTEXITCODE -ne 0) { Write-Error "Backend Packaging Failed"; exit 1 }
 
+# Rename Output File
+$OriginalExe = "dist/SmartFactoryBackend.exe"
+$NewExeName = "SmartFactory_v$Version.exe"
+$NewExePath = "dist/$NewExeName"
+
+if (Test-Path $OriginalExe) {
+    Rename-Item -Path $OriginalExe -NewName $NewExeName -Force
+    Write-Host ">>> Renamed Output to: $NewExeName" -ForegroundColor Cyan
+} else {
+    Write-Error "Could not find built EXE at $OriginalExe"
+    exit 1
+}
+
 Write-Host ">>> Deployment Build Complete!" -ForegroundColor Green
-$ExePath = Resolve-Path "dist/SmartFactoryBackend.exe"
+$ExePath = Resolve-Path $NewExePath
 Write-Host "    Output File: $ExePath"
 Write-Host "    You can run this single file directly."
 Set-Location ".."

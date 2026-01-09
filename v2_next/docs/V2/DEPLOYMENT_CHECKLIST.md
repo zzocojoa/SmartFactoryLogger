@@ -4,11 +4,11 @@
 
 ## 1. 버전 관리 (Versioning)
 
-- [ ] **Frontend 버전**: `frontend/package.json`의 `version` 필드가
-      업데이트되었는지 확인.
-  - 예: `1.2.0` -> `1.2.1`
-- [ ] **Backend 버전**: `backend/version.py` (또는 `config.py`)의 버전 상수가
-      Frontend와 일치하는지 확인.
+- [x] **Frontend 버전**: `frontend/package.json`의 `version` 필드가
+      업데이트되었는지 확인. (Current: `1.0.0`)
+  - 예: `0.1.0` -> `1.0.0`
+- [x] **Backend 버전**: `backend/version.py` (또는 `config.py`)의 버전 상수가
+      Frontend와 일치하는지 확인. (Current: `1.0.0`)
 - [ ] **Changlog**: `CHANGELOG.md` 또는 릴리즈 노트에 변경 사항이 기록되었는지
       확인.
 
