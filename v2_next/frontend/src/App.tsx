@@ -43,17 +43,31 @@ import { useMetricsViewModel } from './hooks/useMetricsViewModel';
 import { useViewportScale, applyRowHeightToCSS } from './hooks/useViewportScale';
 import './App.css';
 import packageJson from '../package.json';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ReferenceLine,
-} from 'recharts';
+import { UPlotChart } from './components/UPlotChart';
+import uPlot from 'uplot';
+
+// UPlot Series Colors Mapping (matching index.css)
+const SERIES_COLORS: Record<string, string> = {
+  Spot: '#ef4444',
+  Press: '#f59e0b',
+  Temp_F: '#3b82f6',
+  Temp_B: '#8b5cf6',
+  Speed: '#10b981',
+  EndPos: '#f97316',
+  Count: '#14b8a6',
+  Billet_Length: '#ec4899',
+  Billet_Temp: '#d946ef',
+  Mold1: '#aaaaaa',
+  Mold2: '#aaaaaa',
+  Mold3: '#aaaaaa',
+  Mold4: '#aaaaaa',
+  Mold5: '#aaaaaa',
+  Mold6: '#aaaaaa',
+  At_Temp: '#06b6d4',
+  At_Pre: '#84cc16'
+};
+
+/* Recharts imports removed */
 import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { getDashboardScene, WidgetType, WidgetRegistry, DashboardItem, DASHBOARD_LAYOUT_KEYS } from './scenes/DashboardScene';
 import { SceneDataNode, SceneGridItemLike, SceneGridLayout, SceneGridItem, SceneObjectBase } from '@grafana/scenes';
@@ -1592,33 +1606,57 @@ function App() {
       };
 
       const originalSheets: { link: HTMLLinkElement; disabled: boolean }[] = [];
+      const originalStyleTags: { sheet: CSSStyleSheet; disabled: boolean }[] = [];
       const tempStyles: HTMLStyleElement[] = [];
 
       try {
         const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]')) as HTMLLinkElement[];
+        const styleTags = Array.from(document.querySelectorAll('style')) as HTMLStyleElement[];
         
         // Parallel fetch and sanitize
-        await Promise.all(links.map(async (link) => {
-          try {
-            const href = link.href;
-            const response = await fetch(href);
-            const text = await response.text();
-            
-            const sanitizedText = sanitizeCss(text);
-            
-            const style = document.createElement('style');
-            style.textContent = sanitizedText;
-            style.setAttribute('data-snapshot-temp', 'true');
-            tempStyles.push(style);
-            
-            originalSheets.push({ link, disabled: link.disabled });
-          } catch (err) {
-            console.warn('Failed to fetch/sanitize stylesheet:', link.href, err);
-          }
-        }));
+        await Promise.all([
+          ...links.map(async (link) => {
+            try {
+              const href = link.href;
+              const response = await fetch(href);
+              const text = await response.text();
+              
+              const sanitizedText = sanitizeCss(text);
+              
+              const style = document.createElement('style');
+              style.textContent = sanitizedText;
+              style.setAttribute('data-snapshot-temp', 'true');
+              tempStyles.push(style);
+              
+              originalSheets.push({ link, disabled: link.disabled });
+            } catch (err) {
+              console.warn('Failed to fetch/sanitize stylesheet:', link.href, err);
+            }
+          }),
+          ...styleTags.map(async (tag) => {
+             try {
+                if (tag.hasAttribute('data-snapshot-temp')) return;
+                const sheet = tag.sheet;
+                if (!sheet) return;
+
+                const text = tag.textContent || '';
+                const sanitizedText = sanitizeCss(text);
+                
+                const style = document.createElement('style');
+                style.textContent = sanitizedText;
+                style.setAttribute('data-snapshot-temp', 'true');
+                tempStyles.push(style);
+                
+                originalStyleTags.push({ sheet, disabled: sheet.disabled });
+             } catch (e) {
+                 console.warn('Failed to sanitize style tag:', e);
+             }
+          })
+        ]);
 
         // Apply DOM changes: Disable originals, Inject temps
         originalSheets.forEach(item => item.link.disabled = true);
+        originalStyleTags.forEach(item => item.sheet.disabled = true);
         tempStyles.forEach(style => document.head.appendChild(style));
 
       } catch (e) {
@@ -1638,8 +1676,14 @@ function App() {
             imageTimeout: 10000,
             height: scrollHeight,
             windowHeight: scrollHeight,
+            width: element.offsetWidth,
+            windowWidth: element.offsetWidth,
             scrollY: -window.scrollY,
             onclone: (clonedDoc: Document) => {
+               // Hide scrollbars to prevent gray track capture
+               clonedDoc.documentElement.style.overflow = 'hidden';
+               clonedDoc.body.style.overflow = 'hidden';
+
                // Also run inline sanitizer on clone just in case dynamic styles exist
                const replaceColorFunctions = (text: string) => {
                   if (!text) return text;
@@ -1672,8 +1716,14 @@ function App() {
             imageTimeout: 5000,
             height: scrollHeight,
             windowHeight: scrollHeight,
+            width: element.offsetWidth,
+            windowWidth: element.offsetWidth,
             scrollY: -window.scrollY,
             onclone: (clonedDoc: Document) => {
+              // Hide scrollbars
+              clonedDoc.documentElement.style.overflow = 'hidden';
+              clonedDoc.body.style.overflow = 'hidden';
+
               clonedDoc.querySelectorAll('link[rel="stylesheet"]').forEach(el => el.remove());
               clonedDoc.querySelectorAll('style').forEach(el => el.remove());
               clonedDoc.querySelectorAll('*').forEach(el => el.removeAttribute('style'));
@@ -1744,7 +1794,12 @@ function App() {
       } finally {
         // CLEANUP: Restore original DOM state
         tempStyles.forEach(el => el.remove());
-        originalSheets.forEach(item => item.link.disabled = item.disabled);
+        originalSheets.forEach(item => {
+           try { item.link.disabled = item.disabled; } catch(e) {}
+        });
+        originalStyleTags.forEach(item => {
+           try { item.sheet.disabled = item.disabled; } catch(e) {}
+        });
       }
     } catch (error) {
       console.error('Snapshot capture failed', error);
@@ -4761,6 +4816,7 @@ function App() {
             spotAlertActive,
             lastDataAt,
             timeSeriesFrames,
+            timeSeriesAllFrame,
             onSpotImageLoaded: handleSpotImageLoaded,
             onSpotImageError: handleSpotImageError,
             requestFocus,
@@ -4796,6 +4852,7 @@ type DataContextValue = {
   data: FactoryData | null;
   thresholds: ThresholdState;
   timeSeriesFrames: Record<string, SeriesFrame> | null;
+  timeSeriesAllFrame: SeriesFrame | null; // Added for uPlot
   spotConfig: SpotConfig | null;
   spotImageUrl: string;
   spotImageLoading: boolean;
@@ -4825,6 +4882,7 @@ const DataContext = React.createContext<DataContextValue>({
   data: null,
   thresholds: buildThresholdStateFromConfig(),
   timeSeriesFrames: null,
+  timeSeriesAllFrame: null,
   spotConfig: null,
   spotImageUrl: '',
   spotImageLoading: false,
@@ -5385,6 +5443,7 @@ function TimeSeriesWidget() {
   const {
     data: factoryData,
     timeSeriesFrames,
+    timeSeriesAllFrame,
     seriesWindowMin,
     setSeriesWindowMin,
     seriesPaused,
@@ -5398,182 +5457,399 @@ function TimeSeriesWidget() {
     thresholds
   } = React.useContext(DataContext);
 
+  const { mode } = useTheme();
+
   // Convert frames to Recharts data
   // Optimizing: Only rebuild when frames update
   // Use a ref to store the last valid data for freezing
   const lastChartDataRef = useRef<any[]>([]);
 
-  const chartData = useMemo(() => {
-    // If paused, return the last known data to "freeze" the chart
-    if (seriesPaused && lastChartDataRef.current.length > 0) {
-      return lastChartDataRef.current;
-    }
+  // uPlot Instance State
+  const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
+  
+  // Active Series State (Tracking visibility for UI)
+  // Initialize with Catalog defaults (Molds are hidden by default)
+  const [activeSeries, setActiveSeries] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    TIME_SERIES_CATALOG.forEach(meta => {
+        initial[meta.key] = !['Mold1','Mold2','Mold3','Mold4','Mold5','Mold6'].includes(meta.key);
+    });
+    return initial;
+  });
 
-    if (!timeSeriesFrames) return [];
+  const toggleSeries = (key: string) => {
+    if (!uPlotInst) return;
+    
+    // Find uPlot series index
+    // Series 0 is Time. TIME_SERIES_CATALOG matches series 1..N
+    const catIndex = TIME_SERIES_CATALOG.findIndex(m => m.key === key);
+    if (catIndex === -1) return;
+    
+    const uPlotIndex = catIndex + 1;
+    const currentShow = activeSeries[key];
+    const newShow = !currentShow;
+    
+    // Update uPlot (Efficient, no React re-render of chart)
+    uPlotInst.setSeries(uPlotIndex, { show: newShow });
+    
+    // Update React UI state (for Legend buttons)
+    setActiveSeries(prev => ({ ...prev, [key]: newShow }));
+  };
 
-    // Use 'process' frame as master for time, as it contains Speed/Press (always present)
-    const master = timeSeriesFrames['process'];
-    if (!master) return [];
-
-    const times = master.fields[0].values; // Time column
-    const length = master.length;
-
-    const data = [];
-    for (let i = 0; i < length; i++) {
-      const time = times[i];
-      const item: any = { time };
-
-      // Iterate all groups (frames)
-      Object.values(timeSeriesFrames).forEach((frame) => {
-        // Check length alignment
-        if (i >= frame.length) return;
-
-        // Iterate all fields in the frame (skip time at index 0)
-        for (let j = 1; j < frame.fields.length; j++) {
-          const field = frame.fields[j];
-          item[field.name] = field.values[i];
+  // uPlot Data Preparation
+  // Direct mapping from columnar timeSeriesAllFrame to uPlot's AlignedData (array of arrays)
+  const uPlotData = useMemo<uPlot.AlignedData | null>(() => {
+    if (!timeSeriesAllFrame) return null;
+    
+    // timeSeriesAllFrame fields are already sorted by TIME_SERIES_CATALOG
+    // Field 0 is Time, others represent series in order
+    // Ensure we are not passed nulls where arrays expected, though 'values' should be arrays.
+    
+    // We must ensure the structure is [ [time...], [series1...], [series2...] ]
+    // which maps to field.values
+    
+    return timeSeriesAllFrame.fields.map((f, i) => {
+        // Field 0 is Time (ms). uPlot prefers seconds.
+        if (i === 0) {
+            return f.values.map(v => (v || 0) / 1000);
         }
-      });
-      data.push(item);
-    }
+        return f.values;
+    }) as uPlot.AlignedData;
+  }, [timeSeriesAllFrame]);
 
-    lastChartDataRef.current = data;
-    return data;
-  }, [timeSeriesFrames, seriesPaused]);
+  // uPlot Options
+  const uPlotOptions = useMemo<uPlot.Options>(() => {
+    const isDark = mode === 'dark' || document.body.getAttribute('data-theme') === 'night';
+    const axisColor = isDark ? '#aaaaaa' : '#333333';
+
+    
+    return {
+      title: "",
+      width: 800, // Placeholder, autosized by component
+      height: 400,
+      mode: 1, // 1: equidistant, 2: non-equidistant
+      scales: {
+        x: {
+          time: true,
+        },
+        y: {
+          auto: true,
+        }
+      },
+      series: [
+        {
+            label: "Time",
+            value: (u, v) => v == null ? "-" : new Date(v * 1000).toLocaleTimeString(),
+            stroke: axisColor,
+        },
+        ...TIME_SERIES_CATALOG.map(meta => ({
+            label: meta.label,
+            stroke: SERIES_COLORS[meta.key] || '#888',
+            width: 2,
+            points: { show: false }, // Disable dots for performance
+            show: ['Mold1','Mold2','Mold3','Mold4','Mold5','Mold6'].includes(meta.key) ? false : true, // Hide Molds by default
+            spanGaps: true,
+        }))
+      ],
+      axes: [
+        {
+          scale: 'x',
+          space: 50,
+          stroke: axisColor,
+          grid: { show: false },
+          ticks: { show: true, stroke: axisColor, width: 1 },
+          values: (u, vals, space) => vals.map(v => new Date(v * 1000).toLocaleTimeString('en-GB', { hour12: false }))
+        },
+        {
+          scale: 'y',
+          size: 50,
+          stroke: axisColor,
+          grid: { show: false },
+          ticks: { show: true, stroke: axisColor, width: 1 },
+          values: (u, vals, space) => vals.map(v => v.toFixed(1))
+        }
+      ],
+      legend: {
+        show: false, // Use Custom Legend
+      },
+      cursor: {
+        drag: { x: true, y: true },
+        points: { show: false }
+      },
+      hooks: {
+        draw: [(u: uPlot) => {
+          if (!showThresholds || !thresholds.masterOn) return;
+          
+          const { ctx } = u;
+          const { left, top, width, height } = u.bbox;
+          const seriesEntries = Object.keys(thresholds.entries) as ThresholdKey[];
+
+          ctx.save();
+          ctx.beginPath();
+          
+          seriesEntries.forEach(key => {
+            const entry = thresholds.entries[key];
+            const color = THRESHOLD_LINE_COLORS[key];
+            
+            if (!entry.enabled || entry.value === null || !color) return;
+
+            // Resolve color variable if it starts with var(--) - uPlot Canvas won't resolve it automatically simply by fillStyle
+            // Ideally we should use getComputedStyle, but for performance, we might assume hex or try simple resolution
+            // Wait, SERIES_COLORS are hex, but THRESHOLD_LINE_COLORS are var(--...)
+            // We need to resolve these. Or just use a fallback.
+            // For now, let's assume 'color' string works if we can't resolve vars easily in canvas loop without perf hit.
+            // Actually, ctx.fillStyle DOES support "var(--...)" in modern browsers? No, Canvas API does NOT support CSS variables directly.
+            // We must resolve them.
+            // Optimization: Variables are resolved in React style prop, but not in Canvas 2D Context.
+            
+            // Temporary Workaround: Use fixed colors or read from a hidden element (expensive).
+            // Better: parse vars once. But they are simple. 
+            // Let's use getComputedStyle(document.documentElement).getPropertyValue(...) inside the hook is ok? 
+            // It will run every frame. 
+            // Let's try to map keys to SERIES_COLORS if possible? 
+            // Speed -> SERIES_COLORS['Speed']. 
+            // Let's rely on SERIES_COLORS for mapping if keys match.
+            // ThresholdKey: 'speed', 'press' ... 
+            // Series Key is: 'Speed', 'Press' (Capitalized).
+            
+            // Mapping:
+            const capKey = key.charAt(0).toUpperCase() + key.slice(1);
+            let hexColor = SERIES_COLORS[capKey] || '#888888';
+             // Special cases
+            if (key === 'temp_f') hexColor = SERIES_COLORS['Temp_F'];
+            if (key === 'temp_b') hexColor = SERIES_COLORS['Temp_B'];
+            if (key === 'billet_temp') hexColor = SERIES_COLORS['Billet_Temp'];
+            if (key === 'billet') hexColor = SERIES_COLORS['Billet_Length'];
+            if (key === 'at_temp') hexColor = SERIES_COLORS['At_Temp'];
+            if (key === 'at_pre') hexColor = SERIES_COLORS['At_Pre'];
+
+            const yVal = entry.value!;
+            // uPlot implicitly uses scale 'y' for values
+            const yPos = u.valToPos(yVal, 'y', true);
+
+            // Check if line is within visible area
+            if (yPos < top || yPos > top + height) return;
+
+            // Draw Line
+            ctx.lineWidth = 1;         
+            ctx.strokeStyle = hexColor;
+            ctx.setLineDash([5, 5]); // Dashed line
+            
+            ctx.moveTo(left, yPos);
+            ctx.lineTo(left + width, yPos);
+            ctx.stroke();
+            
+            // Draw Label
+            ctx.fillStyle = hexColor;
+            ctx.font = "10px sans-serif";
+            ctx.textAlign = "right";
+            ctx.textBaseline = "bottom";
+            ctx.fillText(THRESHOLD_LABELS[key] || key, left + width - 5, yPos - 2);
+            
+            ctx.beginPath(); // Reset path for next line
+          });
+          
+          
+          ctx.restore();
+        }],
+        setCursor: [(u: uPlot) => {
+            if (!u.cursor) return;
+            const { left, top, idx } = u.cursor;
+            if (left === undefined || top === undefined) return;
+            const tooltip = document.getElementById('uplot-tooltip');
+            if (!tooltip) return;
+
+            if (idx === null || idx === undefined) {
+                tooltip.style.display = 'none';
+                return;
+            }
+
+            // Data
+            const xVal = u.data[0][idx];
+            // Skip Time series (index 0)
+            const activeSeriesIndices = u.series.map((s, i) => s.show ? i : -1).filter(i => i > 0);
+            
+            // Build HTML
+            // Note: In React we usually avoid innerHTML, but for perf in 60fps hook it's acceptable/common in chart libs
+            let html = `<div class="uplot-tooltip-time">${new Date(xVal * 1000).toLocaleTimeString('en-GB', { hour12: false })}</div>`;
+            
+            activeSeriesIndices.forEach(sIdx => {
+                const s = u.series[sIdx];
+                const val = u.data[sIdx][idx];
+                const valStr = val != null ? val.toFixed(1) : '-';
+                const color = s.stroke as string; // We know it's string
+                
+                html += `
+                <div class="uplot-tooltip-item">
+                    <div class="uplot-tooltip-label">
+                        <div class="uplot-tooltip-dot" style="background-color: ${color}"></div>
+                        <span>${s.label}</span>
+                    </div>
+                    <span class="uplot-tooltip-value">${valStr}</span>
+                </div>
+                `;
+            });
+
+            tooltip.innerHTML = html;
+            tooltip.style.display = 'block';
+            
+            // Positioning
+            const plotLeft = u.bbox.left;
+            const plotTop = u.bbox.top;
+            const container = u.root.querySelector('.u-over');
+            if (!container) return;
+            
+            // Simple positioning: right of cursor + offset
+            let cssLeft = left + 20;
+            let cssTop = top;
+            
+            // Boundary detection could be added here
+            
+            tooltip.style.transform = `translate(${cssLeft}px, ${cssTop}px)`;
+        }]
+      }
+    };
+  }, [showThresholds, thresholds, mode]);
 
   if (!timeSeriesFrames) return <div style={{ color: 'white', padding: '16px' }}>Loading data...</div>;
 
   return (
     <div className="card timeseries-card" style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Controls Header within the Widget */}
-      <div className="timeseries-controls" style={{
+      {/* Joined Header: Legend (Left) + Controls (Right) */}
+      <div style={{
         display: 'flex',
-        justifyContent: 'flex-end',
+        justifyContent: 'space-between',
         alignItems: 'center',
-        gap: '8px',
-        padding: '4px 8px',
+        padding: '6px 8px',
         borderBottom: '1px solid var(--border-muted)',
-        background: 'var(--bg-header)'
+        background: 'var(--bg-card-muted)',
+        gap: '16px'
       }}>
-        <div className="series-group">
-          {[1, 5, 10, 30, 60].map((min) => (
-            <button
-              key={min}
-              className={`status-action ${seriesWindowMin === min ? 'active' : ''}`}
-              style={{ minWidth: '32px', padding: '0 4px', opacity: seriesWindowMin === min ? 1 : 0.5, fontSize: '11px', height: '24px' }}
-              onClick={() => setSeriesWindowMin(min)}
-            >
-              {min}m
-            </button>
-          ))}
+        {/* Left: Custom Legend */}
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '6px',
+        }}>
+          {TIME_SERIES_CATALOG
+              .filter(meta => !['Mold1', 'Mold2', 'Mold3', 'Mold4', 'Mold5', 'Mold6'].includes(meta.key))
+              .map(meta => {
+              const isActive = activeSeries[meta.key];
+              const color = SERIES_COLORS[meta.key] || '#888';
+              return (
+                  <button
+                      key={meta.key}
+                      onClick={() => toggleSeries(meta.key)}
+                      style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          border: `1px solid ${isActive ? color : 'var(--border-muted)'}`,
+                          background: isActive ? `${color}20` : 'transparent', // 20 = ~12% opacity
+                          fontSize: '11px',
+                          color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          opacity: isActive ? 1 : 0.6
+                      }}
+                  >
+                      <div style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor: isActive ? color : 'var(--text-muted)'
+                      }} />
+                      <span>{meta.label}</span>
+                      <span style={{ fontWeight: 600, marginLeft: '4px' }}>
+                          {factoryData && typeof factoryData[meta.key] === 'number' 
+                            ? (factoryData[meta.key] as number).toFixed(1) 
+                            : '-'}
+                      </span>
+                  </button>
+              );
+          })}
         </div>
-        <span
-          className="series-density-badge"
-          title="현재 수집 간격 기준 데이터 밀도"
-          style={{
-            fontSize: '10px',
-            padding: '2px 8px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            color: 'var(--text-muted)',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          📊 {(1 / intervalSec).toFixed(0)}pt/s
-        </span>
-        <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
-        <button
-          className={`status-action ${seriesPaused ? 'warn' : ''}`}
-          onClick={() => setSeriesPaused((prev) => !prev)}
-        >
-          {seriesPaused ? 'Pause' : 'Live'}
-        </button>
-        <label style={{ display: 'flex', alignItems: 'center', fontSize: '11px', cursor: 'pointer', gap: '4px', userSelect: 'none', color: 'var(--text-secondary)' }}>
-          <input
-            type="checkbox"
-            checked={showThresholds}
-            onChange={(e) => setShowThresholds(e.target.checked)}
-          />
-          {LABELS.THRESHOLDS}
-        </label>
-        <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
-        <button
-          className={`status-action ${snapshotLoading ? 'loading' : ''}`}
-          onClick={handleSnapshot}
-          disabled={snapshotLoading}
-          title={LABELS.SAVE_SNAPSHOT}
-        >
-          스냅샷
-        </button>
+
+        {/* Right: Controls */}
+        <div className="timeseries-controls" style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}>
+          <div className="series-group">
+            {[1, 5, 10, 30, 60].map((min) => (
+              <button
+                key={min}
+                className={`status-action ${seriesWindowMin === min ? 'active' : ''}`}
+                style={{ minWidth: '32px', padding: '0 4px', opacity: seriesWindowMin === min ? 1 : 0.5, fontSize: '11px', height: '24px' }}
+                onClick={() => setSeriesWindowMin(min)}
+              >
+                {min}m
+              </button>
+            ))}
+          </div>
+          <span
+            className="series-density-badge"
+            title="현재 수집 간격 기준 데이터 밀도"
+            style={{
+              fontSize: '10px',
+              padding: '2px 8px',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '10px',
+              color: 'var(--text-muted)',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            📊 {(1 / intervalSec).toFixed(0)}pt/s
+          </span>
+          <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
+          <button
+            className={`status-action ${seriesPaused ? 'warn' : ''}`}
+            onClick={() => setSeriesPaused((prev) => !prev)}
+          >
+            {seriesPaused ? 'Pause' : 'Live'}
+          </button>
+          <label style={{ display: 'flex', alignItems: 'center', fontSize: '11px', cursor: 'pointer', gap: '4px', userSelect: 'none', color: 'var(--text-secondary)' }}>
+            <input
+              type="checkbox"
+              checked={showThresholds}
+              onChange={(e) => setShowThresholds(e.target.checked)}
+            />
+            {LABELS.THRESHOLDS}
+          </label>
+          <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
+          <button
+            className={`status-action ${snapshotLoading ? 'loading' : ''}`}
+            onClick={handleSnapshot}
+            disabled={snapshotLoading}
+            title={LABELS.SAVE_SNAPSHOT}
+          >
+            스냅샷
+          </button>
+        </div>
       </div>
 
       <div style={{ flexGrow: 1, minHeight: 0 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-muted)" />
-            <XAxis
-              dataKey="time"
-              type="number"
-              domain={['dataMin', (min: number) => min + seriesWindowMin * 60 * 1000]}
-              allowDataOverflow={true}
-              tickFormatter={(unixTime) => new Date(unixTime).toLocaleTimeString()}
-              stroke="var(--text-muted)"
-              height={30}
+        {uPlotData ? (
+          <div style={{ position: 'relative', height: '100%', width: '100%' }}>
+            <UPlotChart 
+                data={uPlotData} 
+                options={uPlotOptions} 
+                height={400} 
+                className="uplot-container"
+                onCreate={setUPlotInst}
             />
-            <YAxis stroke="var(--text-muted)" width={40} />
-            <Tooltip
-              labelFormatter={(label) => new Date(label).toLocaleTimeString()}
-              contentStyle={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-main)', color: 'var(--text-primary)' }}
-            />
-            <Legend
-              verticalAlign="top"
-              height={36}
-              formatter={(value, entry: any) => {
-                const { color, dataKey } = entry;
-                const rawVal = factoryData ? (factoryData as any)[dataKey] : null;
-                const valStr = rawVal !== null && rawVal !== undefined ? rawVal : '--';
-                return <span style={{ color, marginRight: '10px', fontWeight: 600 }}>{value} {valStr}</span>;
-              }}
-            />
-
-            {/* Defined Lines - Reordered as requested */}
-            {/* Order: SPOT, Speed, Press, Temp_F, Temp_B, Billet_Temp, Billet_Length, Count, EndPos, At_Temp, At_Pre */}
-            <Line type="monotone" dataKey="Spot" stroke="var(--color-spot)" dot={false} strokeWidth={2} name="SPOT" isAnimationActive={false} />
-            <Line type="monotone" dataKey="Speed" stroke="var(--color-speed)" dot={false} strokeWidth={2} name="속도" isAnimationActive={false} />
-            <Line type="monotone" dataKey="Press" stroke="var(--color-press)" dot={false} strokeWidth={2} name="압력" isAnimationActive={false} />
-            <Line type="monotone" dataKey="Temp_F" stroke="var(--color-temp-f)" dot={false} strokeWidth={1} name="온도(F)" isAnimationActive={false} />
-            <Line type="monotone" dataKey="Temp_B" stroke="var(--color-temp-b)" dot={false} strokeWidth={1} name="온도(B)" isAnimationActive={false} />
-            <Line type="monotone" dataKey="Billet_Temp" stroke="var(--color-billet-temp)" dot={false} strokeWidth={1} name="빌렛 온도" isAnimationActive={false} />
-            <Line type="monotone" dataKey="Billet_Length" stroke="var(--color-billet-len)" dot={false} strokeWidth={1} name="빌렛 길이" isAnimationActive={false} />
-            <Line type="monotone" dataKey="Count" stroke="var(--color-count)" dot={false} strokeWidth={1} name="생산 수량" isAnimationActive={false} />
-            <Line type="monotone" dataKey="EndPos" stroke="var(--color-endpos)" dot={false} strokeWidth={1} name="종료 위치" isAnimationActive={false} />
-            <Line type="monotone" dataKey="At_Temp" stroke="var(--color-env-temp)" dot={false} strokeWidth={1} name="환경 온도" isAnimationActive={false} />
-            <Line type="monotone" dataKey="At_Pre" stroke="var(--color-env-pre)" dot={false} strokeWidth={1} name="환경 습도" isAnimationActive={false} />
-
-            {showThresholds && thresholds.masterOn && (Object.keys(thresholds.entries) as ThresholdKey[]).map((key) => {
-              const entry = thresholds.entries[key];
-              const color = THRESHOLD_LINE_COLORS[key];
-              if (!entry.enabled || entry.value === null || !color) return null;
-              return (
-                <ReferenceLine
-                  key={key}
-                  y={entry.value}
-                  label={{ 
-                    value: THRESHOLD_LABELS[key], 
-                    fill: color, 
-                    fontSize: 10, 
-                    position: 'insideTopRight',
-                    dy: -10 
-                  }}
-                  stroke={color}
-                  strokeDasharray="3 3"
-                />
-              );
-            })}
-
-          </LineChart>
-        </ResponsiveContainer>
+            <div id="uplot-tooltip" className="uplot-tooltip" style={{top: 0, left: 0}}></div>
+          </div>
+          ) : (
+            <div style={{color: 'var(--text-muted)', display:'flex', justifyContent:'center', alignItems:'center', height:'100%'}}>
+                Waiting for data...
+            </div>
+          )}
       </div>
     </div>
   );

@@ -4504,3 +4504,52 @@ body {
   background: var(--bg-main);
   width: 100%;
 }
+
+/* uPlot Tooltip */
+.uplot-tooltip {
+  position: absolute;
+  background: var(--bg-card);
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 100;
+  display: none;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  min-width: 140px;
+}
+
+.uplot-tooltip-time {
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-muted);
+  padding-bottom: 4px;
+}
+
+.uplot-tooltip-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+
+.uplot-tooltip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.uplot-tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.uplot-tooltip-value {
+  font-family: var(--font-number);
+  font-weight: 600;
+}

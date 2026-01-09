@@ -9,7 +9,7 @@ import { buildSeriesThresholds } from '../timeseries/seriesThresholds';
 import { ThresholdState } from '../types';
 
 const SERIES_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const SERIES_MAX_POINTS = 7200; // ~2 pts/sec for 1 hour
+const SERIES_MAX_POINTS = 36000; // 10 pts/sec for 1 hour (Safe buffer for high freq)
 const POLL_INTERVAL_MS = 500;
 
 export interface UseMetricsViewModelParams {
@@ -36,9 +36,11 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
   const [data, setData] = useState<FactoryData | null>(null);
   const [connected, setConnected] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
-  const [latencyMs, setLatencyMs] = useState<number | null>(null);
   
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const seriesBufferRef = useRef<SeriesBuffer>(new SeriesBuffer(SERIES_WINDOW_MS, SERIES_MAX_POINTS));
+  const frozenFramesRef = useRef<Record<string, SeriesFrame> | null>(null);
+  const frozenAllFrameRef = useRef<SeriesFrame | null>(null);
 
   // Web Worker Polling Effect
   useEffect(() => {
@@ -83,24 +85,47 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
   // Time Series Frames (grouped)
   const timeSeriesFrames = useMemo<Record<string, SeriesFrame> | null>(() => {
     if (seriesPaused) {
-      // When paused, still return frames but don't update
-      // This requires storing the last frames - simplified: just compute
+      return frozenFramesRef.current;
     }
     const samples = seriesBufferRef.current.getSamples();
     if (!samples.length) {
       return null;
     }
-    return buildGroupedFrames(samples, TIME_SERIES_CATALOG, timeSeriesThresholds);
-  }, [data, timeSeriesThresholds, seriesPaused]); // data triggers recalc on new poll
+    
+    // Filter by window
+    const now = Date.now();
+    const cutoff = now - (seriesWindowMin * 60 * 1000);
+    const filteredSamples = samples.filter(s => s.timestampMs >= cutoff);
+    
+    if (filteredSamples.length === 0) return null;
+
+    const result = buildGroupedFrames(filteredSamples, TIME_SERIES_CATALOG, timeSeriesThresholds);
+    frozenFramesRef.current = result;
+    return result;
+  }, [data, timeSeriesThresholds, seriesPaused, seriesWindowMin]); // data triggers recalc on new poll
 
   // Time Series All Frame (for Grafana Scenes)
   const timeSeriesAllFrame = useMemo<SeriesFrame | null>(() => {
+    if (seriesPaused) {
+        return frozenAllFrameRef.current;
+    }
+
     const samples = seriesBufferRef.current.getSamples();
     if (!samples.length) {
       return null;
     }
-    return buildTimeSeriesFrame(samples, TIME_SERIES_CATALOG, timeSeriesThresholds);
-  }, [data, timeSeriesThresholds]);
+
+    // Filter by window
+    const now = Date.now();
+    const cutoff = now - (seriesWindowMin * 60 * 1000);
+    const filteredSamples = samples.filter(s => s.timestampMs >= cutoff);
+    
+    if (filteredSamples.length === 0) return null;
+
+    const result = buildTimeSeriesFrame(filteredSamples, TIME_SERIES_CATALOG, timeSeriesThresholds);
+    frozenAllFrameRef.current = result;
+    return result;
+  }, [data, timeSeriesThresholds, seriesWindowMin, seriesPaused]);
 
   const getSeriesSamples = useCallback(() => {
     return seriesBufferRef.current.getSamples();
