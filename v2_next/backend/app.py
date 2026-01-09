@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import os
 from pathlib import Path
@@ -1542,17 +1543,15 @@ def spot_focus(steps: int = 0):
 
 
 @app.get("/api/spot/proxy_image")
-def proxy_spot_image():
-    """Proxy the SPOT camera image for remote clients."""
+async def proxy_spot_image():
+    """Proxy the SPOT camera image for remote clients (Async + Cached)."""
     try:
-        if not config.SPOT_IMAGE_URL:
-            raise HTTPException(status_code=404, detail="SPOT URL not configured")
-            
-        with urlopen(config.SPOT_IMAGE_URL, timeout=config.SPOT_TIMEOUT or 2.0) as conn:
-            data = conn.read()
-            return Response(content=data, media_type="image/jpeg")
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch upstream image: {exc}")
+        data = await spot_control.fetch_image_async()
+        return Response(content=data, media_type="image/jpeg")
+    except ValueError as e:
+         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch upstream image: {e}")
 
 @app.post("/api/control/shutdown")
 def shutdown(payload: ShutdownRequest):

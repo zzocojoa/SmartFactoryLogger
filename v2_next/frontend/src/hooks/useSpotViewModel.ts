@@ -29,6 +29,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   const [focusBusy, setFocusBusy] = useState(false);
   
   const hasImageRef = useRef(false);
+  const prevUrlRef = useRef<string | null>(null);
 
   const refreshConfig = useCallback(async () => {
     try {
@@ -39,16 +40,43 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     }
   }, []);
 
+  const fetchImage = useCallback(async () => {
+      if (!config?.image_url) return;
+
+      if (!hasImageRef.current) setImageLoading(true);
+
+      try {
+          // Use fetch instead of img src for memory control
+          const url = `${spotService.getImageUrl()}?t=${Date.now()}`;
+          const response = await fetch(url);
+          
+          if (!response.ok) throw new Error('Network response was not ok');
+          
+          const blob = await response.blob();
+          
+          // Revoke previous URL to prevent memory leaks
+          if (prevUrlRef.current) {
+              URL.revokeObjectURL(prevUrlRef.current);
+          }
+          
+          const newUrl = URL.createObjectURL(blob);
+          prevUrlRef.current = newUrl;
+          setImageUrl(newUrl);
+          setImageError(null);
+          hasImageRef.current = true;
+          setLastSuccessAt(Date.now());
+          
+      } catch (err) {
+          console.error('Image fetch failed', err);
+          setImageError('이미지 수신 실패');
+      } finally {
+          setImageLoading(false);
+      }
+  }, [config]);
+
   const refreshImage = useCallback(() => {
-    setImageLoading(true);
-    // Add timestamp to prevent caching
-    const url = `${spotService.getImageUrl()}?t=${Date.now()}`;
-    setImageUrl(url);
-    // Note: The actual loading state is usually cleared by the <img> onLoad handler 
-    // in the View, but we can manage specific logic here if needed.
-    // For now, we set the URL. The error state is reset when a new URL is set.
-    setImageError(null);
-  }, []);
+    fetchImage();
+  }, [fetchImage]);
 
   const controlSpot = useCallback(async (action: string, value?: number) => {
     try {
@@ -79,35 +107,37 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           console.error('Spot actuator failed', error);
       }
   }, []);
-  // Polling for image
+
+  // Smart Polling
   useEffect(() => {
     if (!config || !config.image_url) return;
-    const refreshMs = Math.max(500, Math.round(config.refresh_interval * 1000));
     
-    // We use a ref to track if we show loading state
-    // In strict mode, we might want to be careful, but this matches App.tsx
-    const updateImage = () => {
-       if (!hasImageRef.current) setImageLoading(true);
-       // Use proxy_image as per App.tsx
-       // We need API_BASE? spotService.getImageUrl() should return the full path or client handles it.
-       // actually App.tsx uses `${API_BASE}/api/spot/proxy_image`
-       // But spotService uses apiClient which has baseURL.
-       // For <img> src, we need the full URL including protocol/host if it's on a different port,
-       // OR just the relative path if we are proxying correctly.
-       // Assuming relative path works if served from same origin, or use helper.
-       // Let's assume spotService.getImageUrl() provides the base path.
-       // We'll update spotService to be consistent or just use the string here.
+    let active = true;
+    let timerId: NodeJS.Timeout;
+    
+    const loop = async () => {
+       if (!active) return;
        
-       // App.tsx uses: `${API_BASE}/api/spot/proxy_image?t=${Date.now()}`
-       // spotService.getImageUrl() now returns the full path with API_BASE
-       const baseUrl = spotService.getImageUrl();
-       setImageUrl(`${baseUrl}?t=${Date.now()}`);
+       await fetchImage();
+       
+       if (active) {
+           const refreshMs = Math.max(500, Math.round(config.refresh_interval * 1000));
+           timerId = setTimeout(loop, refreshMs);
+       }
     };
 
-    updateImage();
-    const timer = setInterval(updateImage, refreshMs);
-    return () => clearInterval(timer);
-  }, [config]);
+    loop();
+    
+    return () => {
+        active = false;
+        if (timerId) clearTimeout(timerId);
+        // Cleanup final Blob URL
+        if (prevUrlRef.current) {
+            URL.revokeObjectURL(prevUrlRef.current);
+            prevUrlRef.current = null;
+        }
+    };
+  }, [config, fetchImage]);
 
   // Initial config load
   useEffect(() => {
@@ -115,16 +145,16 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   }, [refreshConfig]);
 
   const handleImageLoad = useCallback(() => {
+    // Legacy handler: The loading state is now managed by fetchImage
     hasImageRef.current = true;
-    setImageLoading(false);
-    setImageError(null);
-    setLastSuccessAt(Date.now());
+    setImageLoading(false); 
   }, []);
 
   const handleImageError = useCallback(() => {
+    // Legacy handler
     setImageLoading(false);
-    setImageError('이미지 수신 실패');
-  }, []);
+    if (!imageError) setImageError('이미지 로드 실패');
+  }, [imageError]);
 
   return {
     config,
@@ -135,7 +165,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     focusBusy,
     
     refreshConfig,
-    refreshImage, // Manual refresh if needed
+    refreshImage, // Manual refresh
     handleImageLoad,
     handleImageError,
     controlSpot,

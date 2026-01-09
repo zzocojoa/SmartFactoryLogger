@@ -1,12 +1,42 @@
+import asyncio
 import re
 import threading
-from typing import Any, Dict
+import time
+from typing import Any, Dict, Optional
 from urllib.request import urlopen
 
 from .. import config
 
 _ACTUATOR_LOCK = threading.Lock()
 _POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
+
+# Short-term cache for image proxy (Throttling)
+_img_cache = {"data": None, "time": 0}
+
+
+def _fetch_sync() -> bytes:
+    if not config.SPOT_IMAGE_URL:
+        raise ValueError("SPOT_IMAGE_URL is not configured")
+    with urlopen(config.SPOT_IMAGE_URL, timeout=config.SPOT_TIMEOUT or 2.0) as conn:
+        return conn.read()
+
+
+async def fetch_image_async() -> bytes:
+    """Fetch image asynchronously with short-term caching (0.5s)."""
+    now = time.time()
+    # 1. Cache Check
+    if _img_cache["data"] and (now - _img_cache["time"] < 0.5):
+        return _img_cache["data"]
+
+    # 2. Async Fetch
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, _fetch_sync)
+
+    # 3. Update Cache
+    if data:
+        _img_cache["data"] = data
+        _img_cache["time"] = now
+    return data
 
 
 def move_focus(steps: int) -> Dict[str, Any]:
