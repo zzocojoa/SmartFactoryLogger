@@ -1625,16 +1625,47 @@ function App() {
 
         const base64Data = canvas.toDataURL('image/png');
 
-        try {
-          await saveSnapshot({
-            image_base64: base64Data,
-            name: 'snapshot',
-            format: 'png'
-          });
-          pushNotification('스냅샷 성공', '서버 설정 폴더에 저장되었습니다.', 'info');
-        } catch (apiError) {
-          console.error('Snapshot API failed', apiError);
-          pushNotification('스냅샷 실패', '서버 저장 중 오류가 발생했습니다.', 'error');
+        // Smart Snapshot Saving:
+        // - Localhost/127.0.0.1 (EXE/Dev): Save to server 'snapshots' folder
+        // - Remote IP (Client PC): Download to browser default download folder
+        const hostname = window.location.hostname;
+        const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+
+        if (isLocal) {
+          try {
+            await saveSnapshot({
+              image_base64: base64Data,
+              name: 'snapshot',
+              format: 'png'
+            });
+            pushNotification('스냅샷 성공', '서버 설정 폴더에 저장되었습니다.', 'info');
+          } catch (apiError) {
+            console.error('Snapshot API failed', apiError);
+            pushNotification('스냅샷 실패', '서버 저장 중 오류가 발생했습니다.', 'error');
+          }
+        } else {
+          try {
+            // Client-side download for remote clients
+            const link = document.createElement('a');
+            link.href = base64Data;
+            // Generate filename with timestamp: snapshot_YYYYMMDD_HHMMSS.png
+            const now = new Date();
+            const timestamp = now.getFullYear().toString() +
+              (now.getMonth() + 1).toString().padStart(2, '0') +
+              now.getDate().toString().padStart(2, '0') + '_' +
+              now.getHours().toString().padStart(2, '0') +
+              now.getMinutes().toString().padStart(2, '0') +
+              now.getSeconds().toString().padStart(2, '0');
+            link.download = `snapshot_${timestamp}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            pushNotification('스냅샷 다운로드', '스냅샷이 내 컴퓨터에 저장되었습니다.', 'info');
+          } catch (downloadError) {
+            console.error('Snapshot download failed', downloadError);
+            pushNotification('스냅샷 실패', '다운로드 중 오류가 발생했습니다.', 'error');
+          }
         }
       } finally {
         // Restore stylesheets
