@@ -211,10 +211,35 @@ def _config_log(level: str, message: str) -> None:
 def resolve_storage_path(path_value: Optional[str], default_subdir: str, label: str) -> Path:
     raw_value = path_value or default_subdir
     candidate = Path(raw_value)
-    if not candidate.is_absolute():
-        candidate = APP_DATA_DIR / raw_value
+    
+    # If absolute, use as is
+    if candidate.is_absolute():
+        if _ensure_writable_dir(candidate):
+            return candidate
+        # Fallback if specific absolute path isn't writable (rare but possible)
+        fallback = APP_DATA_DIR / default_subdir
+        _ensure_writable_dir(fallback)
+        _config_log("WARNING", f"{label} absolute path not writable: {candidate}. Fallback: {fallback}")
+        return fallback
+
+    # If relative, determine base directory
+    # Portable Mode Check: If frozen (EXE), try to use the executable's directory first
+    base_dir = APP_DATA_DIR
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        # Try to use a test path to check writability of the EXE dir
+        test_path = exe_dir / raw_value
+        if _ensure_writable_dir(test_path):
+            base_dir = exe_dir
+            _config_log("INFO", f"Portable mode detected. Using EXE dir for {label}: {base_dir}")
+        else:
+            _config_log("INFO", f"EXE dir not writable. Using AppData for {label}")
+
+    candidate = base_dir / raw_value
+    
     if _ensure_writable_dir(candidate):
         return candidate
+        
     fallback = APP_DATA_DIR / default_subdir
     _ensure_writable_dir(fallback)
     _config_log(
@@ -223,10 +248,6 @@ def resolve_storage_path(path_value: Optional[str], default_subdir: str, label: 
         f"Check permissions or run as administrator. Using fallback: {fallback}",
     )
     return fallback
-    try:
-        return float(val)
-    except ValueError:
-        return fallback
 
 
 CONFIG_PATH = _resolve_config_path()

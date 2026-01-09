@@ -1567,118 +1567,170 @@ function App() {
       const element = document.getElementById('root') || document.body;
       const scrollHeight = document.documentElement.scrollHeight;
 
-      // Scan and selectively patch stylesheets/styles that contain unsupported color() or color-mix() functions
-      const allStyleSheets: Array<{ sheet: CSSStyleSheet; disabled: boolean }> = [];
-      const allStyleElements: Array<{ el: HTMLStyleElement; originalText: string }> = [];
+      // Pre-Capture Sanitization Strategy (Async Fetch)
+      // Fetch external stylesheets to sanitize 'color-mix' and 'color' functions
+      // This prevents html2canvas from crashing during parsing of original links.
+      const sanitizeCss = (cssText: string) => {
+        if (!cssText) return '';
+        let newText = cssText.replace(/color-mix\(in\s+[a-z]+,\s*([^, ]+)[^)]*\)/gi, '$1');
+        newText = newText.replace(/color\([^)]+\)/gi, '#1e1e1e');
+        return newText;
+      };
+
+      const originalSheets: { link: HTMLLinkElement; disabled: boolean }[] = [];
+      const tempStyles: HTMLStyleElement[] = [];
 
       try {
-        // 1. Process external stylesheets - disable only problematic ones
-        Array.from(document.styleSheets).forEach((sheet) => {
-          if (sheet && sheet.href) {
-             if (sheet.href.includes('grafana') || sheet.href.includes('blob:')) {
-                allStyleSheets.push({ sheet, disabled: sheet.disabled });
-                sheet.disabled = true;
-             }
+        const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]')) as HTMLLinkElement[];
+        
+        // Parallel fetch and sanitize
+        await Promise.all(links.map(async (link) => {
+          try {
+            const href = link.href;
+            const response = await fetch(href);
+            const text = await response.text();
+            
+            const sanitizedText = sanitizeCss(text);
+            
+            const style = document.createElement('style');
+            style.textContent = sanitizedText;
+            style.setAttribute('data-snapshot-temp', 'true');
+            tempStyles.push(style);
+            
+            originalSheets.push({ link, disabled: link.disabled });
+          } catch (err) {
+            console.warn('Failed to fetch/sanitize stylesheet:', link.href, err);
           }
-        });
+        }));
 
-        // 2. Process inline <style> tags content
-        // Instead of clearing, we replace color-mix() with a fallback color to preserve layout
-        const styleTags = Array.from(document.querySelectorAll('style'));
-        styleTags.forEach((el) => {
-          const content = el.textContent || '';
-          if (content.includes('color(') || content.includes('color-mix(')) {
-            allStyleElements.push({ el, originalText: content });
-            
-            // Regex to replace color-mix(in srgb, COLOR PERCENT, ...) -> COLOR
-            // This preserves the main color component so background/text colors remain visible
-            // Simplified regex to capture the first color argument
-            let newContent = content.replace(/color-mix\(in\s+[a-z]+,\s*([^, ]+)[^)]*\)/gi, '$1');
-            
-            // Also handle standard color() function if present -> fallback to #000 or inherit
-            // Since we can't easily parse color() arguments without a library, we replace it with a safe hex
-            // But based on analysis, color-mix is the main culprit
-            newContent = newContent.replace(/color\([^)]+\)/gi, '#1e1e1e'); 
-            
-            el.textContent = newContent;
-          }
-        });
+        // Apply DOM changes: Disable originals, Inject temps
+        originalSheets.forEach(item => item.link.disabled = true);
+        tempStyles.forEach(style => document.head.appendChild(style));
+
       } catch (e) {
-        console.warn('Error processing styles for snapshot', e);
+        console.warn('Pre-capture sanitization error:', e);
       }
 
+      
+      
+      // Now run html2canvas on the "clean" DOM
       try {
-        const canvas = await html2canvas(element, {
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#1E1E1E', // Standard dark background
-          imageTimeout: 5000,
-          height: scrollHeight,
-          windowHeight: scrollHeight,
-          scrollY: -window.scrollY,
-          ignoreElements: (el: Element) => {
-            const className = el.className?.toString() || '';
-            if (className.includes('scene-tooltip')) return true;
-            return false;
-          }
-        } as any);
+        let canvas;
+        try {
+          canvas = await html2canvas(element, {
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#1E1E1E',
+            imageTimeout: 10000,
+            height: scrollHeight,
+            windowHeight: scrollHeight,
+            scrollY: -window.scrollY,
+            onclone: (clonedDoc: Document) => {
+               // Also run inline sanitizer on clone just in case dynamic styles exist
+               const replaceColorFunctions = (text: string) => {
+                  if (!text) return text;
+                  let newText = text.replace(/color-mix\(in\s+[a-z]+,\s*([^, ]+)[^)]*\)/gi, '$1');
+                  newText = newText.replace(/color\([^)]+\)/gi, '#1e1e1e');
+                  return newText;
+               };
+               const allElements = Array.from(clonedDoc.querySelectorAll('*'));
+               allElements.forEach(el => {
+                 const styleAttr = el.getAttribute('style');
+                 if (styleAttr && (styleAttr.includes('color(') || styleAttr.includes('color-mix('))) {
+                   el.setAttribute('style', replaceColorFunctions(styleAttr));
+                 }
+               });
+            },
+            ignoreElements: (el: Element) => {
+              const className = el.className?.toString() || '';
+              if (className.includes('scene-tooltip')) return true;
+              return false;
+            }
+          } as any);
+        } catch (initialError) {
+          console.warn('Sanitized snapshot failed, retrying in Nuclear Safe Mode:', initialError);
+          
+          // NUCLEAR SAFE MODE RETRY
+          canvas = await html2canvas(element, {
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#121212',
+            imageTimeout: 5000,
+            height: scrollHeight,
+            windowHeight: scrollHeight,
+            scrollY: -window.scrollY,
+            onclone: (clonedDoc: Document) => {
+              clonedDoc.querySelectorAll('link[rel="stylesheet"]').forEach(el => el.remove());
+              clonedDoc.querySelectorAll('style').forEach(el => el.remove());
+              clonedDoc.querySelectorAll('*').forEach(el => el.removeAttribute('style'));
+              
+              const fallbackStyle = clonedDoc.createElement('style');
+              fallbackStyle.textContent = `
+                body, #root, .app-container { background-color: #121212 !important; color: #ffffff !important; font-family: sans-serif !important; }
+                .card-base, .MuiPaper-root, .panel-container { 
+                  background-color: #1e1e1e !important; 
+                  border: 1px solid #333 !important; 
+                  margin: 4px !important; padding: 8px !important; 
+                }
+                * { border-color: #444 !important; }
+                p, h1, h2, h3, span, div { color: #e0e0e0 !important; }
+                .text-primary { color: #90caf9 !important; }
+              `;
+              clonedDoc.head.appendChild(fallbackStyle);
+            }
+          } as any);
+        }
 
         const base64Data = canvas.toDataURL('image/png');
+        
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-        // Smart Snapshot Saving:
-        // - Localhost/127.0.0.1 (EXE/Dev): Save to server 'snapshots' folder
-        // - Remote IP (Client PC): Download to browser default download folder
-        const hostname = window.location.hostname;
-        const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+        // Use Blob for better browser compatibility with large images
+        canvas.toBlob((blob) => {
+          if (!blob) throw new Error('Canvas to Blob conversion failed');
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          
+          const now = new Date();
+          const timestamp = now.getFullYear().toString() +
+            (now.getMonth() + 1).toString().padStart(2, '0') +
+            now.getDate().toString().padStart(2, '0') + '_' +
+            now.getHours().toString().padStart(2, '0') +
+            now.getMinutes().toString().padStart(2, '0') +
+            now.getSeconds().toString().padStart(2, '0');
+            
+          link.download = `snapshot_${timestamp}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(url), 100);
+          
+          if (!isLocal) {
+             pushNotification('스냅샷 다운로드', '스냅샷이 내 컴퓨터에 저장되었습니다.', 'info');
+          }
+        }, 'image/png');
 
         if (isLocal) {
           try {
-            await saveSnapshot({
-              image_base64: base64Data,
-              name: 'snapshot',
-              format: 'png'
-            });
-            pushNotification('스냅샷 성공', '서버 설정 폴더에 저장되었습니다.', 'info');
+             // Removing 'data:image/png;base64,' prefix
+             const base64Content = base64Data.split(',')[1];
+             await saveSnapshot({
+               image_base64: base64Content,
+               name: 'snapshot',
+               format: 'png'
+             });
+             pushNotification('스냅샷 성공', '서버 설정 폴더에 저장되었습니다.', 'info');
           } catch (apiError) {
-            console.error('Snapshot API failed', apiError);
-            pushNotification('스냅샷 실패', '서버 저장 중 오류가 발생했습니다.', 'error');
-          }
-        } else {
-          try {
-            // Client-side download for remote clients
-            const link = document.createElement('a');
-            link.href = base64Data;
-            // Generate filename with timestamp: snapshot_YYYYMMDD_HHMMSS.png
-            const now = new Date();
-            const timestamp = now.getFullYear().toString() +
-              (now.getMonth() + 1).toString().padStart(2, '0') +
-              now.getDate().toString().padStart(2, '0') + '_' +
-              now.getHours().toString().padStart(2, '0') +
-              now.getMinutes().toString().padStart(2, '0') +
-              now.getSeconds().toString().padStart(2, '0');
-            link.download = `snapshot_${timestamp}.png`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            
-            pushNotification('스냅샷 다운로드', '스냅샷이 내 컴퓨터에 저장되었습니다.', 'info');
-          } catch (downloadError) {
-            console.error('Snapshot download failed', downloadError);
-            pushNotification('스냅샷 실패', '다운로드 중 오류가 발생했습니다.', 'error');
+             console.error('Snapshot API failed', apiError);
+             pushNotification('스냅샷 실패', '서버 저장 중 오류가 발생했습니다.', 'error');
           }
         }
+
       } finally {
-        // Restore stylesheets
-        allStyleSheets.forEach(({ sheet, disabled }) => {
-          try {
-            sheet.disabled = disabled;
-          } catch (e) { /* ignore */ }
-        });
-        
-        // Restore inline style content
-        allStyleElements.forEach(({ el, originalText }) => {
-          el.textContent = originalText;
-        });
+        // CLEANUP: Restore original DOM state
+        tempStyles.forEach(el => el.remove());
+        originalSheets.forEach(item => item.link.disabled = item.disabled);
       }
     } catch (error) {
       console.error('Snapshot capture failed', error);
