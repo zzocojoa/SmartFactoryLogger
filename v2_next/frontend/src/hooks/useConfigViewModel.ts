@@ -258,6 +258,8 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       cycleIdleTime: values.logging.cycle_idle_time?.toString() ?? '',
       cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
       intervalSec: values.system?.interval_sec?.toString() ?? '0.2',
+      statusWarnMs: values.system?.status_warn_ms?.toString() ?? '10000',
+      statusOfflineMs: values.system?.status_offline_ms?.toString() ?? '20000',
       password: '',
       passwordSet: Boolean(values.settings.password_set),
     };
@@ -386,6 +388,8 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       'thresholdAtPreValue',
       'thresholdCountValue',
       'thresholdEndPosValue',
+      'statusWarnMs',
+      'statusOfflineMs',
     ];
     thresholdValueFields.forEach((field) => {
       const value = settingsForm[field] as string;
@@ -516,6 +520,8 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       },
       system: {
         interval_sec: toFloat(settingsForm.intervalSec),
+        status_warn_ms: toInt(settingsForm.statusWarnMs),
+        status_offline_ms: toInt(settingsForm.statusOfflineMs),
       },
     };
 

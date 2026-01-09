@@ -3,7 +3,8 @@ import struct
 import time
 from datetime import datetime
 from typing import Optional, List, Dict
-from urllib.request import urlopen
+
+import httpx
 
 from .base_driver import BasePLCDriver
 from ..models.data_model import FactoryData
@@ -75,6 +76,10 @@ class RealPLCDriver(BasePLCDriver):
         self.spot_read_failures = 0
         self.spot_last_error_time: Optional[float] = None
         self.spot_last_success_time: Optional[float] = None
+        # Shared httpx client for SPOT with connection pooling
+        self._spot_http_client = httpx.Client(
+            timeout=httpx.Timeout(connect=0.5, read=self.spot_timeout or 0.5, write=0.5, pool=2.0)
+        )
         self.logic = LogicProcessor()
 
     def _backoff_ext(self):
@@ -311,14 +316,15 @@ class RealPLCDriver(BasePLCDriver):
 
     # --- SPOT Logic ---
     def _read_spot(self) -> float:
-        """Read SPOT temperature. Returns 0.0 on failure (V1 compatible)."""
+        """Read SPOT temperature using httpx. Returns 0.0 on failure (V1 compatible)."""
         try:
-            with urlopen(config.SPOT_URL, timeout=self.spot_timeout) as resp:
-                raw = resp.read().decode("ascii", errors="ignore").strip()
-                if raw:
-                    value = float(raw)
-                    self._mark_spot_success()
-                    return value
+            resp = self._spot_http_client.get(config.SPOT_URL)
+            resp.raise_for_status()
+            raw = resp.text.strip()
+            if raw:
+                value = float(raw)
+                self._mark_spot_success()
+                return value
         except Exception as exc:
             self._mark_spot_error(str(exc))
             return 0.0  # V1 compatible: show 0 on failure

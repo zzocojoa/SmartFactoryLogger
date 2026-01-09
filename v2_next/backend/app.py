@@ -2,6 +2,7 @@ import asyncio
 import sys
 import os
 from pathlib import Path
+from typing import Optional
 
 # Important: Add the directory containing the 'backend' folder to sys.path
 # This ensures that 'from backend.services...' works in all environments.
@@ -233,14 +234,16 @@ def _ensure_dir(path: Path) -> bool:
 
 
 def _resolve_log_dir() -> Path:
+    """Resolve log directory for system logs (server.log, crash.log)."""
     global _log_dir
     if _log_dir:
         return _log_dir
     base_dir = config.APP_DATA_DIR
+    # System logs go to 'system' subdirectory
     candidates = [
-        base_dir / "logs",
-        Path(tempfile.gettempdir()) / "SmartFactoryLogger" / "logs",
-        Path.cwd() / "logs",
+        base_dir / "logs" / "system",
+        Path(tempfile.gettempdir()) / "SmartFactoryLogger" / "logs" / "system",
+        Path.cwd() / "logs" / "system",
     ]
     for candidate in candidates:
         if _ensure_dir(candidate):
@@ -1552,6 +1555,41 @@ async def proxy_spot_image():
          raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch upstream image: {e}")
+
+
+# --- Frontend Status Logging ---
+class StatusLogRequest(BaseModel):
+    previous: str
+    current: str
+    reason: Optional[str] = None
+
+
+_status_log_lock = threading.Lock()
+
+
+def _get_status_log_path() -> Path:
+    """Get the path for status log file."""
+    log_dir = _resolve_log_dir()
+    return log_dir / "status.log"
+
+
+@app.post("/api/log/status")
+async def log_status_change(payload: StatusLogRequest):
+    """Log frontend status badge changes (Running/Warning/Offline)."""
+    try:
+        log_path = _get_status_log_path()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        reason_str = f" reason='{payload.reason}'" if payload.reason else ""
+        log_line = f"[{timestamp}] STATUS_CHANGE {payload.previous} -> {payload.current}{reason_str}\n"
+        
+        with _status_log_lock:
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write(log_line)
+        
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 
 @app.post("/api/control/shutdown")
 def shutdown(payload: ShutdownRequest):

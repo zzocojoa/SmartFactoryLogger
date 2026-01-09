@@ -76,15 +76,16 @@ class CommMetricsLoggerService:
             from .. import config
 
             if config.LOG_PATH:
-                log_dir = config.LOG_PATH
+                # Comm metrics logs go to 'comm' subdirectory
+                log_dir = os.path.join(config.LOG_PATH, "comm")
         except Exception:
             log_dir = None
         if not log_dir:
             appdata = os.getenv("APPDATA")
             if appdata:
-                log_dir = os.path.join(appdata, "SmartFactoryLogger", "logs")
+                log_dir = os.path.join(appdata, "SmartFactoryLogger", "logs", "comm")
             else:
-                log_dir = os.path.join(os.getcwd(), "logs")
+                log_dir = os.path.join(os.getcwd(), "logs", "comm")
         try:
             os.makedirs(log_dir, exist_ok=True)
         except Exception:

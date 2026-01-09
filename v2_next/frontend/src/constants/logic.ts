@@ -32,8 +32,8 @@ export const PRESS_RUNNING_THRESHOLD = 20;
 // Alarm & Status Timers (in MS)
 export const ALERT_HOLD_MS = 2000;
 export const ALERT_HOLD_LONG_MS = 5000;
-export const STATUS_WARN_MS = 2000;
-export const STATUS_OFFLINE_MS = 5000;
+export const STATUS_WARN_MS = 10000;
+export const STATUS_OFFLINE_MS = 20000;
 export const SETTINGS_AUTO_REFRESH_MS = 4000;
 export const OBSERVABILITY_REFRESH_MS = 10000;
 

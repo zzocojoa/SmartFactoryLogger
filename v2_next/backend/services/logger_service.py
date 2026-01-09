@@ -19,8 +19,9 @@ class CSVLoggerService:
         self.logger = logging.getLogger("SmartFactoryLoggerV2")
         self._config_lock = threading.Lock()
         self._config_version = 0
-        self.active_log_dir = Path(config.LOG_PATH)
-        self.fallback_log_dir = config.APP_DATA_DIR / "logs"
+        # CSV data logs go to 'data' subdirectory
+        self.active_log_dir = Path(config.LOG_PATH) / "data"
+        self.fallback_log_dir = config.APP_DATA_DIR / "logs" / "data"
         self.auto_save = bool(config.AUTO_SAVE)
         self.rotation_enabled = bool(config.ROTATION_ENABLED)
         self.rotation_mode = (config.ROTATION_MODE or "DAILY").upper()

@@ -48,6 +48,8 @@ DEFAULT_SPOT_WIDGET_HEIGHT = 288
 DEFAULT_LOG_PATH = "logs"
 DEFAULT_SNAPSHOT_PATH = "snapshots"
 DEFAULT_AUTO_SAVE = True
+DEFAULT_STATUS_WARN_MS = 10000
+DEFAULT_STATUS_OFFLINE_MS = 20000
 DEFAULT_ROTATION_ENABLED = True
 DEFAULT_ROTATION_MODE = "BILLET"
 DEFAULT_CYCLE_IDLE_TIME = 30
@@ -198,7 +200,8 @@ def _ensure_writable_dir(path: Path) -> bool:
 def _config_log(level: str, message: str) -> None:
     try:
         base_dir = APP_DATA_DIR if "APP_DATA_DIR" in globals() else _get_user_data_dir()
-        log_dir = base_dir / "logs"
+        # Config logs go to 'system' subdirectory
+        log_dir = base_dir / "logs" / "system"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "system.log"
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -358,6 +361,10 @@ SNAPSHOT_PATH = resolve_storage_path(
 _interval_raw = _get_float(CONFIG, "SYSTEM", "intervalsec", DEFAULT_INTERVAL_SEC)
 _interval_raw = _env_float("INTERVAL_SEC", _interval_raw)
 INTERVAL_SEC = max(MIN_INTERVAL_SEC, min(MAX_INTERVAL_SEC, _interval_raw))
+
+# SYSTEM / Status Thresholds
+STATUS_WARN_MS = _get_int(CONFIG, "SYSTEM", "statuswarnms", DEFAULT_STATUS_WARN_MS)
+STATUS_OFFLINE_MS = _get_int(CONFIG, "SYSTEM", "statusofflinems", DEFAULT_STATUS_OFFLINE_MS)
 
 
 # Validation Logic

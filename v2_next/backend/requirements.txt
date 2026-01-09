@@ -6,3 +6,4 @@ websockets
 python-dotenv
 pystray
 Pillow
+httpx

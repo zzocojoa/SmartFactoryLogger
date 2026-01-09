@@ -517,7 +517,7 @@ const buildSpotCommBadge = (
   const lastError = metrics.last_error_time ?? null;
   const readFailures = metrics.read_failures ?? 0;
   const ageMs = lastSuccess && nowMs ? Math.max(0, nowMs - lastSuccess * 1000) : null;
-  const staleMs = Math.max(2000, Math.round((refreshMs ?? 1000) * 3));
+  const staleMs = Math.max(5000, Math.round((refreshMs ?? 1000) * 3));
   let state: CommBadge['state'] = 'idle';
   let label = 'IDLE';
   if (lastSuccess && ageMs !== null && ageMs <= staleMs) {
@@ -1618,7 +1618,10 @@ function App() {
           ...links.map(async (link) => {
             try {
               const href = link.href;
-              const response = await fetch(href);
+          if (href.startsWith('chrome-extension:') || href.startsWith('moz-extension:') || href.startsWith('edge-extension:')) {
+            return;
+          }
+          const response = await fetch(href);
               const text = await response.text();
               
               const sanitizedText = sanitizeCss(text);
@@ -1935,6 +1938,8 @@ function App() {
       cycleIdleTime: values.logging.cycle_idle_time?.toString() ?? '',
       cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
       intervalSec: values.system?.interval_sec?.toString() ?? '0.2',
+      statusWarnMs: values.system?.status_warn_ms?.toString() ?? '10000',
+      statusOfflineMs: values.system?.status_offline_ms?.toString() ?? '20000',
       password: '',
       passwordSet: Boolean(values.settings.password_set),
     };
@@ -2528,6 +2533,8 @@ function App() {
       cycleIdleTime: 'Cycle Idle Time (sec)',
       cycleThresholdPress: 'Cycle Threshold Press',
       intervalSec: '수집 간격 (초)',
+      statusWarnMs: '경고 임계값 (ms)',
+      statusOfflineMs: '오프라인 임계값 (ms)',
       password: '설정 비밀번호',
       passwordSet: '비밀번호 설정 상태',
 
@@ -2777,7 +2784,11 @@ function App() {
   const ageMs = lastDataAt ? Math.max(0, nowTick - lastDataAt) : null;
   const lastUpdateMs = health?.last_update ? health.last_update * 1000 : null;
   const healthAgeMs = lastUpdateMs ? Math.max(0, nowTick - lastUpdateMs) : null;
-  const effectiveAgeMs = healthAgeMs ?? ageMs;
+  const effectiveAgeMs = (healthAgeMs !== null && ageMs !== null) 
+    ? Math.min(healthAgeMs, ageMs) 
+    : (healthAgeMs ?? ageMs);
+  const dynWarnMs = (settingsBaseline?.statusWarnMs) ? parseInt(settingsBaseline.statusWarnMs, 10) : STATUS_WARN_MS;
+  const dynOfflineMs = (settingsBaseline?.statusOfflineMs) ? parseInt(settingsBaseline.statusOfflineMs, 10) : STATUS_OFFLINE_MS;
   const statsWindow = stats?.window;
   const windowRequestCount = statsWindow?.request_count ?? 0;
   const windowErrorRate = statsWindow?.error_rate ?? null;
@@ -2798,11 +2809,11 @@ function App() {
     if (!comm) {
       return 'idle';
     }
-    const refreshMs = spotConfig ? Math.max(500, Math.round(spotConfig.refresh_interval * 1000)) : null;
+    // Exclude SPOT from commSeverity calculation - SPOT has its own dedicated notifications
+    // Only EX and LS affect global system status
     const states = [
       buildCommBadge('EX', comm.extruder, nowTick).state,
       buildCommBadge('LS', comm.ls_plc, nowTick).state,
-      buildSpotCommBadge('SPOT', comm.spot, nowTick, refreshMs).state,
     ];
     if (states.includes('error')) return 'error';
     if (states.includes('warn')) return 'warn';
@@ -2811,10 +2822,10 @@ function App() {
   let statusLabel = 'Offline';
   let statusClass = 'status-offline';
   if (effectiveAgeMs !== null) {
-    if (effectiveAgeMs <= STATUS_WARN_MS) {
+    if (effectiveAgeMs <= dynWarnMs) {
       statusLabel = 'Running';
       statusClass = 'status-ok';
-    } else if (effectiveAgeMs <= STATUS_OFFLINE_MS) {
+    } else if (effectiveAgeMs <= dynOfflineMs) {
       statusLabel = 'Warning';
       statusClass = 'status-warn';
     }
@@ -2926,15 +2937,20 @@ function App() {
     if (statusRef.current === statusLabel) {
       return;
     }
-    if (statusLabel === 'Warning') {
-      pushNotification('통신 지연', `데이터 갱신 지연: ${ageText}`, 'warn');
-    } else if (statusLabel === 'Offline') {
-      pushNotification('통신 끊김', '데이터 수신이 중단되었습니다.', 'error');
-    } else if (statusLabel === 'Running') {
-      pushNotification('통신 정상', '데이터 수신이 정상화되었습니다.', 'info');
-    }
+    
+    const prev = statusRef.current;
+    
+    // Log status change to backend
+    fetch('/api/log/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ previous: prev, current: statusLabel }),
+    }).catch(() => {
+      // Ignore logging errors
+    });
+    
     statusRef.current = statusLabel;
-  }, [statusLabel, ageText, pushNotification]);
+  }, [statusLabel]);
 
   useEffect(() => {
     if (spotAlertRef.current === false && spotAlertActive) {
@@ -4382,6 +4398,36 @@ function App() {
                               );
                             })()}
                           </div>
+                        </div>
+
+                        {/* Status Threshold Settings */}
+                        <div className="settings-system-thresholds">
+                          <label
+                            className={`settings-field ${isSettingsFieldDirty('statusWarnMs') ? 'changed' : ''} ${validationErrors.statusWarnMs ? 'error' : ''}`}
+                          >
+                            상태 경고 임계값 (ms)
+                            <input
+                              type="number"
+                              step="500"
+                              min="1000"
+                              value={settingsForm.statusWarnMs}
+                              onChange={(e) => updateSettingsField('statusWarnMs', e.target.value)}
+                            />
+                            <span className="settings-field-help">통신 지연이 이 시간을 초과하면 'Warning'으로 표시됩니다.</span>
+                          </label>
+                          <label
+                            className={`settings-field ${isSettingsFieldDirty('statusOfflineMs') ? 'changed' : ''} ${validationErrors.statusOfflineMs ? 'error' : ''}`}
+                          >
+                            오프라인 임계값 (ms)
+                            <input
+                              type="number"
+                              step="1000"
+                              min="2000"
+                              value={settingsForm.statusOfflineMs}
+                              onChange={(e) => updateSettingsField('statusOfflineMs', e.target.value)}
+                            />
+                            <span className="settings-field-help">통신 지연이 이 시간을 초과하면 'Offline'으로 표시됩니다.</span>
+                          </label>
                         </div>
                       </div>
                       <div className="settings-path-health">

@@ -290,6 +290,8 @@ export interface ConfigSnapshot {
     };
     system?: {
       interval_sec?: number;
+      status_warn_ms?: number;
+      status_offline_ms?: number;
     };
   };
 }
@@ -332,6 +334,8 @@ export interface SettingsFormState {
   cycleIdleTime: string;
   cycleThresholdPress: string;
   intervalSec: string;
+  statusWarnMs: string;
+  statusOfflineMs: string;
   password: string;
   passwordSet: boolean;
 }

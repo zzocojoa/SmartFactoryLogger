@@ -139,6 +139,8 @@ def get_config_snapshot() -> dict:
     thresholds_enable["master_on"] = _get_bool(parser, "THRESHOLDS_ENABLE", "master_on", False)
     system_cfg = {
         "interval_sec": _get_float(parser, "SYSTEM", "intervalsec", config.DEFAULT_INTERVAL_SEC),
+        "status_warn_ms": _get_int(parser, "SYSTEM", "statuswarnms", config.DEFAULT_STATUS_WARN_MS),
+        "status_offline_ms": _get_int(parser, "SYSTEM", "statusofflinems", config.DEFAULT_STATUS_OFFLINE_MS),
     }
 
     pending_info = None
@@ -453,6 +455,10 @@ def update_config(
             # Clamp to valid range
             clamped = max(config.MIN_INTERVAL_SEC, min(config.MAX_INTERVAL_SEC, payload.system.interval_sec))
             parser.set("SYSTEM", "intervalsec", str(clamped))
+        if payload.system.status_warn_ms is not None:
+            parser.set("SYSTEM", "statuswarnms", str(payload.system.status_warn_ms))
+        if payload.system.status_offline_ms is not None:
+            parser.set("SYSTEM", "statusofflinems", str(payload.system.status_offline_ms))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     write_encoding = "utf-8-sig"

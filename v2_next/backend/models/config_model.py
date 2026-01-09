@@ -64,6 +64,8 @@ class ThresholdsConfig(BaseModel):
 
 class SystemConfig(BaseModel):
     interval_sec: Optional[float] = None
+    status_warn_ms: Optional[int] = None
+    status_offline_ms: Optional[int] = None
 
 
 class ConfigUpdate(BaseModel):
