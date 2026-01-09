@@ -40,6 +40,7 @@ import { useSpotViewModel } from './hooks/useSpotViewModel';
 import { useConfigViewModel } from './hooks/useConfigViewModel';
 import { useLayoutViewModel } from './hooks/useLayoutViewModel';
 import { useMetricsViewModel } from './hooks/useMetricsViewModel';
+import { useViewportScale, applyRowHeightToCSS } from './hooks/useViewportScale';
 import './App.css';
 import packageJson from '../package.json';
 import {
@@ -952,6 +953,14 @@ function App() {
   const { mode, activeCycle, setMode } = useTheme();
   const modal = useModal();
 
+  // Viewport scale for responsive grid
+  const { rowHeight, scaleFactor, aspectRatio } = useViewportScale();
+  
+  // Apply row height to CSS variable when it changes
+  useEffect(() => {
+    applyRowHeightToCSS(rowHeight);
+  }, [rowHeight]);
+
   // Time Series States (UI Control - stays in App)
   const [seriesWindowMin, setSeriesWindowMinState] = useState(() => {
     const saved = localStorage.getItem('seriesWindowMin');
@@ -1072,11 +1081,14 @@ function App() {
     layoutLoadError,
     layoutSaveMessage,
     layoutSaveError,
+    storageMode,
     setLayoutEditing,
+    setStorageMode,
     loadLayoutSnapshot,
     handleSaveLayout,
     handleRestoreLayout,
     handleDeleteLayout,
+    applyPreset,
     updateWidget,
     deleteWidget,
     addWidget,
@@ -1130,6 +1142,8 @@ function App() {
   */
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [widgetAddOpen, setWidgetAddOpen] = useState(false);
+  const [presetOpen, setPresetOpen] = useState(false);
   
   // Password UI states
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
@@ -3003,6 +3017,23 @@ function App() {
               </button>
               {layoutEditing ? (
                 <>
+                  <div className="menu-dropdown-section">
+                    <div className="menu-section-title">저장 위치</div>
+                    <div className="menu-storage-toggle">
+                      <button
+                        className={`menu-item menu-storage-btn ${storageMode === 'local' ? 'active' : ''}`}
+                        onClick={() => setStorageMode('local')}
+                      >
+                        💻 이 PC
+                      </button>
+                      <button
+                        className={`menu-item menu-storage-btn ${storageMode === 'server' ? 'active' : ''}`}
+                        onClick={() => setStorageMode('server')}
+                      >
+                        🖥️ 서버
+                      </button>
+                    </div>
+                  </div>
                   <button
                     onClick={() => {
                       saveLayout();
@@ -3013,7 +3044,7 @@ function App() {
                     {layoutSaveMessage ?? '레이아웃 저장'}
                   </button>
                   <div className="menu-layout-list">
-                    <div className="menu-section-title">저장된 레이아웃</div>
+                    <div className="menu-section-title">저장된 레이아웃 {storageMode === 'local' ? '(로컬)' : '(서버)'}</div>
                     {layoutSlots.length > 0 ? (
                       layoutSlots.map((slot) => (
                         <div
@@ -3051,56 +3082,68 @@ function App() {
                     )}
                   </div>
                   <div className="menu-divider" />
-                  <div className="menu-dropdown-section">
-                    <div className="menu-section-title">위젯 추가</div>
+                  <div className="menu-accordion">
                     <button
-                      className="menu-item"
-                      onClick={() => handleAddWidget('markdown')}
+                      className={`menu-accordion-header ${widgetAddOpen ? 'open' : ''}`}
+                      onClick={() => setWidgetAddOpen(!widgetAddOpen)}
                     >
-                      New Memo
+                      <span>위젯 추가</span>
+                      <span className="menu-accordion-icon">{widgetAddOpen ? '▲' : '▼'}</span>
                     </button>
+                    {widgetAddOpen && (
+                      <div className="menu-accordion-content">
+                        <button className="menu-item" onClick={() => handleAddWidget('markdown')}>
+                          📝 New Memo
+                        </button>
+                        <button className="menu-item" onClick={() => handleAddWidget('timeseries')}>
+                          📊 Time Series
+                        </button>
+                        <button className="menu-item" onClick={() => handleAddWidget('kpi')}>
+                          📈 KPI
+                        </button>
+                        <button className="menu-item" onClick={() => handleAddWidget('spot')}>
+                          🌡️ SPOT Temp
+                        </button>
+                        <button className="menu-item" onClick={() => handleAddWidget('camera')}>
+                          📷 SPOT Camera
+                        </button>
+                        <button className="menu-item" onClick={() => handleAddWidget('temps')}>
+                          🔥 Temps
+                        </button>
+                        <button className="menu-item" onClick={() => handleAddWidget('molds')}>
+                          🧊 Molds
+                        </button>
+                        <button className="menu-item" onClick={() => handleAddWidget('env')}>
+                          🌍 Env
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="menu-divider" />
+                  <div className="menu-accordion">
                     <button
-                      className="menu-item"
-                      onClick={() => handleAddWidget('timeseries')}
+                      className={`menu-accordion-header ${presetOpen ? 'open' : ''}`}
+                      onClick={() => setPresetOpen(!presetOpen)}
                     >
-                      Time Series
+                      <span>화면 비율 프리셋</span>
+                      <span className="menu-accordion-icon">{presetOpen ? '▲' : '▼'}</span>
                     </button>
-                    <button
-                      className="menu-item"
-                      onClick={() => handleAddWidget('kpi')}
-                    >
-                      KPI
-                    </button>
-                    <button
-                      className="menu-item"
-                      onClick={() => handleAddWidget('spot')}
-                    >
-                      SPOT Temp
-                    </button>
-                    <button
-                      className="menu-item"
-                      onClick={() => handleAddWidget('camera')}
-                    >
-                      SPOT Camera
-                    </button>
-                    <button
-                      className="menu-item"
-                      onClick={() => handleAddWidget('temps')}
-                    >
-                      Temps
-                    </button>
-                    <button
-                      className="menu-item"
-                      onClick={() => handleAddWidget('molds')}
-                    >
-                      Molds
-                    </button>
-                    <button
-                      className="menu-item"
-                      onClick={() => handleAddWidget('env')}
-                    >
-                      Env
-                    </button>
+                    {presetOpen && (
+                      <div className="menu-accordion-content">
+                        <button className="menu-item" onClick={() => applyPreset('16:9')}>
+                          📺 16:9 일반
+                        </button>
+                        <button className="menu-item" onClick={() => applyPreset('21:9')}>
+                          🖥️ 21:9 울트라와이드
+                        </button>
+                        <button className="menu-item" onClick={() => applyPreset('4:3')}>
+                          📟 4:3 클래식
+                        </button>
+                        <button className="menu-item" onClick={() => applyPreset('compact')}>
+                          📱 컴팩트
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </>
               ) : null}

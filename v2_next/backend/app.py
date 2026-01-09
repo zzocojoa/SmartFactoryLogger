@@ -1172,6 +1172,208 @@ def restore_layout_api():
         _logger.error("Layout restore failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+
+# --- Client-Specific Layout Storage ---
+# Each client has a unique UUID; layouts are stored in AppData/Roaming/SmartFactoryLogger/layouts/
+
+_CLIENT_LAYOUTS_DIR: Path | None = None
+
+
+def _get_client_layouts_dir() -> Path:
+    """Get the directory for storing client-specific layouts."""
+    global _CLIENT_LAYOUTS_DIR
+    if _CLIENT_LAYOUTS_DIR is not None:
+        return _CLIENT_LAYOUTS_DIR
+    
+    # Use APPDATA on Windows, or a fallback for other systems
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        base_dir = Path(appdata) / "SmartFactoryLogger"
+    else:
+        # Fallback for non-Windows systems
+        base_dir = Path.home() / ".smartfactorylogger"
+    
+    layouts_dir = base_dir / "layouts"
+    layouts_dir.mkdir(parents=True, exist_ok=True)
+    _CLIENT_LAYOUTS_DIR = layouts_dir
+    _logger.info(f"[ClientLayout] Storage directory: {layouts_dir}")
+    return layouts_dir
+
+
+def _validate_client_id(client_id: str) -> bool:
+    """Validate that client_id is a safe UUID-like string."""
+    import re
+    # Accept UUID format or simple alphanumeric with dashes
+    pattern = r'^[a-zA-Z0-9\-]{8,64}$'
+    return bool(re.match(pattern, client_id))
+
+
+class ClientLayoutSaveRequest(BaseModel):
+    layout: dict[str, dict[str, Any]]
+    cols: str | int | None = None
+    version: str | None = None
+    name: str | None = None
+
+
+def _get_client_dir(client_id: str) -> Path:
+    """Get (and create if needed) the directory for a specific client layout slots."""
+    if not _validate_client_id(client_id):
+        raise ValueError("Invalid client ID")
+    
+    # layouts/{client_id}/
+    root = _get_client_layouts_dir()
+    client_dir = root / client_id
+    client_dir.mkdir(parents=True, exist_ok=True)
+    return client_dir
+
+def _make_safe_filename(name: str) -> str:
+    """Convert a layout name to a safe filename."""
+    # Replace invalid chars with underscore
+    safe = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in name)
+    return safe.strip('_') or "layout"
+
+@app.get("/api/layouts/client/{client_id}/list")
+def list_client_layouts(client_id: str):
+    """List all layout slots for a specific client."""
+    try:
+        client_dir = _get_client_dir(client_id)
+        files = list(client_dir.glob("*.json"))
+        results = []
+        
+        for f in files:
+            # Skip special file
+            if f.name == "last_active.json":
+                continue
+                
+            try:
+                content = json.loads(f.read_text(encoding="utf-8"))
+                results.append({
+                    "id": f.stem, # safe filename as ID
+                    "name": content.get("name", f.stem),
+                    "updated_at": content.get("updated_at", ""),
+                })
+            except Exception:
+                continue
+                
+        # Sort by updated_at desc
+        results.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+        return results
+
+    except Exception as exc:
+        _logger.error("Client layout list failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/layouts/client/{client_id}/latest")
+def get_client_latest_layout(client_id: str):
+    """Get the 'last active' layout for automatic restoration."""
+    try:
+        client_dir = _get_client_dir(client_id)
+        active_path = client_dir / "last_active.json"
+        
+        if not active_path.exists():
+             # Fallback: check legacy single-file format (migration)
+            legacy_path = _get_client_layouts_dir() / f"{client_id}.json"
+            if legacy_path.exists():
+                return json.loads(legacy_path.read_text(encoding="utf-8"))
+            raise HTTPException(status_code=404, detail="No active layout")
+            
+        data = json.loads(active_path.read_text(encoding="utf-8"))
+        return data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Client latest layout load failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/layouts/client/{client_id}/{slot_id}")
+def get_client_layout_slot(client_id: str, slot_id: str):
+    """Get a specific layout slot."""
+    try:
+        client_dir = _get_client_dir(client_id)
+        # Security check: ensure slot_id is safe path component
+        if not all(c.isalnum() or c in ('-', '_') for c in slot_id):
+             raise HTTPException(status_code=400, detail="Invalid slot ID")
+             
+        file_path = client_dir / f"{slot_id}.json"
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Layout slot not found")
+        
+        data = json.loads(file_path.read_text(encoding="utf-8"))
+        return data
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Client layout slot load failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/layouts/client/{client_id}")
+def save_client_layout(client_id: str, payload: ClientLayoutSaveRequest):
+    """
+    Save layout for a specific client.
+    Updates 'last_active.json' AND creates a named slot if 'name' is provided.
+    """
+    try:
+        client_dir = _get_client_dir(client_id)
+        
+        data = {
+            "layout": payload.layout,
+            "cols": str(payload.cols) if payload.cols else "60",
+            "version": payload.version or "v2",
+            "name": payload.name or "Client Layout",
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "client_id": client_id,
+        }
+        
+        json_data = json.dumps(data, ensure_ascii=False, indent=2)
+        
+        # 1. Always update last_active
+        (client_dir / "last_active.json").write_text(json_data, encoding="utf-8")
+        
+        # 2. Save as named slot
+        safe_name = _make_safe_filename(payload.name or "unnamed")
+        slot_path = client_dir / f"{safe_name}.json"
+        
+        # Avoid overwriting if name collision? No, overwrite is expected for same name.
+        slot_path.write_text(json_data, encoding="utf-8")
+        
+        _logger.info(f"[ClientLayout] Saved layout '{payload.name}' for client: {client_id}")
+        
+        return {"ok": True, "path": str(slot_path), "slot_id": safe_name}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Client layout save failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.delete("/api/layouts/client/{client_id}/{slot_id}")
+def delete_client_layout(client_id: str, slot_id: str):
+    """Delete a specific layout slot."""
+    try:
+        client_dir = _get_client_dir(client_id)
+        # Security check
+        if not all(c.isalnum() or c in ('-', '_') for c in slot_id):
+             raise HTTPException(status_code=400, detail="Invalid slot ID")
+             
+        file_path = client_dir / f"{slot_id}.json"
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Layout slot not found")
+        
+        file_path.unlink()
+        _logger.info(f"[ClientLayout] Deleted slot '{slot_id}' for client: {client_id}")
+        
+        return {"ok": True, "slot_id": slot_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Client layout delete failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
 @app.get("/api/config/central-status")
 def central_status():
     try:

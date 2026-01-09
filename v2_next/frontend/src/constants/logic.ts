@@ -18,6 +18,12 @@ export const SERIES_MAX_POINTS = SERIES_WINDOW_MINUTES * 60 * SERIES_SAMPLES_PER
 export const CURRENT_LAYOUT_COLS = 60;
 export const SPARKLINE_POINTS = 10;
 
+// Auto-scaling (viewport-responsive row height)
+export const DEFAULT_ROW_HEIGHT = 20;
+export const MIN_ROW_HEIGHT = 12;
+export const MAX_ROW_HEIGHT = 32;
+export const BASE_VIEWPORT_HEIGHT = 1080;
+
 // Business Thresholds
 export const SPEED_MAX = 15;
 export const PRESS_MAX = 250;
@@ -43,3 +49,9 @@ export const FRONT_ERROR_STORAGE_KEY = 'sfl_front_errors';
 export const FRONT_ERROR_MAX = 50;
 export const OBSERVABILITY_ERROR_LIMIT = 50;
 export const EXPORT_PATH_STORAGE_KEY = 'sfl_observability_export_path';
+
+// Client-local layout storage
+export const LOCAL_LAYOUT_STORAGE_KEY = 'sfl_local_layout';
+export const STORAGE_MODE_KEY = 'sfl_storage_mode';
+export type StorageMode = 'local' | 'server';
+

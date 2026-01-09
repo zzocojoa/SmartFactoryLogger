@@ -41,6 +41,14 @@
   --color-billet-temp: #FF1493;
   --color-env-temp: #00FA9A;
   --color-env-pre: #9370DB;
+
+  /* Dynamic Grid Row Height (auto-scaling) */
+  --grid-row-height: 20px;
+}
+
+/* Grafana Scenes Grid Row Height Override */
+.react-grid-layout .react-grid-item {
+  transition: transform 0.2s ease, height 0.2s ease;
 }
 
 /* Day Mode (08:00 - 18:00) - Light & Clean */
@@ -516,10 +524,64 @@ body {
   cursor: not-allowed;
 }
 
+/* Storage Mode Toggle */
+.menu-storage-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.menu-storage-btn {
+  flex: 1;
+  text-align: center;
+  padding: 8px 6px;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.menu-storage-btn.active {
+  background: color-mix(in srgb, var(--accent-main) 20%, transparent);
+  border-color: var(--accent-main);
+  color: var(--accent-main);
+}
+
 .menu-layout-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Preset Dropdown Select */
+.menu-preset-select {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237b8794' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.menu-preset-select:hover {
+  border-color: var(--accent-main);
+}
+
+.menu-preset-select:focus {
+  outline: none;
+  border-color: var(--accent-main);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-main) 20%, transparent);
+}
+
+.menu-preset-select option {
+  padding: 8px;
+  background: var(--bg-menu);
+  color: var(--text-primary);
 }
 
 .menu-section-title {
@@ -527,6 +589,60 @@ body {
   font-weight: 700;
   color: var(--text-muted);
   letter-spacing: 0.02em;
+}
+
+/* Menu Accordion */
+.menu-accordion {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-accordion-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-button);
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.menu-accordion-header:hover {
+  background: var(--bg-button-hover);
+}
+
+.menu-accordion-header.open {
+  border-color: var(--accent-main);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.menu-accordion-icon {
+  font-size: 0.65rem;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+
+.menu-accordion-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-card-muted);
+  border: 1px solid var(--accent-main);
+  border-top: none;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.menu-accordion-content .menu-item {
+  padding: 8px 10px;
+  font-size: 0.75rem;
 }
 
 .menu-layout-row {
