@@ -39,7 +39,7 @@ export const buildTimeSeriesFrame = (
   thresholdsByKey?: Partial<Record<TimeSeriesKey, ThresholdsConfig>>
 ): MutableDataFrame => {
   const timeValues = samples.map((sample) => sample.timestampMs);
-  const fields = [
+  const fields: any[] = [
     {
       name: 'time',
       type: FieldType.time,
