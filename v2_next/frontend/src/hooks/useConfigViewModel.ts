@@ -258,10 +258,14 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       cycleIdleTime: values.logging.cycle_idle_time?.toString() ?? '',
       cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
       intervalSec: values.system?.interval_sec?.toString() ?? '0.2',
-      statusWarnMs: values.system?.status_warn_ms?.toString() ?? '10000',
-      statusOfflineMs: values.system?.status_offline_ms?.toString() ?? '20000',
+      statusWarnMs: String(values.system?.status_warn_ms ?? 10000),
+      statusOfflineMs: String(values.system?.status_offline_ms ?? 20000),
       password: '',
-      passwordSet: Boolean(values.settings.password_set),
+      passwordSet: values.settings.password_set ?? false,
+      mesEnabled: values.mes?.enabled ?? false,
+      mesUserId: values.mes?.userid ?? '',
+      mesPassword: '',
+      mesPasswordSet: values.mes?.password_set ?? false,
     };
     return { form: nextForm, thresholds: nextThresholdState };
   }, []);
@@ -385,6 +389,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       'thresholdBilletValue',
       'thresholdBilletTempValue',
       'thresholdAtTempValue',
+      'thresholdAtPreValue',
       'thresholdAtPreValue',
       'thresholdCountValue',
       'thresholdEndPosValue',
@@ -519,14 +524,19 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         cycle_threshold_press: toFloat(settingsForm.cycleThresholdPress),
       },
       system: {
-        interval_sec: toFloat(settingsForm.intervalSec),
+        interval_sec: parseThresholdValue(settingsForm.intervalSec) ?? 0.2, // Use parseThresholdValue helper
         status_warn_ms: toInt(settingsForm.statusWarnMs),
         status_offline_ms: toInt(settingsForm.statusOfflineMs),
       },
+      mes: {
+        enabled: settingsForm.mesEnabled,
+        userid: settingsForm.mesUserId.trim() || undefined,
+        password: settingsForm.mesPassword.trim() || undefined,
+      }
     };
 
     try {
-      const data = await configService.saveConfig(payload);
+      const data = (await configService.saveConfig(payload)) as ConfigUpdateResponse;
       const applyInfo = data?.apply ?? null;
       const nextMeta = data?.meta ?? null;
       const pendingCount = applyInfo?.pending?.length ?? 0;
@@ -552,9 +562,11 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         ...settingsForm,
         password: '',
         passwordSet: settingsForm.passwordSet || settingsForm.password.trim().length > 0,
+        mesPassword: '',
       });
       setThresholdConfig(buildThresholdStateFromForm(settingsForm));
       updateSettingsField('password', '');
+      updateSettingsField('mesPassword', '');
       
       if (!isAuto) {
         showSettingsToast(message, pendingCount > 0 ? 'warn' : 'ok');

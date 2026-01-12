@@ -1,12 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('../frontend/dist', 'frontend/dist'), ('assets', 'backend/assets')]
+datas = [
+    ('../frontend/dist', 'frontend/dist'), 
+    ('assets', 'backend/assets'),
+    ('mes_bridge/data', 'backend/mes_bridge/data')
+]
 binaries = []
-hiddenimports = ['httpx', 'httpx._transports', 'httpx._transports.default', 'anyio', 'anyio._backends', 'anyio._backends._asyncio']
+hiddenimports = [
+    'httpx', 'httpx._transports', 'httpx._transports.default', 
+    'anyio', 'anyio._backends', 'anyio._backends._asyncio',
+    'playwright', 'greenlet'
+]
 tmp_ret = collect_all('pydantic')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pydantic_core')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('playwright')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 

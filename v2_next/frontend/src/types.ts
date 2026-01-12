@@ -293,6 +293,11 @@ export interface ConfigSnapshot {
       status_warn_ms?: number;
       status_offline_ms?: number;
     };
+    mes?: {
+      enabled: boolean;
+      userid: string;
+      password_set: boolean;
+    };
   };
 }
 
@@ -338,6 +343,10 @@ export interface SettingsFormState {
   statusOfflineMs: string;
   password: string;
   passwordSet: boolean;
+  mesEnabled: boolean;
+  mesUserId: string;
+  mesPassword: string;
+  mesPasswordSet: boolean;
 }
 
 export interface ConfigApplyResult {

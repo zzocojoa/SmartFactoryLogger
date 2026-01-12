@@ -10,9 +10,19 @@ npm run build
 if ($LASTEXITCODE -ne 0) { Write-Error "Frontend Build Failed"; exit 1 }
 Set-Location ".."
 
-# 2. Package Backend (clean build)
-Write-Host ">>> Packaging Backend (PyInstaller - Single File)..." -ForegroundColor Yellow
+# 2. Update Backend Dependencies
+Write-Host ">>> Updating Backend Dependencies..." -ForegroundColor Yellow
 Set-Location "backend"
+python -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) { Write-Error "Backend Dependency Install Failed"; exit 1 }
+
+# 3. Install Playwright Browsers (Required for MES Bridge)
+Write-Host ">>> Installing Playwright Browsers..." -ForegroundColor Yellow
+python -m playwright install chromium
+if ($LASTEXITCODE -ne 0) { Write-Error "Playwright Install Failed"; exit 1 }
+
+# 4. Package Backend (clean build)
+Write-Host ">>> Packaging Backend (PyInstaller - Single File)..." -ForegroundColor Yellow
 # Remove old dist if exists
 if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
 

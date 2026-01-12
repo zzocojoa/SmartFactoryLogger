@@ -82,6 +82,9 @@ from backend.services import spot_control
 from backend.models.data_model import FactoryData
 from backend.services.verification_service import compare_with_reference
 from backend import config
+from backend.mes_bridge import scheduler as mes_scheduler
+from backend.mes_bridge import db_manager as mes_db
+from backend.mes_bridge.pages_registry import MES_PAGES
 
 class ConnectionTarget(BaseModel):
     ip: str | None = None
@@ -650,6 +653,8 @@ def acquire_single_instance_lock() -> bool:
         print(f"[Main] Failed to acquire single instance lock: {exc}")
         return True
 
+# MES Bridge 제어는 mes_scheduler.start() / stop()을 통해 수행됩니다.
+
 # Lifecycle Manager (Startup/Shutdown)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -666,6 +671,10 @@ async def lifespan(app: FastAPI):
     plc_service.start()
     print("[Main] Starting Comm Metrics Logger...")
     comm_metrics_logger_service.start()
+
+    # Start MES Bridge if enabled
+    if config.MES_ENABLED:
+        await mes_scheduler.start()
     
     # Log local IPs for debugging remote connectivity
     try:
@@ -1386,6 +1395,74 @@ def central_status():
         _logger.error("Central status failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+@app.post("/api/config")
+async def save_config(payload: ConfigUpdate):
+    try:
+        # 1. Update config object in memory and config.ini
+        # PLC/SPOT/Logging
+        if payload.extruder:
+            if payload.extruder.ip: config.EXTRUDER_IP = payload.extruder.ip
+            if payload.extruder.port: config.EXTRUDER_PORT = payload.extruder.port
+        if payload.ls_plc:
+            if payload.ls_plc.ip: config.LS_IP = payload.ls_plc.ip
+            if payload.ls_plc.port: config.LS_PORT = payload.ls_plc.port
+        if payload.spot:
+            if payload.spot.ip: config.SPOT_IP = payload.spot.ip
+            if payload.spot.refresh_interval: config.SPOT_REFRESH_INTERVAL = payload.spot.refresh_interval
+            
+        if payload.thresholds:
+             # This part might involve more complex logic in update_config, 
+             # but we follow the existing pattern if applicable.
+             pass
+             
+        if payload.settings:
+            if payload.settings.logpath: config.LOG_PATH = Path(payload.settings.logpath)
+            if payload.settings.snapshotpath: config.SNAPSHOT_PATH = Path(payload.settings.snapshotpath)
+            if payload.settings.autosave is not None: config.AUTO_SAVE = payload.settings.autosave
+            
+        if payload.logging:
+            if payload.logging.rotation_enabled is not None: config.ROTATION_ENABLED = payload.logging.rotation_enabled
+            if payload.logging.rotation_mode: config.ROTATION_MODE = payload.logging.rotation_mode
+            if payload.logging.cycle_idle_time: config.CYCLE_IDLE_TIME = int(payload.logging.cycle_idle_time)
+            
+        if payload.system:
+            if payload.system.interval_sec: config.INTERVAL_SEC = payload.system.interval_sec
+            if payload.system.status_warn_ms: config.STATUS_WARN_MS = payload.system.status_warn_ms
+            if payload.system.status_offline_ms: config.STATUS_OFFLINE_MS = payload.system.status_offline_ms
+            
+        if payload.mes:
+            mes_changed = False
+            if payload.mes.enabled is not None: 
+                if config.MES_ENABLED != payload.mes.enabled:
+                    config.MES_ENABLED = payload.mes.enabled
+                    mes_changed = True
+            if payload.mes.userid: 
+                if config.MES_USER_ID != payload.mes.userid:
+                    config.MES_USER_ID = payload.mes.userid
+                    mes_changed = True
+            if payload.mes.password: 
+                if config.MES_PASSWORD != payload.mes.password:
+                    config.MES_PASSWORD = payload.mes.password
+                    mes_changed = True
+        else:
+            mes_changed = False
+            
+        # 2. Persist to config.ini
+        results = update_config(payload)
+        
+        # 3. Apply MES changes: restart or start/stop
+        if mes_changed:
+            if config.MES_ENABLED:
+                await mes_scheduler.restart()
+            else:
+                await mes_scheduler.stop()
+        
+        return results
+    except Exception as exc:
+        _logger.error("Config save failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/api/config/sync")
 def sync_central_config():
     try:
@@ -1623,6 +1700,36 @@ def shutdown(payload: ShutdownRequest):
 
     threading.Thread(target=_shutdown, daemon=True).start()
     return {"ok": True}
+
+# --- MES Data APIs ---
+@app.get("/api/mes/pages")
+async def list_mes_pages():
+    """List all available MES pages and their metadata."""
+    try:
+        pages = []
+        for key, info in MES_PAGES.items():
+            pages.append({
+                "key": key,
+                "name": info["name"],
+                "category": info["category"],
+                "has_table": info.get("has_table", False)
+            })
+        return {"pages": pages}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/mes/latest/{page_key}")
+async def get_mes_latest_data(page_key: str):
+    """Fetch the most recently collected data for a specific page."""
+    try:
+        data = mes_db.get_latest_data(page_key)
+        if not data:
+            raise HTTPException(status_code=404, detail="Data not found for the requested page")
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Static File Serving (Frontend) ---
 # Check common locations for frontend dist

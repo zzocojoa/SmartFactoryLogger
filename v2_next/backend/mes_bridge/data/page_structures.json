@@ -1,0 +1,2632 @@
+{
+  "analyzed_at": "2026-01-12T08:47:31.640720",
+  "total_pages": 91,
+  "summary": {
+    "with_table": 89,
+    "date_range_filter": 52,
+    "year_filter": 6,
+    "no_filter": 2
+  },
+  "pages": [
+    {
+      "key": "all_sign",
+      "name": "검토/승인 처리",
+      "category": "결재",
+      "url": "/P75_ETC/AllSign.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "발주일자",
+        "번호",
+        "매입처",
+        "납기일",
+        "자재명",
+        "Grade",
+        "길이",
+        "수량",
+        "중량",
+        "혼적구분",
+        "입고지",
+        "검토",
+        "승인"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "shape_sign",
+      "name": "금형 수정/폐기 보고",
+      "category": "결재",
+      "url": "/P75_ETC/ShapeSign.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "이력일자",
+        "시각",
+        "금형REV.",
+        "금형명",
+        "상태",
+        "작업자",
+        "메모",
+        "확인"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "order",
+      "name": "수주 등록",
+      "category": "수주",
+      "url": "/P10_ORD/Order.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "수주일자",
+        "번호",
+        "매출처",
+        "납기일",
+        "수주담당",
+        "포장법",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "단가",
+        "중량적용",
+        "금액",
+        "압출중량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "order_end",
+      "name": "수주 납품완료 처리",
+      "category": "수주",
+      "url": "/P10_ORD/OrderEnd.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "수주일자",
+        "번호",
+        "매출처",
+        "납기일",
+        "수주담당",
+        "포장법",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "압출중량",
+        "출고수량",
+        "완료"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "balzu",
+      "name": "발주 관리",
+      "category": "자재",
+      "url": "/P20_RSC/Balzu.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "발주일자",
+        "번호",
+        "매입처",
+        "납기일",
+        "자재명",
+        "Grade",
+        "길이",
+        "수량",
+        "중량",
+        "혼적구분",
+        "입고지",
+        "검토",
+        "승인"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "rescin2",
+      "name": "입고 관리",
+      "category": "자재",
+      "url": "/P20_RSC/Rescin2.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "입고예정일",
+        "매입처",
+        "자재명",
+        "길이",
+        "수량",
+        "이론중량",
+        "작업",
+        "실제입고일",
+        "LOT번호",
+        "LOT수량",
+        "LOT중량",
+        "입고지",
+        "협의중량",
+        "중량차이",
+        "상태"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc_out",
+      "name": "반품 관리",
+      "category": "자재",
+      "url": "/P20_RSC/RescOut.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "반품일자",
+        "번호",
+        "매입처",
+        "자재명",
+        "길이",
+        "대우중량",
+        "공급사중량",
+        "협의중량",
+        "LOT",
+        "LOT수량",
+        "LOT중량",
+        "입고지",
+        "비고"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc_move",
+      "name": "이동 관리",
+      "category": "자재",
+      "url": "/P20_RSC/RescMove.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "이동일자",
+        "번호",
+        "매입처",
+        "자재명",
+        "길이",
+        "LOT",
+        "LOT수량",
+        "LOT중량",
+        "출고지",
+        "입고지"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc_sell",
+      "name": "판매 관리",
+      "category": "자재",
+      "url": "/P20_RSC/RescSell.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "판매일자",
+        "번호",
+        "외주처",
+        "자재명",
+        "Grade",
+        "길이",
+        "LOT",
+        "수량",
+        "중량",
+        "단가",
+        "금액",
+        "출고지"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "scrap",
+      "name": "스크랩수불 관리",
+      "category": "자재",
+      "url": "/P20_RSC/Scrap.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "발생일자",
+        "번호",
+        "생산공장",
+        "거래처",
+        "구분",
+        "종류",
+        "품명",
+        "대우중량",
+        "거래처중량",
+        "협의중량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc_check",
+      "name": "자재 수입검사 등록",
+      "category": "자재",
+      "url": "/P20_RSC/RescCheck.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "입고번호",
+        "매입처",
+        "자재",
+        "Alloy",
+        "Grade",
+        "Type",
+        "규격",
+        "길이",
+        "수량",
+        "매입처LOT",
+        "합격수량",
+        "검사일자 검사자",
+        "작업"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "resc_check_status",
+      "name": "기간별 수입검사 현황",
+      "category": "자재",
+      "url": "/P20_RSC/RescCheckStatus.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "생산공장",
+        "검사일자",
+        "검사자",
+        "매입처",
+        "자재",
+        "Alloy",
+        "Grade",
+        "Type",
+        "규격",
+        "길이",
+        "합격수량",
+        "불합격수량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "resc_comp",
+      "name": "매입처원장",
+      "category": "자재",
+      "url": "/P20_RSC/RescComp.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "일자",
+        "번호",
+        "구분",
+        "자재",
+        "Alloy",
+        "Grade",
+        "Type",
+        "규격",
+        "길이",
+        "수량",
+        "중량",
+        "단가",
+        "금액"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc_status",
+      "name": "자재 재고현황",
+      "category": "자재",
+      "url": "/P20_RSC/RescStatus.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "입고지",
+        "구분",
+        "자재명",
+        "매입처LOT",
+        "재고중량"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc_status_all",
+      "name": "전체 자재 재고현황",
+      "category": "자재",
+      "url": "/P20_RSC/RescStatusAll.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "입고지",
+        "자재명",
+        "Alloy",
+        "Grade",
+        "Type",
+        "규격",
+        "재고중량",
+        "비고"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc_hist",
+      "name": "자재별 입출내역",
+      "category": "자재",
+      "url": "/P20_RSC/RescHist.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "입출일자",
+        "구분",
+        "생산공장",
+        "자재",
+        "Alloy",
+        "Grade",
+        "Type",
+        "규격",
+        "매입처LOT",
+        "중량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "summ_resc",
+      "name": "빌레트 수불현황",
+      "category": "자재",
+      "url": "/P20_RSC/SummResc.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "일자",
+        "입고량",
+        "투입량",
+        "재고량",
+        "상세",
+        "비고"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "summ_scrap",
+      "name": "스크랩 수불현황",
+      "category": "자재",
+      "url": "/P20_RSC/SummScrap.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "일자",
+        "압출",
+        "압출불량",
+        "열처리",
+        "피막",
+        "절단",
+        "가공",
+        "매입",
+        "출하포장",
+        "반품",
+        "출고",
+        "스크랩 재고량",
+        "매입 퍽",
+        "출고 퍽",
+        "퍽 재고량",
+        "절단 칩",
+        "가공 칩",
+        "매입 칩",
+        "출고 칩",
+        "칩 재고량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "m_shape",
+      "name": "금형번호 등록",
+      "category": "금형",
+      "url": "/P50_QLT/MShape.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "금형번호",
+        "금형명",
+        "단중"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "shape_bal",
+      "name": "금형발주 등록",
+      "category": "금형",
+      "url": "/P50_QLT/ShapeBal.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "발주일자",
+        "번호",
+        "제작처",
+        "수주처",
+        "금형번호",
+        "금형",
+        "제작내용",
+        "제작구분",
+        "개발비",
+        "금형청구",
+        "예정일",
+        "검토",
+        "승인",
+        "입고일"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "shape_inn",
+      "name": "금형입고 등록",
+      "category": "금형",
+      "url": "/P50_QLT/ShapeINN.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "발주일자",
+        "번호",
+        "제작처",
+        "수주처",
+        "금형번호",
+        "금형",
+        "제작내용",
+        "제작구분",
+        "개발비",
+        "금형청구",
+        "예정일",
+        "입고일자",
+        "금형비",
+        "REV No.",
+        "작업"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "shape",
+      "name": "금형 REV 관리",
+      "category": "금형",
+      "url": "/P50_QLT/Shape.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "금형REV",
+        "금형번호",
+        "Rev.",
+        "금형명",
+        "L.I.P",
+        "CORE",
+        "DIE",
+        "B.K",
+        "I.B.K",
+        "보유공장",
+        "제작일자",
+        "압출중량",
+        "최종상태",
+        "이력내역"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "shape_hist",
+      "name": "금형 이력현황",
+      "category": "금형",
+      "url": "/P50_QLT/ShapeHist.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "이력일자",
+        "시각",
+        "금형REV.",
+        "금형명",
+        "상태",
+        "작업자",
+        "메모",
+        "지시번호",
+        "압출중량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "shape_man",
+      "name": "금형 수정/폐기 등록",
+      "category": "금형",
+      "url": "/P50_QLT/ShapeMan.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "이력일자",
+        "시각",
+        "금형REV.",
+        "금형명",
+        "번호",
+        "상태",
+        "작업자",
+        "메모"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "job",
+      "name": "작업지시 등록",
+      "category": "생산",
+      "url": "/P30_PRO/Job.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "긴급",
+        "생산공장",
+        "지시번호",
+        "매출처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "지시량",
+        "지시중량",
+        "검토",
+        "승인"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "proc_res_shape",
+      "name": "금형 투입 등록",
+      "category": "생산",
+      "url": "/P30_PRO/ProcRes_Shape.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "긴급",
+        "생산공장",
+        "지시번호",
+        "매출처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "납기일",
+        "금형REV.",
+        "양산구분",
+        "작업"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "proc_res_press",
+      "name": "압출 결과등록",
+      "category": "생산",
+      "url": "/P30_PRO/ProcRes_Press.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "긴급",
+        "생산공장",
+        "지시번호",
+        "매출처",
+        "품번",
+        "제품",
+        "금형Rev.",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "납기일",
+        "양산구분",
+        "작업시간",
+        "생산량",
+        "생산중량",
+        "작업",
+        "입력",
+        "이동표"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "proc_res_heating",
+      "name": "열처리 결과등록",
+      "category": "생산",
+      "url": "/P30_PRO/ProcRes_Heating.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board1",
+      "columns": [
+        "긴급",
+        "생산공장",
+        "지시번호",
+        "품번",
+        "제품",
+        "재질",
+        "퀜칭",
+        "길이",
+        "납기일",
+        "파렛트번호",
+        "투입수량",
+        "투입중량",
+        "작업"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "proc_res_cutting",
+      "name": "절단가공 결과등록",
+      "category": "생산",
+      "url": "/P30_PRO/ProcRes_Cutting.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "지시번호",
+        "작업일자",
+        "작업시각",
+        "종료시각",
+        "매출처",
+        "품번",
+        "제품",
+        "금형Rev.",
+        "색상",
+        "납기일",
+        "파렛트번호",
+        "길이",
+        "수량",
+        "잔량",
+        "투입",
+        "생산길이",
+        "생산량",
+        "불량수량",
+        "작업자",
+        "작업",
+        "입력",
+        "이동표"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "proc_res_mct",
+      "name": "MCT가공 결과등록",
+      "category": "생산",
+      "url": "/P30_PRO/ProcRes_MCT.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "긴급",
+        "생산공장",
+        "지시번호",
+        "매출처",
+        "품번",
+        "제품",
+        "금형Rev.",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "납기일",
+        "파렛트번호",
+        "생산량",
+        "생산중량",
+        "작업자",
+        "작업",
+        "완료",
+        "이동표"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "proc_res_qc",
+      "name": "QC검사 결과등록",
+      "category": "생산",
+      "url": "/P30_PRO/ProcRes_QC.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "긴급",
+        "생산공장",
+        "지시번호",
+        "매출처",
+        "품번",
+        "제품",
+        "금형Rev.",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "공정",
+        "작업자",
+        "작업일자",
+        "작업시각",
+        "파렛트번호",
+        "생산량",
+        "생산중량",
+        "검사자",
+        "입력",
+        "이동표"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "goods_prt",
+      "name": "제품식별표 출력",
+      "category": "생산",
+      "url": "/P30_PRO/GoodsPrt.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "제조일자",
+        "번호",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "매출처",
+        "작업자",
+        "파렛트",
+        "바코드",
+        "식별표"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "proc_status",
+      "name": "공정이동 현황",
+      "category": "생산",
+      "url": "/P30_PRO/ProcStatus.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "작업일자",
+        "공정",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "공정이동바코드",
+        "파렛트"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "proc_stock",
+      "name": "공정별 재공현황",
+      "category": "생산",
+      "url": "/P30_PRO/ProcStock.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "공정",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "공정이동바코드",
+        "파렛트"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "proc_goods_stock",
+      "name": "제품별 재공집계",
+      "category": "생산",
+      "url": "/P30_PRO/ProcGoodsStock.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량계",
+        "중량계"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "goods_out_ret",
+      "name": "반품 등록",
+      "category": "품질",
+      "url": "/P40_GDS/GoodsOutRet.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "반품일자",
+        "번호",
+        "매출처",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "양품수량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "goods_out_ret_status",
+      "name": "기간별 제품반품 현황",
+      "category": "품질",
+      "url": "/P40_GDS/GoodsOutRetStatus.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "반품번호",
+        "매출처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "out_ret_check",
+      "name": "반품 품질검사 등록",
+      "category": "품질",
+      "url": "/P40_GDS/OutRetCheck.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "반품번호",
+        "매출처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "양품수량",
+        "불량수량",
+        "작업"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "b_type_graph",
+      "name": "불량유형별 분석",
+      "category": "품질",
+      "url": "/P75_ETC/BTypeGraph.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "생산공장",
+        "공정",
+        "기포",
+        "뜯김",
+        "백선/흑선",
+        "산화물",
+        "스크래치",
+        "길이",
+        "치수",
+        "라인",
+        "Stop Mark",
+        "휨",
+        "피막",
+        "경도",
+        "기타",
+        "합계"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "outside_bal",
+      "name": "외주 발주등록",
+      "category": "외주",
+      "url": "/P30_PRO/OutsideBal.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "발주일자",
+        "번호",
+        "구분",
+        "외주처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "파렛트번호",
+        "수량",
+        "중량",
+        "검토",
+        "승인",
+        "식별표"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "outside_out",
+      "name": "외주 출고등록",
+      "category": "외주",
+      "url": "/P30_PRO/OutsideOut.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "출고일자",
+        "번호",
+        "구분",
+        "외주처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "파렛트번호",
+        "수량",
+        "중량계"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "outside_out_in",
+      "name": "외주 입고등록",
+      "category": "외주",
+      "url": "/P30_PRO/OutsideOutIN.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "출고번호",
+        "구분",
+        "외주처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "파렛트번호",
+        "수량",
+        "중량",
+        "작업",
+        "입고일",
+        "입고파렛트",
+        "입고길이",
+        "입고수량",
+        "입고중량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "outside_in2_sts",
+      "name": "기간별 외주입고 현황",
+      "category": "외주",
+      "url": "/P30_PRO/OutsideIN2Sts.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "출고번호",
+        "입고일",
+        "외주처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "파렛트",
+        "출고수량",
+        "납기일",
+        "입고수량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "outside_in2_comp",
+      "name": "외주처원장",
+      "category": "외주",
+      "url": "/P30_PRO/OutsideIN2Comp.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "출고일",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "출고수량",
+        "입고수량",
+        "입고일"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "outside_stock",
+      "name": "외주처별 재고현황",
+      "category": "외주",
+      "url": "/P30_PRO/OutsideStock.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "외주처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "출고수량",
+        "출고중량",
+        "입고수량",
+        "입고중량",
+        "재고수량",
+        "재고중량"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "out_press_bal",
+      "name": "외주생산 발주등록",
+      "category": "외주생산",
+      "url": "/P30_PRO/OutPressBal.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "발주일자",
+        "번호",
+        "외주처",
+        "품번",
+        "제품",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "검토",
+        "승인",
+        "상태"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "out_press_in",
+      "name": "외주생산 입고등록",
+      "category": "외주생산",
+      "url": "/P30_PRO/OutPressIN.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "발주번호",
+        "외주처",
+        "품번",
+        "제품",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "작업",
+        "입고일",
+        "입고길이",
+        "입고수량",
+        "입고중량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "out",
+      "name": "출고 등록",
+      "category": "제품",
+      "url": "/P40_GDS/Out.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "출고일자",
+        "번호",
+        "매출처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "단가",
+        "금액",
+        "현품표",
+        "명세서"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "goods_out_status",
+      "name": "기간별 제품출고 현황",
+      "category": "제품",
+      "url": "/P40_GDS/GoodsOutStatus.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "출고번호",
+        "매출처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "단가",
+        "금액",
+        "제품바코드"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "out_price",
+      "name": "출고단가 조정",
+      "category": "제품",
+      "url": "/P40_GDS/OutPrice.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "매출처",
+        "수량단가 (최소)",
+        "수량단가 (최대)",
+        "수량단가 차이",
+        "변경 수량단가",
+        "중량단가 (최소)",
+        "중량단가 (최대)",
+        "중량단가 차이",
+        "변경 중량단가"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "goods_out_comp",
+      "name": "매출처원장",
+      "category": "제품",
+      "url": "/P40_GDS/GoodsOutComp.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "일자",
+        "번호",
+        "구분",
+        "매출처",
+        "품번",
+        "제품",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "goods_status",
+      "name": "제품 재고현황",
+      "category": "제품",
+      "url": "/P40_GDS/GoodsStatus.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "품번",
+        "제품",
+        "DW-NO",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "단중",
+        "수량",
+        "중량",
+        "제품바코드"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "goods_hist",
+      "name": "제품별 입출내역",
+      "category": "제품",
+      "url": "/P40_GDS/GoodsHist.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "입출일자",
+        "구분",
+        "품번",
+        "제품",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "수량",
+        "중량",
+        "제품바코드"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "trace_lot",
+      "name": "Lot No. 추적",
+      "category": "제품",
+      "url": "/P50_QLT/TraceLOT.aspx",
+      "has_table": false,
+      "table_id": null,
+      "columns": [],
+      "filter_type": "none",
+      "filter_fields": {},
+      "has_pagination": false,
+      "error": "Page.goto: Timeout 15000ms exceeded.\nCall log:\n  - navigating to \"https://dmc.mescloud.net/P50_QLT/TraceLOT.aspx\", waiting until \"load\"\n"
+    },
+    {
+      "key": "rpt_press",
+      "name": "압출 일보",
+      "category": "리포트",
+      "url": "/P60_SUM/RptPress.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "일자",
+        "작업자",
+        "구분",
+        "업체명",
+        "LOT",
+        "재질",
+        "질별",
+        "온도",
+        "자재 중량",
+        "거래처",
+        "품번",
+        "제품",
+        "DW-NO",
+        "생산 길이",
+        "이론 단중",
+        "실 단중",
+        "적합 수량",
+        "적합 중량",
+        "부적합 수량",
+        "부적합 중량",
+        "수율",
+        "생산성"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "rpt_heating",
+      "name": "열처리 일보",
+      "category": "리포트",
+      "url": "/P60_SUM/RptHeating.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "일자",
+        "시작",
+        "종료",
+        "파렛트",
+        "형번",
+        "거래처",
+        "품번",
+        "품명",
+        "생산량",
+        "생산중량",
+        "온도",
+        "시간"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "rpt_2nd_cut",
+      "name": "절단 일보",
+      "category": "리포트",
+      "url": "/P60_SUM/Rpt2ndCut.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "일자",
+        "절단기",
+        "시작",
+        "종료",
+        "소요",
+        "파렛트",
+        "형번",
+        "거래처",
+        "품번",
+        "품명",
+        "길이",
+        "절단 길이",
+        "공차-",
+        "공자+",
+        "생산량",
+        "작업 인원",
+        "Cavities",
+        "부적합 수량",
+        "생산성",
+        "시간당 절단횟수"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "rpt_mct",
+      "name": "가공 일보",
+      "category": "리포트",
+      "url": "/P60_SUM/RptMCT.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "일자",
+        "시작",
+        "종료",
+        "소요",
+        "파렛트",
+        "형번",
+        "거래처",
+        "품번",
+        "품명",
+        "공수",
+        "홀수",
+        "작업 인원",
+        "Cavities",
+        "기계 대수",
+        "C.T.",
+        "적합 수량",
+        "부적합 수량",
+        "생산성",
+        "개당 소요분"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "stock_sum",
+      "name": "재고조사 현황",
+      "category": "리포트",
+      "url": "/P60_SUM/StockSum.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "구분",
+        "전월재고",
+        "당월입고",
+        "당월출고",
+        "당월조정",
+        "당월재고",
+        "전월대비"
+      ],
+      "filter_type": "year",
+      "filter_fields": {
+        "year_select": "ctl00_BodyHolder_dd_Srch1",
+        "available_years": [
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026",
+          "2027"
+        ]
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "p_rate_mon",
+      "name": "월별 생산성현황",
+      "category": "리포트",
+      "url": "/P60_SUM/PRateMon.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공장",
+        "구분",
+        "프로파일 투입량",
+        "프로파일 생산량",
+        "프로파일 수율",
+        "프로파일 가동시간",
+        "프로파일 생산성",
+        "건축재 투입량",
+        "건축재 생산량",
+        "건축재 수율",
+        "건축재 가동시간",
+        "건축재 생산성",
+        "전자 투입량",
+        "전자 생산량",
+        "전자 수율",
+        "전자 가동시간",
+        "전자 생산성",
+        "산업재 투입량",
+        "산업재 생산량",
+        "산업재 수율",
+        "산업재 가동시간",
+        "산업재 생산성",
+        "일반재 투입량",
+        "일반재 생산량",
+        "일반재 수율",
+        "일반재 가동시간",
+        "일반재 생산성",
+        "자동차 투입량",
+        "자동차 생산량",
+        "자동차 수율",
+        "자동차 가동시간",
+        "자동차 생산성",
+        "건축기자재 투입량",
+        "건축기자재 생산량",
+        "건축기자재 수율",
+        "건축기자재 가동시간",
+        "건축기자재 생산성",
+        "비철 투입량",
+        "비철 생산량",
+        "비철 수율",
+        "비철 가동시간",
+        "비철 생산성",
+        "수출 투입량",
+        "수출 생산량",
+        "수출 수율",
+        "수출 가동시간",
+        "수출 생산성",
+        "합계 투입량",
+        "합계 생산량",
+        "합계 수율",
+        "합계 가동시간",
+        "합계 생산성"
+      ],
+      "filter_type": "year",
+      "filter_fields": {
+        "year_select": "ctl00_BodyHolder_dd_Srch1",
+        "available_years": [
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026",
+          "2027"
+        ]
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "cust_rank",
+      "name": "거래처별 매출분석",
+      "category": "분석통계",
+      "url": "/P60_SUM/CustRank.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "거래처",
+        "1월",
+        "2월",
+        "3월",
+        "4월",
+        "5월",
+        "6월",
+        "7월",
+        "8월",
+        "9월",
+        "10월",
+        "11월",
+        "12월",
+        "년계"
+      ],
+      "filter_type": "year",
+      "filter_fields": {
+        "year_select": "ctl00_BodyHolder_dd_Srch1",
+        "available_years": [
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026",
+          "2027"
+        ]
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "goods_rank",
+      "name": "제품별 매출분석",
+      "category": "분석통계",
+      "url": "/P60_SUM/GoodsRank.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "품번",
+        "제품",
+        "1월",
+        "2월",
+        "3월",
+        "4월",
+        "5월",
+        "6월",
+        "7월",
+        "8월",
+        "9월",
+        "10월",
+        "11월",
+        "12월",
+        "년계"
+      ],
+      "filter_type": "year",
+      "filter_fields": {
+        "year_select": "ctl00_BodyHolder_dd_Srch1",
+        "available_years": [
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026",
+          "2027"
+        ]
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "delivery_anal",
+      "name": "납기준수율 분석",
+      "category": "분석통계",
+      "url": "/P60_SUM/DeliveryAnal.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "구분",
+        "1월",
+        "2월",
+        "3월",
+        "4월",
+        "5월",
+        "6월",
+        "7월",
+        "8월",
+        "9월",
+        "10월",
+        "11월",
+        "12월",
+        "년계"
+      ],
+      "filter_type": "year",
+      "filter_fields": {
+        "year_select": "ctl00_BodyHolder_dd_Srch1",
+        "available_years": [
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026",
+          "2027"
+        ]
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc_base",
+      "name": "자재 기초재고 수정",
+      "category": "재고",
+      "url": "/P70_BAS/RescBase.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "생산공장",
+        "자재",
+        "Alloy",
+        "Grade",
+        "Type",
+        "규격",
+        "매입처LOT",
+        "길이",
+        "기초수량",
+        "기초중량",
+        "작업"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "goods_base",
+      "name": "제품 기초재고 수정",
+      "category": "재고",
+      "url": "/P70_BAS/GoodsBase.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "금형번호",
+        "품번",
+        "제품",
+        "재질",
+        "퀜칭",
+        "색상",
+        "길이",
+        "제품바코드",
+        "기초재고량",
+        "작업"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "resc_stock_adj",
+      "name": "자재 재고조정 등록",
+      "category": "재고",
+      "url": "/P70_BAS/RescStock.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "조정일자",
+        "번호",
+        "대상공장",
+        "재고기준일",
+        "제목",
+        "확정여부"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "goods_stock_adj",
+      "name": "제품 재고조정 등록",
+      "category": "재고",
+      "url": "/P70_BAS/GoodsStock.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "조정일자",
+        "번호",
+        "재고기준일",
+        "제목",
+        "확정여부"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "cust",
+      "name": "매출처 등록",
+      "category": "기초",
+      "url": "/P70_BAS/Cust.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "매출처명",
+        "대표자",
+        "사업자번호",
+        "업태",
+        "종목",
+        "담당자",
+        "전화번호"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "buy",
+      "name": "매입처 등록",
+      "category": "기초",
+      "url": "/P70_BAS/Buy.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "매입처명",
+        "대표자",
+        "사업자번호",
+        "업태",
+        "종목",
+        "담당자",
+        "전화번호"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "outside",
+      "name": "외주처 등록",
+      "category": "기초",
+      "url": "/P70_BAS/Outside.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "외주처명",
+        "대표자",
+        "사업자번호",
+        "업태",
+        "종목",
+        "담당자",
+        "전화번호"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "maker",
+      "name": "제작처 등록",
+      "category": "기초",
+      "url": "/P70_BAS/Maker.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "제작처명",
+        "대표자",
+        "사업자번호",
+        "업태",
+        "종목",
+        "담당자",
+        "전화번호"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "resc",
+      "name": "자재 등록",
+      "category": "기초",
+      "url": "/P70_BAS/Resc.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "자재명",
+        "Alloy",
+        "Grade",
+        "Type",
+        "규격",
+        "비중",
+        "길이"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "goods",
+      "name": "제품 등록",
+      "category": "기초",
+      "url": "/P70_BAS/Goods.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "품번",
+        "제품명",
+        "길이",
+        "금형번호",
+        "업종",
+        "형상",
+        "재질",
+        "퀜칭",
+        "색상"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "plan",
+      "name": "KPI지표 계획 등록",
+      "category": "기초",
+      "url": "/P70_BAS/Plan.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "구분",
+        "1월",
+        "2월",
+        "3월",
+        "4월",
+        "5월",
+        "6월",
+        "7월",
+        "8월",
+        "9월",
+        "10월",
+        "11월",
+        "12월",
+        "작업"
+      ],
+      "filter_type": "year",
+      "filter_fields": {
+        "year_select": "ctl00_BodyHolder_dd_Srch1",
+        "available_years": [
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026",
+          "2027"
+        ]
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "sector",
+      "name": "제품업종 등록",
+      "category": "참조코드",
+      "url": "/P70_BAS/Sector.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "제품업종명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "shape_ref",
+      "name": "제품형상 등록",
+      "category": "참조코드",
+      "url": "/P70_BAS/Shape.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "제품형상명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "color",
+      "name": "색상 등록",
+      "category": "참조코드",
+      "url": "/P90_SYS/Color.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "색상명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "quenching",
+      "name": "퀜칭 등록",
+      "category": "참조코드",
+      "url": "/P90_SYS/Quenching.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "퀜칭명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "p_type",
+      "name": "양산구분 등록",
+      "category": "참조코드",
+      "url": "/P90_SYS/PType.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "양산구분명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "cutter",
+      "name": "절단기 등록",
+      "category": "참조코드",
+      "url": "/P90_SYS/Cutter.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "절단기명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "pallet",
+      "name": "파렛트 등록",
+      "category": "참조코드",
+      "url": "/P90_SYS/Pallet.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "파렛트번호",
+        "중량",
+        ""
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "scrap_kind",
+      "name": "스크랩종류 등록",
+      "category": "참조코드",
+      "url": "/P75_ETC/ScrapKind.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "종류명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "scrap_resc",
+      "name": "스크랩품목 등록",
+      "category": "참조코드",
+      "url": "/P75_ETC/ScrapResc.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "품목명",
+        "관련자재코드"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "fact",
+      "name": "공장 등록",
+      "category": "시스템",
+      "url": "/P90_SYS/Fact.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "공장명",
+        "사업자번호",
+        "상호",
+        "대표자",
+        "업태",
+        "종목",
+        "전화번호",
+        "주소",
+        "외주처"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "dept",
+      "name": "부서 등록",
+      "category": "시스템",
+      "url": "/P90_SYS/Dept.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "부서명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "zik",
+      "name": "직위 등록",
+      "category": "시스템",
+      "url": "/P90_SYS/Zik.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "직위명"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "user",
+      "name": "사원 등록",
+      "category": "시스템",
+      "url": "/P90_SYS/User.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "사원명",
+        "USER ID",
+        "공장",
+        "부서",
+        "직위",
+        "폰번호",
+        "이메일",
+        "접근수준",
+        "활성여부"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "app_line",
+      "name": "결재선 설정",
+      "category": "시스템",
+      "url": "/P90_SYS/AppLine.aspx",
+      "has_table": false,
+      "table_id": null,
+      "columns": [],
+      "filter_type": "none",
+      "filter_fields": {},
+      "has_pagination": false,
+      "error": null
+    },
+    {
+      "key": "m_group",
+      "name": "메뉴모음 등록",
+      "category": "시스템",
+      "url": "/P90_SYS/MGroup.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "코드",
+        "메뉴모음명",
+        "Dashboard",
+        "비고"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "m_user",
+      "name": "사원메뉴 설정",
+      "category": "시스템",
+      "url": "/P90_SYS/MUser.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "사원명",
+        "USER ID",
+        "부서",
+        "직위",
+        "폰번호",
+        "접근수준",
+        "활성여부",
+        "메뉴모음 설정"
+      ],
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
+      "has_pagination": true,
+      "error": null
+    },
+    {
+      "key": "acc_log",
+      "name": "접속로그 현황",
+      "category": "시스템",
+      "url": "/P90_SYS/AccLog.aspx",
+      "has_table": true,
+      "table_id": "ctl00_BodyHolder_gv_Board",
+      "columns": [
+        "공급기업",
+        "도입기업",
+        "솔루션구분",
+        "사원명",
+        "접속IP",
+        "접속일시",
+        "종료일시",
+        "활용데이터크기"
+      ],
+      "filter_type": "date_range",
+      "filter_fields": {
+        "from_date": "ctl00_BodyHolder_txt_FDate",
+        "to_date": "ctl00_BodyHolder_txt_TDate"
+      },
+      "has_pagination": true,
+      "error": null
+    }
+  ]
+}

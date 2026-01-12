@@ -7,3 +7,7 @@ python-dotenv
 pystray
 Pillow
 httpx
+playwright
+greenlet
+pyee
+typing_extensions

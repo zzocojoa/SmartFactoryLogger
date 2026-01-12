@@ -1194,6 +1194,8 @@ function App() {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const settingsScrollRef = useRef<HTMLDivElement | null>(null);
   const settingsSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const isManualScrollingRef = useRef(false);
+  const manualScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSpotValue = useLastValidNumber(data?.Spot);
   const spotAlertFallback = useSustainedFlag(
     lastSpotValue !== null && lastSpotValue >= SPOT_WARN_TEMP,
@@ -1261,6 +1263,7 @@ function App() {
       { id: 'settings-spot', label: LABELS.SPOT_CAMERA },
       { id: 'settings-storage', label: LABELS.STORAGE_CONFIG },
       { id: 'settings-logging', label: LABELS.LOG_ROTATION },
+      { id: 'settings-mes', label: 'MES 설정' },
       { id: 'settings-alerts', label: LABELS.ALERTS_THRESHOLDS },
       { id: 'settings-security', label: LABELS.SECURITY },
     ],
@@ -1456,7 +1459,6 @@ function App() {
     // Busy check is handled in hook, but UI disabling is via reconnectBusy from hook
     const success = await reconnect();
     if (success) {
-      await fetchHealth();
       await modal.alert('Reconnect requested. Check status badge.');
     } else {
       await modal.alert('Reconnect failed.');
@@ -1940,6 +1942,10 @@ function App() {
       intervalSec: values.system?.interval_sec?.toString() ?? '0.2',
       statusWarnMs: values.system?.status_warn_ms?.toString() ?? '10000',
       statusOfflineMs: values.system?.status_offline_ms?.toString() ?? '20000',
+      mesEnabled: values.mes?.enabled ?? false,
+      mesUserId: values.mes?.userid ?? '',
+      mesPassword: '', // Password is never loaded into the form for security
+      mesPasswordSet: values.mes?.password_set ?? false,
       password: '',
       passwordSet: Boolean(values.settings.password_set),
     };
@@ -2029,12 +2035,21 @@ function App() {
       'rotationMode',
       'cycleIdleTime',
       'cycleThresholdPress',
+      'intervalSec',
+      'statusWarnMs',
+      'statusOfflineMs',
+      'mesEnabled',
+      'mesUserId',
+      'mesPassword',
       'password',
     ];
 
     return keys.reduce((count, key) => {
-      if (key === 'password') {
-        return settingsForm.password.trim() ? count + 1 : count;
+      if (key === 'password' || key === 'mesPassword') {
+        return settingsForm[key].trim() ? count + 1 : count;
+      }
+      if (key === 'passwordSet') { // passwordSet is not a user-editable field
+        return count;
       }
       const current = settingsForm[key];
       const baseline = settingsBaseline[key];
@@ -2388,8 +2403,9 @@ function App() {
       ],
       'settings-observability': [],
       'settings-spot': ['spotIp', 'spotRefreshInterval'],
-      'settings-storage': ['logPath', 'snapshotPath', 'autoSave'],
+      'settings-storage': ['logPath', 'snapshotPath', 'autoSave', 'intervalSec', 'statusWarnMs', 'statusOfflineMs'],
       'settings-logging': ['rotationEnabled', 'rotationMode', 'cycleIdleTime', 'cycleThresholdPress'],
+      'settings-mes': ['mesEnabled', 'mesUserId', 'mesPassword'],
       'settings-alerts': [
         'thresholdMasterOn',
         'thresholdSpeedEnabled',
@@ -2485,6 +2501,16 @@ function App() {
       if (!target) {
         return;
       }
+      
+      // Block scroll spy updates during smooth scroll
+      isManualScrollingRef.current = true;
+      if (manualScrollTimeoutRef.current) {
+        clearTimeout(manualScrollTimeoutRef.current);
+      }
+      manualScrollTimeoutRef.current = setTimeout(() => {
+        isManualScrollingRef.current = false;
+      }, 800);
+
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setActiveSettingsSection(id);
     },
@@ -2535,6 +2561,10 @@ function App() {
       intervalSec: '수집 간격 (초)',
       statusWarnMs: '경고 임계값 (ms)',
       statusOfflineMs: '오프라인 임계값 (ms)',
+      mesEnabled: 'MES 연동 사용',
+      mesUserId: 'MES 사용자 ID',
+      mesPassword: 'MES 비밀번호',
+      mesPasswordSet: 'MES 비밀번호 설정 상태',
       password: '설정 비밀번호',
       passwordSet: '비밀번호 설정 상태',
 
@@ -2562,6 +2592,12 @@ function App() {
       'rotationMode',
       'cycleIdleTime',
       'cycleThresholdPress',
+      'intervalSec',
+      'statusWarnMs',
+      'statusOfflineMs',
+      'mesEnabled',
+      'mesUserId',
+      'mesPassword',
       'password',
     ];
 
@@ -2571,6 +2607,12 @@ function App() {
       if (key === 'password') {
         if (settingsForm.password.trim()) {
           summary.push(`${labelMap.password}: 변경됨`);
+        }
+        return;
+      }
+      if (key === 'mesPassword') {
+        if (settingsForm.mesPassword.trim()) {
+          summary.push(`${labelMap.mesPassword}: 변경됨`);
         }
         return;
       }
@@ -2594,9 +2636,24 @@ function App() {
       return;
     }
     const updateActiveSection = () => {
+      if (isManualScrollingRef.current) return;
+      
+      const container = settingsScrollRef.current;
+      if (!container) return;
+
       const containerRect = container.getBoundingClientRect();
-      const triggerY = 100; // Adjusted visual trigger point
-      let currentId = settingsSections[0]?.id ?? '';
+      const targetY = 24; // Align with .settings-content padding-top
+      
+      let bestId = settingsSections[0]?.id ?? '';
+      let minDistance = Infinity;
+
+      // Special case: If at the very bottom, always pick the last section
+      const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
+      if (isAtBottom && settingsSections.length > 0) {
+        const lastId = settingsSections[settingsSections.length - 1].id;
+        setActiveSettingsSection((prev) => (prev !== lastId ? lastId : prev));
+        return;
+      }
 
       settingsSections.forEach(({ id }) => {
         const section = settingsSectionRefs.current[id];
@@ -2604,14 +2661,18 @@ function App() {
 
         const rect = section.getBoundingClientRect();
         const relativeTop = rect.top - containerRect.top;
+        
+        // Find the section whose top is closest to our target (24px from container top)
+        const distance = Math.abs(relativeTop - targetY);
 
-        if (relativeTop <= triggerY) {
-          currentId = id;
+        if (distance < minDistance) {
+          minDistance = distance;
+          bestId = id;
         }
       });
 
-      if (currentId) {
-        setActiveSettingsSection((prev) => (prev !== currentId ? currentId : prev));
+      if (bestId) {
+        setActiveSettingsSection((prev) => (prev !== bestId ? bestId : prev));
       }
     };
     updateActiveSection();
@@ -2621,7 +2682,7 @@ function App() {
       container.removeEventListener('scroll', updateActiveSection);
       window.removeEventListener('resize', updateActiveSection);
     };
-  }, [settingsOpen, settingsSections, settingsForm]);
+  }, [settingsOpen, settingsSections]);
 
 
   // Spot Logic moved to useSpotViewModel
@@ -4536,6 +4597,53 @@ function App() {
                       </div>
                       <div className="settings-hint">
                         로그 회전 기준과 사이클 조건은 CSV 분리 및 저장 주기에 직접 영향을 줍니다.
+                      </div>
+                    </div>
+
+                    <div
+                      className="settings-section"
+                      id="settings-mes"
+                      ref={registerSettingsSection('settings-mes')}
+                    >
+                      <div className="settings-section-title">MES 설정</div>
+                      <div className="settings-grid">
+                        <label
+                          className={`settings-field settings-toggle-field ${isSettingsFieldDirty('mesEnabled') ? 'changed' : ''}`}
+                        >
+                          <span className="settings-toggle-label">MES 연동 사용</span>
+                          <button
+                            type="button"
+                            className="settings-toggle"
+                            aria-pressed={settingsForm.mesEnabled}
+                            onClick={() => updateSettingsField('mesEnabled', !settingsForm.mesEnabled)}
+                          >
+                            <span className="settings-toggle-text">{settingsForm.mesEnabled ? 'ON' : 'OFF'}</span>
+                          </button>
+                        </label>
+                        <label className={`settings-field ${isSettingsFieldDirty('mesUserId') ? 'changed' : ''}`}>
+                          MES User ID
+                          <input
+                            value={settingsForm.mesUserId}
+                            onChange={(e) => updateSettingsField('mesUserId', e.target.value)}
+                            placeholder="UserID"
+                          />
+                        </label>
+                        <label className={`settings-field ${isSettingsFieldDirty('mesPassword') ? 'changed' : ''}`}>
+                          MES Password
+                          <input
+                            type="password"
+                            value={settingsForm.mesPassword}
+                            onChange={(e) => updateSettingsField('mesPassword', e.target.value)}
+                            placeholder={settingsForm.mesPasswordSet ? "********" : "비밀번호 입력"}
+                          />
+                          <span className="settings-field-help">
+                            {settingsForm.mesPasswordSet ? "비밀번호가 설정되어 있습니다. 변경 시에만 입력하세요." : "MES 연동을 위해 비밀번호를 입력하세요."}
+                          </span>
+                        </label>
+
+                      </div>
+                      <div className="settings-hint">
+                        MES 연동을 활성화하면 수집된 데이터를 실시간으로 MES 서버에 전송합니다.
                       </div>
                     </div>
 

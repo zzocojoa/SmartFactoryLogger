@@ -59,6 +59,9 @@ DEFAULT_CSV_HEADER = (
     "Date,Time,Temperature,MainPress,BilletLength,Temp_F,Temp_B,Count,Speed,EndPos,"
     "Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp,DIE_ID,Billet_CycleID"
 )
+DEFAULT_MES_USER_ID = ""
+DEFAULT_MES_PASSWORD = ""
+DEFAULT_MES_ENABLED = False
 DEFAULT_LS_TARGETS: List[Tuple[str, str]] = [
     ("%DW250", "Mold1"),
     ("%DW256", "Mold2"),
@@ -136,6 +139,23 @@ def _get_int(parser: configparser.ConfigParser, section: str, option: str, fallb
         return int(val) if val is not None else fallback
     except ValueError:
         return fallback
+
+
+def _save_config(path: Path, parser: configparser.ConfigParser, encoding: str) -> None:
+    """Save the current config parser back to disk safely."""
+    try:
+        # Create a backup before writing
+        backup_path = path.with_suffix(".bak")
+        if path.exists() and not backup_path.exists():
+            shutil.copy2(path, backup_path)
+            
+        tmp_path = path.with_suffix(".tmp")
+        with tmp_path.open("w", encoding=encoding) as handle:
+            parser.write(handle)
+        tmp_path.replace(path)
+        _config_log("INFO", f"Config file auto-updated: {path}")
+    except Exception as exc:
+        _config_log("ERROR", f"Failed to auto-update config: {exc}")
 
 
 def _get_float(parser: configparser.ConfigParser, section: str, option: str, fallback: float) -> float:
@@ -255,6 +275,28 @@ def resolve_storage_path(path_value: Optional[str], default_subdir: str, label: 
 
 CONFIG_PATH = _resolve_config_path()
 CONFIG, CONFIG_ENCODING = _load_config(CONFIG_PATH)
+
+# --- Auto-Update config.ini if missing new sections ---
+if CONFIG_PATH and CONFIG_PATH.is_file():
+    _updated = False
+    if not CONFIG.has_section("MES"):
+        CONFIG.add_section("MES")
+        CONFIG.set("MES", "enabled", str(DEFAULT_MES_ENABLED))
+        CONFIG.set("MES", "userid", DEFAULT_MES_USER_ID)
+        CONFIG.set("MES", "password", DEFAULT_MES_PASSWORD)
+        _updated = True
+    
+    # Also ensure SYSTEM section exists for clarity in the file
+    if not CONFIG.has_section("SYSTEM"):
+        CONFIG.add_section("SYSTEM")
+        CONFIG.set("SYSTEM", "intervalsec", str(DEFAULT_INTERVAL_SEC))
+        CONFIG.set("SYSTEM", "statuswarnms", str(DEFAULT_STATUS_WARN_MS))
+        CONFIG.set("SYSTEM", "statusofflinems", str(DEFAULT_STATUS_OFFLINE_MS))
+        _updated = True
+
+    if _updated:
+        _save_config(CONFIG_PATH, CONFIG, CONFIG_ENCODING or "utf-8-sig")
+
 APP_DATA_DIR = _get_user_data_dir()
 
 # Distributed Settings (Environment & Ports)
@@ -365,6 +407,11 @@ INTERVAL_SEC = max(MIN_INTERVAL_SEC, min(MAX_INTERVAL_SEC, _interval_raw))
 # SYSTEM / Status Thresholds
 STATUS_WARN_MS = _get_int(CONFIG, "SYSTEM", "statuswarnms", DEFAULT_STATUS_WARN_MS)
 STATUS_OFFLINE_MS = _get_int(CONFIG, "SYSTEM", "statusofflinems", DEFAULT_STATUS_OFFLINE_MS)
+
+# MES
+MES_ENABLED = _get_bool(CONFIG, "MES", "enabled", DEFAULT_MES_ENABLED)
+MES_USER_ID = os.getenv("MES_USER_ID", _get(CONFIG, "MES", "userid", DEFAULT_MES_USER_ID) or DEFAULT_MES_USER_ID)
+MES_PASSWORD = os.getenv("MES_PASSWORD", _get(CONFIG, "MES", "password", DEFAULT_MES_PASSWORD) or DEFAULT_MES_PASSWORD)
 
 
 # Validation Logic
