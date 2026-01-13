@@ -266,6 +266,8 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       mesUserId: values.mes?.userid ?? '',
       mesPassword: '',
       mesPasswordSet: values.mes?.password_set ?? false,
+      mesStartHour: String(values.mes?.starthour ?? 8),
+      mesEndHour: String(values.mes?.endhour ?? 19),
     };
     return { form: nextForm, thresholds: nextThresholdState };
   }, []);
@@ -532,6 +534,8 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         enabled: settingsForm.mesEnabled,
         userid: settingsForm.mesUserId.trim() || undefined,
         password: settingsForm.mesPassword.trim() || undefined,
+        starthour: toInt(settingsForm.mesStartHour) ?? 8,
+        endhour: toInt(settingsForm.mesEndHour) ?? 19,
       }
     };
 

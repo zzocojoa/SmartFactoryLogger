@@ -66,6 +66,8 @@ class MESConfig(BaseModel):
     enabled: Optional[bool] = None
     userid: Optional[str] = None
     password: Optional[str] = None
+    starthour: Optional[int] = None
+    endhour: Optional[int] = None
 
 
 class SystemConfig(BaseModel):

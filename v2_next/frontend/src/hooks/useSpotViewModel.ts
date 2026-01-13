@@ -30,6 +30,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   
   const hasImageRef = useRef(false);
   const prevUrlRef = useRef<string | null>(null);
+  const inFlightRef = useRef(false);
 
   const refreshConfig = useCallback(async () => {
     try {
@@ -42,15 +43,21 @@ export const useSpotViewModel = (): UseSpotViewModel => {
 
   const fetchImage = useCallback(async () => {
       if (!config?.image_url) return;
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
 
       if (!hasImageRef.current) setImageLoading(true);
 
       try {
           // Use fetch instead of img src for memory control
           const url = `${spotService.getImageUrl()}?t=${Date.now()}`;
-          const response = await fetch(url);
+          const response = await fetch(url, { cache: 'no-store' });
           
           if (!response.ok) throw new Error('Network response was not ok');
+
+          const statusHeader = response.headers.get('X-Spot-Image-Status');
+          const capturedAtHeader = response.headers.get('X-Spot-Image-At');
+          const ageHeader = response.headers.get('X-Spot-Image-Age');
           
           const blob = await response.blob();
           
@@ -64,13 +71,29 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           setImageUrl(newUrl);
           setImageError(null);
           hasImageRef.current = true;
-          setLastSuccessAt(Date.now());
+
+          const receivedAt = Date.now();
+          let effectiveAt = receivedAt;
+          const capturedAt = capturedAtHeader ? Number(capturedAtHeader) : NaN;
+          const ageSec = ageHeader ? Number(ageHeader) : NaN;
+          
+          // Fix: Prefer relative age (ageSec) to avoid server-client clock skew
+          if (Number.isFinite(ageSec)) {
+              effectiveAt = receivedAt - Math.max(0, ageSec * 1000);
+          } else if (Number.isFinite(capturedAt)) {
+              effectiveAt = capturedAt;
+          }
+          setLastSuccessAt(effectiveAt);
+          if (statusHeader === 'stale') {
+              setImageError(null);
+          }
           
       } catch (err) {
           console.error('Image fetch failed', err);
           setImageError('이미지 수신 실패');
       } finally {
           setImageLoading(false);
+          inFlightRef.current = false;
       }
   }, [config]);
 
@@ -117,11 +140,14 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     
     const loop = async () => {
        if (!active) return;
-       
-       await fetchImage();
+
+       const refreshMs = Math.max(500, Math.round(config.refresh_interval * 1000));
+       const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+       if (!hidden) {
+           await fetchImage();
+       }
        
        if (active) {
-           const refreshMs = Math.max(500, Math.round(config.refresh_interval * 1000));
            timerId = setTimeout(loop, refreshMs);
        }
     };
@@ -138,6 +164,19 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         }
     };
   }, [config, fetchImage]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchImage();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [fetchImage]);
 
   // Initial config load
   useEffect(() => {

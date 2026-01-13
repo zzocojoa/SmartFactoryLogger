@@ -62,6 +62,8 @@ DEFAULT_CSV_HEADER = (
 DEFAULT_MES_USER_ID = ""
 DEFAULT_MES_PASSWORD = ""
 DEFAULT_MES_ENABLED = False
+DEFAULT_MES_START_HOUR = 8   # 운영 시작 시간 (08:00)
+DEFAULT_MES_END_HOUR = 19    # 운영 종료 시간 (19:00)
 DEFAULT_LS_TARGETS: List[Tuple[str, str]] = [
     ("%DW250", "Mold1"),
     ("%DW256", "Mold2"),
@@ -279,20 +281,38 @@ CONFIG, CONFIG_ENCODING = _load_config(CONFIG_PATH)
 # --- Auto-Update config.ini if missing new sections ---
 if CONFIG_PATH and CONFIG_PATH.is_file():
     _updated = False
+    
+    # MES 섹션 및 개별 키 자동 추가 (기존 config.ini 호환)
     if not CONFIG.has_section("MES"):
         CONFIG.add_section("MES")
-        CONFIG.set("MES", "enabled", str(DEFAULT_MES_ENABLED))
-        CONFIG.set("MES", "userid", DEFAULT_MES_USER_ID)
-        CONFIG.set("MES", "password", DEFAULT_MES_PASSWORD)
         _updated = True
+    _mes_defaults = {
+        "enabled": str(DEFAULT_MES_ENABLED),
+        "userid": DEFAULT_MES_USER_ID,
+        "password": DEFAULT_MES_PASSWORD,
+        "starthour": str(DEFAULT_MES_START_HOUR),
+        "endhour": str(DEFAULT_MES_END_HOUR),
+    }
+    for _key, _default_val in _mes_defaults.items():
+        if not CONFIG.has_option("MES", _key):
+            CONFIG.set("MES", _key, _default_val)
+            _updated = True
+            _config_log("INFO", f"Auto-added missing MES.{_key} = {_default_val}")
     
-    # Also ensure SYSTEM section exists for clarity in the file
+    # SYSTEM 섹션 및 개별 키 자동 추가
     if not CONFIG.has_section("SYSTEM"):
         CONFIG.add_section("SYSTEM")
-        CONFIG.set("SYSTEM", "intervalsec", str(DEFAULT_INTERVAL_SEC))
-        CONFIG.set("SYSTEM", "statuswarnms", str(DEFAULT_STATUS_WARN_MS))
-        CONFIG.set("SYSTEM", "statusofflinems", str(DEFAULT_STATUS_OFFLINE_MS))
         _updated = True
+    _system_defaults = {
+        "intervalsec": str(DEFAULT_INTERVAL_SEC),
+        "statuswarnms": str(DEFAULT_STATUS_WARN_MS),
+        "statusofflinems": str(DEFAULT_STATUS_OFFLINE_MS),
+    }
+    for _key, _default_val in _system_defaults.items():
+        if not CONFIG.has_option("SYSTEM", _key):
+            CONFIG.set("SYSTEM", _key, _default_val)
+            _updated = True
+            _config_log("INFO", f"Auto-added missing SYSTEM.{_key} = {_default_val}")
 
     if _updated:
         _save_config(CONFIG_PATH, CONFIG, CONFIG_ENCODING or "utf-8-sig")
@@ -412,6 +432,8 @@ STATUS_OFFLINE_MS = _get_int(CONFIG, "SYSTEM", "statusofflinems", DEFAULT_STATUS
 MES_ENABLED = _get_bool(CONFIG, "MES", "enabled", DEFAULT_MES_ENABLED)
 MES_USER_ID = os.getenv("MES_USER_ID", _get(CONFIG, "MES", "userid", DEFAULT_MES_USER_ID) or DEFAULT_MES_USER_ID)
 MES_PASSWORD = os.getenv("MES_PASSWORD", _get(CONFIG, "MES", "password", DEFAULT_MES_PASSWORD) or DEFAULT_MES_PASSWORD)
+MES_START_HOUR = _get_int(CONFIG, "MES", "starthour", DEFAULT_MES_START_HOUR)
+MES_END_HOUR = _get_int(CONFIG, "MES", "endhour", DEFAULT_MES_END_HOUR)
 
 
 # Validation Logic

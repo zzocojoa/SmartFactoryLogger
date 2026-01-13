@@ -297,6 +297,8 @@ export interface ConfigSnapshot {
       enabled: boolean;
       userid: string;
       password_set: boolean;
+      starthour: number;
+      endhour: number;
     };
   };
 }
@@ -347,6 +349,8 @@ export interface SettingsFormState {
   mesUserId: string;
   mesPassword: string;
   mesPasswordSet: boolean;
+  mesStartHour: string;
+  mesEndHour: string;
 }
 
 export interface ConfigApplyResult {

@@ -957,7 +957,7 @@ const getCameraStatus = (params: {
   if (delayMs !== null && delayMs > refreshMs * 5) {
     return { type: 'danger', title: '이미지 수신 지연', detail: `지연 ${Math.round(delayMs / 1000)}초` };
   }
-  if (delayMs !== null && delayMs > refreshMs * 2) {
+  if (delayMs !== null && delayMs > refreshMs * 4) {
     return { type: 'warn', title: '이미지 지연 감지', detail: `지연 ${Math.round(delayMs / 1000)}초` };
   }
   return null;
@@ -1191,6 +1191,7 @@ function App() {
   const statusRef = useRef<string | null>(null);
   const spotAlertRef = useRef(false);
   const cameraStatusRef = useRef<string | null>(null);
+  const cameraStatusTimerRef = useRef<NodeJS.Timeout | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const settingsScrollRef = useRef<HTMLDivElement | null>(null);
   const settingsSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -1946,6 +1947,8 @@ function App() {
       mesUserId: values.mes?.userid ?? '',
       mesPassword: '', // Password is never loaded into the form for security
       mesPasswordSet: values.mes?.password_set ?? false,
+      mesStartHour: String(values.mes?.starthour ?? 8),
+      mesEndHour: String(values.mes?.endhour ?? 19),
       password: '',
       passwordSet: Boolean(values.settings.password_set),
     };
@@ -2405,7 +2408,7 @@ function App() {
       'settings-spot': ['spotIp', 'spotRefreshInterval'],
       'settings-storage': ['logPath', 'snapshotPath', 'autoSave', 'intervalSec', 'statusWarnMs', 'statusOfflineMs'],
       'settings-logging': ['rotationEnabled', 'rotationMode', 'cycleIdleTime', 'cycleThresholdPress'],
-      'settings-mes': ['mesEnabled', 'mesUserId', 'mesPassword'],
+      'settings-mes': ['mesEnabled', 'mesUserId', 'mesPassword', 'mesStartHour', 'mesEndHour'],
       'settings-alerts': [
         'thresholdMasterOn',
         'thresholdSpeedEnabled',
@@ -2565,6 +2568,8 @@ function App() {
       mesUserId: 'MES 사용자 ID',
       mesPassword: 'MES 비밀번호',
       mesPasswordSet: 'MES 비밀번호 설정 상태',
+      mesStartHour: 'MES 운영 시작 시간',
+      mesEndHour: 'MES 운영 종료 시간',
       password: '설정 비밀번호',
       passwordSet: '비밀번호 설정 상태',
 
@@ -3029,17 +3034,37 @@ function App() {
       cameraStatusRef.current = type;
       return;
     }
+    
     if (cameraStatusRef.current === type) {
       return;
     }
-    if (type === 'error' || type === 'danger') {
-      pushNotification('카메라 오류', `SPOT 카메라 ${cameraStatus?.title ?? '오류'}`, 'error');
-    } else if (type === 'warn') {
-      pushNotification('카메라 지연', 'SPOT 카메라 응답이 지연됩니다.', 'warn');
-    } else if (type === 'ok' && cameraStatusRef.current !== 'ok') {
-      pushNotification('카메라 정상', 'SPOT 카메라가 정상화되었습니다.', 'info');
+
+    // Status changed. Cancel any pending timer.
+    if (cameraStatusTimerRef.current) {
+      clearTimeout(cameraStatusTimerRef.current);
+      cameraStatusTimerRef.current = null;
     }
-    cameraStatusRef.current = type;
+
+    // Start 3-second debounce timer
+    cameraStatusTimerRef.current = setTimeout(() => {
+      // If we are here, status has been stable for 3 seconds
+      if (type === 'error' || type === 'danger') {
+        pushNotification('카메라 오류', `SPOT 카메라 ${cameraStatus?.title ?? '오류'}`, 'error');
+      } else if (type === 'warn') {
+        pushNotification('카메라 지연', 'SPOT 카메라 응답이 지연됩니다.', 'warn');
+      } else if (type === 'ok' && cameraStatusRef.current !== 'ok') {
+        pushNotification('카메라 정상', 'SPOT 카메라가 정상화되었습니다.', 'info');
+      }
+      // Update ref only after notification
+      cameraStatusRef.current = type;
+      cameraStatusTimerRef.current = null;
+    }, 3000);
+
+    return () => {
+      if (cameraStatusTimerRef.current) {
+        clearTimeout(cameraStatusTimerRef.current);
+      }
+    };
   }, [cameraStatus, pushNotification]);
 
   return (
@@ -4640,10 +4665,32 @@ function App() {
                             {settingsForm.mesPasswordSet ? "비밀번호가 설정되어 있습니다. 변경 시에만 입력하세요." : "MES 연동을 위해 비밀번호를 입력하세요."}
                           </span>
                         </label>
+                        <label className={`settings-field ${isSettingsFieldDirty('mesStartHour') ? 'changed' : ''}`}>
+                          운영 시작 시간
+                          <input
+                            type="number"
+                            min="0"
+                            max="23"
+                            value={settingsForm.mesStartHour}
+                            onChange={(e) => updateSettingsField('mesStartHour', e.target.value)}
+                          />
+                          <span className="settings-field-help">시 (0~23)</span>
+                        </label>
+                        <label className={`settings-field ${isSettingsFieldDirty('mesEndHour') ? 'changed' : ''}`}>
+                          운영 종료 시간
+                          <input
+                            type="number"
+                            min="0"
+                            max="23"
+                            value={settingsForm.mesEndHour}
+                            onChange={(e) => updateSettingsField('mesEndHour', e.target.value)}
+                          />
+                          <span className="settings-field-help">시 (0~23)</span>
+                        </label>
 
                       </div>
                       <div className="settings-hint">
-                        MES 연동을 활성화하면 수집된 데이터를 실시간으로 MES 서버에 전송합니다.
+                        MES 연동을 활성화하면 수집된 데이터를 실시간으로 MES 서버에 전송합니다. 운영 시간 외에는 수집이 일시 중지됩니다.
                       </div>
                     </div>
 
@@ -5552,7 +5599,7 @@ function CameraComponent() {
             onError={() => onSpotImageError()}
           />
         )}
-        <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="none" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+        <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
           {lines.map((line, idx) => (
             <g key={idx}>
               <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="black" strokeWidth={thick + 2} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />

@@ -676,6 +676,10 @@ async def lifespan(app: FastAPI):
     if config.MES_ENABLED:
         await mes_scheduler.start()
     
+    # Start SPOT image background prefetching
+    print("[Main] Starting SPOT Image Prefetch...")
+    await spot_control.start_prefetch_loop()
+    
     # Log local IPs for debugging remote connectivity
     try:
         hostname = socket.gethostname()
@@ -688,6 +692,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # Shutdown
+        print("[Main] Stopping SPOT Image Prefetch...")
+        await spot_control.stop_prefetch_loop()
         print("[Main] Stopping Comm Metrics Logger...")
         comm_metrics_logger_service.stop()
         print("[Main] Stopping PLC Service...")
@@ -1430,8 +1436,8 @@ async def save_config(payload: ConfigUpdate):
             if payload.system.status_warn_ms: config.STATUS_WARN_MS = payload.system.status_warn_ms
             if payload.system.status_offline_ms: config.STATUS_OFFLINE_MS = payload.system.status_offline_ms
             
+        mes_changed = False
         if payload.mes:
-            mes_changed = False
             if payload.mes.enabled is not None: 
                 if config.MES_ENABLED != payload.mes.enabled:
                     config.MES_ENABLED = payload.mes.enabled
@@ -1444,8 +1450,10 @@ async def save_config(payload: ConfigUpdate):
                 if config.MES_PASSWORD != payload.mes.password:
                     config.MES_PASSWORD = payload.mes.password
                     mes_changed = True
-        else:
-            mes_changed = False
+            if payload.mes.starthour is not None:
+                config.MES_START_HOUR = payload.mes.starthour
+            if payload.mes.endhour is not None:
+                config.MES_END_HOUR = payload.mes.endhour
             
         # 2. Persist to config.ini
         results = update_config(payload)
@@ -1626,8 +1634,23 @@ def spot_focus(steps: int = 0):
 async def proxy_spot_image():
     """Proxy the SPOT camera image for remote clients (Async + Cached)."""
     try:
-        data = await spot_control.fetch_image_async()
-        return Response(content=data, media_type="image/jpeg")
+        data, meta = await spot_control.fetch_image_async()
+        headers = {
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        }
+        captured_at = meta.get("captured_at") or 0.0
+        age_sec = meta.get("age_sec")
+        if captured_at:
+            headers["X-Spot-Image-At"] = str(int(captured_at * 1000))
+        if age_sec is not None:
+            headers["X-Spot-Image-Age"] = f"{age_sec:.3f}"
+        if meta.get("status"):
+            headers["X-Spot-Image-Status"] = str(meta["status"])
+        if meta.get("source"):
+            headers["X-Spot-Image-Source"] = str(meta["source"])
+        return Response(content=data, media_type="image/jpeg", headers=headers)
     except ValueError as e:
          raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
