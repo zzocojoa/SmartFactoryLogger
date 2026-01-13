@@ -20,7 +20,7 @@ from .. import config
 
 PROJECT_ROOT = Path(config.__file__).resolve().parent
 # Reuse the main log architecture (either AppData or Portable folder)
-DATA_DIR = Path(config.LOG_PATH).parent / "mes_data"
+DATA_DIR = config.APP_DATA_DIR / "logs" / "mes_data"
 CONFIG_FILE = config.CONFIG_PATH or (PROJECT_ROOT / "config.ini")
 
 # For EXE environments, we need to handle inner resource paths carefully

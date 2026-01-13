@@ -16,7 +16,8 @@ from .constants import PROJECT_ROOT
 # Log Directory setup integrated with SmartFactoryLogger
 from .. import config
 # Use the main system's system log directory
-LOG_DIR = Path(config.LOG_PATH).parent / "system"
+# Use the main system's system log directory
+LOG_DIR = config.APP_DATA_DIR / "logs" / "system"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 class JSONFormatter(logging.Formatter):

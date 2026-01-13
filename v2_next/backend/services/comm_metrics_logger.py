@@ -76,8 +76,8 @@ class CommMetricsLoggerService:
             from .. import config
 
             if config.LOG_PATH:
-                # Comm metrics logs go to 'comm' subdirectory
-                log_dir = os.path.join(config.LOG_PATH, "comm")
+                # Comm metrics logs go to 'comm' subdirectory (Fixed path)
+                log_dir = os.path.join(config.APP_DATA_DIR, "logs", "comm")
         except Exception:
             log_dir = None
         if not log_dir:
