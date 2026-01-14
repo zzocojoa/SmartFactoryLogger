@@ -2,6 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import Home from './pages/Home';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { GlobalModalProvider } from './GlobalModalContext';
 import { CustomDialog } from './components/CustomDialog';
@@ -21,7 +23,12 @@ root.render(
   <React.StrictMode>
     <GlobalModalProvider>
       <ThemeProvider>
-        <App />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/dashboard" element={<App />} />
+          </Routes>
+        </BrowserRouter>
         <CustomDialog />
       </ThemeProvider>
     </GlobalModalProvider>
