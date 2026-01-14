@@ -45,7 +45,7 @@ const Home: React.FC = () => {
       </div>
 
       <footer className="home-footer">
-        © 2026 Smart Factory Logger System v2.0
+        Copyright © HOIHOU. All Rights Reserved. v1.0.0
       </footer>
     </div>
   );

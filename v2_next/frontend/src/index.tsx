@@ -1,13 +1,25 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import App from './App';
-import Home from './pages/Home';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { GlobalModalProvider } from './GlobalModalContext';
 import { CustomDialog } from './components/CustomDialog';
 import { ThemeProvider } from './ThemeContext';
+
+// Lazy Components
+const App = lazy(() => import('./App'));
+const Home = lazy(() => import('./pages/Home'));
+
+// Loading Fallback
+const LoadingFallback = () => (
+  <div style={{
+    display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh',
+    background: '#0f172a', color: '#94a3b8', fontSize: '1.2rem'
+  }}>
+    Running Smart Factory Environment...
+  </div>
+);
 
 console.log("Index.tsx: Booting...");
 
@@ -24,14 +36,15 @@ root.render(
     <GlobalModalProvider>
       <ThemeProvider>
         <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/dashboard" element={<App />} />
-          </Routes>
+          <Suspense fallback={<LoadingFallback />}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/dashboard" element={<App />} />
+            </Routes>
+          </Suspense>
         </BrowserRouter>
         <CustomDialog />
       </ThemeProvider>
     </GlobalModalProvider>
   </React.StrictMode>
 );
-

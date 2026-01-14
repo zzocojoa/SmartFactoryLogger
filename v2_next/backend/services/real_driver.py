@@ -1,8 +1,11 @@
-import socket
 import struct
 import time
+import select
 from datetime import datetime
 from typing import Optional, List, Dict
+import socket
+
+print(">>> REAL DRIVER V5 (NON-BLOCKING/SELECT) LOADED <<<") # VERSION CHECK
 
 import httpx
 
@@ -78,7 +81,8 @@ class RealPLCDriver(BasePLCDriver):
         self.spot_last_success_time: Optional[float] = None
         # Shared httpx client for SPOT with connection pooling
         self._spot_http_client = httpx.Client(
-            timeout=httpx.Timeout(connect=0.5, read=self.spot_timeout or 0.5, write=0.5, pool=2.0)
+            # Fail Fast: 0.2s connect + 0.2s read = 0.4s max latency (Safe for 1.0s loop)
+            timeout=httpx.Timeout(connect=0.2, read=0.2, write=0.5, pool=2.0)
         )
         self.logic = LogicProcessor()
 
@@ -206,11 +210,29 @@ class RealPLCDriver(BasePLCDriver):
                     pass
             self.sock_ext = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock_ext.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self.sock_ext.settimeout(self.ext_timeout)
-            self.sock_ext.connect((config.EXTRUDER_IP, config.EXTRUDER_PORT))
+            
+            # Non-Blocking Connect (Force Timeout)
+            self.sock_ext.setblocking(False)
+            err = self.sock_ext.connect_ex((config.EXTRUDER_IP, config.EXTRUDER_PORT))
+            
+            if err != 0:
+                # Wait for writeability (connection success)
+                _, writable, _ = select.select([], [self.sock_ext], [], self.ext_timeout)
+                if not writable:
+                    raise socket.timeout("Connect timeout (Non-Blocking)")
+                
+                # Check for socket errors
+                err = self.sock_ext.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if err != 0:
+                     raise OSError(err, "Connect failed")
+
+            # CRITICAL: Keep Non-Blocking Mode permanently!
+            # self.sock_ext.setblocking(True)  <-- REMOVED
+            # self.sock_ext.settimeout(...)    <-- REMOVED
+            
             self.ext_retry_interval = 1.0
             self.ext_next_retry = 0.0
-            print(f"[RealDriver] Connected to Extruder ({config.EXTRUDER_IP})")
+            # print(f"[RealDriver] Connected to Extruder ({config.EXTRUDER_IP})")
             return True
         except Exception as e:
             self.sock_ext = None
@@ -261,14 +283,22 @@ class RealPLCDriver(BasePLCDriver):
         print("[RealDriver] All Connections Closed.")
 
     def read_data(self) -> FactoryData:
+        t_start = time.time()
+
         # 1. Read Extruder (Melsec ASCII)
+        t0 = time.time()
         ext_data = self._read_extruder()
+        t_ext = time.time() - t0
 
         # 2. Read LS (XGT Binary)
+        t0 = time.time()
         ls_data = self._read_ls()
+        t_ls = time.time() - t0
 
         # 3. Read SPOT Temp (HTTP)
+        t0 = time.time()
         spot_val = self._read_spot()
+        t_spot = time.time() - t0
         if spot_val is not None:
             self.last_spot = spot_val
 
@@ -277,6 +307,22 @@ class RealPLCDriver(BasePLCDriver):
 
         # 4. Merge & Return
         now = datetime.now()
+        
+        # --- Latency Monitoring ---
+        total_duration = time.time() - t_start
+        if total_duration > 1.0:
+            # Latency Warning
+            try:
+                msg = (
+                    f"[Latency] Main loop took {total_duration:.2f}s (Threshold: 1.0s). Breakdown: "
+                    f"Ext: {t_ext:.2f}s, LS: {t_ls:.2f}s, SPOT: {t_spot:.2f}s"
+                )
+                print(f"[WARNING] {msg}")
+                config._config_log("WARNING", msg)
+            except Exception:
+                pass
+        # --------------------------
+
         die_id, billet_cycle_id = self.logic.update(
             ext_data.get("Count"),
             ext_data.get("Press"),
@@ -419,10 +465,10 @@ class RealPLCDriver(BasePLCDriver):
                 else:
                     self.ext_split_success_count = 0
 
+
         except Exception as e:
             print(f"[RealDriver] Extruder Read Error: {e}")
             self._mark_ext_error(str(e))
-            self.sock_ext = None
             self._backoff_ext()
             self.ext_skip_counter = 5
 
@@ -432,11 +478,58 @@ class RealPLCDriver(BasePLCDriver):
         if not self.sock_ext:
             return b""
         data = bytearray()
+        start_time = time.time()
+        loop_count = 0
         while len(data) < max_bytes:
+            loop_count += 1
+            # 1. Calculate remaining time
+            elapsed = time.time() - start_time
+            remaining = self.ext_timeout - elapsed
+            
+            # DEBUG: Log every iteration
+            if elapsed > 0.3:  # Only log if already slow
+                msg = f"[DEBUG recv_until] Loop#{loop_count}: elapsed={elapsed:.3f}s, remaining={remaining:.3f}s, data_len={len(data)}"
+                print(msg)
+                config._config_log("WARNING", msg) # Force to system.log
+            
+            if remaining <= 0:
+                msg = f"[DEBUG recv_until] TIMEOUT at loop#{loop_count}, elapsed={elapsed:.3f}s"
+                print(msg)
+                config._config_log("WARNING", msg)
+                raise socket.timeout("Application-level timeout (Loop)")
+
             try:
+                # 2. Add Select Guard (The Real Timeout Enforcer)
+                t_select_start = time.time()
+                r, _, _ = select.select([self.sock_ext], [], [], remaining)
+                t_select_end = time.time()
+                
+                if not r:
+                    msg = f"[DEBUG recv_until] Select timeout at loop#{loop_count}, waited={t_select_end - t_select_start:.3f}s"
+                    print(msg)
+                    config._config_log("WARNING", msg)
+                    raise socket.timeout("Select timeout (Recv Guard)")
+                
+                # 3. Safe Recv (Should not block now)
+                t_recv_start = time.time()
                 chunk = self.sock_ext.recv(4096)
+                t_recv_end = time.time()
+                
+                # DEBUG: Log if recv took long
+                recv_duration = t_recv_end - t_recv_start
+                if recv_duration > 0.1:
+                    msg = f"[DEBUG recv_until] recv() blocked for {recv_duration:.3f}s at loop#{loop_count}"
+                    print(msg)
+                    config._config_log("WARNING", msg)
+                    
             except socket.timeout:
-                break
+                msg = f"[DEBUG recv_until] socket.timeout exception at loop#{loop_count}, elapsed={time.time() - start_time:.3f}s"
+                print(msg)
+                config._config_log("WARNING", msg)
+                raise  # CRITICAL: Re-raise timeout, don't swallow it!
+            except Exception:
+                raise
+
             if not chunk:
                 break
             data.extend(chunk)
@@ -444,25 +537,64 @@ class RealPLCDriver(BasePLCDriver):
                 break
         return bytes(data)
 
+    def _send_with_timeout(self, data: bytes) -> None:
+        if not self.sock_ext:
+            raise ConnectionError("No socket")
+        
+        # Manual Non-Blocking Send Loop
+        total_sent = 0
+        total_len = len(data)
+        start_time = time.time()
+        
+        while total_sent < total_len:
+            elapsed = time.time() - start_time
+            remaining = self.ext_timeout - elapsed
+            if remaining <= 0:
+                raise socket.timeout("Send timeout (Loop)")
+
+            # Select Guard
+            try:
+                _, writable, _ = select.select([], [self.sock_ext], [], remaining)
+                if not writable:
+                    raise socket.timeout("Select timeout (Send Guard)")
+                
+                # Non-blocking Send
+                sent = self.sock_ext.send(data[total_sent:])
+                if sent == 0:
+                    raise ConnectionResetError("Socket connection broken (send returned 0)")
+                total_sent += sent
+            except BlockingIOError:
+                continue # Retry select
+            except Exception:
+                raise
+
     def _melsec_read(self, addr: str, count: int) -> List[int]:
         if not self.sock_ext:
             return []
         cmd = f"01WRD{addr} {count:02}\r\n".encode()
+        t_start = time.time()
+        t_after_send = t_start
+        result_status = "OK"
         try:
-            self.sock_ext.sendall(cmd)
+            self._send_with_timeout(cmd)
+            t_after_send = time.time()  # <--- Capture send completion time
+            t_after_send = time.time()  # <--- Capture send completion time
             raw = self._recv_until()
             if not raw:
                 self.ext_invalid_responses += 1
+                result_status = "EMPTY"
                 raise ConnectionResetError("Empty response")
 
             resp_str = raw.decode("ascii", errors="replace").strip()
             if "OK" not in resp_str:
                 self.ext_invalid_responses += 1
+                result_status = "NO_OK"
                 return []
 
             parts = resp_str.split("OK", 1)
             if len(parts) < 2:
                 self.ext_invalid_responses += 1
+                result_status = "PARSE_ERR"
                 return []
 
             hex_data = parts[1]
@@ -476,15 +608,29 @@ class RealPLCDriver(BasePLCDriver):
                         values.append(0)
             if len(values) < count:
                 self.ext_invalid_responses += 1
+                result_status = "SHORT"
                 return []
             return values
         except Exception as e:
+            result_status = f"ERR:{type(e).__name__}"
             print(f"[RealDriver] Extruder Read Error: {e}")
             self._mark_ext_error(str(e))
             self.sock_ext = None
             self._backoff_ext()
             self.ext_skip_counter = 5
             return []
+        finally:
+            elapsed = time.time() - t_start
+            # Log slow reads (> 0.3s) for diagnosis
+            if elapsed > 0.3:
+                try:
+                    t_send = t_after_send - t_start
+                    t_recv = elapsed - t_send
+                    msg = f"[MelsecRead] Addr={addr}, Count={count}, Elapsed={elapsed:.2f}s (Send={t_send:.2f}s, Recv={t_recv:.2f}s), Status={result_status}"
+                    print(f"[WARNING] {msg}")
+                    config._config_log("WARNING", msg)
+                except Exception:
+                    pass
 
     def _read_extruder_merged(self) -> Optional[Dict[str, float]]:
         b1 = self._melsec_read("D0020", 16)

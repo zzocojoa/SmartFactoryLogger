@@ -6,3 +6,4 @@ logs/
 dist/
 build/
 tests/
+mes_data/
