@@ -85,25 +85,66 @@ def save_page_data(page_key: str, data: list, record_count: int):
         conn.close()
 
 def get_latest_data(page_key: str):
-    """Get the latest data for a specific page"""
+    """Get all historical data for a specific page (aggregated from all entries)"""
     conn = get_connection()
     try:
         cursor = conn.cursor()
+        # Get all unique data entries for this page, ordered by collected_at DESC
+        # We'll merge all data arrays together
         cursor.execute("""
-            SELECT data_json, record_count, hash_val 
+            SELECT data_json, record_count, hash_val, collected_at
             FROM raw_data 
             WHERE page_key = ? 
-            ORDER BY collected_at DESC 
-            LIMIT 1
+            ORDER BY collected_at DESC
         """, (page_key,))
-        row = cursor.fetchone()
+        rows = cursor.fetchall()
         
-        if row:
-            return {
-                "data": json.loads(row["data_json"]),
-                "record_count": row["record_count"],
-                "hash_val": row["hash_val"]
-            }
-        return None
+        if not rows:
+            return None
+        
+        # Aggregate all data from all entries (deduplicated by content hash)
+        all_data = []
+        seen_hashes = set()
+        latest_collected_at = None
+        
+        for row in rows:
+            if latest_collected_at is None:
+                latest_collected_at = row["collected_at"]
+            
+            try:
+                data = json.loads(row["data_json"])
+                # Add each record if not already seen (simple dedup by string repr)
+                for record in data:
+                    # Filter out effectively empty records (treat '.' as empty too)
+                    if not any(str(v).strip() not in ['', '.'] for v in record.values() if v is not None):
+                        continue
+
+                    record_hash = hash(json.dumps(record, sort_keys=True, ensure_ascii=False))
+                    if record_hash not in seen_hashes:
+                        seen_hashes.add(record_hash)
+                        all_data.append(record)
+            except:
+                pass
+        
+        return {
+            "data": all_data,
+            "record_count": len(all_data),
+            "hash_val": str(hash(str(len(all_data)))),
+            "collected_at": latest_collected_at
+        }
+    finally:
+        conn.close()
+
+
+def get_available_pages() -> list[str]:
+    """Get list of all page keys that have data"""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT page_key FROM raw_data ORDER BY page_key")
+        rows = cursor.fetchall()
+        return [row["page_key"] for row in rows]
+    except Exception:
+        return []
     finally:
         conn.close()

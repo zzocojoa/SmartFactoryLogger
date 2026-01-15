@@ -428,6 +428,9 @@ INTERVAL_SEC = max(MIN_INTERVAL_SEC, min(MAX_INTERVAL_SEC, _interval_raw))
 STATUS_WARN_MS = _get_int(CONFIG, "SYSTEM", "statuswarnms", DEFAULT_STATUS_WARN_MS)
 STATUS_OFFLINE_MS = _get_int(CONFIG, "SYSTEM", "statusofflinems", DEFAULT_STATUS_OFFLINE_MS)
 
+# SETTINGS / Password
+SETTINGS_PASSWORD = os.getenv("SETTINGS_PASSWORD", _get(CONFIG, "SETTINGS", "password", "") or "")
+
 # MES
 MES_ENABLED = _get_bool(CONFIG, "MES", "enabled", DEFAULT_MES_ENABLED)
 MES_USER_ID = os.getenv("MES_USER_ID", _get(CONFIG, "MES", "userid", DEFAULT_MES_USER_ID) or DEFAULT_MES_USER_ID)

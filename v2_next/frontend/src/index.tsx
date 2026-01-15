@@ -10,6 +10,7 @@ import { ThemeProvider } from './ThemeContext';
 // Lazy Components
 const App = lazy(() => import('./App'));
 const Home = lazy(() => import('./pages/Home'));
+const MesDashboard = lazy(() => import('./pages/MesDashboard').then(module => ({ default: module.MesDashboard })));
 
 // Loading Fallback
 const LoadingFallback = () => (
@@ -40,6 +41,7 @@ root.render(
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/dashboard" element={<App />} />
+              <Route path="/mes-dashboard" element={<MesDashboard />} />
             </Routes>
           </Suspense>
         </BrowserRouter>

@@ -85,6 +85,7 @@ from backend import config
 from backend.mes_bridge import scheduler as mes_scheduler
 from backend.mes_bridge import db_manager as mes_db
 from backend.mes_bridge.pages_registry import MES_PAGES
+from backend.routers import mes as mes_router
 
 class ConnectionTarget(BaseModel):
     ip: str | None = None
@@ -713,6 +714,9 @@ app = FastAPI(
     version="2.1.0",
     lifespan=lifespan
 )
+
+# Register Routers
+app.include_router(mes_router.router, prefix="/api/mes", tags=["MES"])
 
 # CORS (Allow Frontend Access)
 app.add_middleware(

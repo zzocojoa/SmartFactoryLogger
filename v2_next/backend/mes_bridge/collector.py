@@ -77,14 +77,32 @@ async def extract_table_data(page, table_id: str) -> list[dict]:
                 const cells = row.querySelectorAll('td');
                 if (cells.length === 0) continue;
                 
+                // 전체 행 텍스트로 필터링할 패턴 체크
+                const rowText = row.innerText.trim();
+                
+                // 페이지네이션 행 건너뛰기 (예: "1 2 3 ... of 36 Pages")
+                if (rowText.includes(' of ') && rowText.includes('Pages')) continue;
+                if (/^[\\d\\s]+of\\s+\\d+\\s+Pages?$/i.test(rowText)) continue;
+                
                 // 합계 행 건너뛰기
                 const cellTexts = Array.from(cells).map(c => c.innerText.trim());
                 if (cellTexts.includes('합계') || cellTexts.includes('소계')) continue;
                 
+                // 빈 행 건너뛰기
+                const allEmpty = cellTexts.every(t => t === '' || t === '-');
+                if (allEmpty) continue;
+                
                 const rowData = {{}};
                 cells.forEach((cell, idx) => {{
                     if (headers[idx]) {{
-                        rowData[headers[idx]] = cell.innerText.trim();
+                        // Check for input elements first
+                        const input = cell.querySelector('input, textarea, select');
+                        if (input && (input.value || input.innerText)) {{
+                            // Prefer value, fallback to innerText for select/textarea if needed
+                            rowData[headers[idx]] = (input.value || input.innerText).trim();
+                        }} else {{
+                            rowData[headers[idx]] = cell.innerText.trim();
+                        }}
                     }}
                 }});
                 
@@ -97,6 +115,7 @@ async def extract_table_data(page, table_id: str) -> list[dict]:
         }}
     """)
     return data
+
 
 
 async def set_date_range(page, from_date: str, to_date: str, filter_fields: dict):
