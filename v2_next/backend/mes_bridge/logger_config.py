@@ -53,14 +53,20 @@ class JSONFormatter(logging.Formatter):
             
         return json.dumps(log_obj, ensure_ascii=False)
 
+_configured_loggers = {}
+
 def get_logger(name: str) -> logging.Logger:
     """
-    Get a configured logger instance
+    Get a configured logger instance (Singleton pattern per name)
     """
+    if name in _configured_loggers:
+        return _configured_loggers[name]
+
     logger = logging.getLogger(name)
     
-    # Prevent duplicate handlers
+    # Prevent duplicate handlers if already configured by another means
     if logger.handlers:
+        _configured_loggers[name] = logger
         return logger
         
     logger.setLevel(logging.INFO)
@@ -79,12 +85,16 @@ def get_logger(name: str) -> logging.Logger:
     
     # 3. Application Log Handler (Daily Rotation, JSON)
     app_log_file = LOG_DIR / "mes_application.log"
+    # match existing handler if possible? No, we are creating new.
+    # delay=True prevents opening the file until the first log is emitted.
+    # This helps avoid WinError 32 during rotation if multiple processes/threads race.
     app_handler = TimedRotatingFileHandler(
         filename=app_log_file,
         when="midnight",
         interval=1,
         backupCount=30, # Keep 30 days
-        encoding="utf-8"
+        encoding="utf-8",
+        delay=True 
     )
     app_handler.setLevel(logging.INFO)
     app_handler.setFormatter(json_formatter)
@@ -93,7 +103,8 @@ def get_logger(name: str) -> logging.Logger:
     error_log_file = LOG_DIR / "mes_error.log"
     error_handler = logging.FileHandler(
         filename=error_log_file,
-        encoding="utf-8"
+        encoding="utf-8",
+        delay=True
     )
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(json_formatter)
@@ -103,4 +114,19 @@ def get_logger(name: str) -> logging.Logger:
     logger.addHandler(app_handler)
     logger.addHandler(error_handler)
     
+    # Cache the configured logger
+    _configured_loggers[name] = logger
+    
     return logger
+
+def _cleanup_loggers():
+    """Close all handlers on exit"""
+    for logger in _configured_loggers.values():
+        for handler in logger.handlers:
+            try:
+                handler.close()
+            except:
+                pass
+
+import atexit
+atexit.register(_cleanup_loggers)

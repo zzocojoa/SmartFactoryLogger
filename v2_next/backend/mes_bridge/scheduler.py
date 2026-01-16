@@ -545,7 +545,10 @@ async def run_browser_session(cycle_limit, user_id, password, pages, start_corre
         for i in range(cycle_limit):
             try:
                 # 사이클 시작 전 세션 점검 (첫번째 탭 이용)
-                await check_login_session(browser_pages[0], user_id, password)
+                if not await check_login_session(browser_pages[0], user_id, password):
+                    logger.warning("Session check failed. Restarting browser session.")
+                    print("⚠️ [세션오류] 세션 점검 실패. 브라우저를 재시작합니다.")
+                    break
                 
                 elapsed, next_idx = await run_collection_cycle(pages, browser_pages, correction_index)
                 correction_index = next_idx

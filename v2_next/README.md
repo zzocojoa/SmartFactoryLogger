@@ -22,6 +22,9 @@ cd backend; python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 taskkill /F /IM python.exe 2>$null
 
+Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force;
+Write-Host "모든 Node 프로세스 종료됨"
+
 ## 2. Lock 파일 삭제
 
 Remove-Item -Path "$env:APPDATA\SmartFactoryLogger\sfl_v2.lock" -ErrorAction

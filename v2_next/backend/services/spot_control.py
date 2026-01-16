@@ -31,7 +31,8 @@ def _get_http_client() -> httpx.AsyncClient:
     if _http_client is None:
         timeout = httpx.Timeout(
             connect=1.0,
-            read=config.SPOT_TIMEOUT or 2.0,
+            # Increase read timeout slightly to avoid strict deadlines on slow networks
+            read=config.SPOT_TIMEOUT or 3.0, 
             write=1.0,
             pool=5.0,
         )
@@ -95,6 +96,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             _img_cache["time"] = time.time()
             return data, _build_image_meta(time.time(), "ok", "upstream")
         except Exception as exc:
+            # First fetch failure is expected if camera is offline
             raise RuntimeError(f"SPOT image fetch failed: {exc}") from exc
 
 
@@ -108,6 +110,10 @@ async def _prefetch_loop():
     global _img_failure_count, _img_last_error, _prefetch_running
     _prefetch_running = True
     
+    # Use logger for critical errors
+    from ..mes_bridge.logger_config import get_logger
+    logger = get_logger("spot_control")
+    
     while _prefetch_running:
         try:
             if config.SPOT_IMAGE_URL:
@@ -119,10 +125,14 @@ async def _prefetch_loop():
                 if data:
                     _img_cache["data"] = data
                     _img_cache["time"] = time.time()
+                    if _img_failure_count > 0:
+                        logger.info(f"Spot camera reconnected after {_img_failure_count} failures")
                     _img_failure_count = 0
-        except Exception:
+        except Exception as e:
             _img_last_error = time.time()
             _img_failure_count = min(_img_failure_count + 1, 6)
+            if _img_failure_count == 1 or _img_failure_count == 6:
+                 logger.warning(f"Spot prefetch failed: {str(e)} (Count: {_img_failure_count})")
         
         # 설정된 refresh 간격으로 대기 (최소 0.5초)
         interval = max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))

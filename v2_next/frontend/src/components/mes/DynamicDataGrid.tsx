@@ -80,7 +80,7 @@ export const DynamicDataGrid: React.FC<DynamicDataGridProps> = ({
     // Refs for scroll and header sync
     const listRef = useRef<List<any>>(null);
     const headerRef = useRef<HTMLDivElement>(null);
-    const outerRef = useRef<HTMLDivElement>(null); // To capture the scrolling container of the List
+    const outerRef = useRef<HTMLDivElement | null>(null); // Mutable ref for scroll sync
 
     // Effect to reset scroll position when data changes (e.g., changing tabs or pages)
     useEffect(() => {
@@ -93,36 +93,33 @@ export const DynamicDataGrid: React.FC<DynamicDataGridProps> = ({
     }, [data]);
 
     // Cleanup scroll listener if component unmounts
+    // Using a state variable to trigger re-run when outerRef is assigned
+    const [outerElement, setOuterElement] = React.useState<HTMLDivElement | null>(null);
+
+    // Callback ref to capture when List's outer element is mounted
+    const outerRefCallback = useCallback((node: HTMLDivElement | null) => {
+        outerRef.current = node;
+        setOuterElement(node);
+    }, []);
+
     useEffect(() => {
-        const handleScroll = () => {
-             if (headerRef.current && outerRef.current) {
-                 headerRef.current.scrollLeft = outerRef.current.scrollLeft;
+        const handleHorizontalScroll = () => {
+             if (headerRef.current && outerElement) {
+                 headerRef.current.scrollLeft = outerElement.scrollLeft;
              }
         };
 
-        const currentOuter = outerRef.current;
-        if (currentOuter) {
-            currentOuter.addEventListener('scroll', handleScroll);
+        if (outerElement) {
+            outerElement.addEventListener('scroll', handleHorizontalScroll);
         }
 
         return () => {
-            if (currentOuter) {
-                currentOuter.removeEventListener('scroll', handleScroll);
+            if (outerElement) {
+                outerElement.removeEventListener('scroll', handleHorizontalScroll);
             }
         };
-    }, []); // Empty dependency array means this sets up once. But we need outerRef to be assigned. 
-    // Actually outerRef is assigned when List renders. We might need to listen to it carefully.
-    // Better: use the `onScroll` prop of List if it exposes horizontal scroll, 
-    // OR just use callback ref for outerRef?
-    // react-window passes `onScroll` { scrollDirection, scrollOffset, scrollUpdateWasRequested }.
-    // scrollOffset is vertical only for vertical list?
-    // Let's verify: Yes generally vertical.
-    
-    // Safer: attach onScroll directly to the outer element via `outerRef`.
-    // We need to trigger the effect when outerRef.current is set.
-    // But ref updates don't trigger effects.
-    // We can use `innerRef` or `outerRef` callback on the List.
-    
+    }, [outerElement]); // Re-run when outerElement changes
+
 
     // 2. Base Column Widths (Minimums)
     const { baseColumnWidths, totalBaseWidth } = useMemo(() => {
@@ -258,15 +255,7 @@ const NUMBER_COL_WIDTH = 50; // Use const for consistency
                             <div style={{ flex: 1 }}>
                                 <List
                                     ref={listRef}
-                                    outerRef={outerRef} // Capture scroll container
-                                    onScroll={({ scrollOffset }) => {
-                                        // Vertical scroll callback
-                                        // We also check horizontal here manually if possible, but
-                                        // attaching native listener to outerRef is more reliable for horizontal.
-                                        if (headerRef.current && outerRef.current) {
-                                            headerRef.current.scrollLeft = outerRef.current.scrollLeft;
-                                        }
-                                    }}
+                                    outerRef={outerRefCallback} // Use callback ref for scroll sync
                                     height={bodyHeight}
                                     itemCount={data.length}
                                     itemSize={40}
