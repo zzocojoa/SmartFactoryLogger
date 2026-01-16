@@ -6,6 +6,8 @@ import { Pagination } from '../components/mes/Pagination';
 import { DataGridToolbar } from '../components/mes/DataGridToolbar';
 import { StatsContainer } from '../components/mes/StatsContainer';
 import { SettingsModal } from '../components/mes/SettingsModal';
+import { ProductivityChart } from '../components/mes/ProductivityChart';
+import { MesAnalysisView } from '../components/mes/MesAnalysisView';
 import { applyFilters, FilterState, detectDateColumn } from '../utils/dataGridUtils';
 
 const MesDashboardContent: React.FC = () => {
@@ -59,7 +61,15 @@ const MesDashboardContent: React.FC = () => {
                 const response = await fetch('http://localhost:8000/api/mes/pages');
                 if (!response.ok) throw new Error('Failed to load menu');
                 const menuData: PageItem[] = await response.json();
-                setPages(menuData);
+                
+                // [NEW] Add Dashboard Tab
+                const dashboardItem: PageItem = { 
+                    key: 'dashboard', 
+                    name: 'DASHBOARD', 
+                    category: 'Dashboard' 
+                };
+                
+                setPages([dashboardItem, ...menuData]);
                 
                 // Auto-select first page if none selected and pages exist
                 if (menuData.length > 0 && !selectedPage) {
@@ -89,7 +99,9 @@ const MesDashboardContent: React.FC = () => {
             setLoading(true);
             setError(null);
             try {
-                const response = await fetch(`http://localhost:8000/api/mes/data/${selectedPage}`);
+                // [NEW] If dashboard is selected, load rpt_press data for visualization
+                const targetKey = selectedPage === 'dashboard' ? 'rpt_press' : selectedPage;
+                const response = await fetch(`http://localhost:8000/api/mes/data/${targetKey}`);
                 if (!response.ok) {
                     if (response.status === 404) throw new Error('No data found');
                     throw new Error('Failed to load data');
@@ -267,66 +279,73 @@ const MesDashboardContent: React.FC = () => {
                     </button>
                 </header>
 
-                {/* Stats Widgets */}
-                <StatsContainer data={filteredData} />
-
-                {/* Toolbar - Search, Filter, Page Size */}
-                <DataGridToolbar
-                    searchQuery={searchQuery}
-                    onSearchChange={handleSearchChange}
-                    dateRange={dateRange}
-                    onDateRangeChange={handleDateRangeChange}
-                    pageSize={pageSize}
-                    onPageSizeChange={handlePageSizeChange}
-                    totalCount={filteredData.length}
-                    data={filteredData}
-                    pageName={selectedPage || 'export'}
-                />
-
-
-
                 {/* Content */}
-                <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-                    {loading && (
-                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', zIndex: 10 }}>
-                            <div className="spinner"></div> 
-                        </div>
-                    )}
-                    
-                    {error ? (
-                        <div style={{ padding: '2rem', color: 'var(--state-danger)', textAlign: 'center' }}>
-                            {error}
-                        </div>
-                    ) : (
-                        <DynamicDataGrid 
-                            data={paginatedData} 
-                            sortColumn={sortColumn}
-                            sortDirection={sortDirection}
-                            onSort={handleSort}
-                            startIndex={(currentPage - 1) * pageSize + 1}
-                        />
-                    )}
-                </div>
+                {selectedPage === 'dashboard' ? (
+                    <MesAnalysisView data={filteredData} pageKey={selectedPage} />
+                ) : (
+                    <>
+                        {/* Stats Widgets */}
+                        <StatsContainer data={filteredData} />
 
-                {/* Footer - Pagination */}
-                {filteredData.length > 0 && (
-                    <footer style={{ 
-                        padding: '0.75rem 1.5rem', 
-                        borderTop: '1px solid var(--border-color)', 
-                        background: 'var(--bg-secondary)',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                    }}>
-                        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                            {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, filteredData.length)} / {filteredData.length.toLocaleString()}건
-                        </span>
-                        <Pagination 
-                            currentPage={currentPage} 
-                            totalPages={totalPages} 
-                            onPageChange={setCurrentPage} 
+                        {/* Productivity Chart */}
+                        <ProductivityChart data={filteredData} pageKey={selectedPage} />
+
+                        {/* Toolbar - Search, Filter, Page Size */}
+                        <DataGridToolbar
+                            searchQuery={searchQuery}
+                            onSearchChange={handleSearchChange}
+                            dateRange={dateRange}
+                            onDateRangeChange={handleDateRangeChange}
+                            pageSize={pageSize}
+                            onPageSizeChange={handlePageSizeChange}
+                            totalCount={filteredData.length}
+                            data={filteredData}
+                            pageName={selectedPage || 'export'}
                         />
-                    </footer>
+
+                        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+                            {loading && (
+                                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', zIndex: 10 }}>
+                                    <div className="spinner"></div> 
+                                </div>
+                            )}
+                            
+                            {error ? (
+                                <div style={{ padding: '2rem', color: 'var(--state-danger)', textAlign: 'center' }}>
+                                    {error}
+                                </div>
+                            ) : (
+                                <DynamicDataGrid 
+                                    data={paginatedData} 
+                                    sortColumn={sortColumn}
+                                    sortDirection={sortDirection}
+                                    onSort={handleSort}
+                                    startIndex={(currentPage - 1) * pageSize + 1}
+                                />
+                            )}
+                        </div>
+
+                        {/* Footer - Pagination */}
+                        {filteredData.length > 0 && (
+                            <footer style={{ 
+                                padding: '0.75rem 1.5rem', 
+                                borderTop: '1px solid var(--border-color)', 
+                                background: 'var(--bg-secondary)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                            }}>
+                                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                    {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, filteredData.length)} / {filteredData.length.toLocaleString()}건
+                                </span>
+                                <Pagination 
+                                    currentPage={currentPage} 
+                                    totalPages={totalPages} 
+                                    onPageChange={setCurrentPage} 
+                                />
+                            </footer>
+                        )}
+                    </>
                 )}
 
             </div>

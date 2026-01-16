@@ -6,6 +6,7 @@ import sys
 # Setup backend path
 current_dir = Path(os.getcwd())
 sys.path.append(str(current_dir))
+sys.path.append(str(current_dir / "v2_next"))
 
 from backend.mes_bridge.db_manager import save_page_data, init_db
 from backend.mes_bridge.constants import DATA_DIR as APPDATA_DIR
@@ -61,8 +62,30 @@ def sync_all():
                     
                     # collector returns {key, name, data, ...} 
                     # If content has "data" list.
-                    data = content.get("data", [])
-                    record_count = content.get("record_count", len(data))
+                    raw_data = content.get("data", [])
+                    
+                    # --- Data Cleaning ---
+                    # Filter out noise (e.g., pagination text, missing dates)
+                    valid_data = []
+                    for record in raw_data:
+                        # 1. Check for required field '일자' (Date)
+                        if "일자" not in record or not record["일자"]:
+                            continue
+                            
+                        # 2. Check for date format (simple check)
+                        # Valid date should be like "2026-01-01"
+                        if len(record["일자"]) != 10 or "-" not in record["일자"]:
+                            continue
+
+                        # 3. Check for '공장' field noise (pagination artifacts often have newlines)
+                        if "공장" in record and "\n" in record["공장"]:
+                            continue
+                            
+                        valid_data.append(record)
+                    # ---------------------
+
+                    data = valid_data
+                    record_count = len(data) # Update count based on valid data
                     
                     if data:
                         # Save to DB
