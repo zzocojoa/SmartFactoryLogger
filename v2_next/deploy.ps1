@@ -3,7 +3,10 @@
 
 Write-Host ">>> Starting Deployment Process..." -ForegroundColor Cyan
 
-# 1. Build Frontend
+# 1. Build Frontend (with clean)
+Write-Host ">>> Cleaning Frontend dist..." -ForegroundColor Yellow
+if (Test-Path "frontend/dist") { Remove-Item "frontend/dist" -Recurse -Force }
+
 Write-Host ">>> Building Frontend..." -ForegroundColor Yellow
 Set-Location "frontend"
 npm run build
@@ -25,6 +28,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Playwright Install Failed"; exit 1 }
 Write-Host ">>> Packaging Backend (PyInstaller - Single File)..." -ForegroundColor Yellow
 # Remove old dist if exists
 if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
+if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
 
 # Extract Version from package.json
 Write-Host ">>> Extracting Version from frontend/package.json..." -ForegroundColor Yellow
@@ -54,7 +58,8 @@ $NewExePath = "dist/$NewExeName"
 if (Test-Path $OriginalExe) {
     Rename-Item -Path $OriginalExe -NewName $NewExeName -Force
     Write-Host ">>> Renamed Output to: $NewExeName" -ForegroundColor Cyan
-} else {
+}
+else {
     Write-Error "Could not find built EXE at $OriginalExe"
     exit 1
 }

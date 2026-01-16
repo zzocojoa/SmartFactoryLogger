@@ -23,8 +23,8 @@ def get_process_usage(names):
             name = proc.info['name'].lower()
             if any(target.lower() in name for target in names):
                 try:
-                    # CPU aggregation
-                    total_cpu += proc.cpu_percent(interval=None)
+                    # CPU aggregation (interval=0.1 for actual measurement)
+                    total_cpu += proc.cpu_percent(interval=0.1)
                     
                     # Memory aggregation
                     mem_info = proc.memory_info()

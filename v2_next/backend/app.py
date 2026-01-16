@@ -24,6 +24,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import time
+from backend.routers import mes_sync
 
 class SafeRotatingFileHandler(RotatingFileHandler):
     """
@@ -717,6 +718,7 @@ app = FastAPI(
 
 # Register Routers
 app.include_router(mes_router.router, prefix="/api/mes", tags=["MES"])
+app.include_router(mes_sync.router, prefix="/api/mes/sync", tags=["MES Sync"])
 
 # CORS (Allow Frontend Access)
 app.add_middleware(

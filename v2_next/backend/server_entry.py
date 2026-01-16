@@ -87,13 +87,33 @@ try:
     try:
         from backend.app import app
         from backend import config
+        from backend.scripts.migrate_json_to_db import migrate_json_files, get_default_data_dir
     except ImportError:
         from app import app
         import config
+        from scripts.migrate_json_to_db import migrate_json_files, get_default_data_dir
 except Exception as e:
     print("CRITICAL: Code Import Failed")
     traceback.print_exc()
     sys.exit(1)
+
+# --- CLI ARGUMENT PARSING ---
+def parse_args():
+    """Parse command line arguments."""
+    import argparse
+    parser = argparse.ArgumentParser(description="SmartFactory Logger Backend")
+    parser.add_argument(
+        "--migrate-json",
+        action="store_true",
+        help="Migrate legacy JSON files to SQLite database before starting"
+    )
+    parser.add_argument(
+        "--migrate-only",
+        action="store_true",
+        help="Run migration only without starting the server"
+    )
+    return parser.parse_args()
+
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -196,6 +216,21 @@ def run_server():
 
 if __name__ == "__main__":
     try:
+        # Parse CLI arguments
+        args = parse_args()
+        
+        # Run JSON migration if requested
+        if args.migrate_json or args.migrate_only:
+            print("[Migration] Starting JSON to SQLite migration...")
+            data_dir = get_default_data_dir()
+            db_path = data_dir / "mes_data.db"
+            migrate_json_files(data_dir, db_path, dry_run=False)
+            print("[Migration] Migration complete.")
+            
+            if args.migrate_only:
+                print("[Migration] --migrate-only flag set. Exiting without starting server.")
+                sys.exit(0)
+        
         # Start Splash Screen in separate thread (GUI must run in main for some OSes, but we'll try)
         splash_thread = threading.Thread(target=show_splash, daemon=True)
         splash_thread.start()

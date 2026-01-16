@@ -73,23 +73,23 @@ async def analyze_page(page, page_key: str, page_info: dict) -> dict:
                 const table = document.querySelector('table[id*="gv_Board"]');
                 if (!table) return null;
                 
+                // Use table.rows for consistency with collector
+                const rows = Array.from(table.rows);
+                
                 // 헤더 추출
                 const headers = [];
-                const headerRow = table.querySelector('tr');
+                const headerRow = rows[0]; // Assuming first row is header
                 if (headerRow) {
                     headerRow.querySelectorAll('th').forEach(th => {
                         headers.push(th.innerText.trim().replace(/\\n/g, ' '));
                     });
                 }
                 
-                // 행 수
-                const rows = table.querySelectorAll('tr');
-                
                 return {
                     id: table.id,
                     columnCount: headers.length,
                     headers: headers,
-                    rowCount: rows.length - 1  // 헤더 제외
+                    rowCount: Math.max(0, rows.length - 1)  // 헤더 제외
                 };
             }
         """)

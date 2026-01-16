@@ -77,15 +77,52 @@ export const DynamicDataGrid: React.FC<DynamicDataGridProps> = ({
         return Object.keys(data[0]);
     }, [data]);
 
-    // Reference for the List component to control scrolling
+    // Refs for scroll and header sync
     const listRef = useRef<List<any>>(null);
+    const headerRef = useRef<HTMLDivElement>(null);
+    const outerRef = useRef<HTMLDivElement>(null); // To capture the scrolling container of the List
 
     // Effect to reset scroll position when data changes (e.g., changing tabs or pages)
     useEffect(() => {
         if (listRef.current) {
             listRef.current.scrollTo(0);
         }
+        if (headerRef.current) {
+            headerRef.current.scrollLeft = 0;
+        }
     }, [data]);
+
+    // Cleanup scroll listener if component unmounts
+    useEffect(() => {
+        const handleScroll = () => {
+             if (headerRef.current && outerRef.current) {
+                 headerRef.current.scrollLeft = outerRef.current.scrollLeft;
+             }
+        };
+
+        const currentOuter = outerRef.current;
+        if (currentOuter) {
+            currentOuter.addEventListener('scroll', handleScroll);
+        }
+
+        return () => {
+            if (currentOuter) {
+                currentOuter.removeEventListener('scroll', handleScroll);
+            }
+        };
+    }, []); // Empty dependency array means this sets up once. But we need outerRef to be assigned. 
+    // Actually outerRef is assigned when List renders. We might need to listen to it carefully.
+    // Better: use the `onScroll` prop of List if it exposes horizontal scroll, 
+    // OR just use callback ref for outerRef?
+    // react-window passes `onScroll` { scrollDirection, scrollOffset, scrollUpdateWasRequested }.
+    // scrollOffset is vertical only for vertical list?
+    // Let's verify: Yes generally vertical.
+    
+    // Safer: attach onScroll directly to the outer element via `outerRef`.
+    // We need to trigger the effect when outerRef.current is set.
+    // But ref updates don't trigger effects.
+    // We can use `innerRef` or `outerRef` callback on the List.
+    
 
     // 2. Base Column Widths (Minimums)
     const { baseColumnWidths, totalBaseWidth } = useMemo(() => {
@@ -153,17 +190,19 @@ const NUMBER_COL_WIDTH = 50; // Use const for consistency
                     return (
                         <div style={{ height, width, display: 'flex', flexDirection: 'column' }}>
                              {/* Header */}
-                             <div style={{ 
-                                 flex: '0 0 40px', 
-                                 width: '100%',
-                                 background: 'var(--bg-secondary)', 
-                                 borderBottom: '1px solid var(--border-color)', 
-                                 color: 'var(--text-primary)', 
-                                 fontWeight: 600,
-                                 overflowX: 'auto', 
-                                 overflowY: 'hidden',
-                                 scrollbarWidth: 'thin'
-                             }}
+                             <div 
+                                 ref={headerRef}
+                                 style={{ 
+                                     flex: '0 0 40px', 
+                                     width: '100%',
+                                     background: 'var(--bg-secondary)', 
+                                     borderBottom: '1px solid var(--border-color)', 
+                                     color: 'var(--text-primary)', 
+                                     fontWeight: 600,
+                                     overflowX: 'hidden', // Hide header scrollbar
+                                     overflowY: 'hidden',
+                                     // scrollbarWidth: 'thin' // No longer needed
+                                 }}
                              >
                                 <div style={{ display: 'flex', width: totalScrollWidth, height: '100%', alignItems: 'center' }}>
                                     {/* Number Header */}
@@ -219,6 +258,15 @@ const NUMBER_COL_WIDTH = 50; // Use const for consistency
                             <div style={{ flex: 1 }}>
                                 <List
                                     ref={listRef}
+                                    outerRef={outerRef} // Capture scroll container
+                                    onScroll={({ scrollOffset }) => {
+                                        // Vertical scroll callback
+                                        // We also check horizontal here manually if possible, but
+                                        // attaching native listener to outerRef is more reliable for horizontal.
+                                        if (headerRef.current && outerRef.current) {
+                                            headerRef.current.scrollLeft = outerRef.current.scrollLeft;
+                                        }
+                                    }}
                                     height={bodyHeight}
                                     itemCount={data.length}
                                     itemSize={40}

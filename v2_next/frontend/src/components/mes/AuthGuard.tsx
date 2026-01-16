@@ -10,16 +10,18 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
     const [checking, setChecking] = useState(true);
 
     useEffect(() => {
-        // Simple Session Check
-        const auth = sessionStorage.getItem('mes_auth');
-        if (auth === 'true') {
-            setIsAuthenticated(true);
-        }
+        // Force login every time component mounts (User Request)
+        // const auth = sessionStorage.getItem('mes_auth');
+        // if (auth === 'true') {
+        //     setIsAuthenticated(true);
+        // }
+        
+        // Always start as unauthenticated
         setChecking(false);
     }, []);
 
     const handleLoginSuccess = () => {
-        sessionStorage.setItem('mes_auth', 'true');
+        // sessionStorage.setItem('mes_auth', 'true');
         setIsAuthenticated(true);
     };
 

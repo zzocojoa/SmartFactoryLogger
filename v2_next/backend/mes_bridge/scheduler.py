@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from playwright.async_api import async_playwright
 import traceback
+import gc
 from typing import Optional
 
 from .constants import (
@@ -77,8 +78,8 @@ logger = get_logger("scheduler")
 
 # 설정 (메모리 최적화)
 NUM_WORKERS = 3         # 동시 탭 수 (5 -> 3으로 감소)
-INTERVAL_SECONDS = 60   # 수집 주기 (초)
-BROWSER_RESTART_CYCLES = 30  # 브라우저 재시작 주기 (30분, 메모리 누수 방지)
+INTERVAL_SECONDS = 300  # 수집 주기 (5분, 메모리 최적화)
+BROWSER_RESTART_CYCLES = 6   # 브라우저 재시작 주기 (6 * 5분 = 30분, 메모리 누수 방지)
 
 # 안전장치 인스턴스
 circuit_breaker = CircuitBreaker()
@@ -550,6 +551,12 @@ async def run_browser_session(cycle_limit, user_id, password, pages, start_corre
                 correction_index = next_idx
                 
                 wait_time = max(0, INTERVAL_SECONDS - elapsed)
+                
+                # 메모리 최적화: 사이클 종료 후 GC 강제 호출
+                collected = gc.collect()
+                if collected > 0:
+                    logger.debug(f"GC collected {collected} objects after cycle {i+1}")
+                
                 print(f"[대기] {wait_time:.0f}초 (사이클 {i+1}/{cycle_limit})")
                 await asyncio.sleep(wait_time)
                 
@@ -566,6 +573,10 @@ async def run_browser_session(cycle_limit, user_id, password, pages, start_corre
         logger.info("Browser session ending for restart")
         print("🧹 [브라우저 종료] Self-Healing 재시작")
         await browser.close()
+        
+        # 메모리 최적화: 브라우저 종료 후 강제 GC
+        gc_count = gc.collect()
+        logger.info(f"Post-browser GC collected {gc_count} objects")
         
     return correction_index
 

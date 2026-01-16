@@ -5,7 +5,8 @@ import { DynamicDataGrid } from '../components/mes/DynamicDataGrid';
 import { Pagination } from '../components/mes/Pagination';
 import { DataGridToolbar } from '../components/mes/DataGridToolbar';
 import { StatsContainer } from '../components/mes/StatsContainer';
-import { applyFilters, FilterState } from '../utils/dataGridUtils';
+import { SettingsModal } from '../components/mes/SettingsModal';
+import { applyFilters, FilterState, detectDateColumn } from '../utils/dataGridUtils';
 
 const MesDashboardContent: React.FC = () => {
     const [selectedPage, setSelectedPage] = useState<string | null>(null);
@@ -14,6 +15,7 @@ const MesDashboardContent: React.FC = () => {
     
     // UI State
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
     // Data states
     const [data, setData] = useState<any[]>([]);
@@ -32,6 +34,23 @@ const MesDashboardContent: React.FC = () => {
     // Sort states
     const [sortColumn, setSortColumn] = useState<string | null>(null);
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+    // Reset sort when page changes
+    useEffect(() => {
+        setSortColumn(null);
+        setSortDirection('asc');
+    }, [selectedPage]);
+
+    // Auto-detect date column and sort descending by default when data loads
+    useEffect(() => {
+        if (data.length > 0 && !sortColumn) {
+            const dateCol = detectDateColumn(data[0]);
+            if (dateCol) {
+                setSortColumn(dateCol);
+                setSortDirection('desc');
+            }
+        }
+    }, [data, sortColumn]);
 
     // Fetch Menu
     useEffect(() => {
@@ -161,6 +180,12 @@ const MesDashboardContent: React.FC = () => {
             />
             
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-primary)' }}>
+                {/* Check Settings Modal */}
+                <SettingsModal 
+                    isOpen={isSettingsOpen} 
+                    onClose={() => setIsSettingsOpen(false)} 
+                />
+
                 {/* Header */}
                 <header style={{ 
                     padding: '1rem 1.5rem', 
@@ -206,6 +231,40 @@ const MesDashboardContent: React.FC = () => {
                             )}
                         </div>
                     </div>
+
+                    {/* Settings Button */}
+                    <button 
+                        onClick={() => setIsSettingsOpen(true)}
+                        style={{
+                            background: 'transparent',
+                            border: '1px solid var(--border-color)',
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            padding: '6px 12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            borderRadius: '6px',
+                            fontSize: '0.85rem',
+                            transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+                            e.currentTarget.style.borderColor = 'var(--text-secondary)';
+                            e.currentTarget.style.color = 'var(--text-primary)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.borderColor = 'var(--border-color)';
+                            e.currentTarget.style.color = 'var(--text-secondary)';
+                        }}
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                        Settings
+                    </button>
                 </header>
 
                 {/* Stats Widgets */}

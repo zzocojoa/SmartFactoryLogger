@@ -82,6 +82,7 @@ def save_page_data(page_key: str, data: list, record_count: int):
         logger.error(f"Failed to insert data for {page_key}", exc_info=e)
         raise e
     finally:
+        cursor.close()
         conn.close()
 
 def get_latest_data(page_key: str):
@@ -119,6 +120,12 @@ def get_latest_data(page_key: str):
                     if not any(str(v).strip() not in ['', '.'] for v in record.values() if v is not None):
                         continue
 
+                    # Filter out pagination rows (e.g. "1 2 3 ... of 13 Pages") which were wrongly scraped
+                    # Check if any value in the record looks like a pagination string
+                    record_values = [str(v) for v in record.values() if v is not None]
+                    if any("of" in v and "Pages" in v and any(c.isdigit() for c in v) for v in record_values):
+                        continue
+
                     record_hash = hash(json.dumps(record, sort_keys=True, ensure_ascii=False))
                     if record_hash not in seen_hashes:
                         seen_hashes.add(record_hash)
@@ -133,6 +140,7 @@ def get_latest_data(page_key: str):
             "collected_at": latest_collected_at
         }
     finally:
+        cursor.close()
         conn.close()
 
 
@@ -147,4 +155,5 @@ def get_available_pages() -> list[str]:
     except Exception:
         return []
     finally:
+        cursor.close()
         conn.close()

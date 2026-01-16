@@ -59,11 +59,14 @@ async def extract_table_data(page, table_id: str) -> list[dict]:
             const table = document.getElementById('{table_id}');
             if (!table) return [];
             
-            const rows = table.querySelectorAll('tr');
+            // Use table.rows to get only direct rows of the table (excludes nested tables)
+            const rows = Array.from(table.rows);
+            if (rows.length === 0) return [];
+
             const headers = [];
             const result = [];
             
-            // 헤더 추출
+            // 헤더 추출 (First row is usually header)
             const headerRow = rows[0];
             if (headerRow) {{
                 headerRow.querySelectorAll('th').forEach(th => {{
@@ -74,13 +77,17 @@ async def extract_table_data(page, table_id: str) -> list[dict]:
             // 데이터 행 추출
             for (let i = 1; i < rows.length; i++) {{
                 const row = rows[i];
+                
+                // Skip if row is part of tfoot (often used for pagination/sums)
+                if (row.parentElement.tagName === 'TFOOT') continue;
+
                 const cells = row.querySelectorAll('td');
                 if (cells.length === 0) continue;
                 
                 // 전체 행 텍스트로 필터링할 패턴 체크
                 const rowText = row.innerText.trim();
                 
-                // 페이지네이션 행 건너뛰기 (예: "1 2 3 ... of 36 Pages")
+                // 페이지네이션 행 건너뛰기 (Double check, though table.rows should help)
                 if (rowText.includes(' of ') && rowText.includes('Pages')) continue;
                 if (/^[\\d\\s]+of\\s+\\d+\\s+Pages?$/i.test(rowText)) continue;
                 
