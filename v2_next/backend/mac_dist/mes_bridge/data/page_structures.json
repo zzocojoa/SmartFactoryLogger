@@ -409,20 +409,13 @@
         "구분",
         "자재명",
         "매입처LOT",
-        "재고중량",
-        "비고",
-        "No",
-        "입고일자",
-        "업체",
-        "LOT No",
-        "번들번호",
-        "위치",
-        "수량",
-        "중량"
+        "재고중량"
       ],
-      "filter_type": "none",
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
       "has_pagination": false,
-      "forward_fill_keys": ["입고지", "구분", "자재명", "매입처LOT", "재고중량"],
       "error": null
     },
     {
@@ -484,125 +477,19 @@
       "has_table": true,
       "table_id": "ctl00_BodyHolder_gv_Board",
       "columns": [
-        "구분",
-        "생산공장",
-        "자재",
-        "Alloy",
-        "Grade",
-        "Type",
-        "규격",
-        "길이",
-        "매입처LOT",
-        "수량",
-        "중량"
-      ],
-      "filter_type": "date_range",
-      "filter_fields": {
-        "from_date": "ctl00_BodyHolder_txt_FDate",
-        "to_date": "ctl00_BodyHolder_txt_TDate"
-      },
-      "has_pagination": false,
-      "forward_fill_keys": ["구분", "생산공장", "자재"],
-      "error": null
-    },
-    {
-      "key": "resc_status_all",
-      "name": "전체 자재 재고현황",
-      "category": "자재",
-      "url": "/P20_RSC/RescStatusAll.aspx",
-      "has_table": true,
-      "table_id": "ctl00_BodyHolder_gv_Board",
-      "columns": [
-        "입고지",
-        "자재명",
-        "Alloy",
-        "Grade",
-        "Type",
-        "규격",
-        "재고중량",
+        "일자",
+        "입고량",
+        "투입량",
+        "재고량",
+        "상세",
         "비고"
       ],
-      "filter_type": "none",
-      "has_pagination": false,
-      "forward_fill_keys": ["입고지"],
-      "error": null
-    },
-    {
-      "key": "stock_sum_status",
-      "name": "재고집계(상태별)",
-      "category": "집계",
-      "url": "/P60_SUM/StockSum.aspx",
-      "has_table": true,
-      "table_id": "ctl00_BodyHolder_gv_Board",
-      "columns": [
-        "구분",
-        "전월재고",
-        "당월입고",
-        "당월출고",
-        "당월조정",
-        "당월재고",
-        "전월대비"
-      ],
       "filter_type": "date_range",
       "filter_fields": {
         "from_date": "ctl00_BodyHolder_txt_FDate",
         "to_date": "ctl00_BodyHolder_txt_TDate"
       },
       "has_pagination": false,
-      "forward_fill_keys": ["구분"],
-      "error": null
-    },
-    {
-      "key": "stock_sum_outsource",
-      "name": "재고집계(외주생산)",
-      "category": "집계",
-      "url": "/P60_SUM/StockSum.aspx",
-      "has_table": true,
-      "table_id": "ctl00_BodyHolder_gv_Board2",
-      "columns": [
-        "기간",
-        "발주",
-        "입고",
-        "출고",
-        "출하불량",
-        "재고누계"
-      ],
-      "filter_type": "date_range",
-      "filter_fields": {
-        "from_date": "ctl00_BodyHolder_txt_FDate",
-        "to_date": "ctl00_BodyHolder_txt_TDate"
-      },
-      "has_pagination": false,
-      "forward_fill_keys": ["기간"],
-      "error": null
-    },
-    {
-      "key": "stock_sum_industry",
-      "name": "재고집계(업종별)",
-      "category": "집계",
-      "url": "/P60_SUM/StockSum.aspx",
-      "has_table": true,
-      "table_id": "ctl00_BodyHolder_gv_Board3",
-      "columns": [
-        "기간",
-        "건축기자재",
-        "건축재",
-        "비철",
-        "산업재",
-        "수출",
-        "일반재",
-        "자동차",
-        "전자",
-        "프로파일",
-        "총합계"
-      ],
-      "filter_type": "date_range",
-      "filter_fields": {
-        "from_date": "ctl00_BodyHolder_txt_FDate",
-        "to_date": "ctl00_BodyHolder_txt_TDate"
-      },
-      "has_pagination": false,
-      "forward_fill_keys": ["기간"],
       "error": null
     },
     {
@@ -1139,7 +1026,10 @@
         "공정이동바코드",
         "파렛트"
       ],
-      "filter_type": "none",
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
       "has_pagination": true,
       "error": null
     },
@@ -1162,7 +1052,10 @@
         "수량계",
         "중량계"
       ],
-      "filter_type": "none",
+      "filter_type": "search",
+      "filter_fields": {
+        "search_button": "ctl00_BodyHolder_btnSearch"
+      },
       "has_pagination": true,
       "error": null
     },

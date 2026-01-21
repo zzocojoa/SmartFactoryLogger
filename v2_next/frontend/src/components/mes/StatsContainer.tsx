@@ -1,3 +1,4 @@
+import { detectDateColumn } from '../../utils/dataGridUtils';
 import React, { useMemo } from 'react';
 import { StatsWidget } from './StatsWidget';
 
@@ -46,17 +47,26 @@ export const StatsContainer: React.FC<StatsContainerProps> = ({ data }) => {
 
         const total = data.length;
         
+        // Auto-detect date column
+        const sample = data[0];
+        const dateCol = detectDateColumn(sample);
+        
         // Calculate today's count
         const today = new Date();
-        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const todayStr = today.toLocaleDateString('en-CA'); // YYYY-MM-DD format (local time)
         
-        const todayCount = data.filter(item => {
-            const dateVal = item.collected_at || item.create_time || item.timestamp || item.date || '';
-            return String(dateVal).startsWith(todayStr);
-        }).length;
+        const todayCount = dateCol 
+            ? data.filter(item => {
+                const val = item[dateCol];
+                if (!val) return false;
+                
+                // If value is a full timestamp (e.g. 2026-01-16T...), extract just the date part
+                const dateValStr = String(val).substring(0, 10);
+                return dateValStr === todayStr;
+            }).length
+            : 0;
 
         // Auto-detect status column
-        const sample = data[0];
         const statusKey = Object.keys(sample).find(k => 
             ['status', 'result', 'judgment', 'judge', 'quality', 'state'].includes(k.toLowerCase())
         );

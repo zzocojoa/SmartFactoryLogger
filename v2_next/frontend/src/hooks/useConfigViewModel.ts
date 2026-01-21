@@ -282,8 +282,16 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         if (!prev) return form;
         
         // Check if user is editing the password field
-        if (prev.password.length > 0) {
-          return { ...form, password: prev.password };
+        // BUG FIX: Also preserve mesPassword
+        const preservePassword = prev.password.length > 0;
+        const preserveMesPassword = prev.mesPassword.length > 0;
+        
+        if (preservePassword || preserveMesPassword) {
+            return { 
+                ...form, 
+                password: preservePassword ? prev.password : form.password,
+                mesPassword: preserveMesPassword ? prev.mesPassword : form.mesPassword
+            };
         }
         
         // Check if user has any unsaved changes - if so, don't overwrite the entire form
@@ -291,7 +299,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
           const key = k as keyof SettingsFormState;
           // Skip password since baseline always has empty password
           if (key === 'password') return prev.password.length > 0;
+          if (key === 'mesPassword') return prev.mesPassword.length > 0; // Fix: Treat mesPassword like password
           if (key === 'passwordSet') return false; // Read-only field
+          if (key === 'mesPasswordSet') return false; // Fix: Read-only field
           // Compare with what would be the new baseline
           return prev[key] !== form[key];
         });
@@ -852,40 +862,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
   }, [settingsInfo]);
 
   // Auto-Save Logic
-  useEffect(() => {
-    const autoSaveEnabled = settingsForm?.autoSave;
-    
-    if (!autoSaveEnabled || !hasSettingsChanges || settingsLoading || !settingsForm || !settingsBaseline) {
-      return;
-    }
-
-    // Check if the ONLY change is the password field - if so, skip auto-save
-    // Password changes should only be saved manually by the user
-    const nonPasswordChanges = Object.keys(settingsForm).some((k) => {
-      const key = k as keyof SettingsFormState;
-      if (key === 'password' || key === 'passwordSet') return false; // Skip password fields
-      return settingsForm[key] !== settingsBaseline[key];
-    });
-    
-    if (!nonPasswordChanges) {
-      // Only password has changed, don't auto-save
-      return;
-    }
-
-    if (autoSaveTimerRef.current) {
-      window.clearTimeout(autoSaveTimerRef.current);
-    }
-
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      handleSaveSettings({ auto: true });
-    }, 1000); // 1 second debounce
-
-    return () => {
-      if (autoSaveTimerRef.current) {
-        window.clearTimeout(autoSaveTimerRef.current);
-      }
-    };
-  }, [settingsForm, settingsBaseline, hasSettingsChanges, settingsLoading]);
+  // Auto-Save Logic REMOVED:
+  // The 'autoSave' setting controls backend CSV logging behavior, not the UI form.
+  // UI changes must be saved manually by clicking the Save button.
 
   return {
     settingsOpen,

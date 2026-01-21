@@ -91,6 +91,11 @@ async def extract_table_data(page, table_id: str) -> list[dict]:
                 if (rowText.includes(' of ') && rowText.includes('Pages')) continue;
                 if (/^[\\d\\s]+of\\s+\\d+\\s+Pages?$/i.test(rowText)) continue;
                 
+                // 컬럼 개수 불일치 행 건너뛰기 (가장 강력한 필터)
+                // 헤더가 있는데 셀 개수가 절반도 안되면(예: colspan된 1개 셀) 데이터 아님
+                if (headers.length > 0 && cells.length < headers.length * 0.5) continue;
+
+                
                 // 합계 행 건너뛰기
                 const cellTexts = Array.from(cells).map(c => c.innerText.trim());
                 if (cellTexts.includes('합계') || cellTexts.includes('소계')) continue;
@@ -179,8 +184,8 @@ async def get_all_pages_data(page, table_id: str) -> list[dict]:
             await page.wait_for_load_state("networkidle", timeout=10000)
             page_num += 1
             
-            # 무한 루프 방지 (최대 100페이지)
-            if page_num > 100:
+            # 무한 루프 방지 (최대 5000페이지)
+            if page_num > 5000:
                 break
         except:
             break

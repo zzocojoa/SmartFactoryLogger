@@ -1,6 +1,6 @@
-/* @tailwind base;
+@tailwind base;
 @tailwind components;
-@tailwind utilities; */
+@tailwind utilities;
 
 :root {
   /* Colors */
@@ -135,4 +135,44 @@ code {
   flex-grow: 1;
   overflow: hidden;
 }
+
+/* Custom Utilities for Premium Design */
+.calendar-picker-indicator-white::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.calendar-picker-indicator-white::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+
+/* Animation Utilities that might be missing in default Tailwind config */
+@layer utilities {
+  .animate-in {
+    animation-duration: 0.2s;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    animation-fill-mode: both;
+  }
+  
+  .fade-in {
+    animation-name: fadeIn;
+  }
+  
+  .slide-in-from-right-4 {
+    animation-name: slideInFromRight;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideInFromRight {
+  from { transform: translateX(1rem); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
 

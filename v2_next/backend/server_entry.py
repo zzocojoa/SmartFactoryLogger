@@ -62,10 +62,11 @@ try:
         def fileno(self):
             return self.file.fileno()
 
-    # Redirect stdout/stderr if they are None or we want to capture them
-    # For noconsole, we MUST redirect them to avoid crashes on print()
-    sys.stdout = StreamToLogger(stdout_path)
-    sys.stderr = StreamToLogger(stderr_path)
+    # Redirect stdout/stderr ONLY if they are None (Windowed mode)
+    if sys.stdout is None:
+        sys.stdout = StreamToLogger(stdout_path)
+    if sys.stderr is None:
+        sys.stderr = StreamToLogger(stderr_path)
     
     # Write startup marker
     print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Launcher Starting (PID: {os.getpid()})...")

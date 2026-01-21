@@ -1,0 +1,20 @@
+{
+  "proc_status": {
+    "field": "작업일자",
+    "dates": [
+      "2026-01-14"
+    ]
+  },
+  "proc_res_mct": {
+    "error": "No date field found"
+  },
+  "proc_res_cutting": {
+    "field": "작업일자",
+    "dates": [
+      ""
+    ]
+  },
+  "proc_res_heating": {
+    "error": "No date field found"
+  }
+}

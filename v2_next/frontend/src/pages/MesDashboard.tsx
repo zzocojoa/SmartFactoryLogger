@@ -6,8 +6,7 @@ import { Pagination } from '../components/mes/Pagination';
 import { DataGridToolbar } from '../components/mes/DataGridToolbar';
 import { StatsContainer } from '../components/mes/StatsContainer';
 import { SettingsModal } from '../components/mes/SettingsModal';
-import { ProductivityChart } from '../components/mes/ProductivityChart';
-import { MesAnalysisView } from '../components/mes/MesAnalysisView';
+import { GrafanaEmbed } from '../components/mes/GrafanaEmbed';
 import { applyFilters, FilterState, detectDateColumn } from '../utils/dataGridUtils';
 
 const MesDashboardContent: React.FC = () => {
@@ -69,7 +68,14 @@ const MesDashboardContent: React.FC = () => {
                     category: 'Dashboard' 
                 };
                 
-                setPages([dashboardItem, ...menuData]);
+                // [NEW] Add Grafana Tab
+                const grafanaItem: PageItem = {
+                    key: 'grafana',
+                    name: 'GRAFANA',
+                    category: 'Dashboard'
+                };
+                
+                setPages([grafanaItem, ...menuData]);
                 
                 // Auto-select first page if none selected and pages exist
                 if (menuData.length > 0 && !selectedPage) {
@@ -99,9 +105,7 @@ const MesDashboardContent: React.FC = () => {
             setLoading(true);
             setError(null);
             try {
-                // [NEW] If dashboard is selected, load rpt_press data for visualization
-                const targetKey = selectedPage === 'dashboard' ? 'rpt_press' : selectedPage;
-                const response = await fetch(`http://localhost:8000/api/mes/data/${targetKey}`);
+                const response = await fetch(`http://localhost:8000/api/mes/data/${selectedPage}`);
                 if (!response.ok) {
                     if (response.status === 404) throw new Error('No data found');
                     throw new Error('Failed to load data');
@@ -280,15 +284,20 @@ const MesDashboardContent: React.FC = () => {
                 </header>
 
                 {/* Content */}
-                {selectedPage === 'dashboard' ? (
-                    <MesAnalysisView data={filteredData} pageKey={selectedPage} />
+                {selectedPage === 'grafana' ? (
+                    <div style={{ flex: 1, padding: '16px', overflow: 'auto' }}>
+                        <GrafanaEmbed 
+                            dashboardUrl="http://localhost:3030/?orgId=1&kiosk" 
+                            height="calc(100vh - 180px)"
+                            title="MES Grafana Dashboard"
+                        />
+                    </div>
                 ) : (
                     <>
                         {/* Stats Widgets */}
                         <StatsContainer data={filteredData} />
 
-                        {/* Productivity Chart */}
-                        <ProductivityChart data={filteredData} pageKey={selectedPage} />
+
 
                         {/* Toolbar - Search, Filter, Page Size */}
                         <DataGridToolbar
