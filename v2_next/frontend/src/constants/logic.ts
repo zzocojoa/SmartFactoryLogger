@@ -53,5 +53,5 @@ export const EXPORT_PATH_STORAGE_KEY = 'sfl_observability_export_path';
 // Client-local layout storage
 export const LOCAL_LAYOUT_STORAGE_KEY = 'sfl_local_layout';
 export const STORAGE_MODE_KEY = 'sfl_storage_mode';
-export type StorageMode = 'local' | 'server';
+export type { StorageMode } from './logic.types';
 

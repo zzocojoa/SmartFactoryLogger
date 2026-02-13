@@ -2,7 +2,11 @@
  * UI Theme & Style Tokens
  */
 
-export const COLORS = {
+import type { ThemeColors, ThemeTransitions, ThemeUiDimensions } from './theme.types';
+
+export type { ThemeColors, ThemeTransitions, ThemeUiDimensions } from './theme.types';
+
+export const COLORS: ThemeColors = {
   // Chart Series (Should match CSS Variables)
   series: {
     speed: 'var(--color-speed)',
@@ -38,14 +42,14 @@ export const COLORS = {
   border: 'var(--border-main)',
 };
 
-export const UI_DIMENSIONS = {
+export const UI_DIMENSIONS: ThemeUiDimensions = {
   header_height: 'var(--header-height)',
   card_radius: 'var(--card-radius)',
   card_padding: 'var(--card-padding)',
   card_gap: 'var(--card-gap)',
 };
 
-export const TRANSITIONS = {
+export const TRANSITIONS: ThemeTransitions = {
   default: '0.2s ease',
   long: '0.5s ease',
 };

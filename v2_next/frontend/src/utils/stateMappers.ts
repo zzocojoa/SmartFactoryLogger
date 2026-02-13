@@ -2,20 +2,9 @@
  * State mapping utility functions extracted from App.tsx
  */
 
-// ============ Types ============
+import type { LevelState, SpotState } from './stateMappers.types';
 
-export type SpotState = {
-  label: string;
-  statusClass: string;
-  fillClass: string;
-  warning: boolean;
-  sparkClass: string;
-};
-
-export type LevelState = {
-  label: string;
-  className: string;
-};
+export type { LevelState, SpotState } from './stateMappers.types';
 
 // ============ Constants ============
 

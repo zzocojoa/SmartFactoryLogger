@@ -2,16 +2,11 @@
  * Layout Presets for different screen aspect ratios
  */
 
-import { LayoutMap, LayoutEntry } from '../types';
+import type { LayoutMap } from '../types';
+import { pickPresetById, pickRecommendedPreset } from './layoutPresets.selectors';
+import type { LayoutPreset, LayoutPresetId } from './layoutPresets.types';
 
-export type LayoutPresetId = '16:9' | '21:9' | '4:3' | 'compact';
-
-export interface LayoutPreset {
-  id: LayoutPresetId;
-  name: string;
-  description: string;
-  layout: LayoutMap;
-}
+export type { LayoutPreset, LayoutPresetId } from './layoutPresets.types';
 
 /**
  * Standard 16:9 layout (Default - 1920x1080, etc.)
@@ -97,21 +92,12 @@ export const LAYOUT_PRESETS: LayoutPreset[] = [
  * Get a preset by its ID
  */
 export function getPresetById(id: LayoutPresetId): LayoutPreset | undefined {
-  return LAYOUT_PRESETS.find(p => p.id === id);
+  return pickPresetById(LAYOUT_PRESETS, id);
 }
 
 /**
  * Get the recommended preset based on detected aspect ratio
  */
 export function getRecommendedPreset(aspectRatio: string): LayoutPreset {
-  switch (aspectRatio) {
-    case '21:9':
-      return LAYOUT_PRESETS.find(p => p.id === '21:9')!;
-    case '4:3':
-      return LAYOUT_PRESETS.find(p => p.id === '4:3')!;
-    case 'portrait':
-      return LAYOUT_PRESETS.find(p => p.id === 'compact')!;
-    default:
-      return LAYOUT_PRESETS.find(p => p.id === '16:9')!;
-  }
+  return pickRecommendedPreset(LAYOUT_PRESETS, aspectRatio);
 }
