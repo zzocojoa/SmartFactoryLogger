@@ -254,6 +254,33 @@ const APPLY_KEY_LABELS: Record<string, string> = {
 
 
 import { buildLayoutMap } from './utils/layoutUtils';
+import {
+  calcRecoverySec,
+  formatAgeSec,
+  formatInteger,
+  formatMetaTime,
+  formatNumber,
+  formatOptionalNumber,
+  formatOptionalSeconds,
+  formatOptionalText,
+  formatTime,
+  formatTimeFromSec,
+} from './utils/formatters';
+import { isValidIp, isValidNumberInput, isValidPort, parseThresholdValue } from './utils/validators';
+import {
+  getEnvHumidityState,
+  getEnvTempState,
+  getMoldState,
+  getPressState,
+  getSpeedState,
+  getSpotState,
+  mapEnvPreLevel,
+  mapEnvTempLevel,
+  mapMoldLevel,
+  mapPressLevel,
+  mapSpeedLevel,
+  mapSpotLevel,
+} from './utils/stateMappers';
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -389,66 +416,6 @@ const useThresholdLevel = (value: number, warnThreshold: number, dangerThreshold
   return level;
 };
 
-const formatTime = (timestamp: number | null) => {
-  if (!timestamp) {
-    return '--:--:--';
-  }
-  const date = new Date(timestamp);
-  return date.toTimeString().slice(0, 8);
-};
-
-const formatTimeFromSec = (value?: number | null) => {
-  if (!value) {
-    return '--:--:--';
-  }
-  return formatTime(value * 1000);
-};
-
-const formatAgeSec = (value?: number | null, nowMs?: number | null) => {
-  if (!value || !nowMs) {
-    return '--';
-  }
-  const ageSec = Math.max(0, Math.round(nowMs / 1000 - value));
-  return `${ageSec}s`;
-};
-
-const formatOptionalNumber = (value?: number | null, decimals: number = 0) => {
-  if (value === undefined || value === null) {
-    return '--';
-  }
-  return formatNumber(value, decimals);
-};
-
-const formatOptionalSeconds = (value?: number | null) => {
-  if (value === undefined || value === null) {
-    return '--';
-  }
-  return `${Math.round(value)}s`;
-};
-
-const formatOptionalText = (value?: string | null) => {
-  const trimmed = (value ?? '').trim();
-  return trimmed ? trimmed : '--';
-};
-
-const calcRecoverySec = (metrics?: {
-  last_recovery_sec?: number | null;
-  last_error_time?: number | null;
-  last_success_time?: number | null;
-}) => {
-  if (!metrics) {
-    return null;
-  }
-  if (metrics.last_recovery_sec !== undefined && metrics.last_recovery_sec !== null) {
-    return metrics.last_recovery_sec;
-  }
-  const lastErr = metrics.last_error_time;
-  const lastOk = metrics.last_success_time;
-  if (lastErr && lastOk && lastOk > lastErr) {
-    return lastOk - lastErr;
-  }
-  return null;
-};
 
 type CommBadge = {
   key: string;
@@ -548,80 +515,6 @@ const buildSpotCommBadge = (
   };
 };
 
-const formatNumber = (value: number, decimals: number) => {
-  if (!Number.isFinite(value)) {
-    return '--';
-  }
-  return value.toFixed(decimals);
-};
-
-const formatInteger = (value: number) => {
-  if (!Number.isFinite(value)) {
-    return '--';
-  }
-  return Math.round(value).toString();
-};
-
-const formatMetaTime = (value?: string | null) => {
-  if (!value) {
-    return '--';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  const formatted = date.toLocaleString();
-  return formatted;
-};
-
-const isValidIp = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return false;
-  }
-  const parts = trimmed.split('.');
-  if (parts.length !== 4) {
-    return false;
-  }
-  return parts.every((part) => {
-    if (!/^\d+$/.test(part)) {
-      return false;
-    }
-    const num = Number(part);
-    return num >= 0 && num <= 255;
-  });
-};
-
-const isValidPort = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return false;
-  }
-  if (!/^\d+$/.test(trimmed)) {
-    return false;
-  }
-  const num = Number(trimmed);
-  return num >= 1 && num <= 65535;
-};
-
-const isValidNumberInput = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return true;
-  }
-  const num = Number(trimmed);
-  return Number.isFinite(num);
-};
-
-const parseThresholdValue = (value?: string | null) => {
-  const trimmed = (value ?? '').trim();
-  if (!trimmed) {
-    return null;
-  }
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
 const buildThresholdStateFromConfig = (thresholds?: ConfigSnapshot['values']['thresholds']): ThresholdState => {
   const enable = thresholds?.enable ?? {};
   const values = thresholds?.values ?? {};
@@ -701,229 +594,6 @@ const THRESHOLD_LABELS: Record<ThresholdKey, string> = {
   at_pre: LABELS.ENV_HUMID,
   count: LABELS.COUNT,
   endpos: LABELS.END_POS,
-};
-
-const getSpeedState = (speed: number) => {
-  if (speed === 0) {
-    return { label: '대기', className: 'speed-idle' };
-  }
-  if (speed >= 8) {
-    return { label: '매우빠름', className: 'speed-very-fast' };
-  }
-  if (speed >= 6) {
-    return { label: '빠름', className: 'speed-fast' };
-  }
-  if (speed >= 4) {
-    return { label: '보통', className: 'speed-normal' };
-  }
-  if (speed >= 2) {
-    return { label: '저속', className: 'speed-slow' };
-  }
-  return { label: '매우저속', className: 'speed-very-slow' };
-};
-
-const getPressState = (press: number) => {
-  if (press === 0) {
-    return { label: '대기', className: 'press-idle' };
-  }
-  if (press >= 180) {
-    return { label: '높음', className: 'press-high' };
-  }
-  if (press >= 126) {
-    return { label: '보통', className: 'press-normal' };
-  }
-  return { label: '낮음', className: 'press-low' };
-};
-
-const SPEED_LEVEL_MAP: Record<string, { label: string; className: string }> = {
-  very_fast: { label: '매우빠름', className: 'speed-very-fast' },
-  fast: { label: '빠름', className: 'speed-fast' },
-  normal: { label: '보통', className: 'speed-normal' },
-  slow: { label: '저속', className: 'speed-slow' },
-  very_slow: { label: '매우저속', className: 'speed-very-slow' },
-  idle: { label: '대기', className: 'speed-idle' },
-};
-
-const PRESS_LEVEL_MAP: Record<string, { label: string; className: string }> = {
-  high: { label: '높음', className: 'press-high' },
-  normal: { label: '보통', className: 'press-normal' },
-  low: { label: '낮음', className: 'press-low' },
-  idle: { label: '대기', className: 'press-idle' },
-};
-
-const mapSpeedLevel = (level?: string) => {
-  if (!level) return null;
-  return SPEED_LEVEL_MAP[level] ?? null;
-};
-
-const mapPressLevel = (level?: string) => {
-  if (!level) return null;
-  return PRESS_LEVEL_MAP[level] ?? null;
-};
-
-type SpotState = {
-  label: string;
-  statusClass: string;
-  fillClass: string;
-  warning: boolean;
-  sparkClass: string;
-};
-
-const SPOT_LEVEL_MAP: Record<string, SpotState> = {
-  low: {
-    label: '저온',
-    statusClass: 'spot-status-low',
-    fillClass: 'spot-fill-low',
-    warning: false,
-    sparkClass: 'sparkline-low',
-  },
-  normal: {
-    label: '보통',
-    statusClass: 'spot-status-normal',
-    fillClass: 'spot-fill-normal',
-    warning: false,
-    sparkClass: 'sparkline-normal',
-  },
-  high: {
-    label: '고온',
-    statusClass: 'spot-status-high',
-    fillClass: 'spot-fill-high',
-    warning: false,
-    sparkClass: 'sparkline-high',
-  },
-  warning: {
-    label: '경고',
-    statusClass: 'spot-status-warning',
-    fillClass: 'spot-fill-warning',
-    warning: true,
-    sparkClass: 'sparkline-warning',
-  },
-  idle: {
-    label: '대기',
-    statusClass: 'spot-status-idle',
-    fillClass: 'spot-fill-idle',
-    warning: false,
-    sparkClass: 'sparkline-idle',
-  },
-};
-
-const mapSpotLevel = (level?: string) => {
-  if (!level) return null;
-  return SPOT_LEVEL_MAP[level] ?? null;
-};
-
-const getSpotState = (temp: number, warningActive: boolean): SpotState => {
-  if (!Number.isFinite(temp) || temp === 0) {
-    return {
-      label: '대기',
-      statusClass: 'spot-status-idle',
-      fillClass: 'spot-fill-idle',
-      warning: false,
-      sparkClass: 'sparkline-idle',
-    };
-  }
-  if (temp >= SPOT_WARN_TEMP && warningActive) {
-    return {
-      label: '경고',
-      statusClass: 'spot-status-warning',
-      fillClass: 'spot-fill-warning',
-      warning: true,
-      sparkClass: 'sparkline-warning',
-    };
-  }
-  if (temp >= SPOT_HIGH_MIN) {
-    return {
-      label: '고온',
-      statusClass: 'spot-status-high',
-      fillClass: 'spot-fill-high',
-      warning: false,
-      sparkClass: 'sparkline-high',
-    };
-  }
-  if (temp >= SPOT_NORMAL_MIN) {
-    return {
-      label: '보통',
-      statusClass: 'spot-status-normal',
-      fillClass: 'spot-fill-normal',
-      warning: false,
-      sparkClass: 'sparkline-normal',
-    };
-  }
-  return {
-    label: '저온',
-    statusClass: 'spot-status-low',
-    fillClass: 'spot-fill-low',
-    warning: false,
-    sparkClass: 'sparkline-low',
-  };
-};
-
-const getMoldState = (value: number) => {
-  if (!Number.isFinite(value)) {
-    return { className: 'mold-muted' };
-  }
-  return value >= 100 ? { className: 'mold-alert' } : { className: 'mold-normal' };
-};
-
-const MOLD_LEVEL_CLASS: Record<string, string> = {
-  alert: 'mold-alert',
-  normal: 'mold-normal',
-  muted: 'mold-muted',
-};
-
-const mapMoldLevel = (level?: string) => {
-  if (!level) return null;
-  return MOLD_LEVEL_CLASS[level] ?? null;
-};
-
-const getEnvTempState = (value: number) => {
-  if (!Number.isFinite(value)) {
-    return { label: '미확인', className: 'env-muted' };
-  }
-  if (value >= 28) {
-    return { label: '더움', className: 'env-hot' };
-  }
-  if (value < 10) {
-    return { label: '추움', className: 'env-cold' };
-  }
-  return { label: '쾌적', className: 'env-comfort' };
-};
-
-const getEnvHumidityState = (value: number) => {
-  if (!Number.isFinite(value)) {
-    return { label: '미확인', className: 'env-muted' };
-  }
-  if (value >= 60) {
-    return { label: '다습', className: 'env-humid' };
-  }
-  if (value < 30) {
-    return { label: '건조', className: 'env-dry' };
-  }
-  return { label: '쾌적', className: 'env-comfort' };
-};
-
-const ENV_TEMP_LEVEL_MAP: Record<string, { label: string; className: string }> = {
-  hot: { label: '더움', className: 'env-hot' },
-  cold: { label: '추움', className: 'env-cold' },
-  comfort: { label: '쾌적', className: 'env-comfort' },
-  unknown: { label: '미확인', className: 'env-muted' },
-};
-
-const ENV_PRE_LEVEL_MAP: Record<string, { label: string; className: string }> = {
-  humid: { label: '다습', className: 'env-humid' },
-  dry: { label: '건조', className: 'env-dry' },
-  comfort: { label: '쾌적', className: 'env-comfort' },
-  unknown: { label: '미확인', className: 'env-muted' },
-};
-
-const mapEnvTempLevel = (level?: string) => {
-  if (!level) return null;
-  return ENV_TEMP_LEVEL_MAP[level] ?? null;
-};
-
-const mapEnvPreLevel = (level?: string) => {
-  if (!level) return null;
-  return ENV_PRE_LEVEL_MAP[level] ?? null;
 };
 
 const calcPercent = (value: number, max: number) => {
@@ -5214,7 +4884,9 @@ function SpotComponent() {
   const missing = !Number.isFinite(data?.Spot);
   const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : (data?.Spot ?? NaN);
   const computed = data?.Computed;
-  const spotState = mapSpotLevel(computed?.spot_level) ?? getSpotState(spotDisplayValue, spotAlertActive);
+  const spotState =
+    mapSpotLevel(computed?.spot_level) ??
+    getSpotState(spotDisplayValue, spotAlertActive, SPOT_WARN_TEMP, SPOT_HIGH_MIN, SPOT_NORMAL_MIN);
   const spotThresholdHit = computed?.thresholds?.spot ?? isThresholdHit(thresholds, 'spot', spotValue);
   const spotConfigThreshold = getThresholdValue(thresholds, 'spot');
   const spotPercent = calcPercent(spotDisplayValue, SPOT_MAX_TEMP);

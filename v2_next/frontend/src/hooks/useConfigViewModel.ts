@@ -12,6 +12,12 @@ import {
 } from '../types';
 import { LABELS, MESSAGES } from '../constants/uiText';
 import { useModal } from '../GlobalModalContext';
+import {
+  isValidIp,
+  isValidNumberInput,
+  isValidPort,
+  parseThresholdValue,
+} from '../utils/validators';
 
 // --- Type Definitions for the Hook ---
 
@@ -65,56 +71,6 @@ export interface UseConfigViewModel {
   // Additional helpers exposed if needed
   isSettingsFieldDirty: (field: keyof SettingsFormState) => boolean;
 }
-
-// --- Helper Functions (migrated from App.tsx) ---
-
-const isValidIp = (ip: string) => {
-    const trimmed = ip.trim();
-    if (!trimmed) {
-      return false;
-    }
-    const parts = trimmed.split('.');
-    if (parts.length !== 4) {
-      return false;
-    }
-    return parts.every((part) => {
-      if (!/^\d+$/.test(part)) {
-        return false;
-      }
-      const num = Number(part);
-      return num >= 0 && num <= 255;
-    });
-  };
-  
-  const isValidPort = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return false;
-    }
-    if (!/^\d+$/.test(trimmed)) {
-      return false;
-    }
-    const num = Number(trimmed);
-    return num >= 1 && num <= 65535;
-  };
-  
-  const isValidNumberInput = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return true;
-    }
-    const num = Number(trimmed);
-    return Number.isFinite(num);
-  };
-  
-  const parseThresholdValue = (value?: string | null) => {
-    const trimmed = (value ?? '').trim();
-    if (!trimmed) {
-      return null;
-    }
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
 
 const buildThresholdStateFromConfig = (thresholds?: ConfigSnapshot['values']['thresholds']): ThresholdState => {
   const enable = thresholds?.enable ?? {};
