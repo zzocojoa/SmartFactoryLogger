@@ -746,6 +746,54 @@ async def collect_page(page, page_info: dict, target_date_str: str) -> dict:
             result["error"] = "No table"
             return result
         
+        # [Fix] Extract Total Record Count from lbl_ListCnt for change detection
+        # Example: <span id="ctl00_BodyHolder_lbl_ListCnt">(3,280 건)</span>
+        try:
+            total_count = await page.evaluate("""() => {
+                const span = document.getElementById('ctl00_BodyHolder_lbl_ListCnt');
+                if (!span) return 0;
+                const text = span.innerText || span.textContent || '';
+                const match = text.match(/([\\d,]+)/);
+                return match ? parseInt(match[1].replace(/,/g, '')) : 0;
+            }""")
+            result["total_count"] = total_count
+            if total_count > 0:
+                print(f"  [RecordCount] Total: {total_count:,} records")
+        except Exception as e:
+            result["total_count"] = 0
+            print(f"  [RecordCount] Failed to extract count: {e}")
+        
+        # [Fix] Maximize Page Rows to 100 (Default is often 10)
+        # This must be done BEFORE any date filtering, and requires clicking "조회" (Search) to apply
+        try:
+            page_row_dropdown = await page.query_selector('#ctl00_BodyHolder_ddl_PageRow')
+            if page_row_dropdown:
+                # Check if 100 option exists
+                has_100 = await page.evaluate("""() => {
+                    const select = document.getElementById('ctl00_BodyHolder_ddl_PageRow');
+                    if (!select) return false;
+                    return Array.from(select.options).some(opt => opt.value === '100');
+                }""")
+                
+                if has_100:
+                    current_val = await page.evaluate("""() => {
+                        const select = document.getElementById('ctl00_BodyHolder_ddl_PageRow');
+                        return select ? select.value : null;
+                    }""")
+                    
+                    if current_val != "100":
+                        print(f"  [PageRow] Setting page rows from {current_val} to 100...")
+                        await page.select_option('#ctl00_BodyHolder_ddl_PageRow', value="100")
+                        
+                        # Click Search to apply the new page row setting
+                        search_btn = await page.query_selector('[id*="btnSearch"]')
+                        if search_btn:
+                            await search_btn.click()
+                            await page.wait_for_load_state("networkidle", timeout=15000)
+                            await asyncio.sleep(1)
+        except Exception as e:
+            print(f"  [PageRow] Failed to set max rows: {e}")
+        
         filter_type = page_info.get("filter_type")
         filter_fields = page_info.get("filter_fields", {})
         

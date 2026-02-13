@@ -78,39 +78,30 @@ async def extract_table_data(page, table_id: str) -> list[dict]:
             for (let i = 1; i < rows.length; i++) {{
                 const row = rows[i];
                 
-                // Skip if row is part of tfoot (often used for pagination/sums)
+                // Skip if row is part of tfoot
                 if (row.parentElement.tagName === 'TFOOT') continue;
 
                 const cells = row.querySelectorAll('td');
                 if (cells.length === 0) continue;
                 
-                // 전체 행 텍스트로 필터링할 패턴 체크
                 const rowText = row.innerText.trim();
                 
-                // 페이지네이션 행 건너뛰기 (Double check, though table.rows should help)
+                // 페이지네이션/합계 행 필터링
                 if (rowText.includes(' of ') && rowText.includes('Pages')) continue;
                 if (/^[\\d\\s]+of\\s+\\d+\\s+Pages?$/i.test(rowText)) continue;
-                
-                // 컬럼 개수 불일치 행 건너뛰기 (가장 강력한 필터)
-                // 헤더가 있는데 셀 개수가 절반도 안되면(예: colspan된 1개 셀) 데이터 아님
                 if (headers.length > 0 && cells.length < headers.length * 0.5) continue;
-
                 
-                // 합계 행 건너뛰기
                 const cellTexts = Array.from(cells).map(c => c.innerText.trim());
                 if (cellTexts.includes('합계') || cellTexts.includes('소계')) continue;
                 
-                // 빈 행 건너뛰기
                 const allEmpty = cellTexts.every(t => t === '' || t === '-');
                 if (allEmpty) continue;
                 
                 const rowData = {{}};
                 cells.forEach((cell, idx) => {{
                     if (headers[idx]) {{
-                        // Check for input elements first
                         const input = cell.querySelector('input, textarea, select');
                         if (input && (input.value || input.innerText)) {{
-                            // Prefer value, fallback to innerText for select/textarea if needed
                             rowData[headers[idx]] = (input.value || input.innerText).trim();
                         }} else {{
                             rowData[headers[idx]] = cell.innerText.trim();
@@ -126,6 +117,13 @@ async def extract_table_data(page, table_id: str) -> list[dict]:
             return result;
         }}
     """)
+    
+    # [Fix] Logic: Forward Fill (If configured) - Python Side Processing
+    # This must be done here if we are processing page-by-page, but ideally on full dataset.
+    # However, collector.py returns 'all_data' later. 
+    # Since Forward Fill is usually needed FOR the extraction (e.g. valid row detection),
+    # doing it on raw chunks is fine IF the split doesn't occur mid-merge-cell.
+    # For robustnes, we should probably do it in 'extract_page_data' after aggregation.
     return data
 
 
@@ -160,19 +158,33 @@ async def set_year_filter(page, year: str, filter_fields: dict):
 
 
 async def get_all_pages_data(page, table_id: str) -> list[dict]:
-    """페이지네이션 포함 전체 데이터 추출"""
+    """페이지네이션 포함 전체 데이터 추출 (중복 감지 및 no_next 이미지 처리 강화)"""
     all_data = []
     page_num = 1
+    last_raw_data = None
     
     while True:
         # 현재 페이지 데이터 추출
         data = await extract_table_data(page, table_id)
+        
+        # [Fix] Duplicate Page Detection (Raw Data Comparison)
+        # If current page data is identical to previous, server is repeating - stop
+        if page_num > 1 and last_raw_data is not None:
+            if data == last_raw_data:
+                logger.info(f"[Pagination] Page {page_num} identical to previous. Stopping.")
+                break
+        
+        last_raw_data = list(data)  # Copy for next comparison
         all_data.extend(data)
         
         # 다음 페이지 버튼 확인
         next_btn = await page.query_selector('[id*="btnNext"]')
         if not next_btn:
             break
+        
+        # [Update] REMOVED 'no_next' image check
+        # User confirmed that buttons with 'no_next1.jpg' ARE clickable and valid.
+        # Only rely on the 'disabled' attribute.
         
         # 버튼이 비활성화되었는지 확인
         is_disabled = await next_btn.get_attribute("disabled")
@@ -181,15 +193,18 @@ async def get_all_pages_data(page, table_id: str) -> list[dict]:
         
         try:
             await next_btn.click()
-            await page.wait_for_load_state("networkidle", timeout=10000)
+            await page.wait_for_load_state("networkidle", timeout=15000)
             page_num += 1
             
             # 무한 루프 방지 (최대 5000페이지)
             if page_num > 5000:
+                logger.warning("[Pagination] Max pages (5000) reached!")
                 break
-        except:
+        except Exception as e:
+            logger.debug(f"[Pagination] Click failed at page {page_num}: {e}")
             break
     
+    logger.info(f"[Pagination] Collected {len(all_data)} rows from {page_num} pages")
     return all_data
 
 
@@ -232,15 +247,103 @@ async def extract_page_data(page, page_info: dict, year: int = None, timeout: in
         filter_type = page_info["filter_type"]
         filter_fields = page_info["filter_fields"]
         
+        # [Fix] Extract Total Record Count from lbl_ListCnt for change detection
+        # Example: <span id="ctl00_BodyHolder_lbl_ListCnt">(3,280 건)</span>
+        try:
+            total_count = await page.evaluate("""() => {
+                const span = document.getElementById('ctl00_BodyHolder_lbl_ListCnt');
+                if (!span) return 0;
+                const text = span.innerText || span.textContent || '';
+                const match = text.match(/([\\d,]+)/);
+                return match ? parseInt(match[1].replace(/,/g, '')) : 0;
+            }""")
+            result["total_count"] = total_count
+            if total_count > 0:
+                logger.info(f"[RecordCount] Total: {total_count:,} records")
+        except Exception as e:
+            result["total_count"] = 0
+            logger.warning(f"[RecordCount] Failed to extract count: {e}")
+        
+        # [Fix] Maximize Page Rows to 100 (Default is often 10)
+        # This must be done BEFORE any date filtering, and requires clicking "조회" (Search) to apply
+        try:
+            page_row_dropdown = await page.query_selector('#ctl00_BodyHolder_ddl_PageRow')
+            if page_row_dropdown:
+                # Check if 100 option exists
+                has_100 = await page.evaluate("""() => {
+                    const select = document.getElementById('ctl00_BodyHolder_ddl_PageRow');
+                    if (!select) return false;
+                    return Array.from(select.options).some(opt => opt.value === '100');
+                }""")
+                
+                if has_100:
+                    current_val = await page.evaluate("""() => {
+                        const select = document.getElementById('ctl00_BodyHolder_ddl_PageRow');
+                        return select ? select.value : null;
+                    }""")
+                    
+                    if current_val != "100":
+                        logger.info(f"[PageRow] Setting page rows from {current_val} to 100...")
+                        await page.select_option('#ctl00_BodyHolder_ddl_PageRow', value="100")
+                        
+                        # Click Search to apply the new page row setting
+                        search_btn = await page.query_selector('[id*="btnSearch"]')
+                        if search_btn:
+                            await search_btn.click()
+                            await page.wait_for_load_state("networkidle", timeout=15000)
+                            await asyncio.sleep(1)
+        except Exception as e:
+            logger.warning(f"[PageRow] Failed to set max rows: {e}")
+        
         if filter_type == "date_range" and year:
             from_date = f"{year}-01-01"
             to_date = f"{year}-12-31"
             await set_date_range(page, from_date, to_date, filter_fields)
         elif filter_type == "year" and year:
             await set_year_filter(page, str(year), filter_fields)
+        elif filter_type == "year_dropdown" and year:
+            # [Fix] Year Dropdown Support (e.g. GoodsRank)
+            dropdown_id = filter_fields.get("year_dropdown", "")
+            if dropdown_id:
+                try:
+                    await page.select_option(f"#{dropdown_id}", value=str(year))
+                    search_btn = await page.query_selector('[id*="btnSearch"]')
+                    if search_btn:
+                        await search_btn.click()
+                        await page.wait_for_load_state("networkidle", timeout=15000)
+                        await asyncio.sleep(2)
+                except Exception as e:
+                    logger.warning(f"Failed to set year dropdown: {e}")
         
-        # 데이터 추출
-        data = await get_all_pages_data(page, page_info["table_id"])
+        # 데이터 추출 - [Fix] Multi-Table Support
+        table_ids = page_info.get("table_ids", [])
+        table_id = page_info.get("table_id")
+        
+        all_data = []
+        if table_ids:
+            # Multi-Table extraction (e.g. resc_status, stock_sum)
+            for tid in table_ids:
+                tbl_data = await get_all_pages_data(page, tid)
+                all_data.extend(tbl_data)
+        elif table_id:
+            all_data = await get_all_pages_data(page, table_id)
+        
+        data = all_data
+        
+        # [Fix] Logic: Forward Fill Implementation
+        # Some tables (like M_Shape) use merged cells for keys (e.g. Date, SlipNo).
+        # We must fill them down.
+        forward_fill_keys = page_info.get("forward_fill_keys", [])
+        if forward_fill_keys and data:
+            last_values = {k: "" for k in forward_fill_keys}
+            for row in data:
+                for k in forward_fill_keys:
+                    val = row.get(k, "").strip()
+                    if val:
+                        last_values[k] = val
+                    else:
+                        row[k] = last_values[k] # Fill from last seen
+        
         result["data"] = data
         result["record_count"] = len(data)
         
@@ -279,6 +382,10 @@ async def extract_historical_data(
     
     if page_key:
         pages_to_extract = [p for p in pages_to_extract if p["key"] == page_key]
+    else:
+        # [Fix] Logic: Automatic Filter for 'Basic' and 'System'
+        # Per user request, we do not sync these folders.
+        pages_to_extract = [p for p in pages_to_extract if p.get("category") not in ["기초", "시스템"]]
     
     if filter_type:
         pages_to_extract = [p for p in pages_to_extract if p["filter_type"] == filter_type]
@@ -325,12 +432,18 @@ async def extract_historical_data(
                     print(f"✅ {result['record_count']}건")
                     await asyncio.sleep(1)
             else:
-                # 마스터 데이터 (1회 추출)
+                # 마스터 데이터 (1회 추출) - Master Mode
                 print(f"[{key}] {name}... ", end="", flush=True)
                 
                 result = await extract_page_data(page, page_info)
                 
-                output_file = output_dir / "current.json"
+                # [Fix] Logic: Save as {key}.json for Master pages
+                # Used to be 'current.json' which is ambiguous.
+                if page_info.get("is_master"):
+                     output_file = output_dir / f"{key}.json"
+                else:
+                     output_file = output_dir / "current.json"
+                     
                 with open(output_file, "w", encoding="utf-8") as f:
                     json.dump(result, f, ensure_ascii=False, indent=2)
                 
