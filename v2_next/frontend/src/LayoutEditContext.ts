@@ -1,3 +1,7 @@
 import React from 'react';
+import { buildDefaultLayoutEditContextValue } from './services/LayoutEditContext.service';
+import type { LayoutEditContextValue } from './types/LayoutEditContext.types';
 
-export const LayoutEditContext = React.createContext<{ isEditing: boolean; deleteWidget: (key: string) => void; updateWidget: (key: string, updates: any) => void }>({ isEditing: false, deleteWidget: () => {}, updateWidget: () => {} });
+export const LayoutEditContext = React.createContext<LayoutEditContextValue>(
+  buildDefaultLayoutEditContextValue()
+);

@@ -1,83 +1,44 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useState, useCallback, useRef } from 'react';
+import {
+  buildInitialModalState,
+  buildModalState,
+  normalizeModalOptions,
+} from './services/GlobalModalContext.service';
+import type {
+  ModalContextType,
+  ModalOptions,
+  ModalType,
+} from './types/GlobalModalContext.types';
 
-type ModalType = 'alert' | 'confirm' | 'prompt';
-
-interface ModalOptions {
-  title?: string;
-  defaultValue?: string;
-  variant?: 'info' | 'warning' | 'error' | 'success';
-  inputType?: 'text' | 'password';
-}
-
-interface ModalContextType {
-  alert: (message: string, options?: ModalOptions | string) => Promise<void>;
-  confirm: (message: string, options?: ModalOptions | string) => Promise<boolean>;
-  prompt: (message: string, defaultValue?: string, options?: ModalOptions | string) => Promise<string | null>;
-  close: (result?: any) => void;
-  state: ModalState;
-}
-
-interface ModalState {
-  isOpen: boolean;
-  type: ModalType;
-  message: string;
-  title?: string;
-  defaultValue?: string;
-  variant?: 'info' | 'warning' | 'error' | 'success';
-  inputType?: 'text' | 'password';
-}
-
-const ModalContext = createContext<ModalContextType | null>(null);
-
-export const useModal = () => {
-  const context = useContext(ModalContext);
-  if (!context) {
-    throw new Error('useModal must be used within a GlobalModalProvider');
-  }
-  return context;
-};
+export const ModalContext = createContext<ModalContextType | null>(null);
 
 export const GlobalModalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<ModalState>({
-    isOpen: false,
-    type: 'alert',
-    message: '',
-  });
+  const [state, setState] = useState(buildInitialModalState);
 
-  const resolver = useRef<((value: any) => void) | null>(null);
+  const resolver = useRef<((value: unknown) => void) | null>(null);
 
   const openModal = useCallback((type: ModalType, message: string, options: ModalOptions = {}) => {
-    setState({
-      isOpen: true,
-      type,
-      message,
-      title: options.title,
-      defaultValue: options.defaultValue,
-      variant: options.variant,
-      inputType: options.inputType,
-    });
+    setState(buildModalState(type, message, options));
 
-    return new Promise<any>((resolve) => {
+    return new Promise<unknown>((resolve) => {
       resolver.current = resolve;
     });
   }, []);
 
   const alert = useCallback((message: string, options?: ModalOptions | string) => {
-    const opts = typeof options === 'string' ? { title: options } : options;
-    return openModal('alert', message, opts);
+    return openModal('alert', message, normalizeModalOptions(options));
   }, [openModal]);
 
   const confirm = useCallback((message: string, options?: ModalOptions | string) => {
-    const opts = typeof options === 'string' ? { title: options } : options;
-    return openModal('confirm', message, opts);
+    return openModal('confirm', message, normalizeModalOptions(options));
   }, [openModal]);
 
   const prompt = useCallback((message: string, defaultValue?: string, options?: ModalOptions | string) => {
-    const opts = typeof options === 'string' ? { title: options } : options;
+    const opts = normalizeModalOptions(options);
     return openModal('prompt', message, { ...opts, defaultValue });
   }, [openModal]);
 
-  const close = useCallback((result?: any) => {
+  const close = useCallback((result?: unknown) => {
     setState((prev) => ({ ...prev, isOpen: false }));
     if (resolver.current) {
       resolver.current(result);

@@ -94,8 +94,8 @@ import {
 } from './constants/uiText';
 import * as LOGIC from './constants/logic';
 import * as THEME from './constants/theme';
-import { useModal } from './GlobalModalContext';
-import { useTheme } from './ThemeContext';
+import { useModal } from './hooks/useGlobalModalContext';
+import { useTheme } from './hooks/useThemeContext';
 
 const MAX_NOTIFICATIONS = 50;
 

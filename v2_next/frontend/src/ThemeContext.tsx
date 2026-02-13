@@ -1,68 +1,38 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback } from 'react';
+import {
+  applyThemeCycle,
+  persistThemeMode,
+  readThemeMode,
+  resolveThemeCycle,
+} from './services/ThemeContext.service';
+import type { ThemeMode, ThemeState } from './types/ThemeContext.types';
 
-export type ThemeMode = 'auto' | 'light' | 'dark';
-export type ThemeCycle = 'day' | 'sunset' | 'night';
+export type { ThemeMode, ThemeCycle, ThemeState } from './types/ThemeContext.types';
 
-interface ThemeState {
-  mode: ThemeMode;
-  activeCycle: ThemeCycle;
-  setMode: (mode: ThemeMode) => void;
-}
-
-const ThemeContext = createContext<ThemeState | null>(null);
-
-export const useTheme = () => {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return context;
-};
+export const ThemeContext = createContext<ThemeState | null>(null);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mode, setModeState] = useState<ThemeMode>(() => {
-    return (localStorage.getItem('theme_mode') as ThemeMode) || 'auto';
-  });
+  const [mode, setModeState] = useState<ThemeMode>(readThemeMode);
 
-  const [activeCycle, setActiveCycle] = useState<ThemeCycle>('day');
+  const [activeCycle, setActiveCycle] = useState<ThemeState['activeCycle']>('day');
 
   const setMode = useCallback((newMode: ThemeMode) => {
     setModeState(newMode);
-    localStorage.setItem('theme_mode', newMode);
-  }, []);
-
-  const calculateCycle = useCallback((): ThemeCycle => {
-    const hour = new Date().getHours();
-    // Day: 08:00 - 18:00
-    if (hour >= 8 && hour < 18) return 'day';
-    // Sunset: 18:00 - 20:00
-    if (hour >= 18 && hour < 20) return 'sunset';
-    // Night: 20:00 - 08:00 (else)
-    return 'night';
+    persistThemeMode(newMode);
   }, []);
 
   useEffect(() => {
     const updateTheme = () => {
-      let targetCycle: ThemeCycle = 'day';
-
-      if (mode === 'auto') {
-        targetCycle = calculateCycle();
-      } else if (mode === 'light') {
-        targetCycle = 'day';
-      } else if (mode === 'dark') {
-        targetCycle = 'night';
-      }
-
+      const targetCycle = resolveThemeCycle(mode, new Date().getHours());
       setActiveCycle(targetCycle);
-      document.body.setAttribute('data-theme', targetCycle);
+      applyThemeCycle(targetCycle);
     };
 
-    updateTheme(); // Initial call
+    updateTheme();
 
-    // Check every minute
     const interval = setInterval(updateTheme, 60 * 1000);
     return () => clearInterval(interval);
-  }, [mode, calculateCycle]);
+  }, [mode]);
 
   return (
     <ThemeContext.Provider value={{ mode, activeCycle, setMode }}>

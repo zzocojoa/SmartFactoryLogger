@@ -1,18 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   DEFAULT_ROW_HEIGHT,
   MIN_ROW_HEIGHT,
   MAX_ROW_HEIGHT,
   BASE_VIEWPORT_HEIGHT
 } from '../constants/logic';
-
-export interface ViewportScaleResult {
-  rowHeight: number;
-  scaleFactor: number;
-  viewportHeight: number;
-  viewportWidth: number;
-  aspectRatio: string;
-}
+import { resolveAspectRatioLabel, resolveRowHeight } from './useViewportScale.selectors';
+import { useViewportScaleEffects } from './useViewportScaleEffects';
+import type { ViewportScaleResult } from './useViewportScale.types';
+export { applyRowHeightToCSS } from './useViewportScale.service';
 
 /**
  * Hook to calculate dynamic row height based on viewport size.
@@ -23,27 +19,15 @@ export function useViewportScale(): ViewportScaleResult {
   const calculateScale = useCallback(() => {
     const vh = window.innerHeight;
     const vw = window.innerWidth;
-    
-    // Calculate scale factor based on viewport height
-    const scaleFactor = vh / BASE_VIEWPORT_HEIGHT;
-    
-    // Calculate row height with clamping
-    const rawRowHeight = DEFAULT_ROW_HEIGHT * scaleFactor;
-    const rowHeight = Math.max(MIN_ROW_HEIGHT, Math.min(MAX_ROW_HEIGHT, Math.round(rawRowHeight)));
-    
-    // Detect aspect ratio
-    const ratio = vw / vh;
-    let aspectRatio: string;
-    if (ratio >= 2.2) {
-      aspectRatio = '21:9';
-    } else if (ratio >= 1.6) {
-      aspectRatio = '16:9';
-    } else if (ratio >= 1.2) {
-      aspectRatio = '4:3';
-    } else {
-      aspectRatio = 'portrait';
-    }
-    
+    const { rowHeight, scaleFactor } = resolveRowHeight(
+      vh,
+      BASE_VIEWPORT_HEIGHT,
+      DEFAULT_ROW_HEIGHT,
+      MIN_ROW_HEIGHT,
+      MAX_ROW_HEIGHT
+    );
+    const aspectRatio = resolveAspectRatioLabel(vw, vh);
+
     return {
       rowHeight,
       scaleFactor,
@@ -54,29 +38,7 @@ export function useViewportScale(): ViewportScaleResult {
   }, []);
 
   const [scale, setScale] = useState<ViewportScaleResult>(calculateScale);
-
-  useEffect(() => {
-    const handleResize = () => {
-      setScale(calculateScale());
-    };
-
-    // Listen for resize events
-    window.addEventListener('resize', handleResize);
-    
-    // Initial calculation
-    handleResize();
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [calculateScale]);
+  useViewportScaleEffects({ calculateScale, setScale });
 
   return scale;
-}
-
-/**
- * Apply row height to CSS variable for Grafana Scenes grid override.
- */
-export function applyRowHeightToCSS(rowHeight: number): void {
-  document.documentElement.style.setProperty('--grid-row-height', `${rowHeight}px`);
 }

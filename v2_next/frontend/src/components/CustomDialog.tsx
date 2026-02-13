@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useModal } from '../GlobalModalContext';
+import { useModal } from '../hooks/useGlobalModalContext';
 
 export const CustomDialog: React.FC = () => {
   const { state, close } = useModal();

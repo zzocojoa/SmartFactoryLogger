@@ -11,7 +11,7 @@ import {
   ConfigUpdateResponse
 } from '../types';
 import { LABELS, MESSAGES } from '../constants/uiText';
-import { useModal } from '../GlobalModalContext';
+import { useModal } from './useGlobalModalContext';
 import {
   isValidIp,
   isValidNumberInput,
