@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import sys
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from playwright.async_api import async_playwright
@@ -481,6 +482,14 @@ async def run_browser_session(cycle_limit, user_id, password, pages, start_corre
     print(f"\n🚀 [브라우저 시작] {cycle_limit} 사이클 후 재시작 예정")
     
     correction_index = start_correction_index
+
+    current_loop = asyncio.get_running_loop()
+    if _should_use_threaded_loop(current_loop):
+        logger.error(
+            "SelectorEventLoop detected on Windows. "
+            "Playwright requires ProactorEventLoop for subprocess spawning."
+        )
+        return correction_index
     
     
     # EXE 환경에서 시스템에 설치된 브라우저를 찾도록 강제 설정
@@ -585,6 +594,69 @@ async def run_browser_session(cycle_limit, user_id, password, pages, start_corre
 
 
 _scheduler_task: Optional[asyncio.Task] = None
+_scheduler_loop: Optional[asyncio.AbstractEventLoop] = None
+_scheduler_thread: Optional[threading.Thread] = None
+
+
+def _has_reload_flag(argv: list[str]) -> bool:
+    return any(arg == "--reload" or arg.startswith("--reload=") for arg in argv)
+
+
+def _is_uvicorn_reload_mode() -> bool:
+    env_reload = os.getenv("UVICORN_RELOAD", "").strip().lower()
+    if env_reload in {"1", "true", "yes", "on"}:
+        return True
+    return _has_reload_flag(sys.argv)
+
+
+def _reload_guard_disabled() -> bool:
+    # Escape hatch for local debugging.
+    allow_reload = os.getenv("MES_SCHEDULER_ALLOW_RELOAD", "").strip().lower()
+    return allow_reload in {"1", "true", "yes", "on"}
+
+
+def _should_skip_scheduler_for_reload() -> bool:
+    return sys.platform == "win32" and _is_uvicorn_reload_mode() and not _reload_guard_disabled()
+
+
+def _should_use_threaded_loop(loop: asyncio.AbstractEventLoop) -> bool:
+    # On Windows + uvicorn --reload, SelectorEventLoop has no subprocess support.
+    return sys.platform == "win32" and isinstance(loop, asyncio.SelectorEventLoop)
+
+
+def _create_scheduler_loop() -> asyncio.AbstractEventLoop:
+    if sys.platform == "win32":
+        return asyncio.ProactorEventLoop()
+    return asyncio.new_event_loop()
+
+
+def _scheduler_thread_main():
+    global _scheduler_task
+    global _scheduler_loop
+    global _scheduler_thread
+
+    loop = _create_scheduler_loop()
+    _scheduler_loop = loop
+    asyncio.set_event_loop(loop)
+    _scheduler_task = loop.create_task(main_loop())
+
+    try:
+        loop.run_until_complete(_scheduler_task)
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.critical("Scheduler thread crashed", exc_info=e)
+    finally:
+        pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+        _scheduler_task = None
+        _scheduler_loop = None
+        _scheduler_thread = None
 
 async def main_loop():
     logger.info("MES Scheduler starting")
@@ -651,31 +723,80 @@ async def main_loop():
 async def start():
     """스케줄러 시작 (이미 실행 중이면 무시)"""
     global _scheduler_task
-    if _scheduler_task and not _scheduler_task.done():
+    global _scheduler_loop
+    global _scheduler_thread
+
+    if is_running():
         logger.info("Scheduler already running")
+        return
+
+    if _should_skip_scheduler_for_reload():
+        logger.warning(
+            "Scheduler start skipped in Windows uvicorn --reload mode. "
+            "Set MES_SCHEDULER_ALLOW_RELOAD=1 to force enable."
+        )
+        print(
+            "[MES Scheduler] Skipped in --reload mode on Windows. "
+            "Set MES_SCHEDULER_ALLOW_RELOAD=1 to enable."
+        )
         return
     
     loop = asyncio.get_running_loop()
+    if _should_use_threaded_loop(loop):
+        _scheduler_thread = threading.Thread(
+            target=_scheduler_thread_main,
+            name="mes-scheduler-loop",
+            daemon=True,
+        )
+        _scheduler_thread.start()
+        logger.info("Scheduler task started in dedicated loop thread")
+        return
+
+    _scheduler_loop = loop
     _scheduler_task = loop.create_task(main_loop())
-    logger.info("Scheduler task started")
+    logger.info("Scheduler task started on current loop")
 
 async def stop():
     """스케줄러 정지"""
     global _scheduler_task
+    global _scheduler_loop
+    global _scheduler_thread
+
+    if _scheduler_thread and _scheduler_thread.is_alive():
+        loop = _scheduler_loop
+        task = _scheduler_task
+        if loop and task and not task.done():
+            loop.call_soon_threadsafe(task.cancel)
+        await asyncio.to_thread(_scheduler_thread.join, 10)
+        if _scheduler_thread and _scheduler_thread.is_alive():
+            logger.warning("Scheduler thread did not stop within timeout")
+        else:
+            logger.info("Scheduler task stopped")
+        return
+
     if _scheduler_task and not _scheduler_task.done():
         _scheduler_task.cancel()
         try:
             await _scheduler_task
         except asyncio.CancelledError:
             pass
+        finally:
+            _scheduler_task = None
+            _scheduler_loop = None
         logger.info("Scheduler task stopped")
 
 def is_running():
     """실행 상태 확인"""
+    if _scheduler_thread and _scheduler_thread.is_alive():
+        return True
     return _scheduler_task is not None and not _scheduler_task.done()
 
 async def restart():
     """스케줄러 재시작 (설정 변경 시 호출)"""
+    if _should_skip_scheduler_for_reload():
+        logger.info("Scheduler restart skipped in Windows uvicorn --reload mode")
+        return
+
     await stop()
     await asyncio.sleep(1)  # 약간의 지연 후 시작 (취소 완료 보장)
     await start()
