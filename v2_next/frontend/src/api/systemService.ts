@@ -1,83 +1,72 @@
-import { apiClient } from './client';
+import type {
+  BrowseFolderParams,
+  BrowseFolderResponse,
+  CommLogInfoResponse,
+  ConnectionTestData,
+  CreatePathResponse,
+  LatestExportPathResponse,
+  ObservabilityExportRequest,
+  PathHealthRequestItem,
+  PathHealthResponse,
+  ReconnectResponse,
+  SnapshotPayload,
+  SystemHealthResponse,
+  SystemStatsResponse,
+} from './systemService.types';
+import {
+  fetchCommLogInfo,
+  fetchHealth,
+  fetchLatestExportPath,
+  fetchObservabilityErrors,
+  fetchStats,
+  postBrowseFolder,
+  postClearObservabilityErrors,
+  postConnectionTest,
+  postCreatePath,
+  postCreateSnapshot,
+  postObservabilityExport,
+  postOpenCommLogFile,
+  postOpenCommLogPath,
+  postOpenExportFile,
+  postOpenExportFolder,
+  postPathHealth,
+  postReconnect,
+} from './transport/systemService.transport';
 
 export const systemService = {
-  getHealth: async () => {
-    const response = await apiClient.get('/health');
-    return response.data;
-  },
+  getHealth: (): Promise<SystemHealthResponse> => fetchHealth(),
   
-  getStats: async () => {
-    const response = await apiClient.get('/stats');
-    return response.data;
-  },
+  getStats: (): Promise<SystemStatsResponse> => fetchStats(),
 
-  getObservabilityErrors: async (limit: number) => {
-    const response = await apiClient.get('/api/observability/errors', { params: { limit } });
-    return response.data;
-  },
+  getObservabilityErrors: (limit: number) => fetchObservabilityErrors(limit),
   
-  clearObservabilityErrors: async () => {
-    const response = await apiClient.post('/api/observability/errors/clear');
-    return response.data;
-  },
+  clearObservabilityErrors: postClearObservabilityErrors,
 
-  getLatestExportPath: async () => {
-    const response = await apiClient.get<{ path: string | null }>('/api/observability/export/latest');
-    return response.data;
-  },
+  getLatestExportPath: (): Promise<LatestExportPathResponse> => fetchLatestExportPath(),
 
-  exportObservability: async (params: { include_errors: boolean; front_errors: { type: string; message: string; source?: string; timestamp?: number }[] }) => {
-    const response = await apiClient.post<{ path?: string }>('/api/observability/export', params);
-    return response.data;
-  },
+  exportObservability: (params: ObservabilityExportRequest) => postObservabilityExport(params),
 
-  openExportFile: async () => {
-    return await apiClient.post('/api/observability/export/open-file');
-  },
+  openExportFile: postOpenExportFile,
 
-  openExportFolder: async () => {
-    return await apiClient.post('/api/observability/export/open-folder');
-  },
+  openExportFolder: postOpenExportFolder,
   
-  reconnect: async (): Promise<{ ok: boolean }> => {
-    const response = await apiClient.post<{ ok: boolean }>('/api/control/reconnect');
-    return response.data;
-  },
+  reconnect: (): Promise<ReconnectResponse> => postReconnect(),
   
-  createSnapshot: async (params: { image_base64: string; name: string; format: string }) => {
-    return await apiClient.post('/api/control/snapshot', params);
-  },
+  createSnapshot: (params: SnapshotPayload) => postCreateSnapshot(params),
 
-  getCommLogInfo: async () => {
-    const response = await apiClient.get('/api/logs/comm-metrics');
-    return response.data;
-  },
+  getCommLogInfo: (): Promise<CommLogInfoResponse> => fetchCommLogInfo(),
 
-  openCommLogPath: async () => {
-    return await apiClient.post('/api/logs/comm-metrics/open');
-  },
+  openCommLogPath: postOpenCommLogPath,
 
-  openCommLogFile: async () => {
-    return await apiClient.post('/api/logs/comm-metrics/open-file');
-  },
+  openCommLogFile: postOpenCommLogFile,
 
-  runConnectionTest: async (payload: Record<string, unknown> = {}): Promise<{ results: Record<string, { ok: boolean; message?: string }> }> => {
-    const response = await apiClient.post<{ results: Record<string, { ok: boolean; message?: string }> }>('/api/control/test-connection', payload);
-    return response.data;
-  },
+  runConnectionTest: (payload: Record<string, unknown> = {}): Promise<ConnectionTestData> =>
+    postConnectionTest(payload),
 
-  checkPathHealth: async (paths: { key: string; path: string }[]) => {
-    const response = await apiClient.post('/api/control/path-health', { paths });
-    return response.data;
-  },
+  checkPathHealth: (paths: PathHealthRequestItem[]): Promise<PathHealthResponse> => postPathHealth(paths),
 
-  createPath: async (path: string): Promise<{ ok: boolean }> => {
-    const response = await apiClient.post<{ ok: boolean }>('/api/control/path-create', { path });
-    return response.data;
-  },
+  createPath: (path: string): Promise<CreatePathResponse> => postCreatePath(path),
 
-  browseFolder: async (params?: { initial_dir?: string; title?: string }): Promise<{ ok: boolean; path: string | null }> => {
-    const response = await apiClient.post<{ ok: boolean; path: string | null }>('/api/control/folder-browse', params || {});
-    return response.data;
-  }
+  browseFolder: (params?: BrowseFolderParams): Promise<BrowseFolderResponse> =>
+    postBrowseFolder(params),
 };

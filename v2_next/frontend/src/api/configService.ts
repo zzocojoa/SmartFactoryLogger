@@ -1,64 +1,50 @@
-import { apiClient } from './client';
+import type {
+  ConfigPayload,
+  GenericApiResponse,
+  OverridePayload,
+  PasswordVerificationResponse,
+} from './configService.types';
+import {
+  fetchCentralStatus,
+  fetchConfig,
+  fetchNotice,
+  postApplyPending,
+  postCentralSync,
+  postClearPending,
+  postConfig,
+  postConnectionTest,
+  postNotice,
+  postRestoreBackup,
+  postRestoreDefaults,
+  postToggleOverride,
+  postVerifyPassword,
+} from './transport/configService.transport';
 
 export const configService = {
-  getConfig: async () => {
-    const response = await apiClient.get('/api/config');
-    return response.data;
-  },
+  getConfig: fetchConfig,
 
-  saveConfig: async (config: any) => {
-    const response = await apiClient.post('/api/config', config);
-    return response.data;
-  },
+  saveConfig: (config: ConfigPayload) => postConfig(config),
 
-  getNotice: async () => {
-    const response = await apiClient.get('/api/config/notice');
-    return response.data;
-  },
+  getNotice: fetchNotice,
 
-  saveNotice: async (content: string) => {
-    const response = await apiClient.post('/api/config/notice', { content });
-    return response.data;
-  },
-  
-  testConnection: async (target: string, params: any) => {
-    const response = await apiClient.post(`/api/config/test/${target}`, params);
-    return response.data;
-  },
+  saveNotice: (content: string) => postNotice(content),
 
-  getCentralStatus: async () => {
-    const response = await apiClient.get('/api/config/central-status');
-    return response.data;
-  },
+  testConnection: (target: string, params: GenericApiResponse) => postConnectionTest(target, params),
 
-  syncCentral: async () => {
-    const response = await apiClient.post('/api/config/sync');
-    return response.data;
-  },
+  getCentralStatus: fetchCentralStatus,
 
-  restoreDefaults: async () => {
-    return await apiClient.post('/api/config/restore-defaults');
-  },
+  syncCentral: postCentralSync,
 
-  restoreBackup: async () => {
-    return await apiClient.post('/api/config/restore-backup');
-  },
+  restoreDefaults: postRestoreDefaults,
 
-  applyPending: async () => {
-    return await apiClient.post('/api/config/pending/apply');
-  },
+  restoreBackup: postRestoreBackup,
 
-  clearPending: async () => {
-    return await apiClient.post('/api/config/pending/clear');
-  },
+  applyPending: postApplyPending,
 
-  toggleOverride: async (params: { enabled: boolean; password?: string; actor: string }) => {
-    const response = await apiClient.post('/api/config/override', params);
-    return response.data;
-  },
+  clearPending: postClearPending,
 
-  verifyPassword: async (password: string) => {
-    const response = await apiClient.post('/api/config/verify-password', { password });
-    return response.data;
-  }
+  toggleOverride: (params: OverridePayload) => postToggleOverride(params),
+
+  verifyPassword: (password: string): Promise<PasswordVerificationResponse> =>
+    postVerifyPassword(password),
 };

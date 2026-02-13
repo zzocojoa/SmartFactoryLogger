@@ -1,113 +1,89 @@
-import { apiClient } from './client';
-import { LOCAL_LAYOUT_STORAGE_KEY, STORAGE_MODE_KEY, StorageMode } from '../constants/logic';
-import { LayoutSnapshot, LayoutMap } from '../types';
+import { LOCAL_LAYOUT_STORAGE_KEY, STORAGE_MODE_KEY, type StorageMode } from '../constants/logic';
+import type { LayoutMap, LayoutSnapshot } from '../types';
+import {
+  buildClientLayoutPayload,
+  generateUUIDv4,
+  resolveStorageMode,
+} from './layoutService.mapper';
+import type { LayoutSavePayload } from './layoutService.types';
+import {
+  deleteClientLayoutSlot,
+  fetchClientLatestLayout,
+  fetchClientLayoutList,
+  fetchClientLayoutSlot,
+  fetchLayouts,
+  fetchLayoutSnapshot,
+  postClientLayout,
+  postDeleteLayout,
+  postRestoreLayout,
+  postSaveLayout,
+} from './transport/layoutService.transport';
 
-// Client UUID storage key
 const CLIENT_ID_KEY = 'sfl_client_id';
 
-// Generate a UUID v4
-function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-// Get or create client UUID
 function getClientId(): string {
   let clientId = localStorage.getItem(CLIENT_ID_KEY);
   if (!clientId) {
-    clientId = generateUUID();
+    clientId = generateUUIDv4();
     localStorage.setItem(CLIENT_ID_KEY, clientId);
     console.log(`[ClientLayout] Generated new client ID: ${clientId}`);
   }
   return clientId;
 }
 
-// Server-based layout service (existing - shared layouts)
 export const layoutService = {
-  getLayouts: async () => {
-    const response = await apiClient.get('/api/layouts');
-    return response.data;
-  },
-  
-  saveLayout: async (payload: any) => {
-    const response = await apiClient.post('/api/layouts', payload);
-    return response.data;
-  },
+  getLayouts: fetchLayouts,
 
-  getLayoutSnapshot: async () => {
-    const response = await apiClient.get('/api/layout');
-    return response.data;
-  },
+  saveLayout: (payload: LayoutSavePayload) => postSaveLayout(payload),
 
-  restoreLayout: async (slotId: string) => {
-    const response = await apiClient.post('/api/layouts/restore', { slot_id: slotId });
-    return response.data;
-  },
+  getLayoutSnapshot: fetchLayoutSnapshot,
 
-  deleteLayout: async (slotId: string) => {
-    const response = await apiClient.post('/api/layouts/delete', { slot_id: slotId });
-    return response.data;
-  }
+  restoreLayout: (slotId: string) => postRestoreLayout({ slot_id: slotId }),
+
+  deleteLayout: (slotId: string) => postDeleteLayout({ slot_id: slotId }),
 };
 
-// Client-specific layout service (uses backend API with UUID)
 export const localLayoutService = {
-  // Get client ID (generates one if not exists)
   getClientId,
 
-  // Get latest active layout for auto-restore
   getLocalLayout: async (): Promise<LayoutSnapshot | null> => {
     try {
       const clientId = getClientId();
-      const response = await apiClient.get(`/api/layouts/client/${clientId}/latest`);
-      return response.data as LayoutSnapshot;
+      return await fetchClientLatestLayout(clientId);
     } catch (e: any) {
       if (e?.response?.status === 404) {
-        return null; // No active layout
+        return null;
       }
       console.error('Failed to load client layout', e);
       return null;
     }
   },
 
-  // Get list of saved layouts for this client
   getLayoutList: async (): Promise<any[]> => {
     try {
       const clientId = getClientId();
-      const response = await apiClient.get(`/api/layouts/client/${clientId}/list`);
-      return response.data;
+      return await fetchClientLayoutList(clientId);
     } catch (e) {
       console.error('Failed to list client layouts', e);
       return [];
     }
   },
 
-  // Restore specific layout slot
   restoreLocalLayout: async (slotId: string): Promise<LayoutSnapshot | null> => {
     try {
       const clientId = getClientId();
-      const response = await apiClient.get(`/api/layouts/client/${clientId}/${slotId}`);
-      return response.data as LayoutSnapshot;
+      return await fetchClientLayoutSlot(clientId, slotId);
     } catch (e) {
       console.error('Failed to restore client layout slot', e);
       throw e;
     }
   },
 
-  // Save layout to server for this client (new slot)
   saveLocalLayout: async (layout: LayoutMap, name: string, cols: number = 60): Promise<boolean> => {
     try {
       const clientId = getClientId();
-      const payload = {
-        layout,
-        cols,
-        version: 'v2',
-        name,
-      };
-      await apiClient.post(`/api/layouts/client/${clientId}`, payload);
+      const payload = buildClientLayoutPayload(layout, name, cols);
+      await postClientLayout(clientId, payload);
       console.log(`[ClientLayout] Saved layout '${name}' for client: ${clientId}`);
       return true;
     } catch (e) {
@@ -116,11 +92,10 @@ export const localLayoutService = {
     }
   },
 
-  // Delete layout slot from server for this client
   deleteLocalLayout: async (slotId: string): Promise<void> => {
     try {
       const clientId = getClientId();
-      await apiClient.delete(`/api/layouts/client/${clientId}/${slotId}`);
+      await deleteClientLayoutSlot(clientId, slotId);
       console.log(`[ClientLayout] Deleted layout '${slotId}'`);
     } catch (e) {
       console.error('Failed to delete client layout', e);
@@ -128,11 +103,10 @@ export const localLayoutService = {
     }
   },
 
-  // Check if client has a layout saved (quick check via API)
   hasLocalLayout: async (): Promise<boolean> => {
     try {
       const clientId = getClientId();
-      await apiClient.get(`/api/layouts/client/${clientId}/latest`);
+      await fetchClientLatestLayout(clientId);
       return true;
     } catch (e: any) {
       if (e?.response?.status === 404) {
@@ -142,15 +116,16 @@ export const localLayoutService = {
     }
   },
 
-  // Storage mode preference (still stored in localStorage for quick access)
   getStorageMode: (): StorageMode => {
     const mode = localStorage.getItem(STORAGE_MODE_KEY);
-    return (mode === 'server') ? 'server' : 'local'; // Default to local
+    return resolveStorageMode(mode);
   },
 
   setStorageMode: (mode: StorageMode): void => {
     localStorage.setItem(STORAGE_MODE_KEY, mode);
     console.log(`[ClientLayout] Storage mode set to: ${mode}`);
-  }
+  },
 };
 
+// Keep the key exported for backward compatibility with existing storage migration logic.
+export { LOCAL_LAYOUT_STORAGE_KEY };
