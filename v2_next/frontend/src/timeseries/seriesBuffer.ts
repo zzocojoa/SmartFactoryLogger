@@ -1,4 +1,5 @@
 import { SeriesSample } from './seriesSampling';
+import { capSeriesSamples, pruneSeriesSamples } from './seriesBuffer.service';
 
 export class SeriesBuffer {
   private samples: SeriesSample[] = [];
@@ -17,17 +18,13 @@ export class SeriesBuffer {
 
   setMaxPoints(maxPoints?: number) {
     this.maxPoints = maxPoints;
-    if (this.maxPoints && this.samples.length > this.maxPoints) {
-      this.samples.splice(0, this.samples.length - this.maxPoints);
-    }
+    this.samples = capSeriesSamples(this.samples, this.maxPoints);
   }
 
   append(sample: SeriesSample) {
     this.samples.push(sample);
     this.prune(sample.timestampMs);
-    if (this.maxPoints && this.samples.length > this.maxPoints) {
-      this.samples.splice(0, this.samples.length - this.maxPoints);
-    }
+    this.samples = capSeriesSamples(this.samples, this.maxPoints);
   }
 
   getSamples() {
@@ -39,13 +36,6 @@ export class SeriesBuffer {
   }
 
   private prune(nowMs: number) {
-    const cutoff = nowMs - this.windowMs;
-    let index = 0;
-    while (index < this.samples.length && this.samples[index].timestampMs < cutoff) {
-      index += 1;
-    }
-    if (index > 0) {
-      this.samples = this.samples.slice(index);
-    }
+    this.samples = pruneSeriesSamples(this.samples, nowMs, this.windowMs);
   }
 }
