@@ -34,16 +34,16 @@ import {
   LayoutSnapshot,
   LayoutSlotSummary,
   LayoutMap
-} from './types';
-import { useSystemViewModel } from './hooks/useSystemViewModel';
-import { useSpotViewModel } from './hooks/useSpotViewModel';
-import { useConfigViewModel } from './hooks/useConfigViewModel';
-import { useLayoutViewModel } from './hooks/useLayoutViewModel';
-import { useMetricsViewModel } from './hooks/useMetricsViewModel';
-import { useViewportScale, applyRowHeightToCSS } from './hooks/useViewportScale';
+} from './shared/types';
+import { useSystemViewModel } from './domains/Observability/hooks/useSystemViewModel';
+import { useSpotViewModel } from './domains/FacilityData/hooks/useSpotViewModel';
+import { useConfigViewModel } from './domains/Configuration/hooks/useConfigViewModel';
+import { useLayoutViewModel } from './domains/Configuration/hooks/useLayoutViewModel';
+import { useMetricsViewModel } from './domains/FacilityData/hooks/useMetricsViewModel';
+import { useViewportScale, applyRowHeightToCSS } from './domains/Configuration/hooks/useViewportScale';
 import './App.css';
 import packageJson from '../package.json';
-import { UPlotChart } from './components/UPlotChart';
+import { UPlotChart } from './domains/FacilityData/components/UPlotChart';
 import uPlot from 'uplot';
 
 // UPlot Series Colors Mapping (matching index.css)
@@ -73,12 +73,12 @@ import { getDashboardScene, WidgetType, WidgetRegistry, DashboardItem, DASHBOARD
 import { SceneDataNode, SceneGridItemLike, SceneGridLayout, SceneGridItem, SceneObjectBase } from '@grafana/scenes';
 import { ReactWidget } from './scenes/ReactWidgetObject';
 import html2canvas from 'html2canvas';
-import { buildSeriesSample } from './timeseries/seriesSampling';
-import { SeriesBuffer } from './timeseries/seriesBuffer';
-import { buildGroupedFrames, buildTimeSeriesFrame, SeriesFrame } from './timeseries/seriesDataFrames';
-import { TIME_SERIES_CATALOG } from './timeseries/seriesCatalog';
-import { buildPanelData } from './timeseries/seriesPanelData';
-import { buildSeriesThresholds } from './timeseries/seriesThresholds';
+import { buildSeriesSample } from './domains/FacilityData/timeseries/seriesSampling';
+import { SeriesBuffer } from './domains/FacilityData/timeseries/seriesBuffer';
+import { buildGroupedFrames, buildTimeSeriesFrame, SeriesFrame } from './domains/FacilityData/timeseries/seriesDataFrames';
+import { TIME_SERIES_CATALOG } from './domains/FacilityData/timeseries/seriesCatalog';
+import { buildPanelData } from './domains/FacilityData/timeseries/seriesPanelData';
+import { buildSeriesThresholds } from './domains/FacilityData/timeseries/seriesThresholds';
 import {
   APP_TITLE,
   NOTICE_BODY_PREFIX,
@@ -91,15 +91,16 @@ import {
   MESSAGES,
   STATUS,
   CONFIG_LABELS,
-} from './constants/uiText';
-import * as LOGIC from './constants/logic';
-import * as THEME from './constants/theme';
-import { useModal } from './hooks/useGlobalModalContext';
-import { useTheme } from './hooks/useThemeContext';
+} from './shared/constants/uiText';
+import * as LOGIC from './shared/constants/logic';
+import * as THEME from './shared/constants/theme';
+import { useModal } from './shared/hooks/useGlobalModalContext';
+import { useTheme } from './shared/hooks/useThemeContext';
+import { AIChatbot } from './AI/components/AIChatbot';
 
 const MAX_NOTIFICATIONS = 50;
 
-import { LayoutEditContext } from './LayoutEditContext';
+import { LayoutEditContext } from './domains/Configuration/context/LayoutEditContext';
 
 // Initialize Scenes Runtime (guarded for HMR)
 if (typeof window !== 'undefined') {
@@ -115,8 +116,8 @@ if (typeof window !== 'undefined') {
 
 // ... (existing imports)
 
-import { apiClient, API_BASE } from './api/client';
-import { configService } from './api/configService';
+import { apiClient, API_BASE } from './shared/api/client';
+import { configService } from './domains/Configuration/api/configService';
 // metricService, spotService, layoutService moved to hooks
 
 const {
@@ -253,7 +254,7 @@ const APPLY_KEY_LABELS: Record<string, string> = {
 
 
 
-import { buildLayoutMap } from './utils/layoutUtils';
+import { buildLayoutMap } from './shared/utils/layoutUtils';
 import {
   calcRecoverySec,
   formatAgeSec,
@@ -265,8 +266,8 @@ import {
   formatOptionalText,
   formatTime,
   formatTimeFromSec,
-} from './utils/formatters';
-import { isValidIp, isValidNumberInput, isValidPort, parseThresholdValue } from './utils/validators';
+} from './shared/utils/formatters';
+import { isValidIp, isValidNumberInput, isValidPort, parseThresholdValue } from './shared/utils/validators';
 import {
   getEnvHumidityState,
   getEnvTempState,
@@ -280,7 +281,7 @@ import {
   mapPressLevel,
   mapSpeedLevel,
   mapSpotLevel,
-} from './utils/stateMappers';
+} from './shared/utils/stateMappers';
 
 const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -5724,8 +5725,11 @@ function TimeSeriesWidget() {
             </div>
           )}
       </div>
+
+      <AIChatbot />
     </div>
   );
 };
 
 export default App;
+

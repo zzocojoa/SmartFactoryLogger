@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AuthGuard } from '../components/mes/AuthGuard';
-import { PageSidebar, PageItem } from '../components/mes/PageSidebar';
-import { DynamicDataGrid } from '../components/mes/DynamicDataGrid';
-import { Pagination } from '../components/mes/Pagination';
-import { DataGridToolbar } from '../components/mes/DataGridToolbar';
-import { StatsContainer } from '../components/mes/StatsContainer';
-import { SettingsModal } from '../components/mes/SettingsModal';
-import { GrafanaEmbed } from '../components/mes/GrafanaEmbed';
-import { applyFilters, FilterState, detectDateColumn } from '../utils/dataGridUtils';
+import { AuthGuard } from '../domains/MESSync/components/mes/AuthGuard';
+import { PageSidebar, PageItem } from '../domains/MESSync/components/mes/PageSidebar';
+import { DynamicDataGrid } from '../domains/MESSync/components/mes/DynamicDataGrid';
+import { Pagination } from '../domains/MESSync/components/mes/Pagination';
+import { DataGridToolbar } from '../domains/MESSync/components/mes/DataGridToolbar';
+import { StatsContainer } from '../domains/MESSync/components/mes/StatsContainer';
+import { SettingsModal } from '../domains/MESSync/components/mes/SettingsModal';
+import { GrafanaEmbed } from '../domains/MESSync/components/mes/GrafanaEmbed';
+import { applyFilters, FilterState, detectDateColumn } from '../shared/utils/dataGridUtils';
 
 const MesDashboardContent: React.FC = () => {
     const [selectedPage, setSelectedPage] = useState<string | null>(null);

@@ -1,8 +1,9 @@
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent.parent))
-from v2_next.backend.mes_bridge.config_manager import get_credentials
+# Ensure project root (parent of backend/) is on sys.path.
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from backend.MESSync.MESSync_Config import get_credentials
 
 u, p = get_credentials()
 print(f"ID:{u}")

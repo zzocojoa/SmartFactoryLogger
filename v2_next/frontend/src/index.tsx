@@ -3,9 +3,9 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
-import { GlobalModalProvider } from './GlobalModalContext';
-import { CustomDialog } from './components/CustomDialog';
-import { ThemeProvider } from './ThemeContext';
+import { GlobalModalProvider } from './shared/context/GlobalModalContext';
+import { CustomDialog } from './shared/components/CustomDialog';
+import { ThemeProvider } from './shared/context/ThemeContext';
 
 // Lazy Components
 const App = lazy(() => import('./App'));

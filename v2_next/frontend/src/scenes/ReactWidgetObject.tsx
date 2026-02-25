@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { SceneObjectBase, SceneObjectState, SceneComponentProps } from '@grafana/scenes';
-import { LayoutEditContext } from '../LayoutEditContext';
+import { LayoutEditContext } from '../domains/Configuration/context/LayoutEditContext';
 
 export interface ReactWidgetState extends SceneObjectState {
   title?: string;

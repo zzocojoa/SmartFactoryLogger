@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 # Important: Add the directory containing the 'backend' folder to sys.path
-# This ensures that 'from backend.services...' works in all environments.
+# This ensures that 'from backend.Observability...' works in all environments.
 current_dir = Path(__file__).resolve().parent
 project_root = current_dir.parent
 if str(project_root) not in sys.path:
@@ -24,7 +24,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import time
-from backend.routers import mes_sync
+from backend.Api import Api_MESSync_Extended as mes_sync
 
 class SafeRotatingFileHandler(RotatingFileHandler):
     """
@@ -54,11 +54,11 @@ from urllib.request import Request, urlopen
 from typing import Any
 
 # Import Service Layer using absolute imports
-from backend.services.plc_service import plc_service
-from backend.services.logger_service import logger_service
-from backend.services.comm_metrics_logger import comm_metrics_logger_service
-from backend.services.observability_service import observability_service
-from backend.services.layout_service import (
+from backend.FacilityData.FacilityData_Logic_Service import plc_service
+from backend.FacilityData.FacilityData_DB_Logger import logger_service
+from backend.Observability.Observability_Logic_MetricsLogger import comm_metrics_logger_service
+from backend.Observability.Observability_Logic_Service import observability_service
+from backend.Configuration.Configuration_Logic_Layout import (
     delete_layout_slot,
     get_active_layout,
     get_layout_meta,
@@ -67,7 +67,7 @@ from backend.services.layout_service import (
     restore_layout_slot,
     save_layout_slot
 )
-from backend.services.config_service import (
+from backend.Configuration.Configuration_Logic_Service import (
     apply_pending_config,
     clear_pending_config,
     get_config_snapshot,
@@ -76,17 +76,18 @@ from backend.services.config_service import (
     restore_defaults,
     restore_backup,
 )
-from backend.services.config_sync import config_sync_agent
-from backend.services.config_watch import config_watch_service
-from backend.models.config_model import ConfigUpdate, OverrideToggle, SettingsConfig
-from backend.services import spot_control
-from backend.models.data_model import FactoryData
-from backend.services.verification_service import compare_with_reference
+from backend.Configuration.Configuration_Logic_Sync import config_sync_agent
+from backend.Configuration.Configuration_Logic_Watch import config_watch_service
+from backend.Configuration.Configuration_Structure import ConfigUpdate, OverrideToggle, SettingsConfig
+from backend.FacilityData import FacilityData_Logic_Spot as spot_control
+from backend.FacilityData.FacilityData_Structure import FactoryData
+from backend.Observability.Observability_Logic_Verification import compare_with_reference
 from backend import config
-from backend.mes_bridge import scheduler as mes_scheduler
-from backend.mes_bridge import db_manager as mes_db
-from backend.mes_bridge.pages_registry import MES_PAGES
-from backend.routers import mes as mes_router
+from backend.MESSync import MESSync_Logic_Scheduler as mes_scheduler
+from backend.MESSync import MESSync_DB as mes_db
+from backend.MESSync.MESSync_Structure import MES_PAGES
+from backend.Api import Api_MESSync as mes_router
+from backend.Api import Api_AITools as ai_router
 
 class ConnectionTarget(BaseModel):
     ip: str | None = None
@@ -719,6 +720,7 @@ app = FastAPI(
 # Register Routers
 app.include_router(mes_router.router, prefix="/api/mes", tags=["MES"])
 app.include_router(mes_sync.router, prefix="/api/mes/sync", tags=["MES Sync"])
+app.include_router(ai_router.router, prefix="/api", tags=["AI Tool Calling"])
 
 # CORS (Allow Frontend Access)
 app.add_middleware(
@@ -1731,34 +1733,7 @@ def shutdown(payload: ShutdownRequest):
     return {"ok": True}
 
 # --- MES Data APIs ---
-@app.get("/api/mes/pages")
-async def list_mes_pages():
-    """List all available MES pages and their metadata."""
-    try:
-        pages = []
-        for key, info in MES_PAGES.items():
-            pages.append({
-                "key": key,
-                "name": info["name"],
-                "category": info["category"],
-                "has_table": info.get("has_table", False)
-            })
-        return {"pages": pages}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/mes/latest/{page_key}")
-async def get_mes_latest_data(page_key: str):
-    """Fetch the most recently collected data for a specific page."""
-    try:
-        data = mes_db.get_latest_data(page_key)
-        if not data:
-            raise HTTPException(status_code=404, detail="Data not found for the requested page")
-        return data
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# (Moved to Api_MESSync.py)
 
 # --- Static File Serving (Frontend) ---
 # Check common locations for frontend dist
