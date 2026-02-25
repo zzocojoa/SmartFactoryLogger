@@ -111,7 +111,7 @@ async def _prefetch_loop():
     _prefetch_running = True
     
     # Use logger for critical errors
-    from ..MESSync.logger_config import get_logger
+    from ..MESSync.MESSync_Logger import get_logger
     logger = get_logger("spot_control")
     
     while _prefetch_running:
