@@ -37,14 +37,15 @@ export const CustomDialog: React.FC = () => {
 
   return (
     <div className="custom-modal-overlay">
-      <div className="custom-modal-container">
+      <div className="custom-modal-content">
         {state.title && (
-          <div className="custom-modal-title">{state.title}</div>
+          <div className="custom-modal-header">
+            <div className="custom-modal-title">{state.title}</div>
+          </div>
         )}
-        <div className="custom-modal-message">{state.message}</div>
-        
-        {state.type === 'prompt' && (
-          <div className="custom-modal-input-wrapper">
+        <div className="custom-modal-body">
+          {state.message}
+          {state.type === 'prompt' && (
             <input
               ref={inputRef}
               type={state.inputType || 'text'}
@@ -52,8 +53,8 @@ export const CustomDialog: React.FC = () => {
               defaultValue={state.defaultValue || ''}
               onKeyDown={handleKeyDown}
             />
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="custom-modal-actions">
           {state.type !== 'alert' && (
