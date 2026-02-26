@@ -28,6 +28,7 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       alias: [
+        { find: '@', replacement: resolve(__dirname, 'src') },
         { find: '@grafana/scenes', replacement: '@grafana/scenes/dist/index.js' },
         {
           find: /^react-router-dom$/,

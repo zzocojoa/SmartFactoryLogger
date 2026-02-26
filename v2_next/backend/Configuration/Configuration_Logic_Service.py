@@ -10,6 +10,7 @@ from .. import config
 from backend.Configuration.Configuration_Structure import ConfigUpdate
 from backend.Configuration.Configuration_DB_Manager import config_manager
 from . import Configuration_Logic_Meta as config_meta
+import functools
 
 
 def _config_path() -> Path:
@@ -91,7 +92,10 @@ _THRESHOLD_KEYS = [
     "endpos",
 ]
 
+def clear_snapshot_cache() -> None:
+    get_config_snapshot.cache_clear()
 
+@functools.lru_cache(maxsize=1)
 def get_config_snapshot() -> dict:
     path = _config_path()
     parser, encoding = _load_parser(path)
@@ -294,7 +298,9 @@ def apply_pending_config() -> dict:
         settings.pop("password", None)
     payload = ConfigUpdate(**payload_data)
     source = pending.get("source") or "local"
-    return update_config(payload, source=source, override_allowed=source != "local")
+    res = update_config(payload, source=source, override_allowed=source != "local")
+    clear_snapshot_cache()
+    return res
 
 
 def clear_pending_config() -> dict:
@@ -303,6 +309,7 @@ def clear_pending_config() -> dict:
     if not pending_path.exists():
         raise FileNotFoundError("Pending config not found")
     _clear_pending(path)
+    clear_snapshot_cache()
     return {"ok": True, "path": str(pending_path)}
 
 
@@ -334,7 +341,9 @@ def restore_defaults() -> dict:
             "enable": threshold_enable,
         },
     )
-    return update_config(payload, source="local")
+    res = update_config(payload, source="local")
+    clear_snapshot_cache()
+    return res
 
 
 def restore_backup() -> dict:
@@ -351,6 +360,7 @@ def restore_backup() -> dict:
     meta = config_meta.record_local_update()
     changes = config_manager.reload()
     apply_result = config_manager.apply_changes(changes)
+    clear_snapshot_cache()
     return {
         "ok": True,
         "config_path": str(path),
@@ -514,6 +524,7 @@ def update_config(
         meta = config_meta.record_local_update()
     changes = config_manager.reload()
     apply_result = config_manager.apply_changes(changes)
+    clear_snapshot_cache()
     return {
         "ok": True,
         "config_path": str(path),

@@ -1,6 +1,8 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
-import { User, Bot, Wrench } from 'lucide-react';
+import User from 'lucide-react/dist/esm/icons/user';
+import Bot from 'lucide-react/dist/esm/icons/bot';
+import Wrench from 'lucide-react/dist/esm/icons/wrench';
 import { ChatMessage as MessageType } from '../hooks/useAIAgent';
 
 export const ChatMessage: React.FC<{ msg: MessageType }> = ({ msg }) => {

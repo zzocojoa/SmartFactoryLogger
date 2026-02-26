@@ -88,6 +88,11 @@ class ConfigWatchService:
                 if not changes:
                     self.logger.info("Config watch: file changed but no config value differences.")
                     continue
+                
+                # Clear the frontend snapshot cache now that the file has changed
+                from backend.Configuration.Configuration_Logic_Service import clear_snapshot_cache
+                clear_snapshot_cache()
+                
                 apply_result = config_manager.apply_changes(changes)
                 self.logger.info(
                     "Config watch: applied=%s pending=%s",

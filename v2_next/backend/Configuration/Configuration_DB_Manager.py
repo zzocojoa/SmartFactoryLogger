@@ -365,6 +365,13 @@ class ConfigManager:
         for key in _THRESHOLD_KEYS:
             threshold_keys.add(f"thresholds.values.{key}")
             threshold_keys.add(f"thresholds.enable.{key}")
+        
+        mes_keys = {
+            "mes.enabled",
+            "mes.userid",
+            "mes.starthour",
+            "mes.endhour",
+        }
 
         log_changed = [key for key in changes if key in log_keys]
         security_changed = [key for key in changes if key in security_keys]
@@ -373,6 +380,7 @@ class ConfigManager:
         spot_changed = [key for key in changes if key in spot_keys]
         plc_changed = [key for key in changes if key in plc_keys]
         threshold_changed = [key for key in changes if key in threshold_keys]
+        mes_changed = [key for key in changes if key in mes_keys]
 
         if log_changed:
             log_path_value = settings.get("logpath")
@@ -492,6 +500,31 @@ class ConfigManager:
             applied.extend(sorted(threshold_changed))
         if security_changed:
             applied.extend(sorted(security_changed))
+        
+        if mes_changed:
+            mes_cfg = values.get("mes", {})
+            config.MES_ENABLED = bool(mes_cfg.get("enabled", config.DEFAULT_MES_ENABLED))
+            config.MES_USER_ID = str(mes_cfg.get("userid") or config.DEFAULT_MES_USER_ID)
+            try:
+                config.MES_START_HOUR = int(mes_cfg.get("starthour", config.DEFAULT_MES_START_HOUR))
+            except Exception:
+                config.MES_START_HOUR = int(config.DEFAULT_MES_START_HOUR)
+            try:
+                config.MES_END_HOUR = int(mes_cfg.get("endhour", config.DEFAULT_MES_END_HOUR))
+            except Exception:
+                config.MES_END_HOUR = int(config.DEFAULT_MES_END_HOUR)
+            
+            # Clear MESSync cache if loaded
+            import sys
+            if "backend.MESSync.MESSync_Logic_Scheduler" in sys.modules:
+                try:
+                    scheduler = sys.modules["backend.MESSync.MESSync_Logic_Scheduler"]
+                    if hasattr(scheduler, "get_operating_hours"):
+                        scheduler.get_operating_hours.cache_clear()
+                except Exception:
+                    pass
+            
+            applied.extend(sorted(mes_changed))
 
         for key in changes:
             if key not in applied and key not in pending:

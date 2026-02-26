@@ -55,7 +55,7 @@ export function applyFilters(data: any[], state: FilterState): any[] {
   }
 
   if (state.sortColumn) {
-    result.sort((a, b) => {
+    result = [...result].sort((a, b) => {
       const aVal = String(a[state.sortColumn!] ?? '');
       const bVal = String(b[state.sortColumn!] ?? '');
       const cmp = aVal.localeCompare(bVal, 'ko', { numeric: true });

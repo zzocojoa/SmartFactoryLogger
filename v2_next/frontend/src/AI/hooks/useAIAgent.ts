@@ -70,12 +70,25 @@ export const useAIAgent = () => {
         
         // No tool calls means the model produced a final text response.
         if (!responseMessage.tool_calls || responseMessage.tool_calls.length === 0) {
-          setMessages([...currentMessages]);
+          setMessages(prev => {
+            // Replace the last assistant message (which was "thinking") or append
+            const temp = [...prev];
+            if (temp.length > 0 && temp[temp.length - 1].role === 'assistant' && !temp[temp.length - 1].content) {
+              temp.pop();
+            }
+            return [...temp, responseMessage];
+          });
           break;
         }
 
         // Display "assistant is thinking/calling tools" in the UI sequence
-        setMessages([...currentMessages]); 
+        setMessages(prev => {
+          const temp = [...prev];
+          if (temp.length > 0 && temp[temp.length - 1].role === 'assistant' && !temp[temp.length - 1].content) {
+            temp.pop();
+          }
+          return [...temp, responseMessage];
+        }); 
         
         for (const toolCall of responseMessage.tool_calls) {
           if (toolCall.type === 'function') {

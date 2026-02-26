@@ -4,13 +4,13 @@ import './index.css';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { GlobalModalProvider } from './shared/context/GlobalModalContext';
-import { CustomDialog } from './shared/components/CustomDialog';
 import { ThemeProvider } from './shared/context/ThemeContext';
 
 // Lazy Components
 const App = lazy(() => import('./App'));
 const Home = lazy(() => import('./pages/Home'));
 const MesDashboard = lazy(() => import('./pages/MesDashboard').then(module => ({ default: module.MesDashboard })));
+const CustomDialog = lazy(() => import('./shared/components/CustomDialog').then(module => ({ default: module.CustomDialog })));
 
 // Loading Fallback
 const LoadingFallback = () => (
@@ -43,9 +43,9 @@ root.render(
               <Route path="/dashboard" element={<App />} />
               <Route path="/mes-dashboard" element={<MesDashboard />} />
             </Routes>
+            <CustomDialog />
           </Suspense>
         </BrowserRouter>
-        <CustomDialog />
       </ThemeProvider>
     </GlobalModalProvider>
   </React.StrictMode>

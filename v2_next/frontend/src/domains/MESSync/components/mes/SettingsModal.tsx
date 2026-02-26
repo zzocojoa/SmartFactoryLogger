@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Calendar, RefreshCw, AlertTriangle, Loader2, Calculator, Settings } from 'lucide-react';
+import X from 'lucide-react/dist/esm/icons/x';
+import Calendar from 'lucide-react/dist/esm/icons/calendar';
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
+import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
+import Calculator from 'lucide-react/dist/esm/icons/calculator';
+import Settings from 'lucide-react/dist/esm/icons/settings';
 
 interface SettingsModalProps {
   isOpen: boolean;

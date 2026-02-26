@@ -43,36 +43,26 @@ import { useMetricsViewModel } from './domains/FacilityData/hooks/useMetricsView
 import { useViewportScale, applyRowHeightToCSS } from './domains/Configuration/hooks/useViewportScale';
 import './App.css';
 import packageJson from '../package.json';
-import { UPlotChart } from './domains/FacilityData/components/UPlotChart';
-import uPlot from 'uplot';
+const UPlotChart = React.lazy(() => import('./domains/FacilityData/components/UPlotChart').then(m => ({ default: m.UPlotChart })));
+import type uPlot from 'uplot';
 
-// UPlot Series Colors Mapping (matching index.css)
-const SERIES_COLORS: Record<string, string> = {
-  Spot: '#ef4444',
-  Press: '#f59e0b',
-  Temp_F: '#3b82f6',
-  Temp_B: '#8b5cf6',
-  Speed: '#10b981',
-  EndPos: '#f97316',
-  Count: '#14b8a6',
-  Billet_Length: '#ec4899',
-  Billet_Temp: '#d946ef',
-  Mold1: '#aaaaaa',
-  Mold2: '#aaaaaa',
-  Mold3: '#aaaaaa',
-  Mold4: '#aaaaaa',
-  Mold5: '#aaaaaa',
-  Mold6: '#aaaaaa',
-  At_Temp: '#06b6d4',
-  At_Pre: '#84cc16'
-};
+// --- Widget Imports ---
+import { KpiComponent } from './domains/FacilityData/components/widgets/KpiWidget';
+import { SpotComponent } from './domains/FacilityData/components/widgets/SpotWidget';
+import { TempsComponent } from './domains/FacilityData/components/widgets/TempsWidget';
+import { MoldsComponent } from './domains/FacilityData/components/widgets/MoldsWidget';
+import { EnvComponent } from './domains/FacilityData/components/widgets/EnvWidget';
+import { CameraComponent } from './domains/FacilityData/components/widgets/CameraWidget';
+import { TimeSeriesWidget } from './domains/FacilityData/components/widgets/TimeSeriesWidget';
+
+// UPlot Series Colors Mapping - Moved to seriesCatalog.ts
+import { SERIES_COLORS } from './domains/FacilityData/timeseries/seriesCatalog';
 
 /* Recharts imports removed */
 import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { getDashboardScene, WidgetType, WidgetRegistry, DashboardItem, DASHBOARD_LAYOUT_KEYS } from './scenes/DashboardScene';
 import { SceneDataNode, SceneGridItemLike, SceneGridLayout, SceneGridItem, SceneObjectBase } from '@grafana/scenes';
 import { ReactWidget } from './scenes/ReactWidgetObject';
-import html2canvas from 'html2canvas';
 import { buildSeriesSample } from './domains/FacilityData/timeseries/seriesSampling';
 import { SeriesBuffer } from './domains/FacilityData/timeseries/seriesBuffer';
 import { buildGroupedFrames, buildTimeSeriesFrame, SeriesFrame } from './domains/FacilityData/timeseries/seriesDataFrames';
@@ -96,7 +86,7 @@ import * as LOGIC from './shared/constants/logic';
 import * as THEME from './shared/constants/theme';
 import { useModal } from './shared/hooks/useGlobalModalContext';
 import { useTheme } from './shared/hooks/useThemeContext';
-import { AIChatbot } from './AI/components/AIChatbot';
+const AIChatbot = React.lazy(() => import('./AI/components/AIChatbot').then(m => ({ default: m.AIChatbot })));
 
 const MAX_NOTIFICATIONS = 50;
 
@@ -112,13 +102,13 @@ if (typeof window !== 'undefined') {
   initScenesRuntime();
 }
 
-
-
-// ... (existing imports)
-
 import { apiClient, API_BASE } from './shared/api/client';
 import { configService } from './domains/Configuration/api/configService';
-// metricService, spotService, layoutService moved to hooks
+// Data Contexts
+import { FactoryDataContext } from './domains/FacilityData/context/FactoryDataContext';
+import { SpotContext } from './domains/FacilityData/context/SpotContext';
+import { UIContext } from './domains/FacilityData/context/UIContext';
+import { SnapshotContext } from './domains/FacilityData/context/SnapshotContext';
 
 const {
   SPOT_WARN_TEMP,
@@ -283,356 +273,26 @@ import {
   mapSpotLevel,
 } from './shared/utils/stateMappers';
 
-const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
-const buildSparklinePaths = (
-  values: number[],
-  width: number,
-  height: number,
-  thresholds: number[] = [],
-  domain?: { min?: number; max?: number }
-) => {
-  if (values.length === 0) {
-    return {
-      linePath: '',
-      areaPath: '',
-      points: [] as Array<{ x: number; y: number }>,
-      thresholdLines: [] as Array<{ y: number; value: number }>,
-    };
-  }
-  const min = Number.isFinite(domain?.min)
-    ? Math.min(domain?.min as number, ...values)
-    : Math.min(...values);
-  const max = Number.isFinite(domain?.max)
-    ? Math.max(domain?.max as number, ...values)
-    : Math.max(...values);
-  const range = Math.max(max - min, 1);
-  const lastIndex = Math.max(values.length - 1, 1);
-  const points = values.map((value, index) => {
-    const x = (index / lastIndex) * width;
-    const y = height - ((value - min) / range) * height;
-    return { x, y };
-  });
-  const linePath = points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)},${point.y.toFixed(2)}`)
-    .join(' ');
-  const areaPath = `${linePath} L${width.toFixed(2)},${height.toFixed(2)} L0,${height.toFixed(2)} Z`;
-  const thresholdLines = thresholds
-    .filter((value) => Number.isFinite(value))
-    .map((value) => {
-      const clamped = clampNumber(value, min, max);
-      const y = height - ((clamped - min) / range) * height;
-      return { y, value };
-    });
-  return { linePath, areaPath, points, thresholdLines };
-};
-
-const useLastValidNumber = (value: number | null | undefined) => {
-  const lastRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      lastRef.current = value;
-    }
-  }, [value]);
-
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-  return lastRef.current;
-};
-
-const useSustainedFlag = (condition: boolean, durationMs: number) => {
-  const [active, setActive] = useState(false);
-  const sinceRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const now = Date.now();
-    if (condition) {
-      if (sinceRef.current === null) {
-        sinceRef.current = now;
-      }
-      if (!active && now - sinceRef.current >= durationMs) {
-        setActive(true);
-      }
-    } else {
-      sinceRef.current = null;
-      if (active) {
-        setActive(false);
-      }
-    }
-  }, [condition, durationMs, active]);
-
-  return active;
-};
-
-type ThresholdLevel = 'normal' | 'warn' | 'danger';
-
-const useThresholdLevel = (value: number, warnThreshold: number, dangerThreshold: number, holdMs: number) => {
-  const [level, setLevel] = useState<ThresholdLevel>('normal');
-  const warnSinceRef = useRef<number | null>(null);
-  const dangerSinceRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!Number.isFinite(value)) {
-      warnSinceRef.current = null;
-      dangerSinceRef.current = null;
-      return;
-    }
-
-    const now = Date.now();
-
-    if (value >= dangerThreshold) {
-      if (dangerSinceRef.current === null) {
-        dangerSinceRef.current = now;
-      }
-      warnSinceRef.current = null;
-      if (now - dangerSinceRef.current >= holdMs && level !== 'danger') {
-        setLevel('danger');
-      }
-      return;
-    }
-
-    dangerSinceRef.current = null;
-
-    if (value >= warnThreshold) {
-      if (warnSinceRef.current === null) {
-        warnSinceRef.current = now;
-      }
-      if (level === 'danger') {
-        setLevel('warn');
-      }
-      if (now - warnSinceRef.current >= holdMs && level !== 'warn') {
-        setLevel('warn');
-      }
-      return;
-    }
-
-    warnSinceRef.current = null;
-    if (level !== 'normal') {
-      setLevel('normal');
-    }
-  }, [value, warnThreshold, dangerThreshold, holdMs, level]);
-
-  return level;
-};
-
-
-type CommBadge = {
-  key: string;
-  text: string;
-  title: string;
-  state: 'ok' | 'warn' | 'error' | 'idle';
-};
-
-const buildCommBadge = (
-  key: string,
-  metrics?: CommChannelMetrics,
-  nowMs?: number | null
-): CommBadge => {
-  if (!metrics) {
-    return { key, text: `${key} --`, title: `${key}: no data`, state: 'idle' };
-  }
-  const connected = Boolean(metrics.connected);
-  const failures = (metrics.connect_failures ?? 0) + (metrics.read_failures ?? 0);
-  const hasError = Boolean(metrics.last_error_time || failures > 0);
-  const state: CommBadge['state'] = connected ? 'ok' : hasError ? 'error' : 'warn';
-  const backoff = metrics.backoff_sec ?? 0;
-  const recoveryCount = metrics.recovery_count ?? 0;
-  const totalDowntime = metrics.total_downtime_sec ?? null;
-  const currentDowntime = metrics.current_downtime_sec ?? null;
-  const lastDisconnect = metrics.last_disconnect_time ?? null;
-  const lastRecoveryAt = metrics.last_recovery_at ?? null;
-  const mergeState = metrics.merge_blocks === undefined ? '' : `Merge ${metrics.merge_blocks ? 'ON' : 'OFF'}`;
-  const titleParts = [
-    `${key} ${connected ? '연결됨' : '끊김'}`,
-    `실패 ${failures}`,
-    `백오프 ${backoff}s`,
-    `마지막 오류 ${formatTimeFromSec(metrics.last_error_time)}`,
-    `오류 후 경과 ${formatAgeSec(metrics.last_error_time ?? null, nowMs ?? null)}`,
-    `복구횟수 ${recoveryCount}`,
-    `다운타임 ${formatOptionalSeconds(currentDowntime)} / 누적 ${formatOptionalSeconds(totalDowntime)}`,
-    `최근 끊김 ${formatTimeFromSec(lastDisconnect)}`,
-    `최근 복구 ${formatTimeFromSec(lastRecoveryAt)}`,
-  ];
-  if (metrics.last_recovery_sec !== null && metrics.last_recovery_sec !== undefined) {
-    titleParts.push(`복구시간 ${Math.round(metrics.last_recovery_sec)}s`);
-  }
-  if (mergeState) {
-    titleParts.push(mergeState);
-  }
-  if (metrics.last_error) {
-    titleParts.push(`메시지 ${metrics.last_error}`);
-  }
-  return {
-    key,
-    text: `${key} ${connected ? 'OK' : 'DOWN'}`,
-    title: titleParts.join(' | '),
-    state,
-  };
-};
-
-const buildSpotCommBadge = (
-  key: string,
-  metrics?: CommSpotMetrics,
-  nowMs?: number | null,
-  refreshMs?: number | null
-): CommBadge => {
-  if (!metrics) {
-    return { key, text: `${key} --`, title: `${key}: no data`, state: 'idle' };
-  }
-  const lastSuccess = metrics.last_success_time ?? null;
-  const lastError = metrics.last_error_time ?? null;
-  const readFailures = metrics.read_failures ?? 0;
-  const ageMs = lastSuccess && nowMs ? Math.max(0, nowMs - lastSuccess * 1000) : null;
-  const staleMs = Math.max(5000, Math.round((refreshMs ?? 1000) * 3));
-  let state: CommBadge['state'] = 'idle';
-  let label = 'IDLE';
-  if (lastSuccess && ageMs !== null && ageMs <= staleMs) {
-    state = 'ok';
-    label = 'OK';
-  } else if (lastSuccess && ageMs !== null && ageMs > staleMs) {
-    state = 'warn';
-    label = 'STALE';
-  } else if (lastError || readFailures > 0) {
-    state = 'error';
-    label = 'DOWN';
-  } else {
-    state = 'warn';
-    label = 'WAIT';
-  }
-  const titleParts = [
-    `${key} ${label}`,
-    `최근 성공 ${formatTimeFromSec(lastSuccess)}`,
-    `최근 오류 ${formatTimeFromSec(lastError)}`,
-    `오류 후 경과 ${formatAgeSec(lastError, nowMs ?? null)}`,
-    `실패 ${readFailures}`,
-  ];
-  return {
-    key,
-    text: `${key} ${label}`,
-    title: titleParts.join(' | '),
-    state,
-  };
-};
-
-const buildThresholdStateFromConfig = (thresholds?: ConfigSnapshot['values']['thresholds']): ThresholdState => {
-  const enable = thresholds?.enable ?? {};
-  const values = thresholds?.values ?? {};
-  const buildEntry = (key: ThresholdKey): ThresholdEntry => ({
-    enabled: Boolean(enable[key as keyof typeof enable]),
-    value: parseThresholdValue(values[key as keyof typeof values]),
-  });
-  return {
-    masterOn: Boolean(enable.master_on),
-    entries: {
-      speed: buildEntry('speed'),
-      press: buildEntry('press'),
-      spot: buildEntry('spot'),
-      temp_f: buildEntry('temp_f'),
-      temp_b: buildEntry('temp_b'),
-      billet: buildEntry('billet'),
-      billet_temp: buildEntry('billet_temp'),
-      at_temp: buildEntry('at_temp'),
-      at_pre: buildEntry('at_pre'),
-      count: buildEntry('count'),
-      endpos: buildEntry('endpos'),
-    },
-  };
-};
-
-const buildThresholdStateFromForm = (form: SettingsFormState): ThresholdState => ({
-  masterOn: form.thresholdMasterOn,
-  entries: {
-    speed: { enabled: form.thresholdSpeedEnabled, value: parseThresholdValue(form.thresholdSpeedValue) },
-    press: { enabled: form.thresholdPressEnabled, value: parseThresholdValue(form.thresholdPressValue) },
-    spot: { enabled: form.thresholdSpotEnabled, value: parseThresholdValue(form.thresholdSpotValue) },
-    temp_f: { enabled: form.thresholdTempFEnabled, value: parseThresholdValue(form.thresholdTempFValue) },
-    temp_b: { enabled: form.thresholdTempBEnabled, value: parseThresholdValue(form.thresholdTempBValue) },
-    billet: { enabled: form.thresholdBilletEnabled, value: parseThresholdValue(form.thresholdBilletValue) },
-    billet_temp: { enabled: form.thresholdBilletTempEnabled, value: parseThresholdValue(form.thresholdBilletTempValue) },
-    at_temp: { enabled: form.thresholdAtTempEnabled, value: parseThresholdValue(form.thresholdAtTempValue) },
-    at_pre: { enabled: form.thresholdAtPreEnabled, value: parseThresholdValue(form.thresholdAtPreValue) },
-    count: { enabled: form.thresholdCountEnabled, value: parseThresholdValue(form.thresholdCountValue) },
-    endpos: { enabled: form.thresholdEndPosEnabled, value: parseThresholdValue(form.thresholdEndPosValue) },
-  },
-});
-
-const isThresholdHit = (thresholds: ThresholdState, key: ThresholdKey, value: number | null | undefined) => {
-  if (!thresholds.masterOn) {
-    return false;
-  }
-  const entry = thresholds.entries[key];
-  if (!entry?.enabled || entry.value === null) {
-    return false;
-  }
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return false;
-  }
-  return value >= entry.value;
-};
-
-const getThresholdValue = (thresholds: ThresholdState, key: ThresholdKey) => {
-  if (!thresholds.masterOn) {
-    return null;
-  }
-  const entry = thresholds.entries[key];
-  if (!entry?.enabled || entry.value === null) {
-    return null;
-  }
-  return entry.value;
-};
-
-const THRESHOLD_LABELS: Record<ThresholdKey, string> = {
-  speed: LABELS.SPEED,
-  press: LABELS.PRESS,
-  spot: LABELS.SPOT,
-  temp_f: LABELS.CONTAINER_FRONT,
-  temp_b: LABELS.CONTAINER_BACK,
-  billet: LABELS.BILLET_LEN,
-  billet_temp: LABELS.BILLET_TEMP,
-  at_temp: LABELS.ENV_TEMP,
-  at_pre: LABELS.ENV_HUMID,
-  count: LABELS.COUNT,
-  endpos: LABELS.END_POS,
-};
-
-const calcPercent = (value: number, max: number) => {
-  if (!Number.isFinite(value) || max <= 0) {
-    return 0;
-  }
-  return Math.round((clampNumber(value, 0, max) / max) * 100);
-};
-
-const getCameraStatus = (params: {
-  spotConfig: SpotConfig | null;
-  spotImageUrl: string;
-  spotImageLoading: boolean;
-  spotImageError: string | null;
-  spotLastSuccessAt: number | null;
-}) => {
-  const { spotConfig, spotImageUrl, spotImageLoading, spotImageError, spotLastSuccessAt } = params;
-  if (!spotConfig) {
-    return null;
-  }
-  const refreshMs = Math.max(500, Math.round(spotConfig.refresh_interval * 1000));
-  const now = Date.now();
-  const delayMs = spotLastSuccessAt ? now - spotLastSuccessAt : null;
-
-  if (spotImageError) {
-    return { type: 'error', title: spotImageError, detail: '' };
-  }
-  if (!spotImageUrl || spotImageLoading || spotLastSuccessAt === null) {
-    return { type: 'loading', title: '카메라 연결 중', detail: '' };
-  }
-  if (delayMs !== null && delayMs > refreshMs * 5) {
-    return { type: 'danger', title: '이미지 수신 지연', detail: `지연 ${Math.round(delayMs / 1000)}초` };
-  }
-  if (delayMs !== null && delayMs > refreshMs * 4) {
-    return { type: 'warn', title: '이미지 지연 감지', detail: `지연 ${Math.round(delayMs / 1000)}초` };
-  }
-  return null;
-};
+// --- Extracted Utilities (Phase 9 Step 1) ---
+import { clampNumber, buildSparklinePaths, calcPercent } from './shared/utils/sparkline';
+import {
+  buildThresholdStateFromConfig,
+  buildThresholdStateFromForm,
+  isThresholdHit,
+  getThresholdValue,
+  THRESHOLD_LABELS,
+} from './shared/utils/thresholds';
+import type { ThresholdLevel } from './shared/utils/thresholds';
+import { buildCommBadge, buildSpotCommBadge, getCameraStatus } from './shared/utils/commBadge';
+import type { CommBadge } from './shared/utils/commBadge';
+import { useThresholdLevel } from './shared/hooks/useThresholdLevel';
+import { useSustainedFlag } from './shared/hooks/useSustainedFlag';
+import { useLastValidNumber } from './shared/hooks/useLastValidNumber';
+import { useNotifications } from './shared/hooks/useNotifications';
+import { useSnapshotManager } from './shared/hooks/useSnapshotManager';
+import { useObservabilityHandlers } from './shared/hooks/useObservabilityHandlers';
+import { useSettingsFormHandlers } from './shared/hooks/useSettingsFormHandlers';
+import { useLayoutHandlers } from './shared/hooks/useLayoutHandlers';
 
 function App() {
   const { mode, activeCycle, setMode } = useTheme();
@@ -648,12 +308,14 @@ function App() {
 
   // Time Series States (UI Control - stays in App)
   const [seriesWindowMin, setSeriesWindowMinState] = useState(() => {
-    const saved = localStorage.getItem('seriesWindowMin');
-    return saved ? parseInt(saved, 10) : 30;
+    try {
+      const saved = localStorage.getItem('seriesWindowMin');
+      return saved ? parseInt(saved, 10) : 30;
+    } catch { return 30; }
   });
   const setSeriesWindowMin = useCallback((min: number) => {
     setSeriesWindowMinState(min);
-    localStorage.setItem('seriesWindowMin', String(min));
+    try { localStorage.setItem('seriesWindowMin', String(min)); } catch {}
   }, []);
   const [seriesPaused, setSeriesPaused] = useState(false);
   const [showThresholds, setShowThresholds] = useState(true);
@@ -796,18 +458,11 @@ function App() {
   });
 
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
-  // const [centralStatus, setCentralStatus] = useState<CentralStatus | null>(null);
-  const [connectionTestBusy, setConnectionTestBusy] = useState<Record<string, boolean>>({});
-
-  /* Time Series UI Control States already declared at top of App */
+  const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
+  const [layoutRestoreMessage, setLayoutRestoreMessage] = useState<string | null>(null);
   /* centralSyncBusy moved to useConfigViewModel */
 
-  const [diagnosisBusy, setDiagnosisBusy] = useState(false);
-  const [exportBusy, setExportBusy] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
 
   // Settings State moved to useConfigViewModel
   /*
@@ -848,14 +503,7 @@ function App() {
   */
   /* Layout state moved to useLayoutViewModel */
 
-  const [snapshotLoading, setSnapshotLoading] = useState(false);
-
-  const [layoutRestoreMessage, setLayoutRestoreMessage] = useState<string | null>(null);
-  const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
-
   // const spotHasImage = useRef(false);
-  const saveMessageTimerRef = useRef<number | null>(null);
-  const restoreMessageTimerRef = useRef<number | null>(null);
   const settingsToastTimerRef = useRef<number | null>(null);
   const settingsFingerprintRef = useRef<string | null>(null);
   const settingsExternalNotifyRef = useRef<string | null>(null);
@@ -864,8 +512,6 @@ function App() {
   const cameraStatusRef = useRef<string | null>(null);
   const cameraStatusTimerRef = useRef<NodeJS.Timeout | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const settingsScrollRef = useRef<HTMLDivElement | null>(null);
-  const settingsSectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isManualScrollingRef = useRef(false);
   const manualScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSpotValue = useLastValidNumber(data?.Spot);
@@ -1074,7 +720,7 @@ function App() {
     ],
     []
   );
-  const [activeSettingsSection, setActiveSettingsSection] = useState(settingsSections[0]?.id ?? '');
+
 
 
   // --- Data Fetching Hooks (Same as before) ---
@@ -1082,12 +728,6 @@ function App() {
 
   useEffect(() => {
     return () => {
-      if (saveMessageTimerRef.current !== null) {
-        window.clearTimeout(saveMessageTimerRef.current);
-      }
-      if (restoreMessageTimerRef.current !== null) {
-        window.clearTimeout(restoreMessageTimerRef.current);
-      }
       if (settingsToastTimerRef.current !== null) {
         window.clearTimeout(settingsToastTimerRef.current);
       }
@@ -1122,10 +762,104 @@ function App() {
   }, []);
 
 
+  // --- 1. Notification Management ---
+  const {
+    notifications,
+    notificationsOpen,
+    unreadCount,
+    setNotificationsOpen,
+    pushNotification,
+    clearNotifications,
+    setUnreadCount,
+  } = useNotifications();
 
+  // --- 2. Snapshot Management ---
+  const { snapshotLoading, handleSnapshot } = useSnapshotManager({
+    pushNotification,
+    saveSnapshot,
+  });
 
+  // --- 3. Observability Handlers ---
+  const {
+    diagnosisBusy,
+    exportBusy,
+    handleDiagnosis,
+    handleExportObservability,
+    handleOpenObservabilityExportFile,
+    handleOpenObservabilityExportFolder,
+    handleCopyObservabilityExportPath,
+    handleClearObservabilityErrors,
+  } = useObservabilityHandlers({
+    fetchHealth,
+    fetchStats,
+    exportObservability,
+    clearObservabilityErrors,
+    openExportFile,
+    openExportFolder,
+    lastExportPath,
+    modal,
+    pushNotification,
+  });
 
+  // --- 4. Settings Form & UI Handlers ---
+  const {
+    activeSettingsSection,
+    setActiveSettingsSection,
+    settingsScrollRef,
+    registerSettingsSection,
+    scrollToSettingsSection,
+    runPathHealthCheck,
+    handleConnectionTest,
+    handleCreatePath,
+    connectionTestBusy,
+  } = useSettingsFormHandlers({
+    settingsForm,
+    settingsBaseline,
+    settingsOpen,
+    settingsReady: true, // Assuming true if settingsOpen is managed
+    validationErrors,
+    isSettingsFieldDirty,
+    updateSettingsField,
+    runConnectionTest,
+    checkPathsHealth: checkPathsHealth as any,
+    createPath,
+    modal,
+    setSettingsError,
+    setPathHealth,
+    pathHealth,
+  });
 
+  const handleCopyCommLogPath = useCallback(() => {
+    if (!commLogInfo.path) return;
+    navigator.clipboard.writeText(commLogInfo.path);
+    pushNotification('경로 복사', '통신 로그 경로가 클립보드에 복사되었습니다.', 'info');
+  }, [commLogInfo.path, pushNotification]);
+
+  // --- 5. Layout Handlers ---
+  const {
+    layoutRef,
+    saveLayout,
+    restoreLayout,
+    handleAddWidget,
+    deleteLayoutSlot,
+    handleRemoveWidget,
+    handleUpdateWidget,
+  } = useLayoutHandlers({
+    layoutEditing,
+    layoutSlots,
+    layoutActiveId,
+    handleSaveLayout,
+    handleRestoreLayout,
+    handleDeleteLayout,
+    addWidget,
+    deleteWidget,
+    updateWidget,
+    modal,
+    pushNotification,
+    setMenuOpen,
+    setLayoutRestoreError,
+    setLayoutRestoreMessage,
+  });
 
   const handleReconnect = async () => {
     // Busy check is handled in hook, but UI disabling is via reconnectBusy from hook
@@ -1135,360 +869,6 @@ function App() {
     } else {
       await modal.alert('Reconnect failed.');
     }
-  };
-
-  const handleDiagnosis = async () => {
-    if (diagnosisBusy) return;
-    setDiagnosisBusy(true);
-    try {
-      const snapshot = await fetchHealth();
-      const statsSnapshot = await fetchStats().catch(() => null);
-
-      if (!snapshot) {
-        await modal.alert('Failed to fetch health data.');
-        return;
-      }
-
-      const lastUpdate = snapshot.last_update
-        ? new Date(snapshot.last_update * 1000).toLocaleString()
-        : 'n/a';
-      const windowStats = statsSnapshot?.window;
-      const errorSummary = statsSnapshot?.errors;
-      const windowLine = windowStats
-        ? `Window ${windowStats.window_sec}s: req ${windowStats.request_count}, err ${windowStats.error_count}, p95 ${formatOptionalNumber(windowStats.p95_latency_ms)}ms`
-        : 'Window: n/a';
-      const errorLine = errorSummary
-        ? `ErrorQ ${errorSummary.queue_size}, Last ${formatTimeFromSec(errorSummary.last_error_at)}`
-        : 'ErrorQ: n/a';
-      const detail = [
-        `Mode: ${snapshot.mode}`,
-        `Driver: ${snapshot.driver_connected ? 'OK' : 'Down'}`,
-        `Thread: ${snapshot.thread_alive ? 'Alive' : 'Stopped'}`,
-        `Last Update: ${lastUpdate}`,
-        windowLine,
-        errorLine,
-      ].join('\n');
-      await modal.alert(detail);
-    } catch (error) {
-      console.error('Diagnosis failed', error);
-      await modal.alert('Diagnosis failed.');
-    } finally {
-      setDiagnosisBusy(false);
-    }
-  };
-
-  const handleExportObservability = async () => {
-    if (exportBusy) return;
-    setExportBusy(true);
-    try {
-      const path = await exportObservability(true);
-      if (!path) {
-        throw new Error('Export path missing');
-      }
-      await modal.alert(`지표 내보내기 완료:\n${path}`);
-    } catch (error) {
-      console.error('Observability export failed', error);
-      await modal.alert('지표 내보내기 실패.');
-    } finally {
-      setExportBusy(false);
-    }
-  };
-
-  const handleOpenObservabilityExportFile = async () => {
-    if (!lastExportPath) {
-      return;
-    }
-    try {
-      await openExportFile();
-    } catch (error) {
-      console.error('Open export file failed', error);
-      await modal.alert('내보낸 파일 열기 실패.');
-    }
-  };
-
-  const handleOpenObservabilityExportFolder = async () => {
-    if (!lastExportPath) {
-      return;
-    }
-    try {
-      await openExportFolder();
-    } catch (error) {
-      console.error('Open export folder failed', error);
-      await modal.alert('내보낸 폴더 열기 실패.');
-    }
-  };
-
-  const handleCopyObservabilityExportPath = async () => {
-    if (!lastExportPath) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(lastExportPath);
-      await modal.alert('내보낸 경로를 복사했습니다.');
-    } catch (error) {
-      console.error('Copy export path failed', error);
-      await modal.alert('경로 복사 실패');
-    }
-  };
-
-  const handleClearObservabilityErrors = async () => {
-    if (!await modal.confirm('에러 큐를 비우면 복구할 수 없습니다. 비우시겠습니까?')) {
-      return;
-    }
-    try {
-      await clearObservabilityErrors();
-    } catch (error) {
-      console.error('Observability clear failed', error);
-      await modal.alert('에러 큐 비우기 실패.');
-    }
-  };
-
-  const pushNotification = useCallback(
-    (title: string, message: string, level: NotificationLevel) => {
-      const item: NotificationItem = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        time: Date.now(),
-        title,
-        message,
-        level,
-      };
-      setNotifications((prev) => [item, ...prev].slice(0, MAX_NOTIFICATIONS));
-      if (!notificationsOpen) {
-        setUnreadCount((prev) => Math.min(prev + 1, MAX_NOTIFICATIONS));
-      }
-    },
-    [notificationsOpen]
-  );
-
-  const handleSnapshot = useCallback(async () => {
-    if (snapshotLoading) return;
-    try {
-      setSnapshotLoading(true);
-      pushNotification('스냅샷', '스냅샷 생성 및 서버 저장 중...', 'info');
-      
-      const element = document.getElementById('root') || document.body;
-      const scrollHeight = document.documentElement.scrollHeight;
-
-      // Pre-Capture Sanitization Strategy (Async Fetch)
-      // Fetch external stylesheets to sanitize 'color-mix' and 'color' functions
-      // This prevents html2canvas from crashing during parsing of original links.
-      const sanitizeCss = (cssText: string) => {
-        if (!cssText) return '';
-        let newText = cssText.replace(/color-mix\(in\s+[a-z]+,\s*([^, ]+)[^)]*\)/gi, '$1');
-        newText = newText.replace(/color\([^)]+\)/gi, '#1e1e1e');
-        return newText;
-      };
-
-      const originalSheets: { link: HTMLLinkElement; disabled: boolean }[] = [];
-      const originalStyleTags: { sheet: CSSStyleSheet; disabled: boolean }[] = [];
-      const tempStyles: HTMLStyleElement[] = [];
-
-      try {
-        const links = Array.from(document.querySelectorAll('link[rel="stylesheet"]')) as HTMLLinkElement[];
-        const styleTags = Array.from(document.querySelectorAll('style')) as HTMLStyleElement[];
-        
-        // Parallel fetch and sanitize
-        await Promise.all([
-          ...links.map(async (link) => {
-            try {
-              const href = link.href;
-          if (href.startsWith('chrome-extension:') || href.startsWith('moz-extension:') || href.startsWith('edge-extension:')) {
-            return;
-          }
-          const response = await fetch(href);
-              const text = await response.text();
-              
-              const sanitizedText = sanitizeCss(text);
-              
-              const style = document.createElement('style');
-              style.textContent = sanitizedText;
-              style.setAttribute('data-snapshot-temp', 'true');
-              tempStyles.push(style);
-              
-              originalSheets.push({ link, disabled: link.disabled });
-            } catch (err) {
-              console.warn('Failed to fetch/sanitize stylesheet:', link.href, err);
-            }
-          }),
-          ...styleTags.map(async (tag) => {
-             try {
-                if (tag.hasAttribute('data-snapshot-temp')) return;
-                const sheet = tag.sheet;
-                if (!sheet) return;
-
-                const text = tag.textContent || '';
-                const sanitizedText = sanitizeCss(text);
-                
-                const style = document.createElement('style');
-                style.textContent = sanitizedText;
-                style.setAttribute('data-snapshot-temp', 'true');
-                tempStyles.push(style);
-                
-                originalStyleTags.push({ sheet, disabled: sheet.disabled });
-             } catch (e) {
-                 console.warn('Failed to sanitize style tag:', e);
-             }
-          })
-        ]);
-
-        // Apply DOM changes: Disable originals, Inject temps
-        originalSheets.forEach(item => item.link.disabled = true);
-        originalStyleTags.forEach(item => item.sheet.disabled = true);
-        tempStyles.forEach(style => document.head.appendChild(style));
-
-      } catch (e) {
-        console.warn('Pre-capture sanitization error:', e);
-      }
-
-      
-      
-      // Now run html2canvas on the "clean" DOM
-      try {
-        let canvas;
-        try {
-          canvas = await html2canvas(element, {
-            useCORS: true,
-            logging: false,
-            backgroundColor: '#1E1E1E',
-            imageTimeout: 10000,
-            height: scrollHeight,
-            windowHeight: scrollHeight,
-            width: element.offsetWidth,
-            windowWidth: element.offsetWidth,
-            scrollY: -window.scrollY,
-            onclone: (clonedDoc: Document) => {
-               // Hide scrollbars to prevent gray track capture
-               clonedDoc.documentElement.style.overflow = 'hidden';
-               clonedDoc.body.style.overflow = 'hidden';
-
-               // Also run inline sanitizer on clone just in case dynamic styles exist
-               const replaceColorFunctions = (text: string) => {
-                  if (!text) return text;
-                  let newText = text.replace(/color-mix\(in\s+[a-z]+,\s*([^, ]+)[^)]*\)/gi, '$1');
-                  newText = newText.replace(/color\([^)]+\)/gi, '#1e1e1e');
-                  return newText;
-               };
-               const allElements = Array.from(clonedDoc.querySelectorAll('*'));
-               allElements.forEach(el => {
-                 const styleAttr = el.getAttribute('style');
-                 if (styleAttr && (styleAttr.includes('color(') || styleAttr.includes('color-mix('))) {
-                   el.setAttribute('style', replaceColorFunctions(styleAttr));
-                 }
-               });
-            },
-            ignoreElements: (el: Element) => {
-              const className = el.className?.toString() || '';
-              if (className.includes('scene-tooltip')) return true;
-              return false;
-            }
-          } as any);
-        } catch (initialError) {
-          console.warn('Sanitized snapshot failed, retrying in Nuclear Safe Mode:', initialError);
-          
-          // NUCLEAR SAFE MODE RETRY
-          canvas = await html2canvas(element, {
-            useCORS: true,
-            logging: false,
-            backgroundColor: '#121212',
-            imageTimeout: 5000,
-            height: scrollHeight,
-            windowHeight: scrollHeight,
-            width: element.offsetWidth,
-            windowWidth: element.offsetWidth,
-            scrollY: -window.scrollY,
-            onclone: (clonedDoc: Document) => {
-              // Hide scrollbars
-              clonedDoc.documentElement.style.overflow = 'hidden';
-              clonedDoc.body.style.overflow = 'hidden';
-
-              clonedDoc.querySelectorAll('link[rel="stylesheet"]').forEach(el => el.remove());
-              clonedDoc.querySelectorAll('style').forEach(el => el.remove());
-              clonedDoc.querySelectorAll('*').forEach(el => el.removeAttribute('style'));
-              
-              const fallbackStyle = clonedDoc.createElement('style');
-              fallbackStyle.textContent = `
-                body, #root, .app-container { background-color: #121212 !important; color: #ffffff !important; font-family: sans-serif !important; }
-                .card-base, .MuiPaper-root, .panel-container { 
-                  background-color: #1e1e1e !important; 
-                  border: 1px solid #333 !important; 
-                  margin: 4px !important; padding: 8px !important; 
-                }
-                * { border-color: #444 !important; }
-                p, h1, h2, h3, span, div { color: #e0e0e0 !important; }
-                .text-primary { color: #90caf9 !important; }
-              `;
-              clonedDoc.head.appendChild(fallbackStyle);
-            }
-          } as any);
-        }
-
-        const base64Data = canvas.toDataURL('image/png');
-        
-        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-        // Use Blob for better browser compatibility with large images
-        canvas.toBlob((blob) => {
-          if (!blob) throw new Error('Canvas to Blob conversion failed');
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          
-          const now = new Date();
-          const timestamp = now.getFullYear().toString() +
-            (now.getMonth() + 1).toString().padStart(2, '0') +
-            now.getDate().toString().padStart(2, '0') + '_' +
-            now.getHours().toString().padStart(2, '0') +
-            now.getMinutes().toString().padStart(2, '0') +
-            now.getSeconds().toString().padStart(2, '0');
-            
-          link.download = `snapshot_${timestamp}.png`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          setTimeout(() => URL.revokeObjectURL(url), 100);
-          
-          if (!isLocal) {
-             pushNotification('스냅샷 다운로드', '스냅샷이 내 컴퓨터에 저장되었습니다.', 'info');
-          }
-        }, 'image/png');
-
-        if (isLocal) {
-          try {
-             // Removing 'data:image/png;base64,' prefix
-             const base64Content = base64Data.split(',')[1];
-             await saveSnapshot({
-               image_base64: base64Content,
-               name: 'snapshot',
-               format: 'png'
-             });
-             pushNotification('스냅샷 성공', '서버 설정 폴더에 저장되었습니다.', 'info');
-          } catch (apiError) {
-             console.error('Snapshot API failed', apiError);
-             pushNotification('스냅샷 실패', '서버 저장 중 오류가 발생했습니다.', 'error');
-          }
-        }
-
-      } finally {
-        // CLEANUP: Restore original DOM state
-        tempStyles.forEach(el => el.remove());
-        originalSheets.forEach(item => {
-           try { item.link.disabled = item.disabled; } catch(e) {}
-        });
-        originalStyleTags.forEach(item => {
-           try { item.sheet.disabled = item.disabled; } catch(e) {}
-        });
-      }
-    } catch (error) {
-      console.error('Snapshot capture failed', error);
-      pushNotification('스냅샷 실패', '화면 캡처 중 오류가 발생했습니다.', 'error');
-    } finally {
-      setSnapshotLoading(false);
-    }
-  }, [pushNotification, snapshotLoading]);
-
-  const clearNotifications = () => {
-    setNotifications([]);
-    setUnreadCount(0);
   };
 
   const handleOpenSettings = useCallback(async () => {
@@ -1534,11 +914,7 @@ function App() {
     }
   }, [modal]);
 
-  useEffect(() => {
-    if (notificationsOpen) {
-      setUnreadCount(0);
-    }
-  }, [notificationsOpen]);
+
 
   useEffect(() => {
     if (!menuOpen) {
@@ -1738,18 +1114,6 @@ function App() {
   const handleExternalIgnore = ...
   */
 
-  const handleCopyCommLogPath = useCallback(async () => {
-    if (!commLogInfo.path) {
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(commLogInfo.path);
-      showSettingsToast('통신 로그 경로를 복사했습니다.', 'ok');
-    } catch (error) {
-      console.error('Clipboard copy failed', error);
-      showSettingsToast('복사에 실패했습니다.', 'error');
-    }
-  }, [commLogInfo.path, showSettingsToast]);
 
   const handleOpenCommLogPath = async () => {
     if (!commLogInfo.path) {
@@ -1786,193 +1150,8 @@ function App() {
   // Auto-dismiss settingsInfo
   /* Auto-dismiss settingsInfo moved to useConfigViewModel */
 
-  // Restore system polling
-  useEffect(() => {
-    const poll = async () => {
-      await fetchHealth().catch(() => null);
-      await fetchStats().catch(() => null);
-    };
-    poll();
-    const interval = window.setInterval(poll, 5000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  /* handleMasterToggle moved to useConfigViewModel */
-
-  /* autoSaveTimerRef moved to useConfigViewModel */
-  /* Garbage removed (auto-save and partial header) */
-
-  const handleConnectionTest = async (target: ConnectionTargetKey) => {
-    if (!settingsForm) {
-      return;
-    }
-    if (target === 'extruder' && (validationErrors.extruderIp || validationErrors.extruderPort)) {
-      setSettingsError('Extruder IP/Port 형식을 확인하세요.');
-      return;
-    }
-    if (target === 'ls_plc' && (validationErrors.lsIp || validationErrors.lsPort)) {
-      setSettingsError('LS PLC IP/Port 형식을 확인하세요.');
-      return;
-    }
-    if (target === 'spot' && validationErrors.spotIp) {
-      setSettingsError('SPOT IP 형식을 확인하세요.');
-      return;
-    }
-    const toInt = (value: string) => {
-      const parsed = Number.parseInt(value, 10);
-      return Number.isFinite(parsed) ? parsed : null;
-    };
-    const payload: Record<string, { ip?: string; port?: number | null; url?: string }> = {};
-    if (target === 'extruder') {
-      payload.extruder = {
-        ip: settingsForm.extruderIp.trim() || undefined,
-        port: toInt(settingsForm.extruderPort),
-      };
-    } else if (target === 'ls_plc') {
-      payload.ls_plc = {
-        ip: settingsForm.lsIp.trim() || undefined,
-        port: toInt(settingsForm.lsPort),
-      };
-    } else if (target === 'spot') {
-      const ip = settingsForm.spotIp.trim();
-      payload.spot = {
-        ip: ip || undefined,
-        url: ip ? `http://${ip}/image.jpg` : undefined,
-      };
-    }
-
-    setConnectionTestBusy((prev) => ({ ...prev, [target]: true }));
-    try {
-      await runConnectionTest(payload);
-    } catch (error) {
-      console.error('Connection test failed', error);
-    } finally {
-      setConnectionTestBusy((prev) => ({ ...prev, [target]: false }));
-    }
-  };
-
-
-  /* toggleOverride moved to useConfigViewModel (handleOverrideToggle) */
-
-  const runPathHealthCheck = useCallback(
-    async (paths?: Array<{ key: 'log' | 'snapshot'; path: string }>) => {
-      if (!settingsReady) {
-        return;
-      }
-      const now = Date.now();
-      const targets =
-        paths ??
-        [
-          { key: 'log', path: logPathValue },
-          { key: 'snapshot', path: snapshotPathValue },
-        ];
-
-      const payload: Array<{ key: string; path: string }> = [];
-      const localResults: PathHealthState = {};
-
-      targets.forEach((item) => {
-        const trimmed = item.path.trim();
-        if (!trimmed) {
-          localResults[item.key] = {
-            status: 'ERROR',
-            exists: false,
-            writable: false,
-            is_dir: false,
-            is_network: false,
-            latency_ms: null,
-            message: '경로 없음',
-            checked_at: now,
-          };
-          return;
-        }
-        payload.push({ key: item.key, path: trimmed });
-      });
-
-      if (payload.length === 0) {
-        setPathHealth((prev) => ({ ...prev, ...localResults }));
-        return;
-      }
-
-      setPathCheckBusy(true);
-      try {
-        const data = await checkPathsHealth(payload);
-        const results = data?.results ?? {};
-        const merged: PathHealthState = { ...localResults };
-        Object.entries(results).forEach(([key, val]) => {
-          if (key === 'log' || key === 'snapshot') {
-            const value = val as PathHealthResult;
-            merged[key] = {
-              status: value.status ?? 'UNKNOWN',
-              exists: Boolean(value.exists),
-              writable: Boolean(value.writable),
-              is_dir: Boolean(value.is_dir),
-              is_network: Boolean(value.is_network),
-              latency_ms: value.latency_ms ?? null,
-              message: value.message ?? '',
-              checked_at: now,
-            };
-          }
-        });
-        setPathHealth((prev) => ({ ...prev, ...merged }));
-      } catch (error) {
-        console.error('Path health check failed', error);
-        setPathHealth((prev) => ({
-          ...prev,
-          log: prev.log ?? {
-            status: 'UNKNOWN',
-            exists: false,
-            writable: false,
-            is_dir: false,
-            is_network: false,
-            latency_ms: null,
-            message: '검사 실패',
-            checked_at: now,
-          },
-          snapshot: prev.snapshot ?? {
-            status: 'UNKNOWN',
-            exists: false,
-            writable: false,
-            is_dir: false,
-            is_network: false,
-            latency_ms: null,
-            message: '검사 실패',
-            checked_at: now,
-          },
-        }));
-      } finally {
-        setPathCheckBusy(false);
-      }
-    },
-    [settingsReady, logPathValue, snapshotPathValue]
-  );
-
-  useEffect(() => {
-    if (!settingsOpen || !settingsReady) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      runPathHealthCheck();
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [settingsOpen, settingsReady, logPathValue, snapshotPathValue, runPathHealthCheck]);
-
-  const handleCreatePath = useCallback(
-    async (path: string) => {
-      const trimmed = path.trim();
-      if (!trimmed) {
-        setSettingsError('경로가 비어 있습니다.');
-        return;
-      }
-      try {
-        await createPath(trimmed);
-        await runPathHealthCheck();
-      } catch (error) {
-        console.error('Path create failed', error);
-        setSettingsError('폴더 생성에 실패했습니다.');
-      }
-    },
-    [runPathHealthCheck]
-  );
+  /* connectionTest, pathHealth handlers moved to useSettingsFormHandlers.ts */
+  /* getTestBadge, formatTestTime, getPathBadge helpers moved or kept if solely for UI */
 
   const getTestBadge = (result?: ConnectionTestResult) => {
     if (!result) {
@@ -2163,33 +1342,6 @@ function App() {
       },
     ];
   }, [settingsForm, settingsApplyResult, overrideMeta]);
-  const registerSettingsSection = useCallback(
-    (id: string) => (element: HTMLDivElement | null) => {
-      settingsSectionRefs.current[id] = element;
-    },
-    []
-  );
-  const scrollToSettingsSection = useCallback(
-    (id: string) => {
-      const target = settingsSectionRefs.current[id];
-      if (!target) {
-        return;
-      }
-      
-      // Block scroll spy updates during smooth scroll
-      isManualScrollingRef.current = true;
-      if (manualScrollTimeoutRef.current) {
-        clearTimeout(manualScrollTimeoutRef.current);
-      }
-      manualScrollTimeoutRef.current = setTimeout(() => {
-        isManualScrollingRef.current = false;
-      }, 800);
-
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setActiveSettingsSection(id);
-    },
-    []
-  );
 
   const buildSettingsChangeSummary = useCallback(() => {
     if (!settingsForm || !settingsBaseline) {
@@ -2303,62 +1455,6 @@ function App() {
     return summary;
   }, [settingsForm, settingsBaseline, isSettingsFieldDirty]);
 
-  useEffect(() => {
-    if (!settingsOpen) {
-      return;
-    }
-    const container = settingsScrollRef.current;
-    if (!container) {
-      return;
-    }
-    const updateActiveSection = () => {
-      if (isManualScrollingRef.current) return;
-      
-      const container = settingsScrollRef.current;
-      if (!container) return;
-
-      const containerRect = container.getBoundingClientRect();
-      const targetY = 24; // Align with .settings-content padding-top
-      
-      let bestId = settingsSections[0]?.id ?? '';
-      let minDistance = Infinity;
-
-      // Special case: If at the very bottom, always pick the last section
-      const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
-      if (isAtBottom && settingsSections.length > 0) {
-        const lastId = settingsSections[settingsSections.length - 1].id;
-        setActiveSettingsSection((prev) => (prev !== lastId ? lastId : prev));
-        return;
-      }
-
-      settingsSections.forEach(({ id }) => {
-        const section = settingsSectionRefs.current[id];
-        if (!section) return;
-
-        const rect = section.getBoundingClientRect();
-        const relativeTop = rect.top - containerRect.top;
-        
-        // Find the section whose top is closest to our target (24px from container top)
-        const distance = Math.abs(relativeTop - targetY);
-
-        if (distance < minDistance) {
-          minDistance = distance;
-          bestId = id;
-        }
-      });
-
-      if (bestId) {
-        setActiveSettingsSection((prev) => (prev !== bestId ? bestId : prev));
-      }
-    };
-    updateActiveSection();
-    container.addEventListener('scroll', updateActiveSection, { passive: true });
-    window.addEventListener('resize', updateActiveSection);
-    return () => {
-      container.removeEventListener('scroll', updateActiveSection);
-      window.removeEventListener('resize', updateActiveSection);
-    };
-  }, [settingsOpen, settingsSections]);
 
 
   // Spot Logic moved to useSpotViewModel
@@ -2394,11 +1490,9 @@ function App() {
       markdown: (item, model) => <MarkdownWidget item={item} model={model} />,
     };
     return getDashboardScene(registry, layoutSnapshot?.layout ?? null);
-  }, [layoutSnapshot, timeSeriesDataNode]);
+  }, [layoutSnapshot]);
   // timeSeriesDataNode dep might need removal if unused 
 
-  const layoutRef = useRef<LayoutMap>({});
-  const lastRestoreSlotIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const grid = scene.state.body;
@@ -2424,99 +1518,17 @@ function App() {
   }, [scene, layoutEditing]);
 
   // --- Layout Persistence (using ViewModel) ---
-  const saveLayout = async () => {
-    if (!layoutEditing) {
-      return;
-    }
+  /* Layout handlers moved to useLayoutHandlers.ts */
+  useEffect(() => {
     const grid = scene.state.body;
-    if (grid instanceof SceneGridLayout) {
+    if (!(grid instanceof SceneGridLayout)) return;
+    const updateLayoutRef = () => {
       layoutRef.current = buildLayoutMap(grid.state.children);
-    }
-    if (Object.keys(layoutRef.current).length === 0) {
-      pushNotification('레이아웃 저장', '레이아웃 정보를 찾을 수 없습니다.', 'error');
-      return;
-    }
-    const defaultName =
-      layoutSlots.find((slot) => slot.id === layoutActiveId)?.name ??
-      `레이아웃 ${Math.min(layoutSlots.length + 1, 3)}`;
-    const name = await modal.prompt('레이아웃 이름을 입력하세요', defaultName);
-    if (!name) {
-      pushNotification('레이아웃 저장', '저장이 취소되었습니다.', 'warn');
-      return;
-    }
-    try {
-      await handleSaveLayout(name, layoutRef.current);
-      pushNotification('레이아웃 저장', `저장 완료: ${name}`, 'info');
-    } catch (error) {
-      console.error('Layout save failed', error);
-      pushNotification('레이아웃 저장 실패', '저장 실패', 'error');
-    }
-  };
-
-  const restoreLayout = async (slotId?: string | null) => {
-    const targetId = slotId ?? lastRestoreSlotIdRef.current;
-    if (!targetId) {
-      setLayoutRestoreError('복구 대상 없음');
-      return;
-    }
-    lastRestoreSlotIdRef.current = targetId;
-    if (!await modal.confirm('선택한 레이아웃으로 복구하면 현재 배치가 사라집니다. 복구하시겠습니까?', { variant: 'warning' })) {
-      return;
-    }
-    try {
-      await handleRestoreLayout(targetId);
-      setLayoutRestoreError(null);
-      setLayoutRestoreMessage('복구됨');
-      if (restoreMessageTimerRef.current !== null) {
-        window.clearTimeout(restoreMessageTimerRef.current);
-      }
-      restoreMessageTimerRef.current = window.setTimeout(() => {
-        setLayoutRestoreMessage(null);
-        restoreMessageTimerRef.current = null;
-      }, 2000);
-    } catch (error) {
-      console.error('Layout restore failed', error);
-      setLayoutRestoreError('복구 실패');
-    }
-  };
-
-  const handleAddWidget = (type: WidgetType) => {
-    addWidget(type);
-    setMenuOpen(false);
-  };
-
-  const deleteLayoutSlot = async (slotId: string) => {
-    if (!slotId) {
-      setLayoutRestoreError('삭제 대상 없음');
-      return;
-    }
-    if (!await modal.confirm('선택한 레이아웃을 삭제하면 되돌릴 수 없습니다. 삭제하시겠습니까?', { variant: 'error' })) {
-      return;
-    }
-    try {
-      await handleDeleteLayout(slotId);
-      setLayoutRestoreError(null);
-      setLayoutRestoreMessage('삭제됨');
-      if (restoreMessageTimerRef.current !== null) {
-        window.clearTimeout(restoreMessageTimerRef.current);
-      }
-      restoreMessageTimerRef.current = window.setTimeout(() => {
-        setLayoutRestoreMessage(null);
-        restoreMessageTimerRef.current = null;
-      }, 2000);
-    } catch (error) {
-      console.error('Layout delete failed', error);
-      setLayoutRestoreError('삭제 실패');
-    }
-  };
-
-  const handleRemoveWidget = (key: string) => {
-    deleteWidget(key);
-  };
-
-  const handleUpdateWidget = (key: string, updates: any) => {
-    updateWidget(key, updates);
-  };
+    };
+    updateLayoutRef();
+    const sub = grid.subscribeToState(() => updateLayoutRef());
+    return () => sub.unsubscribe();
+  }, [scene, layoutRef]);
 
   const ageMs = lastDataAt ? Math.max(0, nowTick - lastDataAt) : null;
   const lastUpdateMs = health?.last_update ? health.last_update * 1000 : null;
@@ -2820,7 +1832,11 @@ function App() {
           {/* Removed Series Controls from Header */}
           <button
             className="notify-bell"
-            onClick={() => setNotificationsOpen((prev) => !prev)}
+            onClick={() => {
+              const nextState = !notificationsOpen;
+              setNotificationsOpen(nextState);
+              if (nextState) setUnreadCount(0);
+            }}
             aria-pressed={notificationsOpen}
           >
             알림
@@ -4676,40 +3692,55 @@ function App() {
             Actually, wrapping the Scene Component in a Context Provider works!
             The ReactWidget will be rendered *inside* this provider.
         */}
-        <DataContext.Provider
+        <FactoryDataContext.Provider
           value={{
             data,
             thresholds: thresholdState,
-            spotConfig,
-            spotImageUrl,
-            spotImageLoading,
-            spotImageError,
-            spotLastSuccessAt,
-            spotAlertActive,
             lastDataAt,
+            nowTick,
+            intervalSec: parseFloat(settingsForm?.intervalSec ?? '0.2') || 0.2,
             timeSeriesFrames,
             timeSeriesAllFrame,
-            onSpotImageLoaded: handleSpotImageLoaded,
-            onSpotImageError: handleSpotImageError,
-            requestFocus,
-            seriesWindowMin,
-            seriesPaused,
-            showThresholds,
-            setSeriesWindowMin,
-            setSeriesPaused,
-            setShowThresholds,
-            handleSnapshot,
-            snapshotLoading,
-            nowTick,
-            layoutEditing,
-            setLayoutEditing,
-            intervalSec: parseFloat(settingsForm?.intervalSec ?? '0.2') || 0.2,
           }}
         >
-          <LayoutEditContext.Provider value={{ isEditing: layoutEditing, deleteWidget: handleRemoveWidget, updateWidget: handleUpdateWidget }}>
-            <scene.Component model={scene} />
-          </LayoutEditContext.Provider>
-        </DataContext.Provider>
+          <SpotContext.Provider
+            value={{
+              spotConfig,
+              spotImageUrl,
+              spotImageLoading,
+              spotImageError,
+              spotLastSuccessAt,
+              spotAlertActive,
+              onSpotImageLoaded: handleSpotImageLoaded,
+              onSpotImageError: handleSpotImageError,
+              requestFocus,
+            }}
+          >
+            <UIContext.Provider
+              value={{
+                seriesWindowMin,
+                seriesPaused,
+                showThresholds,
+                layoutEditing,
+                setSeriesWindowMin,
+                setSeriesPaused,
+                setShowThresholds,
+                setLayoutEditing,
+              }}
+            >
+              <SnapshotContext.Provider
+                value={{
+                  handleSnapshot,
+                  snapshotLoading,
+                }}
+              >
+                <LayoutEditContext.Provider value={{ isEditing: layoutEditing, deleteWidget: handleRemoveWidget, updateWidget: handleUpdateWidget }}>
+                  <scene.Component model={scene} />
+                </LayoutEditContext.Provider>
+              </SnapshotContext.Provider>
+            </UIContext.Provider>
+          </SpotContext.Provider>
+        </FactoryDataContext.Provider>
         <footer className="app-footer">
           Copyright © HOIHOU. All Rights Reserved. v{packageJson.version}
         </footer>
@@ -4717,1019 +3748,6 @@ function App() {
     </div>
   );
 }
-
-// --- Context & Components ---
-// Define Context to pass data into the Scene's ReactWidgets
-type DataContextValue = {
-  data: FactoryData | null;
-  thresholds: ThresholdState;
-  timeSeriesFrames: Record<string, SeriesFrame> | null;
-  timeSeriesAllFrame: SeriesFrame | null; // Added for uPlot
-  spotConfig: SpotConfig | null;
-  spotImageUrl: string;
-  spotImageLoading: boolean;
-  spotImageError: string | null;
-  spotLastSuccessAt: number | null;
-  spotAlertActive: boolean;
-  lastDataAt: number | null;
-  onSpotImageLoaded: () => void;
-  onSpotImageError: (message?: string) => void;
-  requestFocus: (steps: number) => void;
-  // Time Series Control
-  seriesWindowMin: number;
-  seriesPaused: boolean;
-  showThresholds: boolean;
-  setSeriesWindowMin: (min: number) => void;
-  setSeriesPaused: React.Dispatch<React.SetStateAction<boolean>>;
-  setShowThresholds: (show: boolean) => void;
-  handleSnapshot: () => void;
-  snapshotLoading: boolean;
-  nowTick: number; // For XAxis domain sync
-  layoutEditing: boolean;
-  setLayoutEditing: (editing: boolean) => void;
-  intervalSec: number;
-};
-
-const DataContext = React.createContext<DataContextValue>({
-  data: null,
-  thresholds: buildThresholdStateFromConfig(),
-  timeSeriesFrames: null,
-  timeSeriesAllFrame: null,
-  spotConfig: null,
-  spotImageUrl: '',
-  spotImageLoading: false,
-  spotImageError: null,
-  spotLastSuccessAt: null,
-  spotAlertActive: false,
-  lastDataAt: null,
-  onSpotImageLoaded: () => undefined,
-  onSpotImageError: () => undefined,
-  requestFocus: () => undefined,
-  seriesWindowMin: 30,
-  seriesPaused: false,
-  showThresholds: true,
-  setSeriesWindowMin: () => undefined,
-  setSeriesPaused: () => undefined,
-  setShowThresholds: () => undefined,
-  handleSnapshot: () => undefined,
-  snapshotLoading: false,
-  nowTick: Date.now(),
-  layoutEditing: false,
-  setLayoutEditing: () => { },
-  intervalSec: 0.2,
-});
-
-function KpiComponent() {
-  const { data, lastDataAt, thresholds } = React.useContext(DataContext);
-  const speedValue = useLastValidNumber(data?.Speed);
-  const pressValue = useLastValidNumber(data?.Press);
-  const countValue = useLastValidNumber(data?.Count);
-  const endPosValue = useLastValidNumber(data?.EndPos);
-
-  const missing = !Number.isFinite(data?.Speed) || !Number.isFinite(data?.Press);
-  const speedForLogic = speedValue ?? data?.Speed;
-  const pressForLogic = pressValue ?? data?.Press;
-  const safeSpeed = (typeof speedForLogic === 'number' && Number.isFinite(speedForLogic)) ? speedForLogic : 0;
-  const safePress = (typeof pressForLogic === 'number' && Number.isFinite(pressForLogic)) ? pressForLogic : 0;
-  const jamCondition = safeSpeed === 0 && safePress >= PRESS_RUNNING_THRESHOLD;
-  const jamWarnFallback = useSustainedFlag(jamCondition, ALERT_HOLD_MS);
-  const jamDangerFallback = useSustainedFlag(jamCondition, ALERT_HOLD_LONG_MS);
-  const computed = data?.Computed;
-  const jamLevel = computed?.jam_level;
-  const jamWarn = jamLevel ? jamLevel === 'warn' : jamWarnFallback;
-  const jamDanger = jamLevel ? jamLevel === 'danger' : jamDangerFallback;
-  const speedPercent = calcPercent(safeSpeed, SPEED_MAX);
-  const pressPercent = calcPercent(safePress, PRESS_MAX);
-  const computedThresholds = computed?.thresholds;
-  const speedThresholdHit = computedThresholds?.speed ?? isThresholdHit(thresholds, 'speed', speedValue);
-  const pressThresholdHit = computedThresholds?.press ?? isThresholdHit(thresholds, 'press', pressValue);
-  const countThresholdHit = computedThresholds?.count ?? isThresholdHit(thresholds, 'count', countValue);
-  const endPosThresholdHit = computedThresholds?.endpos ?? isThresholdHit(thresholds, 'endpos', endPosValue);
-  const thresholdWarn = speedThresholdHit || pressThresholdHit || countThresholdHit || endPosThresholdHit;
-
-  if (!data) return <div>Loading...</div>;
-
-  const kpiAlertClass = jamDanger ? 'card-danger' : jamWarn || thresholdWarn ? 'card-warning' : '';
-  const speedState = mapSpeedLevel(computed?.speed_level) ?? getSpeedState(safeSpeed);
-  const pressState = mapPressLevel(computed?.press_level) ?? getPressState(safePress);
-
-  return (
-    <div className={`card kpi-card ${kpiAlertClass}`} style={{ height: '100%' }}>
-      <div className="kpi-metric">
-        <div className="kpi-header">
-          <span className="kpi-title">속도</span>
-          <div className="kpi-header-meta">
-            {speedThresholdHit && <span className="threshold-badge">임계</span>}
-            <span className={`kpi-state ${speedState.className}`}>{speedState.label}</span>
-          </div>
-        </div>
-        <div className="kpi-value-row">
-          <span className="kpi-value">{formatNumber(data.Speed ?? NaN, 1)}</span>
-          <span className="kpi-unit">mm/s</span>
-        </div>
-        <div className="kpi-bar">
-          <div className={`kpi-bar-fill ${speedState.className}`} style={{ width: `${speedPercent}%` }} />
-        </div>
-      </div>
-
-      <div className="kpi-metric">
-        <div className="kpi-header">
-          <span className="kpi-title">압력</span>
-          <div className="kpi-header-meta">
-            {pressThresholdHit && <span className="threshold-badge">임계</span>}
-            <span className={`kpi-state ${pressState.className}`}>{pressState.label}</span>
-          </div>
-        </div>
-        <div className="kpi-value-row">
-          <span className="kpi-value">{formatNumber(data.Press ?? NaN, 1)}</span>
-          <span className="kpi-unit">bar</span>
-        </div>
-        <div className="kpi-bar">
-          <div className={`kpi-bar-fill ${pressState.className}`} style={{ width: `${pressPercent}%` }} />
-        </div>
-      </div>
-
-      <div className="kpi-secondary">
-        <div className={`kpi-mini ${countThresholdHit ? 'kpi-mini-threshold' : ''}`}>
-          <div className="kpi-mini-header">
-            <span className="kpi-mini-label">카운트</span>
-            {countThresholdHit && <span className="threshold-badge">임계</span>}
-          </div>
-          <span className="kpi-mini-value">{formatInteger(data.Count ?? 0)}</span>
-        </div>
-        <div className={`kpi-mini ${endPosThresholdHit ? 'kpi-mini-threshold' : ''}`}>
-          <div className="kpi-mini-header">
-            <span className="kpi-mini-label">종료 위치</span>
-            {endPosThresholdHit && <span className="threshold-badge">임계</span>}
-          </div>
-          <div className="kpi-mini-value-row">
-            <span className="kpi-mini-value">{formatNumber(data.EndPos ?? NaN, 1)}</span>
-            <span className="kpi-mini-unit">mm</span>
-          </div>
-        </div>
-      </div>
-      {missing && (
-        <div className="missing-note">
-          마지막 갱신 {formatTime(lastDataAt)}
-        </div>
-      )}
-    </div>
-  );
-};
-
-function SpotComponent() {
-  const { data, spotAlertActive, lastDataAt, thresholds } = React.useContext(DataContext);
-  const [sparklineValues, setSparklineValues] = useState<number[]>([]);
-  const spotValue = useLastValidNumber(data?.Spot);
-
-  const missing = !Number.isFinite(data?.Spot);
-  const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : (data?.Spot ?? NaN);
-  const computed = data?.Computed;
-  const spotState =
-    mapSpotLevel(computed?.spot_level) ??
-    getSpotState(spotDisplayValue, spotAlertActive, SPOT_WARN_TEMP, SPOT_HIGH_MIN, SPOT_NORMAL_MIN);
-  const spotThresholdHit = computed?.thresholds?.spot ?? isThresholdHit(thresholds, 'spot', spotValue);
-  const spotConfigThreshold = getThresholdValue(thresholds, 'spot');
-  const spotPercent = calcPercent(spotDisplayValue, SPOT_MAX_TEMP);
-  const sparklineThresholds = useMemo(() => {
-    const list = [SPOT_NORMAL_MIN, SPOT_HIGH_MIN, SPOT_WARN_TEMP];
-    if (typeof spotConfigThreshold === 'number' && Number.isFinite(spotConfigThreshold)) {
-      const exists = list.some((value) => Math.abs(value - spotConfigThreshold) < 0.01);
-      if (!exists) {
-        list.push(spotConfigThreshold);
-      }
-    }
-    return list;
-  }, [spotConfigThreshold]);
-  const { linePath, areaPath, points, thresholdLines } = useMemo(
-    () =>
-      buildSparklinePaths(
-        sparklineValues,
-        100,
-        60,
-        sparklineThresholds,
-        { min: SPOT_NORMAL_MIN, max: SPOT_WARN_TEMP }
-      ),
-    [sparklineValues, sparklineThresholds]
-  );
-
-  useEffect(() => {
-    if (!Number.isFinite(spotDisplayValue)) {
-      return;
-    }
-    setSparklineValues((prev) => {
-      const next = [...prev, spotDisplayValue];
-      if (next.length > SPARKLINE_POINTS) {
-        next.splice(0, next.length - SPARKLINE_POINTS);
-      }
-      return next;
-    });
-  }, [spotDisplayValue]);
-
-  if (!data) return <div>Loading...</div>;
-
-  return (
-    <div
-      className={`card spot-card ${spotState.warning ? 'spot-danger' : spotThresholdHit ? 'spot-threshold' : 'spot-normal'}`}
-      style={{ height: '100%' }}
-    >
-      <div className="spot-gauge">
-        <svg viewBox="0 0 200 120" className="spot-gauge-svg" aria-hidden="true">
-          <path
-            className="spot-gauge-track"
-            d="M20 100 A80 80 0 0 1 180 100"
-            pathLength={100}
-          />
-          <path
-            className={`spot-gauge-fill ${spotState.fillClass}`}
-            d="M20 100 A80 80 0 0 1 180 100"
-            pathLength={100}
-            strokeDasharray={`${spotPercent} 100`}
-          />
-        </svg>
-        <div className="spot-value">
-          <span className="spot-value-number">{formatNumber(spotDisplayValue, 1)}</span>
-          <span className="spot-unit">{SPOT_UNIT}</span>
-        </div>
-      </div>
-      <div className="spot-status-row">
-        <span className={`spot-status ${spotState.statusClass}`}>
-          {spotState.label}
-        </span>
-        {spotThresholdHit && <span className="threshold-badge">임계</span>}
-        {spotState.warning && (
-          <span className="spot-alert-icon" aria-label="SPOT 경고">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3L2 21h20L12 3zm0 5.5c.6 0 1 .4 1 1v5c0 .6-.4 1-1 1s-1-.4-1-1v-5c0-.6.4-1 1-1zm0 9c.7 0 1.3.6 1.3 1.3S12.7 20 12 20s-1.3-.6-1.3-1.3S11.3 17.5 12 17.5z" />
-            </svg>
-          </span>
-        )}
-      </div>
-      <div className={`sparkline ${spotState.sparkClass}`}>
-        <svg viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="spot-sparkline-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="var(--sparkline-color)" stopOpacity="0.35" />
-              <stop offset="100%" stopColor="var(--sparkline-color)" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          {areaPath && <path className="sparkline-area" d={areaPath} />}
-          {thresholdLines.map((line) => (
-            <line
-              key={`thr-${line.value}`}
-              className={[
-                'sparkline-threshold',
-                line.value === SPOT_WARN_TEMP
-                  ? 'sparkline-threshold-warn'
-                  : line.value === SPOT_HIGH_MIN
-                    ? 'sparkline-threshold-high'
-                    : line.value === SPOT_NORMAL_MIN
-                      ? 'sparkline-threshold-normal'
-                      : '',
-                typeof spotConfigThreshold === 'number' &&
-                  Number.isFinite(spotConfigThreshold) &&
-                  Math.abs(line.value - spotConfigThreshold) < 0.01
-                  ? 'sparkline-threshold-config'
-                  : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              x1={0}
-              y1={line.y}
-              x2={100}
-              y2={line.y}
-            />
-          ))}
-          {linePath && <path className="sparkline-path" d={linePath} />}
-          {points.map((point, index) => (
-            <circle
-              key={`${point.x}-${point.y}-${index}`}
-              className={`sparkline-dot ${index === points.length - 1 ? 'sparkline-dot-last' : ''}`}
-              cx={point.x}
-              cy={point.y}
-              r={index === points.length - 1 ? 3 : 2}
-            />
-          ))}
-        </svg>
-      </div>
-      {missing && (
-        <div className="missing-note">
-          마지막 갱신 {formatTime(lastDataAt)}
-        </div>
-      )}
-    </div>
-  );
-};
-
-function TempsComponent() {
-  const { data, lastDataAt, thresholds } = React.useContext(DataContext);
-  const missing =
-    !Number.isFinite(data?.Temp_F) ||
-    !Number.isFinite(data?.Temp_B) ||
-    !Number.isFinite(data?.Billet_Temp) ||
-    !Number.isFinite(data?.Billet_Length);
-  const tempFValue = useLastValidNumber(data?.Temp_F);
-  const tempBValue = useLastValidNumber(data?.Temp_B);
-  const billetTempValue = useLastValidNumber(data?.Billet_Temp);
-  const billetLengthValue = useLastValidNumber(data?.Billet_Length);
-  const tempFLevel = useThresholdLevel(tempFValue ?? NaN, 350, 450, ALERT_HOLD_MS);
-  const tempBLevel = useThresholdLevel(tempBValue ?? NaN, 350, 450, ALERT_HOLD_MS);
-  const billetTempLevel = useThresholdLevel(billetTempValue ?? NaN, 440, 480, ALERT_HOLD_MS);
-  const computedThresholds = data?.Computed?.thresholds;
-  const tempFThresholdHit = computedThresholds?.temp_f ?? isThresholdHit(thresholds, 'temp_f', tempFValue);
-  const tempBThresholdHit = computedThresholds?.temp_b ?? isThresholdHit(thresholds, 'temp_b', tempBValue);
-  const billetTempThresholdHit =
-    computedThresholds?.billet_temp ?? isThresholdHit(thresholds, 'billet_temp', billetTempValue);
-  const billetLengthThresholdHit =
-    computedThresholds?.billet ?? isThresholdHit(thresholds, 'billet', billetLengthValue);
-
-  if (!data) return <div>Loading...</div>;
-  const tempFClass = [
-    tempFLevel === 'danger' ? 'temp-danger' : tempFLevel === 'warn' ? 'temp-warn' : '',
-    tempFThresholdHit ? 'temp-threshold' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const tempBClass = [
-    tempBLevel === 'danger' ? 'temp-danger' : tempBLevel === 'warn' ? 'temp-warn' : '',
-    tempBThresholdHit ? 'temp-threshold' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const billetTempClass = [
-    billetTempLevel === 'danger' ? 'temp-danger' : billetTempLevel === 'warn' ? 'temp-warn' : '',
-    billetTempThresholdHit ? 'temp-threshold' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const billetLengthClass = billetLengthThresholdHit ? 'temp-threshold' : '';
-  return (
-    <div className="card" style={{ height: '100%' }}>
-      <div className="temp-grid">
-        <div className={`temp-tile ${tempFClass}`}>
-          <div className="temp-header">
-            <span className="temp-label">{LABELS.CONTAINER_FRONT}</span>
-            {tempFThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-          </div>
-          <div className="temp-value-row">
-            <span className="temp-value">{formatNumber(data.Temp_F ?? NaN, 1)}</span>
-            <span className="temp-unit">{SPOT_UNIT}</span>
-          </div>
-        </div>
-        <div className={`temp-tile ${tempBClass}`}>
-          <div className="temp-header">
-            <span className="temp-label">{LABELS.CONTAINER_BACK}</span>
-            {tempBThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-          </div>
-          <div className="temp-value-row">
-            <span className="temp-value">{formatNumber(data.Temp_B ?? NaN, 1)}</span>
-            <span className="temp-unit">{SPOT_UNIT}</span>
-          </div>
-        </div>
-        <div className={`temp-tile ${billetTempClass}`}>
-          <div className="temp-header">
-            <span className="temp-label">{LABELS.BILLET_TEMP}</span>
-            {billetTempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-          </div>
-          <div className="temp-value-row">
-            <span className="temp-value">{formatNumber(data.Billet_Temp ?? NaN, 1)}</span>
-            <span className="temp-unit">{SPOT_UNIT}</span>
-          </div>
-        </div>
-        <div className={`temp-tile ${billetLengthClass}`}>
-          <div className="temp-header">
-            <span className="temp-label">{LABELS.BILLET_LEN}</span>
-            {billetLengthThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-          </div>
-          <div className="temp-value-row">
-            <span className="temp-value">{formatNumber(data.Billet_Length ?? NaN, 1)}</span>
-            <span className="temp-unit">mm</span>
-          </div>
-        </div>
-      </div>
-      {missing && (
-        <div className="missing-note">
-          마지막 갱신 {formatTime(lastDataAt)}
-        </div>
-      )}
-    </div>
-  );
-};
-
-function MoldsComponent() {
-  const { data, lastDataAt } = React.useContext(DataContext);
-  if (!data) return <div>Loading...</div>;
-  const missing =
-    !Number.isFinite(data.Mold1) ||
-    !Number.isFinite(data.Mold2) ||
-    !Number.isFinite(data.Mold3) ||
-    !Number.isFinite(data.Mold4) ||
-    !Number.isFinite(data.Mold5) ||
-    !Number.isFinite(data.Mold6);
-  const moldLevels = data?.Computed?.mold_levels;
-  const mold1 = mapMoldLevel(moldLevels?.Mold1) ?? getMoldState(data.Mold1 ?? 0).className;
-  const mold2 = mapMoldLevel(moldLevels?.Mold2) ?? getMoldState(data.Mold2 ?? 0).className;
-  const mold3 = mapMoldLevel(moldLevels?.Mold3) ?? getMoldState(data.Mold3 ?? 0).className;
-  const mold4 = mapMoldLevel(moldLevels?.Mold4) ?? getMoldState(data.Mold4 ?? 0).className;
-  const mold5 = mapMoldLevel(moldLevels?.Mold5) ?? getMoldState(data.Mold5 ?? 0).className;
-  const mold6 = mapMoldLevel(moldLevels?.Mold6) ?? getMoldState(data.Mold6 ?? 0).className;
-  return (
-    <div className="card" style={{ height: '100%' }}>
-      <div className="mold-grid">
-        <div className={`mold-tile ${mold1}`}>
-          <span className="mold-label">Mold 1</span>
-          <span className="mold-value">{formatNumber(data.Mold1 ?? NaN, 1)}</span>
-        </div>
-        <div className={`mold-tile ${mold2}`}>
-          <span className="mold-label">Mold 2</span>
-          <span className="mold-value">{formatNumber(data.Mold2 ?? NaN, 1)}</span>
-        </div>
-        <div className={`mold-tile ${mold3}`}>
-          <span className="mold-label">Mold 3</span>
-          <span className="mold-value">{formatNumber(data.Mold3 ?? NaN, 1)}</span>
-        </div>
-        <div className={`mold-tile ${mold4}`}>
-          <span className="mold-label">Mold 4</span>
-          <span className="mold-value">{formatNumber(data.Mold4 ?? NaN, 1)}</span>
-        </div>
-        <div className={`mold-tile ${mold5}`}>
-          <span className="mold-label">Mold 5</span>
-          <span className="mold-value">{formatNumber(data.Mold5 ?? NaN, 1)}</span>
-        </div>
-        <div className={`mold-tile ${mold6}`}>
-          <span className="mold-label">Mold 6</span>
-          <span className="mold-value">{formatNumber(data.Mold6 ?? NaN, 1)}</span>
-        </div>
-      </div>
-      {missing && (
-        <div className="missing-note">
-          마지막 갱신 {formatTime(lastDataAt)}
-        </div>
-      )}
-    </div>
-  );
-};
-
-function EnvComponent() {
-  const { data, lastDataAt, thresholds } = React.useContext(DataContext);
-  const envTempValue = useLastValidNumber(data?.At_Temp);
-  const envHumidityValue = useLastValidNumber(data?.At_Pre);
-  const tempRaw = data?.At_Temp;
-  const humidityRaw = data?.At_Pre;
-  const tempDisplay = envTempValue ?? tempRaw ?? NaN;
-  const humidityDisplay = envHumidityValue ?? humidityRaw ?? NaN;
-  const missing = !Number.isFinite(tempRaw) || !Number.isFinite(humidityRaw);
-  const computed = data?.Computed;
-  const tempState = mapEnvTempLevel(computed?.env_temp_level) ?? getEnvTempState(tempDisplay);
-  const humidityState = mapEnvPreLevel(computed?.env_pre_level) ?? getEnvHumidityState(humidityDisplay);
-  const computedThresholds = computed?.thresholds;
-  const tempThresholdHit = computedThresholds?.at_temp ?? isThresholdHit(thresholds, 'at_temp', envTempValue);
-  const humidityThresholdHit =
-    computedThresholds?.at_pre ?? isThresholdHit(thresholds, 'at_pre', envHumidityValue);
-  return (
-    <div className="card env-card" style={{ height: '100%' }}>
-      <div className="env-grid">
-        <div className={`env-tile ${tempThresholdHit ? 'env-threshold' : ''}`}>
-          <div className="env-header">
-            <span className="env-label">{LABELS.ENV_TEMP}</span>
-            {tempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-          </div>
-          <div className="env-value-row">
-            <span className="env-value">{formatNumber(tempDisplay ?? NaN, 1)}</span>
-            <span className="env-unit">{SPOT_UNIT}</span>
-          </div>
-          <span className={`env-badge ${tempState.className}`}>{tempState.label}</span>
-        </div>
-        <div className={`env-tile ${humidityThresholdHit ? 'env-threshold' : ''}`}>
-          <div className="env-header">
-            <span className="env-label">{LABELS.ENV_HUMID}</span>
-            {humidityThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
-          </div>
-          <div className="env-value-row">
-            <span className="env-value">{formatNumber(humidityDisplay ?? NaN, 1)}</span>
-            <span className="env-unit">%</span>
-          </div>
-          <span className={`env-badge ${humidityState.className}`}>{humidityState.label}</span>
-        </div>
-      </div>
-      {missing && (
-        <div className="missing-note">
-          마지막 갱신 {formatTime(lastDataAt)}
-        </div>
-      )}
-    </div>
-  );
-};
-
-
-function CameraComponent() {
-  const {
-    spotConfig,
-    spotImageUrl,
-    spotImageLoading,
-    spotImageError,
-    spotLastSuccessAt,
-    onSpotImageLoaded,
-    onSpotImageError,
-    requestFocus,
-  } = React.useContext(DataContext);
-  if (!spotConfig) return <div>Loading Config...</div>;
-
-  // Crosshair logic
-  const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
-  const cx = clamp(spotConfig.crosshair_x, 0, 1) * spotConfig.widget_width;
-  const cy = clamp(spotConfig.crosshair_y, 0, 1) * spotConfig.widget_height;
-  const arm = Math.max(1, spotConfig.crosshair_size);
-  const gap = Math.max(0, spotConfig.crosshair_gap);
-  const thick = Math.max(1, spotConfig.crosshair_thickness);
-  const color = spotConfig.crosshair_color || 'lime';
-
-  const lines = [
-    { x1: cx - gap, y1: cy, x2: cx - arm, y2: cy },
-    { x1: cx + gap, y1: cy, x2: cx + arm, y2: cy },
-    { x1: cx, y1: cy - gap, x2: cx, y2: cy - arm },
-    { x1: cx, y1: cy + gap, x2: cx, y2: cy + arm },
-  ];
-
-  const cameraStatus = getCameraStatus({
-    spotConfig,
-    spotImageUrl,
-    spotImageLoading,
-    spotImageError,
-    spotLastSuccessAt,
-  });
-
-  return (
-    <div className="card camera-card" style={{ height: '100%', position: 'relative' }}>
-      <div className="camera-frame">
-        {spotImageUrl && (
-          <img
-            className="camera-image"
-            src={spotImageUrl}
-            alt={LABELS.SPOT_CAMERA}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            onLoad={onSpotImageLoaded}
-            onError={() => onSpotImageError()}
-          />
-        )}
-        <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
-          {lines.map((line, idx) => (
-            <g key={idx}>
-              <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="black" strokeWidth={thick + 2} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-              <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke={color} strokeWidth={thick} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-            </g>
-          ))}
-          <circle cx={cx} cy={cy} r={3} stroke="black" strokeWidth={3} fill="none" vectorEffect="non-scaling-stroke" />
-          <circle cx={cx} cy={cy} r={3} stroke={color} strokeWidth={1} fill="none" vectorEffect="non-scaling-stroke" />
-        </svg>
-        {cameraStatus && (
-          <div className={`camera-overlay ${cameraStatus.type}`}>
-            {cameraStatus.type === 'loading' && <span className="camera-spinner" aria-hidden="true" />}
-            <div className="camera-status-text">
-              <div className="camera-status-title">{cameraStatus.title}</div>
-              {cameraStatus.detail && <div className="camera-status-detail">{cameraStatus.detail}</div>}
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="camera-controls" style={{ marginTop: '4px' }}>
-        <button onClick={() => requestFocus(1)}>&lt;-Focus</button>
-        <button onClick={() => requestFocus(-1)}>Focus-&gt;</button>
-      </div>
-    </div>
-  );
-};
-
-  /* Chart Colors for Threshold Lines */
-  const THRESHOLD_LINE_COLORS: Partial<Record<ThresholdKey, string>> = {
-    speed: 'var(--color-speed)',
-    press: 'var(--color-press)',
-    spot: 'var(--color-spot)',
-    temp_f: 'var(--color-temp-f)',
-    temp_b: 'var(--color-temp-b)',
-    billet: 'var(--color-billet-len)',
-    billet_temp: 'var(--color-billet-temp)',
-    at_temp: 'var(--color-env-temp)',
-    at_pre: 'var(--color-env-pre)',
-  };
-
-function TimeSeriesWidget() {
-  const {
-    data: factoryData,
-    timeSeriesFrames,
-    timeSeriesAllFrame,
-    seriesWindowMin,
-    setSeriesWindowMin,
-    seriesPaused,
-    setSeriesPaused,
-    showThresholds,
-    setShowThresholds,
-    handleSnapshot,
-    snapshotLoading,
-    nowTick,
-    intervalSec,
-    thresholds
-  } = React.useContext(DataContext);
-
-  const { mode } = useTheme();
-
-  // Convert frames to Recharts data
-  // Optimizing: Only rebuild when frames update
-  // Use a ref to store the last valid data for freezing
-  const lastChartDataRef = useRef<any[]>([]);
-
-  // uPlot Instance State
-  const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
-  
-  // Active Series State (Tracking visibility for UI)
-  // Initialize with Catalog defaults (Molds are hidden by default)
-  const [activeSeries, setActiveSeries] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {};
-    TIME_SERIES_CATALOG.forEach(meta => {
-        initial[meta.key] = !['Mold1','Mold2','Mold3','Mold4','Mold5','Mold6'].includes(meta.key);
-    });
-    return initial;
-  });
-
-  const toggleSeries = (key: string) => {
-    if (!uPlotInst) return;
-    
-    // Find uPlot series index
-    // Series 0 is Time. TIME_SERIES_CATALOG matches series 1..N
-    const catIndex = TIME_SERIES_CATALOG.findIndex(m => m.key === key);
-    if (catIndex === -1) return;
-    
-    const uPlotIndex = catIndex + 1;
-    const currentShow = activeSeries[key];
-    const newShow = !currentShow;
-    
-    // Update uPlot (Efficient, no React re-render of chart)
-    uPlotInst.setSeries(uPlotIndex, { show: newShow });
-    
-    // Update React UI state (for Legend buttons)
-    setActiveSeries(prev => ({ ...prev, [key]: newShow }));
-  };
-
-  // uPlot Data Preparation
-  // Direct mapping from columnar timeSeriesAllFrame to uPlot's AlignedData (array of arrays)
-  const uPlotData = useMemo<uPlot.AlignedData | null>(() => {
-    if (!timeSeriesAllFrame) return null;
-    
-    // timeSeriesAllFrame fields are already sorted by TIME_SERIES_CATALOG
-    // Field 0 is Time, others represent series in order
-    // Ensure we are not passed nulls where arrays expected, though 'values' should be arrays.
-    
-    // We must ensure the structure is [ [time...], [series1...], [series2...] ]
-    // which maps to field.values
-    
-    return timeSeriesAllFrame.fields.map((f, i) => {
-        // Field 0 is Time (ms). uPlot prefers seconds.
-        if (i === 0) {
-            return f.values.map(v => (v || 0) / 1000);
-        }
-        return f.values;
-    }) as uPlot.AlignedData;
-  }, [timeSeriesAllFrame]);
-
-  // uPlot Options
-  const uPlotOptions = useMemo<uPlot.Options>(() => {
-    const isDark = mode === 'dark' || document.body.getAttribute('data-theme') === 'night';
-    const axisColor = isDark ? '#aaaaaa' : '#333333';
-
-    
-    return {
-      title: "",
-      width: 800, // Placeholder, autosized by component
-      height: 400,
-      mode: 1, // 1: equidistant, 2: non-equidistant
-      scales: {
-        x: {
-          time: true,
-        },
-        y: {
-          auto: true,
-        }
-      },
-      series: [
-        {
-            label: "Time",
-            value: (u, v) => v == null ? "-" : new Date(v * 1000).toLocaleTimeString(),
-            stroke: axisColor,
-        },
-        ...TIME_SERIES_CATALOG.map(meta => ({
-            label: meta.label,
-            stroke: SERIES_COLORS[meta.key] || '#888',
-            width: 2,
-            points: { show: false }, // Disable dots for performance
-            show: ['Mold1','Mold2','Mold3','Mold4','Mold5','Mold6'].includes(meta.key) ? false : true, // Hide Molds by default
-            spanGaps: true,
-        }))
-      ],
-      axes: [
-        {
-          scale: 'x',
-          space: 50,
-          stroke: axisColor,
-          grid: { show: false },
-          ticks: { show: true, stroke: axisColor, width: 1 },
-          values: (u, vals, space) => vals.map(v => new Date(v * 1000).toLocaleTimeString('en-GB', { hour12: false }))
-        },
-        {
-          scale: 'y',
-          size: 50,
-          stroke: axisColor,
-          grid: { show: false },
-          ticks: { show: true, stroke: axisColor, width: 1 },
-          values: (u, vals, space) => vals.map(v => v.toFixed(1))
-        }
-      ],
-      legend: {
-        show: false, // Use Custom Legend
-      },
-      cursor: {
-        drag: { x: true, y: true },
-        points: { show: false }
-      },
-      hooks: {
-        draw: [(u: uPlot) => {
-          if (!showThresholds || !thresholds.masterOn) return;
-          
-          const { ctx } = u;
-          const { left, top, width, height } = u.bbox;
-          const seriesEntries = Object.keys(thresholds.entries) as ThresholdKey[];
-
-          ctx.save();
-          ctx.beginPath();
-          
-          seriesEntries.forEach(key => {
-            const entry = thresholds.entries[key];
-            const color = THRESHOLD_LINE_COLORS[key];
-            
-            if (!entry.enabled || entry.value === null || !color) return;
-
-            // Resolve color variable if it starts with var(--) - uPlot Canvas won't resolve it automatically simply by fillStyle
-            // Ideally we should use getComputedStyle, but for performance, we might assume hex or try simple resolution
-            // Wait, SERIES_COLORS are hex, but THRESHOLD_LINE_COLORS are var(--...)
-            // We need to resolve these. Or just use a fallback.
-            // For now, let's assume 'color' string works if we can't resolve vars easily in canvas loop without perf hit.
-            // Actually, ctx.fillStyle DOES support "var(--...)" in modern browsers? No, Canvas API does NOT support CSS variables directly.
-            // We must resolve them.
-            // Optimization: Variables are resolved in React style prop, but not in Canvas 2D Context.
-            
-            // Temporary Workaround: Use fixed colors or read from a hidden element (expensive).
-            // Better: parse vars once. But they are simple. 
-            // Let's use getComputedStyle(document.documentElement).getPropertyValue(...) inside the hook is ok? 
-            // It will run every frame. 
-            // Let's try to map keys to SERIES_COLORS if possible? 
-            // Speed -> SERIES_COLORS['Speed']. 
-            // Let's rely on SERIES_COLORS for mapping if keys match.
-            // ThresholdKey: 'speed', 'press' ... 
-            // Series Key is: 'Speed', 'Press' (Capitalized).
-            
-            // Mapping:
-            const capKey = key.charAt(0).toUpperCase() + key.slice(1);
-            let hexColor = SERIES_COLORS[capKey] || '#888888';
-             // Special cases
-            if (key === 'temp_f') hexColor = SERIES_COLORS['Temp_F'];
-            if (key === 'temp_b') hexColor = SERIES_COLORS['Temp_B'];
-            if (key === 'billet_temp') hexColor = SERIES_COLORS['Billet_Temp'];
-            if (key === 'billet') hexColor = SERIES_COLORS['Billet_Length'];
-            if (key === 'at_temp') hexColor = SERIES_COLORS['At_Temp'];
-            if (key === 'at_pre') hexColor = SERIES_COLORS['At_Pre'];
-
-            const yVal = entry.value!;
-            // uPlot implicitly uses scale 'y' for values
-            const yPos = u.valToPos(yVal, 'y', true);
-
-            // Check if line is within visible area
-            if (yPos < top || yPos > top + height) return;
-
-            // Draw Line
-            ctx.lineWidth = 1;         
-            ctx.strokeStyle = hexColor;
-            ctx.setLineDash([5, 5]); // Dashed line
-            
-            ctx.moveTo(left, yPos);
-            ctx.lineTo(left + width, yPos);
-            ctx.stroke();
-            
-            // Draw Label
-            ctx.fillStyle = hexColor;
-            ctx.font = "10px sans-serif";
-            ctx.textAlign = "right";
-            ctx.textBaseline = "bottom";
-            ctx.fillText(THRESHOLD_LABELS[key] || key, left + width - 5, yPos - 2);
-            
-            ctx.beginPath(); // Reset path for next line
-          });
-          
-          
-          ctx.restore();
-        }],
-        setCursor: [(u: uPlot) => {
-            if (!u.cursor) return;
-            const { left, top, idx } = u.cursor;
-            if (left === undefined || top === undefined) return;
-            const tooltip = document.getElementById('uplot-tooltip');
-            if (!tooltip) return;
-
-            if (idx === null || idx === undefined) {
-                tooltip.style.display = 'none';
-                return;
-            }
-
-            // Data
-            const xVal = u.data[0][idx];
-            // Skip Time series (index 0)
-            const activeSeriesIndices = u.series.map((s, i) => s.show ? i : -1).filter(i => i > 0);
-            
-            // Build HTML
-            // Note: In React we usually avoid innerHTML, but for perf in 60fps hook it's acceptable/common in chart libs
-            let html = `<div class="uplot-tooltip-time">${new Date(xVal * 1000).toLocaleTimeString('en-GB', { hour12: false })}</div>`;
-            
-            activeSeriesIndices.forEach(sIdx => {
-                const s = u.series[sIdx];
-                const val = u.data[sIdx][idx];
-                const valStr = val != null ? val.toFixed(1) : '-';
-                const color = s.stroke as string; // We know it's string
-                
-                html += `
-                <div class="uplot-tooltip-item">
-                    <div class="uplot-tooltip-label">
-                        <div class="uplot-tooltip-dot" style="background-color: ${color}"></div>
-                        <span>${s.label}</span>
-                    </div>
-                    <span class="uplot-tooltip-value">${valStr}</span>
-                </div>
-                `;
-            });
-
-            tooltip.innerHTML = html;
-            tooltip.style.display = 'block';
-            
-            // Positioning
-            const plotLeft = u.bbox.left;
-            const plotTop = u.bbox.top;
-            const container = u.root.querySelector('.u-over');
-            if (!container) return;
-            
-            // Simple positioning: right of cursor + offset
-            let cssLeft = left + 20;
-            let cssTop = top;
-            
-            // Boundary detection could be added here
-            
-            tooltip.style.transform = `translate(${cssLeft}px, ${cssTop}px)`;
-        }]
-      }
-    };
-  }, [showThresholds, thresholds, mode]);
-
-  if (!timeSeriesFrames) return <div style={{ color: 'white', padding: '16px' }}>Loading data...</div>;
-
-  return (
-    <div className="card timeseries-card" style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Controls Header within the Widget */}
-      {/* Joined Header: Legend (Left) + Controls (Right) */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '6px 8px',
-        borderBottom: '1px solid var(--border-muted)',
-        background: 'var(--bg-card-muted)',
-        gap: '16px'
-      }}>
-        {/* Left: Custom Legend */}
-        <div style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '6px',
-        }}>
-          {TIME_SERIES_CATALOG
-              .filter(meta => !['Mold1', 'Mold2', 'Mold3', 'Mold4', 'Mold5', 'Mold6'].includes(meta.key))
-              .map(meta => {
-              const isActive = activeSeries[meta.key];
-              const color = SERIES_COLORS[meta.key] || '#888';
-              return (
-                  <button
-                      key={meta.key}
-                      onClick={() => toggleSeries(meta.key)}
-                      style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '2px 8px',
-                          borderRadius: '12px',
-                          border: `1px solid ${isActive ? color : 'var(--border-muted)'}`,
-                          background: isActive ? `${color}20` : 'transparent', // 20 = ~12% opacity
-                          fontSize: '11px',
-                          color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
-                          cursor: 'pointer',
-                          transition: 'all 0.2s ease',
-                          opacity: isActive ? 1 : 0.6
-                      }}
-                  >
-                      <div style={{
-                          width: '8px',
-                          height: '8px',
-                          borderRadius: '50%',
-                          backgroundColor: isActive ? color : 'var(--text-muted)'
-                      }} />
-                      <span>{meta.label}</span>
-                      <span style={{ fontWeight: 600, marginLeft: '4px' }}>
-                          {factoryData && typeof factoryData[meta.key] === 'number' 
-                            ? (factoryData[meta.key] as number).toFixed(1) 
-                            : '-'}
-                      </span>
-                  </button>
-              );
-          })}
-        </div>
-
-        {/* Right: Controls */}
-        <div className="timeseries-controls" style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}>
-          <div className="series-group">
-            {[1, 5, 10, 30, 60].map((min) => (
-              <button
-                key={min}
-                className={`status-action ${seriesWindowMin === min ? 'active' : ''}`}
-                style={{ minWidth: '32px', padding: '0 4px', opacity: seriesWindowMin === min ? 1 : 0.5, fontSize: '11px', height: '24px' }}
-                onClick={() => setSeriesWindowMin(min)}
-              >
-                {min}m
-              </button>
-            ))}
-          </div>
-          <span
-            className="series-density-badge"
-            title="현재 수집 간격 기준 데이터 밀도"
-            style={{
-              fontSize: '10px',
-              padding: '2px 8px',
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '10px',
-              color: 'var(--text-muted)',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            📊 {(1 / intervalSec).toFixed(0)}pt/s
-          </span>
-          <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
-          <button
-            className={`status-action ${seriesPaused ? 'warn' : ''}`}
-            onClick={() => setSeriesPaused((prev) => !prev)}
-          >
-            {seriesPaused ? 'Pause' : 'Live'}
-          </button>
-          <label style={{ display: 'flex', alignItems: 'center', fontSize: '11px', cursor: 'pointer', gap: '4px', userSelect: 'none', color: 'var(--text-secondary)' }}>
-            <input
-              type="checkbox"
-              checked={showThresholds}
-              onChange={(e) => setShowThresholds(e.target.checked)}
-            />
-            {LABELS.THRESHOLDS}
-          </label>
-          <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}></div>
-          <button
-            className={`status-action ${snapshotLoading ? 'loading' : ''}`}
-            onClick={handleSnapshot}
-            disabled={snapshotLoading}
-            title={LABELS.SAVE_SNAPSHOT}
-          >
-            스냅샷
-          </button>
-        </div>
-      </div>
-
-      <div style={{ flexGrow: 1, minHeight: 0 }}>
-        {uPlotData ? (
-          <div style={{ position: 'relative', height: '100%', width: '100%' }}>
-            <UPlotChart 
-                data={uPlotData} 
-                options={uPlotOptions} 
-                height={400} 
-                className="uplot-container"
-                onCreate={setUPlotInst}
-            />
-            <div id="uplot-tooltip" className="uplot-tooltip" style={{top: 0, left: 0}}></div>
-          </div>
-          ) : (
-            <div style={{color: 'var(--text-muted)', display:'flex', justifyContent:'center', alignItems:'center', height:'100%'}}>
-                Waiting for data...
-            </div>
-          )}
-      </div>
-
-      <AIChatbot />
-    </div>
-  );
-};
 
 export default App;
 

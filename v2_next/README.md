@@ -33,3 +33,7 @@ SilentlyContinue
 ## 3. 백엔드 재시작
 
 python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+
+## 4. EXE 빌드
+
+powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1

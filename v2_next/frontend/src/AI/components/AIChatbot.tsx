@@ -1,6 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
-import { MessageSquare, X, Send, Settings, Trash2, Bot, Wrench } from 'lucide-react';
+import MessageSquare from 'lucide-react/dist/esm/icons/message-square';
+import X from 'lucide-react/dist/esm/icons/x';
+import Send from 'lucide-react/dist/esm/icons/send';
+import Settings from 'lucide-react/dist/esm/icons/settings';
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
+import Bot from 'lucide-react/dist/esm/icons/bot';
+import Wrench from 'lucide-react/dist/esm/icons/wrench';
 import { useAIAgent } from '../hooks/useAIAgent';
 import { ChatMessage } from './ChatMessage';
 
@@ -161,7 +167,9 @@ export const AIChatbot: React.FC = () => {
                 </div>
               ) : (
                 messages.map((msg, idx) => (
-                  <ChatMessage key={idx} msg={msg} />
+                  <div key={idx} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 60px' }}>
+                    <ChatMessage msg={msg} />
+                  </div>
                 ))
               )}
               

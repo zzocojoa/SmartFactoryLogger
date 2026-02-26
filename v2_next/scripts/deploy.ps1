@@ -5,7 +5,7 @@
 Write-Host ">>> Starting Deployment Process..." -ForegroundColor Cyan
 
 $ErrorActionPreference = "Stop"
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptDir = (Get-Item "$(Split-Path -Parent $MyInvocation.MyCommand.Path)\..").FullName
 Set-Location $ScriptDir
 
 # =============================================================================

@@ -1,4 +1,5 @@
 import type { WidgetType } from '../scenes/DashboardScene';
+export type { WidgetType };
 
 export interface FactoryData {
     // System

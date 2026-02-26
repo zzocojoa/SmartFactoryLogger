@@ -6,6 +6,7 @@ MES 실시간 데이터 수집 스케줄러 (Robust Version)
 """
 
 import asyncio
+import functools
 import json
 import os
 import sys
@@ -87,8 +88,9 @@ circuit_breaker = CircuitBreaker()
 
 
 # 운영 시간 체크 함수들
+@functools.lru_cache(maxsize=1)
 def get_operating_hours() -> tuple[int, int]:
-    """config 모듈에서 현재 운영 시간 로드 (동적 반영)"""
+    """config 모듈에서 현재 운영 시간 로드 (동적 반영, cached)"""
     from backend import config
     return config.MES_START_HOUR, config.MES_END_HOUR
 
@@ -118,8 +120,9 @@ def seconds_until_start() -> float:
     
     return (next_start - now).total_seconds()
 
+@functools.lru_cache(maxsize=1)
 def load_page_structures():
-    """페이지 구조 정보 로드"""
+    """페이지 구조 정보 로드 (cached)"""
     with open(STRUCTURES_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 

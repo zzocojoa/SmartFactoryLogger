@@ -197,3 +197,24 @@ export const TIME_SERIES_CATALOG: TimeSeriesMeta[] = [
     legacyKey: 'At_Pre',
   },
 ];
+
+// UPlot Series Colors Mapping (matching index.css)
+export const SERIES_COLORS: Record<string, string> = {
+  Spot: '#ef4444',
+  Press: '#f59e0b',
+  Temp_F: '#3b82f6',
+  Temp_B: '#8b5cf6',
+  Speed: '#10b981',
+  EndPos: '#f97316',
+  Count: '#14b8a6',
+  Billet_Length: '#ec4899',
+  Billet_Temp: '#d946ef',
+  Mold1: '#aaaaaa',
+  Mold2: '#aaaaaa',
+  Mold3: '#aaaaaa',
+  Mold4: '#aaaaaa',
+  Mold5: '#aaaaaa',
+  Mold6: '#aaaaaa',
+  At_Temp: '#06b6d4',
+  At_Pre: '#84cc16',
+};

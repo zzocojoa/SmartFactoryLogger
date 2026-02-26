@@ -64,15 +64,21 @@ export function getDashboardScene(
   
   // If a saved layout exists, we use it as the source of truth for which widgets to display.
   // We do NOT automatically merge defaults, otherwise a user cannot delete a default widget.
-  const allKeys = (savedLayout 
-    ? Object.keys(savedMap) 
-    : DEFAULT_DASHBOARD_ITEMS.map(i => i.key)).filter(k => k !== 'notice');
+  const allKeys = savedLayout
+    ? Object.keys(savedMap).filter(k => k !== 'notice')
+    : DEFAULT_DASHBOARD_ITEMS.reduce<string[]>((acc, i) => {
+        if (i.key !== 'notice') acc.push(i.key);
+        return acc;
+      }, []);
   
   // Scale factor: 60 (User) -> 24 (Scene) = 0.4
   const SCALE_TO_SCENE = 24 / 60;
 
+  // Pre-build index map for O(1) lookups instead of O(N) .find() per key (Rule 7.11)
+  const defaultItemMap = new Map(DEFAULT_DASHBOARD_ITEMS.map(i => [i.key, i]));
+
   const children = allKeys.map(key => {
-    const defaultItem = DEFAULT_DASHBOARD_ITEMS.find(i => i.key === key);
+    const defaultItem = defaultItemMap.get(key);
     const saved = savedMap[key];
     
     if (!defaultItem && !saved) return null; // Should not happen

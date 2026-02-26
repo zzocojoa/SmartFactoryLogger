@@ -4,8 +4,8 @@ from PyInstaller.utils.hooks import collect_all
 datas = [
     ('../frontend/dist', 'frontend/dist'), 
     ('assets', 'backend/assets'),
-    ('mes_bridge/data', 'backend/mes_bridge/data'),
-    ('scripts', 'backend/scripts')
+    ('MESSync/data', 'backend/MESSync/data'),
+    ('../scripts', 'backend/scripts')
 ]
 binaries = []
 hiddenimports = [

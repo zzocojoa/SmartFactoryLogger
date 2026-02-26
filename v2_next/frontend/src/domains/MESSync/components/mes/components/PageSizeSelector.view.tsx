@@ -1,5 +1,6 @@
 import React from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
+import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up';
 import type { PageSizeSelectorViewProps } from '../types/PageSizeSelector.types';
 import {
   createDropdownOptionStyle,

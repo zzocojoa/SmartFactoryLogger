@@ -45,7 +45,7 @@ export const useDynamicDataGridModel = ({
     };
 
     if (outerElement) {
-      outerElement.addEventListener('scroll', handleHorizontalScroll);
+      outerElement.addEventListener('scroll', handleHorizontalScroll, { passive: true });
     }
 
     return () => {

@@ -4,6 +4,7 @@ MES 데이터 추출 엔진
 """
 
 import asyncio
+import functools
 import json
 from pathlib import Path
 from datetime import datetime
@@ -26,8 +27,9 @@ from .MESSync_Logger import get_logger
 
 logger = get_logger("collector")
 
+@functools.lru_cache(maxsize=1)
 def load_page_structures() -> dict:
-    """페이지 구조 정보 로드"""
+    """페이지 구조 정보 로드 (cached)"""
     with open(STRUCTURES_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
