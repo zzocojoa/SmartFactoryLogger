@@ -38,6 +38,14 @@ snapshots/
 debug_electron.log
 debug_plc_service.log
 debug_csv_driver.log
+.tmp_system_zip*/
+system.zip
+frontend/tsc_out.txt
+backend/.tmp_temp/
+backend/scripts/utils/refactor_ddd.py
+scripts/test_spot_drift.py
+scripts/test_spot_unified.py
+docs/optimization/
 
 # Config & Environment
 .env
