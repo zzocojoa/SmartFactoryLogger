@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import logging
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
+import queue
 from datetime import datetime
 import os
 import threading
 import time
 from typing import Any, Dict, Optional
+from pythonjsonlogger import jsonlogger
 
-from backend.FacilityData.FacilityData_Logic_Service import plc_service
+from backend.FacilityData.service import plc_service
 
 
 def _format_ts(value: Optional[float]) -> str:
@@ -65,21 +67,26 @@ class CommMetricsLoggerService:
         logger = logging.getLogger("SmartFactoryLoggerV2.CommMetrics")
         if logger.handlers:
             for handler in logger.handlers:
-                if isinstance(handler, RotatingFileHandler):
-                    self._file_path = handler.baseFilename
-                    break
+                if isinstance(handler, RotatingFileHandler) or isinstance(handler, QueueHandler):
+                    # Keep existing queue handler active if present
+                    pass
             return logger
+            
         logger.setLevel(logging.INFO)
-        formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        json_formatter = jsonlogger.JsonFormatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        
         log_dir = None
         try:
             from .. import config
 
             if config.LOG_PATH:
-                # Comm metrics logs go to 'comm' subdirectory (Fixed path)
                 log_dir = os.path.join(config.APP_DATA_DIR, "logs", "comm")
         except Exception:
             log_dir = None
+            
         if not log_dir:
             appdata = os.getenv("APPDATA")
             if appdata:
@@ -90,12 +97,21 @@ class CommMetricsLoggerService:
             os.makedirs(log_dir, exist_ok=True)
         except Exception:
             log_dir = os.getcwd()
+            
         file_path = os.path.join(log_dir, "comm_metrics.log")
         self._file_path = file_path
-        handler = RotatingFileHandler(file_path, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        
+        file_handler = RotatingFileHandler(file_path, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")
+        file_handler.setFormatter(json_formatter)
+        
+        log_queue = queue.Queue(-1)
+        queue_handler = QueueHandler(log_queue)
+        logger.addHandler(queue_handler)
         logger.propagate = False
+        
+        self.listener = QueueListener(log_queue, file_handler, respect_handler_level=True)
+        self.listener.start()
+        
         return logger
 
     def get_log_path(self) -> Optional[str]:
@@ -116,6 +132,11 @@ class CommMetricsLoggerService:
         if self.thread:
             self.thread.join(timeout=1.0)
         self.thread = None
+        if hasattr(self, "listener") and self.listener:
+            try:
+                self.listener.stop()
+            except Exception:
+                pass
         self.logger.info("Comm metrics logger stopped.")
 
     def _summarize_ex(self, metrics: Optional[Dict[str, Any]]) -> str:

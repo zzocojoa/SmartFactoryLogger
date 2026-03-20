@@ -6,6 +6,9 @@ import type {
   ConnectionTestData,
   CreatePathResponse,
   LatestExportPathResponse,
+  MemoryDetailsData,
+  MemoryExportRequest,
+  MemoryStateData,
   ObservabilityErrorsData,
   ObservabilityExportRequest,
   PathHealthRequestItem,
@@ -33,6 +36,16 @@ export const fetchObservabilityErrors = async (limit: number): Promise<Observabi
   return response.data;
 };
 
+export const fetchMemoryState = async (): Promise<MemoryStateData> => {
+  const response = await apiClient.get<MemoryStateData>('/api/memory/state');
+  return response.data;
+};
+
+export const fetchMemoryDetails = async (): Promise<MemoryDetailsData> => {
+  const response = await apiClient.get<MemoryDetailsData>('/api/memory/details');
+  return response.data;
+};
+
 export const postClearObservabilityErrors = async () => {
   const response = await apiClient.post('/api/observability/errors/clear');
   return response.data;
@@ -47,6 +60,35 @@ export const postObservabilityExport = async (params: ObservabilityExportRequest
   const response = await apiClient.post<{ path?: string }>('/api/observability/export', params);
   return response.data;
 };
+
+export const fetchLatestMemoryExportPath = async (): Promise<LatestExportPathResponse> => {
+  const response = await apiClient.get<LatestExportPathResponse>('/api/memory/export/latest');
+  return response.data;
+};
+
+export const postStartMemoryProfiler = async () => {
+  const response = await apiClient.post('/api/memory/profiler/start');
+  return response.data;
+};
+
+export const postStopMemoryProfiler = async () => {
+  const response = await apiClient.post('/api/memory/profiler/stop');
+  return response.data;
+};
+
+export const postCaptureMemorySnapshot = async () => {
+  const response = await apiClient.post('/api/memory/snapshot');
+  return response.data;
+};
+
+export const postMemoryExport = async (params: MemoryExportRequest) => {
+  const response = await apiClient.post<{ path?: string }>('/api/memory/export', params);
+  return response.data;
+};
+
+export const postOpenMemoryExportFile = async () => apiClient.post('/api/memory/export/open-file');
+
+export const postOpenMemoryExportFolder = async () => apiClient.post('/api/memory/export/open-folder');
 
 export const postOpenExportFile = async () => apiClient.post('/api/observability/export/open-file');
 

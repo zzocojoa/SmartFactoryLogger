@@ -4,6 +4,8 @@ pydantic>=2.0.0
 python-multipart
 websockets
 python-dotenv
+python-json-logger
+psutil
 pystray
 Pillow
 httpx

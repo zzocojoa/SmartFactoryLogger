@@ -3,8 +3,7 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { FactoryDataContext } from '../../context/FactoryDataContext';
-import { SpotContext } from '../../context/SpotContext';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { buildSparklinePaths, calcPercent } from '../../../../shared/utils/sparkline';
 import { isThresholdHit, getThresholdValue } from '../../../../shared/utils/thresholds';
@@ -19,9 +18,12 @@ import {
 } from '../../../../shared/constants/logic';
 import { SPOT_UNIT } from '../../../../shared/constants/uiText';
 
-export function SpotComponent() {
-  const { data, lastDataAt, thresholds } = React.useContext(FactoryDataContext);
-  const { spotAlertActive } = React.useContext(SpotContext);
+export const SpotComponent = React.memo(function SpotComponent() {
+  const data = useDashboardStore(state => state.data);
+  const lastDataAt = useDashboardStore(state => state.lastDataAt);
+  const thresholds = useDashboardStore(state => state.thresholds);
+  const spotAlertActive = useDashboardStore(state => state.spotAlertActive);
+
   const [sparklineValues, setSparklineValues] = useState<number[]>([]);
   const spotValue = useLastValidNumber(data?.Spot);
 
@@ -31,8 +33,8 @@ export function SpotComponent() {
   const spotState =
     mapSpotLevel(computed?.spot_level) ??
     getSpotState(spotDisplayValue, spotAlertActive, SPOT_WARN_TEMP, SPOT_HIGH_MIN, SPOT_NORMAL_MIN);
-  const spotThresholdHit = computed?.thresholds?.spot ?? isThresholdHit(thresholds, 'spot', spotValue);
-  const spotConfigThreshold = getThresholdValue(thresholds, 'spot');
+  const spotThresholdHit = computed?.thresholds?.spot ?? (thresholds ? isThresholdHit(thresholds, 'spot', spotValue) : false);
+  const spotConfigThreshold = thresholds ? getThresholdValue(thresholds, 'spot') : null;
   const spotPercent = calcPercent(spotDisplayValue, SPOT_MAX_TEMP);
   const sparklineThresholds = useMemo(() => {
     const list = [SPOT_NORMAL_MIN, SPOT_HIGH_MIN, SPOT_WARN_TEMP];
@@ -163,3 +165,4 @@ export function SpotComponent() {
     </div>
   );
 }
+);

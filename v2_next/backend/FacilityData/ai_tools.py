@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
 # Import necessary logic modules
-from .FacilityData_Logic_Service import PLCService
+from .service import PLCService
 
 TOOLS_SCHEMA = [
     {

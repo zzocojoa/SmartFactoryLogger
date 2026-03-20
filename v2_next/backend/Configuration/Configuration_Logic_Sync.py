@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from .. import config
 from backend.Configuration.Configuration_Structure import ConfigUpdate
 from . import Configuration_Logic_Meta as config_meta
-from backend.Configuration.Configuration_Logic_Service import update_config
+from backend.Configuration.service import update_config
 
 
 def _request(

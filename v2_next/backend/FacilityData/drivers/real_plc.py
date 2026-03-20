@@ -1,20 +1,22 @@
 import struct
 import time
 import select
+import threading
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 import socket
 
 print(">>> REAL DRIVER V5 (NON-BLOCKING/SELECT) LOADED <<<") # VERSION CHECK
 
 import httpx
 
-from .FacilityData_Logic_Base import BasePLCDriver
-from backend.FacilityData.FacilityData_Structure import FactoryData
-from .. import config
-from .FacilityData_Logic_Processor import LogicProcessor
-from backend.Observability.Observability_Logic_Service import observability_service
-from .. import constants
+from .base import BasePLCDriver
+from .spot_api import get_cached_spot_temp
+from backend.FacilityData.schemas import FactoryData
+from backend import config
+from ..processor import LogicProcessor
+from backend.Observability.service import observability_service
+from backend import constants
 
 
 class RealPLCDriver(BasePLCDriver):
@@ -75,16 +77,23 @@ class RealPLCDriver(BasePLCDriver):
         self.ls_in_error = False
 
         self.spot_timeout = config.SPOT_TIMEOUT
-        self.last_spot: Optional[float] = None
+        self.last_spot: Optional[float] = 0.0
         self.spot_read_failures = 0
         self.spot_last_error_time: Optional[float] = None
         self.spot_last_success_time: Optional[float] = None
-        # Shared httpx client for SPOT with connection pooling
-        self._spot_http_client = httpx.Client(
-            # Fail Fast: 0.2s connect + 0.2s read = 0.4s max latency (Safe for 1.0s loop)
-            timeout=httpx.Timeout(connect=0.2, read=0.2, write=0.5, pool=2.0)
-        )
         self.logic = LogicProcessor()
+        self._snapshot_lock = threading.Lock()
+        self._worker_stop = threading.Event()
+        self._worker_threads: list[threading.Thread] = []
+        self._ext_snapshot: Dict[str, float] = {}
+        self._ext_snapshot_at: Optional[float] = None
+        self._ext_snapshot_error: Optional[str] = None
+        self._ls_snapshot: Dict[str, float] = {}
+        self._ls_snapshot_at: Optional[float] = None
+        self._ls_snapshot_error: Optional[str] = None
+        self._spot_snapshot: Optional[float] = None
+        self._spot_snapshot_at: Optional[float] = None
+        self._spot_snapshot_error: Optional[str] = None
 
     def _backoff_ext(self):
         self.ext_next_retry = time.time() + self.ext_retry_interval
@@ -179,6 +188,7 @@ class RealPLCDriver(BasePLCDriver):
         ok_ext = self._connect_extruder()
         ok_ls = self._connect_ls()
         self.connected = ok_ext or ok_ls
+        self._start_workers()
         return self.connected
 
     def apply_connection_config(self) -> None:
@@ -269,6 +279,10 @@ class RealPLCDriver(BasePLCDriver):
             return False
 
     def close(self):
+        self._worker_stop.set()
+        for thread in self._worker_threads:
+            thread.join(timeout=1.0)
+        self._worker_threads = []
         if self.sock_ext:
             try:
                 self.sock_ext.close()
@@ -283,45 +297,11 @@ class RealPLCDriver(BasePLCDriver):
         print("[RealDriver] All Connections Closed.")
 
     def read_data(self) -> FactoryData:
-        t_start = time.time()
+        ext_data, ls_data, spot_val = self._read_cached_snapshot()
 
-        # 1. Read Extruder (Melsec ASCII)
-        t0 = time.time()
-        ext_data = self._read_extruder()
-        t_ext = time.time() - t0
-
-        # 2. Read LS (XGT Binary)
-        t0 = time.time()
-        ls_data = self._read_ls()
-        t_ls = time.time() - t0
-
-        # 3. Read SPOT Temp (HTTP)
-        t0 = time.time()
-        spot_val = self._read_spot()
-        t_spot = time.time() - t0
-        if spot_val is not None:
-            self.last_spot = spot_val
-
-        # Update connection status
         self.connected = bool(self.sock_ext or self.sock_ls)
 
-        # 4. Merge & Return
         now = datetime.now()
-        
-        # --- Latency Monitoring ---
-        total_duration = time.time() - t_start
-        if total_duration > 1.0:
-            # Latency Warning
-            try:
-                msg = (
-                    f"[Latency] Main loop took {total_duration:.2f}s (Threshold: 1.0s). Breakdown: "
-                    f"Ext: {t_ext:.2f}s, LS: {t_ls:.2f}s, SPOT: {t_spot:.2f}s"
-                )
-                print(f"[WARNING] {msg}")
-                config._config_log("WARNING", msg)
-            except Exception:
-                pass
-        # --------------------------
 
         die_id, billet_cycle_id = self.logic.update(
             ext_data.get("Count"),
@@ -360,24 +340,125 @@ class RealPLCDriver(BasePLCDriver):
             Spot=spot_val,
         )
 
-    # --- SPOT Logic ---
-    def _read_spot(self) -> float:
-        """Read SPOT temperature using httpx. Returns 0.0 on failure (V1 compatible)."""
-        try:
-            resp = self._spot_http_client.get(config.SPOT_URL)
-            resp.raise_for_status()
-            raw = resp.text.strip()
-            if raw:
-                value = float(raw)
-                self._mark_spot_success()
-                return value
-        except Exception as exc:
-            self._mark_spot_error(str(exc))
-            return 0.0  # V1 compatible: show 0 on failure
-        return 0.0
+    def _start_workers(self) -> None:
+        if self._worker_threads:
+            return
+        self._worker_stop.clear()
+        self._worker_threads = [
+            threading.Thread(target=self._ext_worker_loop, name="RealPLC-Extruder", daemon=True),
+            threading.Thread(target=self._ls_worker_loop, name="RealPLC-LS", daemon=True),
+            threading.Thread(target=self._spot_worker_loop, name="RealPLC-SPOT", daemon=True),
+        ]
+        for thread in self._worker_threads:
+            thread.start()
 
-    # --- Melsec Logic ---
-    def _read_extruder(self) -> Dict[str, float]:
+    def _connector_poll_interval_sec(self) -> float:
+        return max(0.25, float(config.INTERVAL_SEC))
+
+    def _spot_poll_interval_sec(self) -> float:
+        return max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
+
+    def _sleep_until_next_cycle(self, started_at: float, interval_sec: float) -> None:
+        elapsed_sec = time.time() - started_at
+        sleep_sec = max(0.0, interval_sec - elapsed_sec)
+        if sleep_sec > 0:
+            self._worker_stop.wait(sleep_sec)
+
+    def _update_ext_snapshot(self, payload: Dict[str, float], captured_at: float) -> None:
+        with self._snapshot_lock:
+            self._ext_snapshot = dict(payload)
+            self._ext_snapshot_at = captured_at
+            self._ext_snapshot_error = None
+
+    def _update_ls_snapshot(self, payload: Dict[str, float], captured_at: float) -> None:
+        with self._snapshot_lock:
+            self._ls_snapshot = dict(payload)
+            self._ls_snapshot_at = captured_at
+            self._ls_snapshot_error = None
+
+    def _update_spot_snapshot(self, value: float, captured_at: float) -> None:
+        with self._snapshot_lock:
+            self._spot_snapshot = value
+            self._spot_snapshot_at = captured_at
+            self._spot_snapshot_error = None
+
+    def _record_ext_snapshot_error(self, message: str) -> None:
+        with self._snapshot_lock:
+            self._ext_snapshot_error = message
+
+    def _record_ls_snapshot_error(self, message: str) -> None:
+        with self._snapshot_lock:
+            self._ls_snapshot_error = message
+
+    def _record_spot_snapshot_error(self, message: str) -> None:
+        with self._snapshot_lock:
+            self._spot_snapshot_error = message
+
+    def _read_cached_snapshot(self) -> tuple[Dict[str, float], Dict[str, float], Optional[float]]:
+        with self._snapshot_lock:
+            ext_data = dict(self._ext_snapshot)
+            ls_data = dict(self._ls_snapshot)
+            spot_val = self._spot_snapshot
+        if spot_val is not None:
+            self.last_spot = spot_val
+        return ext_data, ls_data, spot_val if spot_val is not None else self.last_spot
+
+    def _ext_worker_loop(self) -> None:
+        while not self._worker_stop.is_set():
+            started_at = time.time()
+            try:
+                payload = self._read_extruder(started_at + max(self.ext_timeout, 1.0))
+                if payload:
+                    self._update_ext_snapshot(payload, time.time())
+                elif self.ext_last_error:
+                    self._record_ext_snapshot_error(self.ext_last_error)
+            except Exception as exc:
+                self._record_ext_snapshot_error(str(exc))
+            self._sleep_until_next_cycle(started_at, self._connector_poll_interval_sec())
+
+    def _ls_worker_loop(self) -> None:
+        while not self._worker_stop.is_set():
+            started_at = time.time()
+            try:
+                payload = self._read_ls(started_at + max(self.ls_timeout, 1.0))
+                if payload:
+                    self._update_ls_snapshot(payload, time.time())
+                elif self.ls_last_error:
+                    self._record_ls_snapshot_error(self.ls_last_error)
+            except Exception as exc:
+                self._record_ls_snapshot_error(str(exc))
+            self._sleep_until_next_cycle(started_at, self._connector_poll_interval_sec())
+
+    def _spot_worker_loop(self) -> None:
+        while not self._worker_stop.is_set():
+            started_at = time.time()
+            try:
+                spot_val = self._read_spot()
+                if spot_val > 0:
+                    self._update_spot_snapshot(spot_val, time.time())
+                elif self.spot_last_error_time is not None:
+                    self._record_spot_snapshot_error("spot_read_failed")
+            except Exception as exc:
+                self._record_spot_snapshot_error(str(exc))
+            self._sleep_until_next_cycle(started_at, self._spot_poll_interval_sec())
+
+    def _read_spot(self) -> float:
+        val = get_cached_spot_temp()
+        if val > 0:
+            self.last_spot = val
+            self._mark_spot_success()
+        return val
+
+    def _remaining_timeout(self, deadline: float, base_timeout: float, context: str) -> float:
+        remaining = deadline - time.time()
+        if remaining <= 0 or base_timeout <= 0:
+            raise socket.timeout(f"{context} timeout")
+        return min(base_timeout, remaining)
+
+    def _read_extruder(self, deadline: float) -> Dict[str, float]:
+        if time.time() >= deadline:
+            self._mark_ext_error("Extruder cycle timeout", count_read_failure=False)
+            return {}
         if self.ext_skip_counter > 0:
             self.ext_skip_counter -= 1
             self.ext_skipped_reads += 1
@@ -389,7 +470,7 @@ class RealPLCDriver(BasePLCDriver):
         data: Dict[str, float] = {}
         try:
             if self.ext_merge_blocks:
-                merged = self._read_extruder_merged()
+                merged = self._read_extruder_merged(deadline)
                 if merged is not None:
                     data.update(merged)
                     self.ext_merge_failures = 0
@@ -414,26 +495,25 @@ class RealPLCDriver(BasePLCDriver):
             if not self.sock_ext:
                 return data
 
-            # Split reads
-            b1 = self._melsec_read("D0020", 20)
+            b1 = self._melsec_read("D0020", 20, deadline)
             if len(b1) > 14:
                 data["Press"] = b1[3] / 10.0
                 data["Temp_F"] = b1[11]
                 data["Temp_B"] = b1[12]
 
-            b_spd = self._melsec_read("B1502", 1)
+            b_spd = self._melsec_read("B1502", 1, deadline)
             if b_spd:
                 data["Speed"] = b_spd[0] / 10.0
 
-            b3 = self._melsec_read("D1500", 20)
+            b3 = self._melsec_read("D1500", 20, deadline)
             if len(b3) > 10:
                 data["Count"] = b3[10]
 
-            b2 = self._melsec_read("D0420", 10)
+            b2 = self._melsec_read("D0420", 10, deadline)
             if len(b2) > 1:
                 data["EndPos"] = b2[1] / 10.0
 
-            b4 = self._melsec_read("D1900", 20)
+            b4 = self._melsec_read("D1900", 20, deadline)
             if len(b4) > 11:
                 data["Billet"] = b4[11]
 
@@ -474,7 +554,7 @@ class RealPLCDriver(BasePLCDriver):
 
         return data
 
-    def _recv_until(self, terminator: bytes = b"\r\n", max_bytes: int = 8192) -> bytes:
+    def _recv_until(self, terminator: bytes, max_bytes: int, deadline: float) -> bytes:
         if not self.sock_ext:
             return b""
         data = bytearray()
@@ -482,24 +562,15 @@ class RealPLCDriver(BasePLCDriver):
         loop_count = 0
         while len(data) < max_bytes:
             loop_count += 1
-            # 1. Calculate remaining time
             elapsed = time.time() - start_time
-            remaining = self.ext_timeout - elapsed
-            
-            # DEBUG: Log every iteration
+            remaining = self._remaining_timeout(deadline, self.ext_timeout - elapsed, "Extruder recv")
+
             if elapsed > 0.3:  # Only log if already slow
                 msg = f"[DEBUG recv_until] Loop#{loop_count}: elapsed={elapsed:.3f}s, remaining={remaining:.3f}s, data_len={len(data)}"
                 print(msg)
-                config._config_log("WARNING", msg) # Force to system.log
-            
-            if remaining <= 0:
-                msg = f"[DEBUG recv_until] TIMEOUT at loop#{loop_count}, elapsed={elapsed:.3f}s"
-                print(msg)
                 config._config_log("WARNING", msg)
-                raise socket.timeout("Application-level timeout (Loop)")
 
             try:
-                # 2. Add Select Guard (The Real Timeout Enforcer)
                 t_select_start = time.time()
                 r, _, _ = select.select([self.sock_ext], [], [], remaining)
                 t_select_end = time.time()
@@ -509,13 +580,11 @@ class RealPLCDriver(BasePLCDriver):
                     print(msg)
                     config._config_log("WARNING", msg)
                     raise socket.timeout("Select timeout (Recv Guard)")
-                
-                # 3. Safe Recv (Should not block now)
+
                 t_recv_start = time.time()
                 chunk = self.sock_ext.recv(4096)
                 t_recv_end = time.time()
-                
-                # DEBUG: Log if recv took long
+
                 recv_duration = t_recv_end - t_recv_start
                 if recv_duration > 0.1:
                     msg = f"[DEBUG recv_until] recv() blocked for {recv_duration:.3f}s at loop#{loop_count}"
@@ -537,38 +606,33 @@ class RealPLCDriver(BasePLCDriver):
                 break
         return bytes(data)
 
-    def _send_with_timeout(self, data: bytes) -> None:
+    def _send_with_timeout(self, data: bytes, deadline: float) -> None:
         if not self.sock_ext:
             raise ConnectionError("No socket")
-        
-        # Manual Non-Blocking Send Loop
+
         total_sent = 0
         total_len = len(data)
         start_time = time.time()
-        
+
         while total_sent < total_len:
             elapsed = time.time() - start_time
-            remaining = self.ext_timeout - elapsed
-            if remaining <= 0:
-                raise socket.timeout("Send timeout (Loop)")
+            remaining = self._remaining_timeout(deadline, self.ext_timeout - elapsed, "Extruder send")
 
-            # Select Guard
             try:
                 _, writable, _ = select.select([], [self.sock_ext], [], remaining)
                 if not writable:
                     raise socket.timeout("Select timeout (Send Guard)")
-                
-                # Non-blocking Send
+
                 sent = self.sock_ext.send(data[total_sent:])
                 if sent == 0:
                     raise ConnectionResetError("Socket connection broken (send returned 0)")
                 total_sent += sent
             except BlockingIOError:
-                continue # Retry select
+                continue
             except Exception:
                 raise
 
-    def _melsec_read(self, addr: str, count: int) -> List[int]:
+    def _melsec_read(self, addr: str, count: int, deadline: float) -> List[int]:
         if not self.sock_ext:
             return []
         cmd = f"01WRD{addr} {count:02}\r\n".encode()
@@ -576,10 +640,9 @@ class RealPLCDriver(BasePLCDriver):
         t_after_send = t_start
         result_status = "OK"
         try:
-            self._send_with_timeout(cmd)
-            t_after_send = time.time()  # <--- Capture send completion time
-            t_after_send = time.time()  # <--- Capture send completion time
-            raw = self._recv_until()
+            self._send_with_timeout(cmd, deadline)
+            t_after_send = time.time()
+            raw = self._recv_until(b"\r\n", 8192, deadline)
             if not raw:
                 self.ext_invalid_responses += 1
                 result_status = "EMPTY"
@@ -632,20 +695,20 @@ class RealPLCDriver(BasePLCDriver):
                 except Exception:
                     pass
 
-    def _read_extruder_merged(self) -> Optional[Dict[str, float]]:
-        b1 = self._melsec_read("D0020", 16)
+    def _read_extruder_merged(self, deadline: float) -> Optional[Dict[str, float]]:
+        b1 = self._melsec_read("D0020", 16, deadline)
         if not b1:
             return None
-        b2 = self._melsec_read("D0420", 6)
+        b2 = self._melsec_read("D0420", 6, deadline)
         if not b2:
             return None
-        b3 = self._melsec_read("D1500", 16)
+        b3 = self._melsec_read("D1500", 16, deadline)
         if not b3:
             return None
-        b4 = self._melsec_read("D1900", 16)
+        b4 = self._melsec_read("D1900", 16, deadline)
         if not b4:
             return None
-        b_spd = self._melsec_read("B1502", 1)
+        b_spd = self._melsec_read("B1502", 1, deadline)
         if not b_spd:
             return None
         return {
@@ -658,8 +721,10 @@ class RealPLCDriver(BasePLCDriver):
             "Speed": b_spd[0] / 10.0,
         }
 
-    # --- LS Logic ---
-    def _read_ls(self) -> Dict[str, float]:
+    def _read_ls(self, deadline: float) -> Dict[str, float]:
+        if time.time() >= deadline:
+            self._mark_ls_error("LS cycle timeout", count_read_failure=False)
+            return {}
         if not self.sock_ls:
             if not self._connect_ls():
                 return {}
@@ -667,10 +732,11 @@ class RealPLCDriver(BasePLCDriver):
         data: Dict[str, float] = {}
         try:
             targets = [t[0] for t in config.LS_TARGETS]
+            self.sock_ls.settimeout(self._remaining_timeout(deadline, self.ls_timeout, "LS send"))
             req = self._ls_create_packet(targets)
             self.sock_ls.sendall(req)
 
-            header = self._ls_recv_exact(20)
+            header = self._ls_recv_exact(20, deadline)
             if not header:
                 raise ConnectionResetError("No Header")
 
@@ -678,7 +744,7 @@ class RealPLCDriver(BasePLCDriver):
             if body_len > 8192:
                 raise ValueError("Body too large")
 
-            body = self._ls_recv_exact(body_len)
+            body = self._ls_recv_exact(body_len, deadline)
             if not body:
                 raise ConnectionResetError("No Body")
 
@@ -725,12 +791,13 @@ class RealPLCDriver(BasePLCDriver):
 
         return header + body
 
-    def _ls_recv_exact(self, size: int) -> Optional[bytes]:
+    def _ls_recv_exact(self, size: int, deadline: float) -> Optional[bytes]:
         if not self.sock_ls:
             return None
         data = bytearray()
         while len(data) < size:
             try:
+                self.sock_ls.settimeout(self._remaining_timeout(deadline, self.ls_timeout, "LS recv"))
                 chunk = self.sock_ls.recv(size - len(data))
             except socket.timeout:
                 return None
@@ -771,6 +838,13 @@ class RealPLCDriver(BasePLCDriver):
         ls_current_downtime_sec = 0.0
         if self.ls_in_error and self.ls_error_started is not None:
             ls_current_downtime_sec = max(0.0, now - self.ls_error_started)
+        with self._snapshot_lock:
+            ext_snapshot_at = self._ext_snapshot_at
+            ext_snapshot_error = self._ext_snapshot_error
+            ls_snapshot_at = self._ls_snapshot_at
+            ls_snapshot_error = self._ls_snapshot_error
+            spot_snapshot_at = self._spot_snapshot_at
+            spot_snapshot_error = self._spot_snapshot_error
         return {
             "extruder": {
                 "connected": self.sock_ext is not None,
@@ -793,6 +867,9 @@ class RealPLCDriver(BasePLCDriver):
                 "last_recovery_at": self.ext_last_recovery_at,
                 "merge_blocks": self.ext_merge_blocks,
                 "merge_failures": self.ext_merge_failures,
+                "snapshot_at": ext_snapshot_at,
+                "snapshot_age_sec": max(0.0, now - ext_snapshot_at) if ext_snapshot_at is not None else None,
+                "snapshot_error": ext_snapshot_error,
             },
             "ls_plc": {
                 "connected": self.sock_ls is not None,
@@ -812,6 +889,9 @@ class RealPLCDriver(BasePLCDriver):
                 "current_downtime_sec": ls_current_downtime_sec,
                 "last_disconnect_time": self.ls_last_disconnect_time,
                 "last_recovery_at": self.ls_last_recovery_at,
+                "snapshot_at": ls_snapshot_at,
+                "snapshot_age_sec": max(0.0, now - ls_snapshot_at) if ls_snapshot_at is not None else None,
+                "snapshot_error": ls_snapshot_error,
             },
             "spot": {
                 "last_value": self.last_spot,
@@ -819,5 +899,8 @@ class RealPLCDriver(BasePLCDriver):
                 "last_error_time": self.spot_last_error_time,
                 "last_success_time": self.spot_last_success_time,
                 "timeout_sec": self.spot_timeout,
+                "snapshot_at": spot_snapshot_at,
+                "snapshot_age_sec": max(0.0, now - spot_snapshot_at) if spot_snapshot_at is not None else None,
+                "snapshot_error": spot_snapshot_error,
             },
         }

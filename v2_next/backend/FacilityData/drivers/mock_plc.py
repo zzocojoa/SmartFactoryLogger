@@ -1,9 +1,9 @@
 import random
 import time
 from datetime import datetime
-from .FacilityData_Logic_Base import BasePLCDriver
-from backend.FacilityData.FacilityData_Structure import FactoryData
-from .FacilityData_Logic_Processor import LogicProcessor
+from .base import BasePLCDriver
+from backend.FacilityData.schemas import FactoryData
+from ..processor import LogicProcessor
 
 class MockPLCDriver(BasePLCDriver):
     def __init__(self):

@@ -90,7 +90,7 @@ class ConfigWatchService:
                     continue
                 
                 # Clear the frontend snapshot cache now that the file has changed
-                from backend.Configuration.Configuration_Logic_Service import clear_snapshot_cache
+                from backend.Configuration.service import clear_snapshot_cache
                 clear_snapshot_cache()
                 
                 apply_result = config_manager.apply_changes(changes)

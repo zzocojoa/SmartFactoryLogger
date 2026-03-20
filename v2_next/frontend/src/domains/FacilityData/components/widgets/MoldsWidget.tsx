@@ -3,12 +3,13 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React from 'react';
-import { FactoryDataContext } from '../../context/FactoryDataContext';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { formatNumber, formatTime } from '../../../../shared/utils/formatters';
 import { mapMoldLevel, getMoldState } from '../../../../shared/utils/stateMappers';
 
-export function MoldsComponent() {
-  const { data, lastDataAt } = React.useContext(FactoryDataContext);
+export const MoldsComponent = React.memo(function MoldsComponent() {
+  const data = useDashboardStore(state => state.data);
+  const lastDataAt = useDashboardStore(state => state.lastDataAt);
   if (!data) return <div>Loading...</div>;
   const missing =
     !Number.isFinite(data.Mold1) ||
@@ -60,3 +61,4 @@ export function MoldsComponent() {
     </div>
   );
 }
+);

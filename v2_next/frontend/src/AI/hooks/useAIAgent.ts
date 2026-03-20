@@ -5,6 +5,8 @@ import {
   callOpenAIChat, 
   AIToolSchema 
 } from '../api/ai_service';
+import { safeGetItem, safeSetItem } from '../../shared/utils/safeStorage';
+import { updateAIDiagnostics } from '../state/aiDiagnostics';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -21,22 +23,26 @@ export const useAIAgent = () => {
   const [tools, setTools] = useState<AIToolSchema[]>([]);
   
   // Try to load API key from local storage
-  const [apiKey, setApiKeyState] = useState<string>(() => localStorage.getItem('ai_api_key') || '');
-  const [model, setModel] = useState<string>(() => localStorage.getItem('ai_model') || 'gpt-4o-mini');
+  const [apiKey, setApiKeyState] = useState<string>(() => safeGetItem('ai_api_key') || '');
+  const [model, setModel] = useState<string>(() => safeGetItem('ai_model') || 'gpt-4o-mini');
 
   const setApiKey = (key: string) => {
-    localStorage.setItem('ai_api_key', key);
+    safeSetItem('ai_api_key', key);
     setApiKeyState(key);
   };
 
   const updateModel = (m: string) => {
-    localStorage.setItem('ai_model', m);
+    safeSetItem('ai_model', m);
     setModel(m);
   }
 
   useEffect(() => {
     fetchAITools().then(setTools);
   }, []);
+
+  useEffect(() => {
+    updateAIDiagnostics(messages, tools.length);
+  }, [messages, tools.length]);
 
   // Set system prompt on init
   useEffect(() => {

@@ -4,7 +4,7 @@ import os
 # Add v2_next to path to allow imports from backend
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from backend.MESSync import MESSync_DB as db_manager
+from backend.MESSync import repository as db_manager
 
 def inspect_page(page_key):
     print(f"Testing db_manager.get_latest_data('{page_key}')...")

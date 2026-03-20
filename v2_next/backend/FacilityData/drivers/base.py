@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any
-from backend.FacilityData.FacilityData_Structure import FactoryData
+from backend.FacilityData.schemas import FactoryData
 
 class BasePLCDriver(ABC):
     """

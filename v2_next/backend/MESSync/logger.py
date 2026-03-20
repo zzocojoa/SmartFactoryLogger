@@ -8,10 +8,11 @@ Centralized Logging Configuration
 import logging
 import json
 import sys
+import queue
 from pathlib import Path
-from logging.handlers import TimedRotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler, QueueHandler, QueueListener
 from datetime import datetime
-from .MESSync_Constants import PROJECT_ROOT
+from .constants import PROJECT_ROOT
 
 # Log Directory setup integrated with SmartFactoryLogger
 from .. import config
@@ -54,6 +55,7 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_obj, ensure_ascii=False)
 
 _configured_loggers = {}
+_queue_listeners = []
 
 def get_logger(name: str) -> logging.Logger:
     """
@@ -85,9 +87,7 @@ def get_logger(name: str) -> logging.Logger:
     
     # 3. Application Log Handler (Daily Rotation, JSON)
     app_log_file = LOG_DIR / "mes_application.log"
-    # match existing handler if possible? No, we are creating new.
     # delay=True prevents opening the file until the first log is emitted.
-    # This helps avoid WinError 32 during rotation if multiple processes/threads race.
     app_handler = TimedRotatingFileHandler(
         filename=app_log_file,
         when="midnight",
@@ -109,10 +109,15 @@ def get_logger(name: str) -> logging.Logger:
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(json_formatter)
     
-    # Add Handlers
-    logger.addHandler(console_handler)
-    logger.addHandler(app_handler)
-    logger.addHandler(error_handler)
+    # Async Queue Handler
+    log_queue = queue.Queue(-1)
+    queue_handler = QueueHandler(log_queue)
+    logger.addHandler(queue_handler)
+    logger.propagate = False
+    
+    listener = QueueListener(log_queue, console_handler, app_handler, error_handler, respect_handler_level=True)
+    listener.start()
+    _queue_listeners.append(listener)
     
     # Cache the configured logger
     _configured_loggers[name] = logger
@@ -121,6 +126,12 @@ def get_logger(name: str) -> logging.Logger:
 
 def _cleanup_loggers():
     """Close all handlers on exit"""
+    for listener in _queue_listeners:
+        try:
+            listener.stop()
+        except:
+            pass
+            
     for logger in _configured_loggers.values():
         for handler in logger.handlers:
             try:

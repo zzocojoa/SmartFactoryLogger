@@ -3,7 +3,7 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React from 'react';
-import { FactoryDataContext } from '../../context/FactoryDataContext';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { useThresholdLevel } from '../../../../shared/hooks/useThresholdLevel';
 import { isThresholdHit } from '../../../../shared/utils/thresholds';
@@ -11,8 +11,11 @@ import { formatNumber, formatTime } from '../../../../shared/utils/formatters';
 import { ALERT_HOLD_MS } from '../../../../shared/constants/logic';
 import { LABELS, SPOT_UNIT } from '../../../../shared/constants/uiText';
 
-export function TempsComponent() {
-  const { data, lastDataAt, thresholds } = React.useContext(FactoryDataContext);
+export const TempsComponent = React.memo(function TempsComponent() {
+  const data = useDashboardStore(state => state.data);
+  const lastDataAt = useDashboardStore(state => state.lastDataAt);
+  const thresholds = useDashboardStore(state => state.thresholds);
+
   const missing =
     !Number.isFinite(data?.Temp_F) ||
     !Number.isFinite(data?.Temp_B) ||
@@ -26,12 +29,12 @@ export function TempsComponent() {
   const tempBLevel = useThresholdLevel(tempBValue ?? NaN, 350, 450, ALERT_HOLD_MS);
   const billetTempLevel = useThresholdLevel(billetTempValue ?? NaN, 440, 480, ALERT_HOLD_MS);
   const computedThresholds = data?.Computed?.thresholds;
-  const tempFThresholdHit = computedThresholds?.temp_f ?? isThresholdHit(thresholds, 'temp_f', tempFValue);
-  const tempBThresholdHit = computedThresholds?.temp_b ?? isThresholdHit(thresholds, 'temp_b', tempBValue);
+  const tempFThresholdHit = computedThresholds?.temp_f ?? (thresholds ? isThresholdHit(thresholds, 'temp_f', tempFValue) : false);
+  const tempBThresholdHit = computedThresholds?.temp_b ?? (thresholds ? isThresholdHit(thresholds, 'temp_b', tempBValue) : false);
   const billetTempThresholdHit =
-    computedThresholds?.billet_temp ?? isThresholdHit(thresholds, 'billet_temp', billetTempValue);
+    computedThresholds?.billet_temp ?? (thresholds ? isThresholdHit(thresholds, 'billet_temp', billetTempValue) : false);
   const billetLengthThresholdHit =
-    computedThresholds?.billet ?? isThresholdHit(thresholds, 'billet', billetLengthValue);
+    computedThresholds?.billet ?? (thresholds ? isThresholdHit(thresholds, 'billet', billetLengthValue) : false);
 
   if (!data) return <div>Loading...</div>;
   const tempFClass = [
@@ -105,3 +108,4 @@ export function TempsComponent() {
     </div>
   );
 }
+);

@@ -6,6 +6,7 @@ import {
   resolveStorageMode,
 } from './layoutService.mapper';
 import type { LayoutSavePayload } from './layoutService.types';
+import { safeGetItem, safeSetItem } from '../../../shared/utils/safeStorage';
 import {
   deleteClientLayoutSlot,
   fetchClientLatestLayout,
@@ -22,10 +23,10 @@ import {
 const CLIENT_ID_KEY = 'sfl_client_id';
 
 function getClientId(): string {
-  let clientId = localStorage.getItem(CLIENT_ID_KEY);
+  let clientId = safeGetItem(CLIENT_ID_KEY);
   if (!clientId) {
     clientId = generateUUIDv4();
-    localStorage.setItem(CLIENT_ID_KEY, clientId);
+    safeSetItem(CLIENT_ID_KEY, clientId);
     console.log(`[ClientLayout] Generated new client ID: ${clientId}`);
   }
   return clientId;
@@ -117,12 +118,12 @@ export const localLayoutService = {
   },
 
   getStorageMode: (): StorageMode => {
-    const mode = localStorage.getItem(STORAGE_MODE_KEY);
+    const mode = safeGetItem(STORAGE_MODE_KEY);
     return resolveStorageMode(mode);
   },
 
   setStorageMode: (mode: StorageMode): void => {
-    localStorage.setItem(STORAGE_MODE_KEY, mode);
+    safeSetItem(STORAGE_MODE_KEY, mode);
     console.log(`[ClientLayout] Storage mode set to: ${mode}`);
   },
 };

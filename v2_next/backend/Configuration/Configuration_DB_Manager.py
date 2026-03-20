@@ -9,7 +9,7 @@ from threading import RLock
 from typing import Any, Dict, Optional, Tuple
 
 from .. import config
-from backend.FacilityData.FacilityData_DB_Logger import logger_service
+from backend.FacilityData.repository import logger_service
 
 _THRESHOLD_KEYS = [
     "speed",
@@ -211,10 +211,6 @@ class ConfigManager:
             "SPOT_CROSSHAIR_GAP",
             _get_int(parser, "SPOT", "crosshairgap", config.DEFAULT_SPOT_CROSSHAIR_GAP),
         )
-        spot_focus_step = _env_int(
-            "SPOT_FOCUS_STEP",
-            _get_int(parser, "SPOT", "focusstep", config.DEFAULT_SPOT_FOCUS_STEP),
-        )
         spot_actuator_ip = os.getenv("SPOT_ACTUATOR_IP", _get(parser, "SPOT", "actuatorip", "") or "")
         if not spot_actuator_ip:
             spot_actuator_ip = spot_ip
@@ -269,7 +265,6 @@ class ConfigManager:
                 "crosshair_size": spot_crosshair_size,
                 "crosshair_gap": spot_crosshair_gap,
                 "focus_url": spot_focus_url,
-                "focus_step": spot_focus_step,
                 "actuator_ip": spot_actuator_ip,
                 "actuator_step": spot_actuator_step,
                 "actuator_url": spot_actuator_url,
@@ -347,7 +342,6 @@ class ConfigManager:
             "spot.crosshair_size",
             "spot.crosshair_gap",
             "spot.focus_url",
-            "spot.focus_step",
             "spot.actuator_ip",
             "spot.actuator_step",
             "spot.actuator_url",
@@ -427,7 +421,7 @@ class ConfigManager:
             clamped = max(config.MIN_INTERVAL_SEC, min(config.MAX_INTERVAL_SEC, float(interval_sec)))
             config.INTERVAL_SEC = clamped
             try:
-                from backend.FacilityData.FacilityData_Logic_Service import plc_service
+                from backend.FacilityData.service import plc_service
 
                 plc_service.apply_interval(clamped)
                 applied.extend(sorted(system_changed))
@@ -464,7 +458,6 @@ class ConfigManager:
                     spot_cfg.get("crosshair_gap", config.DEFAULT_SPOT_CROSSHAIR_GAP)
                 )
                 config.SPOT_FOCUS_URL = str(spot_cfg.get("focus_url", config.SPOT_FOCUS_URL))
-                config.SPOT_FOCUS_STEP = int(spot_cfg.get("focus_step", config.SPOT_FOCUS_STEP))
                 config.SPOT_ACTUATOR_IP = str(spot_cfg.get("actuator_ip", spot_ip))
                 config.SPOT_ACTUATOR_STEP = int(
                     spot_cfg.get("actuator_step", config.DEFAULT_SPOT_ACTUATOR_STEP)
@@ -487,7 +480,7 @@ class ConfigManager:
                 config.LS_IP = str(ls_cfg.get("ip") or config.DEFAULT_LS_IP)
                 config.LS_PORT = int(ls_cfg.get("port") or config.DEFAULT_LS_PORT)
                 config.LS_TARGETS = list(ls_cfg.get("targets") or config.DEFAULT_LS_TARGETS)
-                from backend.FacilityData.FacilityData_Logic_Service import plc_service
+                from backend.FacilityData.service import plc_service
 
                 if plc_service.apply_connection_config():
                     applied.extend(sorted(plc_changed))

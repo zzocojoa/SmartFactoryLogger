@@ -1,4 +1,4 @@
-import type { SpotConfig } from '../../../shared/types';
+import type { SpotConfig, SpotPollingDiagnostics } from '../../../shared/types';
 
 export interface UseSpotViewModel {
   config: SpotConfig | null;
@@ -6,6 +6,7 @@ export interface UseSpotViewModel {
   imageError: string | null;
   imageLoading: boolean;
   lastSuccessAt: number | null;
+  diagnostics: SpotPollingDiagnostics;
   focusBusy: boolean;
   refreshConfig: () => Promise<void>;
   refreshImage: () => void;

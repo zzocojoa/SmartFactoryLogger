@@ -1,5 +1,5 @@
 from typing import Dict, Any, List
-from backend.Configuration.Configuration_Logic_Service import get_config_snapshot, update_config
+from backend.Configuration.service import get_config_snapshot, update_config
 from backend.Configuration.Configuration_Structure import ConfigUpdate
 
 TOOLS_SCHEMA = [

@@ -3,7 +3,7 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React from 'react';
-import { FactoryDataContext } from '../../context/FactoryDataContext';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { useSustainedFlag } from '../../../../shared/hooks/useSustainedFlag';
 import { calcPercent } from '../../../../shared/utils/sparkline';
@@ -18,8 +18,11 @@ import {
   ALERT_HOLD_LONG_MS,
 } from '../../../../shared/constants/logic';
 
-export function KpiComponent() {
-  const { data, lastDataAt, thresholds } = React.useContext(FactoryDataContext);
+export const KpiComponent = React.memo(function KpiComponent() {
+  const data = useDashboardStore(state => state.data);
+  const lastDataAt = useDashboardStore(state => state.lastDataAt);
+  const thresholds = useDashboardStore(state => state.thresholds);
+
   const speedValue = useLastValidNumber(data?.Speed);
   const pressValue = useLastValidNumber(data?.Press);
   const countValue = useLastValidNumber(data?.Count);
@@ -40,10 +43,10 @@ export function KpiComponent() {
   const speedPercent = calcPercent(safeSpeed, SPEED_MAX);
   const pressPercent = calcPercent(safePress, PRESS_MAX);
   const computedThresholds = computed?.thresholds;
-  const speedThresholdHit = computedThresholds?.speed ?? isThresholdHit(thresholds, 'speed', speedValue);
-  const pressThresholdHit = computedThresholds?.press ?? isThresholdHit(thresholds, 'press', pressValue);
-  const countThresholdHit = computedThresholds?.count ?? isThresholdHit(thresholds, 'count', countValue);
-  const endPosThresholdHit = computedThresholds?.endpos ?? isThresholdHit(thresholds, 'endpos', endPosValue);
+  const speedThresholdHit = computedThresholds?.speed ?? (thresholds ? isThresholdHit(thresholds, 'speed', speedValue) : false);
+  const pressThresholdHit = computedThresholds?.press ?? (thresholds ? isThresholdHit(thresholds, 'press', pressValue) : false);
+  const countThresholdHit = computedThresholds?.count ?? (thresholds ? isThresholdHit(thresholds, 'count', countValue) : false);
+  const endPosThresholdHit = computedThresholds?.endpos ?? (thresholds ? isThresholdHit(thresholds, 'endpos', endPosValue) : false);
   const thresholdWarn = speedThresholdHit || pressThresholdHit || countThresholdHit || endPosThresholdHit;
 
   if (!data) return <div>Loading...</div>;
@@ -115,3 +118,4 @@ export function KpiComponent() {
     </div>
   );
 }
+);

@@ -81,9 +81,17 @@ export interface SpotConfig {
 export interface HealthSnapshot {
   running: boolean;
   thread_alive: boolean;
+  driver_thread_alive?: boolean;
   last_update: number | null;
   driver_connected: boolean;
   mode: string;
+  driver_snapshot_at?: number | null;
+  driver_snapshot_age_sec?: number | null;
+  driver_last_error?: string | null;
+  app_version?: string;
+  runtime_kind?: string;
+  executable_path?: string;
+  executable_mtime?: string | null;
   comm?: CommMetrics;
 }
 
@@ -150,6 +158,9 @@ export interface StatsSnapshot {
   total_requests: number;
   avg_latency_ms: number | null;
   error_count: number;
+  total_http_error_count?: number;
+  total_http_4xx_count?: number;
+  total_http_5xx_count?: number;
   last: {
     latency_ms: number | null;
     path: string | null;
@@ -160,6 +171,9 @@ export interface StatsSnapshot {
     window_sec: number;
     request_count: number;
     error_count: number;
+    http_error_count?: number;
+    http_4xx_count?: number;
+    http_5xx_count?: number;
     error_rate: number | null;
     avg_latency_ms: number | null;
     p95_latency_ms: number | null;
@@ -177,6 +191,19 @@ export interface StatsSnapshot {
     last_error_source?: string | null;
     last_error_message?: string | null;
     last_error_repeat?: number | null;
+    source_counts?: Record<string, number>;
+  };
+  polling?: {
+    window_sec: number;
+    paths: Record<string, {
+      count: number;
+      requests_per_sec: number;
+      unique_clients: number;
+      top_clients: Array<{
+        client: string;
+        count: number;
+      }>;
+    }>;
   };
 }
 
@@ -199,7 +226,157 @@ export interface ObservabilityErrorsResponse {
     last_error_source?: string | null;
     last_error_message?: string | null;
     last_error_repeat?: number | null;
+    source_counts?: Record<string, number>;
   };
+}
+
+export interface MemoryCollectorItem {
+  name: string;
+  kind: string;
+  exactness: 'exact' | 'estimated' | string;
+  bytes: number;
+  items?: number | null;
+  note?: string | null;
+}
+
+export interface MemoryCollectorDeltaItem {
+  name: string;
+  kind: string;
+  exactness: 'exact' | 'estimated' | string;
+  bytes: number;
+  delta_bytes: number;
+  share_ratio: number;
+  items?: number | null;
+  note?: string | null;
+}
+
+export interface MemoryAlertItem {
+  key: string;
+  severity: 'info' | 'warn' | 'error';
+  title: string;
+  detail: string;
+}
+
+export interface MemorySamplingInfo {
+  sample_interval_sec: number;
+  history_limit: number;
+  collector_history_limit: number;
+  detail_refresh_interval_sec?: number;
+}
+
+export interface BackendMemorySample {
+  captured_at: number;
+  captured_at_iso: string;
+  rss_bytes: number;
+  vms_bytes: number;
+  uss_bytes?: number | null;
+  private_bytes?: number | null;
+  thread_count: number;
+  open_files_count?: number | null;
+  handle_count?: number | null;
+  gc_gen0: number;
+  gc_gen1: number;
+  gc_gen2: number;
+}
+
+export interface MemoryProfilerState {
+  enabled: boolean;
+  started_at?: string | null;
+  last_snapshot_at?: string | null;
+  last_diff_at?: string | null;
+}
+
+export interface TracemallocDiffItem {
+  trace: string;
+  size_diff_bytes: number;
+  size_bytes: number;
+  count_diff: number;
+  count: number;
+}
+
+export interface MemoryStateResponse {
+  summary: BackendMemorySample;
+  history: BackendMemorySample[];
+  profiler: MemoryProfilerState;
+  sampling: MemorySamplingInfo;
+}
+
+export interface MemoryDetailsResponse {
+  backend_top_consumers: MemoryCollectorItem[];
+  backend_growth: MemoryCollectorDeltaItem[];
+  collector_history: Array<{
+    captured_at: number;
+    items: MemoryCollectorItem[];
+  }>;
+  latest_tracemalloc_diff: TracemallocDiffItem[];
+}
+
+export interface MemoryTabLeaderState {
+  tab_id: string;
+  mode: 'leader' | 'follower' | 'recovering' | 'standalone';
+  leader_tab_id: string | null;
+  last_broadcast_at: number | null;
+}
+
+export interface DashboardLeaderState {
+  tab_id: string;
+  mode: 'leader' | 'follower' | 'recovering' | 'standalone';
+  leader_tab_id: string | null;
+  last_broadcast_at: number | null;
+}
+
+export interface MemoryActionState {
+  refresh: boolean;
+  snapshot: boolean;
+  profiler_action: 'start' | 'stop' | null;
+  export: boolean;
+}
+
+export interface FrontendMemorySupport {
+  mode: 'uasm' | 'performance-memory' | 'unsupported';
+  supported: boolean;
+  used_bytes?: number | null;
+  total_bytes?: number | null;
+  limit_bytes?: number | null;
+  breakdown?: Array<{
+    name: string;
+    bytes: number;
+  }>;
+}
+
+export interface FrontendMemorySnapshot {
+  captured_at: number;
+  support: FrontendMemorySupport;
+  top_consumers: MemoryCollectorItem[];
+  growth: MemoryCollectorDeltaItem[];
+  alerts: MemoryAlertItem[];
+  last_refresh_at: number;
+  last_export_at?: number | null;
+  last_summary_at?: number | null;
+  last_details_at?: number | null;
+  last_export_meta_at?: number | null;
+  summary_request_count?: number;
+  details_request_count?: number;
+  last_summary_reason?: string | null;
+  refresh_error?: string | null;
+  history: Array<{
+    captured_at: number;
+    app_bytes: number;
+    heap_used_bytes?: number | null;
+    heap_total_bytes?: number | null;
+  }>;
+}
+
+export interface SpotPollingDiagnostics {
+  in_flight: boolean;
+  refresh_interval_ms: number | null;
+  fetch_count: number;
+  error_count: number;
+  last_fetch_started_at: number | null;
+  last_fetch_completed_at: number | null;
+  last_fetch_latency_ms: number | null;
+  next_fetch_scheduled_at: number | null;
+  last_fetch_reason: string | null;
 }
 
 export interface FrontendErrorEntry {

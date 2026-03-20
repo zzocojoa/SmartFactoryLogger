@@ -31,6 +31,14 @@ export class SeriesBuffer {
     return this.samples;
   }
 
+  getStats() {
+    return {
+      count: this.samples.length,
+      windowMs: this.windowMs,
+      maxPoints: this.maxPoints ?? null,
+    };
+  }
+
   clear() {
     this.samples = [];
   }

@@ -8,10 +8,14 @@ export interface WorkerDataPayload {
   data: FactoryData;
   timestamp: number;
   latency: number;
+  poll_interval_ms: number;
+  failure_count: number;
 }
 
 export interface WorkerErrorPayload {
   message: string;
+  poll_interval_ms: number;
+  failure_count: number;
 }
 
 export type WorkerInboundMessage =

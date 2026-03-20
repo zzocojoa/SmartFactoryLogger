@@ -3,15 +3,18 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React from 'react';
-import { FactoryDataContext } from '../../context/FactoryDataContext';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { isThresholdHit } from '../../../../shared/utils/thresholds';
 import { formatNumber, formatTime } from '../../../../shared/utils/formatters';
 import { mapEnvTempLevel, mapEnvPreLevel, getEnvTempState, getEnvHumidityState } from '../../../../shared/utils/stateMappers';
 import { LABELS, SPOT_UNIT } from '../../../../shared/constants/uiText';
 
-export function EnvComponent() {
-  const { data, lastDataAt, thresholds } = React.useContext(FactoryDataContext);
+export const EnvComponent = React.memo(function EnvComponent() {
+  const data = useDashboardStore(state => state.data);
+  const lastDataAt = useDashboardStore(state => state.lastDataAt);
+  const thresholds = useDashboardStore(state => state.thresholds);
+
   const envTempValue = useLastValidNumber(data?.At_Temp);
   const envHumidityValue = useLastValidNumber(data?.At_Pre);
   const tempRaw = data?.At_Temp;
@@ -23,9 +26,9 @@ export function EnvComponent() {
   const tempState = mapEnvTempLevel(computed?.env_temp_level) ?? getEnvTempState(tempDisplay);
   const humidityState = mapEnvPreLevel(computed?.env_pre_level) ?? getEnvHumidityState(humidityDisplay);
   const computedThresholds = computed?.thresholds;
-  const tempThresholdHit = computedThresholds?.at_temp ?? isThresholdHit(thresholds, 'at_temp', envTempValue);
+  const tempThresholdHit = computedThresholds?.at_temp ?? (thresholds ? isThresholdHit(thresholds, 'at_temp', envTempValue) : false);
   const humidityThresholdHit =
-    computedThresholds?.at_pre ?? isThresholdHit(thresholds, 'at_pre', envHumidityValue);
+    computedThresholds?.at_pre ?? (thresholds ? isThresholdHit(thresholds, 'at_pre', envHumidityValue) : false);
   return (
     <div className="card env-card" style={{ height: '100%' }}>
       <div className="env-grid">
@@ -60,3 +63,4 @@ export function EnvComponent() {
     </div>
   );
 }
+);

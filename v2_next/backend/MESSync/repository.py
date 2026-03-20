@@ -9,8 +9,8 @@ import sqlite3
 import json
 from datetime import datetime
 from pathlib import Path
-from .MESSync_Constants import DATA_DIR
-from .MESSync_Logger import get_logger
+from .constants import DATA_DIR
+from .logger import get_logger
 
 logger = get_logger("db_manager")
 
@@ -85,13 +85,14 @@ def save_page_data(page_key: str, data: list, record_count: int):
         cursor.close()
         conn.close()
 
-def get_latest_data(page_key: str):
-    """Get all historical data for a specific page (aggregated from all entries)"""
+from functools import lru_cache
+
+def get_latest_data(page_key: str, limit: int = 1000, offset: int = 0):
+    """Get historical data for a specific page with pagination"""
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        # Get all unique data entries for this page, ordered by collected_at DESC
-        # We'll merge all data arrays together
+        # Get elements ordered by collected_at DESC
         cursor.execute("""
             SELECT data_json, record_count, hash_val, collected_at
             FROM raw_data 
@@ -103,7 +104,7 @@ def get_latest_data(page_key: str):
         if not rows:
             return None
         
-        # Aggregate all data from all entries (deduplicated by content hash)
+        # Aggregate logic
         all_data = []
         seen_hashes = set()
         latest_collected_at = None
@@ -114,14 +115,10 @@ def get_latest_data(page_key: str):
             
             try:
                 data = json.loads(row["data_json"])
-                # Add each record if not already seen (simple dedup by string repr)
                 for record in data:
-                    # Filter out effectively empty records (treat '.' as empty too)
                     if not any(str(v).strip() not in ['', '.'] for v in record.values() if v is not None):
                         continue
 
-                    # Filter out pagination rows (e.g. "1 2 3 ... of 13 Pages") which were wrongly scraped
-                    # Check if any value in the record looks like a pagination string
                     record_values = [str(v) for v in record.values() if v is not None]
                     if any("of" in v and "Pages" in v and any(c.isdigit() for c in v) for v in record_values):
                         continue
@@ -133,19 +130,26 @@ def get_latest_data(page_key: str):
             except:
                 pass
         
+        total_count = len(all_data)
+        # Apply pagination after aggregation (since aggregation removes duplicates)
+        paginated_data = all_data[offset:offset+limit] if limit > 0 else all_data
+        
         return {
-            "data": all_data,
-            "record_count": len(all_data),
-            "hash_val": str(hash(str(len(all_data)))),
+            "data": paginated_data,
+            "record_count": total_count,
+            "hash_val": str(hash(str(total_count))),
             "collected_at": latest_collected_at
         }
     finally:
         cursor.close()
         conn.close()
 
+def invalidate_available_pages_cache():
+    get_available_pages.cache_clear()
 
+@lru_cache(maxsize=1)
 def get_available_pages() -> list[str]:
-    """Get list of all page keys that have data"""
+    """Get list of all page keys that have data (Cached)"""
     conn = get_connection()
     try:
         cursor = conn.cursor()

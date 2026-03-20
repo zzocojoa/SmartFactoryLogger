@@ -4,7 +4,7 @@ import math
 import time
 from typing import Any, Dict, Optional
 
-from backend.FacilityData.FacilityData_Structure import FactoryData
+from backend.FacilityData.schemas import FactoryData
 
 from .. import constants
 

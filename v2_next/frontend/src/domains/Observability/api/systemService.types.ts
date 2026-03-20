@@ -2,6 +2,8 @@ import type {
   CommLogInfo,
   ConnectionTestResponse,
   HealthSnapshot,
+  MemoryDetailsResponse,
+  MemoryStateResponse,
   ObservabilityErrorsResponse,
   PathHealthResult,
   StatsSnapshot,
@@ -52,8 +54,14 @@ export interface SnapshotPayload {
   format: string;
 }
 
+export interface MemoryExportRequest {
+  frontend: Record<string, unknown>;
+}
+
 export type SystemHealthResponse = HealthSnapshot;
 export type SystemStatsResponse = StatsSnapshot;
 export type ObservabilityErrorsData = ObservabilityErrorsResponse;
 export type CommLogInfoResponse = CommLogInfo;
 export type ConnectionTestData = ConnectionTestResponse;
+export type MemoryStateData = MemoryStateResponse;
+export type MemoryDetailsData = MemoryDetailsResponse;

@@ -1,14 +1,15 @@
 import type { ThemeCycle, ThemeMode } from '../types/ThemeContext.types';
+import { safeGetItem, safeSetItem } from '../utils/safeStorage';
 
 const THEME_STORAGE_KEY = 'theme_mode';
 
 export const readThemeMode = (): ThemeMode => {
-  const stored = localStorage.getItem(THEME_STORAGE_KEY) as ThemeMode | null;
+  const stored = safeGetItem(THEME_STORAGE_KEY) as ThemeMode | null;
   return stored ?? 'auto';
 };
 
 export const persistThemeMode = (mode: ThemeMode): void => {
-  localStorage.setItem(THEME_STORAGE_KEY, mode);
+  safeSetItem(THEME_STORAGE_KEY, mode);
 };
 
 export const calculateThemeCycle = (hour: number): ThemeCycle => {

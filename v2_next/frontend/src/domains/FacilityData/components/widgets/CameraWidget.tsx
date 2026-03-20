@@ -3,21 +3,23 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React from 'react';
-import { SpotContext } from '../../context/SpotContext';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { getCameraStatus } from '../../../../shared/utils/commBadge';
 import { LABELS } from '../../../../shared/constants/uiText';
 
-export function CameraComponent() {
-  const {
-    spotConfig,
-    spotImageUrl,
-    spotImageLoading,
-    spotImageError,
-    spotLastSuccessAt,
-    onSpotImageLoaded,
-    onSpotImageError,
-    requestFocus,
-  } = React.useContext(SpotContext);
+interface CameraComponentProps {
+  onSpotImageLoaded?: () => void;
+  onSpotImageError?: () => void;
+  requestFocus?: (steps: number) => void;
+  focusBusy?: boolean;
+}
+
+export const CameraComponent = React.memo(function CameraComponent(props: CameraComponentProps) {
+  const spotConfig = useDashboardStore(state => state.spotConfig);
+  const spotImageUrl = useDashboardStore(state => state.spotImageUrl);
+  const spotImageLoading = useDashboardStore(state => state.spotImageLoading);
+  const spotImageError = useDashboardStore(state => state.spotImageError);
+  const spotLastSuccessAt = useDashboardStore(state => state.spotLastSuccessAt);
   if (!spotConfig) return <div>Loading Config...</div>;
 
   // Crosshair logic
@@ -43,6 +45,8 @@ export function CameraComponent() {
     spotImageError,
     spotLastSuccessAt,
   });
+  const moveStep = 1;
+  const focusDisabled = !spotConfig.focus_enabled || !props.requestFocus || Boolean(props.focusBusy);
 
   return (
     <div className="card camera-card" style={{ height: '100%', position: 'relative' }}>
@@ -53,8 +57,10 @@ export function CameraComponent() {
             src={spotImageUrl}
             alt={LABELS.SPOT_CAMERA}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            onLoad={onSpotImageLoaded}
-            onError={() => onSpotImageError()}
+            onLoad={props.onSpotImageLoaded}
+            onError={props.onSpotImageError}
+            loading="lazy"
+            decoding="async"
           />
         )}
         <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
@@ -78,9 +84,14 @@ export function CameraComponent() {
         )}
       </div>
       <div className="camera-controls" style={{ marginTop: '4px' }}>
-        <button onClick={() => requestFocus(1)}>&lt;-Focus</button>
-        <button onClick={() => requestFocus(-1)}>Focus-&gt;</button>
+        <button type="button" disabled={focusDisabled} onClick={() => props.requestFocus?.(moveStep)}>
+          &lt;-Focus
+        </button>
+        <button type="button" disabled={focusDisabled} onClick={() => props.requestFocus?.(-moveStep)}>
+          Focus-&gt;
+        </button>
       </div>
     </div>
   );
 }
+);

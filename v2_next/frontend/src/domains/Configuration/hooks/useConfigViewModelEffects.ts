@@ -3,6 +3,8 @@ import type { MutableRefObject } from 'react';
 import { configService } from '../api/configService';
 import type { ConfigSnapshot } from '../types';
 
+const CONFIG_AUTO_REFRESH_MS = 15000;
+
 interface UseConfigAutoRefreshEffectParams {
   settingsOpen: boolean;
   settingsLoading: boolean;
@@ -35,11 +37,24 @@ export const useConfigAutoRefreshEffect = ({
   useEffect(() => {
     if (!settingsOpen) return;
 
-    void loadSettings();
-    void fetchCentralStatus();
+    let disposed = false;
+
+    const isVisible = (): boolean =>
+      typeof document === 'undefined' || document.visibilityState === 'visible';
+
+    const loadInitialState = async (): Promise<void> => {
+      if (disposed) {
+        return;
+      }
+      await loadSettings();
+      if (!isVisible()) {
+        return;
+      }
+      await fetchCentralStatus();
+    };
 
     const poll = async () => {
-      if (settingsLoading) return;
+      if (disposed || settingsLoading || !isVisible()) return;
       try {
         const data = await configService.getConfig();
         const fingerprint = buildSettingsFingerprint(data);
@@ -69,9 +84,47 @@ export const useConfigAutoRefreshEffect = ({
       }
     };
 
-    const interval = window.setInterval(poll, 5000);
-    return () => window.clearInterval(interval);
-  }, [settingsOpen, loadSettings]);
+    const handleVisibility = (): void => {
+      if (!isVisible()) {
+        return;
+      }
+      void fetchCentralStatus();
+      if (!hasSettingsChanges) {
+        void poll();
+      }
+    };
+
+    void loadInitialState();
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibility);
+    }
+
+    const interval = window.setInterval(() => {
+      void poll();
+    }, CONFIG_AUTO_REFRESH_MS);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
+    };
+  }, [
+    settingsOpen,
+    settingsLoading,
+    loadSettings,
+    fetchCentralStatus,
+    hasSettingsChanges,
+    buildSettingsFingerprint,
+    applySettingsSnapshot,
+    showSettingsToast,
+    settingsFingerprintRef,
+    settingsExternalNotifyRef,
+    setExternalConfigPending,
+    setExternalConfigPendingAt,
+  ]);
 };
 
 interface UseConfigInfoAutoDismissEffectParams {

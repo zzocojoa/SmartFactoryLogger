@@ -1,5 +1,6 @@
 import type React from 'react';
 import type { PageItem } from '../types/PageSidebar.types';
+import { safeGetItem, safeSetItem } from '../../../../../shared/utils/safeStorage';
 
 export const SIDEBAR_EXPANDED_STORAGE_KEY = 'mes_sidebar_expanded_categories';
 
@@ -20,7 +21,7 @@ export const getCategoryKeys = (pageItems: PageItem[]): string[] => {
 
 export const loadExpandedCategories = (): Set<string> => {
   try {
-    const raw = localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY);
+    const raw = safeGetItem(SIDEBAR_EXPANDED_STORAGE_KEY);
     if (raw) {
       return new Set(JSON.parse(raw));
     }
@@ -32,7 +33,7 @@ export const loadExpandedCategories = (): Set<string> => {
 
 export const saveExpandedCategories = (expandedCategories: Set<string>) => {
   try {
-    localStorage.setItem(
+    safeSetItem(
       SIDEBAR_EXPANDED_STORAGE_KEY,
       JSON.stringify(Array.from(expandedCategories))
     );

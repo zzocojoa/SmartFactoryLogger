@@ -18,7 +18,7 @@ import traceback
 import gc
 from typing import Optional
 
-from .MESSync_Constants import (
+from .constants import (
     MES_BASE_URL, 
     LOGIN_URL, 
     LOGIN_SELECTOR_ID, 
@@ -32,7 +32,7 @@ from .MESSync_Constants import (
 )
 from .MESSync_Config import get_credentials
 from backend.MESSync.MESSync_Structure import MES_PAGES
-from .MESSync_Logger import get_logger
+from .logger import get_logger
 
 import random
 
@@ -300,7 +300,7 @@ async def collect_page(page, page_info, target_date_str, output_filename="today.
     return result
 
 
-from backend.MESSync.MESSync_DB import init_db, save_page_data
+from backend.MESSync.repository import init_db, save_page_data
 
 async def save_result(page_info, result, output_filename="today.json"):
     """결과 저장 (Hybrid: JSON File + SQLite DB)"""

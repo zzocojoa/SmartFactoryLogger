@@ -4,8 +4,8 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from backend import config
-from backend.MESSync import MESSync_DB as mes_db
-from backend.FacilityData.FacilityData_DB_Logger import logger_service
+from backend.MESSync import repository as mes_db
+from backend.FacilityData.repository import logger_service
 
 router = APIRouter()
 logger = logging.getLogger("SmartFactoryLoggerV2.MES")
@@ -34,7 +34,7 @@ async def verify_password(payload: AuthRequest):
     """
     import configparser
     from pathlib import Path
-    from backend.Configuration.Configuration_Logic_Service import get_config_snapshot
+    from backend.Configuration.service import get_config_snapshot
 
     # 1. Check if password check is skipped based on current config snapshot
     snapshot = get_config_snapshot()
@@ -113,29 +113,25 @@ async def get_pages():
         logger.error(f"Failed to fetch pages: {e}")
         raise HTTPException(status_code=500, detail="Database Error")
 
-@router.get("/data/{page_key}", response_model=DataResponse)
-async def get_page_data(page_key: str):
+@router.get(
+    "/data/{page_key}", 
+    response_model=DataResponse, 
+    response_model_exclude_none=True,
+    summary="Get Paginated MES Data",
+    description="Fetch historical data for a specific MES page by its key, supporting chunked payload streaming via offset-based pagination to prevent memory issues. Highly unrecommended to request more than 5000 records at once."
+)
+async def get_page_data(page_key: str, limit: int = 500, offset: int = 0):
     """
-    Get latest data for a specific page.
+    Retrieves the most recent data for a specific MES page, merged from past collections.
+    Supports limit and offset parameters to control payload size.
     """
     try:
-        result = mes_db.get_latest_data(page_key)
+        # Vercel Guidelines: Use async for DB/IO operations if possible
+        import asyncio
+        result = await asyncio.to_thread(mes_db.get_latest_data, page_key, limit, offset)
+        
         if not result:
             raise HTTPException(status_code=404, detail="No data found for this page")
-        
-        # 'collected_at'은 db_manager가 get_latest_data에서 반환하지 않고 내부 쿼리에서는 정렬용으로만 씀
-        # db_manager.py의 get_latest_data를 보면 collected_at을 반환하지 않음.
-        # 수정이 필요해 보임. 하지만 일단 없는대로 진행하거나 db_manager를 다시 고쳐야 함.
-        # db_manager.py: 93 line: SELECT data_json, record_count, hash_val ...
-        # collected_at이 빠져있음.
-        
-        # 긴급 수정: db_manager가 반환하는 dict에는 collected_at이 없을 수 있음.
-        # 스펙상 collected_at을 보여주기로 했으므로, 지금 바로 db_manager를 고치는 게 맞음.
-        # 하지만 일단 여기서는 dummy 또는 현재시간을 넣고, 다음 단계에서 db_manager를 수정하겠음.
-        # (Actually, strictness is good. I should fix db_manager first? 
-        #  Wait, I will write this file, realizing that it might fail validation if I strictly type it using collected_at.
-        #  I'll fetch collected_at from db_manager if I fix it. 
-        #  Let's fix db_manager in the NEXT step immediately to avoid context switch overhead right now.)
         
         return {
             "page_key": page_key,

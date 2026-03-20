@@ -1,5 +1,6 @@
 import type {
   ConnectionTestState,
+  DashboardLeaderState,
   FrontendErrorEntry,
   HealthSnapshot,
   ObservabilityErrorsResponse,
@@ -7,6 +8,12 @@ import type {
   StatsSnapshot,
 } from '../../../shared/types';
 import type { Dispatch, SetStateAction } from 'react';
+
+export interface PollingState {
+  degraded: boolean;
+  intervalMs: number;
+  failureCount: number;
+}
 
 export interface UseSystemViewModel {
   health: HealthSnapshot | null;
@@ -18,6 +25,10 @@ export interface UseSystemViewModel {
   reconnectBusy: boolean;
   pathCheckBusy: boolean;
   observabilityLoading: boolean;
+  healthPolling: PollingState;
+  statsPolling: PollingState;
+  dashboardLeaderState: DashboardLeaderState | null;
+  pollingPausedByVisibility: boolean;
   fetchHealth: () => Promise<HealthSnapshot | null>;
   fetchStats: () => Promise<StatsSnapshot | null>;
   loadObservabilityErrors: () => Promise<void>;

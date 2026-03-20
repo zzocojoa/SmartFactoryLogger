@@ -7,14 +7,14 @@ from urllib.request import urlopen
 
 import httpx
 
-from .. import config
+from backend import config
 
 _ACTUATOR_LOCK = threading.Lock()
 _POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 
 # Short-term cache for image proxy (Throttling)
-_img_cache: Dict[str, Any] = {"data": None, "time": 0.0}
-_IMG_CACHE_TTL_SEC = 0.5
+_img_cache: Dict[str, Any] = {"data": None, "time": 0.0, "temp": 0.0, "temp_time": 0.0}
+_IMG_CACHE_TTL_SEC = 2.0
 _IMG_BACKOFF_BASE_SEC = 0.5
 _IMG_BACKOFF_MAX_SEC = 5.0
 _img_fetch_lock = asyncio.Lock()
@@ -31,8 +31,8 @@ def _get_http_client() -> httpx.AsyncClient:
     if _http_client is None:
         timeout = httpx.Timeout(
             connect=1.0,
-            # Increase read timeout slightly to avoid strict deadlines on slow networks
-            read=config.SPOT_TIMEOUT or 3.0, 
+            # Increase read timeout to 5s for better resilience globally
+            read=5.0, 
             write=1.0,
             pool=5.0,
         )
@@ -106,13 +106,15 @@ _prefetch_running = False
 
 
 async def _prefetch_loop():
-    """백그라운드에서 지속적으로 SPOT 이미지 프리페칭."""
+    """백그라운드에서 지속적으로 SPOT 이미지 프리페칭 (드리프트 방지 로직 적용)."""
     global _img_failure_count, _img_last_error, _prefetch_running
     _prefetch_running = True
     
-    # Use logger for critical errors
-    from ..MESSync.MESSync_Logger import get_logger
+    from ...MESSync.logger import get_logger
     logger = get_logger("spot_control")
+    
+    interval = max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
+    next_tick = time.time()
     
     while _prefetch_running:
         try:
@@ -121,22 +123,52 @@ async def _prefetch_loop():
                 response = await client.get(config.SPOT_IMAGE_URL)
                 response.raise_for_status()
                 data = response.content
-                
+
                 if data:
                     _img_cache["data"] = data
                     _img_cache["time"] = time.time()
                     if _img_failure_count > 0:
-                        logger.info(f"Spot camera reconnected after {_img_failure_count} failures")
+                        logger.info(f"Spot image stream reconnected after {_img_failure_count} failures")
                     _img_failure_count = 0
+
+                if config.SPOT_URL:
+                    try:
+                        temp_resp = await client.get(config.SPOT_URL)
+                        temp_resp.raise_for_status()
+                        raw_temp = temp_resp.text.strip()
+                        if raw_temp:
+                            _img_cache["temp"] = float(raw_temp)
+                            _img_cache["temp_time"] = time.time()
+                    except ValueError as exc:
+                        logger.warning(f"Spot temperature parse failed: {exc}")
+                    except Exception as exc:
+                        logger.warning(f"Spot temperature fetch failed: {exc}")
+                    
+        except asyncio.CancelledError:
+            break
         except Exception as e:
             _img_last_error = time.time()
-            _img_failure_count = min(_img_failure_count + 1, 6)
-            if _img_failure_count == 1 or _img_failure_count == 6:
-                 logger.warning(f"Spot prefetch failed: {str(e)} (Count: {_img_failure_count})")
+            _img_failure_count = min(_img_failure_count + 1, 10)
+            backoff = _current_backoff_sec()
+            if _img_failure_count == 1 or _img_failure_count >= 6:
+                 logger.warning(f"Spot image fetch failed: {str(e)} (Count: {_img_failure_count}, Next Backoff: {backoff:.1f}s)")
+            
+            # 실패 시 백오프 적용
+            if backoff > 0:
+                await asyncio.sleep(backoff)
+                next_tick = time.time() # Reset tick after backoff recovery
         
-        # 설정된 refresh 간격으로 대기 (최소 0.5초)
-        interval = max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
-        await asyncio.sleep(interval)
+        # 드리프트 방지: 다음 실행 시간 계산
+        next_tick += interval
+        now = time.time()
+        sleep_time = next_tick - now
+        
+        if sleep_time > 0:
+            await asyncio.sleep(sleep_time)
+        else:
+            # 작업이 너무 오래 걸려 다음 tick을 이미 지남 -> tick 보정
+            next_tick = now
+            await asyncio.sleep(0.1) # 최소 0.1초 휴식으로 CPU 점유 방지
 
 
 async def start_prefetch_loop():
@@ -161,6 +193,15 @@ async def stop_prefetch_loop():
         except asyncio.CancelledError:
             pass
         _prefetch_task = None
+
+
+def get_cached_spot_temp() -> float:
+    """캐시된 SPOT 온도를 반환 (PLC 드라이버 등에서 사용)."""
+    now = time.time()
+    # 이미지가 너무 오래되었거나(15s), 온도가 없으면 0.0 반환
+    if not _img_cache["temp_time"] or (now - _img_cache["temp_time"] > 15.0):
+        return 0.0
+    return _img_cache["temp"]
 
 
 def move_focus(steps: int) -> Dict[str, Any]:
@@ -190,7 +231,8 @@ def move_focus(steps: int) -> Dict[str, Any]:
                 "status": "limit",
                 "current": current,
                 "new": new_val,
-                "step": config.SPOT_ACTUATOR_STEP,
+                "request_steps": steps,
+                "actuator_step": config.SPOT_ACTUATOR_STEP,
             }
 
         write_url = f"{config.SPOT_ACTUATOR_URL}?scan=3&move={new_val}"
@@ -204,5 +246,6 @@ def move_focus(steps: int) -> Dict[str, Any]:
             "status": "ok",
             "current": current,
             "new": new_val,
-            "step": config.SPOT_ACTUATOR_STEP,
+            "request_steps": steps,
+            "actuator_step": config.SPOT_ACTUATOR_STEP,
         }

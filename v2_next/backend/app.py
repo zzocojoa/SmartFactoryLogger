@@ -24,7 +24,26 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import time
-from backend.Api import Api_MESSync_Extended as mes_sync
+from backend.MESSync import sync_router as mes_sync
+
+import contextvars
+import queue
+from logging.handlers import QueueHandler, QueueListener
+from pythonjsonlogger import jsonlogger
+import uuid
+
+trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
+
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
+    def add_fields(self, log_record, record, message_dict):
+        super().add_fields(log_record, record, message_dict)
+        if hasattr(record, "trace_id"):
+            log_record["trace_id"] = record.trace_id
+
+class TraceIDFilter(logging.Filter):
+    def filter(self, record):
+        record.trace_id = trace_id_var.get()
+        return True
 
 class SafeRotatingFileHandler(RotatingFileHandler):
     """
@@ -54,10 +73,12 @@ from urllib.request import Request, urlopen
 from typing import Any
 
 # Import Service Layer using absolute imports
-from backend.FacilityData.FacilityData_Logic_Service import plc_service
-from backend.FacilityData.FacilityData_DB_Logger import logger_service
-from backend.Observability.Observability_Logic_MetricsLogger import comm_metrics_logger_service
-from backend.Observability.Observability_Logic_Service import observability_service
+from backend.FacilityData.service import plc_service
+from backend.FacilityData.repository import logger_service
+from backend.Observability.metrics_logger import comm_metrics_logger_service
+from backend.Observability.memory_service import estimate_size_bytes, memory_service
+from backend.Observability.service import observability_service
+from backend.Configuration.Configuration_DB_Manager import config_manager
 from backend.Configuration.Configuration_Logic_Layout import (
     delete_layout_slot,
     get_active_layout,
@@ -67,7 +88,7 @@ from backend.Configuration.Configuration_Logic_Layout import (
     restore_layout_slot,
     save_layout_slot
 )
-from backend.Configuration.Configuration_Logic_Service import (
+from backend.Configuration.service import (
     apply_pending_config,
     clear_pending_config,
     get_config_snapshot,
@@ -79,15 +100,16 @@ from backend.Configuration.Configuration_Logic_Service import (
 from backend.Configuration.Configuration_Logic_Sync import config_sync_agent
 from backend.Configuration.Configuration_Logic_Watch import config_watch_service
 from backend.Configuration.Configuration_Structure import ConfigUpdate, OverrideToggle, SettingsConfig
-from backend.FacilityData import FacilityData_Logic_Spot as spot_control
-from backend.FacilityData.FacilityData_Structure import FactoryData
+from backend.FacilityData.drivers import spot_api as spot_control
+from backend.FacilityData.schemas import FactoryData
 from backend.Observability.Observability_Logic_Verification import compare_with_reference
 from backend import config
 from backend.MESSync import MESSync_Logic_Scheduler as mes_scheduler
-from backend.MESSync import MESSync_DB as mes_db
+from backend.MESSync import repository as mes_db
 from backend.MESSync.MESSync_Structure import MES_PAGES
-from backend.Api import Api_MESSync as mes_router
-from backend.Api import Api_AITools as ai_router
+from backend.MESSync import router as mes_router
+from backend.core import ai_tools_dispatcher
+from backend.version import get_runtime_info
 
 class ConnectionTarget(BaseModel):
     ip: str | None = None
@@ -144,6 +166,10 @@ class ObservabilityExportRequest(BaseModel):
     tolerance_pct: dict[str, float] | None = None
 
 
+class MemoryExportRequest(BaseModel):
+    frontend: dict[str, Any] | None = None
+
+
 class SnapshotRequest(BaseModel):
     image_base64: str
     name: str | None = None
@@ -187,9 +213,66 @@ _stats_last_status: int | None = None
 _stats_last_time: float | None = None
 _stats_error_count = 0
 _last_observability_export_path: Path | None = None
+_last_memory_export_path: Path | None = None
+_access_log_lock = threading.Lock()
+_quiet_access_state: dict[tuple[str, str, int], dict[str, float | int]] = {}
+_QUIET_ACCESS_PATHS = {
+    "/api/spot/proxy_image",
+    "/api/data",
+    "/health",
+    "/stats",
+    "/api/memory/state",
+    "/api/memory/details",
+    "/api/memory/export/latest",
+    "/api/config",
+    "/api/config/central-status",
+}
+_QUIET_ACCESS_PREFIXES = (
+    "/assets/polling.worker-",
+)
+_ACCESS_LOG_SAMPLE_SEC = 5.0
 
 _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
+
+
+def _is_quiet_access_path(path: str) -> bool:
+    if path in _QUIET_ACCESS_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in _QUIET_ACCESS_PREFIXES)
+
+
+def _should_log_access_start(path: str) -> bool:
+    return not _is_quiet_access_path(path)
+
+
+def _consume_quiet_access_sample(path: str, client_host: str, status_code: int, now: float) -> tuple[bool, int]:
+    key = (path, client_host, status_code)
+    with _access_log_lock:
+        state = _quiet_access_state.get(key)
+        if state is None:
+            _quiet_access_state[key] = {
+                "last_logged_at": now,
+                "suppressed_count": 0,
+            }
+            return True, 0
+
+        last_logged_at = float(state.get("last_logged_at") or 0.0)
+        suppressed_count = int(state.get("suppressed_count") or 0)
+        if now - last_logged_at >= _ACCESS_LOG_SAMPLE_SEC:
+            state["last_logged_at"] = now
+            state["suppressed_count"] = 0
+            return True, suppressed_count
+
+        state["suppressed_count"] = suppressed_count + 1
+        return False, suppressed_count + 1
+
+
+def _log_access_completion(path: str, client_host: str, status_code: int, elapsed_ms: float) -> None:
+    if _is_quiet_access_path(path) and status_code < 400:
+        return
+
+    _logger.info(f"[Access] DONE: {client_host} -> {path} (Status: {status_code}, {elapsed_ms:.1f}ms)")
 
 
 def _is_valid_segment(segment: str) -> bool:
@@ -263,6 +346,10 @@ def _observability_state_path() -> Path:
     return _resolve_log_dir() / "observability_last_export.json"
 
 
+def _memory_state_path() -> Path:
+    return _resolve_log_dir() / "memory_last_export.json"
+
+
 def _persist_observability_export_state(path: Path) -> None:
     try:
         payload = {
@@ -277,8 +364,36 @@ def _persist_observability_export_state(path: Path) -> None:
         pass
 
 
+def _persist_memory_export_state(path: Path) -> None:
+    try:
+        payload = {
+            "path": str(path),
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        _memory_state_path().write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 def _load_observability_export_state() -> tuple[Path | None, str | None]:
     state_path = _observability_state_path()
+    if not state_path.exists():
+        return None, None
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, None
+    path_str = raw.get("path")
+    if not path_str:
+        return None, raw.get("updated_at")
+    return Path(path_str), raw.get("updated_at")
+
+
+def _load_memory_export_state() -> tuple[Path | None, str | None]:
+    state_path = _memory_state_path()
     if not state_path.exists():
         return None, None
     try:
@@ -303,6 +418,18 @@ def _latest_observability_snapshot(log_dir: Path) -> Path | None:
         return None
 
 
+def _latest_memory_snapshot(log_dir: Path) -> Path | None:
+    try:
+        candidates = sorted(
+            log_dir.glob("memory_snapshot_*.json"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+    except Exception:
+        return None
+
+
 def _resolve_last_observability_export() -> tuple[Path | None, str | None]:
     global _last_observability_export_path
     if _last_observability_export_path and _last_observability_export_path.exists():
@@ -315,6 +442,17 @@ def _resolve_last_observability_export() -> tuple[Path | None, str | None]:
     if latest:
         _last_observability_export_path = latest
         return latest, None
+    return None, updated_at
+
+
+def _resolve_last_memory_export() -> tuple[Path | None, str | None]:
+    global _last_memory_export_path
+    if _last_memory_export_path and _last_memory_export_path.exists():
+        return _last_memory_export_path, None
+    state_path, updated_at = _load_memory_export_state()
+    if state_path and state_path.exists():
+        _last_memory_export_path = state_path
+        return state_path, updated_at
     return None, updated_at
 
 
@@ -495,13 +633,209 @@ def _open_path(path: Path) -> None:
     subprocess.run(["xdg-open", str(path)], check=False)
 
 
+def _memory_result(
+    name: str,
+    kind: str,
+    bytes_value: int,
+    *,
+    items: int | None = None,
+    note: str | None = None,
+    exactness: str = "estimated",
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "kind": kind,
+        "exactness": exactness,
+        "bytes": max(0, int(bytes_value)),
+        "items": items,
+        "note": note,
+    }
+
+
+def _estimate_text_bytes(value: Any) -> int:
+    if value is None:
+        return 0
+    return len(str(value)) * 2
+
+
+def _estimate_mapping_bytes(value: dict[str, Any]) -> int:
+    total = 0
+    for key, item in value.items():
+        total += _estimate_text_bytes(key)
+        if isinstance(item, bool):
+            total += 8
+        elif isinstance(item, int):
+            total += 8
+        elif isinstance(item, float):
+            total += 8
+        elif item is None:
+            total += 0
+        else:
+            total += _estimate_text_bytes(item)
+    return total
+
+
+def _collect_observability_requests() -> dict[str, Any]:
+    storage_summary = observability_service.get_request_storage_summary()
+    return _memory_result(
+        "observability.requests",
+        "summary",
+        int(storage_summary["estimated_bytes"]),
+        items=int(storage_summary["detail_count"]),
+        note=(
+            f"window={storage_summary['request_count']} "
+            f"detail={storage_summary['detail_count']} "
+            f"polling={storage_summary['polling_count']}"
+        ),
+    )
+
+
+def _collect_observability_errors() -> dict[str, Any]:
+    error_items = list(observability_service._errors)
+    return _memory_result(
+        "observability.errors",
+        "deque",
+        estimate_size_bytes(error_items),
+        items=len(error_items),
+        note="recent runtime errors",
+    )
+
+
+def _collect_plc_state() -> dict[str, Any]:
+    with plc_service.lock:
+        current_data = plc_service.current_data
+        last_update = plc_service.last_update
+    payload = {
+        "Time": getattr(current_data, "Time", None),
+        "Status": getattr(current_data, "Status", None),
+        "Speed": getattr(current_data, "Speed", None),
+        "Press": getattr(current_data, "Press", None),
+        "Spot": getattr(current_data, "Spot", None),
+        "Count": getattr(current_data, "Count", None),
+        "Computed": getattr(current_data, "Computed", None),
+        "last_update": last_update,
+        "mode": plc_service.mode,
+    }
+    return _memory_result(
+        "facility.plc_state",
+        "snapshot",
+        _estimate_mapping_bytes(payload),
+        items=len(payload),
+        note="latest plc scalar summary",
+    )
+
+
+def _collect_csv_logger() -> dict[str, Any]:
+    runtime_state = logger_service.get_runtime_state()
+    payload = {
+        "queue_size": int(runtime_state.get("queue_size") or 0),
+        "buffer_size": int(runtime_state.get("buffer_size") or 0),
+        "rotation_mode": runtime_state.get("rotation_mode"),
+        "rotation_enabled": runtime_state.get("rotation_enabled"),
+        "auto_save": runtime_state.get("auto_save"),
+        "log_path": runtime_state.get("log_path"),
+    }
+    return _memory_result(
+        "facility.csv_logger",
+        "queue",
+        _estimate_mapping_bytes(payload),
+        items=int(runtime_state.get("queue_size") or 0) + int(runtime_state.get("buffer_size") or 0),
+        note=f"queue={runtime_state.get('queue_size')} buffer={runtime_state.get('buffer_size')}",
+    )
+
+
+def _collect_config_manager() -> dict[str, Any]:
+    snapshot = config_manager.get_snapshot()
+    flat_items = dict(config_manager._flat)
+    pending_keys = list(config_manager._pending_keys)
+    last_apply = dict(config_manager._last_apply)
+    payload = {
+        "config_path": snapshot.get("config_path"),
+        "encoding": snapshot.get("encoding"),
+        "restart_required": snapshot.get("restart_required"),
+        "flat_count": len(flat_items),
+        "pending_count": len(pending_keys),
+        "applied_count": len(last_apply.get("applied") or []),
+        "pending_apply_count": len(last_apply.get("pending") or []),
+    }
+    return _memory_result(
+        "configuration.snapshot",
+        "snapshot",
+        _estimate_mapping_bytes(payload),
+        items=len(flat_items),
+        note="config summary and pending counters",
+    )
+
+
+def _collect_spot_cache() -> dict[str, Any]:
+    image_bytes = 0
+    image_data = spot_control._img_cache.get("data")
+    if isinstance(image_data, (bytes, bytearray)):
+        image_bytes = len(image_data)
+    payload = {
+        "image_bytes": image_bytes,
+        "temperature": spot_control._img_cache.get("temp"),
+        "fetched_at": spot_control._img_cache.get("time"),
+        "temperature_at": spot_control._img_cache.get("temp_time"),
+    }
+    note = "cached image metadata and byte length"
+    return _memory_result(
+        "spot.cache",
+        "cache",
+        image_bytes + _estimate_mapping_bytes(payload),
+        items=1,
+        note=note,
+    )
+
+
+def _collect_mes_sync_state() -> dict[str, Any]:
+    payload = dict(mes_sync.sync_state)
+    return _memory_result(
+        "mes.sync_state",
+        "state",
+        estimate_size_bytes(payload),
+        items=1,
+        note="manual sync state",
+    )
+
+
+def _register_memory_collectors() -> None:
+    memory_service.register_collector("observability.requests", _collect_observability_requests)
+    memory_service.register_collector("observability.errors", _collect_observability_errors)
+    memory_service.register_collector("facility.plc_state", _collect_plc_state)
+    memory_service.register_collector("facility.csv_logger", _collect_csv_logger)
+    memory_service.register_collector("configuration.snapshot", _collect_config_manager)
+    memory_service.register_collector("spot.cache", _collect_spot_cache)
+    memory_service.register_collector("mes.sync_state", _collect_mes_sync_state)
+
+
+_log_queue_listeners = []
+
 def _setup_logging() -> tuple[logging.Logger, logging.Logger]:
     log_dir = _resolve_log_dir()
-    formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    
+    # JSON Formatter for Files (Agent Parsing)
+    json_formatter = CustomJsonFormatter(
+        "%(asctime)s %(levelname)s %(name)s %(trace_id)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    
+    # Console Formatter (Human Readable)
+    console_formatter = logging.Formatter(
+        "[%(asctime)s] [%(levelname)s] [%(trace_id)s] %(message)s", 
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
 
     logger = logging.getLogger("SmartFactoryLoggerV2")
     if not logger.handlers:
         logger.setLevel(logging.INFO)
+        
+        # Async Queue Handler
+        log_queue = queue.Queue(-1)
+        queue_handler = QueueHandler(log_queue)
+        queue_handler.addFilter(TraceIDFilter())
+        logger.addHandler(queue_handler)
+
         system_log = log_dir / "system.log"
         file_handler = SafeRotatingFileHandler(
             system_log,
@@ -509,17 +843,25 @@ def _setup_logging() -> tuple[logging.Logger, logging.Logger]:
             backupCount=5,
             encoding="utf-8",
         )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        file_handler.setFormatter(json_formatter)
 
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.ERROR)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
+        console_handler.setFormatter(console_formatter)
+
+        listener = QueueListener(log_queue, file_handler, console_handler, respect_handler_level=True)
+        listener.start()
+        _log_queue_listeners.append(listener)
 
     crash_logger = logging.getLogger("SmartFactoryLoggerV2.Crash")
     if not crash_logger.handlers:
         crash_logger.setLevel(logging.ERROR)
+        
+        crash_queue = queue.Queue(-1)
+        crash_queue_handler = QueueHandler(crash_queue)
+        crash_queue_handler.addFilter(TraceIDFilter())
+        crash_logger.addHandler(crash_queue_handler)
+        
         crash_log = log_dir / "crash.log"
         crash_handler = SafeRotatingFileHandler(
             crash_log,
@@ -527,13 +869,17 @@ def _setup_logging() -> tuple[logging.Logger, logging.Logger]:
             backupCount=5,
             encoding="utf-8",
         )
-        crash_handler.setFormatter(formatter)
-        crash_logger.addHandler(crash_handler)
+        crash_handler.setFormatter(json_formatter)
+        
+        crash_listener = QueueListener(crash_queue, crash_handler, respect_handler_level=True)
+        crash_listener.start()
+        _log_queue_listeners.append(crash_listener)
 
     return logger, crash_logger
 
-
 _logger, _crash_logger = _setup_logging()
+_register_memory_collectors()
+
 
 
 def _write_crash_log(title: str, exc_type, exc_value, tb) -> None:
@@ -674,6 +1020,8 @@ async def lifespan(app: FastAPI):
     plc_service.start()
     print("[Main] Starting Comm Metrics Logger...")
     comm_metrics_logger_service.start()
+    print("[Main] Starting Memory Service...")
+    memory_service.start()
 
     # Start MES Bridge if enabled
     if config.MES_ENABLED:
@@ -699,6 +1047,8 @@ async def lifespan(app: FastAPI):
         await spot_control.stop_prefetch_loop()
         print("[Main] Stopping Comm Metrics Logger...")
         comm_metrics_logger_service.stop()
+        print("[Main] Stopping Memory Service...")
+        memory_service.stop()
         print("[Main] Stopping PLC Service...")
         plc_service.stop()
         print("[Main] Stopping Config Sync Agent...")
@@ -713,14 +1063,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Smart Factory Logger V2 API",
     description="Backend API for Smart Factory Logger V2 (Web Tech)",
-    version="2.1.0",
+    version=config.APP_VERSION,
     lifespan=lifespan
 )
 
 # Register Routers
 app.include_router(mes_router.router, prefix="/api/mes", tags=["MES"])
 app.include_router(mes_sync.router, prefix="/api/mes/sync", tags=["MES Sync"])
-app.include_router(ai_router.router, prefix="/api", tags=["AI Tool Calling"])
+app.include_router(ai_tools_dispatcher.router, prefix="/api", tags=["AI Tool Calling"])
 
 # CORS (Allow Frontend Access)
 app.add_middleware(
@@ -733,6 +1083,9 @@ app.add_middleware(
 
 @app.middleware("http")
 async def record_request_stats(request: Request, call_next):
+    trace_id = str(uuid.uuid4())
+    token = trace_id_var.set(trace_id)
+    
     global _stats_total_requests
     global _stats_total_latency_ms
     global _stats_last_latency_ms
@@ -743,12 +1096,14 @@ async def record_request_stats(request: Request, call_next):
     start = time.perf_counter()
     status_code = 500
     client_host = request.client.host if request.client else "unknown"
+    response = None
     try:
-        # Log incoming request for external visibility
-        _logger.info(f"[Access] INCOMING: {client_host} -> {request.method} {request.url.path}")
+        if _should_log_access_start(request.url.path):
+            _logger.info(f"[Access] INCOMING: {client_host} -> {request.method} {request.url.path}")
         
         response = await call_next(request)
         status_code = response.status_code
+        
         if status_code >= 500:
             try:
                 observability_service.record_error(
@@ -771,11 +1126,13 @@ async def record_request_stats(request: Request, call_next):
         raise
     finally:
         elapsed_ms = (time.perf_counter() - start) * 1000
-        # Log completion
-        _logger.info(f"[Access] DONE: {client_host} -> {request.url.path} (Status: {status_code}, {elapsed_ms:.1f}ms)")
+        _log_access_completion(request.url.path, client_host, status_code, elapsed_ms)
         
+        if response is not None:
+            response.headers["X-Trace-ID"] = trace_id
+            
         try:
-            observability_service.record_request(request.url.path, status_code, elapsed_ms)
+            observability_service.record_request(request.url.path, status_code, elapsed_ms, client_host)
         except Exception:
             pass
         with _stats_lock:
@@ -787,6 +1144,7 @@ async def record_request_stats(request: Request, call_next):
             _stats_last_time = time.time()
             if status_code >= 400:
                 _stats_error_count += 1
+        trace_id_var.reset(token)
 
 @app.get("/")
 def read_root():
@@ -806,7 +1164,7 @@ async def get_data():
 
 @app.get("/health")
 async def health():
-    return plc_service.get_health()
+    return {**plc_service.get_health(), **get_runtime_info()}
 
 @app.get("/stats")
 async def stats():
@@ -834,12 +1192,18 @@ def clear_observability_errors():
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @app.post("/api/observability/export")
-def export_observability(payload: ObservabilityExportRequest):
+async def export_observability(payload: ObservabilityExportRequest):
     global _last_observability_export_path
     try:
-        health_snapshot = plc_service.get_health()
-        stats_snapshot = observability_service.get_stats()
-        errors_snapshot = observability_service.get_errors(200) if payload.include_errors else []
+        # Vercel Guidelines: Run independent tasks concurrently
+        health_task = asyncio.to_thread(plc_service.get_health)
+        stats_task = asyncio.to_thread(observability_service.get_stats)
+        errors_task = asyncio.to_thread(observability_service.get_errors, 200) if payload.include_errors else asyncio.to_thread(lambda: [])
+        
+        health_snapshot, stats_snapshot, errors_snapshot = await asyncio.gather(
+            health_task, stats_task, errors_task
+        )
+
         front_errors_payload: list[dict[str, Any]] = []
         if payload.front_errors:
             for item in payload.front_errors:
@@ -870,10 +1234,16 @@ def export_observability(payload: ObservabilityExportRequest):
         }
         log_dir = _resolve_log_dir()
         filename = f"observability_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        path = log_dir / filename
-        path.write_text(json.dumps(snapshot, ensure_ascii=True, indent=2), encoding="utf-8")
+        
+        # Vercel Guidelines: Use non-blocking disk I/O when possible or offload
+        def _write_and_persist():
+            path = log_dir / filename
+            path.write_text(json.dumps(snapshot, ensure_ascii=True, indent=2), encoding="utf-8")
+            _persist_observability_export_state(path)
+            return path
+            
+        path = await asyncio.to_thread(_write_and_persist)
         _last_observability_export_path = path
-        _persist_observability_export_state(path)
         return {"ok": True, "path": str(path), "size": path.stat().st_size}
     except Exception as exc:
         _logger.error("Observability export failed: %s", exc)
@@ -914,6 +1284,112 @@ def get_observability_export_latest():
         "path": str(path) if path else None,
         "updated_at": updated_at,
     }
+
+
+@app.get("/api/memory/state")
+def get_memory_state():
+    try:
+        return memory_service.get_summary_state()
+    except Exception as exc:
+        _logger.error("Memory state fetch failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/memory/details")
+def get_memory_details():
+    try:
+        return memory_service.get_details_state()
+    except Exception as exc:
+        _logger.error("Memory details fetch failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/memory/profiler/start")
+def start_memory_profiler():
+    try:
+        return memory_service.start_profiler()
+    except Exception as exc:
+        _logger.error("Memory profiler start failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/memory/profiler/stop")
+def stop_memory_profiler():
+    try:
+        return memory_service.stop_profiler()
+    except Exception as exc:
+        _logger.error("Memory profiler stop failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/memory/snapshot")
+def capture_memory_snapshot():
+    try:
+        return memory_service.capture_snapshot()
+    except Exception as exc:
+        _logger.error("Memory snapshot failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/memory/export")
+async def export_memory_snapshot(payload: MemoryExportRequest):
+    global _last_memory_export_path
+    try:
+        snapshot = await asyncio.to_thread(memory_service.build_export_payload, payload.frontend or {})
+        log_dir = _resolve_log_dir()
+        filename = f"memory_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+        def _write_and_persist() -> Path:
+            path = log_dir / filename
+            path.write_text(json.dumps(snapshot, ensure_ascii=True, indent=2), encoding="utf-8")
+            _persist_memory_export_state(path)
+            return path
+
+        path = await asyncio.to_thread(_write_and_persist)
+        _last_memory_export_path = path
+        return {"ok": True, "path": str(path), "size": path.stat().st_size}
+    except Exception as exc:
+        _logger.error("Memory export failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/memory/export/latest")
+def get_memory_export_latest():
+    path, updated_at = _resolve_last_memory_export()
+    return {
+        "path": str(path) if path else None,
+        "updated_at": updated_at,
+    }
+
+
+@app.post("/api/memory/export/open-file")
+def open_memory_export_file():
+    try:
+        path, _ = _resolve_last_memory_export()
+        if not path or not path.exists():
+            raise HTTPException(status_code=404, detail="Export file missing")
+        _open_path(path)
+        return {"ok": True, "path": str(path)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Open memory export file failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/memory/export/open-folder")
+def open_memory_export_folder():
+    try:
+        path, _ = _resolve_last_memory_export()
+        if not path or not path.exists():
+            raise HTTPException(status_code=404, detail="Export file missing")
+        _open_path(path.parent)
+        return {"ok": True, "path": str(path.parent)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _logger.error("Open memory export folder failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 @app.get("/api/logs/comm-metrics")
 def comm_metrics_log_info():

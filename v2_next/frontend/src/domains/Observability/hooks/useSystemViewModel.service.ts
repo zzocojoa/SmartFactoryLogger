@@ -1,10 +1,11 @@
 import { EXPORT_PATH_STORAGE_KEY } from '../../../shared/constants/logic';
+import { safeGetItem, safeSetItem, safeRemoveItem } from '../../../shared/utils/safeStorage';
 
 export const readPersistedExportPath = (): string | null => {
   if (typeof window === 'undefined') {
     return null;
   }
-  return window.localStorage.getItem(EXPORT_PATH_STORAGE_KEY);
+  return safeGetItem(EXPORT_PATH_STORAGE_KEY);
 };
 
 export const persistExportPath = (path: string | null): void => {
@@ -12,8 +13,8 @@ export const persistExportPath = (path: string | null): void => {
     return;
   }
   if (path) {
-    window.localStorage.setItem(EXPORT_PATH_STORAGE_KEY, path);
+    safeSetItem(EXPORT_PATH_STORAGE_KEY, path);
     return;
   }
-  window.localStorage.removeItem(EXPORT_PATH_STORAGE_KEY);
+  safeRemoveItem(EXPORT_PATH_STORAGE_KEY);
 };

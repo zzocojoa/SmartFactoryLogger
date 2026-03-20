@@ -44,15 +44,17 @@ export function useObservabilityHandlers({
       const windowStats = statsSnapshot?.window;
       const errorSummary = statsSnapshot?.errors;
       const windowLine = windowStats
-        ? `Window ${windowStats.window_sec}s: req ${windowStats.request_count}, err ${windowStats.error_count}, p95 ${formatOptionalNumber(windowStats.p95_latency_ms)}ms`
+        ? `Window ${windowStats.window_sec}s: req ${windowStats.request_count}, err ${windowStats.http_error_count ?? windowStats.error_count}, 4xx ${formatOptionalNumber(windowStats.http_4xx_count)}, 5xx ${formatOptionalNumber(windowStats.http_5xx_count)}, p95 ${formatOptionalNumber(windowStats.p95_latency_ms)}ms`
         : 'Window: n/a';
       const errorLine = errorSummary
-        ? `ErrorQ ${errorSummary.queue_size}, Last ${formatTimeFromSec(errorSummary.last_error_at)}`
+        ? `ErrorQ ${errorSummary.queue_size}, Last ${formatTimeFromSec(errorSummary.last_error_at)}, Src ${errorSummary.source_counts ? Object.entries(errorSummary.source_counts).map(([key, value]) => `${key} ${value}`).join(', ') : 'n/a'}`
         : 'ErrorQ: n/a';
       const detail = [
         `Mode: ${snapshot.mode}`,
         `Driver: ${snapshot.driver_connected ? 'OK' : 'Down'}`,
         `Thread: ${snapshot.thread_alive ? 'Alive' : 'Stopped'}`,
+        `Version: ${snapshot.app_version ?? 'n/a'}`,
+        `Runtime: ${snapshot.runtime_kind ?? 'n/a'}`,
         `Last Update: ${lastUpdate}`,
         windowLine,
         errorLine,

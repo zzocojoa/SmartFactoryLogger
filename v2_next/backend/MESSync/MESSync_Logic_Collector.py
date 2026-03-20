@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from playwright.async_api import async_playwright
 
-from .MESSync_Constants import (
+from .constants import (
     MES_BASE_URL, 
     LOGIN_URL, 
     LOGIN_SELECTOR_ID, 
@@ -23,7 +23,7 @@ from .MESSync_Constants import (
 )
 from .MESSync_Config import get_credentials
 from backend.MESSync.MESSync_Structure import MES_PAGES
-from .MESSync_Logger import get_logger
+from .logger import get_logger
 
 logger = get_logger("collector")
 

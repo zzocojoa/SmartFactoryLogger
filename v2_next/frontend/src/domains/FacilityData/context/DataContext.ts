@@ -30,7 +30,6 @@ export type DataContextValue = {
   setShowThresholds: (show: boolean) => void;
   handleSnapshot: () => void;
   snapshotLoading: boolean;
-  nowTick: number;
   layoutEditing: boolean;
   setLayoutEditing: (editing: boolean) => void;
   intervalSec: number;
@@ -59,7 +58,6 @@ export const DataContext = React.createContext<DataContextValue>({
   setShowThresholds: () => undefined,
   handleSnapshot: () => undefined,
   snapshotLoading: false,
-  nowTick: Date.now(),
   layoutEditing: false,
   setLayoutEditing: () => { },
   intervalSec: 0.2,

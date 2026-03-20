@@ -4,9 +4,9 @@
  */
 import React, { useMemo, useRef, useState } from 'react';
 import uPlot from 'uplot';
-import { FactoryDataContext } from '../../context/FactoryDataContext';
 import { UIContext } from '../../context/UIContext';
 import { SnapshotContext } from '../../context/SnapshotContext';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useTheme } from '../../../../shared/hooks/useThemeContext';
 import { TIME_SERIES_CATALOG, SERIES_COLORS } from '../../timeseries/seriesCatalog';
 import { THRESHOLD_LABELS } from '../../../../shared/utils/thresholds';
@@ -29,15 +29,12 @@ const AIChatbot = React.lazy(() => import('../../../../AI/components/AIChatbot')
     at_pre: 'var(--color-env-pre)',
   };
 
-export function TimeSeriesWidget() {
-  const {
-    data: factoryData,
-    timeSeriesFrames,
-    timeSeriesAllFrame,
-    nowTick,
-    intervalSec,
-    thresholds
-  } = React.useContext(FactoryDataContext);
+export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
+  const factoryData = useDashboardStore(state => state.data);
+  const timeSeriesFrames = useDashboardStore(state => state.timeSeriesFrames);
+  const timeSeriesAllFrame = useDashboardStore(state => state.timeSeriesAllFrame);
+  const intervalSec = useDashboardStore(state => state.intervalSec);
+  const thresholds = useDashboardStore(state => state.thresholds);
 
   const {
     seriesWindowMin,
@@ -174,7 +171,7 @@ export function TimeSeriesWidget() {
       },
       hooks: {
         draw: [(u: uPlot) => {
-          if (!showThresholds || !thresholds.masterOn) return;
+          if (!showThresholds || !thresholds?.masterOn) return;
           
           const { ctx } = u;
           const { left, top, width, height } = u.bbox;
@@ -451,7 +448,7 @@ export function TimeSeriesWidget() {
       <AIChatbot />
     </div>
   );
-};
+});
 
 
 

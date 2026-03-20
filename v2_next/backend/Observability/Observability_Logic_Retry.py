@@ -22,7 +22,7 @@ try:
         get_all_pages_data,
         MES_BASE_URL
     )
-    from backend.MESSync.MESSync_DB import save_page_data
+    from backend.MESSync.repository import save_page_data
     from backend.MESSync.MESSync_Config import get_credentials
 except ImportError as e:
     print(f"Import Error: {e}")
@@ -36,7 +36,7 @@ PAGE_STRUCTURE_PATH = BACKEND_DIR.parent / "MESSync" / "data" / "page_structures
 
 # Monkey-patch DB path
 try:
-    import backend.MESSync.MESSync_DB as db_manager
+    import backend.MESSync.repository as db_manager
     db_manager.DB_PATH = TARGET_DB_PATH
 except ImportError:
     pass

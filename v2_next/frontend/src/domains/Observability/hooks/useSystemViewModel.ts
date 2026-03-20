@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { systemService } from '../api/systemService';
 import type {
   ConnectionTestState,
+  DashboardLeaderState,
   FrontendErrorEntry,
   HealthSnapshot,
   ObservabilityErrorsResponse,
@@ -12,7 +13,13 @@ import type {
 import { buildPathHealthFallback } from './useSystemViewModel.selectors';
 import { persistExportPath, readPersistedExportPath } from './useSystemViewModel.service';
 import { useSystemViewModelEffects } from './useSystemViewModelEffects';
-import type { UseSystemViewModel } from './useSystemViewModel.types';
+import type { PollingState, UseSystemViewModel } from './useSystemViewModel.types';
+
+const DEFAULT_POLLING_STATE: PollingState = {
+  degraded: false,
+  intervalMs: 5000,
+  failureCount: 0,
+};
 
 export const useSystemViewModel = (): UseSystemViewModel => {
   const [health, setHealth] = useState<HealthSnapshot | null>(null);
@@ -26,6 +33,10 @@ export const useSystemViewModel = (): UseSystemViewModel => {
   const [pathCheckBusy, setPathCheckBusy] = useState(false);
   const [lastExportPath, setLastExportPath] = useState<string | null>(() => readPersistedExportPath());
   const [commLogInfo, setCommLogInfo] = useState<{ path: string | null }>({ path: null });
+  const [healthPolling, setHealthPolling] = useState<PollingState>(DEFAULT_POLLING_STATE);
+  const [statsPolling, setStatsPolling] = useState<PollingState>(DEFAULT_POLLING_STATE);
+  const [dashboardLeaderState, setDashboardLeaderState] = useState<DashboardLeaderState | null>(null);
+  const [pollingPausedByVisibility, setPollingPausedByVisibility] = useState(false);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -204,7 +215,17 @@ export const useSystemViewModel = (): UseSystemViewModel => {
     }
   }, []);
 
-  useSystemViewModelEffects({ reconnectBusy });
+  useSystemViewModelEffects({
+    fetchHealth,
+    fetchStats,
+    reconnectBusy,
+    setHealthPolling,
+    setStatsPolling,
+    applyHealthSnapshot: setHealth,
+    applyStatsSnapshot: setStats,
+    setDashboardLeaderState,
+    setPollingPausedByVisibility,
+  });
 
   return {
     health,
@@ -216,6 +237,10 @@ export const useSystemViewModel = (): UseSystemViewModel => {
     reconnectBusy,
     pathCheckBusy,
     observabilityLoading,
+    healthPolling,
+    statsPolling,
+    dashboardLeaderState,
+    pollingPausedByVisibility,
     fetchHealth,
     fetchStats,
     loadObservabilityErrors,

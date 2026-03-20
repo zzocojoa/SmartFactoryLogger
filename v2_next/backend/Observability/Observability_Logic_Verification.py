@@ -6,9 +6,9 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from backend.FacilityData.FacilityData_Structure import FactoryData
+from backend.FacilityData.schemas import FactoryData
 from .. import constants
-from backend.FacilityData.FacilityData_Logic_Service import plc_service
+from backend.FacilityData.service import plc_service
 
 
 

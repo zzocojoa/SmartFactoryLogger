@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 import asyncio
-from backend.FacilityData.FacilityData_DB_Logger import logger_service
+from backend.FacilityData.repository import logger_service
 from backend.MESSync.MESSync_Logic_Collector import load_page_structures, get_credentials, login
 from backend.MESSync.MESSync_Logic_Scheduler import save_result, collect_page
 from backend.MESSync.MESSync_Structure import MES_PAGES

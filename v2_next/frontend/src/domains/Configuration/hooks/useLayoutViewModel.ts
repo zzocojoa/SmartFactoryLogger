@@ -34,6 +34,7 @@ import {
 import { resolveDefaultWidgetSpec } from './useLayoutViewModel.selectors';
 import { useLayoutViewModelEffects } from './useLayoutViewModelEffects';
 import type { UseLayoutViewModel } from './useLayoutViewModel.types';
+import { safeGetItem, safeRemoveItem } from '../../../shared/utils/safeStorage';
 
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const CURRENT_LAYOUT_VERSION = 'v2';
@@ -55,7 +56,7 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
   const readLegacyLayoutSnapshot = useCallback((): LayoutSnapshot | null => {
     try {
-      const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
+      const raw = safeGetItem(LAYOUT_STORAGE_KEY);
       if (!raw) {
         return null;
       }
@@ -74,7 +75,7 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
       return {
         layout,
-        cols: localStorage.getItem(LAYOUT_COLS_KEY),
+        cols: safeGetItem(LAYOUT_COLS_KEY),
         version: 'v1',
       };
     } catch (error) {
@@ -99,9 +100,9 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
     try {
       const data = await saveServerLayout(payload);
-      localStorage.removeItem(LAYOUT_STORAGE_KEY);
-      localStorage.removeItem(LAYOUT_COLS_KEY);
-      localStorage.removeItem(LAYOUT_BACKUP_KEY);
+      safeRemoveItem(LAYOUT_STORAGE_KEY);
+      safeRemoveItem(LAYOUT_COLS_KEY);
+      safeRemoveItem(LAYOUT_BACKUP_KEY);
       return {
         layout: payload.layout,
         cols: payload.cols,

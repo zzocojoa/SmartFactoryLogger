@@ -5,6 +5,9 @@ import type {
   ConnectionTestData,
   CreatePathResponse,
   LatestExportPathResponse,
+  MemoryDetailsData,
+  MemoryExportRequest,
+  MemoryStateData,
   ObservabilityExportRequest,
   PathHealthRequestItem,
   PathHealthResponse,
@@ -17,20 +20,29 @@ import {
   fetchCommLogInfo,
   fetchHealth,
   fetchLatestExportPath,
+  fetchLatestMemoryExportPath,
+  fetchMemoryDetails,
+  fetchMemoryState,
   fetchObservabilityErrors,
   fetchStats,
   postBrowseFolder,
+  postCaptureMemorySnapshot,
   postClearObservabilityErrors,
   postConnectionTest,
   postCreatePath,
   postCreateSnapshot,
+  postMemoryExport,
   postObservabilityExport,
   postOpenCommLogFile,
   postOpenCommLogPath,
   postOpenExportFile,
   postOpenExportFolder,
+  postOpenMemoryExportFile,
+  postOpenMemoryExportFolder,
   postPathHealth,
   postReconnect,
+  postStartMemoryProfiler,
+  postStopMemoryProfiler,
 } from '../../../shared/api/transport/systemService.transport';
 
 export const systemService = {
@@ -39,12 +51,30 @@ export const systemService = {
   getStats: (): Promise<SystemStatsResponse> => fetchStats(),
 
   getObservabilityErrors: (limit: number) => fetchObservabilityErrors(limit),
+
+  getMemoryState: (): Promise<MemoryStateData> => fetchMemoryState(),
+
+  getMemoryDetails: (): Promise<MemoryDetailsData> => fetchMemoryDetails(),
   
   clearObservabilityErrors: postClearObservabilityErrors,
 
   getLatestExportPath: (): Promise<LatestExportPathResponse> => fetchLatestExportPath(),
 
   exportObservability: (params: ObservabilityExportRequest) => postObservabilityExport(params),
+
+  getLatestMemoryExportPath: (): Promise<LatestExportPathResponse> => fetchLatestMemoryExportPath(),
+
+  startMemoryProfiler: () => postStartMemoryProfiler(),
+
+  stopMemoryProfiler: () => postStopMemoryProfiler(),
+
+  captureMemorySnapshot: () => postCaptureMemorySnapshot(),
+
+  exportMemory: (params: MemoryExportRequest) => postMemoryExport(params),
+
+  openMemoryExportFile: postOpenMemoryExportFile,
+
+  openMemoryExportFolder: postOpenMemoryExportFolder,
 
   openExportFile: postOpenExportFile,
 

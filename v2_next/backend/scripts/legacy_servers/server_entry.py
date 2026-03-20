@@ -1,101 +1,131 @@
 import sys
 import os
+import asyncio
+import logging
 from pathlib import Path
+import time
+import traceback
+
+# --- EARLY LOGGING REDIRECTION ---
+# Define EarlyLogger BEFORE using it
+class EarlyLogger:
+    def __init__(self, path):
+        self.file = open(path, "a", encoding="utf-8", buffering=1)
+    def write(self, buf):
+        try:
+            self.file.write(buf)
+            self.file.flush()
+        except: pass
+    def flush(self):
+        try: self.file.flush()
+        except: pass
+    def isatty(self): return False
+    def fileno(self): return self.file.fileno()
+
+def get_log_dir():
+    app_data = os.getenv("APPDATA")
+    if app_data:
+        path = Path(app_data) / "SmartFactoryLogger" / "logs"
+    else:
+        path = Path.home() / "SmartFactoryLogger" / "logs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+LOG_DIR = get_log_dir()
+STDOUT_PATH = LOG_DIR / "server_stdout.log"
+STDERR_PATH = LOG_DIR / "server_stderr.log"
+
+# Force redirection to capture EVERYTHING in the frozen environment
+if getattr(sys, 'frozen', False):
+    sys.stdout = EarlyLogger(STDOUT_PATH)
+    sys.stderr = EarlyLogger(STDERR_PATH)
+
+print(f"\n--- SESSION START ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---")
+print(f"DEBUG: sys.executable: {sys.executable}")
+print(f"DEBUG: sys.path at startup: {sys.path}")
+
+def _is_known_disconnect_error(exc):
+    return isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054
+
+
+def _filter_asyncio_disconnect_noise(record):
+    exc_info = getattr(record, "exc_info", None)
+    if not exc_info or len(exc_info) < 2:
+        return True
+    exc = exc_info[1]
+    return not _is_known_disconnect_error(exc)
+
+
+if os.name == "nt":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        print("INFO: WindowsSelectorEventLoopPolicy enabled")
+    except Exception as exc:
+        print(f"WARNING: Failed to enable WindowsSelectorEventLoopPolicy: {exc}")
+    logging.getLogger("asyncio").addFilter(_filter_asyncio_disconnect_noise)
+
+# --- STANDARD IMPORTS ---
 import multiprocessing
 import threading
 import webbrowser
-import time
-import traceback
 from PIL import Image, ImageTk
 import pystray
 import tkinter as tk
-
-# Explicitly import pydantic dependencies
 import pydantic
 import pydantic_core
 from pydantic import BaseModel, field_validator
 
-# --- CRITICAL: SCRIPT SETUP FOR WINDOWLESS EXECUTION ---
 # 1. Initialize Freeze Support immediately for multiprocessing
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 
-# 2. Redirect Standard Streams (Fix for noconsole crash)
-# In noconsole mode, sys.stdin/stdout/stderr are None or invalid.
-try:
-    # Fix stdin
-    if sys.stdin is None or sys.stdin.fileno() < 0:
-        sys.stdin = open(os.devnull, "r")
+# --- 2. PROJECT ROOT & PATH SETUP ---
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # In PyInstaller bundle, the project root is the extraction directory
+    project_root = Path(sys._MEIPASS)
+    print(f"DEBUG: Frozen mode detected. sys._MEIPASS: {sys._MEIPASS}")
+    try:
+        meipass_content = os.listdir(sys._MEIPASS)
+        print(f"DEBUG: Contents of sys._MEIPASS: {meipass_content}")
+        if 'backend' in meipass_content:
+            backend_content = os.listdir(project_root / 'backend')
+            print(f"DEBUG: Contents of backend/ inside _MEIPASS: {backend_content}")
+        else:
+            print("WARNING: 'backend' directory NOT FOUND in sys._MEIPASS")
+    except Exception as e:
+        print(f"DEBUG: Error inspecting _MEIPASS: {e}")
+else:
+    # In development: v2_next/backend/scripts/legacy_servers/server_entry.py
+    # .parent -> legacy_servers, .parent -> scripts, .parent -> backend, .parent -> v2_next
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    print(f"DEBUG: Dev mode detected. project_root: {project_root}")
 
-    # Setup Logging Directory
-    app_data = os.getenv("APPDATA")
-    if app_data:
-        log_dir = Path(app_data) / "SmartFactoryLogger" / "logs"
-    else:
-        log_dir = Path.home() / "SmartFactoryLogger" / "logs"
-    
-    log_dir.mkdir(parents=True, exist_ok=True)
-    
-    stdout_path = log_dir / "server_stdout.log"
-    stderr_path = log_dir / "server_stderr.log"
-
-    class StreamToLogger:
-        def __init__(self, path):
-            self.file = open(path, "a", encoding="utf-8", buffering=1)
-        
-        def write(self, buf):
-            try:
-                self.file.write(buf)
-                self.file.flush()
-            except:
-                pass
-        
-        def flush(self):
-            try:
-                self.file.flush()
-            except:
-                pass
-
-        def isatty(self):
-            return False
-            
-        def fileno(self):
-            return self.file.fileno()
-
-    # Redirect stdout/stderr ONLY if they are None (Windowed mode)
-    if sys.stdout is None:
-        sys.stdout = StreamToLogger(stdout_path)
-    if sys.stderr is None:
-        sys.stderr = StreamToLogger(stderr_path)
-    
-    # Write startup marker
-    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Launcher Starting (PID: {os.getpid()})...")
-
-except Exception as e:
-    # If logging setup fails, we are flying blind, but try to continue
-    pass
-# -------------------------------------------------------
-
-# Add project root to sys.path
-current_dir = Path(__file__).resolve().parent
-project_root = current_dir.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+    print(f"DEBUG: Added {project_root} to sys.path")
 
-# Import App
+print(f"DEBUG: sys.path after injection: {sys.path}")
+
 try:
-    import uvicorn
-    try:
-        from backend.app import app
-        from backend import config
-        from backend.scripts.migrate_json_to_db import migrate_json_files, get_default_data_dir
-    except ImportError:
-        from app import app
-        import config
-        from scripts.migrate_json_to_db import migrate_json_files, get_default_data_dir
+    from backend.version import get_runtime_info
+    print(f"INFO: Runtime info: {get_runtime_info()}")
 except Exception as e:
-    print("CRITICAL: Code Import Failed")
+    print(f"WARNING: Failed to load runtime info: {e}")
+
+# --- CORE IMPORTS ---
+try:
+    print("DEBUG: Importing backend modules...")
+    import uvicorn
+    # Test absolute import
+    from backend.app import app
+    from backend import config
+    from backend.scripts.migrate_json_to_db import migrate_json_files, get_default_data_dir
+    print("DEBUG: Imports successful!")
+except Exception as e:
+    print(f"CRITICAL: Code Import Failed: {e}")
     traceback.print_exc()
+    sys.stderr.flush()
+    sys.stdout.flush()
     sys.exit(1)
 
 # --- CLI ARGUMENT PARSING ---
@@ -210,7 +240,14 @@ def quit_app(icon, item):
 def run_server():
     try:
         print(f"[Server] Starting Uvicorn on {config.BACKEND_PORT}...")
-        uvicorn.run(app, host="0.0.0.0", port=config.BACKEND_PORT, reload=False, log_level="info")
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=config.BACKEND_PORT,
+            reload=False,
+            log_level="info",
+            access_log=False,
+        )
     except Exception as e:
         print(f"[Server] CRASHED: {e}")
         traceback.print_exc()
