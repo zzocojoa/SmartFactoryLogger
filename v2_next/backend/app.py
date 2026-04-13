@@ -13,8 +13,7 @@ if str(project_root) not in sys.path:
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import atexit
@@ -22,6 +21,7 @@ from datetime import datetime, timezone
 import base64
 import json
 import logging
+import re
 from logging.handlers import RotatingFileHandler
 import time
 from backend.MESSync import sync_router as mes_sync
@@ -204,6 +204,8 @@ _lock_fd = None
 _lock_path: Path | None = None
 _log_dir: Path | None = None
 _app_start_time = time.time()
+_app_started_at_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+_app_session_id = uuid.uuid4().hex[:12]
 _stats_lock = threading.Lock()
 _stats_total_requests = 0
 _stats_total_latency_ms = 0.0
@@ -221,14 +223,22 @@ _QUIET_ACCESS_PATHS = {
     "/api/data",
     "/health",
     "/stats",
+    "/api/observability/export/latest",
     "/api/memory/state",
     "/api/memory/details",
     "/api/memory/export/latest",
+    "/api/memory/profiler/start",
+    "/api/memory/profiler/stop",
     "/api/config",
     "/api/config/central-status",
+    "/api/config/verify-password",
+    "/api/logs/comm-metrics",
+    "/api/spot/config",
+    "/api/control/path-health",
 }
 _QUIET_ACCESS_PREFIXES = (
-    "/assets/polling.worker-",
+    "/assets/",
+    "/api/layouts/client/",
 )
 _ACCESS_LOG_SAMPLE_SEC = 5.0
 
@@ -236,8 +246,14 @@ _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
 
 
+def _lifecycle_log_fields() -> str:
+    return f"session={_app_session_id} pid={os.getpid()} started_at={_app_started_at_iso}"
+
+
 def _is_quiet_access_path(path: str) -> bool:
     if path in _QUIET_ACCESS_PATHS:
+        return True
+    if path == "/api/log/status":
         return True
     return any(path.startswith(prefix) for prefix in _QUIET_ACCESS_PREFIXES)
 
@@ -881,6 +897,201 @@ _logger, _crash_logger = _setup_logging()
 _register_memory_collectors()
 
 
+def resolve_frontend_dist() -> tuple[Path, str, str]:
+    if getattr(sys, "frozen", False):
+        resources_root = Path(sys.executable).resolve().parent.parent
+        resources_dist = resources_root / "frontend" / "dist"
+        if resources_dist.exists():
+            return resources_dist, "frozen", "resources"
+
+        if hasattr(sys, "_MEIPASS"):
+            meipass_dist = Path(sys._MEIPASS) / "frontend" / "dist"
+            return meipass_dist, "frozen", "meipass"
+
+        return resources_dist, "frozen", "resources"
+
+    return Path(__file__).resolve().parent.parent / "frontend" / "dist", "development", "project"
+
+
+_FRONTEND_REQUIRED_EXACT_PATHS: tuple[str, ...] = (
+    "index.html",
+    "manifest.json",
+    "favicon.ico",
+    "logo192.png",
+    "logo512.png",
+    "assets/logo_white.png",
+    "assets/logo_color.png",
+)
+_FRONTEND_REQUIRED_GLOB_PATTERNS: tuple[str, ...] = (
+    "assets/index-*.js",
+    "assets/index-*.css",
+)
+_FRONTEND_PUBLIC_FILENAMES: tuple[str, ...] = (
+    "manifest.json",
+    "favicon.ico",
+    "logo192.png",
+    "logo512.png",
+)
+_FRONTEND_ENTRY_ASSET_PATTERN = re.compile(r'(?:src|href)="\./(assets/[^"]+\.(?:js|css))"')
+
+
+def get_frontend_runtime_class(frontend_mode: str, frontend_source: str) -> str:
+    if frontend_mode == "development":
+        return "development"
+    if frontend_source == "resources":
+        return "electron-packaged"
+    if frontend_source == "meipass":
+        return "legacy-one-file"
+    return "unknown"
+
+
+def get_frontend_runtime_warning(frontend_source: str, frontend_missing_assets: list[str]) -> str:
+    if frontend_missing_assets:
+        if "index.html" in frontend_missing_assets:
+            return "missing_index"
+        return "missing_assets"
+    if frontend_source == "meipass":
+        return "legacy_meipass"
+    return "none"
+
+
+def get_frontend_required_entry_assets(frontend_dist_path: Path) -> list[str]:
+    index_path = frontend_dist_path / "index.html"
+    if not index_path.is_file():
+        return []
+
+    try:
+        index_html = index_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        index_html = index_path.read_text(encoding="utf-8", errors="ignore")
+
+    return sorted(set(_FRONTEND_ENTRY_ASSET_PATTERN.findall(index_html)))
+
+
+def get_frontend_missing_assets(frontend_dist_path: Path) -> list[str]:
+    missing_assets: list[str] = []
+    for relative_path in _FRONTEND_REQUIRED_EXACT_PATHS:
+        if not (frontend_dist_path / relative_path).is_file():
+            missing_assets.append(relative_path)
+
+    required_entry_assets = get_frontend_required_entry_assets(frontend_dist_path)
+    if required_entry_assets:
+        for relative_path in required_entry_assets:
+            if not (frontend_dist_path / relative_path).is_file():
+                missing_assets.append(relative_path)
+    else:
+        for relative_pattern in _FRONTEND_REQUIRED_GLOB_PATTERNS:
+            if not any(candidate.is_file() for candidate in frontend_dist_path.glob(relative_pattern)):
+                missing_assets.append(relative_pattern)
+
+    return sorted(missing_assets)
+
+
+def get_frontend_static_status(
+    frontend_dist_path: Path,
+    frontend_mode: str,
+    frontend_source: str,
+) -> dict[str, Any]:
+    index_path = frontend_dist_path / "index.html"
+    assets_path = frontend_dist_path / "assets"
+    frontend_dist_exists = frontend_dist_path.exists()
+    frontend_index_exists = index_path.exists()
+    frontend_assets_exists = assets_path.exists()
+    frontend_missing_assets = get_frontend_missing_assets(frontend_dist_path)
+
+    return {
+        "frontend_mode": frontend_mode,
+        "frontend_source": frontend_source,
+        "frontend_runtime_class": get_frontend_runtime_class(frontend_mode, frontend_source),
+        "frontend_runtime_warning": get_frontend_runtime_warning(frontend_source, frontend_missing_assets),
+        "frontend_dist_path": str(frontend_dist_path),
+        "frontend_dist_exists": frontend_dist_exists,
+        "frontend_index_exists": frontend_index_exists,
+        "frontend_assets_exists": frontend_assets_exists,
+        "frontend_missing_assets": frontend_missing_assets,
+        "frontend_static_ready": frontend_dist_exists and not frontend_missing_assets,
+    }
+
+
+def resolve_frontend_file(base_dir: Path, relative_path: str) -> Path | None:
+    try:
+        resolved_base_dir = base_dir.resolve(strict=False)
+        resolved_target = (base_dir / relative_path).resolve(strict=False)
+    except OSError:
+        return None
+
+    try:
+        resolved_target.relative_to(resolved_base_dir)
+    except ValueError:
+        return None
+
+    return resolved_target
+
+
+def resolve_nested_frontend_file(frontend_dist_path: Path, full_path: str) -> Path | None:
+    normalized_path = full_path.lstrip("/")
+    if "/assets/" in normalized_path:
+        asset_suffix = normalized_path.rsplit("/assets/", 1)[1]
+        if asset_suffix:
+            asset_path = resolve_frontend_file(frontend_dist_path / "assets", asset_suffix)
+            if asset_path is not None:
+                return asset_path
+
+    for public_filename in _FRONTEND_PUBLIC_FILENAMES:
+        if normalized_path == public_filename or normalized_path.endswith(f"/{public_filename}"):
+            public_path = resolve_frontend_file(frontend_dist_path, public_filename)
+            if public_path is not None:
+                return public_path
+
+    return None
+
+
+def is_frontend_file_request(full_path: str) -> bool:
+    normalized_path = full_path.lstrip("/")
+    if "/assets/" in normalized_path:
+        return True
+    last_segment = normalized_path.rsplit("/", 1)[-1]
+    if last_segment in _FRONTEND_PUBLIC_FILENAMES:
+        return True
+    return "." in last_segment
+
+
+def get_frontend_file_request_status(frontend_status: dict[str, Any], full_path: str) -> int:
+    normalized_path = full_path.lstrip("/")
+    if "/assets/" in normalized_path and not frontend_status["frontend_assets_exists"]:
+        return 503
+    if not frontend_status["frontend_dist_exists"]:
+        return 503
+    return 404
+
+
+def build_frontend_error_response(status_code: int, detail: str) -> JSONResponse:
+    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    payload: dict[str, Any] = {
+        "detail": detail,
+        "status_code": status_code,
+        **frontend_status,
+    }
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+frontend_dist, frontend_mode, frontend_source = resolve_frontend_dist()
+frontend_status_snapshot = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+_logger.info(
+    "Frontend static root resolved",
+    extra={
+        **frontend_status_snapshot,
+    },
+)
+if frontend_status_snapshot["frontend_runtime_warning"] != "none":
+    _logger.warning(
+        "Frontend runtime warning",
+        extra={
+            **frontend_status_snapshot,
+        },
+    )
+
+
 
 def _write_crash_log(title: str, exc_type, exc_value, tb) -> None:
     if _crash_logger:
@@ -1010,6 +1221,7 @@ async def lifespan(app: FastAPI):
     # Startup
     if not acquire_single_instance_lock():
         raise RuntimeError("Instance already running")
+    _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
     print("[Main] Starting CSV Logger...")
     logger_service.start()
     print("[Main] Starting Config Sync Agent...")
@@ -1035,7 +1247,11 @@ async def lifespan(app: FastAPI):
     try:
         hostname = socket.gethostname()
         local_ips = socket.gethostbyname_ex(hostname)[2]
-        _logger.info(f"[Main] Backend started. Accessible at: {', '.join([f'http://{ip}:{config.BACKEND_PORT}' for ip in local_ips])}")
+        _logger.info(
+            "[Main] Backend started. Accessible at: %s %s",
+            ", ".join([f"http://{ip}:{config.BACKEND_PORT}" for ip in local_ips]),
+            _lifecycle_log_fields(),
+        )
     except Exception as exc:
         _logger.warning(f"[Main] Failed to log local IPs: {exc}")
 
@@ -1043,6 +1259,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # Shutdown
+        _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
         print("[Main] Stopping SPOT Image Prefetch...")
         await spot_control.stop_prefetch_loop()
         print("[Main] Stopping Comm Metrics Logger...")
@@ -1148,14 +1365,22 @@ async def record_request_stats(request: Request, call_next):
 
 @app.get("/")
 def read_root():
-    # UX Improvement: Serve Dashboard directly at root
-    if frontend_dist.exists() and (frontend_dist / "index.html").exists():
-        return FileResponse(frontend_dist / "index.html")
-    return {
-        "system": "Smart Factory Logger V2",
-        "status": "Online",
-        "backend": "FastAPI with Service Layer (Frontend missing)"
-    }
+    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    if frontend_status["frontend_static_ready"]:
+        index_path = frontend_dist / "index.html"
+        if frontend_status["frontend_index_exists"]:
+            return FileResponse(index_path)
+
+    _logger.error(
+        "Frontend index unavailable for root request",
+        extra={
+            "frontend_mode": frontend_mode,
+            "frontend_source": frontend_source,
+            "frontend_dist_path": str(frontend_dist),
+            "frontend_missing_assets": frontend_status["frontend_missing_assets"],
+        },
+    )
+    return build_frontend_error_response(503, "Frontend bundle is incomplete.")
 
 @app.get("/api/data", response_model=FactoryData)
 async def get_data():
@@ -1164,7 +1389,11 @@ async def get_data():
 
 @app.get("/health")
 async def health():
-    return {**plc_service.get_health(), **get_runtime_info()}
+    return {
+        **plc_service.get_health(),
+        **get_runtime_info(),
+        **get_frontend_static_status(frontend_dist, frontend_mode, frontend_source),
+    }
 
 @app.get("/stats")
 async def stats():
@@ -2126,6 +2355,7 @@ async def proxy_spot_image():
         }
         captured_at = meta.get("captured_at") or 0.0
         age_sec = meta.get("age_sec")
+        is_stale = str(meta.get("status") or "") == "stale"
         if captured_at:
             headers["X-Spot-Image-At"] = str(int(captured_at * 1000))
         if age_sec is not None:
@@ -2134,6 +2364,7 @@ async def proxy_spot_image():
             headers["X-Spot-Image-Status"] = str(meta["status"])
         if meta.get("source"):
             headers["X-Spot-Image-Source"] = str(meta["source"])
+        observability_service.record_spot_proxy_result(200, float(age_sec) if age_sec is not None else None, is_stale)
         return Response(content=data, media_type="image/jpeg", headers=headers)
     except ValueError as e:
          raise HTTPException(status_code=404, detail=str(e))
@@ -2164,7 +2395,11 @@ async def log_status_change(payload: StatusLogRequest):
         log_path = _get_status_log_path()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         reason_str = f" reason='{payload.reason}'" if payload.reason else ""
-        log_line = f"[{timestamp}] STATUS_CHANGE {payload.previous} -> {payload.current}{reason_str}\n"
+        log_line = (
+            f"[{timestamp}] STATUS_CHANGE {payload.previous} -> {payload.current}"
+            f" session='{_app_session_id}' pid={os.getpid()} started_at='{_app_started_at_iso}'"
+            f"{reason_str}\n"
+        )
         
         with _status_log_lock:
             with log_path.open("a", encoding="utf-8") as f:
@@ -2179,7 +2414,7 @@ async def log_status_change(payload: StatusLogRequest):
 def shutdown(payload: ShutdownRequest):
     def _shutdown() -> None:
         try:
-            _logger.info("Shutdown requested: %s", payload.reason)
+            _logger.info("Shutdown requested: reason=%s %s", payload.reason, _lifecycle_log_fields())
         except Exception:
             pass
         try:
@@ -2212,33 +2447,90 @@ def shutdown(payload: ShutdownRequest):
 # (Moved to Api_MESSync.py)
 
 # --- Static File Serving (Frontend) ---
-# Check common locations for frontend dist
-# Check common locations for frontend dist
-if getattr(sys, 'frozen', False):
-    # If running as a one-file exe, PyInstaller extracts to sys._MEIPASS
-    if hasattr(sys, '_MEIPASS'):
-        base_dir = Path(sys._MEIPASS)
-    else:
-        # Fallback for one-dir mode (legacy support just in case)
-        # resources/backend/backend_server.exe -> parent is backend/ -> parent is resources/
-        base_dir = Path(sys.executable).parent.parent
-else:
-    # Development mode
-    base_dir = Path(__file__).parent.parent
-
-frontend_dist = base_dir / "frontend" / "dist"
-
-if frontend_dist.exists():
+@app.get("/assets/{asset_path:path}")
+async def serve_frontend_asset(asset_path: str):
+    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
     assets_dir = frontend_dist / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+    if not frontend_status["frontend_assets_exists"]:
+        _logger.error(
+            "Frontend assets directory unavailable",
+            extra={
+                "frontend_mode": frontend_mode,
+                "frontend_source": frontend_source,
+                "frontend_dist_path": str(frontend_dist),
+                "asset_path": asset_path,
+            },
+        )
+        return build_frontend_error_response(503, "Frontend assets directory is unavailable.")
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        file_path = frontend_dist / full_path
-        if file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(frontend_dist / "index.html")
+    asset_file = resolve_frontend_file(assets_dir, asset_path)
+    if asset_file is None or not asset_file.exists() or not asset_file.is_file():
+        _logger.warning(
+            "Frontend asset not found",
+            extra={
+                "frontend_mode": frontend_mode,
+                "frontend_source": frontend_source,
+                "frontend_dist_path": str(frontend_dist),
+                "asset_path": asset_path,
+            },
+        )
+        return build_frontend_error_response(404, "Frontend asset was not found.")
+
+    return FileResponse(asset_file)
+
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    requested_file = resolve_frontend_file(frontend_dist, full_path)
+    if requested_file is not None and requested_file.exists() and requested_file.is_file():
+        return FileResponse(requested_file)
+
+    nested_file = resolve_nested_frontend_file(frontend_dist, full_path)
+    if nested_file is not None and nested_file.exists() and nested_file.is_file():
+        return FileResponse(nested_file)
+
+    if is_frontend_file_request(full_path):
+        error_status = get_frontend_file_request_status(frontend_status, full_path)
+        _logger.warning(
+            "Frontend file request not found",
+            extra={
+                "frontend_mode": frontend_mode,
+                "frontend_source": frontend_source,
+                "frontend_dist_path": str(frontend_dist),
+                "request_path": full_path,
+                "frontend_missing_assets": frontend_status["frontend_missing_assets"],
+            },
+        )
+        return build_frontend_error_response(error_status, "Requested frontend file was not found.")
+
+    if not frontend_status["frontend_static_ready"]:
+        _logger.error(
+            "Frontend bundle incomplete for SPA request",
+            extra={
+                "frontend_mode": frontend_mode,
+                "frontend_source": frontend_source,
+                "frontend_dist_path": str(frontend_dist),
+                "request_path": full_path,
+                "frontend_missing_assets": frontend_status["frontend_missing_assets"],
+            },
+        )
+        return build_frontend_error_response(503, "Frontend bundle is incomplete.")
+
+    index_path = frontend_dist / "index.html"
+    if frontend_status["frontend_index_exists"]:
+        return FileResponse(index_path)
+
+    _logger.error(
+        "Frontend index unavailable for SPA request",
+        extra={
+            "frontend_mode": frontend_mode,
+            "frontend_source": frontend_source,
+            "frontend_dist_path": str(frontend_dist),
+            "request_path": full_path,
+        },
+    )
+    return build_frontend_error_response(503, "Frontend index is unavailable.")
 
 
 if __name__ == "backend.app" or __name__ == "app":
