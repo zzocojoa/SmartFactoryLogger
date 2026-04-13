@@ -13,15 +13,16 @@ if str(project_root) not in sys.path:
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 import atexit
 from datetime import datetime, timezone
 import base64
-import json
+
 import logging
+
+import re
 from logging.handlers import RotatingFileHandler
 import time
 from backend.Api import Api_MESSync_Extended as mes_sync
@@ -536,6 +537,195 @@ def _setup_logging() -> tuple[logging.Logger, logging.Logger]:
 _logger, _crash_logger = _setup_logging()
 
 
+def resolve_frontend_dist() -> tuple[Path, str, str]:
+    if getattr(sys, "frozen", False):
+        resources_root = Path(sys.executable).resolve().parent.parent
+        resources_dist = resources_root / "frontend" / "dist"
+        if resources_dist.exists():
+            return resources_dist, "frozen", "resources"
+
+        if hasattr(sys, "_MEIPASS"):
+            meipass_dist = Path(sys._MEIPASS) / "frontend" / "dist"
+            return meipass_dist, "frozen", "meipass"
+
+        return resources_dist, "frozen", "resources"
+
+    return Path(__file__).resolve().parent.parent / "frontend" / "dist", "development", "project"
+
+
+_FRONTEND_REQUIRED_EXACT_PATHS: tuple[str, ...] = (
+    "index.html",
+    "manifest.json",
+    "favicon.ico",
+    "logo192.png",
+    "logo512.png",
+    "assets/logo_white.png",
+    "assets/logo_color.png",
+)
+_FRONTEND_REQUIRED_GLOB_PATTERNS: tuple[str, ...] = (
+    "assets/index-*.js",
+    "assets/index-*.css",
+)
+_FRONTEND_PUBLIC_FILENAMES: tuple[str, ...] = (
+    "manifest.json",
+    "favicon.ico",
+    "logo192.png",
+    "logo512.png",
+)
+_FRONTEND_ENTRY_ASSET_PATTERN = re.compile(r'(?:src|href)="\./(assets/[^"]+\.(?:js|css))"')
+
+
+def get_frontend_runtime_class(frontend_mode: str, frontend_source: str) -> str:
+    if frontend_mode == "development":
+        return "development"
+    if frontend_source == "resources":
+        return "electron-packaged"
+    if frontend_source == "meipass":
+        return "legacy-one-file"
+    return "unknown"
+
+
+
+def get_frontend_runtime_warning(frontend_source: str, frontend_missing_assets: list[str]) -> str:
+    if frontend_missing_assets:
+        if "index.html" in frontend_missing_assets:
+            return "missing_index"
+        return "missing_assets"
+    if frontend_source == "meipass":
+        return "legacy_meipass"
+    return "none"
+
+
+
+def get_frontend_required_entry_assets(frontend_dist_path: Path) -> list[str]:
+    index_path = frontend_dist_path / "index.html"
+    if not index_path.is_file():
+        return []
+
+    try:
+        index_html = index_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        index_html = index_path.read_text(encoding="utf-8", errors="ignore")
+
+    return sorted(set(_FRONTEND_ENTRY_ASSET_PATTERN.findall(index_html)))
+
+
+
+def get_frontend_missing_assets(frontend_dist_path: Path) -> list[str]:
+    missing_assets: list[str] = []
+    for relative_path in _FRONTEND_REQUIRED_EXACT_PATHS:
+        if not (frontend_dist_path / relative_path).is_file():
+            missing_assets.append(relative_path)
+
+    required_entry_assets = get_frontend_required_entry_assets(frontend_dist_path)
+    if required_entry_assets:
+        for relative_path in required_entry_assets:
+            if not (frontend_dist_path / relative_path).is_file():
+                missing_assets.append(relative_path)
+    else:
+        for relative_pattern in _FRONTEND_REQUIRED_GLOB_PATTERNS:
+            if not any(candidate.is_file() for candidate in frontend_dist_path.glob(relative_pattern)):
+                missing_assets.append(relative_pattern)
+
+    return sorted(missing_assets)
+
+
+
+def get_frontend_static_status(
+    frontend_dist_path: Path,
+    frontend_mode: str,
+    frontend_source: str,
+) -> dict[str, Any]:
+    index_path = frontend_dist_path / "index.html"
+    assets_path = frontend_dist_path / "assets"
+    frontend_dist_exists = frontend_dist_path.exists()
+    frontend_index_exists = index_path.exists()
+    frontend_assets_exists = assets_path.exists()
+    frontend_missing_assets = get_frontend_missing_assets(frontend_dist_path)
+
+    return {
+        "frontend_mode": frontend_mode,
+        "frontend_source": frontend_source,
+        "frontend_runtime_class": get_frontend_runtime_class(frontend_mode, frontend_source),
+        "frontend_runtime_warning": get_frontend_runtime_warning(frontend_source, frontend_missing_assets),
+        "frontend_dist_path": str(frontend_dist_path),
+        "frontend_dist_exists": frontend_dist_exists,
+        "frontend_index_exists": frontend_index_exists,
+        "frontend_assets_exists": frontend_assets_exists,
+        "frontend_missing_assets": frontend_missing_assets,
+        "frontend_static_ready": frontend_dist_exists and not frontend_missing_assets,
+    }
+
+
+
+def resolve_frontend_file(base_dir: Path, relative_path: str) -> Path | None:
+    try:
+        resolved_base_dir = base_dir.resolve(strict=False)
+        resolved_target = (base_dir / relative_path).resolve(strict=False)
+    except OSError:
+        return None
+
+    try:
+        resolved_target.relative_to(resolved_base_dir)
+    except ValueError:
+        return None
+
+    return resolved_target
+
+
+
+def resolve_nested_frontend_file(frontend_dist_path: Path, full_path: str) -> Path | None:
+    normalized_path = full_path.lstrip("/")
+    if "/assets/" in normalized_path:
+        asset_suffix = normalized_path.rsplit("/assets/", 1)[1]
+        if asset_suffix:
+            asset_path = resolve_frontend_file(frontend_dist_path / "assets", asset_suffix)
+            if asset_path is not None:
+                return asset_path
+
+    for public_filename in _FRONTEND_PUBLIC_FILENAMES:
+        if normalized_path == public_filename or normalized_path.endswith(f"/{public_filename}"):
+            public_path = resolve_frontend_file(frontend_dist_path, public_filename)
+            if public_path is not None:
+                return public_path
+
+    return None
+
+
+
+def is_frontend_file_request(full_path: str) -> bool:
+    normalized_path = full_path.lstrip("/")
+    if "/assets/" in normalized_path:
+        return True
+    last_segment = normalized_path.rsplit("/", 1)[-1]
+    if last_segment in _FRONTEND_PUBLIC_FILENAMES:
+        return True
+    return "." in last_segment
+
+
+
+def get_frontend_file_request_status(frontend_status: dict[str, Any], full_path: str) -> int:
+    normalized_path = full_path.lstrip("/")
+    if "/assets/" in normalized_path and not frontend_status["frontend_assets_exists"]:
+        return 503
+    if not frontend_status["frontend_dist_exists"]:
+        return 503
+    return 404
+
+
+
+def build_frontend_error_response(status_code: int, detail: str) -> JSONResponse:
+    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    payload: dict[str, Any] = {
+        "detail": detail,
+        "status_code": status_code,
+        **frontend_status,
+    }
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+frontend_dist, frontend_mode, frontend_source = resolve_frontend_dist()
+
 def _write_crash_log(title: str, exc_type, exc_value, tb) -> None:
     if _crash_logger:
         _crash_logger.error(title, exc_info=(exc_type, exc_value, tb))
@@ -656,7 +846,7 @@ def acquire_single_instance_lock() -> bool:
         print(f"[Main] Failed to acquire single instance lock: {exc}")
         return True
 
-# MES Bridge 제어는 mes_scheduler.start() / stop()을 통해 수행됩니다.
+# MES Bridge ?쒖뼱??mes_scheduler.start() / stop()???듯빐 ?섑뻾?⑸땲??
 
 # Lifecycle Manager (Startup/Shutdown)
 @asynccontextmanager
@@ -790,14 +980,13 @@ async def record_request_stats(request: Request, call_next):
 
 @app.get("/")
 def read_root():
-    # UX Improvement: Serve Dashboard directly at root
-    if frontend_dist.exists() and (frontend_dist / "index.html").exists():
-        return FileResponse(frontend_dist / "index.html")
-    return {
-        "system": "Smart Factory Logger V2",
-        "status": "Online",
-        "backend": "FastAPI with Service Layer (Frontend missing)"
-    }
+    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    if frontend_status["frontend_static_ready"]:
+        index_path = frontend_dist / "index.html"
+        if frontend_status["frontend_index_exists"]:
+            return FileResponse(index_path)
+
+    return build_frontend_error_response(503, "Frontend bundle is incomplete.")
 
 @app.get("/api/data", response_model=FactoryData)
 async def get_data():
@@ -806,7 +995,10 @@ async def get_data():
 
 @app.get("/health")
 async def health():
-    return plc_service.get_health()
+    return {
+        **plc_service.get_health(),
+        **get_frontend_static_status(frontend_dist, frontend_mode, frontend_source),
+    }
 
 @app.get("/stats")
 async def stats():
@@ -1022,14 +1214,14 @@ def verify_password(payload: PasswordVerifyRequest):
         
         if not password_set:
             # No password set, allow access
-            return {"ok": True, "message": "비밀번호가 설정되지 않았습니다."}
+            return {"ok": True, "message": "鍮꾨?踰덊샇媛 ?ㅼ젙?섏? ?딆븯?듬땲??"}
         
         # Read actual password from config file
         config_path_str = snapshot.get("config_path", "")
         config_path = Path(config_path_str) if config_path_str else None
         
         if not config_path or not config_path.exists():
-            return {"ok": True, "message": "설정 파일이 없습니다."}
+            return {"ok": True, "message": "?ㅼ젙 ?뚯씪???놁뒿?덈떎."}
         
         parser = configparser.ConfigParser()
         parser.optionxform = str
@@ -1040,12 +1232,12 @@ def verify_password(payload: PasswordVerifyRequest):
             stored_password = parser.get("SETTINGS", "password").strip()
         
         if not stored_password:
-            return {"ok": True, "message": "비밀번호가 설정되지 않았습니다."}
+            return {"ok": True, "message": "鍮꾨?踰덊샇媛 ?ㅼ젙?섏? ?딆븯?듬땲??"}
         
         if payload.password == stored_password:
-            return {"ok": True, "message": "인증 성공"}
+            return {"ok": True, "message": "?몄쬆 ?깃났"}
         else:
-            raise HTTPException(status_code=403, detail="비밀번호가 일치하지 않습니다.")
+            raise HTTPException(status_code=403, detail="鍮꾨?踰덊샇媛 ?쇱튂?섏? ?딆뒿?덈떎.")
     except HTTPException:
         raise
     except Exception as exc:
@@ -1177,7 +1369,7 @@ def delete_layout_slot_api(payload: LayoutSlotDeleteRequest):
 @app.post("/api/layout")
 def save_layout_api(payload: LayoutSaveRequest):
     try:
-        return save_layout_slot("레이아웃", payload.layout, payload.cols, payload.version, None)
+        return save_layout_slot("?덉씠?꾩썐", payload.layout, payload.cols, payload.version, None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -1553,7 +1745,7 @@ def folder_browse(payload: FolderBrowseRequest):
         root.attributes('-topmost', True)  # Bring to front
         
         initial = payload.initial_dir if payload.initial_dir and Path(payload.initial_dir).exists() else None
-        title = payload.title or "폴더 선택"
+        title = payload.title or "?대뜑 ?좏깮"
         
         selected = filedialog.askdirectory(
             parent=root,
@@ -1736,36 +1928,45 @@ def shutdown(payload: ShutdownRequest):
 # (Moved to Api_MESSync.py)
 
 # --- Static File Serving (Frontend) ---
-# Check common locations for frontend dist
-# Check common locations for frontend dist
-if getattr(sys, 'frozen', False):
-    # If running as a one-file exe, PyInstaller extracts to sys._MEIPASS
-    if hasattr(sys, '_MEIPASS'):
-        base_dir = Path(sys._MEIPASS)
-    else:
-        # Fallback for one-dir mode (legacy support just in case)
-        # resources/backend/backend_server.exe -> parent is backend/ -> parent is resources/
-        base_dir = Path(sys.executable).parent.parent
-else:
-    # Development mode
-    base_dir = Path(__file__).parent.parent
-
-frontend_dist = base_dir / "frontend" / "dist"
-
-if frontend_dist.exists():
+@app.get("/assets/{asset_path:path}")
+async def serve_frontend_asset(asset_path: str):
+    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
     assets_dir = frontend_dist / "assets"
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+    if not frontend_status["frontend_assets_exists"]:
+        return build_frontend_error_response(503, "Frontend assets directory is unavailable.")
 
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        file_path = frontend_dist / full_path
-        if file_path.exists() and file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(frontend_dist / "index.html")
+    asset_file = resolve_frontend_file(assets_dir, asset_path)
+    if asset_file is None or not asset_file.exists() or not asset_file.is_file():
+        return build_frontend_error_response(404, "Frontend asset was not found.")
+
+    return FileResponse(asset_file)
+
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    requested_file = resolve_frontend_file(frontend_dist, full_path)
+    if requested_file is not None and requested_file.exists() and requested_file.is_file():
+        return FileResponse(requested_file)
+
+    nested_file = resolve_nested_frontend_file(frontend_dist, full_path)
+    if nested_file is not None and nested_file.exists() and nested_file.is_file():
+        return FileResponse(nested_file)
+
+    if is_frontend_file_request(full_path):
+        error_status = get_frontend_file_request_status(frontend_status, full_path)
+        return build_frontend_error_response(error_status, "Requested frontend file was not found.")
+
+    if not frontend_status["frontend_static_ready"]:
+        return build_frontend_error_response(503, "Frontend bundle is incomplete.")
+
+    index_path = frontend_dist / "index.html"
+    if frontend_status["frontend_index_exists"]:
+        return FileResponse(index_path)
+
+    return build_frontend_error_response(503, "Frontend index is unavailable.")
 
 
 if __name__ == "backend.app" or __name__ == "app":
     # Ensure app is defined if imported
     pass
-

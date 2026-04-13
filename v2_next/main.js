@@ -55,6 +55,7 @@ function createWindow() {
 
   let indexPath;
   if (app.isPackaged) {
+    log(`Packaged resources path: ${process.resourcesPath}`);
     // extraResources/frontend/dist/index.html
     indexPath = path.join(process.resourcesPath, 'frontend', 'dist', 'index.html');
   } else {
@@ -62,6 +63,7 @@ function createWindow() {
   }
   
   log(`Loading index.html from: ${indexPath}`);
+  log(`Frontend index exists: ${fs.existsSync(indexPath)}`);
   
   if (!fs.existsSync(indexPath)) {
     log(`ERROR: index.html not found at: ${indexPath}`);
@@ -88,10 +90,14 @@ function startBackend() {
   } else {
     backendPath = 'python';
     const backendPort = process.env.BACKEND_PORT || '8000';
-    args = ['-m', 'uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', backendPort];
+    args = ['-m', 'uvicorn', 'backend.app:app', '--host', '127.0.0.1', '--port', backendPort];
   }
 
   log(`Target backend path: ${backendPath}`);
+  if (isPackaged) {
+    log(`Packaged backend resources path: ${process.resourcesPath}`);
+    log(`Backend executable exists: ${fs.existsSync(backendPath)}`);
+  }
   
   if (isPackaged && !fs.existsSync(backendPath)) {
     log(`ERROR: Backend binary NOT FOUND at ${backendPath}`);
