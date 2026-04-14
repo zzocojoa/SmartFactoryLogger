@@ -15,7 +15,7 @@ def _resolve_executable_path() -> Path:
 def _resolve_runtime_kind() -> str:
     if getattr(sys, "frozen", False):
         return "frozen"
-    return "source"
+    return "dev"
 
 
 def _resolve_executable_mtime(path: Path) -> str | None:
