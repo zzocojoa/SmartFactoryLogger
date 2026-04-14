@@ -20,6 +20,8 @@ _IMG_BACKOFF_MAX_SEC = 5.0
 _img_fetch_lock = asyncio.Lock()
 _img_last_error = 0.0
 _img_failure_count = 0
+_img_cache_state = "empty"
+_img_last_cache_log_at = 0.0
 
 # Async HTTP client (reused for connection pooling)
 _http_client: Optional[httpx.AsyncClient] = None
@@ -65,15 +67,34 @@ def _build_image_meta(now: float, status: str, source: str) -> Dict[str, Any]:
     }
 
 
+def _should_log_cache_state(now: float) -> bool:
+    global _img_last_cache_log_at
+    if now - _img_last_cache_log_at < 10.0:
+        return False
+    _img_last_cache_log_at = now
+    return True
+
+
 async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     """캐시에서 즉시 반환 (백그라운드 프리페칭된 이미지)."""
+    global _img_cache_state
+    from ...MESSync.logger import get_logger
+
+    logger = get_logger("spot_control")
     now = time.time()
     
     # 캐시에 이미지가 있으면 즉시 반환
     if _img_cache["data"]:
         age = _cache_age_sec(now)
         status = "ok" if age < _max_stale_age_sec() else "stale"
-        return _img_cache["data"], _build_image_meta(now, status, "cache")
+        next_cache_state = "cache" if status == "ok" else "stale"
+        if _img_cache_state != next_cache_state and _should_log_cache_state(now):
+            if next_cache_state == "cache":
+                logger.info("Spot cache serve: age_sec=%.3f", age)
+            else:
+                logger.warning("Spot stale serve: age_sec=%.3f", age)
+        _img_cache_state = next_cache_state
+        return _img_cache["data"], _build_image_meta(now, status, next_cache_state)
     
     # 캐시가 비어있으면 한번 직접 fetch 시도 (초기 로드용)
     if not config.SPOT_IMAGE_URL:
@@ -82,7 +103,12 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     async with _img_fetch_lock:
         # Double-check after lock
         if _img_cache["data"]:
-            return _img_cache["data"], _build_image_meta(time.time(), "ok", "cache")
+            cached_now = time.time()
+            cached_age = _cache_age_sec(cached_now)
+            cached_status = "ok" if cached_age < _max_stale_age_sec() else "stale"
+            next_cache_state = "cache" if cached_status == "ok" else "stale"
+            _img_cache_state = next_cache_state
+            return _img_cache["data"], _build_image_meta(cached_now, cached_status, next_cache_state)
         
         client = _get_http_client()
         try:
@@ -94,6 +120,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             
             _img_cache["data"] = data
             _img_cache["time"] = time.time()
+            _img_cache_state = "upstream"
             return data, _build_image_meta(time.time(), "ok", "upstream")
         except Exception as exc:
             # First fetch failure is expected if camera is offline
@@ -107,7 +134,7 @@ _prefetch_running = False
 
 async def _prefetch_loop():
     """백그라운드에서 지속적으로 SPOT 이미지 프리페칭 (드리프트 방지 로직 적용)."""
-    global _img_failure_count, _img_last_error, _prefetch_running
+    global _img_cache_state, _img_failure_count, _img_last_error, _prefetch_running
     _prefetch_running = True
     
     from ...MESSync.logger import get_logger
@@ -127,8 +154,9 @@ async def _prefetch_loop():
                 if data:
                     _img_cache["data"] = data
                     _img_cache["time"] = time.time()
+                    _img_cache_state = "upstream"
                     if _img_failure_count > 0:
-                        logger.info(f"Spot image stream reconnected after {_img_failure_count} failures")
+                        logger.info("Spot image fetch recovered after %s failures", _img_failure_count)
                     _img_failure_count = 0
 
                 if config.SPOT_URL:
@@ -140,9 +168,9 @@ async def _prefetch_loop():
                             _img_cache["temp"] = float(raw_temp)
                             _img_cache["temp_time"] = time.time()
                     except ValueError as exc:
-                        logger.warning(f"Spot temperature parse failed: {exc}")
+                        logger.warning("Spot temperature parse failed: %s", exc)
                     except Exception as exc:
-                        logger.warning(f"Spot temperature fetch failed: {exc}")
+                        logger.warning("Spot temperature fetch failed: %s", exc)
                     
         except asyncio.CancelledError:
             break
@@ -151,7 +179,12 @@ async def _prefetch_loop():
             _img_failure_count = min(_img_failure_count + 1, 10)
             backoff = _current_backoff_sec()
             if _img_failure_count == 1 or _img_failure_count >= 6:
-                 logger.warning(f"Spot image fetch failed: {str(e)} (Count: {_img_failure_count}, Next Backoff: {backoff:.1f}s)")
+                 logger.warning(
+                     "Spot image fetch failed: error=%s failure_count=%s next_backoff_sec=%.1f",
+                     str(e),
+                     _img_failure_count,
+                     backoff,
+                 )
             
             # 실패 시 백오프 적용
             if backoff > 0:

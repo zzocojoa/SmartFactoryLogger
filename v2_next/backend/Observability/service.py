@@ -10,21 +10,36 @@ from typing import Any, Deque, Dict, List, Optional, Tuple
 
 
 RequestSample = Tuple[float, float, int, str, str]
-PollingSample = Tuple[float, str, str]
-PollingWindowSample = Tuple[float, float, int, str]
+PollingClientCounts = Dict[str, int]
+PollingPathSummary = Dict[str, Any]
+PollingBucket = Tuple[float, Dict[str, PollingPathSummary]]
+_SPOT_PROXY_PATH = "/api/spot/proxy_image"
 _POLLING_PATHS = {
-    "/api/spot/proxy_image",
+    _SPOT_PROXY_PATH,
     "/api/data",
     "/health",
     "/stats",
+    "/api/observability/export/latest",
     "/api/memory/state",
     "/api/memory/details",
     "/api/memory/export/latest",
+    "/api/memory/profiler/start",
+    "/api/memory/profiler/stop",
     "/api/config",
     "/api/config/central-status",
+    "/api/config/verify-password",
+    "/api/logs/comm-metrics",
+    "/api/spot/config",
+    "/api/control/path-health",
 }
 _QUIET_PATH_PREFIXES = (
-    "/assets/polling.worker-",
+    "/assets/",
+)
+_SUMMARY_ONLY_PATHS = {
+    "/api/log/status",
+}
+_SUMMARY_ONLY_PATH_PREFIXES = (
+    "/api/layouts/client/",
 )
 
 
@@ -32,6 +47,12 @@ def _is_quiet_path(path: str) -> bool:
     if path in _POLLING_PATHS:
         return True
     return any(path.startswith(prefix) for prefix in _QUIET_PATH_PREFIXES)
+
+
+def _is_summary_only_path(path: str) -> bool:
+    if path in _SUMMARY_ONLY_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in _SUMMARY_ONLY_PATH_PREFIXES)
 
 
 def _iso(ts: float) -> str:
@@ -57,8 +78,7 @@ class ObservabilityService:
         self.window_sec = max(10.0, float(window_sec))
         self._requests: Deque[RequestSample] = deque(maxlen=max_requests)
         self._request_details: Deque[RequestSample] = deque(maxlen=max(400, max_requests // 2))
-        self._polling_requests: Deque[PollingSample] = deque(maxlen=max_requests)
-        self._polling_window: Deque[PollingWindowSample] = deque(maxlen=max_requests)
+        self._polling_buckets: Deque[PollingBucket] = deque(maxlen=max(120, int(self.window_sec) + 30))
         self._errors: Deque[Dict[str, Any]] = deque(maxlen=max_errors)
         self._lock = threading.Lock()
         self._logger = logging.getLogger("SmartFactoryLoggerV2")
@@ -73,9 +93,62 @@ class ObservabilityService:
             "timestamp": None,
         }
 
+    def _trim_polling_buckets(self, now: float) -> None:
+        window_start = now - self.window_sec
+        while self._polling_buckets and self._polling_buckets[0][0] < window_start:
+            self._polling_buckets.popleft()
+
+    def _get_or_create_polling_bucket(self, now: float) -> Dict[str, PollingPathSummary]:
+        bucket_ts = float(int(now))
+        if self._polling_buckets and self._polling_buckets[-1][0] == bucket_ts:
+            return self._polling_buckets[-1][1]
+        next_bucket: Dict[str, PollingPathSummary] = {}
+        self._polling_buckets.append((bucket_ts, next_bucket))
+        return next_bucket
+
+    def _get_or_create_polling_entry(
+        self,
+        bucket: Dict[str, PollingPathSummary],
+        path: str,
+    ) -> PollingPathSummary:
+        entry = bucket.get(path)
+        if entry is not None:
+            return entry
+        next_entry: PollingPathSummary = {
+            "count": 0,
+            "latency_total_ms": 0.0,
+            "http_4xx_count": 0,
+            "http_5xx_count": 0,
+            "clients": {},
+            "success_count": 0,
+            "failure_count": 0,
+            "stale_count": 0,
+            "age_total_sec": 0.0,
+            "age_count": 0,
+        }
+        bucket[path] = next_entry
+        return next_entry
+
+    def record_spot_proxy_result(self, status_code: int, age_sec: Optional[float], is_stale: bool) -> None:
+        now = time.time()
+        with self._lock:
+            self._trim_polling_buckets(now)
+            bucket = self._get_or_create_polling_bucket(now)
+            entry = self._get_or_create_polling_entry(bucket, _SPOT_PROXY_PATH)
+            if status_code >= 400:
+                return
+            entry["success_count"] += 1
+            if is_stale:
+                entry["stale_count"] += 1
+            if age_sec is not None:
+                entry["age_total_sec"] += float(age_sec)
+                entry["age_count"] += 1
+
     def record_request(self, path: str, status_code: int, latency_ms: float, client_host: str) -> None:
         now = time.time()
         sample: RequestSample = (now, float(latency_ms), int(status_code), str(path), str(client_host))
+        quiet_path = _is_quiet_path(path)
+        summary_only_success = _is_summary_only_path(path) and status_code < 400
         with self._lock:
             self._total_requests += 1
             self._total_latency_ms += float(latency_ms)
@@ -89,26 +162,50 @@ class ObservabilityService:
                 "status": status_code,
                 "timestamp": now,
             }
-            if _is_quiet_path(path):
-                self._polling_requests.append((now, str(path), str(client_host)))
-                self._polling_window.append((now, float(latency_ms), int(status_code), str(path)))
+            if quiet_path or summary_only_success:
+                self._trim_polling_buckets(now)
+                bucket = self._get_or_create_polling_bucket(now)
+                entry = self._get_or_create_polling_entry(bucket, path)
+                entry["count"] += 1
+                entry["latency_total_ms"] += float(latency_ms)
+                if 400 <= status_code < 500:
+                    entry["http_4xx_count"] += 1
+                elif status_code >= 500:
+                    entry["http_5xx_count"] += 1
+                clients: PollingClientCounts = entry["clients"]
+                clients[client_host] = clients.get(client_host, 0) + 1
+                if path == _SPOT_PROXY_PATH and status_code >= 400:
+                    entry["failure_count"] += 1
             else:
                 self._requests.append(sample)
-            if status_code >= 400 or not _is_quiet_path(path):
+            if status_code >= 400 or (not quiet_path and not summary_only_success):
                 self._request_details.append(sample)
 
     def get_request_storage_summary(self) -> Dict[str, int]:
         with self._lock:
-            request_count = len(self._requests) + len(self._polling_window)
+            self._trim_polling_buckets(time.time())
+            detail_request_count = len(self._requests)
             detail_count = len(self._request_details)
-            polling_count = len(self._polling_requests)
-            polling_window_count = len(self._polling_window)
-        estimated_bytes = request_count * 32 + detail_count * 40 + polling_count * 24 + polling_window_count * 20
+            polling_bucket_count = len(self._polling_buckets)
+            polling_count = 0
+            polling_client_count = 0
+            for _, bucket in self._polling_buckets:
+                for entry in bucket.values():
+                    polling_count += int(entry["count"])
+                    polling_client_count += len(entry["clients"])
+            request_count = detail_request_count + polling_count
+        estimated_bytes = (
+            detail_request_count * 40
+            + detail_count * 40
+            + polling_count * 16
+            + polling_bucket_count * 128
+            + polling_client_count * 32
+        )
         return {
             "request_count": request_count,
             "detail_count": detail_count,
             "polling_count": polling_count,
-            "polling_window_count": polling_window_count,
+            "polling_window_count": polling_bucket_count,
             "estimated_bytes": estimated_bytes,
         }
 
@@ -191,10 +288,10 @@ class ObservabilityService:
         window_start = now - self.window_sec
         with self._lock:
             samples = [sample for sample in self._requests if sample[0] >= window_start]
-            polling_samples = [sample for sample in self._polling_window if sample[0] >= window_start]
+            self._trim_polling_buckets(now)
+            polling_buckets = list(self._polling_buckets)
 
-        request_count = len(samples) + len(polling_samples)
-        if request_count == 0:
+        if not samples and not polling_buckets:
             return {
                 "window_sec": int(self.window_sec),
                 "request_count": 0,
@@ -209,12 +306,14 @@ class ObservabilityService:
                 "top_paths": [],
             }
 
+        request_count = 0
         latency_values: List[float] = []
         error_count = 0
         http_4xx_count = 0
         http_5xx_count = 0
         path_stats: Dict[str, Dict[str, Any]] = {}
         for _, latency_ms, status_code, path, _ in samples:
+            request_count += 1
             latency_values.append(float(latency_ms))
             if 400 <= status_code < 500:
                 error_count += 1
@@ -228,19 +327,22 @@ class ObservabilityService:
             if status_code >= 400:
                 bucket["error_count"] += 1
 
-        for _, latency_ms, status_code, path in polling_samples:
-            latency_values.append(float(latency_ms))
-            if 400 <= status_code < 500:
-                error_count += 1
-                http_4xx_count += 1
-            elif status_code >= 500:
-                error_count += 1
-                http_5xx_count += 1
-            bucket = path_stats.setdefault(path, {"count": 0, "error_count": 0, "lat_total": 0.0})
-            bucket["count"] += 1
-            bucket["lat_total"] += float(latency_ms)
-            if status_code >= 400:
-                bucket["error_count"] += 1
+        for _, bucket in polling_buckets:
+            for path, entry in bucket.items():
+                count = int(entry["count"])
+                if count <= 0:
+                    continue
+                request_count += count
+                avg_latency_ms = float(entry["latency_total_ms"]) / count
+                latency_values.extend([avg_latency_ms] * count)
+                error_delta = int(entry["http_4xx_count"]) + int(entry["http_5xx_count"])
+                error_count += error_delta
+                http_4xx_count += int(entry["http_4xx_count"])
+                http_5xx_count += int(entry["http_5xx_count"])
+                path_bucket = path_stats.setdefault(path, {"count": 0, "error_count": 0, "lat_total": 0.0})
+                path_bucket["count"] += count
+                path_bucket["lat_total"] += float(entry["latency_total_ms"])
+                path_bucket["error_count"] += error_delta
 
         avg_latency = sum(latency_values) / request_count
         p95_latency = _p95(latency_values)
@@ -277,25 +379,54 @@ class ObservabilityService:
         }
 
     def _polling_metrics(self, now: float) -> Dict[str, Any]:
-        window_start = now - self.window_sec
         with self._lock:
-            samples = [sample for sample in self._polling_requests if sample[0] >= window_start]
+            self._trim_polling_buckets(now)
+            polling_buckets = list(self._polling_buckets)
 
         path_stats: Dict[str, Dict[str, Any]] = {}
-        for _, path, client_host in samples:
-            path_entry = path_stats.setdefault(path, {"count": 0, "clients": {}})
-            path_entry["count"] += 1
-            clients = path_entry["clients"]
-            clients[client_host] = clients.get(client_host, 0) + 1
+        for _, bucket in polling_buckets:
+            for path, entry in bucket.items():
+                path_entry = path_stats.setdefault(
+                    path,
+                    {
+                        "count": 0,
+                        "latency_total_ms": 0.0,
+                        "http_4xx_count": 0,
+                        "http_5xx_count": 0,
+                        "clients": {},
+                        "success_count": 0,
+                        "failure_count": 0,
+                        "stale_count": 0,
+                        "age_total_sec": 0.0,
+                        "age_count": 0,
+                    },
+                )
+                path_entry["count"] += int(entry["count"])
+                path_entry["latency_total_ms"] += float(entry["latency_total_ms"])
+                path_entry["http_4xx_count"] += int(entry["http_4xx_count"])
+                path_entry["http_5xx_count"] += int(entry["http_5xx_count"])
+                path_entry["success_count"] += int(entry["success_count"])
+                path_entry["failure_count"] += int(entry["failure_count"])
+                path_entry["stale_count"] += int(entry["stale_count"])
+                path_entry["age_total_sec"] += float(entry["age_total_sec"])
+                path_entry["age_count"] += int(entry["age_count"])
+                clients: PollingClientCounts = path_entry["clients"]
+                for client_host, client_count in entry["clients"].items():
+                    clients[client_host] = clients.get(client_host, 0) + int(client_count)
 
         payload: Dict[str, Any] = {}
         for path, entry in path_stats.items():
             count = int(entry["count"])
+            if count <= 0:
+                continue
             clients = entry["clients"]
             top_clients = sorted(clients.items(), key=lambda item: item[1], reverse=True)[:5]
-            payload[path] = {
+            error_count = int(entry["http_4xx_count"]) + int(entry["http_5xx_count"])
+            path_payload: Dict[str, Any] = {
                 "count": count,
                 "requests_per_sec": round(count / self.window_sec, 3) if self.window_sec else 0.0,
+                "avg_latency_ms": round(float(entry["latency_total_ms"]) / count, 3),
+                "error_rate": (error_count / count) if count else None,
                 "unique_clients": len(clients),
                 "top_clients": [
                     {
@@ -305,6 +436,15 @@ class ObservabilityService:
                     for client_host, client_count in top_clients
                 ],
             }
+            if path == _SPOT_PROXY_PATH:
+                age_count = int(entry["age_count"])
+                path_payload["success_count"] = int(entry["success_count"])
+                path_payload["failure_count"] = int(entry["failure_count"])
+                path_payload["stale_count"] = int(entry["stale_count"])
+                path_payload["avg_age_sec"] = (
+                    round(float(entry["age_total_sec"]) / age_count, 3) if age_count > 0 else None
+                )
+            payload[path] = path_payload
 
         return {
             "window_sec": int(self.window_sec),
