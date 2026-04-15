@@ -208,8 +208,13 @@ class MemoryService:
         self.stop_profiler()
 
     def start_profiler(self) -> Dict[str, Any]:
+        self._expire_profiler_if_needed()
         with self._state_lock:
             now = time.time()
+            if self._profiler_enabled:
+                state = self._build_profiler_state_locked(now)
+                state["already_running"] = True
+                return state
             if not tracemalloc.is_tracing():
                 tracemalloc.start(25)
             self._profiler_enabled = True
@@ -221,7 +226,9 @@ class MemoryService:
             self._latest_tracemalloc_diff = []
             self._latest_summary_state = self._build_summary_state_locked()
             self._latest_details_state = self._build_details_state_locked()
-        return self.get_profiler_state()
+            state = self._build_profiler_state_locked(now)
+        state["already_running"] = False
+        return state
 
     def stop_profiler(self) -> Dict[str, Any]:
         with self._state_lock:
@@ -240,14 +247,7 @@ class MemoryService:
 
     def get_profiler_state(self) -> Dict[str, Any]:
         with self._state_lock:
-            return {
-                "enabled": self._profiler_enabled,
-                "started_at": self._profiler_started_at,
-                "last_snapshot_at": _utc_iso(self._profiler_last_snapshot_at)
-                if self._profiler_last_snapshot_at
-                else None,
-                "last_diff_at": _utc_iso(self._profiler_last_diff_at) if self._profiler_last_diff_at else None,
-            }
+            return self._build_profiler_state_locked(time.time())
 
     def capture_snapshot(self) -> Dict[str, Any]:
         self._expire_profiler_if_needed()
@@ -440,7 +440,14 @@ class MemoryService:
             self._latest_summary_state = self._build_summary_state_locked()
             self._latest_details_state = self._build_details_state_locked()
 
-    def _build_profiler_state_locked(self) -> Dict[str, Any]:
+    def _build_profiler_state_locked(self, now: Optional[float] = None) -> Dict[str, Any]:
+        current_time = time.time() if now is None else now
+        remaining_ttl_sec: Optional[float] = None
+        expires_at: Optional[str] = None
+        if self._profiler_enabled and self._profiler_started_at_ts is not None:
+            expires_at_ts = self._profiler_started_at_ts + self._profiler_max_runtime_sec
+            remaining_ttl_sec = max(0.0, round(expires_at_ts - current_time, 3))
+            expires_at = _utc_iso(expires_at_ts)
         return {
             "enabled": self._profiler_enabled,
             "started_at": self._profiler_started_at,
@@ -448,6 +455,9 @@ class MemoryService:
             if self._profiler_last_snapshot_at
             else None,
             "last_diff_at": _utc_iso(self._profiler_last_diff_at) if self._profiler_last_diff_at else None,
+            "expires_at": expires_at,
+            "remaining_ttl_sec": remaining_ttl_sec,
+            "max_runtime_sec": round(self._profiler_max_runtime_sec, 3),
         }
 
     def _expire_profiler_if_needed(self) -> None:

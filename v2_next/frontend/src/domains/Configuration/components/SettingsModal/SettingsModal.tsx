@@ -4,7 +4,7 @@
  * Pure presentational component for the full Settings Modal.
  * All state and handlers are passed in via props from App.tsx.
  */
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import type {
   SettingsFormState,
   ConnectionTestResult,
@@ -55,6 +55,7 @@ import {
   getCentralBadge,
   formatCentralTime,
 } from './settingsModalHelpers';
+import type { SaveSettingsOptions } from '../../hooks/useConfigViewModel.types';
 import packageJson from '../../../../../package.json';
 
 /* ─── Props ────────────────────────────────────────────────────── */
@@ -90,7 +91,7 @@ export interface SettingsModalProps {
 
   // Config actions
   updateSettingsField: (field: keyof SettingsFormState, value: any) => void;
-  handleSaveSettings: () => void;
+  handleSaveSettings: (options?: SaveSettingsOptions) => Promise<boolean>;
   handleRestoreDefaults: () => void;
   handleRestoreBackup: () => void;
   handleOverrideToggle: () => void;
@@ -371,16 +372,131 @@ export function SettingsModal(props: SettingsModalProps) {
     showSettingsToast,
   } = props;
 
+  useEffect(() => {
+    if (!settingsOpen) {
+      setCurrentPassword('');
+      setPasswordConfirm('');
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+      return;
+    }
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!settingsForm || settingsForm.password.trim().length > 0) {
+      return;
+    }
+    setPasswordConfirm('');
+  }, [settingsForm, setPasswordConfirm]);
+
   if (!settingsOpen) return null;
 
   const spotPollingStats = stats?.polling?.paths?.['/api/spot/proxy_image'];
   const spotPollingClientText = spotPollingStats?.top_clients?.length
     ? spotPollingStats.top_clients.map((item) => `${item.client} ${item.count}`).join(', ')
     : '--';
+  const nextPassword = settingsForm?.password.trim() ?? '';
+  const trimmedCurrentPassword = currentPassword.trim();
+  const trimmedPasswordConfirm = passwordConfirm.trim();
+  const hasPasswordChange = nextPassword.length > 0;
+  const requiresCurrentPassword = Boolean(settingsForm?.passwordSet && hasPasswordChange);
+  const hasPasswordConfirmMismatch =
+    hasPasswordChange && trimmedPasswordConfirm !== nextPassword;
+  const isCurrentPasswordMissing =
+    requiresCurrentPassword && trimmedCurrentPassword.length === 0;
+  const isSecuritySaveBlocked = hasPasswordConfirmMismatch || isCurrentPasswordMissing;
+  const saveDisabled =
+    settingsLoading ||
+    pathCheckBusy ||
+    hasPathError ||
+    hasValidationError ||
+    configReadOnly ||
+    (!overrideEnabled && hasSettingsChanges) ||
+    isSecuritySaveBlocked;
+  const footerNoteText = configReadOnly
+    ? '?쎄린 ?꾩슜?낅땲??'
+    : hasValidationError
+      ? '?낅젰媛믪쓣 ?뺤씤?섏꽭??'
+      : hasPasswordConfirmMismatch
+        ? '비밀번호 확인이 일치해야 저장할 수 있습니다.'
+        : isCurrentPasswordMissing
+          ? '현재 비밀번호를 검증해야 저장할 수 있습니다.'
+          : !overrideEnabled && hasSettingsChanges
+            ? '??ν븯?ㅻ㈃ ?ㅻ쾭?쇱씠?쒕? 耳쒖꽭??'
+            : '蹂寃??ы빆? ??????곸슜?⑸땲??';
+
+  const securityFooterNoteText = configReadOnly
+    ? '읽기 전용입니다.'
+    : hasValidationError
+      ? '입력값을 확인하세요.'
+      : hasPasswordConfirmMismatch
+        ? '비밀번호 확인이 일치해야 저장할 수 있습니다.'
+        : isCurrentPasswordMissing
+          ? '현재 비밀번호를 입력해야 저장할 수 있습니다.'
+          : !overrideEnabled && hasSettingsChanges
+            ? '저장하려면 오버라이드를 켜세요.'
+            : hasPasswordChange
+              ? settingsForm?.passwordSet
+                ? '비밀번호 변경은 저장 후 적용됩니다.'
+                : '비밀번호 설정은 저장 후 적용됩니다.'
+              : '변경 사항은 저장 후 적용됩니다.';
+  const securityStatusLabel = settingsForm?.passwordSet ? '설정됨' : '미설정';
+  const securityIntroText = settingsForm?.passwordSet
+    ? '현재 비밀번호를 확인한 뒤 새 비밀번호를 저장합니다.'
+    : '설정창 접근에 사용할 비밀번호를 먼저 등록하세요.';
+  const newPasswordLabel = settingsForm?.passwordSet ? '새 비밀번호' : '설정 비밀번호';
+  const newPasswordPlaceholder = settingsForm?.passwordSet ? '새 비밀번호 입력' : '비밀번호 입력';
+  const newPasswordHelpText = settingsForm?.passwordSet
+    ? '새 비밀번호를 입력하지 않으면 기존 비밀번호를 유지합니다.'
+    : '설정창 접근에 사용할 비밀번호를 등록합니다.';
+  const confirmPasswordPlaceholder = settingsForm?.passwordSet
+    ? '새 비밀번호 다시 입력'
+    : '비밀번호 다시 입력';
+
+  const handleSecuritySave = async () => {
+    const didSave = await handleSaveSettings({
+      security: {
+        currentPassword,
+        passwordConfirm,
+      },
+    });
+
+    if (!didSave) {
+      return;
+    }
+
+    setCurrentPassword('');
+    setPasswordConfirm('');
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
+    setShowConfirmPassword(false);
+  };
 
   return (
-        <div className="settings-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div className="settings-modal" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="settings-backdrop"
+          onClick={() => setSettingsOpen(false)}
+          onWheel={(event) => event.preventDefault()}
+          onTouchMove={(event) => event.preventDefault()}
+        >
+          <div
+            className="settings-modal"
+            onClick={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
             <div className="settings-header">
               <span className="settings-header-title">설정 (v{packageJson.version})</span>
               <button className="settings-close" onClick={() => setSettingsOpen(false)}>
@@ -483,21 +599,13 @@ export function SettingsModal(props: SettingsModalProps) {
                     >
                       <div className="settings-section-title">{LABELS.SUMMARY_INFO}</div>
                       <div className="settings-summary-grid">
-                        {buildSettingsSummaryCards()
-                          .sort((a, b) => {
-                            const order = ['통신 요약', '저장 요약', 'SPOT 요약'];
-                            const ia = order.indexOf(a.title);
-                            const ib = order.indexOf(b.title);
-                            // Put known items first in order, unknowns last
-                            if (ia === -1 && ib === -1) return 0;
-                            if (ia === -1) return 1;
-                            if (ib === -1) return -1;
-                            return ia - ib;
-                          })
-                          .map((card) => {
-                            const isWide = ['통신 요약', '저장 요약'].includes(card.title);
+                        {buildSettingsSummaryCards().map((card, index) => {
+                            const isWide = index < 2;
                             return (
-                              <div key={card.title} className={`settings-summary-card ${isWide ? 'wide' : ''}`}>
+                              <div
+                                key={`settings-summary-card-${index}`}
+                                className={`settings-summary-card ${isWide ? 'wide' : ''}`}
+                              >
                                 <div className="settings-summary-title">{card.title}</div>
                                 <ul className="settings-summary-list">
                                   {card.items.map((item) => (
@@ -577,7 +685,8 @@ export function SettingsModal(props: SettingsModalProps) {
                       )}
                       <div className="settings-summary-meta">
                         <span>{LABELS.CONFIG_PATH}: {settingsConfigPath ?? LABELS.SYNCING}</span>
-                        <span>백업: config.ini.bak 자동 생성</span>
+                        <span>설정 버전: {overrideMeta?.version ?? '--'}</span>
+                        <span>최근 동기화: {formatMetaTime(overrideMeta?.last_sync)}</span>
                       </div>
                     </div>
                     <div
@@ -1817,9 +1926,10 @@ export function SettingsModal(props: SettingsModalProps) {
                       <div className="settings-section-title">
                         <span>보안</span>
                         <span className={`settings-test-badge ${settingsForm.passwordSet ? 'ok' : 'warn'}`}>
-                          {settingsForm.passwordSet ? '설정됨' : '미설정'}
+                          {securityStatusLabel}
                         </span>
                       </div>
+                      <div className="settings-hint">{securityIntroText}</div>
                       
                       {/* Warning Banner when password not set */}
                       {!settingsForm.passwordSet && (
@@ -1862,17 +1972,17 @@ export function SettingsModal(props: SettingsModalProps) {
                                 {showCurrentPassword ? '🙈' : '👁️'}
                               </button>
                             </div>
-                            <span className="settings-field-help">비밀번호를 변경하려면 현재 비밀번호를 먼저 입력하세요.</span>
+                            <span className="settings-field-help">비밀번호를 변경할 때만 현재 비밀번호를 입력합니다.</span>
                           </label>
                         )}
                         
                         {/* New Password - only enable input when current password is provided (if password was set) */}
                         <label className={`settings-field ${isSettingsFieldDirty('password') ? 'changed' : ''}`}>
-                          {settingsForm.passwordSet ? '새 비밀번호' : '설정 비밀번호'}
+                          {newPasswordLabel}
                           <div style={{ position: 'relative' }}>
                             <input
                               type={showNewPassword ? 'text' : 'password'}
-                              placeholder={settingsForm.passwordSet ? '새 비밀번호 입력 (변경 시에만)' : '비밀번호 입력'}
+                              placeholder={newPasswordPlaceholder}
                               value={settingsForm.password}
                               onChange={(e) => updateSettingsField('password', e.target.value)}
                               disabled={settingsForm.passwordSet && currentPassword.trim().length === 0}
@@ -1939,6 +2049,7 @@ export function SettingsModal(props: SettingsModalProps) {
                               </span>
                             </div>
                           )}
+                          <span className="settings-field-help">{newPasswordHelpText}</span>
                         </label>
                         
                         {/* Password Confirmation */}
@@ -1948,7 +2059,7 @@ export function SettingsModal(props: SettingsModalProps) {
                             <div style={{ position: 'relative' }}>
                               <input
                                 type={showConfirmPassword ? 'text' : 'password'}
-                                placeholder="비밀번호 재입력"
+                                placeholder={confirmPasswordPlaceholder}
                                 value={passwordConfirm}
                                 onChange={(e) => setPasswordConfirm(e.target.value)}
                                 style={{ 
@@ -1980,31 +2091,23 @@ export function SettingsModal(props: SettingsModalProps) {
                               <span className="settings-field-help error">비밀번호가 일치하지 않습니다.</span>
                             )}
                             {passwordConfirm.length > 0 && passwordConfirm === settingsForm.password && (
-                              <span className="settings-field-help" style={{ color: '#22c55e' }}>✓ 비밀번호 일치</span>
+                              <span className="settings-field-help" style={{ color: '#22c55e' }}>비밀번호가 일치합니다.</span>
                             )}
                           </label>
                         )}
-                        
-                        <div className="settings-hint">
-                          {settingsForm.passwordSet 
-                            ? '비밀번호를 변경하려면 현재 비밀번호 입력 후 새 비밀번호를 입력하세요. 비워두면 기존 비밀번호를 유지합니다.'
-                            : '설정에 접근할 때 사용할 비밀번호를 설정하세요.'}
-                        </div>
+
+                        {isCurrentPasswordMissing && (
+                          <div className="settings-hint" style={{ color: '#fca5a5' }}>
+                            변경하려면 현재 비밀번호를 먼저 입력하세요.
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
               <div className="settings-footer">
-                <span className="settings-footer-note">
-                  {configReadOnly
-                    ? '설정 파일이 읽기 전용입니다. 관리자 권한/속성을 확인하세요.'
-                    : hasValidationError
-                      ? '입력값 형식을 확인하세요.'
-                      : !overrideEnabled && hasSettingsChanges
-                        ? '로컬 오버라이드가 OFF 상태입니다. 저장하려면 먼저 활성화하세요.'
-                        : '변경 사항은 재시작 후 적용됩니다.'}
-                </span>
+                <span className="settings-footer-note">{securityFooterNoteText}</span>
                 <div className="settings-footer-actions">
                   <button
                     className="settings-action secondary"
@@ -2027,23 +2130,11 @@ export function SettingsModal(props: SettingsModalProps) {
                   </button>
                   <button
                     className="settings-action primary"
-                    onClick={() => handleSaveSettings()}
-                    disabled={
-                      settingsLoading ||
-                      pathCheckBusy ||
-                      hasPathError ||
-                      hasValidationError ||
-                      configReadOnly ||
-                      (!overrideEnabled && hasSettingsChanges)
-                    }
-                    aria-disabled={
-                      settingsLoading ||
-                      pathCheckBusy ||
-                      hasPathError ||
-                      hasValidationError ||
-                      configReadOnly ||
-                      (!overrideEnabled && hasSettingsChanges)
-                    }
+                    onClick={() => {
+                      void handleSecuritySave();
+                    }}
+                    disabled={saveDisabled}
+                    aria-disabled={saveDisabled}
                   >
                     저장
                   </button>

@@ -15,3 +15,13 @@ export const capSeriesSamples = (samples: SeriesSample[], maxPoints?: number): S
   }
   return samples.slice(samples.length - maxPoints);
 };
+
+export const trimSeriesSamples = (
+  samples: SeriesSample[],
+  nowMs: number,
+  windowMs: number,
+  maxPoints: number | undefined,
+): SeriesSample[] => {
+  const prunedSamples = pruneSeriesSamples(samples, nowMs, windowMs);
+  return capSeriesSamples(prunedSamples, maxPoints);
+};

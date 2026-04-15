@@ -108,15 +108,17 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
   const ageMs = lastDataAt ? Math.max(0, nowTick - lastDataAt) : null;
   const lastUpdateMs = health?.last_update ? health.last_update * 1000 : null;
   const healthAgeMs = lastUpdateMs ? Math.max(0, nowTick - lastUpdateMs) : null;
-  const effectiveAgeMs = (healthAgeMs !== null && ageMs !== null)
+  const driverSnapshotAgeMs =
+    health?.driver_snapshot_age_sec !== null && health?.driver_snapshot_age_sec !== undefined
+      ? Math.max(0, health.driver_snapshot_age_sec * 1000)
+      : null;
+  const effectiveAgeMs = driverSnapshotAgeMs ?? ((healthAgeMs !== null && ageMs !== null)
     ? Math.min(healthAgeMs, ageMs)
-    : (healthAgeMs ?? ageMs);
-  const dynWarnMs = settingsBaseline?.statusWarnMs
-    ? parseInt(settingsBaseline.statusWarnMs, 10)
-    : STATUS_WARN_MS;
-  const dynOfflineMs = settingsBaseline?.statusOfflineMs
-    ? parseInt(settingsBaseline.statusOfflineMs, 10)
-    : STATUS_OFFLINE_MS;
+    : (healthAgeMs ?? ageMs));
+  const parsedWarnMs = settingsBaseline?.statusWarnMs ? parseInt(settingsBaseline.statusWarnMs, 10) : NaN;
+  const parsedOfflineMs = settingsBaseline?.statusOfflineMs ? parseInt(settingsBaseline.statusOfflineMs, 10) : NaN;
+  const dynWarnMs = Number.isFinite(parsedWarnMs) ? parsedWarnMs : STATUS_WARN_MS;
+  const dynOfflineMs = Number.isFinite(parsedOfflineMs) ? parsedOfflineMs : STATUS_OFFLINE_MS;
 
   // --- Window stats ---
   const statsWindow = stats?.window;

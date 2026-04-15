@@ -13,6 +13,7 @@ import {
   resolveSpotImageErrorMessage,
   resolveSpotImageLoadErrorMessage,
   resolveSpotRefreshMs,
+  type SpotProxyErrorDetail,
 } from './useSpotViewModel.selectors';
 import { useSpotViewModelEffects } from './useSpotViewModelEffects';
 import type { UseSpotViewModel } from './useSpotViewModel.types';
@@ -22,6 +23,22 @@ interface SpotImageState {
   imageError: string | null;
   lastSuccessAt: number | null;
 }
+
+const resolveSpotProxyErrorDetail = async (response: Response): Promise<SpotProxyErrorDetail | null> => {
+  try {
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+    const candidate = 'detail' in payload ? (payload as { detail?: unknown }).detail : payload;
+    if (!candidate || typeof candidate !== 'object') {
+      return null;
+    }
+    return candidate as SpotProxyErrorDetail;
+  } catch {
+    return null;
+  }
+};
 
 const INITIAL_SPOT_DIAGNOSTICS: SpotPollingDiagnostics = {
   in_flight: false,
@@ -67,19 +84,34 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     [setDashboardSpotImageState]
   );
 
-  const refreshConfig = useCallback(async () => {
-    try {
-      const data = await fetchSpotConfig();
-      setConfig(data);
-      setDashboardSpotConfig(data);
+  const applySpotConfig = useCallback(
+    (nextConfig: SpotConfig): void => {
+      setConfig(nextConfig);
+      setDashboardSpotConfig(nextConfig);
       setDiagnostics((prev) => ({
         ...prev,
-        refresh_interval_ms: resolveSpotRefreshMs(data.refresh_interval),
+        refresh_interval_ms: resolveSpotRefreshMs(nextConfig.refresh_interval),
       }));
+    },
+    [setDashboardSpotConfig]
+  );
+
+  const loadConfig = useCallback(async (): Promise<SpotConfig | null> => {
+    try {
+      return await fetchSpotConfig();
     } catch (error) {
       console.error('Failed to load spot config', error);
+      return null;
     }
-  }, [setDashboardSpotConfig]);
+  }, []);
+
+  const refreshConfig = useCallback(async (): Promise<void> => {
+    const nextConfig = await loadConfig();
+    if (!nextConfig) {
+      return;
+    }
+    applySpotConfig(nextConfig);
+  }, [applySpotConfig, loadConfig]);
 
   const setNextFetchScheduledAt = useCallback((nextFetchScheduledAt: number | null) => {
     nextFetchScheduledAtRef.current = nextFetchScheduledAt;
@@ -140,7 +172,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       try {
         const response = await fetchSpotImageResponse();
         if (!response.ok) {
-          throw new Error('Network response was not ok');
+          const detail = await resolveSpotProxyErrorDetail(response);
+          throw new Error(resolveSpotImageErrorMessage(response.status, detail));
         }
 
         const capturedAtHeader = response.headers.get('X-Spot-Image-At');
@@ -169,7 +202,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         syncDashboardSpotImageState(nextImageUrl, false, null, effectiveAt);
       } catch (error) {
         console.error('Image fetch failed', error);
-        const nextImageError = resolveSpotImageErrorMessage();
+        const nextImageError = error instanceof Error ? error.message : resolveSpotImageErrorMessage(0, null);
         const nextImageState = {
           ...imageStateRef.current,
           imageError: nextImageError,
@@ -252,7 +285,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     config,
     fetchScheduledImage,
     fetchVisibleImage,
-    refreshConfig,
+    loadConfig,
+    applySpotConfig,
     prevUrlRef,
     setNextFetchScheduledAt,
     shouldFetchOnVisibility,

@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { FactoryData, SpotConfig, ThresholdState } from '../shared/types';
-import type { SeriesFrame } from '../domains/FacilityData/timeseries/seriesDataFrames';
 
 interface DashboardState {
   // FactoryDataContext
@@ -8,8 +7,6 @@ interface DashboardState {
   thresholds: ThresholdState | null;
   lastDataAt: number | null;
   intervalSec: number;
-  timeSeriesFrames: Record<string, SeriesFrame> | null;
-  timeSeriesAllFrame: SeriesFrame | null;
   
   // SpotContext
   spotConfig: SpotConfig | null;
@@ -23,7 +20,6 @@ interface DashboardState {
   setData: (data: FactoryData | null, lastDataAt: number | null) => void;
   setThresholds: (thresholds: ThresholdState) => void;
   setIntervalSec: (intervalSec: number) => void;
-  setTimeSeriesData: (frames: Record<string, SeriesFrame> | null, allFrame: SeriesFrame | null) => void;
   
   setSpotConfig: (config: SpotConfig | null) => void;
   setSpotImageState: (url: string, loading: boolean, error: string | null, lastSuccessAt: number | null) => void;
@@ -35,8 +31,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   thresholds: null,
   lastDataAt: null,
   intervalSec: 0.2,
-  timeSeriesFrames: null,
-  timeSeriesAllFrame: null,
 
   spotConfig: null,
   spotImageUrl: '',
@@ -48,7 +42,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setData: (data, lastDataAt) => set({ data, lastDataAt }),
   setThresholds: (thresholds) => set({ thresholds }),
   setIntervalSec: (intervalSec) => set({ intervalSec }),
-  setTimeSeriesData: (timeSeriesFrames, timeSeriesAllFrame) => set({ timeSeriesFrames, timeSeriesAllFrame }),
   
   setSpotConfig: (spotConfig) => set({ spotConfig }),
   setSpotImageState: (spotImageUrl, spotImageLoading, spotImageError, spotLastSuccessAt) => set((state) => ({

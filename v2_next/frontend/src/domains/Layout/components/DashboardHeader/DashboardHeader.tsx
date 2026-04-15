@@ -1,17 +1,14 @@
-import { 
-  LayoutSlotSummary, 
+import {
+  LayoutSlotSummary,
   SettingsFormState,
 } from '../../../../shared/types';
+import { APP_TITLE } from '../../../../shared/constants/uiText';
 import { CommBadge } from '../../../../shared/utils/commBadge';
 import { formatMetaTime } from '../../../../shared/utils/formatters';
-import { LABELS, APP_TITLE } from '../../../../shared/constants/uiText';
 
 export interface DashboardHeaderProps {
-  // Brand
   activeCycle: string;
   appTitle?: string;
-
-  // Status (computed values from useStatusPanel)
   statusLabel: string;
   statusClass: string;
   statusTitle: string;
@@ -21,8 +18,6 @@ export interface DashboardHeaderProps {
   errorQueueText: string;
   errorQueueTitle: string;
   commBadges: CommBadge[];
-
-  // Actions
   handleSnapshot: () => void;
   snapshotLoading: boolean;
   handleReconnect: () => void;
@@ -30,15 +25,11 @@ export interface DashboardHeaderProps {
   handleDiagnosis: () => void;
   diagnosisBusy: boolean;
   settingsForm: SettingsFormState | null;
-
-  // Notifications
   unreadCount: number;
   notificationsOpen: boolean;
   setNotificationsOpen: (open: boolean) => void;
   setUnreadCount: (count: number) => void;
   clearNotifications: () => void;
-
-  // Menu State
   menuOpen: boolean;
   setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   menuRef: React.RefObject<HTMLDivElement | null>;
@@ -46,8 +37,6 @@ export interface DashboardHeaderProps {
   setWidgetAddOpen: (open: boolean) => void;
   presetOpen: boolean;
   setPresetOpen: (open: boolean) => void;
-
-  // Layout Controls
   layoutEditing: boolean;
   setLayoutEditing: (editing: boolean) => void;
   storageMode: 'local' | 'server';
@@ -61,14 +50,10 @@ export interface DashboardHeaderProps {
   layoutSaveMessage: string | null;
   layoutSaveError: string | null;
   layoutRestoreError: string | null;
-  handleAddWidget: (type: any) => void;
-  applyPreset: (preset: any) => void;
-
-  // Theme
+  handleAddWidget: (type: string) => void;
+  applyPreset: (preset: string) => void;
   themeMode: 'light' | 'dark' | 'auto';
   setThemeMode: (mode: 'light' | 'dark' | 'auto') => void;
-
-  // Settings
   handleOpenSettings: () => void;
 }
 
@@ -203,14 +188,17 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           onClick={() => {
             const nextState = !notificationsOpen;
             setNotificationsOpen(nextState);
-            if (nextState) setUnreadCount(0);
+            if (nextState) {
+              setUnreadCount(0);
+            }
           }}
           aria-pressed={notificationsOpen}
         >
           알림
           {unreadCount > 0 && <span className="notify-badge">{unreadCount}</span>}
         </button>
-        <div className="menu-wrapper" ref={menuRef as any}>
+
+        <div className="menu-wrapper" ref={menuRef as React.RefObject<HTMLDivElement>}>
           <button
             className="menu-toggle"
             onClick={() => setMenuOpen((prev) => !prev)}
@@ -227,6 +215,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             >
               {layoutEditing ? '편집 완료' : '편집 모드'}
             </button>
+
             {layoutEditing ? (
               <>
                 <div className="menu-dropdown-section">
@@ -236,16 +225,17 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                       className={`menu-item menu-storage-btn ${storageMode === 'local' ? 'active' : ''}`}
                       onClick={() => setStorageMode('local')}
                     >
-                      💻 이 PC
+                      로컬 PC
                     </button>
                     <button
                       className={`menu-item menu-storage-btn ${storageMode === 'server' ? 'active' : ''}`}
                       onClick={() => setStorageMode('server')}
                     >
-                      🖥️ 서버
+                      서버
                     </button>
                   </div>
                 </div>
+
                 <button
                   onClick={() => {
                     saveLayout();
@@ -253,10 +243,13 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                   }}
                   className="menu-item"
                 >
-                  {layoutSaveMessage ?? '레이아웃 저장'}
+                  레이아웃 저장
                 </button>
+
                 <div className="menu-layout-list">
-                  <div className="menu-section-title">저장된 레이아웃 {storageMode === 'local' ? '(로컬)' : '(서버)'}</div>
+                  <div className="menu-section-title">
+                    저장된 레이아웃 {storageMode === 'local' ? '(로컬)' : '(서버)'}
+                  </div>
                   {layoutSlots.length > 0 ? (
                     layoutSlots.map((slot) => (
                       <div
@@ -292,73 +285,81 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                   {layoutRestoreMessage && (
                     <div className="menu-layout-message">{layoutRestoreMessage}</div>
                   )}
+                  {layoutSaveMessage && (
+                    <div className="menu-layout-message">{layoutSaveMessage}</div>
+                  )}
                 </div>
+
                 <div className="menu-divider" />
+
                 <div className="menu-accordion">
                   <button
                     className={`menu-accordion-header ${widgetAddOpen ? 'open' : ''}`}
                     onClick={() => setWidgetAddOpen(!widgetAddOpen)}
                   >
                     <span>위젯 추가</span>
-                    <span className="menu-accordion-icon">{widgetAddOpen ? '▲' : '▼'}</span>
+                    <span className="menu-accordion-icon">{widgetAddOpen ? '▾' : '▸'}</span>
                   </button>
                   {widgetAddOpen && (
                     <div className="menu-accordion-content">
                       <button className="menu-item" onClick={() => handleAddWidget('markdown')}>
-                        📝 New Memo
+                        메모
                       </button>
                       <button className="menu-item" onClick={() => handleAddWidget('timeseries')}>
-                        📊 Time Series
+                        시계열
                       </button>
                       <button className="menu-item" onClick={() => handleAddWidget('kpi')}>
-                        📈 KPI
+                        KPI
                       </button>
                       <button className="menu-item" onClick={() => handleAddWidget('spot')}>
-                        🌡️ SPOT Temp
+                        SPOT 온도
                       </button>
                       <button className="menu-item" onClick={() => handleAddWidget('camera')}>
-                        📷 SPOT Camera
+                        SPOT 카메라
                       </button>
                       <button className="menu-item" onClick={() => handleAddWidget('temps')}>
-                        🔥 Temps
+                        보조 온도
                       </button>
                       <button className="menu-item" onClick={() => handleAddWidget('molds')}>
-                        🧊 Molds
+                        금형
                       </button>
                       <button className="menu-item" onClick={() => handleAddWidget('env')}>
-                        🌍 Env
+                        환경
                       </button>
                     </div>
                   )}
                 </div>
+
                 <div className="menu-divider" />
+
                 <div className="menu-accordion">
                   <button
                     className={`menu-accordion-header ${presetOpen ? 'open' : ''}`}
                     onClick={() => setPresetOpen(!presetOpen)}
                   >
                     <span>화면 비율 프리셋</span>
-                    <span className="menu-accordion-icon">{presetOpen ? '▲' : '▼'}</span>
+                    <span className="menu-accordion-icon">{presetOpen ? '▾' : '▸'}</span>
                   </button>
                   {presetOpen && (
                     <div className="menu-accordion-content">
                       <button className="menu-item" onClick={() => applyPreset('16:9')}>
-                        📺 16:9 일반
+                        16:9 일반
                       </button>
                       <button className="menu-item" onClick={() => applyPreset('21:9')}>
-                        🖥️ 21:9 울트라와이드
+                        21:9 와이드
                       </button>
                       <button className="menu-item" onClick={() => applyPreset('4:3')}>
-                        📟 4:3 클래식
+                        4:3 클래식
                       </button>
                       <button className="menu-item" onClick={() => applyPreset('compact')}>
-                        📱 컴팩트
+                        컴팩트
                       </button>
                     </div>
                   )}
                 </div>
               </>
             ) : null}
+
             <div className="menu-divider" />
             <button
               className="menu-item"
@@ -366,25 +367,32 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             >
               설정
             </button>
+
             {layoutEditing && layoutSaveError && (
               <div className="menu-error">
                 <span>{layoutSaveError}</span>
                 <button onClick={saveLayout} className="retry-button">
-                  재시도
+                  다시 시도
                 </button>
               </div>
             )}
+
             {layoutEditing && layoutRestoreError && (
               <div className="menu-error">
                 <span>{layoutRestoreError}</span>
                 <button onClick={() => restoreLayout()} className="retry-button">
-                  재시도
+                  다시 시도
                 </button>
               </div>
             )}
 
             <div style={{ margin: '8px 0', borderBottom: '1px solid var(--border-muted)' }} />
-            <div className="menu-section-title" style={{ padding: '4px 12px', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>테마 설정</div>
+            <div
+              className="menu-section-title"
+              style={{ padding: '4px 12px', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}
+            >
+              테마 설정
+            </div>
             <div style={{ padding: '0 12px 12px 12px', display: 'flex', gap: '8px' }}>
               <button
                 className={`custom-modal-btn ${themeMode === 'light' ? 'confirm' : 'cancel'}`}

@@ -22,9 +22,105 @@ _img_last_error = 0.0
 _img_failure_count = 0
 _img_cache_state = "empty"
 _img_last_cache_log_at = 0.0
+_img_last_error_code: Optional[str] = None
+_img_last_error_message: Optional[str] = None
 
 # Async HTTP client (reused for connection pooling)
 _http_client: Optional[httpx.AsyncClient] = None
+
+
+class SpotImageConfigError(ValueError):
+    def __init__(self, image_url: str) -> None:
+        super().__init__("SPOT_IMAGE_URL is not configured")
+        self.image_url = image_url
+
+
+class SpotImageFetchError(RuntimeError):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        image_url: str,
+        upstream_status: Optional[int],
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.image_url = image_url
+        self.upstream_status = upstream_status
+
+
+def _resolve_spot_image_url() -> str:
+    image_url = str(config.SPOT_IMAGE_URL or "").strip()
+    if not image_url:
+        raise SpotImageConfigError(image_url)
+    return image_url
+
+
+async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+    try:
+        response = await client.get(image_url)
+        response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise SpotImageFetchError(
+            "upstream-timeout",
+            "SPOT image upstream timed out",
+            image_url=image_url,
+            upstream_status=None,
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise SpotImageFetchError(
+            "upstream-http-error",
+            f"SPOT image upstream returned HTTP {exc.response.status_code}",
+            image_url=image_url,
+            upstream_status=exc.response.status_code,
+        ) from exc
+    except httpx.RequestError as exc:
+        raise SpotImageFetchError(
+            "upstream-request-error",
+            f"SPOT image upstream request failed: {exc}",
+            image_url=image_url,
+            upstream_status=None,
+        ) from exc
+
+    data = response.content
+    if not data:
+        raise SpotImageFetchError(
+            "empty-body",
+            "SPOT image upstream returned an empty body",
+            image_url=image_url,
+            upstream_status=response.status_code,
+        )
+    return data
+
+
+def _record_image_error(code: str, message: str) -> None:
+    global _img_last_error
+    global _img_last_error_code
+    global _img_last_error_message
+
+    _img_last_error = time.time()
+    _img_last_error_code = code
+    _img_last_error_message = message
+
+
+def _record_image_success() -> None:
+    global _img_last_error_code
+    global _img_last_error_message
+
+    _img_last_error_code = None
+    _img_last_error_message = None
+
+
+def get_image_proxy_diagnostics() -> Dict[str, Any]:
+    return {
+        "cache_state": str(_img_cache_state),
+        "failure_count": int(_img_failure_count),
+        "last_error_at": float(_img_last_error) if _img_last_error else None,
+        "last_error_code": _img_last_error_code,
+        "last_error_message": _img_last_error_message,
+        "image_url_configured": bool(str(config.SPOT_IMAGE_URL or "").strip()),
+    }
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -97,8 +193,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         return _img_cache["data"], _build_image_meta(now, status, next_cache_state)
     
     # 캐시가 비어있으면 한번 직접 fetch 시도 (초기 로드용)
-    if not config.SPOT_IMAGE_URL:
-        raise ValueError("SPOT_IMAGE_URL is not configured")
+    image_url = _resolve_spot_image_url()
     
     async with _img_fetch_lock:
         # Double-check after lock
@@ -112,19 +207,15 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         
         client = _get_http_client()
         try:
-            response = await client.get(config.SPOT_IMAGE_URL)
-            response.raise_for_status()
-            data = response.content
-            if not data:
-                raise RuntimeError("Empty SPOT image response")
-            
-            _img_cache["data"] = data
-            _img_cache["time"] = time.time()
-            _img_cache_state = "upstream"
-            return data, _build_image_meta(time.time(), "ok", "upstream")
-        except Exception as exc:
-            # First fetch failure is expected if camera is offline
-            raise RuntimeError(f"SPOT image fetch failed: {exc}") from exc
+            data = await _request_spot_image(client, image_url)
+        except SpotImageFetchError as exc:
+            _record_image_error(exc.code, str(exc))
+            raise
+        _img_cache["data"] = data
+        _img_cache["time"] = time.time()
+        _img_cache_state = "upstream"
+        _record_image_success()
+        return data, _build_image_meta(time.time(), "ok", "upstream")
 
 
 # --- 백그라운드 프리페칭 ---
@@ -147,9 +238,8 @@ async def _prefetch_loop():
         try:
             if config.SPOT_IMAGE_URL:
                 client = _get_http_client()
-                response = await client.get(config.SPOT_IMAGE_URL)
-                response.raise_for_status()
-                data = response.content
+                image_url = _resolve_spot_image_url()
+                data = await _request_spot_image(client, image_url)
 
                 if data:
                     _img_cache["data"] = data
@@ -158,6 +248,7 @@ async def _prefetch_loop():
                     if _img_failure_count > 0:
                         logger.info("Spot image fetch recovered after %s failures", _img_failure_count)
                     _img_failure_count = 0
+                    _record_image_success()
 
                 if config.SPOT_URL:
                     try:
@@ -174,22 +265,46 @@ async def _prefetch_loop():
                     
         except asyncio.CancelledError:
             break
-        except Exception as e:
-            _img_last_error = time.time()
+        except SpotImageConfigError as exc:
+            _record_image_error("config-missing", str(exc))
+            _img_failure_count = min(_img_failure_count + 1, 10)
+            logger.warning(
+                "Spot image fetch misconfigured: error=%s failure_count=%s",
+                str(exc),
+                _img_failure_count,
+            )
+            await asyncio.sleep(max(interval, 1.0))
+            next_tick = time.time()
+        except SpotImageFetchError as exc:
+            _record_image_error(exc.code, str(exc))
             _img_failure_count = min(_img_failure_count + 1, 10)
             backoff = _current_backoff_sec()
             if _img_failure_count == 1 or _img_failure_count >= 6:
-                 logger.warning(
-                     "Spot image fetch failed: error=%s failure_count=%s next_backoff_sec=%.1f",
-                     str(e),
-                     _img_failure_count,
-                     backoff,
-                 )
+                logger.warning(
+                    "Spot image fetch failed: code=%s error=%s failure_count=%s next_backoff_sec=%.1f",
+                    exc.code,
+                    str(exc),
+                    _img_failure_count,
+                    backoff,
+                )
             
-            # 실패 시 백오프 적용
             if backoff > 0:
                 await asyncio.sleep(backoff)
-                next_tick = time.time() # Reset tick after backoff recovery
+                next_tick = time.time()
+        except Exception as exc:
+            _record_image_error("unknown", str(exc))
+            _img_failure_count = min(_img_failure_count + 1, 10)
+            backoff = _current_backoff_sec()
+            logger.warning(
+                "Spot image fetch failed: code=%s error=%s failure_count=%s next_backoff_sec=%.1f",
+                "unknown",
+                str(exc),
+                _img_failure_count,
+                backoff,
+            )
+            if backoff > 0:
+                await asyncio.sleep(backoff)
+                next_tick = time.time()
         
         # 드리프트 방지: 다음 실행 시간 계산
         next_tick += interval

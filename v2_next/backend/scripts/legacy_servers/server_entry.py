@@ -2,9 +2,11 @@ import sys
 import os
 import asyncio
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 import time
 import traceback
+import uuid
 
 # --- EARLY LOGGING REDIRECTION ---
 # Define EarlyLogger BEFORE using it
@@ -40,7 +42,14 @@ if getattr(sys, 'frozen', False):
     sys.stdout = EarlyLogger(STDOUT_PATH)
     sys.stderr = EarlyLogger(STDERR_PATH)
 
-print(f"\n--- SESSION START ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---")
+SESSION_ID = uuid.uuid4().hex[:12]
+SESSION_STARTED_AT = datetime.now(timezone.utc).isoformat(timespec="seconds")
+SESSION_PID = os.getpid()
+
+print(
+    f"\n--- SESSION START ({time.strftime('%Y-%m-%d %H:%M:%S')}) "
+    f"session={SESSION_ID} pid={SESSION_PID} started_at={SESSION_STARTED_AT} ---"
+)
 print(f"DEBUG: sys.executable: {sys.executable}")
 print(f"DEBUG: sys.path at startup: {sys.path}")
 
@@ -234,12 +243,16 @@ def open_browser(icon=None, item=None):
         print(f"Failed to open browser: {e}")
 
 def quit_app(icon, item):
+    print(f"[Launcher] Quit requested session={SESSION_ID} pid={SESSION_PID} started_at={SESSION_STARTED_AT}")
     icon.stop()
     os._exit(0)
 
 def run_server():
     try:
-        print(f"[Server] Starting Uvicorn on {config.BACKEND_PORT}...")
+        print(
+            f"[Server] Starting Uvicorn on {config.BACKEND_PORT} "
+            f"session={SESSION_ID} pid={SESSION_PID} started_at={SESSION_STARTED_AT}"
+        )
         uvicorn.run(
             app,
             host="0.0.0.0",
@@ -249,7 +262,10 @@ def run_server():
             access_log=False,
         )
     except Exception as e:
-        print(f"[Server] CRASHED: {e}")
+        print(
+            f"[Server] CRASHED: {e} "
+            f"session={SESSION_ID} pid={SESSION_PID} started_at={SESSION_STARTED_AT}"
+        )
         traceback.print_exc()
 
 if __name__ == "__main__":
@@ -311,7 +327,10 @@ if __name__ == "__main__":
             server_thread.join()
 
     except Exception as e:
-        print(f"[Launcher] Main Loop Crash: {e}")
+        print(
+            f"[Launcher] Main Loop Crash: {e} "
+            f"session={SESSION_ID} pid={SESSION_PID} started_at={SESSION_STARTED_AT}"
+        )
         traceback.print_exc()
         # Ensure we log before dying
         sys.stderr.flush()

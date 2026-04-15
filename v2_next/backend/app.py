@@ -2366,10 +2366,71 @@ async def proxy_spot_image():
             headers["X-Spot-Image-Source"] = str(meta["source"])
         observability_service.record_spot_proxy_result(200, float(age_sec) if age_sec is not None else None, is_stale)
         return Response(content=data, media_type="image/jpeg", headers=headers)
-    except ValueError as e:
-         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch upstream image: {e}")
+    except spot_control.SpotImageConfigError as exc:
+        diagnostics = spot_control.get_image_proxy_diagnostics()
+        observability_service.record_error(
+            "spot_proxy",
+            "SPOT image proxy misconfigured",
+            detail=str({
+                "code": "config-missing",
+                "message": str(exc),
+                "diagnostics": diagnostics,
+            }),
+            path="/api/spot/proxy_image",
+            level="warning",
+        )
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "config-missing",
+                "message": "SPOT 이미지 URL이 설정되지 않았습니다.",
+                "diagnostics": diagnostics,
+            },
+        ) from exc
+    except spot_control.SpotImageFetchError as exc:
+        diagnostics = spot_control.get_image_proxy_diagnostics()
+        observability_service.record_error(
+            "spot_proxy",
+            "SPOT image proxy upstream failure",
+            detail=str({
+                "code": exc.code,
+                "message": str(exc),
+                "upstream_status": exc.upstream_status,
+                "image_url": exc.image_url,
+                "diagnostics": diagnostics,
+            }),
+            path="/api/spot/proxy_image",
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": exc.code,
+                "message": "SPOT 이미지 상위 서버 요청에 실패했습니다.",
+                "upstream_status": exc.upstream_status,
+                "image_url": exc.image_url,
+                "diagnostics": diagnostics,
+            },
+        ) from exc
+    except Exception as exc:
+        diagnostics = spot_control.get_image_proxy_diagnostics()
+        observability_service.record_error(
+            "spot_proxy",
+            "SPOT image proxy unexpected failure",
+            detail=str({
+                "code": "unknown",
+                "message": str(exc),
+                "diagnostics": diagnostics,
+            }),
+            path="/api/spot/proxy_image",
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "unknown",
+                "message": "SPOT 이미지 프록시 처리 중 알 수 없는 오류가 발생했습니다.",
+                "diagnostics": diagnostics,
+            },
+        ) from exc
 
 
 # --- Frontend Status Logging ---

@@ -1,8 +1,8 @@
 /**
- * 통신 상태 뱃지 & 카메라 상태 유틸리티
+ * 통신 상태 배지와 카메라 상태 유틸리티
  */
 import type { CommChannelMetrics, CommSpotMetrics, SpotConfig } from '../types';
-import { formatTimeFromSec, formatAgeSec, formatOptionalSeconds } from './formatters';
+import { formatAgeSec, formatOptionalSeconds, formatTimeFromSec } from './formatters';
 
 export type CommBadge = {
   key: string;
@@ -19,6 +19,7 @@ export const buildCommBadge = (
   if (!metrics) {
     return { key, text: `${key} --`, title: `${key}: no data`, state: 'idle' };
   }
+
   const connected = Boolean(metrics.connected);
   const failures = (metrics.connect_failures ?? 0) + (metrics.read_failures ?? 0);
   const hasError = Boolean(metrics.last_error_time || failures > 0);
@@ -35,14 +36,15 @@ export const buildCommBadge = (
     `실패 ${failures}`,
     `백오프 ${backoff}s`,
     `마지막 오류 ${formatTimeFromSec(metrics.last_error_time)}`,
-    `오류 후 경과 ${formatAgeSec(metrics.last_error_time ?? null, nowMs ?? null)}`,
-    `복구횟수 ${recoveryCount}`,
+    `오류 경과 ${formatAgeSec(metrics.last_error_time ?? null, nowMs ?? null)}`,
+    `복구 횟수 ${recoveryCount}`,
     `다운타임 ${formatOptionalSeconds(currentDowntime)} / 누적 ${formatOptionalSeconds(totalDowntime)}`,
     `최근 끊김 ${formatTimeFromSec(lastDisconnect)}`,
     `최근 복구 ${formatTimeFromSec(lastRecoveryAt)}`,
   ];
+
   if (metrics.last_recovery_sec !== null && metrics.last_recovery_sec !== undefined) {
-    titleParts.push(`복구시간 ${Math.round(metrics.last_recovery_sec)}s`);
+    titleParts.push(`복구 시간 ${Math.round(metrics.last_recovery_sec)}s`);
   }
   if (mergeState) {
     titleParts.push(mergeState);
@@ -50,6 +52,7 @@ export const buildCommBadge = (
   if (metrics.last_error) {
     titleParts.push(`메시지 ${metrics.last_error}`);
   }
+
   return {
     key,
     text: `${key} ${connected ? 'OK' : 'DOWN'}`,
@@ -67,6 +70,7 @@ export const buildSpotCommBadge = (
   if (!metrics) {
     return { key, text: `${key} --`, title: `${key}: no data`, state: 'idle' };
   }
+
   const lastSuccess = metrics.last_success_time ?? null;
   const lastError = metrics.last_error_time ?? null;
   const readFailures = metrics.read_failures ?? 0;
@@ -74,6 +78,7 @@ export const buildSpotCommBadge = (
   const staleMs = Math.max(5000, Math.round((refreshMs ?? 1000) * 3));
   let state: CommBadge['state'] = 'idle';
   let label = 'IDLE';
+
   if (lastSuccess && ageMs !== null && ageMs <= staleMs) {
     state = 'ok';
     label = 'OK';
@@ -87,13 +92,15 @@ export const buildSpotCommBadge = (
     state = 'warn';
     label = 'WAIT';
   }
+
   const titleParts = [
     `${key} ${label}`,
     `최근 성공 ${formatTimeFromSec(lastSuccess)}`,
     `최근 오류 ${formatTimeFromSec(lastError)}`,
-    `오류 후 경과 ${formatAgeSec(lastError, nowMs ?? null)}`,
+    `오류 경과 ${formatAgeSec(lastError, nowMs ?? null)}`,
     `실패 ${readFailures}`,
   ];
+
   return {
     key,
     text: `${key} ${label}`,
@@ -113,21 +120,30 @@ export const getCameraStatus = (params: {
   if (!spotConfig) {
     return null;
   }
+
   const refreshMs = Math.max(500, Math.round(spotConfig.refresh_interval * 1000));
   const now = Date.now();
   const delayMs = spotLastSuccessAt ? now - spotLastSuccessAt : null;
 
   if (spotImageError) {
-    return { type: 'error', title: spotImageError, detail: '' };
+    return { type: 'error' as const, title: spotImageError, detail: '' };
   }
   if (!spotImageUrl || spotImageLoading || spotLastSuccessAt === null) {
-    return { type: 'loading', title: '카메라 연결 중', detail: '' };
+    return { type: 'loading' as const, title: '카메라 연결 중', detail: '' };
   }
   if (delayMs !== null && delayMs > refreshMs * 5) {
-    return { type: 'danger', title: '이미지 수신 지연', detail: `지연 ${Math.round(delayMs / 1000)}초` };
+    return {
+      type: 'danger' as const,
+      title: '오래된 이미지 제공 중',
+      detail: `지연 ${Math.round(delayMs / 1000)}초`,
+    };
   }
   if (delayMs !== null && delayMs > refreshMs * 4) {
-    return { type: 'warn', title: '이미지 지연 감지', detail: `지연 ${Math.round(delayMs / 1000)}초` };
+    return {
+      type: 'warn' as const,
+      title: '이미지 수신 지연',
+      detail: `지연 ${Math.round(delayMs / 1000)}초`,
+    };
   }
   return null;
 };

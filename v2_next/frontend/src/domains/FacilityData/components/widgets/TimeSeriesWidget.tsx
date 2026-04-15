@@ -5,8 +5,8 @@
 import React, { useMemo, useRef, useState } from 'react';
 import uPlot from 'uplot';
 import { UIContext } from '../../context/UIContext';
+import { DataContext } from '../../context/DataContext';
 import { SnapshotContext } from '../../context/SnapshotContext';
-import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useTheme } from '../../../../shared/hooks/useThemeContext';
 import { TIME_SERIES_CATALOG, SERIES_COLORS } from '../../timeseries/seriesCatalog';
 import { THRESHOLD_LABELS } from '../../../../shared/utils/thresholds';
@@ -30,11 +30,12 @@ const AIChatbot = React.lazy(() => import('../../../../AI/components/AIChatbot')
   };
 
 export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
-  const factoryData = useDashboardStore(state => state.data);
-  const timeSeriesFrames = useDashboardStore(state => state.timeSeriesFrames);
-  const timeSeriesAllFrame = useDashboardStore(state => state.timeSeriesAllFrame);
-  const intervalSec = useDashboardStore(state => state.intervalSec);
-  const thresholds = useDashboardStore(state => state.thresholds);
+  const {
+    data: factoryData,
+    intervalSec,
+    thresholds,
+    timeSeriesAllFrame,
+  } = React.useContext(DataContext);
 
   const {
     seriesWindowMin,
@@ -304,7 +305,7 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
     };
   }, [showThresholds, thresholds, mode]);
 
-  if (!timeSeriesFrames) return <div style={{ color: 'white', padding: '16px' }}>Loading data...</div>;
+  if (!timeSeriesAllFrame) return <div style={{ color: 'white', padding: '16px' }}>Loading data...</div>;
 
   return (
     <div className="card timeseries-card" style={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>

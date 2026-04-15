@@ -344,17 +344,17 @@ export function useSettingsModalState(opts: SettingsModalStateOptions) {
         ],
       },
       {
-        title: 'SPOT 요약',
+        title: '저장 요약',
         items: [
-          `IP: ${settingsForm.spotIp || '-'}`,
-          `Refresh: ${settingsForm.spotRefreshInterval || '-'} sec`,
+          `로그: ${settingsForm.logPath || '-'}`,
+          `스냅샷: ${settingsForm.snapshotPath || '-'}`,
         ],
       },
       {
-        title: '저장 요약',
+        title: 'SPOT 요약',
         items: [
-          `Log: ${settingsForm.logPath || '-'}`,
-          `Snapshot: ${settingsForm.snapshotPath || '-'}`,
+          `IP: ${settingsForm.spotIp || '-'}`,
+          `새로고침: ${settingsForm.spotRefreshInterval || '-'}초`,
         ],
       },
       {

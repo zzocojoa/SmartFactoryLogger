@@ -1,5 +1,5 @@
 import { SeriesSample } from './seriesSampling';
-import { capSeriesSamples, pruneSeriesSamples } from './seriesBuffer.service';
+import { trimSeriesSamples } from './seriesBuffer.service';
 
 export class SeriesBuffer {
   private samples: SeriesSample[] = [];
@@ -13,18 +13,21 @@ export class SeriesBuffer {
 
   setWindowMs(windowMs: number) {
     this.windowMs = windowMs;
-    this.prune(Date.now());
+    this.samples = trimSeriesSamples(this.samples, Date.now(), this.windowMs, this.maxPoints);
   }
 
   setMaxPoints(maxPoints?: number) {
     this.maxPoints = maxPoints;
-    this.samples = capSeriesSamples(this.samples, this.maxPoints);
+    this.samples = trimSeriesSamples(this.samples, Date.now(), this.windowMs, this.maxPoints);
   }
 
   append(sample: SeriesSample) {
-    this.samples.push(sample);
-    this.prune(sample.timestampMs);
-    this.samples = capSeriesSamples(this.samples, this.maxPoints);
+    this.samples = trimSeriesSamples(
+      [...this.samples, sample],
+      sample.timestampMs,
+      this.windowMs,
+      this.maxPoints,
+    );
   }
 
   getSamples() {
@@ -41,9 +44,5 @@ export class SeriesBuffer {
 
   clear() {
     this.samples = [];
-  }
-
-  private prune(nowMs: number) {
-    this.samples = pruneSeriesSamples(this.samples, nowMs, this.windowMs);
   }
 }

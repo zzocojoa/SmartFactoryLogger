@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { configService } from '../api/configService';
 import {
   ConfigSnapshot,
@@ -25,7 +25,10 @@ import {
   useConfigAutoRefreshEffect,
   useConfigInfoAutoDismissEffect,
 } from './useConfigViewModelEffects';
-import type { UseConfigViewModel } from './useConfigViewModel.types';
+import type {
+  SaveSettingsOptions,
+  UseConfigViewModel,
+} from './useConfigViewModel.types';
 
 export const useConfigViewModel = (): UseConfigViewModel => {
   const modal = useModal();
@@ -186,6 +189,17 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     [buildSettingsFormFromSnapshot]
   );
 
+  const applySettingsSnapshotRef = useRef(applySettingsSnapshot);
+  const buildSettingsFingerprintRef = useRef(buildSettingsFingerprint);
+
+  useEffect(() => {
+    applySettingsSnapshotRef.current = applySettingsSnapshot;
+  }, [applySettingsSnapshot]);
+
+  useEffect(() => {
+    buildSettingsFingerprintRef.current = buildSettingsFingerprint;
+  }, [buildSettingsFingerprint]);
+
   // --- Actions ---
 
   const fetchCentralStatus = useCallback(async () => {
@@ -210,19 +224,21 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     // For now, we skip clearing path health here as it is not strictly config data.
     try {
       const data = await configService.getConfig();
-      applySettingsSnapshot(data);
-      const fingerprint = buildSettingsFingerprint(data);
+      applySettingsSnapshotRef.current(data);
+      const fingerprint = buildSettingsFingerprintRef.current(data);
       settingsFingerprintRef.current = fingerprint;
       settingsExternalNotifyRef.current = null;
+      return true;
       setExternalConfigPending(null);
       setExternalConfigPendingAt(null);
     } catch (error) {
       console.error('Config load failed', error);
       setSettingsError('???깆젧???釉띾쐞???? 嶺뚮쪇沅?쭛???鍮??');
+      return false;
     } finally {
       setSettingsLoading(false);
     }
-  }, [applySettingsSnapshot, buildSettingsFingerprint]);
+  }, []);
 
   const updateSettingsField = useCallback((field: keyof SettingsFormState, value: string | boolean) => {
     setSettingsForm((prev) => {
@@ -298,28 +314,62 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     return thresholdConfig;
   }, [settingsOpen, settingsForm, thresholdConfig]);
 
-  const handleSaveSettings = async (options?: { auto?: boolean }) => {
+  const handleSaveSettings = async (options?: SaveSettingsOptions): Promise<boolean> => {
     const isAuto = options?.auto;
+    const trimmedCurrentPassword = options?.security?.currentPassword.trim() ?? '';
+    const trimmedPasswordConfirm = options?.security?.passwordConfirm.trim() ?? '';
     if (!settingsForm) {
-      return;
+      return false;
     }
-    if (configWritable === false) { // configReadOnly
-      if (!isAuto) setSettingsError('???깆젧 ???逾????袁ⓥ뵛 ?熬곣뫗????낅퉵?? ??㉱?洹먮봿??雅?굝??뇡????裕????逾????㏃뎽???筌먦끉逾??琉얠돪??');
-      return;
+    if (configWritable === false) {
+      if (!isAuto) setSettingsError('설정 파일이 읽기 전용입니다.');
+      return false;
     }
     if (hasValidationError) {
-      if (!isAuto) setSettingsError('???놁졑???筌먦끇六???筌먦끉逾??琉얠돪??');
-      return;
+      if (!isAuto) setSettingsError('입력값을 확인하세요.');
+      return false;
     }
     if (!overrideEnabled && hasSettingsChanges) {
-      if (!isAuto) setSettingsError('?β돦裕뉛쭚????댁뮅??源녿턄??? ?????繹먮봿???琉우꽑 ???繞③뇡?????怨룸????덈펲.');
-      return;
+      if (!isAuto) setSettingsError('저장하려면 오버라이드를 켜야 합니다.');
+      return false;
     }
     if (!hasSettingsChanges && !settingsRestartRequired) {
-      if (!isAuto) setSettingsInfo('?곌떠??????????怨룸????덈펲.');
-      return;
+      if (!isAuto) setSettingsInfo('변경된 내용이 없습니다.');
+      return false;
     }
     
+    const nextPassword = settingsForm.password.trim();
+    const hasPasswordChange = nextPassword.length > 0;
+    const requiresCurrentPassword = settingsForm.passwordSet && hasPasswordChange;
+    const hasPasswordConfirmMismatch =
+      hasPasswordChange && trimmedPasswordConfirm !== nextPassword;
+
+    if (hasPasswordConfirmMismatch) {
+      if (!isAuto) {
+        setSettingsError('새 비밀번호와 확인 비밀번호가 일치하지 않습니다.');
+      }
+      return false;
+    }
+
+    if (requiresCurrentPassword && trimmedCurrentPassword.length === 0) {
+      if (!isAuto) {
+        setSettingsError('기존 비밀번호를 변경하려면 현재 비밀번호를 입력해야 합니다.');
+      }
+      return false;
+    }
+
+    if (requiresCurrentPassword) {
+      try {
+        await configService.verifyPassword(trimmedCurrentPassword);
+      } catch (error: unknown) {
+        if (!isAuto) {
+          const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+          setSettingsError(detail || '현재 비밀번호가 일치하지 않습니다.');
+        }
+        return false;
+      }
+    }
+
     // NOTE: Path health check dependency should be injected or handled via a callback if needed. 
     // For now we assume the consumer handles path checks or we skip strictly checking it inside the hook 
     // unless we pass pathHealth into the hook. 
@@ -414,6 +464,11 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       const nextMeta = data?.meta ?? null;
       const pendingCount = applyInfo?.pending?.length ?? 0;
       const appliedCount = applyInfo?.applied?.length ?? 0;
+      const saveMessage = pendingCount > 0
+        ? `설정이 저장되었지만 즉시 적용되지 않은 항목이 ${pendingCount}건 있습니다.`
+        : appliedCount > 0
+          ? '설정이 저장되고 즉시 적용되었습니다.'
+          : '설정이 저장되었습니다.';
       
       const message = pendingCount > 0
           ? `???깆젧 ?????熬곣뫁?? ??????熬곣뫗??????${pendingCount}濾?`
@@ -422,7 +477,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
             : '???깆젧 ?????熬곣뫁??';
       
       if (!isAuto) {
-           setSettingsInfo(message);
+           setSettingsInfo(saveMessage);
       }
       
       setSettingsRestartRequired(Boolean(data?.restart_required));
@@ -442,7 +497,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       updateSettingsField('mesPassword', '');
       
       if (!isAuto) {
-        showSettingsToast(message, pendingCount > 0 ? 'warn' : 'ok');
+        showSettingsToast(saveMessage, pendingCount > 0 ? 'warn' : 'ok');
       }
 
       setExternalConfigPending(null);
@@ -458,6 +513,11 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       settingsExternalNotifyRef.current = null;
     } catch (error) {
       console.error('Config save failed', error);
+      if (!isAuto) {
+        setSettingsError('설정을 저장하지 못했습니다.');
+        showSettingsToast('설정 저장에 실패했습니다.', 'error');
+      }
+      return false;
       if (!isAuto) {
         setSettingsError('???깆젧 ????쒑굢????덉넮???곕????덈펲.');
         showSettingsToast('???깆젧 ???????덉넮', 'error');

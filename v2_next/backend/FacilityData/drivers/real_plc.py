@@ -94,6 +94,9 @@ class RealPLCDriver(BasePLCDriver):
         self._spot_snapshot: Optional[float] = None
         self._spot_snapshot_at: Optional[float] = None
         self._spot_snapshot_error: Optional[str] = None
+        self._connected_state = False
+        self._connected_failure_count = 0
+        self._connected_recovery_count = 0
 
     def _backoff_ext(self):
         self.ext_next_retry = time.time() + self.ext_retry_interval
@@ -188,6 +191,9 @@ class RealPLCDriver(BasePLCDriver):
         ok_ext = self._connect_extruder()
         ok_ls = self._connect_ls()
         self.connected = ok_ext or ok_ls
+        self._connected_state = self.connected
+        self._connected_failure_count = 0
+        self._connected_recovery_count = 0
         self._start_workers()
         return self.connected
 
@@ -206,6 +212,9 @@ class RealPLCDriver(BasePLCDriver):
                 pass
             self.sock_ls = None
         self.connected = False
+        self._connected_state = False
+        self._connected_failure_count = 0
+        self._connected_recovery_count = 0
 
     def _connect_extruder(self) -> bool:
         now = time.time()
@@ -294,12 +303,15 @@ class RealPLCDriver(BasePLCDriver):
             except Exception:
                 pass
         self.connected = False
+        self._connected_state = False
+        self._connected_failure_count = 0
+        self._connected_recovery_count = 0
         print("[RealDriver] All Connections Closed.")
 
     def read_data(self) -> FactoryData:
         ext_data, ls_data, spot_val = self._read_cached_snapshot()
 
-        self.connected = bool(self.sock_ext or self.sock_ls)
+        self.connected = self._update_connected_state(time.time())
 
         now = datetime.now()
 
@@ -402,6 +414,48 @@ class RealPLCDriver(BasePLCDriver):
         if spot_val is not None:
             self.last_spot = spot_val
         return ext_data, ls_data, spot_val if spot_val is not None else self.last_spot
+
+    def _connected_grace_sec(self) -> float:
+        poll_interval_sec = self._connector_poll_interval_sec()
+        timeout_sec = max(self.ext_timeout, self.ls_timeout, 1.0)
+        return max(poll_interval_sec * 3.0, timeout_sec * 2.0)
+
+    def _has_recent_snapshot(self, snapshot_at: Optional[float], now: float, grace_sec: float) -> bool:
+        if snapshot_at is None:
+            return False
+        return max(0.0, now - snapshot_at) <= grace_sec
+
+    def _compute_connected(self, now: float) -> bool:
+        if self.sock_ext is not None or self.sock_ls is not None:
+            return True
+        with self._snapshot_lock:
+            ext_snapshot_at = self._ext_snapshot_at
+            ls_snapshot_at = self._ls_snapshot_at
+        grace_sec = self._connected_grace_sec()
+        return self._has_recent_snapshot(ext_snapshot_at, now, grace_sec) or self._has_recent_snapshot(ls_snapshot_at, now, grace_sec)
+
+    def _update_connected_state(self, now: float) -> bool:
+        candidate_connected = self._compute_connected(now)
+        if candidate_connected:
+            self._connected_failure_count = 0
+            if self._connected_state:
+                self._connected_recovery_count = 0
+                return True
+            self._connected_recovery_count += 1
+            if self._connected_recovery_count >= 2:
+                self._connected_state = True
+                self._connected_recovery_count = 0
+            return self._connected_state
+
+        self._connected_recovery_count = 0
+        if not self._connected_state:
+            self._connected_failure_count = 0
+            return False
+        self._connected_failure_count += 1
+        if self._connected_failure_count >= 2:
+            self._connected_state = False
+            self._connected_failure_count = 0
+        return self._connected_state
 
     def _ext_worker_loop(self) -> None:
         while not self._worker_stop.is_set():

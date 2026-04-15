@@ -19,7 +19,6 @@ export interface UseMetricsViewModel {
   pollingFailureCount: number;
   dashboardLeaderState: DashboardLeaderState | null;
   pollingPausedByVisibility: boolean;
-  timeSeriesFrames: Record<string, SeriesFrame> | null;
   timeSeriesAllFrame: SeriesFrame | null;
   getSeriesSamples: () => SeriesSample[];
   getSeriesStats: () => { count: number; windowMs: number; maxPoints: number | null };

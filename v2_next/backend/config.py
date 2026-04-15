@@ -85,7 +85,7 @@ def _resolve_config_path() -> Optional[Path]:
 
     standard_dir = _get_user_data_dir()
     standard_path = standard_dir / "config.ini"
-    if standard_path.is_file():
+    if _safe_is_file(standard_path):
         return standard_path
 
     here = Path(__file__).resolve()
@@ -96,7 +96,7 @@ def _resolve_config_path() -> Optional[Path]:
         here.parents[1] / "config" / "config.ini",
         here.parents[2] / "config" / "config.ini",
     ]
-    legacy_path = next((candidate for candidate in candidates if candidate.is_file()), None)
+    legacy_path = next((candidate for candidate in candidates if _safe_is_file(candidate)), None)
     if legacy_path:
         try:
             standard_dir.mkdir(parents=True, exist_ok=True)
@@ -116,13 +116,13 @@ def _resolve_config_path() -> Optional[Path]:
 def _load_config(path: Optional[Path]) -> tuple[configparser.ConfigParser, Optional[str]]:
     parser = configparser.ConfigParser()
     parser.optionxform = str
-    if not path or not path.is_file():
+    if not _safe_is_file(path):
         return parser, None
 
     for enc in ("utf-8-sig", "utf-8", "cp949", "euc-kr"):
         try:
             text = path.read_text(encoding=enc)
-        except UnicodeDecodeError:
+        except (OSError, UnicodeDecodeError):
             continue
         parser.read_string(text)
         return parser, enc
@@ -182,6 +182,10 @@ def _env_float(name: str, fallback: float) -> float:
     val = os.getenv(name)
     if val is None:
         return fallback
+    try:
+        return float(val)
+    except ValueError:
+        return fallback
 
 
 def _get_bool(parser: configparser.ConfigParser, section: str, option: str, fallback: bool) -> bool:
@@ -216,6 +220,15 @@ def _ensure_writable_dir(path: Path) -> bool:
         Path(tmp_path).unlink(missing_ok=True)
         return True
     except Exception:
+        return False
+
+
+def _safe_is_file(path: Optional[Path]) -> bool:
+    if path is None:
+        return False
+    try:
+        return path.is_file()
+    except OSError:
         return False
 
 
@@ -279,7 +292,7 @@ CONFIG_PATH = _resolve_config_path()
 CONFIG, CONFIG_ENCODING = _load_config(CONFIG_PATH)
 
 # --- Auto-Update config.ini if missing new sections ---
-if CONFIG_PATH and CONFIG_PATH.is_file():
+if _safe_is_file(CONFIG_PATH):
     _updated = False
     
     # MES 섹션 및 개별 키 자동 추가 (기존 config.ini 호환)

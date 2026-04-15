@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { systemService } from '../api/systemService';
 import type {
+  CommLogInfo,
   ConnectionTestState,
   DashboardLeaderState,
   FrontendErrorEntry,
@@ -11,7 +12,12 @@ import type {
   StatsSnapshot,
 } from '../../../shared/types';
 import { buildPathHealthFallback } from './useSystemViewModel.selectors';
-import { persistExportPath, readPersistedExportPath } from './useSystemViewModel.service';
+import {
+  persistCommLogPath,
+  persistExportPath,
+  readPersistedCommLogPath,
+  readPersistedExportPath,
+} from './useSystemViewModel.service';
 import { useSystemViewModelEffects } from './useSystemViewModelEffects';
 import type { PollingState, UseSystemViewModel } from './useSystemViewModel.types';
 
@@ -32,11 +38,18 @@ export const useSystemViewModel = (): UseSystemViewModel => {
   const [reconnectBusy, setReconnectBusy] = useState(false);
   const [pathCheckBusy, setPathCheckBusy] = useState(false);
   const [lastExportPath, setLastExportPath] = useState<string | null>(() => readPersistedExportPath());
-  const [commLogInfo, setCommLogInfo] = useState<{ path: string | null }>({ path: null });
+  const [commLogInfo, setCommLogInfo] = useState<{ path: string | null }>(() => ({
+    path: readPersistedCommLogPath(),
+  }));
   const [healthPolling, setHealthPolling] = useState<PollingState>(DEFAULT_POLLING_STATE);
   const [statsPolling, setStatsPolling] = useState<PollingState>(DEFAULT_POLLING_STATE);
   const [dashboardLeaderState, setDashboardLeaderState] = useState<DashboardLeaderState | null>(null);
   const [pollingPausedByVisibility, setPollingPausedByVisibility] = useState(false);
+
+  const applyCommLogInfoSnapshot = useCallback((next: CommLogInfo) => {
+    setCommLogInfo(next);
+    persistCommLogPath(next.path ?? null);
+  }, []);
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -98,7 +111,7 @@ export const useSystemViewModel = (): UseSystemViewModel => {
   const runConnectionTest = useCallback(async (payload: Record<string, unknown> = {}) => {
     try {
       const res = await systemService.runConnectionTest(payload);
-      setConnectionTest(res.results);
+      setConnectionTest((prev) => ({ ...prev, ...res.results }));
     } catch (error) {
       console.error('Connection test failed', error);
     }
@@ -189,14 +202,21 @@ export const useSystemViewModel = (): UseSystemViewModel => {
     await systemService.openExportFile();
   }, []);
 
-  const fetchCommLogInfo = useCallback(async () => {
+  const loadCommLogInfo = useCallback(async () => {
     try {
-      const data = await systemService.getCommLogInfo();
-      setCommLogInfo(data);
+      return await systemService.getCommLogInfo();
     } catch (error) {
       console.error('Failed to fetch comm log info', error);
+      return null;
     }
   }, []);
+
+  const fetchCommLogInfo = useCallback(async () => {
+    const data = await loadCommLogInfo();
+    if (data) {
+      applyCommLogInfoSnapshot(data);
+    }
+  }, [applyCommLogInfoSnapshot, loadCommLogInfo]);
 
   const openCommLogPath = useCallback(async () => {
     await systemService.openCommLogPath();
@@ -254,6 +274,8 @@ export const useSystemViewModel = (): UseSystemViewModel => {
     setPathHealth,
     setPathCheckBusy,
     lastExportPath,
+    loadCommLogInfo,
+    applyCommLogInfoSnapshot,
     fetchLatestExportPath,
     exportObservability,
     openExportFolder,

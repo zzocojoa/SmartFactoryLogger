@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import type { DashboardLeaderState, FactoryData } from '../../../shared/types';
 import { SeriesBuffer } from '../timeseries/seriesBuffer';
 import type { SeriesSample } from '../timeseries/seriesSampling';
-import { buildGroupedFrames, buildTimeSeriesFrame, SeriesFrame } from '../timeseries/seriesDataFrames';
+import { buildTimeSeriesFrame, SeriesFrame } from '../timeseries/seriesDataFrames';
 import { TIME_SERIES_CATALOG } from '../timeseries/seriesCatalog';
 import { buildSeriesThresholds } from '../timeseries/seriesThresholds';
 import { filterSeriesSamplesByWindow } from './useMetricsViewModel.selectors';
@@ -28,11 +28,9 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
   const [dashboardLeaderState, setDashboardLeaderState] = useState<DashboardLeaderState | null>(null);
   const [pollingPausedByVisibility, setPollingPausedByVisibility] = useState(false);
   const seriesBufferRef = useRef<SeriesBuffer>(new SeriesBuffer(SERIES_WINDOW_MS, SERIES_MAX_POINTS));
-  const frozenFramesRef = useRef<Record<string, SeriesFrame> | null>(null);
   const frozenAllFrameRef = useRef<SeriesFrame | null>(null);
 
   const setDashboardData = useDashboardStore(state => state.setData);
-  const setDashboardTimeSeries = useDashboardStore(state => state.setTimeSeriesData);
 
   useMetricsPollingEffects({
     pollIntervalMs: POLL_INTERVAL_MS,
@@ -71,20 +69,6 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
     return filteredSamples;
   }, [data, seriesWindowMin]);
 
-  // Time Series Frames (grouped)
-  const timeSeriesFrames = useMemo<Record<string, SeriesFrame> | null>(() => {
-    if (seriesPaused) {
-      return frozenFramesRef.current;
-    }
-    if (!filteredSeriesSamples) {
-      return null;
-    }
-
-    const result = buildGroupedFrames(filteredSeriesSamples, TIME_SERIES_CATALOG, timeSeriesThresholds);
-    frozenFramesRef.current = result;
-    return result;
-  }, [filteredSeriesSamples, timeSeriesThresholds, seriesPaused]);
-
   // Time Series All Frame (for Grafana Scenes)
   const timeSeriesAllFrame = useMemo<SeriesFrame | null>(() => {
     if (seriesPaused) {
@@ -98,10 +82,6 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
     frozenAllFrameRef.current = result;
     return result;
   }, [filteredSeriesSamples, timeSeriesThresholds, seriesPaused]);
-
-  useEffect(() => {
-    setDashboardTimeSeries(timeSeriesFrames, timeSeriesAllFrame);
-  }, [timeSeriesFrames, timeSeriesAllFrame, setDashboardTimeSeries]);
 
   const getSeriesSamples = useCallback(() => {
     return seriesBufferRef.current.getSamples();
@@ -121,7 +101,6 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
     pollingFailureCount,
     dashboardLeaderState,
     pollingPausedByVisibility,
-    timeSeriesFrames,
     timeSeriesAllFrame,
     getSeriesSamples,
     getSeriesStats,

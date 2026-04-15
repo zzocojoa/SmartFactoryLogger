@@ -1,4 +1,5 @@
 import type {
+  CommLogInfo,
   ConnectionTestState,
   DashboardLeaderState,
   FrontendErrorEntry,
@@ -47,6 +48,8 @@ export interface UseSystemViewModel {
   openExportFolder: () => Promise<void>;
   openExportFile: () => Promise<void>;
   commLogInfo: { path: string | null };
+  loadCommLogInfo: () => Promise<CommLogInfo | null>;
+  applyCommLogInfoSnapshot: (next: CommLogInfo) => void;
   fetchCommLogInfo: () => Promise<void>;
   openCommLogPath: () => Promise<void>;
   openCommLogFile: () => Promise<void>;

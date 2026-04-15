@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { configService } from '../api/configService';
 import type { ConfigSnapshot } from '../types';
@@ -34,6 +34,17 @@ export const useConfigAutoRefreshEffect = ({
   setExternalConfigPending,
   setExternalConfigPendingAt,
 }: UseConfigAutoRefreshEffectParams) => {
+  const settingsLoadingRef = useRef(settingsLoading);
+  const hasSettingsChangesRef = useRef(hasSettingsChanges);
+
+  useEffect(() => {
+    settingsLoadingRef.current = settingsLoading;
+  }, [settingsLoading]);
+
+  useEffect(() => {
+    hasSettingsChangesRef.current = hasSettingsChanges;
+  }, [hasSettingsChanges]);
+
   useEffect(() => {
     if (!settingsOpen) return;
 
@@ -54,7 +65,7 @@ export const useConfigAutoRefreshEffect = ({
     };
 
     const poll = async () => {
-      if (disposed || settingsLoading || !isVisible()) return;
+      if (disposed || settingsLoadingRef.current || !isVisible()) return;
       try {
         const data = await configService.getConfig();
         const fingerprint = buildSettingsFingerprint(data);
@@ -64,7 +75,7 @@ export const useConfigAutoRefreshEffect = ({
         }
         if (fingerprint === settingsFingerprintRef.current) return;
 
-        if (hasSettingsChanges) {
+        if (hasSettingsChangesRef.current) {
           if (settingsExternalNotifyRef.current !== fingerprint) {
             showSettingsToast('?ㅼ젙 ?뚯씪???몃??먯꽌 蹂寃쎈릺?덉뒿?덈떎. (媛깆떊 蹂대쪟)', 'warn');
             settingsExternalNotifyRef.current = fingerprint;
@@ -89,7 +100,7 @@ export const useConfigAutoRefreshEffect = ({
         return;
       }
       void fetchCentralStatus();
-      if (!hasSettingsChanges) {
+      if (!hasSettingsChangesRef.current) {
         void poll();
       }
     };
@@ -113,10 +124,8 @@ export const useConfigAutoRefreshEffect = ({
     };
   }, [
     settingsOpen,
-    settingsLoading,
     loadSettings,
     fetchCentralStatus,
-    hasSettingsChanges,
     buildSettingsFingerprint,
     applySettingsSnapshot,
     showSettingsToast,

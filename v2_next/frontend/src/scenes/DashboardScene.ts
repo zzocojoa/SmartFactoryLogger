@@ -96,7 +96,14 @@ export function getDashboardScene(
     const width = Math.max(1, Math.round(wBase * SCALE_TO_SCENE));
 
     const item: DashboardItem = {
-       key, type, title, x: xBase, y, width: wBase, height: h, properties
+      key,
+      type,
+      title,
+      x: xBase,
+      y,
+      width: wBase,
+      height: h,
+      properties,
     };
 
     const render = registry[type] || registry['markdown'] || ((_item: DashboardItem, _model: ReactWidget) => React.createElement('div', null, `Unknown widget type: ${type}`));
@@ -112,7 +119,16 @@ export function getDashboardScene(
         title,
         type,
         properties,
-        renderWidget: (m) => render(item, m)
+        renderWidget: (m) =>
+          render(
+            {
+              ...item,
+              title: typeof m.state.title === 'string' ? m.state.title : item.title,
+              type: typeof m.state.type === 'string' ? (m.state.type as WidgetType) : item.type,
+              properties: m.state.properties ?? item.properties,
+            },
+            m
+          )
       })
     });
   }).filter(Boolean) as SceneGridItem[];

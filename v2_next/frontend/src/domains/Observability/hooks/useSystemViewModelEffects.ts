@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import type { DashboardLeaderState, HealthSnapshot, StatsSnapshot } from '../../../shared/types';
+import type { CommLogInfo, DashboardLeaderState, HealthSnapshot, StatsSnapshot } from '../../../shared/types';
 import {
   clearDashboardLeaderLock,
   readDashboardLeaderLock,
@@ -31,6 +31,7 @@ const BACKOFF_MULTIPLIERS = [1, 2, 4, 10];
 const DASHBOARD_TAB_ID_KEY = 'dashboard_polling_tab_id_v1';
 const DASHBOARD_LEADER_KEY = 'dashboard_polling_leader_v1';
 const DASHBOARD_SYSTEM_BROADCAST_KEY = 'dashboard_system_broadcast_v1';
+const COMM_LOG_BROADCAST_KEY = 'settings_comm_log_broadcast_v1';
 const LEADER_HEARTBEAT_MS = 4000;
 const LEADER_TAKEOVER_MS = 30000;
 
@@ -40,6 +41,29 @@ interface DashboardSystemBroadcast {
   data: HealthSnapshot | StatsSnapshot;
   sent_at: number;
 }
+
+interface CommLogInfoBroadcast {
+  tab_id: string;
+  kind: 'comm-metrics';
+  data: CommLogInfo;
+  sent_at: number;
+}
+
+const readStoredCommLogSnapshot = (): CommLogInfoBroadcast | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(COMM_LOG_BROADCAST_KEY);
+    if (!raw) {
+      return null;
+    }
+    const payload = JSON.parse(raw) as CommLogInfoBroadcast;
+    return payload.kind === 'comm-metrics' ? payload : null;
+  } catch {
+    return null;
+  }
+};
 
 const buildPollingState = (intervalMs: number, failureCount: number): PollingState => ({
   degraded: failureCount > 0,
@@ -355,5 +379,124 @@ export const useSystemViewModelEffects = ({
     setHealthPolling,
     setPollingPausedByVisibility,
     setStatsPolling,
+  ]);
+};
+
+interface UseCommLogInfoEffectsParams {
+  enabled: boolean;
+  settingsLeaderMode: DashboardLeaderState['mode'] | null;
+  settingsPollingPausedByVisibility: boolean;
+  pollingPausedByVisibility: boolean;
+  loadCommLogInfo: () => Promise<CommLogInfo | null>;
+  applyCommLogInfoSnapshot: (next: CommLogInfo) => void;
+}
+
+export const useCommLogInfoEffects = ({
+  enabled,
+  settingsLeaderMode,
+  settingsPollingPausedByVisibility,
+  pollingPausedByVisibility,
+  loadCommLogInfo,
+  applyCommLogInfoSnapshot,
+}: UseCommLogInfoEffectsParams) => {
+  const syncKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    let mounted = true;
+    let channel: BroadcastChannel | null = null;
+    const tabId = readOrCreateDashboardTabId(DASHBOARD_TAB_ID_KEY);
+
+    const applyBroadcast = (payload: CommLogInfoBroadcast): void => {
+      if (!mounted || payload.tab_id === tabId) {
+        return;
+      }
+      applyCommLogInfoSnapshot(payload.data);
+    };
+
+    const publishSnapshot = (data: CommLogInfo): void => {
+      const payload: CommLogInfoBroadcast = {
+        tab_id: tabId,
+        kind: 'comm-metrics',
+        data,
+        sent_at: Date.now(),
+      };
+      channel?.postMessage(payload);
+      window.localStorage.setItem(COMM_LOG_BROADCAST_KEY, JSON.stringify(payload));
+    };
+
+    const leaderAllowed = settingsLeaderMode === 'leader' || settingsLeaderMode === 'standalone';
+    const hidden = document.visibilityState === 'hidden';
+    const shouldSync =
+      enabled &&
+      leaderAllowed &&
+      !settingsPollingPausedByVisibility &&
+      !pollingPausedByVisibility &&
+      !hidden;
+
+    if (typeof BroadcastChannel === 'function') {
+      channel = new BroadcastChannel('smartfactory-settings-comm-log');
+      channel.onmessage = (event: MessageEvent<CommLogInfoBroadcast>) => {
+        const payload = event.data;
+        if (!payload || payload.kind !== 'comm-metrics') {
+          return;
+        }
+        applyBroadcast(payload);
+      };
+    }
+
+    const handleStorage = (event: StorageEvent): void => {
+      if (event.key !== COMM_LOG_BROADCAST_KEY || !event.newValue) {
+        return;
+      }
+      try {
+        const payload = JSON.parse(event.newValue) as CommLogInfoBroadcast;
+        if (payload.kind !== 'comm-metrics') {
+          return;
+        }
+        applyBroadcast(payload);
+      } catch {
+        return;
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+
+    if (!enabled) {
+      syncKeyRef.current = null;
+    } else if (!leaderAllowed) {
+      const stored = readStoredCommLogSnapshot();
+      if (stored) {
+        applyBroadcast(stored);
+      }
+    } else if (shouldSync) {
+      const nextSyncKey = `${tabId}:${settingsLeaderMode ?? 'standalone'}`;
+      if (syncKeyRef.current !== nextSyncKey) {
+        syncKeyRef.current = nextSyncKey;
+        void loadCommLogInfo().then((data) => {
+          if (!mounted || !data) {
+            return;
+          }
+          applyCommLogInfoSnapshot(data);
+          publishSnapshot(data);
+        });
+      }
+    }
+
+    return () => {
+      mounted = false;
+      window.removeEventListener('storage', handleStorage);
+      channel?.close();
+    };
+  }, [
+    applyCommLogInfoSnapshot,
+    enabled,
+    loadCommLogInfo,
+    pollingPausedByVisibility,
+    settingsLeaderMode,
+    settingsPollingPausedByVisibility,
   ]);
 };

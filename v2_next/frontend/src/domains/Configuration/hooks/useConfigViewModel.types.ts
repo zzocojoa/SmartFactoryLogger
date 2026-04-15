@@ -6,6 +6,16 @@ import type {
   ThresholdState,
 } from '../../../shared/types';
 
+export interface SecuritySaveState {
+  currentPassword: string;
+  passwordConfirm: string;
+}
+
+export interface SaveSettingsOptions {
+  auto?: boolean;
+  security?: SecuritySaveState;
+}
+
 export interface UseConfigViewModel {
   settingsOpen: boolean;
   settingsLoading: boolean;
@@ -38,7 +48,7 @@ export interface UseConfigViewModel {
   setSettingsInfo: (info: string | null) => void;
   loadSettings: () => Promise<void>;
   updateSettingsField: (field: keyof SettingsFormState, value: string | boolean) => void;
-  handleSaveSettings: (options?: { auto?: boolean }) => Promise<void>;
+  handleSaveSettings: (options?: SaveSettingsOptions) => Promise<boolean>;
   handleRestoreDefaults: () => Promise<void>;
   handleRestoreBackup: () => Promise<void>;
   handlePendingApply: () => Promise<void>;

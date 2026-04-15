@@ -76,7 +76,6 @@ interface MemoryDiagnosticsState {
 interface MemoryViewModelParams {
   enabled: boolean;
   seriesStats: { count: number; windowMs: number; maxPoints: number | null };
-  timeSeriesFrames: Record<string, unknown> | null;
   timeSeriesAllFrame: unknown | null;
   layoutSnapshot: unknown | null;
   observabilityErrors: ObservabilityErrorsResponse | null;
@@ -409,7 +408,6 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
   const {
     enabled,
     seriesStats,
-    timeSeriesFrames,
     timeSeriesAllFrame,
     layoutSnapshot,
     observabilityErrors,
@@ -486,7 +484,6 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
   const collectorInputs = useMemo(
     () => ({
       seriesStats,
-      timeSeriesFrames,
       timeSeriesAllFrame,
       layoutSnapshot,
       observabilityErrors,
@@ -499,7 +496,6 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
     }),
     [
       seriesStats,
-      timeSeriesFrames,
       timeSeriesAllFrame,
       layoutSnapshot,
       observabilityErrors,
@@ -577,7 +573,12 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
     const aiSnapshot = getAIDiagnostics();
     const localStorageBytes = typeof window !== 'undefined' ? readStorageBytes(window.localStorage) : 0;
     const sessionStorageBytes = typeof window !== 'undefined' ? readStorageBytes(window.sessionStorage) : 0;
-    const frameCount = collectorInputs.timeSeriesFrames ? Object.keys(collectorInputs.timeSeriesFrames).length : 0;
+    const frameCount =
+      collectorInputs.timeSeriesAllFrame &&
+      typeof collectorInputs.timeSeriesAllFrame === 'object' &&
+      Array.isArray((collectorInputs.timeSeriesAllFrame as { fields?: unknown[] }).fields)
+        ? Math.max(0, ((collectorInputs.timeSeriesAllFrame as { fields: unknown[] }).fields.length - 1))
+        : 0;
     const timeSeriesBytes =
       collectorInputs.seriesStats.count * 96 + frameCount * 2048 + (collectorInputs.timeSeriesAllFrame ? 4096 : 0);
     const collectors = sortCollectors([

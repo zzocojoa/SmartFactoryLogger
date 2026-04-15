@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import type {
   LayoutEntry,
   LayoutMap,
@@ -63,6 +63,7 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
       const parsed = JSON.parse(raw);
       let layout: LayoutMap = {};
+
       if (Array.isArray(parsed)) {
         layout = buildLayoutMapFromArray(parsed);
       } else if (parsed && typeof parsed === 'object') {
@@ -176,7 +177,9 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
   const handleSaveLayout = async (name: string, newLayout?: LayoutMap) => {
     const layoutToSave = newLayout ?? layoutSnapshot?.layout;
-    if (!layoutToSave) return;
+    if (!layoutToSave) {
+      return;
+    }
 
     setLayoutSaveError(null);
     setLayoutSaveMessage(null);
@@ -223,7 +226,7 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
             }
       );
 
-      setLayoutSaveMessage(`레이아웃 '${name}' 서버 저장 완료`);
+      setLayoutSaveMessage(`레이아웃 '${name}' 저장 완료 (서버)`);
       await fetchLayoutSlots();
     } catch (error) {
       console.error('Layout save failed', error);
@@ -234,12 +237,14 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
   const handleRestoreLayout = async (slotId: string) => {
     setLayoutSaveError(null);
     setLayoutSaveMessage(null);
+
     try {
       if (storageMode === 'local') {
         const snapshot = await restoreLocalLayout(slotId);
         if (!snapshot) {
           throw new Error('Snapshot not found');
         }
+
         const normalized = normalizeLayoutMap(snapshot.layout, snapshot.cols ?? null);
         setLayoutSnapshot({
           ...snapshot,
@@ -275,10 +280,26 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
   const updateWidget = useCallback((key: string, updates: Partial<LayoutEntry>) => {
     setLayoutSnapshot((prev) => {
-      if (!prev) return null;
+      if (!prev) {
+        return null;
+      }
+
       const nextLayout = { ...prev.layout };
-      if (nextLayout[key]) {
-        nextLayout[key] = { ...nextLayout[key], ...updates };
+      const currentEntry = nextLayout[key];
+      if (currentEntry) {
+        const nextProperties =
+          updates.properties === undefined
+            ? currentEntry.properties
+            : {
+                ...(currentEntry.properties ?? {}),
+                ...(updates.properties ?? {}),
+              };
+
+        nextLayout[key] = {
+          ...currentEntry,
+          ...updates,
+          properties: nextProperties,
+        };
       }
       return { ...prev, layout: nextLayout };
     });
@@ -286,7 +307,10 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
   const deleteWidget = useCallback((key: string) => {
     setLayoutSnapshot((prev) => {
-      if (!prev) return null;
+      if (!prev) {
+        return null;
+      }
+
       const nextLayout = { ...prev.layout };
       delete nextLayout[key];
       return { ...prev, layout: nextLayout };
@@ -298,7 +322,10 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
     const defaults = resolveDefaultWidgetSpec(type, DEFAULT_DASHBOARD_ITEMS);
 
     setLayoutSnapshot((prev) => {
-      if (!prev) return prev;
+      if (!prev) {
+        return prev;
+      }
+
       return {
         ...prev,
         layout: {

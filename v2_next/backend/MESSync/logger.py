@@ -16,10 +16,24 @@ from .constants import PROJECT_ROOT
 
 # Log Directory setup integrated with SmartFactoryLogger
 from .. import config
-# Use the main system's system log directory
-# Use the main system's system log directory
-LOG_DIR = config.APP_DATA_DIR / "logs" / "system"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _resolve_log_dir() -> Path | None:
+    candidates = [
+        config.APP_DATA_DIR / "logs" / "system",
+        PROJECT_ROOT / ".tmp_runtime_logs" / "system",
+        Path.cwd() / ".tmp_runtime_logs" / "system",
+    ]
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate
+        except OSError:
+            continue
+    return None
+
+
+LOG_DIR = _resolve_log_dir()
 
 class JSONFormatter(logging.Formatter):
     """
@@ -85,37 +99,43 @@ def get_logger(name: str) -> logging.Logger:
     )
     console_handler.setFormatter(console_formatter)
     
-    # 3. Application Log Handler (Daily Rotation, JSON)
-    app_log_file = LOG_DIR / "mes_application.log"
-    # delay=True prevents opening the file until the first log is emitted.
-    app_handler = TimedRotatingFileHandler(
-        filename=app_log_file,
-        when="midnight",
-        interval=1,
-        backupCount=30, # Keep 30 days
-        encoding="utf-8",
-        delay=True 
-    )
-    app_handler.setLevel(logging.INFO)
-    app_handler.setFormatter(json_formatter)
-    
-    # 4. Error Log Handler (Separate file, JSON)
-    error_log_file = LOG_DIR / "mes_error.log"
-    error_handler = logging.FileHandler(
-        filename=error_log_file,
-        encoding="utf-8",
-        delay=True
-    )
-    error_handler.setLevel(logging.ERROR)
-    error_handler.setFormatter(json_formatter)
-    
     # Async Queue Handler
     log_queue = queue.Queue(-1)
     queue_handler = QueueHandler(log_queue)
     logger.addHandler(queue_handler)
     logger.propagate = False
-    
-    listener = QueueListener(log_queue, console_handler, app_handler, error_handler, respect_handler_level=True)
+
+    handlers: list[logging.Handler] = [console_handler]
+    if LOG_DIR is not None:
+        try:
+            # 3. Application Log Handler (Daily Rotation, JSON)
+            app_log_file = LOG_DIR / "mes_application.log"
+            # delay=True prevents opening the file until the first log is emitted.
+            app_handler = TimedRotatingFileHandler(
+                filename=app_log_file,
+                when="midnight",
+                interval=1,
+                backupCount=30, # Keep 30 days
+                encoding="utf-8",
+                delay=True
+            )
+            app_handler.setLevel(logging.INFO)
+            app_handler.setFormatter(json_formatter)
+
+            # 4. Error Log Handler (Separate file, JSON)
+            error_log_file = LOG_DIR / "mes_error.log"
+            error_handler = logging.FileHandler(
+                filename=error_log_file,
+                encoding="utf-8",
+                delay=True
+            )
+            error_handler.setLevel(logging.ERROR)
+            error_handler.setFormatter(json_formatter)
+            handlers.extend([app_handler, error_handler])
+        except OSError:
+            handlers = [console_handler]
+
+    listener = QueueListener(log_queue, *handlers, respect_handler_level=True)
     listener.start()
     _queue_listeners.append(listener)
     

@@ -56,47 +56,6 @@ $PackageJson = Get-Content -Raw -Path "../frontend/package.json" | ConvertFrom-J
 $Version = $PackageJson.version
 Write-Host "    Detected Version: $Version" -ForegroundColor Cyan
 
-# Generate version.py
-$VersionContent = @"
-from __future__ import annotations
-
-from datetime import datetime
-from pathlib import Path
-import sys
-from typing import Any
-
-__version__ = "$Version"
-
-
-def _resolve_executable_path() -> Path:
-    return Path(sys.executable).resolve()
-
-
-def _resolve_runtime_kind() -> str:
-    if getattr(sys, "frozen", False):
-        return "frozen"
-    return "source"
-
-
-def _resolve_executable_mtime(path: Path) -> str | None:
-    try:
-        return datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
-    except OSError:
-        return None
-
-
-def get_runtime_info() -> dict[str, Any]:
-    executable_path = _resolve_executable_path()
-    return {
-        "app_version": __version__,
-        "runtime_kind": _resolve_runtime_kind(),
-        "executable_path": str(executable_path),
-        "executable_mtime": _resolve_executable_mtime(executable_path),
-    }
-"@
-Set-Content -Path "version.py" -Value $VersionContent -Encoding UTF8
-Write-Host "    version.py updated to $Version" -ForegroundColor Green
-
 # Build EXE
 python -m PyInstaller --noconfirm --clean build_specs\SmartFactoryBackend.spec
 if ($LASTEXITCODE -ne 0) { Write-Error "Backend Packaging Failed"; exit 1 }

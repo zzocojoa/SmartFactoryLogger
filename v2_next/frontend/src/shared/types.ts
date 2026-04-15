@@ -198,11 +198,17 @@ export interface StatsSnapshot {
     paths: Record<string, {
       count: number;
       requests_per_sec: number;
+      avg_latency_ms?: number | null;
+      error_rate?: number | null;
       unique_clients: number;
       top_clients: Array<{
         client: string;
         count: number;
       }>;
+      success_count?: number;
+      failure_count?: number;
+      stale_count?: number;
+      avg_age_sec?: number | null;
     }>;
   };
 }
@@ -284,6 +290,10 @@ export interface MemoryProfilerState {
   started_at?: string | null;
   last_snapshot_at?: string | null;
   last_diff_at?: string | null;
+  already_running?: boolean;
+  expires_at?: string | null;
+  remaining_ttl_sec?: number | null;
+  max_runtime_sec?: number | null;
 }
 
 export interface TracemallocDiffItem {

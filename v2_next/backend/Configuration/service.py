@@ -209,6 +209,7 @@ def set_override_enabled(enabled: bool, password: Optional[str], actor: Optional
     if stored_password and stored_password != (password or ""):
         raise PermissionError("Invalid password")
     meta = config_meta.set_override_enabled(enabled, actor)
+    clear_snapshot_cache()
     return {
         "ok": True,
         "meta": meta,

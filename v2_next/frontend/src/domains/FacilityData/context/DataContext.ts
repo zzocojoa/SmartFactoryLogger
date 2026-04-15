@@ -10,7 +10,6 @@ import { buildThresholdStateFromConfig } from '../../../shared/utils/thresholds'
 export type DataContextValue = {
   data: FactoryData | null;
   thresholds: ThresholdState;
-  timeSeriesFrames: Record<string, SeriesFrame> | null;
   timeSeriesAllFrame: SeriesFrame | null;
   spotConfig: SpotConfig | null;
   spotImageUrl: string;
@@ -38,7 +37,6 @@ export type DataContextValue = {
 export const DataContext = React.createContext<DataContextValue>({
   data: null,
   thresholds: buildThresholdStateFromConfig(),
-  timeSeriesFrames: null,
   timeSeriesAllFrame: null,
   spotConfig: null,
   spotImageUrl: '',

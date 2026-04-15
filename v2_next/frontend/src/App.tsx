@@ -26,6 +26,7 @@ import {
   LayoutMap
 } from './shared/types';
 import { useSystemViewModel } from './domains/Observability/hooks/useSystemViewModel';
+import { useCommLogInfoEffects } from './domains/Observability/hooks/useSystemViewModelEffects';
 import { useMemoryViewModel } from './domains/Observability/hooks/useMemoryViewModel';
 import { useSpotViewModel } from './domains/FacilityData/hooks/useSpotViewModel';
 import { useConfigViewModel } from './domains/Configuration/hooks/useConfigViewModel';
@@ -113,6 +114,7 @@ import { apiClient, API_BASE } from './shared/api/client';
 import { configService } from './domains/Configuration/api/configService';
 // Data Contexts
 import { UIContext } from './domains/FacilityData/context/UIContext';
+import { DataContext } from './domains/FacilityData/context/DataContext';
 import { SnapshotContext } from './domains/FacilityData/context/SnapshotContext';
 
 const {
@@ -131,16 +133,23 @@ const LEGACY_LAYOUT_COLS = 24;
 
 const MarkdownWidget = ({ item, model }: { item: DashboardItem; model: ReactWidget }) => {
   const { updateWidget } = React.useContext(LayoutEditContext);
-  const { isContentEditing: editing } = model.useState();
-  const [editValue, setEditValue] = useState(item.properties?.content || '');
+  const { isContentEditing: editing, properties } = model.useState();
+  const currentProperties = properties ?? item.properties ?? {};
+  const currentContent =
+    typeof currentProperties.content === 'string' ? currentProperties.content : '';
+  const [editValue, setEditValue] = useState(currentContent);
 
   useEffect(() => {
-    setEditValue(item.properties?.content || '');
-  }, [item.properties?.content]);
+    setEditValue(currentContent);
+  }, [currentContent]);
 
   const handleSave = () => {
-    updateWidget(item.key, { properties: { ...item.properties, content: editValue } });
-    model.setState({ isContentEditing: false });
+    const nextProperties = {
+      ...currentProperties,
+      content: editValue,
+    };
+    updateWidget(item.key, { properties: nextProperties });
+    model.setState({ properties: nextProperties, isContentEditing: false });
   };
 
   return (
@@ -156,7 +165,7 @@ const MarkdownWidget = ({ item, model }: { item: DashboardItem; model: ReactWidg
         </div>
       ) : (
         <div className="notice-content markdown-body" style={{ flex: 1, overflow: 'auto' }}>
-          <ReactMarkdown>{item.properties?.content || ''}</ReactMarkdown>
+          <ReactMarkdown>{currentContent}</ReactMarkdown>
         </div>
       )}
     </div>
@@ -282,8 +291,11 @@ function App() {
     pathCheckBusy,
     lastExportPath,
     commLogInfo,
+    loadCommLogInfo,
+    applyCommLogInfoSnapshot,
     healthPolling,
     statsPolling,
+    pollingPausedByVisibility,
     fetchHealth,
     fetchStats,
     loadObservabilityErrors,
@@ -306,10 +318,6 @@ function App() {
     saveSnapshot,
     connectionTest
   } = useSystemViewModel();
-  
-  useEffect(() => {
-    fetchCommLogInfo();
-  }, [fetchCommLogInfo]);
 
   const {
     config: spotConfig,
@@ -319,7 +327,6 @@ function App() {
     lastSuccessAt: spotLastSuccessAt,
     diagnostics: spotDiagnostics,
     focusBusy,
-    refreshConfig: fetchSpotConfig,
     handleImageLoad: handleSpotImageLoaded,
     handleImageError: handleSpotImageError,
     controlFocus: requestFocus
@@ -366,6 +373,8 @@ function App() {
     setSettingsError,
     setSettingsInfo,
     fetchCentralStatus,
+    settingsLeaderState,
+    settingsPollingPausedByVisibility,
     isSettingsFieldDirty,
     externalConfigPending,
     externalConfigPendingAt,
@@ -402,7 +411,6 @@ function App() {
     pollingDegraded,
     pollingIntervalMs,
     pollingFailureCount,
-    timeSeriesFrames,
     timeSeriesAllFrame,
     getSeriesSamples,
     getSeriesStats,
@@ -530,11 +538,11 @@ function App() {
       { id: 'settings-central', label: LABELS.CENTRAL_CONFIG },
       { id: 'settings-comm', label: LABELS.COMM_CONFIG },
       { id: 'settings-observability', label: LABELS.OPER_OBSERVABILITY },
-      { id: 'settings-memory', label: '메모리' },
+      { id: 'settings-memory', label: '\uBA54\uBAA8\uB9AC' },
       { id: 'settings-spot', label: LABELS.SPOT_CAMERA },
       { id: 'settings-storage', label: LABELS.STORAGE_CONFIG },
       { id: 'settings-logging', label: LABELS.LOG_ROTATION },
-      { id: 'settings-mes', label: 'MES 설정' },
+      { id: 'settings-mes', label: 'MES \uC124\uC815' },
       { id: 'settings-alerts', label: LABELS.ALERTS_THRESHOLDS },
       { id: 'settings-security', label: LABELS.SECURITY },
     ],
@@ -610,21 +618,21 @@ function App() {
       {
         key: 'spot',
         label: LABELS.SPOT,
-        unit: '℃',
+        unit: SPOT_UNIT,
         enableField: 'thresholdSpotEnabled',
         valueField: 'thresholdSpotValue',
       },
       {
         key: 'temp_f',
         label: LABELS.CONTAINER_FRONT,
-        unit: '℃',
+        unit: SPOT_UNIT,
         enableField: 'thresholdTempFEnabled',
         valueField: 'thresholdTempFValue',
       },
       {
         key: 'temp_b',
         label: LABELS.CONTAINER_BACK,
-        unit: '℃',
+        unit: SPOT_UNIT,
         enableField: 'thresholdTempBEnabled',
         valueField: 'thresholdTempBValue',
       },
@@ -638,14 +646,14 @@ function App() {
       {
         key: 'billet_temp',
         label: LABELS.BILLET_TEMP,
-        unit: '℃',
+        unit: SPOT_UNIT,
         enableField: 'thresholdBilletTempEnabled',
         valueField: 'thresholdBilletTempValue',
       },
       {
         key: 'at_temp',
         label: LABELS.ENV_TEMP,
-        unit: '℃',
+        unit: SPOT_UNIT,
         enableField: 'thresholdAtTempEnabled',
         valueField: 'thresholdAtTempValue',
       },
@@ -694,7 +702,7 @@ function App() {
     fetchLayoutSlots();
   }, [layoutEditing, menuOpen, fetchLayoutSlots]);
 
-  /* Polling and timeSeriesFrames/timeSeriesAllFrame computation moved to useMetricsViewModel */
+  /* Polling and timeSeriesAllFrame computation moved to useMetricsViewModel */
 
   useEffect(() => {
     if (!timeSeriesAllFrame) {
@@ -782,6 +790,15 @@ function App() {
     pathHealth,
   });
 
+  useCommLogInfoEffects({
+    enabled: settingsOpen && activeSettingsSection === 'settings-observability',
+    settingsLeaderMode: settingsLeaderState?.mode ?? null,
+    settingsPollingPausedByVisibility,
+    pollingPausedByVisibility,
+    loadCommLogInfo,
+    applyCommLogInfoSnapshot,
+  });
+
   const {
     backendMemory,
     backendMemoryDetails,
@@ -814,7 +831,6 @@ function App() {
   } = useMemoryViewModel({
     enabled: settingsOpen && activeSettingsSection === 'settings-memory',
     seriesStats: getSeriesStats(),
-    timeSeriesFrames,
     timeSeriesAllFrame,
     layoutSnapshot,
     observabilityErrors,
@@ -829,7 +845,7 @@ function App() {
   const handleCopyCommLogPath = useCallback(() => {
     if (!commLogInfo.path) return;
     navigator.clipboard.writeText(commLogInfo.path);
-    pushNotification('경로 복사', '통신 로그 경로가 클립보드에 복사되었습니다.', 'info');
+    pushNotification('\uACBD\uB85C \uBCF5\uC0AC \uC644\uB8CC', '\uD1B5\uC2E0 \uB85C\uADF8 \uACBD\uB85C\uB97C \uD074\uB9BD\uBCF4\uB4DC\uC5D0 \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4.', 'info');
   }, [commLogInfo.path, pushNotification]);
 
   // --- 5. Layout Handlers ---
@@ -856,7 +872,18 @@ function App() {
     setMenuOpen,
     setLayoutRestoreError,
     setLayoutRestoreMessage,
+    captureCurrentLayout: () => {
+      const grid = scene.state.body;
+      if (!(grid instanceof SceneGridLayout)) {
+        return {};
+      }
+      return buildLayoutMap(grid.state.children);
+    },
   });
+
+  const handleSaveCurrentLayout = useCallback(async () => {
+    await saveLayout();
+  }, [saveLayout]);
 
   const handleReconnect = async () => {
     // Busy check is handled in hook, but UI disabling is via reconnectBusy from hook
@@ -868,30 +895,34 @@ function App() {
     }
   };
 
+  const openSettingsAfterBootstrap = useCallback(async () => {
+    setActiveSettingsSection('settings-summary');
+    await loadSettings();
+    setSettingsOpen(true);
+    setMenuOpen(false);
+    void fetchCentralStatus();
+  }, [fetchCentralStatus, loadSettings, setActiveSettingsSection, setSettingsOpen]);
+
   const handleOpenSettings = useCallback(async () => {
     try {
       // Check if password is required
       const checkResult = await configService.verifyPassword('');
       if (checkResult.ok) {
-        // No password set, open directly
-        setSettingsOpen(true);
-        setMenuOpen(false);
+        await openSettingsAfterBootstrap();
         return;
       }
     } catch (err: any) {
       if (err?.response?.status !== 403) {
-        // Non-password error, open anyway
-        setSettingsOpen(true);
-        setMenuOpen(false);
+        await openSettingsAfterBootstrap();
         return;
       }
     }
     
     // Password is required, prompt user
     const password = await modal.prompt(
-      '설정 화면에 접근하려면 관리자 비밀번호를 입력하세요.',
+      '\uC124\uC815\uC744 \uC5F4\uB824\uBA74 \uAD00\uB9AC\uC790 \uBE44\uBC00\uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694.',
       '',
-      { inputType: 'password', title: '관리자 인증' }
+      { inputType: 'password', title: '\uAD00\uB9AC\uC790 \uBE44\uBC00\uBC88\uD638' }
     );
     
     if (password === null) {
@@ -902,14 +933,13 @@ function App() {
     try {
       const result = await configService.verifyPassword(password);
       if (result.ok) {
-        setSettingsOpen(true);
-        setMenuOpen(false);
+        await openSettingsAfterBootstrap();
       }
     } catch (err: any) {
-      const errMsg = err?.response?.data?.detail || '비밀번호 확인에 실패했습니다.';
+      const errMsg = err?.response?.data?.detail || '\uBE44\uBC00\uBC88\uD638\uAC00 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.';
       await modal.alert(errMsg);
     }
-  }, [modal]);
+  }, [modal, openSettingsAfterBootstrap]);
 
 
 
@@ -1045,10 +1075,10 @@ function App() {
     }
     try {
       await openCommLogPath();
-      showSettingsToast('통신 로그 폴더를 열었습니다.', 'ok');
+      showSettingsToast('???嶺??汝??吏????????쒕늅????????????', 'ok');
     } catch (error) {
       console.error('Open comm log path failed', error);
-      showSettingsToast('폴더 열기에 실패했습니다.', 'error');
+      showSettingsToast('?????????源낇꺙???????곌숯??????????딅젩.', 'error');
     }
   };
 
@@ -1058,49 +1088,49 @@ function App() {
     }
     try {
       await openCommLogFile();
-      showSettingsToast('통신 로그 파일을 열었습니다.', 'ok');
+      showSettingsToast('???嶺??汝??吏??????????????????', 'ok');
     } catch (error) {
       console.error('Open comm log file failed', error);
-      showSettingsToast('파일 열기에 실패했습니다.', 'error');
+      showSettingsToast('?????????源낇꺙???????곌숯??????????딅젩.', 'error');
     }
   };
   const handleRefreshMemory = useCallback(async () => {
     try {
       await refreshMemory();
-      showSettingsToast('메모리 상태를 새로고침했습니다.', 'ok');
+      showSettingsToast('?꿔꺂??????熬곣뫀??????븐뻤???????沅???쒙쭫???????????딅젩.', 'ok');
     } catch (error) {
       console.error('Memory refresh failed', error);
-      showSettingsToast('메모리 상태 새로고침에 실패했습니다.', 'error');
+      showSettingsToast('?꿔꺂??????熬곣뫀??????븐뻤??????沅???쒙쭫????????곌숯??????????딅젩.', 'error');
     }
   }, [refreshMemory, showSettingsToast]);
 
   const handleStartMemoryProfiler = useCallback(async () => {
     try {
       await startMemoryProfiler();
-      showSettingsToast('상세 메모리 추적을 시작했습니다.', 'ok');
+      showSettingsToast('????노듋???꿔꺂??????熬곣뫀?????ㅻ쿋驪?????嶺뚮??ｆ뤃??????????딅젩.', 'ok');
     } catch (error) {
       console.error('Memory profiler start failed', error);
-      showSettingsToast('상세 메모리 추적 시작에 실패했습니다.', 'error');
+      showSettingsToast('????노듋???꿔꺂??????熬곣뫀?????ㅻ쿋驪????嶺뚮??ｆ뤃???????곌숯??????????딅젩.', 'error');
     }
   }, [showSettingsToast, startMemoryProfiler]);
 
   const handleStopMemoryProfiler = useCallback(async () => {
     try {
       await stopMemoryProfiler();
-      showSettingsToast('상세 메모리 추적을 중지했습니다.', 'ok');
+      showSettingsToast('????노듋???꿔꺂??????熬곣뫀?????ㅻ쿋驪???嚥싳쉶瑗??꾧틡???????????딅젩.', 'ok');
     } catch (error) {
       console.error('Memory profiler stop failed', error);
-      showSettingsToast('상세 메모리 추적 중지에 실패했습니다.', 'error');
+      showSettingsToast('????노듋???꿔꺂??????熬곣뫀?????ㅻ쿋驪??嚥싳쉶瑗??꾧틡????????곌숯??????????딅젩.', 'error');
     }
   }, [showSettingsToast, stopMemoryProfiler]);
 
   const handleCaptureMemorySnapshot = useCallback(async () => {
     try {
       await captureMemorySnapshot();
-      showSettingsToast('메모리 스냅샷을 수집했습니다.', 'ok');
+      showSettingsToast('?꿔꺂??????熬곣뫀??????⑥쥓猷??????????볥궚???????????딅젩.', 'ok');
     } catch (error) {
       console.error('Memory snapshot failed', error);
-      showSettingsToast('메모리 스냅샷 수집에 실패했습니다.', 'error');
+      showSettingsToast('?꿔꺂??????熬곣뫀??????⑥쥓猷??????볥궚????????곌숯??????????딅젩.', 'error');
     }
   }, [captureMemorySnapshot, showSettingsToast]);
 
@@ -1110,10 +1140,10 @@ function App() {
       if (!path) {
         throw new Error('Memory export path missing');
       }
-      showSettingsToast('메모리 진단 파일을 저장했습니다.', 'ok');
+      showSettingsToast('?꿔꺂??????熬곣뫀???꿔꺂??????????????嚥싳쇎維끻퐲??????', 'ok');
     } catch (error) {
       console.error('Memory export failed', error);
-      showSettingsToast('메모리 진단 파일 저장에 실패했습니다.', 'error');
+      showSettingsToast('?꿔꺂??????熬곣뫀???꿔꺂???????????????臾롫뜦??????곌숯??????????딅젩.', 'error');
     }
   }, [exportMemory, showSettingsToast]);
 
@@ -1122,7 +1152,7 @@ function App() {
       await openMemoryExportFile();
     } catch (error) {
       console.error('Open memory export file failed', error);
-      showSettingsToast('메모리 export 파일 열기에 실패했습니다.', 'error');
+      showSettingsToast('?꿔꺂??????熬곣뫀??export ?????????源낇꺙???????곌숯??????????딅젩.', 'error');
     }
   }, [openMemoryExportFile, showSettingsToast]);
 
@@ -1131,17 +1161,17 @@ function App() {
       await openMemoryExportFolder();
     } catch (error) {
       console.error('Open memory export folder failed', error);
-      showSettingsToast('메모리 export 폴더 열기에 실패했습니다.', 'error');
+      showSettingsToast('?꿔꺂??????熬곣뫀??export ?????????源낇꺙???????곌숯??????????딅젩.', 'error');
     }
   }, [openMemoryExportFolder, showSettingsToast]);
 
   const handleCopyMemoryExportPath = useCallback(async () => {
     try {
       await copyMemoryExportPath();
-      showSettingsToast('메모리 export 경로를 복사했습니다.', 'ok');
+      showSettingsToast('?꿔꺂??????熬곣뫀??export ?嚥▲굧???뚪뜮?熬곣벀嫄???⑤슢?뽫뵓怨????????????딅젩.', 'ok');
     } catch (error) {
       console.error('Copy memory export path failed', error);
-      showSettingsToast('메모리 export 경로 복사에 실패했습니다.', 'error');
+      showSettingsToast('?꿔꺂??????熬곣뫀??export ?嚥▲굧???뚪뜮???⑤슢?뽫뵓怨?????????곌숯??????????딅젩.', 'error');
     }
   }, [copyMemoryExportPath, showSettingsToast]);
 
@@ -1285,10 +1315,10 @@ function App() {
 
   useEffect(() => {
     if (spotAlertRef.current === false && spotAlertActive) {
-      pushNotification('SPOT 경고', 'SPOT 온도 경고 상태입니다.', 'error');
+      pushNotification('SPOT \uACBD\uACE0', 'SPOT \uC628\uB3C4 \uACBD\uACE0 \uC0C1\uD0DC\uC785\uB2C8\uB2E4.', 'error');
     }
     if (spotAlertRef.current === true && !spotAlertActive) {
-      pushNotification('SPOT 정상', 'SPOT 온도가 정상 범위로 복귀했습니다.', 'info');
+      pushNotification('SPOT \uC815\uC0C1', 'SPOT \uC628\uB3C4\uAC00 \uC815\uC0C1 \uBC94\uC704\uB85C \uBCF5\uADC0\uD588\uC2B5\uB2C8\uB2E4.', 'info');
     }
     spotAlertRef.current = spotAlertActive;
   }, [spotAlertActive, pushNotification]);
@@ -1313,12 +1343,14 @@ function App() {
     // Start 3-second debounce timer
     cameraStatusTimerRef.current = setTimeout(() => {
       // If we are here, status has been stable for 3 seconds
-      if (type === 'error' || type === 'danger') {
-        pushNotification('카메라 오류', `SPOT 카메라 ${cameraStatus?.title ?? '오류'}`, 'error');
+      if (type === 'error') {
+        pushNotification('\uCE74\uBA54\uB77C \uC624\uB958', 'SPOT \uCE74\uBA54\uB77C ' + (cameraStatus?.title ?? '\uC624\uB958'), 'error');
+      } else if (type === 'danger') {
+        pushNotification('\uCE74\uBA54\uB77C \uC9C0\uC5F0', 'SPOT \uCE74\uBA54\uB77C ' + (cameraStatus?.title ?? '\uC9C0\uC5F0'), 'warn');
       } else if (type === 'warn') {
-        pushNotification('카메라 지연', 'SPOT 카메라 응답이 지연됩니다.', 'warn');
+        pushNotification('\uCE74\uBA54\uB77C \uC9C0\uC5F0', 'SPOT \uCE74\uBA54\uB77C \uC751\uB2F5\uC774 \uC9C0\uC5F0\uB429\uB2C8\uB2E4.', 'warn');
       } else if (type === 'ok' && cameraStatusRef.current !== 'ok') {
-        pushNotification('카메라 정상', 'SPOT 카메라가 정상화되었습니다.', 'info');
+        pushNotification('\uCE74\uBA54\uB77C \uC815\uC0C1', 'SPOT \uCE74\uBA54\uB77C\uAC00 \uC815\uC0C1\uD654\uB418\uC5C8\uC2B5\uB2C8\uB2E4.', 'info');
       }
       // Update ref only after notification
       cameraStatusRef.current = type;
@@ -1349,6 +1381,58 @@ function App() {
     handleSnapshot,
     snapshotLoading,
   }), [handleSnapshot, snapshotLoading]);
+
+  const dataContextValue = useMemo(() => ({
+    data,
+    thresholds: thresholdState,
+    timeSeriesAllFrame,
+    spotConfig,
+    spotImageUrl,
+    spotImageLoading,
+    spotImageError,
+    spotLastSuccessAt,
+    spotAlertActive,
+    lastDataAt,
+    onSpotImageLoaded: handleSpotImageLoaded,
+    onSpotImageError: handleSpotImageError,
+    requestFocus,
+    seriesWindowMin,
+    seriesPaused,
+    showThresholds,
+    setSeriesWindowMin,
+    setSeriesPaused,
+    setShowThresholds,
+    handleSnapshot,
+    snapshotLoading,
+    layoutEditing,
+    setLayoutEditing,
+    intervalSec: Number(settingsForm?.intervalSec ?? '0.2') || 0.2,
+  }), [
+    data,
+    thresholdState,
+    timeSeriesAllFrame,
+    spotConfig,
+    spotImageUrl,
+    spotImageLoading,
+    spotImageError,
+    spotLastSuccessAt,
+    spotAlertActive,
+    lastDataAt,
+    handleSpotImageLoaded,
+    handleSpotImageError,
+    requestFocus,
+    seriesWindowMin,
+    seriesPaused,
+    showThresholds,
+    setSeriesWindowMin,
+    setSeriesPaused,
+    setShowThresholds,
+    handleSnapshot,
+    snapshotLoading,
+    layoutEditing,
+    setLayoutEditing,
+    settingsForm?.intervalSec,
+  ]);
 
   const layoutEditContextValue = useMemo(() => ({
     isEditing: layoutEditing,
@@ -1394,7 +1478,7 @@ function App() {
         setLayoutEditing={setLayoutEditing}
         storageMode={storageMode}
         setStorageMode={setStorageMode}
-        saveLayout={saveLayout}
+        saveLayout={handleSaveCurrentLayout}
         restoreLayout={restoreLayout}
         deleteLayoutSlot={deleteLayoutSlot}
         layoutSlots={layoutSlots}
@@ -1556,15 +1640,17 @@ function App() {
       />
       <div className="scene-container" style={{ flexGrow: 1 }}>
         {/* The ReactWidget will be rendered *inside* this provider hierarchy. */}
-        <UIContext.Provider value={uiContextValue}>
-          <SnapshotContext.Provider value={snapshotContextValue}>
-            <LayoutEditContext.Provider value={layoutEditContextValue}>
-              {SceneRenderer}
-            </LayoutEditContext.Provider>
-          </SnapshotContext.Provider>
-        </UIContext.Provider>
+        <DataContext.Provider value={dataContextValue}>
+          <UIContext.Provider value={uiContextValue}>
+            <SnapshotContext.Provider value={snapshotContextValue}>
+              <LayoutEditContext.Provider value={layoutEditContextValue}>
+                {SceneRenderer}
+              </LayoutEditContext.Provider>
+            </SnapshotContext.Provider>
+          </UIContext.Provider>
+        </DataContext.Provider>
         <footer className="app-footer">
-          Copyright © HOIHOU. All Rights Reserved. v{packageJson.version}
+          Copyright 癲?HOIHOU. All Rights Reserved. v{packageJson.version}
         </footer>
       </div>
     </div>
