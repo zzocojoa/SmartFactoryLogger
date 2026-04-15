@@ -228,9 +228,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       const fingerprint = buildSettingsFingerprintRef.current(data);
       settingsFingerprintRef.current = fingerprint;
       settingsExternalNotifyRef.current = null;
-      return true;
       setExternalConfigPending(null);
       setExternalConfigPendingAt(null);
+      return true;
     } catch (error) {
       console.error('Config load failed', error);
       setSettingsError('???깆젧???釉띾쐞???? 嶺뚮쪇沅?쭛???鍮??');
@@ -437,6 +437,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         snapshotpath: settingsForm.snapshotPath.trim() || undefined,
         autosave: settingsForm.autoSave,
         password: settingsForm.password.trim() || undefined,
+        current_password: requiresCurrentPassword ? trimmedCurrentPassword : undefined,
       },
       logging: {
         rotation_enabled: settingsForm.rotationEnabled,
@@ -513,6 +514,10 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       settingsExternalNotifyRef.current = null;
     } catch (error) {
       console.error('Config save failed', error);
+      const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      const errorMessage = typeof detail === 'string' && detail.trim().length > 0
+        ? detail
+        : '설정을 저장하지 못했습니다.';
       if (!isAuto) {
         setSettingsError('설정을 저장하지 못했습니다.');
         showSettingsToast('설정 저장에 실패했습니다.', 'error');

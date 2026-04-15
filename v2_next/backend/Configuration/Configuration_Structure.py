@@ -18,6 +18,7 @@ class SettingsConfig(BaseModel):
     snapshotpath: Optional[str] = None
     autosave: Optional[bool] = None
     password: Optional[str] = None
+    current_password: Optional[str] = None
     custom_notice: Optional[str] = None
 
 

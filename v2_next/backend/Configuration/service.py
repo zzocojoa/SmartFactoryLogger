@@ -221,6 +221,25 @@ def _ensure_section(parser: configparser.ConfigParser, section: str) -> None:
         parser.add_section(section)
 
 
+def _verify_settings_password_change(
+    parser: configparser.ConfigParser,
+    payload: ConfigUpdate,
+) -> None:
+    if payload.settings is None:
+        return
+    next_password = payload.settings.password
+    if not next_password:
+        return
+    stored_password = _get(parser, "SETTINGS", "password", "")
+    if stored_password == "":
+        return
+    current_password = (payload.settings.current_password or "").strip()
+    if current_password == "":
+        raise PermissionError("Current password is required")
+    if current_password != stored_password:
+        raise PermissionError("Invalid current password")
+
+
 def _is_writable(path: Path) -> bool:
     try:
         if path.exists():
@@ -433,6 +452,7 @@ def update_config(
             parser.set("SPOT", "timeout", str(payload.spot.timeout))
 
     if payload.settings:
+        _verify_settings_password_change(parser, payload)
         if payload.settings.logpath is not None:
             parser.set("SETTINGS", "logpath", payload.settings.logpath)
         if payload.settings.snapshotpath is not None:
