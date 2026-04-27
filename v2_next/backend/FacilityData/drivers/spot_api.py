@@ -114,7 +114,11 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     except httpx.TimeoutException as exc:
         raise SpotImageFetchError(
             "upstream-timeout",
-            "SPOT image upstream timed out",
+            (
+                "SPOT image upstream timed out; "
+                f"url={image_url}; error_type={exc.__class__.__name__}; "
+                f"error={_format_exception_message(exc)}"
+            ),
             image_url=image_url,
             upstream_status=None,
         ) from exc
@@ -144,7 +148,7 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     if not data:
         raise SpotImageFetchError(
             "empty-body",
-            "SPOT image upstream returned an empty body",
+            f"SPOT image upstream returned an empty body; url={image_url}",
             image_url=image_url,
             upstream_status=response.status_code,
         )

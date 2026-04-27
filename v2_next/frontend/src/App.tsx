@@ -904,15 +904,9 @@ function App() {
   }, [fetchCentralStatus, loadSettings, setActiveSettingsSection, setSettingsOpen]);
 
   const getSettingsPasswordRequired = useCallback(async (): Promise<boolean> => {
-    if (settingsBaseline) {
-      return settingsBaseline.passwordSet;
-    }
-    if (settingsForm) {
-      return settingsForm.passwordSet;
-    }
     const snapshot = await configService.getConfig();
     return Boolean(snapshot.values.settings.password_set);
-  }, [settingsBaseline, settingsForm]);
+  }, []);
 
   const handleOpenSettings = useCallback(async () => {
     let passwordRequired: boolean;

@@ -73,6 +73,36 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("not-a-number", str(error))
         self.assertIn("http://spot.local/temp", str(error))
 
+    async def test_image_timeout_diagnostics_include_url_and_error_type(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+                await spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+
+        error = raised.exception
+
+        self.assertEqual(error.code, "upstream-timeout")
+        self.assertIn("http://spot.local/image.jpg", str(error))
+        self.assertIn("ReadTimeout", str(error))
+
+    async def test_image_empty_body_diagnostics_include_url_and_status(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+                await spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+
+        error = raised.exception
+
+        self.assertEqual(error.code, "empty-body")
+        self.assertEqual(error.upstream_status, 200)
+        self.assertIn("http://spot.local/image.jpg", str(error))
+
     def test_image_backoff_diagnostics_include_retry_timing(self) -> None:
         spot_api._img_failure_count = 3
         spot_api._record_image_error("upstream-timeout", "timeout")
