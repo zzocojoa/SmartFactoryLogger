@@ -176,6 +176,7 @@ class MemoryService:
         self._latest_summary_state: dict[str, Any] = {}
         self._latest_details_state: dict[str, Any] = {}
         self._latest_tracemalloc_diff: list[Dict[str, Any]] = []
+        self._latest_capture_latency: Dict[str, Any] = {}
         self._profiler_enabled = False
         self._profiler_collector_interval_sec = max(self._sample_interval_sec * 3.0, self._profiler_interval_sec)
         self._profiler_max_runtime_sec = 600.0
@@ -184,6 +185,9 @@ class MemoryService:
         self._profiler_last_snapshot: Optional[tracemalloc.Snapshot] = None
         self._profiler_last_snapshot_at: Optional[float] = None
         self._profiler_last_diff_at: Optional[float] = None
+        self._profiler_last_stop_reason: Optional[str] = None
+        self._profiler_last_stop_at: Optional[str] = None
+        self._profiler_last_stop_expected = False
 
     def register_collector(self, name: str, collector: MemoryCollector) -> None:
         with self._collector_lock:
@@ -223,6 +227,9 @@ class MemoryService:
             self._profiler_last_snapshot = None
             self._profiler_last_snapshot_at = None
             self._profiler_last_diff_at = None
+            self._profiler_last_stop_reason = None
+            self._profiler_last_stop_at = None
+            self._profiler_last_stop_expected = False
             self._latest_tracemalloc_diff = []
             self._latest_summary_state = self._build_summary_state_locked()
             self._latest_details_state = self._build_details_state_locked()
@@ -231,13 +238,22 @@ class MemoryService:
         return state
 
     def stop_profiler(self) -> Dict[str, Any]:
+        return self._stop_profiler("manual", False)
+
+    def _stop_profiler(self, stop_reason: str, expected_stop: bool) -> Dict[str, Any]:
         with self._state_lock:
+            stopped_at = time.time()
+            if not self._profiler_enabled and not tracemalloc.is_tracing():
+                return self._build_profiler_state_locked(stopped_at)
             self._profiler_enabled = False
             self._profiler_started_at = None
             self._profiler_started_at_ts = None
             self._profiler_last_snapshot = None
             self._profiler_last_snapshot_at = None
             self._profiler_last_diff_at = None
+            self._profiler_last_stop_reason = stop_reason
+            self._profiler_last_stop_at = _utc_iso(stopped_at)
+            self._profiler_last_stop_expected = expected_stop
             self._latest_tracemalloc_diff = []
             if tracemalloc.is_tracing():
                 tracemalloc.stop()
@@ -250,12 +266,43 @@ class MemoryService:
             return self._build_profiler_state_locked(time.time())
 
     def capture_snapshot(self) -> Dict[str, Any]:
+        started_perf = time.perf_counter()
+        steps: list[Dict[str, Any]] = []
+
+        step_started_perf = time.perf_counter()
         self._expire_profiler_if_needed()
+        steps.append(self._build_latency_step("expire_profiler", step_started_perf, time.perf_counter()))
+
+        step_started_perf = time.perf_counter()
         sample = self._build_process_sample()
+        steps.append(self._build_latency_step("build_process_sample", step_started_perf, time.perf_counter()))
+
+        step_started_perf = time.perf_counter()
         collectors = self._run_collectors(force=True)
+        steps.append(self._build_latency_step("run_collectors", step_started_perf, time.perf_counter()))
+
+        step_started_perf = time.perf_counter()
         self._apply_snapshot(sample, collectors)
+        steps.append(self._build_latency_step("apply_snapshot", step_started_perf, time.perf_counter()))
+
+        step_started_perf = time.perf_counter()
         self._capture_profiler_diff(force=True)
-        return self.get_state()
+        steps.append(self._build_latency_step("capture_profiler_diff", step_started_perf, time.perf_counter()))
+
+        step_started_perf = time.perf_counter()
+        state = self.get_state()
+        steps.append(self._build_latency_step("build_state", step_started_perf, time.perf_counter()))
+
+        latency = {
+            "captured_at": sample.get("captured_at_iso"),
+            "total_ms": round((time.perf_counter() - started_perf) * 1000.0, 3),
+            "steps": steps,
+        }
+        with self._state_lock:
+            self._latest_capture_latency = latency
+            self._latest_details_state = self._build_details_state_locked()
+        state["capture_latency"] = latency
+        return state
 
     def get_summary_state(self) -> Dict[str, Any]:
         with self._state_lock:
@@ -440,6 +487,12 @@ class MemoryService:
             self._latest_summary_state = self._build_summary_state_locked()
             self._latest_details_state = self._build_details_state_locked()
 
+    def _build_latency_step(self, name: str, started_perf: float, ended_perf: float) -> Dict[str, Any]:
+        return {
+            "name": name,
+            "latency_ms": round((ended_perf - started_perf) * 1000.0, 3),
+        }
+
     def _build_profiler_state_locked(self, now: Optional[float] = None) -> Dict[str, Any]:
         current_time = time.time() if now is None else now
         remaining_ttl_sec: Optional[float] = None
@@ -458,6 +511,9 @@ class MemoryService:
             "expires_at": expires_at,
             "remaining_ttl_sec": remaining_ttl_sec,
             "max_runtime_sec": round(self._profiler_max_runtime_sec, 3),
+            "last_stop_reason": self._profiler_last_stop_reason,
+            "last_stop_at": self._profiler_last_stop_at,
+            "last_stop_expected": self._profiler_last_stop_expected,
         }
 
     def _expire_profiler_if_needed(self) -> None:
@@ -467,14 +523,16 @@ class MemoryService:
             runtime_sec = time.time() - self._profiler_started_at_ts
         if runtime_sec < self._profiler_max_runtime_sec:
             return
-        self._logger.warning(
+        self._logger.info(
             "Memory profiler auto-stopped",
             extra={
                 "memory_profiler_runtime_sec": round(runtime_sec, 3),
                 "memory_profiler_max_runtime_sec": self._profiler_max_runtime_sec,
+                "memory_profiler_stop_reason": "ttl_expired",
+                "memory_profiler_stop_expected": True,
             },
         )
-        self.stop_profiler()
+        self._stop_profiler("ttl_expired", True)
 
     def _build_sampling_state_locked(self) -> Dict[str, Any]:
         return {
@@ -498,6 +556,7 @@ class MemoryService:
             "backend_growth": list(self._latest_backend_growth),
             "collector_history": list(self._collector_history),
             "latest_tracemalloc_diff": list(self._latest_tracemalloc_diff),
+            "capture_latency": dict(self._latest_capture_latency),
         }
 
 

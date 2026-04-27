@@ -19,6 +19,38 @@ from backend.Observability.service import observability_service
 from backend import constants
 
 
+class MelsecResponseError(ValueError):
+    pass
+
+
+def _melsec_response_error(addr: str, count: int, raw: bytes, chunk: str, offset: int, reason: str) -> MelsecResponseError:
+    return MelsecResponseError(
+        f"MELSEC response parse failed addr={addr} count={count} raw={raw!r} "
+        f"chunk={chunk!r} offset={offset} reason={reason}"
+    )
+
+
+def _parse_melsec_values(addr: str, count: int, raw: bytes, response: str) -> List[int]:
+    if "OK" not in response:
+        raise _melsec_response_error(addr, count, raw, "", 0, "missing OK marker")
+
+    hex_data = response.split("OK", 1)[1]
+    values: List[int] = []
+    for offset in range(0, len(hex_data), 4):
+        chunk = hex_data[offset : offset + 4]
+        if len(chunk) != 4:
+            raise _melsec_response_error(addr, count, raw, chunk, offset, "incomplete hex word")
+        try:
+            values.append(int(chunk, 16))
+        except ValueError as exc:
+            raise _melsec_response_error(addr, count, raw, chunk, offset, "invalid hex word") from exc
+
+    if len(values) < count:
+        raise _melsec_response_error(addr, count, raw, "", len(hex_data), "short response")
+
+    return values
+
+
 class RealPLCDriver(BasePLCDriver):
     def __init__(self):
         super().__init__()
@@ -608,7 +640,7 @@ class RealPLCDriver(BasePLCDriver):
 
         return data
 
-    def _recv_until(self, terminator: bytes, max_bytes: int, deadline: float) -> bytes:
+    def _recv_until(self, terminator: bytes, max_bytes: int, deadline: float, context: str) -> bytes:
         if not self.sock_ext:
             return b""
         data = bytearray()
@@ -619,8 +651,11 @@ class RealPLCDriver(BasePLCDriver):
             elapsed = time.time() - start_time
             remaining = self._remaining_timeout(deadline, self.ext_timeout - elapsed, "Extruder recv")
 
-            if elapsed > 0.3:  # Only log if already slow
-                msg = f"[DEBUG recv_until] Loop#{loop_count}: elapsed={elapsed:.3f}s, remaining={remaining:.3f}s, data_len={len(data)}"
+            if elapsed > 0.3:
+                msg = (
+                    f"[recv_until] context={context}, loop={loop_count}, elapsed_sec={elapsed:.3f}, "
+                    f"remaining_sec={remaining:.3f}, bytes={len(data)}, max_bytes={max_bytes}"
+                )
                 print(msg)
                 config._config_log("WARNING", msg)
 
@@ -630,7 +665,10 @@ class RealPLCDriver(BasePLCDriver):
                 t_select_end = time.time()
                 
                 if not r:
-                    msg = f"[DEBUG recv_until] Select timeout at loop#{loop_count}, waited={t_select_end - t_select_start:.3f}s"
+                    msg = (
+                        f"[recv_until] context={context}, select_timeout=true, loop={loop_count}, "
+                        f"waited_sec={t_select_end - t_select_start:.3f}, bytes={len(data)}, max_bytes={max_bytes}"
+                    )
                     print(msg)
                     config._config_log("WARNING", msg)
                     raise socket.timeout("Select timeout (Recv Guard)")
@@ -641,16 +679,20 @@ class RealPLCDriver(BasePLCDriver):
 
                 recv_duration = t_recv_end - t_recv_start
                 if recv_duration > 0.1:
-                    msg = f"[DEBUG recv_until] recv() blocked for {recv_duration:.3f}s at loop#{loop_count}"
+                    msg = (
+                        f"[recv_until] context={context}, recv_blocked_sec={recv_duration:.3f}, "
+                        f"loop={loop_count}, chunk_len={len(chunk)}, bytes_before={len(data)}"
+                    )
                     print(msg)
                     config._config_log("WARNING", msg)
                     
             except socket.timeout:
-                msg = f"[DEBUG recv_until] socket.timeout exception at loop#{loop_count}, elapsed={time.time() - start_time:.3f}s"
+                msg = (
+                    f"[recv_until] context={context}, socket_timeout=true, loop={loop_count}, "
+                    f"elapsed_sec={time.time() - start_time:.3f}, bytes={len(data)}"
+                )
                 print(msg)
                 config._config_log("WARNING", msg)
-                raise  # CRITICAL: Re-raise timeout, don't swallow it!
-            except Exception:
                 raise
 
             if not chunk:
@@ -683,8 +725,6 @@ class RealPLCDriver(BasePLCDriver):
                 total_sent += sent
             except BlockingIOError:
                 continue
-            except Exception:
-                raise
 
     def _melsec_read(self, addr: str, count: int, deadline: float) -> List[int]:
         if not self.sock_ext:
@@ -692,43 +732,36 @@ class RealPLCDriver(BasePLCDriver):
         cmd = f"01WRD{addr} {count:02}\r\n".encode()
         t_start = time.time()
         t_after_send = t_start
+        t_after_recv = t_start
+        raw_len = 0
         result_status = "OK"
         try:
             self._send_with_timeout(cmd, deadline)
             t_after_send = time.time()
-            raw = self._recv_until(b"\r\n", 8192, deadline)
+            t_after_recv = t_after_send
+            raw = self._recv_until(b"\r\n", 8192, deadline, f"MELSEC addr={addr} count={count}")
+            t_after_recv = time.time()
+            raw_len = len(raw)
             if not raw:
                 self.ext_invalid_responses += 1
                 result_status = "EMPTY"
                 raise ConnectionResetError("Empty response")
 
-            resp_str = raw.decode("ascii", errors="replace").strip()
-            if "OK" not in resp_str:
+            try:
+                resp_str = raw.decode("ascii").strip()
+            except UnicodeDecodeError as exc:
                 self.ext_invalid_responses += 1
-                result_status = "NO_OK"
-                return []
+                result_status = "DECODE_ERR"
+                raise _melsec_response_error(addr, count, raw, "", 0, "non-ascii response") from exc
 
-            parts = resp_str.split("OK", 1)
-            if len(parts) < 2:
+            try:
+                values = _parse_melsec_values(addr, count, raw, resp_str)
+            except MelsecResponseError:
                 self.ext_invalid_responses += 1
                 result_status = "PARSE_ERR"
-                return []
-
-            hex_data = parts[1]
-            values: List[int] = []
-            for i in range(0, len(hex_data), 4):
-                chunk = hex_data[i : i + 4]
-                if len(chunk) == 4:
-                    try:
-                        values.append(int(chunk, 16))
-                    except Exception:
-                        values.append(0)
-            if len(values) < count:
-                self.ext_invalid_responses += 1
-                result_status = "SHORT"
-                return []
+                raise
             return values
-        except Exception as e:
+        except (ConnectionError, OSError, MelsecResponseError) as e:
             result_status = f"ERR:{type(e).__name__}"
             print(f"[RealDriver] Extruder Read Error: {e}")
             self._mark_ext_error(str(e))
@@ -738,15 +771,19 @@ class RealPLCDriver(BasePLCDriver):
             return []
         finally:
             elapsed = time.time() - t_start
-            # Log slow reads (> 0.3s) for diagnosis
             if elapsed > 0.3:
                 try:
                     t_send = t_after_send - t_start
-                    t_recv = elapsed - t_send
-                    msg = f"[MelsecRead] Addr={addr}, Count={count}, Elapsed={elapsed:.2f}s (Send={t_send:.2f}s, Recv={t_recv:.2f}s), Status={result_status}"
+                    t_recv = t_after_recv - t_after_send
+                    t_parse = elapsed - t_send - t_recv
+                    msg = (
+                        f"[MelsecRead] addr={addr}, count={count}, elapsed_sec={elapsed:.2f}, "
+                        f"send_sec={t_send:.2f}, recv_sec={t_recv:.2f}, parse_sec={t_parse:.2f}, "
+                        f"raw_len={raw_len}, status={result_status}"
+                    )
                     print(f"[WARNING] {msg}")
                     config._config_log("WARNING", msg)
-                except Exception:
+                except OSError:
                     pass
 
     def _read_extruder_merged(self, deadline: float) -> Optional[Dict[str, float]]:

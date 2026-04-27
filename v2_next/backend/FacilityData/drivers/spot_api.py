@@ -12,11 +12,12 @@ from backend import config
 _ACTUATOR_LOCK = threading.Lock()
 _POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 
-# Short-term cache for image proxy (Throttling)
+# 이미지 프록시 단기 캐시
 _img_cache: Dict[str, Any] = {"data": None, "time": 0.0, "temp": 0.0, "temp_time": 0.0}
 _IMG_CACHE_TTL_SEC = 2.0
 _IMG_BACKOFF_BASE_SEC = 0.5
 _IMG_BACKOFF_MAX_SEC = 5.0
+_TEMP_CACHE_TTL_SEC = 15.0
 _img_fetch_lock = asyncio.Lock()
 _img_last_error = 0.0
 _img_failure_count = 0
@@ -24,8 +25,15 @@ _img_cache_state = "empty"
 _img_last_cache_log_at = 0.0
 _img_last_error_code: Optional[str] = None
 _img_last_error_message: Optional[str] = None
+_img_next_retry_at: Optional[float] = None
+_temp_last_error = 0.0
+_temp_last_error_code: Optional[str] = None
+_temp_last_error_message: Optional[str] = None
+_temp_last_upstream_status: Optional[int] = None
+_temp_last_url: Optional[str] = None
+_temp_last_success_at = 0.0
 
-# Async HTTP client (reused for connection pooling)
+# 연결 풀 재사용을 위한 비동기 HTTP 클라이언트
 _http_client: Optional[httpx.AsyncClient] = None
 
 
@@ -50,11 +58,53 @@ class SpotImageFetchError(RuntimeError):
         self.upstream_status = upstream_status
 
 
+class SpotTemperatureConfigError(ValueError):
+    def __init__(self, temp_url: str) -> None:
+        super().__init__("SPOT_URL is not configured")
+        self.temp_url = temp_url
+
+
+class SpotTemperatureFetchError(RuntimeError):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        temp_url: str,
+        upstream_status: Optional[int],
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.temp_url = temp_url
+        self.upstream_status = upstream_status
+
+
+def _format_exception_message(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return message
+    return exc.__class__.__name__
+
+
+def _response_body_preview(response: httpx.Response, max_chars: int) -> str:
+    body = response.text.strip()
+    if len(body) <= max_chars:
+        return body
+    return body[:max_chars]
+
+
 def _resolve_spot_image_url() -> str:
     image_url = str(config.SPOT_IMAGE_URL or "").strip()
     if not image_url:
         raise SpotImageConfigError(image_url)
     return image_url
+
+
+def _resolve_spot_temperature_url() -> str:
+    temp_url = str(config.SPOT_URL or "").strip()
+    if not temp_url:
+        raise SpotTemperatureConfigError(temp_url)
+    return temp_url
 
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
@@ -64,21 +114,32 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     except httpx.TimeoutException as exc:
         raise SpotImageFetchError(
             "upstream-timeout",
-            "SPOT image upstream timed out",
+            (
+                "SPOT image upstream timed out; "
+                f"url={image_url}; error_type={exc.__class__.__name__}; "
+                f"error={_format_exception_message(exc)}"
+            ),
             image_url=image_url,
             upstream_status=None,
         ) from exc
     except httpx.HTTPStatusError as exc:
         raise SpotImageFetchError(
             "upstream-http-error",
-            f"SPOT image upstream returned HTTP {exc.response.status_code}",
+            (
+                f"SPOT image upstream returned HTTP {exc.response.status_code}; "
+                f"url={image_url}; body={_response_body_preview(exc.response, 200)}"
+            ),
             image_url=image_url,
             upstream_status=exc.response.status_code,
         ) from exc
     except httpx.RequestError as exc:
         raise SpotImageFetchError(
             "upstream-request-error",
-            f"SPOT image upstream request failed: {exc}",
+            (
+                "SPOT image upstream request failed; "
+                f"url={image_url}; error_type={exc.__class__.__name__}; "
+                f"error={_format_exception_message(exc)}"
+            ),
             image_url=image_url,
             upstream_status=None,
         ) from exc
@@ -87,11 +148,71 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     if not data:
         raise SpotImageFetchError(
             "empty-body",
-            "SPOT image upstream returned an empty body",
+            f"SPOT image upstream returned an empty body; url={image_url}",
             image_url=image_url,
             upstream_status=response.status_code,
         )
     return data
+
+
+async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) -> float:
+    try:
+        response = await client.get(temp_url)
+        response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise SpotTemperatureFetchError(
+            "temperature-upstream-timeout",
+            (
+                "SPOT temperature upstream timed out; "
+                f"url={temp_url}; error_type={exc.__class__.__name__}; "
+                f"error={_format_exception_message(exc)}"
+            ),
+            temp_url=temp_url,
+            upstream_status=None,
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise SpotTemperatureFetchError(
+            "temperature-upstream-http-error",
+            (
+                f"SPOT temperature upstream returned HTTP {exc.response.status_code}; "
+                f"url={temp_url}; body={_response_body_preview(exc.response, 200)}"
+            ),
+            temp_url=temp_url,
+            upstream_status=exc.response.status_code,
+        ) from exc
+    except httpx.RequestError as exc:
+        raise SpotTemperatureFetchError(
+            "temperature-upstream-request-error",
+            (
+                "SPOT temperature upstream request failed; "
+                f"url={temp_url}; error_type={exc.__class__.__name__}; "
+                f"error={_format_exception_message(exc)}"
+            ),
+            temp_url=temp_url,
+            upstream_status=None,
+        ) from exc
+
+    raw_temp = response.text.strip()
+    if not raw_temp:
+        raise SpotTemperatureFetchError(
+            "temperature-empty-body",
+            f"SPOT temperature upstream returned an empty body; url={temp_url}",
+            temp_url=temp_url,
+            upstream_status=response.status_code,
+        )
+
+    try:
+        return float(raw_temp)
+    except ValueError as exc:
+        raise SpotTemperatureFetchError(
+            "temperature-parse-error",
+            (
+                "SPOT temperature upstream returned a non-numeric body; "
+                f"url={temp_url}; body={raw_temp[:200]}"
+            ),
+            temp_url=temp_url,
+            upstream_status=response.status_code,
+        ) from exc
 
 
 def _record_image_error(code: str, message: str) -> None:
@@ -105,14 +226,91 @@ def _record_image_error(code: str, message: str) -> None:
 
 
 def _record_image_success() -> None:
+    global _img_failure_count
     global _img_last_error_code
     global _img_last_error_message
+    global _img_next_retry_at
 
+    _img_failure_count = 0
     _img_last_error_code = None
     _img_last_error_message = None
+    _img_next_retry_at = None
+
+
+def _record_image_backoff(backoff_sec: float) -> None:
+    global _img_next_retry_at
+
+    if backoff_sec <= 0.0:
+        _img_next_retry_at = None
+        return
+    _img_next_retry_at = time.time() + backoff_sec
+
+
+def _record_temperature_error(
+    code: str,
+    message: str,
+    temp_url: str,
+    upstream_status: Optional[int],
+) -> None:
+    global _temp_last_error
+    global _temp_last_error_code
+    global _temp_last_error_message
+    global _temp_last_upstream_status
+    global _temp_last_url
+
+    _temp_last_error = time.time()
+    _temp_last_error_code = code
+    _temp_last_error_message = message
+    _temp_last_upstream_status = upstream_status
+    _temp_last_url = temp_url
+
+
+def _record_temperature_success(temp_url: str) -> None:
+    global _temp_last_error_code
+    global _temp_last_error_message
+    global _temp_last_upstream_status
+    global _temp_last_url
+    global _temp_last_success_at
+
+    _temp_last_error_code = None
+    _temp_last_error_message = None
+    _temp_last_upstream_status = None
+    _temp_last_url = temp_url
+    _temp_last_success_at = time.time()
+
+
+def _temperature_cache_age_sec(now: float) -> Optional[float]:
+    temp_time = float(_img_cache.get("temp_time") or 0.0)
+    if temp_time <= 0.0:
+        return None
+    return max(0.0, now - temp_time)
+
+
+def _temperature_cache_status(now: float) -> str:
+    age = _temperature_cache_age_sec(now)
+    if age is None:
+        if _temp_last_error_code:
+            return "error"
+        return "empty"
+    if age > _TEMP_CACHE_TTL_SEC:
+        return "stale"
+    return "ok"
+
+
+async def _refresh_spot_temperature(client: httpx.AsyncClient) -> None:
+    temp_url = _resolve_spot_temperature_url()
+    temperature = await _request_spot_temperature(client, temp_url)
+    _img_cache["temp"] = temperature
+    _img_cache["temp_time"] = time.time()
+    _record_temperature_success(temp_url)
 
 
 def get_image_proxy_diagnostics() -> Dict[str, Any]:
+    now = time.time()
+    cache_age = _cache_age_sec(now) if _img_cache["data"] else None
+    retry_after = None
+    if _img_next_retry_at is not None:
+        retry_after = max(0.0, _img_next_retry_at - now)
     return {
         "cache_state": str(_img_cache_state),
         "failure_count": int(_img_failure_count),
@@ -120,16 +318,32 @@ def get_image_proxy_diagnostics() -> Dict[str, Any]:
         "last_error_code": _img_last_error_code,
         "last_error_message": _img_last_error_message,
         "image_url_configured": bool(str(config.SPOT_IMAGE_URL or "").strip()),
+        "has_cached_image": bool(_img_cache["data"]),
+        "cache_captured_at": float(_img_cache.get("time") or 0.0) if _img_cache["data"] else None,
+        "cache_age_sec": cache_age,
+        "max_stale_age_sec": _max_stale_age_sec(),
+        "current_backoff_sec": _current_backoff_sec(),
+        "next_retry_at": _img_next_retry_at,
+        "retry_after_sec": retry_after,
+        "temperature_url_configured": bool(str(config.SPOT_URL or "").strip()),
+        "temperature_cache_status": _temperature_cache_status(now),
+        "temperature_cache_age_sec": _temperature_cache_age_sec(now),
+        "temperature_last_success_at": float(_temp_last_success_at) if _temp_last_success_at else None,
+        "temperature_last_error_at": float(_temp_last_error) if _temp_last_error else None,
+        "temperature_last_error_code": _temp_last_error_code,
+        "temperature_last_error_message": _temp_last_error_message,
+        "temperature_last_upstream_status": _temp_last_upstream_status,
+        "temperature_last_url": _temp_last_url,
     }
 
 
 def _get_http_client() -> httpx.AsyncClient:
-    """Lazily initialize and return the shared async HTTP client."""
+    """공유 비동기 HTTP 클라이언트를 지연 초기화해 반환한다."""
     global _http_client
     if _http_client is None:
         timeout = httpx.Timeout(
             connect=1.0,
-            # Increase read timeout to 5s for better resilience globally
+            # 응답 대기 제한을 5초로 둔다.
             read=5.0, 
             write=1.0,
             pool=5.0,
@@ -192,11 +406,15 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         _img_cache_state = next_cache_state
         return _img_cache["data"], _build_image_meta(now, status, next_cache_state)
     
-    # 캐시가 비어있으면 한번 직접 fetch 시도 (초기 로드용)
-    image_url = _resolve_spot_image_url()
+    # 캐시가 비어있으면 초기 로드를 위해 한 번 직접 가져온다.
+    try:
+        image_url = _resolve_spot_image_url()
+    except SpotImageConfigError as exc:
+        _record_image_error("config-missing", str(exc))
+        raise
     
     async with _img_fetch_lock:
-        # Double-check after lock
+        # 잠금 획득 후 캐시를 다시 확인한다.
         if _img_cache["data"]:
             cached_now = time.time()
             cached_age = _cache_age_sec(cached_now)
@@ -236,8 +454,8 @@ async def _prefetch_loop():
     
     while _prefetch_running:
         try:
+            client = _get_http_client()
             if config.SPOT_IMAGE_URL:
-                client = _get_http_client()
                 image_url = _resolve_spot_image_url()
                 data = await _request_spot_image(client, image_url)
 
@@ -246,62 +464,76 @@ async def _prefetch_loop():
                     _img_cache["time"] = time.time()
                     _img_cache_state = "upstream"
                     if _img_failure_count > 0:
-                        logger.info("Spot image fetch recovered after %s failures", _img_failure_count)
+                        logger.info(
+                            "Spot image fetch recovered",
+                            extra={"failure_count": _img_failure_count},
+                        )
                     _img_failure_count = 0
                     _record_image_success()
 
-                if config.SPOT_URL:
-                    try:
-                        temp_resp = await client.get(config.SPOT_URL)
-                        temp_resp.raise_for_status()
-                        raw_temp = temp_resp.text.strip()
-                        if raw_temp:
-                            _img_cache["temp"] = float(raw_temp)
-                            _img_cache["temp_time"] = time.time()
-                    except ValueError as exc:
-                        logger.warning("Spot temperature parse failed: %s", exc)
-                    except Exception as exc:
-                        logger.warning("Spot temperature fetch failed: %s", exc)
+            if config.SPOT_URL:
+                try:
+                    await _refresh_spot_temperature(client)
+                except SpotTemperatureConfigError as exc:
+                    _record_temperature_error("temperature-config-missing", str(exc), exc.temp_url, None)
+                    logger.warning(
+                        "Spot temperature fetch misconfigured",
+                        extra={
+                            "code": "temperature-config-missing",
+                            "temp_url": exc.temp_url,
+                            "error": str(exc),
+                        },
+                    )
+                except SpotTemperatureFetchError as exc:
+                    _record_temperature_error(exc.code, str(exc), exc.temp_url, exc.upstream_status)
+                    logger.warning(
+                        "Spot temperature fetch failed",
+                        extra={
+                            "code": exc.code,
+                            "temp_url": exc.temp_url,
+                            "upstream_status": exc.upstream_status,
+                            "error": str(exc),
+                        },
+                    )
                     
         except asyncio.CancelledError:
             break
         except SpotImageConfigError as exc:
             _record_image_error("config-missing", str(exc))
             _img_failure_count = min(_img_failure_count + 1, 10)
+            config_backoff = max(interval, 1.0)
+            _record_image_backoff(config_backoff)
             logger.warning(
-                "Spot image fetch misconfigured: error=%s failure_count=%s",
-                str(exc),
-                _img_failure_count,
+                "Spot image fetch misconfigured",
+                extra={
+                    "code": "config-missing",
+                    "error": str(exc),
+                    "failure_count": _img_failure_count,
+                    "next_backoff_sec": config_backoff,
+                    "next_retry_at": _img_next_retry_at,
+                },
             )
-            await asyncio.sleep(max(interval, 1.0))
+            await asyncio.sleep(config_backoff)
             next_tick = time.time()
         except SpotImageFetchError as exc:
             _record_image_error(exc.code, str(exc))
             _img_failure_count = min(_img_failure_count + 1, 10)
             backoff = _current_backoff_sec()
+            _record_image_backoff(backoff)
             if _img_failure_count == 1 or _img_failure_count >= 6:
                 logger.warning(
-                    "Spot image fetch failed: code=%s error=%s failure_count=%s next_backoff_sec=%.1f",
-                    exc.code,
-                    str(exc),
-                    _img_failure_count,
-                    backoff,
+                    "Spot image fetch failed",
+                    extra={
+                        "code": exc.code,
+                        "error": str(exc),
+                        "failure_count": _img_failure_count,
+                        "next_backoff_sec": backoff,
+                        "next_retry_at": _img_next_retry_at,
+                        "image_url": exc.image_url,
+                        "upstream_status": exc.upstream_status,
+                    },
                 )
             
-            if backoff > 0:
-                await asyncio.sleep(backoff)
-                next_tick = time.time()
-        except Exception as exc:
-            _record_image_error("unknown", str(exc))
-            _img_failure_count = min(_img_failure_count + 1, 10)
-            backoff = _current_backoff_sec()
-            logger.warning(
-                "Spot image fetch failed: code=%s error=%s failure_count=%s next_backoff_sec=%.1f",
-                "unknown",
-                str(exc),
-                _img_failure_count,
-                backoff,
-            )
             if backoff > 0:
                 await asyncio.sleep(backoff)
                 next_tick = time.time()
@@ -314,9 +546,9 @@ async def _prefetch_loop():
         if sleep_time > 0:
             await asyncio.sleep(sleep_time)
         else:
-            # 작업이 너무 오래 걸려 다음 tick을 이미 지남 -> tick 보정
+            # 작업이 너무 오래 걸려 다음 실행 시점을 이미 지난 경우 보정한다.
             next_tick = now
-            await asyncio.sleep(0.1) # 최소 0.1초 휴식으로 CPU 점유 방지
+            await asyncio.sleep(0.1) # 최소 0.1초 휴식으로 프로세서 점유 방지
 
 
 async def start_prefetch_loop():
@@ -346,8 +578,8 @@ async def stop_prefetch_loop():
 def get_cached_spot_temp() -> float:
     """캐시된 SPOT 온도를 반환 (PLC 드라이버 등에서 사용)."""
     now = time.time()
-    # 이미지가 너무 오래되었거나(15s), 온도가 없으면 0.0 반환
-    if not _img_cache["temp_time"] or (now - _img_cache["temp_time"] > 15.0):
+    # 이미지가 너무 오래되었거나(15초), 온도가 없으면 0.0 반환
+    if not _img_cache["temp_time"] or (now - _img_cache["temp_time"] > _TEMP_CACHE_TTL_SEC):
         return 0.0
     return _img_cache["temp"]
 
@@ -372,7 +604,7 @@ def move_focus(steps: int) -> Dict[str, Any]:
         delta = steps * max(1, config.SPOT_ACTUATOR_STEP)
         new_val = current + delta
 
-        # Clamp (based on v1 behavior)
+        # v1 동작에 맞춰 범위를 제한한다.
         new_val = max(0, min(1000, new_val))
         if new_val == current:
             return {

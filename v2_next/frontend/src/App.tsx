@@ -903,22 +903,25 @@ function App() {
     void fetchCentralStatus();
   }, [fetchCentralStatus, loadSettings, setActiveSettingsSection, setSettingsOpen]);
 
+  const getSettingsPasswordRequired = useCallback(async (): Promise<boolean> => {
+    const snapshot = await configService.getConfig();
+    return Boolean(snapshot.values.settings.password_set);
+  }, []);
+
   const handleOpenSettings = useCallback(async () => {
+    let passwordRequired: boolean;
     try {
-      // Check if password is required
-      const checkResult = await configService.verifyPassword('');
-      if (checkResult.ok) {
-        await openSettingsAfterBootstrap();
-        return;
-      }
-    } catch (err: any) {
-      if (err?.response?.status !== 403) {
-        await openSettingsAfterBootstrap();
-        return;
-      }
+      passwordRequired = await getSettingsPasswordRequired();
+    } catch (error) {
+      console.error('Settings password status check failed', error);
+      await modal.alert('\uC124\uC815 \uBE44\uBC00\uBC88\uD638 \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.');
+      return;
     }
-    
-    // Password is required, prompt user
+    if (!passwordRequired) {
+      await openSettingsAfterBootstrap();
+      return;
+    }
+
     const password = await modal.prompt(
       '\uC124\uC815\uC744 \uC5F4\uB824\uBA74 \uAD00\uB9AC\uC790 \uBE44\uBC00\uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694.',
       '',
@@ -926,7 +929,6 @@ function App() {
     );
     
     if (password === null) {
-      // User cancelled
       return;
     }
     
@@ -939,7 +941,7 @@ function App() {
       const errMsg = err?.response?.data?.detail || '\uBE44\uBC00\uBC88\uD638\uAC00 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.';
       await modal.alert(errMsg);
     }
-  }, [modal, openSettingsAfterBootstrap]);
+  }, [getSettingsPasswordRequired, modal, openSettingsAfterBootstrap]);
 
 
 
