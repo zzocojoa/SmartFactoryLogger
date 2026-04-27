@@ -6,5 +6,7 @@ logs/
 dist/
 build/
 tests/
+!v2_next/backend/tests/
+!v2_next/backend/tests/*.py
 mes_data/
 browsers/
