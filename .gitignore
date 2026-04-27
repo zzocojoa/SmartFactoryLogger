@@ -7,6 +7,9 @@ dist/
 build/
 tests/
 !v2_next/backend/tests/
-!v2_next/backend/tests/*.py
+v2_next/backend/tests/*
+!v2_next/backend/tests/test_memory_service.py
+!v2_next/backend/tests/test_real_plc.py
+!v2_next/backend/tests/test_spot_api.py
 mes_data/
 browsers/
