@@ -70,7 +70,7 @@ import traceback
 import time
 import uvicorn
 from urllib.request import Request, urlopen
-from typing import Any
+from typing import Any, NamedTuple, TypedDict
 
 # Import Service Layer using absolute imports
 from backend.FacilityData.service import plc_service
@@ -897,20 +897,130 @@ _logger, _crash_logger = _setup_logging()
 _register_memory_collectors()
 
 
-def resolve_frontend_dist() -> tuple[Path, str, str]:
+class FrontendResolutionCandidateSpec(NamedTuple):
+    source: str
+    origin: str
+    path: Path
+
+
+class FrontendResolutionCandidate(TypedDict):
+    priority: int
+    source: str
+    origin: str
+    path: str
+    exists: bool
+    missing_assets: list[str]
+    is_ready: bool
+
+
+def build_frontend_resolution_candidate(
+    priority: int,
+    spec: FrontendResolutionCandidateSpec,
+) -> FrontendResolutionCandidate:
+    resolved_path = spec.path.resolve(strict=False)
+    exists = resolved_path.is_dir()
+    missing_assets = get_frontend_missing_assets(resolved_path) if exists else []
+    return {
+        "priority": priority,
+        "source": spec.source,
+        "origin": spec.origin,
+        "path": str(resolved_path),
+        "exists": exists,
+        "missing_assets": missing_assets,
+        "is_ready": exists and not missing_assets,
+    }
+
+
+def get_frontend_resolution_candidates(
+    candidate_specs: list[FrontendResolutionCandidateSpec],
+) -> list[FrontendResolutionCandidate]:
+    return [
+        build_frontend_resolution_candidate(
+            priority=index,
+            spec=spec,
+        )
+        for index, spec in enumerate(candidate_specs, start=1)
+    ]
+
+
+def get_frozen_frontend_candidate_specs() -> list[FrontendResolutionCandidateSpec]:
+    executable_dir = Path(sys.executable).resolve().parent
+    candidate_specs: list[FrontendResolutionCandidateSpec] = [
+        FrontendResolutionCandidateSpec("sidecar", "executable_dir", executable_dir / "frontend" / "dist"),
+        FrontendResolutionCandidateSpec("resources", "executable_parent", executable_dir.parent / "frontend" / "dist"),
+        FrontendResolutionCandidateSpec("resources", "executable_grandparent", executable_dir.parent.parent / "frontend" / "dist"),
+    ]
+
+    if hasattr(sys, "_MEIPASS"):
+        candidate_specs.append(
+            FrontendResolutionCandidateSpec("meipass", "pyinstaller_temp", Path(sys._MEIPASS) / "frontend" / "dist")
+        )
+
+    unique_specs: list[FrontendResolutionCandidateSpec] = []
+    seen_paths: set[str] = set()
+    for spec in candidate_specs:
+        normalized_path = str(spec.path.resolve(strict=False))
+        if normalized_path in seen_paths:
+            continue
+        seen_paths.add(normalized_path)
+        unique_specs.append(spec)
+
+    return unique_specs
+
+
+def resolve_frontend_dist() -> tuple[Path, str, str, str, str, list[FrontendResolutionCandidateSpec]]:
     if getattr(sys, "frozen", False):
-        resources_root = Path(sys.executable).resolve().parent.parent
-        resources_dist = resources_root / "frontend" / "dist"
-        if resources_dist.exists():
-            return resources_dist, "frozen", "resources"
+        candidate_specs = get_frozen_frontend_candidate_specs()
+        candidates = get_frontend_resolution_candidates(candidate_specs)
+        for candidate in candidates:
+            if candidate["is_ready"]:
+                resolution_reason = f"selected_ready_{candidate['source']}_{candidate['origin']}"
+                return (
+                    Path(candidate["path"]),
+                    "frozen",
+                    candidate["source"],
+                    candidate["origin"],
+                    resolution_reason,
+                    candidate_specs,
+                )
 
-        if hasattr(sys, "_MEIPASS"):
-            meipass_dist = Path(sys._MEIPASS) / "frontend" / "dist"
-            return meipass_dist, "frozen", "meipass"
+        for candidate in candidates:
+            if candidate["exists"]:
+                return (
+                    Path(candidate["path"]),
+                    "frozen",
+                    candidate["source"],
+                    candidate["origin"],
+                    f"selected_existing_incomplete_{candidate['source']}_{candidate['origin']}",
+                    candidate_specs,
+                )
 
-        return resources_dist, "frozen", "resources"
+        fallback_path = candidate_specs[0].path.resolve(strict=False)
+        return (
+            fallback_path,
+            "frozen",
+            candidate_specs[0].source,
+            candidate_specs[0].origin,
+            "no_frontend_dist_candidate_exists",
+            candidate_specs,
+        )
 
-    return Path(__file__).resolve().parent.parent / "frontend" / "dist", "development", "project"
+    development_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    development_candidate_specs = [
+        FrontendResolutionCandidateSpec(
+            "project",
+            "project_root",
+            development_dist,
+        )
+    ]
+    return (
+        development_dist,
+        "development",
+        "project",
+        "project_root",
+        "selected_ready_project_project_root",
+        development_candidate_specs,
+    )
 
 
 _FRONTEND_REQUIRED_EXACT_PATHS: tuple[str, ...] = (
@@ -938,8 +1048,10 @@ _FRONTEND_ENTRY_ASSET_PATTERN = re.compile(r'(?:src|href)="\./(assets/[^"]+\.(?:
 def get_frontend_runtime_class(frontend_mode: str, frontend_source: str) -> str:
     if frontend_mode == "development":
         return "development"
+    if frontend_source == "sidecar":
+        return "portable-sidecar"
     if frontend_source == "resources":
-        return "electron-packaged"
+        return "packaged-resources"
     if frontend_source == "meipass":
         return "legacy-one-file"
     return "unknown"
@@ -991,6 +1103,7 @@ def get_frontend_static_status(
     frontend_dist_path: Path,
     frontend_mode: str,
     frontend_source: str,
+    frontend_source_origin: str,
 ) -> dict[str, Any]:
     index_path = frontend_dist_path / "index.html"
     assets_path = frontend_dist_path / "assets"
@@ -998,13 +1111,17 @@ def get_frontend_static_status(
     frontend_index_exists = index_path.exists()
     frontend_assets_exists = assets_path.exists()
     frontend_missing_assets = get_frontend_missing_assets(frontend_dist_path)
+    frontend_resolution_candidates = get_frontend_resolution_candidates(frontend_resolution_candidate_specs)
 
     return {
         "frontend_mode": frontend_mode,
         "frontend_source": frontend_source,
+        "frontend_source_origin": frontend_source_origin,
         "frontend_runtime_class": get_frontend_runtime_class(frontend_mode, frontend_source),
         "frontend_runtime_warning": get_frontend_runtime_warning(frontend_source, frontend_missing_assets),
         "frontend_dist_path": str(frontend_dist_path),
+        "frontend_resolution_reason": frontend_resolution_reason,
+        "frontend_resolution_candidates": frontend_resolution_candidates,
         "frontend_dist_exists": frontend_dist_exists,
         "frontend_index_exists": frontend_index_exists,
         "frontend_assets_exists": frontend_assets_exists,
@@ -1066,7 +1183,12 @@ def get_frontend_file_request_status(frontend_status: dict[str, Any], full_path:
 
 
 def build_frontend_error_response(status_code: int, detail: str) -> JSONResponse:
-    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    frontend_status = get_frontend_static_status(
+        frontend_dist,
+        frontend_mode,
+        frontend_source,
+        frontend_source_origin,
+    )
     payload: dict[str, Any] = {
         "detail": detail,
         "status_code": status_code,
@@ -1075,12 +1197,20 @@ def build_frontend_error_response(status_code: int, detail: str) -> JSONResponse
     return JSONResponse(status_code=status_code, content=payload)
 
 
-frontend_dist, frontend_mode, frontend_source = resolve_frontend_dist()
-frontend_status_snapshot = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+frontend_dist, frontend_mode, frontend_source, frontend_source_origin, frontend_resolution_reason, frontend_resolution_candidate_specs = resolve_frontend_dist()
+frontend_status_snapshot = get_frontend_static_status(
+    frontend_dist,
+    frontend_mode,
+    frontend_source,
+    frontend_source_origin,
+)
 _logger.info(
     "Frontend static root resolved",
     extra={
         **frontend_status_snapshot,
+        "frontend_sys_executable": sys.executable,
+        "frontend_sys_meipass": getattr(sys, "_MEIPASS", None),
+        "frontend_app_project_root": str(project_root),
     },
 )
 if frontend_status_snapshot["frontend_runtime_warning"] != "none":
@@ -1088,8 +1218,21 @@ if frontend_status_snapshot["frontend_runtime_warning"] != "none":
         "Frontend runtime warning",
         extra={
             **frontend_status_snapshot,
+            "frontend_sys_executable": sys.executable,
+            "frontend_sys_meipass": getattr(sys, "_MEIPASS", None),
+            "frontend_app_project_root": str(project_root),
         },
     )
+
+
+def get_frontend_log_context() -> dict[str, Any]:
+    return {
+        "frontend_mode": frontend_mode,
+        "frontend_source": frontend_source,
+        "frontend_source_origin": frontend_source_origin,
+        "frontend_dist_path": str(frontend_dist),
+        "frontend_resolution_reason": frontend_resolution_reason,
+    }
 
 
 
@@ -1365,7 +1508,12 @@ async def record_request_stats(request: Request, call_next):
 
 @app.get("/")
 def read_root():
-    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    frontend_status = get_frontend_static_status(
+        frontend_dist,
+        frontend_mode,
+        frontend_source,
+        frontend_source_origin,
+    )
     if frontend_status["frontend_static_ready"]:
         index_path = frontend_dist / "index.html"
         if frontend_status["frontend_index_exists"]:
@@ -1374,9 +1522,7 @@ def read_root():
     _logger.error(
         "Frontend index unavailable for root request",
         extra={
-            "frontend_mode": frontend_mode,
-            "frontend_source": frontend_source,
-            "frontend_dist_path": str(frontend_dist),
+            **get_frontend_log_context(),
             "frontend_missing_assets": frontend_status["frontend_missing_assets"],
         },
     )
@@ -1392,7 +1538,12 @@ async def health():
     return {
         **plc_service.get_health(),
         **get_runtime_info(),
-        **get_frontend_static_status(frontend_dist, frontend_mode, frontend_source),
+        **get_frontend_static_status(
+            frontend_dist,
+            frontend_mode,
+            frontend_source,
+            frontend_source_origin,
+        ),
     }
 
 @app.get("/stats")
@@ -2513,15 +2664,18 @@ def shutdown(payload: ShutdownRequest):
 # --- Static File Serving (Frontend) ---
 @app.get("/assets/{asset_path:path}")
 async def serve_frontend_asset(asset_path: str):
-    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    frontend_status = get_frontend_static_status(
+        frontend_dist,
+        frontend_mode,
+        frontend_source,
+        frontend_source_origin,
+    )
     assets_dir = frontend_dist / "assets"
     if not frontend_status["frontend_assets_exists"]:
         _logger.error(
             "Frontend assets directory unavailable",
             extra={
-                "frontend_mode": frontend_mode,
-                "frontend_source": frontend_source,
-                "frontend_dist_path": str(frontend_dist),
+                **get_frontend_log_context(),
                 "asset_path": asset_path,
             },
         )
@@ -2532,9 +2686,7 @@ async def serve_frontend_asset(asset_path: str):
         _logger.warning(
             "Frontend asset not found",
             extra={
-                "frontend_mode": frontend_mode,
-                "frontend_source": frontend_source,
-                "frontend_dist_path": str(frontend_dist),
+                **get_frontend_log_context(),
                 "asset_path": asset_path,
             },
         )
@@ -2545,7 +2697,12 @@ async def serve_frontend_asset(asset_path: str):
 
 @app.get("/{full_path:path}")
 async def serve_spa(full_path: str):
-    frontend_status = get_frontend_static_status(frontend_dist, frontend_mode, frontend_source)
+    frontend_status = get_frontend_static_status(
+        frontend_dist,
+        frontend_mode,
+        frontend_source,
+        frontend_source_origin,
+    )
     requested_file = resolve_frontend_file(frontend_dist, full_path)
     if requested_file is not None and requested_file.exists() and requested_file.is_file():
         return FileResponse(requested_file)
@@ -2559,9 +2716,7 @@ async def serve_spa(full_path: str):
         _logger.warning(
             "Frontend file request not found",
             extra={
-                "frontend_mode": frontend_mode,
-                "frontend_source": frontend_source,
-                "frontend_dist_path": str(frontend_dist),
+                **get_frontend_log_context(),
                 "request_path": full_path,
                 "frontend_missing_assets": frontend_status["frontend_missing_assets"],
             },
@@ -2572,9 +2727,7 @@ async def serve_spa(full_path: str):
         _logger.error(
             "Frontend bundle incomplete for SPA request",
             extra={
-                "frontend_mode": frontend_mode,
-                "frontend_source": frontend_source,
-                "frontend_dist_path": str(frontend_dist),
+                **get_frontend_log_context(),
                 "request_path": full_path,
                 "frontend_missing_assets": frontend_status["frontend_missing_assets"],
             },
@@ -2588,9 +2741,7 @@ async def serve_spa(full_path: str):
     _logger.error(
         "Frontend index unavailable for SPA request",
         extra={
-            "frontend_mode": frontend_mode,
-            "frontend_source": frontend_source,
-            "frontend_dist_path": str(frontend_dist),
+            **get_frontend_log_context(),
             "request_path": full_path,
         },
     )

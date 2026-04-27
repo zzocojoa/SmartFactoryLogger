@@ -8,6 +8,37 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = (Get-Item "$(Split-Path -Parent $MyInvocation.MyCommand.Path)\..").FullName
 Set-Location $ScriptDir
 
+function Test-PortableFrontendPattern {
+    param(
+        [string]$BasePath,
+        [string]$RelativePattern
+    )
+
+    $targetPattern = Join-Path $BasePath $RelativePattern
+    $matches = Get-ChildItem -Path $targetPattern -ErrorAction SilentlyContinue
+    return [bool]($matches -and $matches.Count -gt 0)
+}
+
+function Get-FrontendEntryAssets {
+    param(
+        [string]$FrontendDistPath
+    )
+
+    $indexPath = Join-Path $FrontendDistPath "index.html"
+    if (-not (Test-Path $indexPath)) {
+        return @()
+    }
+
+    $indexHtml = Get-Content -Raw -Path $indexPath
+    $matches = [regex]::Matches($indexHtml, '(?:src|href)="\./(assets/[^"]+\.(?:js|css))"')
+    $entryAssets = @()
+    foreach ($match in $matches) {
+        $entryAssets += $match.Groups[1].Value
+    }
+
+    return $entryAssets | Sort-Object -Unique
+}
+
 # =============================================================================
 # 1. Build Frontend
 # =============================================================================
@@ -94,6 +125,48 @@ if (Test-Path $BrowsersSource) {
     Copy-Item -Path $BrowsersSource -Destination $BrowsersDest -Recurse -Force
     Write-Host "    Copied browsers folder" -ForegroundColor Green
 }
+
+# Copy frontend dist sidecar
+$FrontendSource = Join-Path $ScriptDir "frontend\dist"
+$FrontendRootDest = Join-Path $PortablePath "frontend"
+$FrontendDistDest = Join-Path $FrontendRootDest "dist"
+if (-not (Test-Path $FrontendSource)) {
+    Write-Error "Frontend dist not found: $FrontendSource"
+    exit 1
+}
+New-Item -ItemType Directory -Path $FrontendRootDest -Force | Out-Null
+Copy-Item -Path $FrontendSource -Destination $FrontendRootDest -Recurse -Force
+Write-Host "    Copied frontend dist sidecar" -ForegroundColor Green
+
+$RequiredFrontendPatterns = @(
+    "index.html",
+    "manifest.json",
+    "favicon.ico",
+    "logo192.png",
+    "logo512.png",
+    "assets\logo_white.png",
+    "assets\logo_color.png"
+)
+$EntryAssetPatterns = Get-FrontendEntryAssets -FrontendDistPath $FrontendDistDest
+if ($EntryAssetPatterns.Count -gt 0) {
+    $RequiredFrontendPatterns += $EntryAssetPatterns
+} else {
+    $RequiredFrontendPatterns += @(
+        "assets\index-*.js",
+        "assets\index-*.css"
+    )
+}
+$MissingFrontendPatterns = @()
+foreach ($RelativePattern in $RequiredFrontendPatterns) {
+    if (-not (Test-PortableFrontendPattern -BasePath $FrontendDistDest -RelativePattern $RelativePattern)) {
+        $MissingFrontendPatterns += $RelativePattern
+    }
+}
+if ($MissingFrontendPatterns.Count -gt 0) {
+    Write-Error ("Portable frontend sidecar verification failed: " + ($MissingFrontendPatterns -join ", "))
+    exit 1
+}
+Write-Host "    Verified frontend dist sidecar" -ForegroundColor Green
 
 # =============================================================================
 # 6. Create Launcher Scripts (Uses System Grafana)
