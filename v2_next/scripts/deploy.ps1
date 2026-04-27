@@ -126,7 +126,7 @@ if (Test-Path $BrowsersSource) {
     Write-Host "    Copied browsers folder" -ForegroundColor Green
 }
 
-# Copy frontend dist sidecar
+# 프런트 정적 번들을 EXE 옆 사이드카로 복사
 $FrontendSource = Join-Path $ScriptDir "frontend\dist"
 $FrontendRootDest = Join-Path $PortablePath "frontend"
 $FrontendDistDest = Join-Path $FrontendRootDest "dist"

@@ -1104,6 +1104,8 @@ def get_frontend_static_status(
     frontend_mode: str,
     frontend_source: str,
     frontend_source_origin: str,
+    selected_resolution_reason: str,
+    candidate_specs: list[FrontendResolutionCandidateSpec],
 ) -> dict[str, Any]:
     index_path = frontend_dist_path / "index.html"
     assets_path = frontend_dist_path / "assets"
@@ -1111,7 +1113,7 @@ def get_frontend_static_status(
     frontend_index_exists = index_path.exists()
     frontend_assets_exists = assets_path.exists()
     frontend_missing_assets = get_frontend_missing_assets(frontend_dist_path)
-    frontend_resolution_candidates = get_frontend_resolution_candidates(frontend_resolution_candidate_specs)
+    frontend_resolution_candidates = get_frontend_resolution_candidates(candidate_specs)
 
     return {
         "frontend_mode": frontend_mode,
@@ -1120,7 +1122,7 @@ def get_frontend_static_status(
         "frontend_runtime_class": get_frontend_runtime_class(frontend_mode, frontend_source),
         "frontend_runtime_warning": get_frontend_runtime_warning(frontend_source, frontend_missing_assets),
         "frontend_dist_path": str(frontend_dist_path),
-        "frontend_resolution_reason": frontend_resolution_reason,
+        "frontend_resolution_reason": selected_resolution_reason,
         "frontend_resolution_candidates": frontend_resolution_candidates,
         "frontend_dist_exists": frontend_dist_exists,
         "frontend_index_exists": frontend_index_exists,
@@ -1188,6 +1190,8 @@ def build_frontend_error_response(status_code: int, detail: str) -> JSONResponse
         frontend_mode,
         frontend_source,
         frontend_source_origin,
+        frontend_resolution_reason,
+        frontend_resolution_candidate_specs,
     )
     payload: dict[str, Any] = {
         "detail": detail,
@@ -1203,6 +1207,8 @@ frontend_status_snapshot = get_frontend_static_status(
     frontend_mode,
     frontend_source,
     frontend_source_origin,
+    frontend_resolution_reason,
+    frontend_resolution_candidate_specs,
 )
 _logger.info(
     "Frontend static root resolved",
@@ -1513,6 +1519,8 @@ def read_root():
         frontend_mode,
         frontend_source,
         frontend_source_origin,
+        frontend_resolution_reason,
+        frontend_resolution_candidate_specs,
     )
     if frontend_status["frontend_static_ready"]:
         index_path = frontend_dist / "index.html"
@@ -1543,6 +1551,8 @@ async def health():
             frontend_mode,
             frontend_source,
             frontend_source_origin,
+            frontend_resolution_reason,
+            frontend_resolution_candidate_specs,
         ),
     }
 
@@ -2669,6 +2679,8 @@ async def serve_frontend_asset(asset_path: str):
         frontend_mode,
         frontend_source,
         frontend_source_origin,
+        frontend_resolution_reason,
+        frontend_resolution_candidate_specs,
     )
     assets_dir = frontend_dist / "assets"
     if not frontend_status["frontend_assets_exists"]:
@@ -2702,6 +2714,8 @@ async def serve_spa(full_path: str):
         frontend_mode,
         frontend_source,
         frontend_source_origin,
+        frontend_resolution_reason,
+        frontend_resolution_candidate_specs,
     )
     requested_file = resolve_frontend_file(frontend_dist, full_path)
     if requested_file is not None and requested_file.exists() and requested_file.is_file():
