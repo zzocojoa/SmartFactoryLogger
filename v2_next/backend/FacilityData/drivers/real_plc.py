@@ -520,9 +520,7 @@ class RealPLCDriver(BasePLCDriver):
             started_at = time.time()
             try:
                 spot_val = self._read_spot()
-                if spot_val > 0:
-                    self._update_spot_snapshot(spot_val, time.time())
-                elif self.spot_last_error_time is not None:
+                if spot_val <= 0.0 and self.spot_last_error_time is not None:
                     self._record_spot_snapshot_error("spot_read_failed")
             except Exception as exc:
                 self._record_spot_snapshot_error(str(exc))
@@ -533,7 +531,11 @@ class RealPLCDriver(BasePLCDriver):
         if val > 0:
             self.last_spot = val
             self._mark_spot_success()
-        return val
+            self._update_spot_snapshot(val, time.time())
+            return val
+        self.last_spot = 0.0
+        self._update_spot_snapshot(0.0, time.time())
+        return 0.0
 
     def _remaining_timeout(self, deadline: float, base_timeout: float, context: str) -> float:
         remaining = deadline - time.time()

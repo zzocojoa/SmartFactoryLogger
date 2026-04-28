@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from backend.FacilityData.drivers.real_plc import MelsecResponseError, _parse_melsec_values
+from backend.FacilityData.drivers.real_plc import MelsecResponseError, RealPLCDriver, _parse_melsec_values
 
 
 class MelsecParseTests(unittest.TestCase):
@@ -34,6 +35,25 @@ class MelsecParseTests(unittest.TestCase):
         self.assertIn("raw=b'01OK000A1\\r\\n'", message)
         self.assertIn("chunk='1'", message)
         self.assertIn("offset=4", message)
+
+
+class SpotSnapshotTests(unittest.TestCase):
+    def test_zero_cached_spot_temperature_replaces_previous_positive_snapshot(self) -> None:
+        driver = RealPLCDriver()
+        driver.last_spot = 45.5
+        driver._update_spot_snapshot(45.5, 100.0)
+
+        _, _, previous_spot = driver._read_cached_snapshot()
+        self.assertEqual(previous_spot, 45.5)
+
+        with patch("backend.FacilityData.drivers.real_plc.get_cached_spot_temp", return_value=0.0):
+            spot_value = driver._read_spot()
+
+        _, _, cached_spot = driver._read_cached_snapshot()
+
+        self.assertEqual(spot_value, 0.0)
+        self.assertEqual(driver.last_spot, 0.0)
+        self.assertEqual(cached_spot, 0.0)
 
 
 if __name__ == "__main__":
