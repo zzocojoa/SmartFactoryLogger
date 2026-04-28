@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import ReactMarkdown from 'react-markdown';
 import {
   SpotConfig,
   HealthSnapshot,
@@ -35,10 +34,9 @@ import { useMetricsViewModel } from './domains/FacilityData/hooks/useMetricsView
 import { useViewportScale, applyRowHeightToCSS } from './domains/Configuration/hooks/useViewportScale';
 import { useStatusPanel } from './domains/Layout/hooks/useStatusPanel';
 import { DashboardHeader } from './domains/Layout/components/DashboardHeader/DashboardHeader';
-import { NotificationDrawer } from './domains/Layout/components/NotificationDrawer';
 import './App.css';
 import packageJson from '../package.json';
-const UPlotChart = React.lazy(() => import('./domains/FacilityData/components/UPlotChart').then(m => ({ default: m.UPlotChart })));
+const NotificationDrawer = React.lazy(() => import('./domains/Layout/components/NotificationDrawer').then(m => ({ default: m.NotificationDrawer })));
 import type uPlot from 'uplot';
 
 // --- Widget Imports ---
@@ -55,9 +53,8 @@ import { SERIES_COLORS } from './domains/FacilityData/timeseries/seriesCatalog';
 
 /* Recharts imports removed */
 import { initScenesRuntime } from './scenes/ScenesRuntime';
-import { getDashboardScene, WidgetType, WidgetRegistry, DashboardItem, DASHBOARD_LAYOUT_KEYS } from './scenes/DashboardScene';
+import { getDashboardScene, WidgetType, WidgetRegistry, DASHBOARD_LAYOUT_KEYS } from './scenes/DashboardScene';
 import { SceneDataNode, SceneGridItemLike, SceneGridLayout, SceneGridItem, SceneObjectBase } from '@grafana/scenes';
-import { ReactWidget } from './scenes/ReactWidgetObject';
 import { buildSeriesSample } from './domains/FacilityData/timeseries/seriesSampling';
 import { SeriesBuffer } from './domains/FacilityData/timeseries/seriesBuffer';
 import { buildGroupedFrames, buildTimeSeriesFrame, SeriesFrame } from './domains/FacilityData/timeseries/seriesDataFrames';
@@ -81,22 +78,13 @@ import * as LOGIC from './shared/constants/logic';
 import * as THEME from './shared/constants/theme';
 import { useModal } from './shared/hooks/useGlobalModalContext';
 import { useTheme } from './shared/hooks/useThemeContext';
-const AIChatbot = React.lazy(() => import('./AI/components/AIChatbot').then(m => ({ default: m.AIChatbot })));
 
 const MAX_NOTIFICATIONS = 50;
 
 import { LayoutEditContext } from './domains/Configuration/context/LayoutEditContext';
-import {
-  getTestBadge,
-  formatTestTime,
-  getPathBadge,
-  formatPathCheckTime,
-  formatPathMessage,
-  getCentralBadge,
-  formatCentralTime,
-} from './domains/Configuration/components/SettingsModal/settingsModalHelpers';
 import { useSettingsModalState } from './domains/Configuration/components/SettingsModal/useSettingsModalState';
-import { SettingsModal } from './domains/Configuration/components/SettingsModal/SettingsModal';
+const SettingsModal = React.lazy(() => import('./domains/Configuration/components/SettingsModal/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const MarkdownWidget = React.lazy(() => import('./scenes/MarkdownWidget').then(m => ({ default: m.MarkdownWidget })));
 
 // Initialize Scenes Runtime (guarded for HMR)
 if (typeof window !== 'undefined') {
@@ -131,49 +119,16 @@ const {
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LEGACY_LAYOUT_COLS = 24;
 
-const MarkdownWidget = ({ item, model }: { item: DashboardItem; model: ReactWidget }) => {
-  const { updateWidget } = React.useContext(LayoutEditContext);
-  const { isContentEditing: editing, properties } = model.useState();
-  const currentProperties = properties ?? item.properties ?? {};
-  const currentContent =
-    typeof currentProperties.content === 'string' ? currentProperties.content : '';
-  const [editValue, setEditValue] = useState(currentContent);
-
-  useEffect(() => {
-    setEditValue(currentContent);
-  }, [currentContent]);
-
-  const handleSave = () => {
-    const nextProperties = {
-      ...currentProperties,
-      content: editValue,
-    };
-    updateWidget(item.key, { properties: nextProperties });
-    model.setState({ properties: nextProperties, isContentEditing: false });
-  };
-
-  return (
-    <div className="scene-react-widget card" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {editing ? (
-        <div className="notice-editor-container">
-          <textarea
-            className="notice-textarea"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-          />
-          <button className="notice-save-btn" onClick={handleSave}>{LABELS.SAVE}</button>
-        </div>
-      ) : (
-        <div className="notice-content markdown-body" style={{ flex: 1, overflow: 'auto' }}>
-          <ReactMarkdown>{currentContent}</ReactMarkdown>
-        </div>
-      )}
+const LazyModalFallback = ({ title }: { title: string }): JSX.Element => (
+  <div className="custom-modal-overlay">
+    <div className="custom-modal-content">
+      <div className="custom-modal-header">
+        <div className="custom-modal-title">{title}</div>
+      </div>
+      <div className="custom-modal-body">로딩 중입니다.</div>
     </div>
-  );
-};
-
-
-
+  </div>
+);
 
 const {
   SERIES_SAMPLES_PER_SEC,
@@ -1215,7 +1170,11 @@ function App() {
           <TimeSeriesWidget />
         </React.Suspense>
       ),
-      markdown: (item, model) => <MarkdownWidget item={item} model={model} />,
+      markdown: (item, model) => (
+        <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
+          <MarkdownWidget item={item} model={model} />
+        </React.Suspense>
+      ),
     };
     return getDashboardScene(registry, layoutSnapshot?.layout ?? null);
   }, [layoutSnapshot]);
@@ -1495,15 +1454,21 @@ function App() {
         setThemeMode={setMode}
         handleOpenSettings={handleOpenSettings}
       />
-      <NotificationDrawer
-        notifications={notifications}
-        notificationsOpen={notificationsOpen}
-        setNotificationsOpen={setNotificationsOpen}
-        clearNotifications={clearNotifications}
-      />
-      <SettingsModal
-        settingsOpen={settingsOpen}
-        setSettingsOpen={setSettingsOpen}
+      {notificationsOpen ? (
+        <React.Suspense fallback={null}>
+          <NotificationDrawer
+            notifications={notifications}
+            notificationsOpen={notificationsOpen}
+            setNotificationsOpen={setNotificationsOpen}
+            clearNotifications={clearNotifications}
+          />
+        </React.Suspense>
+      ) : null}
+      {settingsOpen ? (
+        <React.Suspense fallback={<LazyModalFallback title="설정" />}>
+          <SettingsModal
+            settingsOpen={settingsOpen}
+            setSettingsOpen={setSettingsOpen}
         settingsLoading={settingsLoading}
         settingsError={settingsError}
         settingsInfo={settingsInfo}
@@ -1638,8 +1603,10 @@ function App() {
         errorQueueText={errorQueueText}
         lastErrorAt={lastErrorAt}
         spotImageError={spotImageError}
-        showSettingsToast={showSettingsToast}
-      />
+            showSettingsToast={showSettingsToast}
+          />
+        </React.Suspense>
+      ) : null}
       <div className="scene-container" style={{ flexGrow: 1 }}>
         {/* The ReactWidget will be rendered *inside* this provider hierarchy. */}
         <DataContext.Provider value={dataContextValue}>
