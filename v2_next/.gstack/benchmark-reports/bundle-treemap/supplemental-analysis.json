@@ -1,0 +1,90 @@
+{
+  "purpose": "Supplement previously missing bundle analysis items using four parallel subagents.",
+  "codeModified": false,
+  "subagents": [
+    {
+      "role": "string_scan_and_vite_rollup_auxiliary_analysis",
+      "status": "completed_with_concerns",
+      "concern": "rg failed with Access is denied; Select-String, npm ls, and Node read-only scans were used instead."
+    },
+    {
+      "role": "import_owner_graph",
+      "status": "completed_with_concerns",
+      "concern": "Package owner and source import owner were confirmed; exact Grafana UI exported component necessity remains unresolved."
+    },
+    {
+      "role": "visualizer_treemap_artifacts",
+      "status": "completed",
+      "artifacts": [
+        {
+          "path": ".gstack/benchmark-reports/bundle-treemap/visualizer/app-chunk-treemap.html",
+          "bytes": 15065
+        },
+        {
+          "path": ".gstack/benchmark-reports/bundle-treemap/visualizer/visualizer-status.md",
+          "bytes": 633
+        }
+      ],
+      "note": "rollup-plugin-visualizer and source-map-explorer were not installed locally; no new dependency install was performed."
+    },
+    {
+      "role": "gzip_and_split_experiment_design",
+      "status": "completed",
+      "appChunk": {
+        "file": "frontend/dist/assets/App-BAswA52Z.js",
+        "rawBytes": 8545720,
+        "rawMiB": 8.15,
+        "gzipBytes": 2270849,
+        "gzipKiB": 2217.63,
+        "gzipMiB": 2.17,
+        "gzipRatioPercent": 26.57
+      }
+    }
+  ],
+  "stringScan": {
+    "note": "String scan is auxiliary evidence, not a byte size source.",
+    "items": [
+      { "pattern": "monaco", "appJsOccurrences": 575, "occurrencesPerMiB": 70.6, "mapOccurrences": 1547, "sourceMapSourceCount": 688 },
+      { "pattern": "grafana", "appJsOccurrences": 991, "occurrencesPerMiB": 121.6, "mapOccurrences": 1939, "sourceMapSourceCount": 379 },
+      { "pattern": "moment-timezone/timezone", "appJsOccurrences": 411, "occurrencesPerMiB": 50.4, "mapOccurrences": 1049, "sourceMapSourceCount": "2 direct, broad 70" },
+      { "pattern": "slate", "appJsOccurrences": 214, "occurrencesPerMiB": 26.3, "mapOccurrences": 524, "sourceMapSourceCount": 14 },
+      { "pattern": "react-select", "appJsOccurrences": 45, "occurrencesPerMiB": 5.5, "mapOccurrences": 184, "sourceMapSourceCount": 10 },
+      { "pattern": "floating-ui", "appJsOccurrences": 30, "occurrencesPerMiB": 3.7, "mapOccurrences": 278, "sourceMapSourceCount": 9 },
+      { "pattern": "react-markdown/markdown", "appJsOccurrences": 142, "occurrencesPerMiB": 17.4, "mapOccurrences": 820, "sourceMapSourceCount": 84 },
+      { "pattern": "uplot", "appJsOccurrences": 15, "occurrencesPerMiB": 1.8, "mapOccurrences": 97, "sourceMapSourceCount": 1 },
+      { "pattern": "html2canvas", "appJsOccurrences": 1, "occurrencesPerMiB": 0.1, "mapOccurrences": 5, "sourceMapSourceCount": 0 },
+      { "pattern": "recharts", "appJsOccurrences": 0, "occurrencesPerMiB": 0.0, "mapOccurrences": 1, "sourceMapSourceCount": 0 },
+      { "pattern": "settings/setting", "appJsOccurrences": 1177, "occurrencesPerMiB": 144.4, "mapOccurrences": 2488, "sourceMapSourceCount": 22 }
+    ]
+  },
+  "importOwnerGraph": {
+    "dashboardEntry": "frontend/src/App.tsx -> @grafana/scenes -> @grafana/scenes/dist/index.js -> @grafana/ui, @grafana/data, @grafana/runtime",
+    "confirmedOwners": [
+      { "package": "monaco-editor", "owner": "@grafana/ui" },
+      { "package": "@monaco-editor/react", "owner": "@grafana/ui" },
+      { "package": "moment-timezone", "owner": "@grafana/data" },
+      { "package": "slate", "owner": "@grafana/ui" },
+      { "package": "react-select", "owner": "@grafana/ui" },
+      { "package": "@floating-ui/react", "owner": "@grafana/ui and @grafana/scenes" },
+      { "package": "@hello-pangea/dnd", "owner": "@grafana/ui" },
+      { "package": "rc-picker", "owner": "@grafana/ui" },
+      { "package": "react-table", "owner": "@grafana/ui" },
+      { "package": "react-dropzone", "owner": "@grafana/ui" }
+    ],
+    "frontendSrcDirectImportsFound": false,
+    "mesDashboardCause": false
+  },
+  "gzip": {
+    "categoryGzipIsNotExact": true,
+    "reason": "gzip compresses the full App chunk as one stream; category boundaries are not compression boundaries and DEFLATE dictionaries are shared.",
+    "conservativeEstimateMethod": "category_raw_bytes * 0.2657 can be used only as a rough planning estimate.",
+    "requiresPatchDeltaForExactMeasurement": true
+  },
+  "splitExperimentPriority": [
+    { "rank": 1, "target": "monaco-editor via @grafana/ui", "branch": "codex/experiment-split-monaco", "risk": "medium_high" },
+    { "rank": 2, "target": "moment-timezone via @grafana/data", "branch": "codex/experiment-trim-moment-timezone", "risk": "medium" },
+    { "rank": 3, "target": "SettingsModal", "branch": "codex/experiment-lazy-settings-modal", "risk": "medium" },
+    { "rank": 4, "target": "MarkdownWidget/react-markdown", "branch": "codex/experiment-lazy-markdown-widget", "risk": "low" },
+    { "rank": 5, "target": "Grafana scene boundary", "branch": "codex/experiment-split-grafana-scene", "risk": "high" }
+  ]
+}

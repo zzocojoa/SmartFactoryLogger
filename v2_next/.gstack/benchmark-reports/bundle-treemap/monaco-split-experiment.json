@@ -1,0 +1,76 @@
+{
+  "branch": "codex/experiment-split-monaco",
+  "codeModified": true,
+  "modifiedFiles": [
+    "frontend/vite.config.ts"
+  ],
+  "baseline": {
+    "appFile": "App-BAswA52Z.js",
+    "appBytes": 8545720,
+    "appMiB": 8.149833679199219,
+    "appGzipBytes": 2270849,
+    "appGzipMiB": 2.1656503677368164
+  },
+  "attempts": [
+    {
+      "name": "monaco_manual_chunks",
+      "status": "failed",
+      "appBytes": 5754136,
+      "appGzipBytes": 1560502,
+      "monacoJsBytes": 3315106,
+      "monacoJsGzipBytes": 839763,
+      "reason": "monaco-editor JS/CSS was still preloaded by index.html and imported by index/App chunks."
+    },
+    {
+      "name": "react_vendor_plus_monaco_manual_chunks",
+      "status": "failed",
+      "appBytes": 5612219,
+      "appGzipBytes": 1515152,
+      "monacoJsBytes": 3307700,
+      "monacoJsGzipBytes": 837277,
+      "reactVendorBytes": 368088,
+      "reactVendorGzipBytes": 119835,
+      "reason": "monaco-editor JS/CSS was still preloaded, and react-vendor imported from the monaco chunk."
+    },
+    {
+      "name": "grafana_scenes_esm_source_entry_alias",
+      "status": "success_candidate",
+      "appFile": "App-Bz_Ymavl.js",
+      "appBytes": 2696880,
+      "appMiB": 2.5719451904296875,
+      "appGzipBytes": 652754,
+      "appGzipMiB": 0.6225147247314453,
+      "indexFile": "index-RArPjYSl.js",
+      "indexBytes": 167998,
+      "indexGzipBytes": 55723,
+      "totalJsBytes": 3347006,
+      "totalJsGzipBytes": 867479,
+      "monacoAssets": [],
+      "appSourceMap": {
+        "sourceCount": 1200,
+        "monacoSourceCount": 0,
+        "grafanaUiCjsSourceCount": 0,
+        "grafanaUiEsmSourceCount": 141
+      }
+    }
+  ],
+  "delta": {
+    "appRawBytesReduced": 5848840,
+    "appRawMiBReduced": 5.577888488769531,
+    "appGzipBytesReduced": 1618095,
+    "appGzipMiBReduced": 1.5421819686889648
+  },
+  "verification": {
+    "npmRunBuild": "passed",
+    "npxViteBuildSourcemap": "passed",
+    "previewUrl": "http://127.0.0.1:4173/",
+    "previewHttpStatus": 200,
+    "indexHtmlHasMonacoPreload": false,
+    "distHasMonacoAssets": false
+  },
+  "risk": [
+    "@grafana/scenes internal ESM source path is used directly, so package dist layout changes can break the alias.",
+    "Dashboard runtime smoke testing is still required for scene rendering, layout editing, widget operations, settings, and snapshot flows.",
+    "Many grafana-scenes.json-* lazy chunks are generated, though they are not preloaded by index.html."
+  ]
+}

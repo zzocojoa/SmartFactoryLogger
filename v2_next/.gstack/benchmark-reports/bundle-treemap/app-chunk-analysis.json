@@ -1,0 +1,830 @@
+{
+  "generatedAt": "2026-04-28T07:24:54.305Z",
+  "projectRoot": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v2_next",
+  "branch": "codex/benchmark-dashboard-performance",
+  "codeModified": false,
+  "build": {
+    "commands": [
+      "npm run build",
+      "npm run build -- --sourcemap",
+      "npx vite build --sourcemap"
+    ],
+    "sourceMapStatus": "npx vite build --sourcemap generated maps; npm run build -- --sourcemap did not emit maps in this environment.",
+    "transformedModules": 6160,
+    "viteVersion": "7.3.0"
+  },
+  "appChunk": {
+    "file": "App-BAswA52Z.js",
+    "mapFile": "App-BAswA52Z.js.map",
+    "bytes": 8545720,
+    "kib": 8345.4296875,
+    "mib": 8.149833679199219,
+    "gzipBytes": 2270849,
+    "gzipKib": 2217.6259765625,
+    "sourceMapBytes": 31335335,
+    "sourceMapMiB": 29.88370418548584,
+    "sourceCount": 3036,
+    "sourcesContentCount": 3036,
+    "mappedBytes": 8525707,
+    "unmappedBytes": 20013,
+    "mappedCoveragePercent": 99.76581259390666
+  },
+  "categories": [
+    {
+      "id": "other_vendor",
+      "bytes": 3379176,
+      "kib": 3299.9765625,
+      "mib": 3.2226333618164062,
+      "percentOfApp": 39.542320600253696
+    },
+    {
+      "id": "monaco",
+      "bytes": 2782338,
+      "kib": 2717.126953125,
+      "mib": 2.653444290161133,
+      "percentOfApp": 32.5582630837425
+    },
+    {
+      "id": "grafana_strict",
+      "bytes": 1974669,
+      "kib": 1928.3876953125,
+      "mib": 1.8831911087036133,
+      "percentOfApp": 23.10711092804351
+    },
+    {
+      "id": "dashboard_code",
+      "bytes": 124739,
+      "kib": 121.8154296875,
+      "mib": 0.11896038055419922,
+      "percentOfApp": 1.459666359300328
+    },
+    {
+      "id": "settings_code",
+      "bytes": 102781,
+      "kib": 100.3720703125,
+      "mib": 0.09801959991455078,
+      "percentOfApp": 1.2027190219197448
+    },
+    {
+      "id": "ai_markdown_html2canvas",
+      "bytes": 87912,
+      "kib": 85.8515625,
+      "mib": 0.08383941650390625,
+      "percentOfApp": 1.0287254906549712
+    },
+    {
+      "id": "chart_libraries",
+      "bytes": 74092,
+      "kib": 72.35546875,
+      "mib": 0.07065963745117188,
+      "percentOfApp": 0.8670071099919024
+    }
+  ],
+  "topPackages": [
+    {
+      "name": "monaco-editor",
+      "bytes": 2770459,
+      "kib": 2705.5263671875,
+      "mib": 2.642115592956543,
+      "percentOfApp": 32.41925782731004
+    },
+    {
+      "name": "@grafana/ui",
+      "bytes": 777309,
+      "kib": 759.0908203125,
+      "mib": 0.7412996292114258,
+      "percentOfApp": 9.095886595863192
+    },
+    {
+      "name": "moment-timezone",
+      "bytes": 731894,
+      "kib": 714.740234375,
+      "mib": 0.6979885101318359,
+      "percentOfApp": 8.564450976629237
+    },
+    {
+      "name": "@grafana/scenes",
+      "bytes": 379786,
+      "kib": 370.884765625,
+      "mib": 0.36219215393066406,
+      "percentOfApp": 4.444166202496688
+    },
+    {
+      "name": "@grafana/data",
+      "bytes": 307464,
+      "kib": 300.2578125,
+      "mib": 0.29322052001953125,
+      "percentOfApp": 3.5978712150643832
+    },
+    {
+      "name": "(app)",
+      "bytes": 227858,
+      "kib": 222.517578125,
+      "mib": 0.2173023223876953,
+      "percentOfApp": 2.6663405775054647
+    },
+    {
+      "name": "rxjs",
+      "bytes": 165901,
+      "kib": 162.0126953125,
+      "mib": 0.15821552276611328,
+      "percentOfApp": 1.9413343755704608
+    },
+    {
+      "name": "date-fns",
+      "bytes": 159785,
+      "kib": 156.0400390625,
+      "mib": 0.15238285064697266,
+      "percentOfApp": 1.8697663859803502
+    },
+    {
+      "name": "slate",
+      "bytes": 159299,
+      "kib": 155.5654296875,
+      "mib": 0.15191936492919922,
+      "percentOfApp": 1.8640793285995796
+    },
+    {
+      "name": "@react-aria/utils",
+      "bytes": 157779,
+      "kib": 154.0810546875,
+      "mib": 0.15046977996826172,
+      "percentOfApp": 1.8462926470794738
+    },
+    {
+      "name": "@floating-ui/react",
+      "bytes": 119370,
+      "kib": 116.572265625,
+      "mib": 0.11384010314941406,
+      "percentOfApp": 1.396839587536217
+    },
+    {
+      "name": "lodash",
+      "bytes": 107560,
+      "kib": 105.0390625,
+      "mib": 0.10257720947265625,
+      "percentOfApp": 1.2586417528306568
+    },
+    {
+      "name": "react-use",
+      "bytes": 96083,
+      "kib": 93.8310546875,
+      "mib": 0.09163188934326172,
+      "percentOfApp": 1.1243406055896987
+    },
+    {
+      "name": "jquery",
+      "bytes": 93736,
+      "kib": 91.5390625,
+      "mib": 0.08939361572265625,
+      "percentOfApp": 1.096876565110956
+    },
+    {
+      "name": "@hello-pangea/dnd",
+      "bytes": 84563,
+      "kib": 82.5810546875,
+      "mib": 0.08064556121826172,
+      "percentOfApp": 0.9895362824899482
+    },
+    {
+      "name": "react-dom",
+      "bytes": 74460,
+      "kib": 72.71484375,
+      "mib": 0.07101058959960938,
+      "percentOfApp": 0.8713133592020333
+    },
+    {
+      "name": "rc-picker",
+      "bytes": 71423,
+      "kib": 69.7490234375,
+      "mib": 0.0681142807006836,
+      "percentOfApp": 0.8357751014542952
+    },
+    {
+      "name": "immutable",
+      "bytes": 66742,
+      "kib": 65.177734375,
+      "mib": 0.06365013122558594,
+      "percentOfApp": 0.7809991434308636
+    },
+    {
+      "name": "react-select",
+      "bytes": 62855,
+      "kib": 61.3818359375,
+      "mib": 0.059943199157714844,
+      "percentOfApp": 0.7355143861488558
+    },
+    {
+      "name": "moment",
+      "bytes": 62587,
+      "kib": 61.1201171875,
+      "mib": 0.05968761444091797,
+      "percentOfApp": 0.7323783133545213
+    },
+    {
+      "name": "react-table",
+      "bytes": 62342,
+      "kib": 60.880859375,
+      "mib": 0.05945396423339844,
+      "percentOfApp": 0.72951138113582
+    },
+    {
+      "name": "react-dropzone",
+      "bytes": 59103,
+      "kib": 57.7177734375,
+      "mib": 0.056365013122558594,
+      "percentOfApp": 0.6916093670281732
+    },
+    {
+      "name": "slate-react",
+      "bytes": 56390,
+      "kib": 55.068359375,
+      "mib": 0.05377769470214844,
+      "percentOfApp": 0.6598624808676157
+    },
+    {
+      "name": "ol",
+      "bytes": 56171,
+      "kib": 54.8544921875,
+      "mib": 0.05356884002685547,
+      "percentOfApp": 0.6572997945170214
+    },
+    {
+      "name": "uplot",
+      "bytes": 55772,
+      "kib": 54.46484375,
+      "mib": 0.053188323974609375,
+      "percentOfApp": 0.6526307906179936
+    },
+    {
+      "name": "@remix-run/router",
+      "bytes": 54486,
+      "kib": 53.208984375,
+      "mib": 0.05196189880371094,
+      "percentOfApp": 0.6375823219108513
+    },
+    {
+      "name": "react-grid-layout",
+      "bytes": 49261,
+      "kib": 48.1064453125,
+      "mib": 0.04697895050048828,
+      "percentOfApp": 0.576440604185487
+    },
+    {
+      "name": "downshift",
+      "bytes": 48302,
+      "kib": 47.169921875,
+      "mib": 0.04606437683105469,
+      "percentOfApp": 0.5652186123579991
+    },
+    {
+      "name": "@grafana/e2e-selectors",
+      "bytes": 47719,
+      "kib": 46.6005859375,
+      "mib": 0.045508384704589844,
+      "percentOfApp": 0.5583964838539058
+    },
+    {
+      "name": "@internationalized/date",
+      "bytes": 45611,
+      "kib": 44.5419921875,
+      "mib": 0.04349803924560547,
+      "percentOfApp": 0.5337291650089168
+    },
+    {
+      "name": "i18next",
+      "bytes": 45302,
+      "kib": 44.240234375,
+      "mib": 0.04320335388183594,
+      "percentOfApp": 0.5301133198841057
+    },
+    {
+      "name": "marked",
+      "bytes": 39689,
+      "kib": 38.7587890625,
+      "mib": 0.037850379943847656,
+      "percentOfApp": 0.46443131766545126
+    },
+    {
+      "name": "axios",
+      "bytes": 37030,
+      "kib": 36.162109375,
+      "mib": 0.03531455993652344,
+      "percentOfApp": 0.4333163267694238
+    },
+    {
+      "name": "react-hook-form",
+      "bytes": 35523,
+      "kib": 34.6904296875,
+      "mib": 0.03387737274169922,
+      "percentOfApp": 0.41568176818337127
+    },
+    {
+      "name": "@grafana/faro-web-sdk",
+      "bytes": 35307,
+      "kib": 34.4794921875,
+      "mib": 0.03367137908935547,
+      "percentOfApp": 0.413154187125251
+    },
+    {
+      "name": "rc-select",
+      "bytes": 34943,
+      "kib": 34.1240234375,
+      "mib": 0.033324241638183594,
+      "percentOfApp": 0.40889474497175193
+    },
+    {
+      "name": "@grafana/runtime",
+      "bytes": 33321,
+      "kib": 32.5400390625,
+      "mib": 0.031777381896972656,
+      "percentOfApp": 0.3899144835075336
+    },
+    {
+      "name": "@react-aria/interactions",
+      "bytes": 32515,
+      "kib": 31.7529296875,
+      "mib": 0.03100872039794922,
+      "percentOfApp": 0.38048286159621425
+    },
+    {
+      "name": "react-calendar",
+      "bytes": 31498,
+      "kib": 30.759765625,
+      "mib": 0.030038833618164062,
+      "percentOfApp": 0.3685821674475644
+    },
+    {
+      "name": "@react-aria/overlays",
+      "bytes": 28516,
+      "kib": 27.84765625,
+      "mib": 0.027194976806640625,
+      "percentOfApp": 0.3336875067285144
+    }
+  ],
+  "topSources": [
+    {
+      "source": "../../node_modules/@grafana/ui/dist/cjs/index.cjs",
+      "bytes": 775404,
+      "kib": 757.23046875,
+      "mib": 0.7394828796386719,
+      "category": "grafana_strict"
+    },
+    {
+      "source": "../../node_modules/moment-timezone/moment-timezone.js",
+      "bytes": 731830,
+      "kib": 714.677734375,
+      "mib": 0.6979274749755859,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/@grafana/data/dist/cjs/index.cjs",
+      "bytes": 301778,
+      "kib": 294.705078125,
+      "mib": 0.2877979278564453,
+      "category": "grafana_strict"
+    },
+    {
+      "source": "../../node_modules/@grafana/scenes/dist/index.js",
+      "bytes": 295250,
+      "kib": 288.330078125,
+      "mib": 0.2815723419189453,
+      "category": "grafana_strict"
+    },
+    {
+      "source": "../../node_modules/slate/lib/slate.es.js",
+      "bytes": 159299,
+      "kib": 155.5654296875,
+      "mib": 0.15191936492919922,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/jquery/dist/jquery.js",
+      "bytes": 93736,
+      "kib": 91.5390625,
+      "mib": 0.08939361572265625,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/@hello-pangea/dnd/dist/dnd.esm.js",
+      "bytes": 84563,
+      "kib": 82.5810546875,
+      "mib": 0.08064556121826172,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/common/config/editorOptions.js",
+      "bytes": 80114,
+      "kib": 78.236328125,
+      "mib": 0.07640266418457031,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/lodash/lodash.js",
+      "bytes": 76375,
+      "kib": 74.5849609375,
+      "mib": 0.07283687591552734,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/immutable/dist/immutable.es.js",
+      "bytes": 66742,
+      "kib": 65.177734375,
+      "mib": 0.06365013122558594,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/moment/dist/moment.js",
+      "bytes": 62587,
+      "kib": 61.1201171875,
+      "mib": 0.05968761444091797,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/react-table/dist/react-table.production.min.js",
+      "bytes": 62311,
+      "kib": 60.8505859375,
+      "mib": 0.059424400329589844,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/react-dropzone/dist/index.js",
+      "bytes": 59103,
+      "kib": 57.7177734375,
+      "mib": 0.056365013122558594,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/common/strings.js",
+      "bytes": 58601,
+      "kib": 57.2275390625,
+      "mib": 0.055886268615722656,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/slate-react/lib/slate-react.es.js",
+      "bytes": 56390,
+      "kib": 55.068359375,
+      "mib": 0.05377769470214844,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/uplot/dist/uPlot.esm.js",
+      "bytes": 55772,
+      "kib": 54.46484375,
+      "mib": 0.053188323974609375,
+      "category": "chart_libraries"
+    },
+    {
+      "source": "../../node_modules/@grafana/ui/node_modules/@floating-ui/react/dist/floating-ui.react.esm.js",
+      "bytes": 55677,
+      "kib": 54.3720703125,
+      "mib": 0.05309772491455078,
+      "category": "grafana_strict"
+    },
+    {
+      "source": "../../node_modules/@floating-ui/react/dist/floating-ui.react.esm.js",
+      "bytes": 55525,
+      "kib": 54.2236328125,
+      "mib": 0.05295276641845703,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/@grafana/ui/node_modules/@remix-run/router/dist/router.js",
+      "bytes": 54486,
+      "kib": 53.208984375,
+      "mib": 0.05196189880371094,
+      "category": "grafana_strict"
+    },
+    {
+      "source": "../../src/domains/Configuration/components/SettingsModal/SettingsModal.tsx",
+      "bytes": 51087,
+      "kib": 49.8896484375,
+      "mib": 0.048720359802246094,
+      "category": "settings_code"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/common/marked/marked.js",
+      "bytes": 50932,
+      "kib": 49.73828125,
+      "mib": 0.048572540283203125,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/browser/widget/diffEditorWidget.js",
+      "bytes": 49450,
+      "kib": 48.291015625,
+      "mib": 0.04715919494628906,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/downshift/dist/downshift.cjs.js",
+      "bytes": 48302,
+      "kib": 47.169921875,
+      "mib": 0.04606437683105469,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/@grafana/e2e-selectors/dist/cjs/index.cjs",
+      "bytes": 47719,
+      "kib": 46.6005859375,
+      "mib": 0.045508384704589844,
+      "category": "grafana_strict"
+    },
+    {
+      "source": "../../node_modules/i18next/dist/cjs/i18next.js",
+      "bytes": 45302,
+      "kib": 44.240234375,
+      "mib": 0.04320335388183594,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/date-fns/index.cjs",
+      "bytes": 43526,
+      "kib": 42.505859375,
+      "mib": 0.04150962829589844,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/platform/theme/common/colorRegistry.js",
+      "bytes": 43477,
+      "kib": 42.4580078125,
+      "mib": 0.04146289825439453,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/browser/widget/codeEditorWidget.js",
+      "bytes": 42220,
+      "kib": 41.23046875,
+      "mib": 0.040264129638671875,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/marked/lib/marked.esm.js",
+      "bytes": 39689,
+      "kib": 38.7587890625,
+      "mib": 0.037850379943847656,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/react-select/dist/Select-ef7c0426.esm.js",
+      "bytes": 39020,
+      "kib": 38.10546875,
+      "mib": 0.037212371826171875,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/common/model/textModel.js",
+      "bytes": 37450,
+      "kib": 36.572265625,
+      "mib": 0.03571510314941406,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/react-dom/cjs/react-dom-server.browser.production.min.js",
+      "bytes": 37337,
+      "kib": 36.4619140625,
+      "mib": 0.035607337951660156,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/react-dom/cjs/react-dom-server-legacy.browser.production.min.js",
+      "bytes": 36733,
+      "kib": 35.8720703125,
+      "mib": 0.03503131866455078,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/react-hook-form/dist/index.cjs.js",
+      "bytes": 35523,
+      "kib": 34.6904296875,
+      "mib": 0.03387737274169922,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/common/codicons.js",
+      "bytes": 33902,
+      "kib": 33.107421875,
+      "mib": 0.03233146667480469,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/@grafana/runtime/dist/cjs/index.cjs",
+      "bytes": 33321,
+      "kib": 32.5400390625,
+      "mib": 0.031777381896972656,
+      "category": "grafana_strict"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/browser/ui/list/listWidget.js",
+      "bytes": 30743,
+      "kib": 30.0224609375,
+      "mib": 0.029318809509277344,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/browser/viewParts/minimap/minimap.js",
+      "bytes": 27965,
+      "kib": 27.3095703125,
+      "mib": 0.02666950225830078,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/parts/quickinput/browser/quickInput.js",
+      "bytes": 27578,
+      "kib": 26.931640625,
+      "mib": 0.026300430297851562,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/contrib/find/browser/findWidget.js",
+      "bytes": 26567,
+      "kib": 25.9443359375,
+      "mib": 0.025336265563964844,
+      "category": "monaco"
+    },
+    {
+      "source": "../../src/App.tsx",
+      "bytes": 25972,
+      "kib": 25.36328125,
+      "mib": 0.024768829345703125,
+      "category": "dashboard_code"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/browser/coreCommands.js",
+      "bytes": 25358,
+      "kib": 24.763671875,
+      "mib": 0.024183273315429688,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/platform/list/browser/listService.js",
+      "bytes": 23997,
+      "kib": 23.4345703125,
+      "mib": 0.02288532257080078,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeBase.js",
+      "bytes": 23850,
+      "kib": 23.291015625,
+      "mib": 0.022745132446289062,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/browser/ui/list/listView.js",
+      "bytes": 23590,
+      "kib": 23.037109375,
+      "mib": 0.022497177124023438,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/dompurify/dist/purify.cjs.js",
+      "bytes": 23326,
+      "kib": 22.779296875,
+      "mib": 0.022245407104492188,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/browser/ui/menu/menu.js",
+      "bytes": 23320,
+      "kib": 22.7734375,
+      "mib": 0.02223968505859375,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/browser/ui/tree/abstractTree.js",
+      "bytes": 21531,
+      "kib": 21.0263671875,
+      "mib": 0.02053356170654297,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/common/viewModel/viewModelImpl.js",
+      "bytes": 21233,
+      "kib": 20.7353515625,
+      "mib": 0.020249366760253906,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/rxjs/dist/cjs/index.js",
+      "bytes": 20335,
+      "kib": 19.8583984375,
+      "mib": 0.019392967224121094,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/@grafana/ui/node_modules/react-router-dom-v5-compat/dist/index.js",
+      "bytes": 20235,
+      "kib": 19.7607421875,
+      "mib": 0.01929759979248047,
+      "category": "grafana_strict"
+    },
+    {
+      "source": "../../node_modules/ua-parser-js/src/ua-parser.js",
+      "bytes": 20054,
+      "kib": 19.583984375,
+      "mib": 0.019124984741210938,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/papaparse/papaparse.min.js",
+      "bytes": 19930,
+      "kib": 19.462890625,
+      "mib": 0.019006729125976562,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/contrib/folding/browser/folding.js",
+      "bytes": 19762,
+      "kib": 19.298828125,
+      "mib": 0.018846511840820312,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/common/viewModel/viewModelLines.js",
+      "bytes": 19730,
+      "kib": 19.267578125,
+      "mib": 0.018815994262695312,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/prismjs/prism.js",
+      "bytes": 19003,
+      "kib": 18.5576171875,
+      "mib": 0.01812267303466797,
+      "category": "other_vendor"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestWidget.js",
+      "bytes": 18841,
+      "kib": 18.3994140625,
+      "mib": 0.017968177795410156,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/base/browser/dompurify/dompurify.js",
+      "bytes": 18677,
+      "kib": 18.2392578125,
+      "mib": 0.01781177520751953,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/monaco-editor/esm/vs/platform/undoRedo/common/undoRedoService.js",
+      "bytes": 18128,
+      "kib": 17.703125,
+      "mib": 0.0172882080078125,
+      "category": "monaco"
+    },
+    {
+      "source": "../../node_modules/react-select/dist/index-641ee5b8.esm.js",
+      "bytes": 18077,
+      "kib": 17.6533203125,
+      "mib": 0.01723957061767578,
+      "category": "other_vendor"
+    }
+  ],
+  "topCauses": [
+    {
+      "rank": 1,
+      "id": "monaco_in_app_chunk",
+      "bytes": 2770459,
+      "splitPossibility": "high",
+      "splitRisk": "medium_high"
+    },
+    {
+      "rank": 2,
+      "id": "grafana_direct_packages",
+      "bytes": 1974669,
+      "splitPossibility": "medium",
+      "splitRisk": "high"
+    },
+    {
+      "rank": 3,
+      "id": "moment_timezone",
+      "bytes": 731894,
+      "splitPossibility": "high",
+      "splitRisk": "medium"
+    },
+    {
+      "rank": 4,
+      "id": "grafana_ui_transitive_vendor_candidates",
+      "bytes": 3379176,
+      "splitPossibility": "medium",
+      "splitRisk": "medium_high"
+    },
+    {
+      "rank": 5,
+      "id": "settings_modal_static_import",
+      "bytes": 102781,
+      "splitPossibility": "high",
+      "splitRisk": "medium"
+    }
+  ],
+  "accuracyLimitations": [
+    "Generated-column source map attribution, not a perfect Rollup treemap.",
+    "other_vendor includes possible Grafana UI transitive dependencies but source paths alone do not prove importer ownership.",
+    "Per-category gzip sizes are omitted because gzip dictionary effects cannot be summed accurately.",
+    "Analysis uses npx vite build --sourcemap output."
+  ]
+}

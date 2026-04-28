@@ -1,0 +1,39 @@
+{
+  "date": "2026-04-28",
+  "changedFile": "frontend/vite.config.ts",
+  "targetPackage": "@grafana/scenes",
+  "supportedVersion": "6.52.0",
+  "internalEsmEntry": "node_modules/@grafana/scenes/dist/esm/packages/scenes/src/index.js",
+  "packageDeclaredModule": "dist/esm/index.js",
+  "packageDeclaredModuleExists": false,
+  "hardening": {
+    "packageJsonShapeValidation": true,
+    "versionGuard": true,
+    "entryExistenceGuard": true,
+    "automaticFallback": false,
+    "buildTimeErrorOnDrift": true
+  },
+  "buildValidation": {
+    "npmRunBuild": "passed",
+    "viteBuildSourcemap": "passed",
+    "appChunk": "App-Bz_Ymavl.js",
+    "appChunkKb": 2696.84,
+    "appChunkGzipKb": 652.72,
+    "transformedModules": 4542
+  },
+  "sourcemapValidation": {
+    "sourceCount": 1200,
+    "monacoSourceCount": 0,
+    "cjsScenesSourceCount": 0,
+    "esmScenesSourceCount": 166
+  },
+  "browserValidation": {
+    "url": "http://127.0.0.1:8000/dashboard",
+    "status": 200,
+    "pageErrors": [],
+    "appScriptLoaded": true,
+    "monacoLoaded": false,
+    "csvReplayDataVisible": true
+  },
+  "remainingRisk": "The optimization still depends on an internal @grafana/scenes package layout. The new guard makes package drift fail at build time instead of silently changing bundle composition."
+}

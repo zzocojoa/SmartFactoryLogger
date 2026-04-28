@@ -1,0 +1,61 @@
+{
+  "date": "2026-04-28",
+  "route": "http://127.0.0.1:8000/dashboard",
+  "backend": {
+    "command": "python -m uvicorn app:app --host 127.0.0.1 --port 8000",
+    "mode": "CSV",
+    "port": 8000,
+    "pid": 36308,
+    "csvPath": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v1_legacy\\logs\\Aligned_Results\\Factory_Integrated_Log_20251231_000000.csv"
+  },
+  "browser": {
+    "tool": "Playwright",
+    "node": "C:\\Users\\user\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "browserPath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+  },
+  "build": {
+    "appChunk": "App-Bz_Ymavl.js",
+    "appChunkBytes": 2696839,
+    "appChunkGzipBytes": 652720,
+    "monacoLoadedInitially": false
+  },
+  "checks": {
+    "healthStatus": 200,
+    "apiDataStatus": 200,
+    "dashboardStatus": 200,
+    "pageErrors": [],
+    "failedRequests": [],
+    "suspiciousPromptInjectionText": false,
+    "csvReplayDataVisible": true
+  },
+  "visibleDataExamples": {
+    "spotTemperatureC": 505.3,
+    "mainPressure": 215.0,
+    "speed": 2.5,
+    "count": 43.0,
+    "environmentTemperatureC": 26.0,
+    "environmentHumidityPercent": 12.3
+  },
+  "knownNonFatalFailures": [
+    {
+      "urlPattern": "/api/layouts/client/{clientId}/latest",
+      "status": 404,
+      "classification": "expected first-run client layout miss"
+    },
+    {
+      "urlPattern": "/api/spot/proxy_image",
+      "status": 502,
+      "classification": "local SPOT camera/proxy target unavailable"
+    }
+  ],
+  "interactionSmoke": {
+    "menuClicked": true,
+    "settingsClicked": true,
+    "themeAndEditClicks": "partial; automated click flow can be blocked by overlay/menu/modal state"
+  },
+  "screenshots": [
+    ".gstack/benchmark-reports/bundle-treemap/backend-connected-dashboard-absolute-csv-smoke.png",
+    ".gstack/benchmark-reports/bundle-treemap/backend-connected-dashboard-smoke.png"
+  ],
+  "conclusion": "The Monaco/Grafana ESM split candidate renders and receives CSV replay data through the real FastAPI backend. Remaining work is hardening the internal Grafana ESM alias and deciding whether to fix unrelated overlay interaction behavior."
+}

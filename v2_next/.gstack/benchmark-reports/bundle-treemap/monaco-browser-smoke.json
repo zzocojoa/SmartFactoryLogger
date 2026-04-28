@@ -1,0 +1,75 @@
+{
+  "date": "2026-04-28",
+  "route": "http://127.0.0.1:4173/dashboard",
+  "previewCommand": "npm run preview -- --host 127.0.0.1 --port 4173",
+  "browserUse": {
+    "attempted": true,
+    "available": false,
+    "blocker": "Node REPL resolved C:\\Program Files\\nodejs\\node.exe v22.17.0, but requires >= v22.22.0"
+  },
+  "fallbackRunner": {
+    "tool": "Playwright",
+    "node": "C:\\Users\\user\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "nodeVersion": "v24.14.0",
+    "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+  },
+  "initialLoad": {
+    "httpStatus": 200,
+    "ok": true,
+    "title": "창녕 2호기 Smart Factory",
+    "rootChildCount": 1,
+    "bodyTextLength": 379,
+    "buttonCount": 12,
+    "pageErrors": [],
+    "suspiciousPromptInjectionText": false,
+    "visiblePanelLabels": [
+      "공정 KPI",
+      "SPOT 온도",
+      "몰드 존",
+      "보조 온도",
+      "SPOT 카메라",
+      "환경",
+      "타임 시리즈"
+    ],
+    "screenshot": ".gstack/benchmark-reports/bundle-treemap/monaco-dashboard-smoke.png"
+  },
+  "interactionSmoke": {
+    "actions": [
+      {
+        "name": "MENU",
+        "clicked": true
+      },
+      {
+        "name": "설정",
+        "clicked": true
+      },
+      {
+        "name": "Dark",
+        "clicked": false,
+        "reason": "Blocked by settings password status alert after backend 500"
+      },
+      {
+        "name": "Light",
+        "clicked": false,
+        "reason": "Blocked by settings password status alert after backend 500"
+      },
+      {
+        "name": "편집 모드",
+        "clicked": false,
+        "reason": "Blocked by settings password status alert after backend 500"
+      }
+    ],
+    "pageErrors": [],
+    "screenshot": ".gstack/benchmark-reports/bundle-treemap/monaco-dashboard-interaction-smoke.png"
+  },
+  "consoleErrorsClassifiedAsPreviewBackendFailures": [
+    "Failed to load spot config g1",
+    "Failed to load client layout g1",
+    "Failed to fetch health g1",
+    "Layout load failed g1",
+    "Failed to list client layouts g1",
+    "Settings password status check failed g1",
+    "API Error (Worker) Request failed with status code 500"
+  ],
+  "conclusion": "The Monaco/Grafana ESM split candidate renders the dashboard without JavaScript page errors. Backend-connected QA is still required for settings, layouts, snapshots, diagnosis, and live data."
+}
