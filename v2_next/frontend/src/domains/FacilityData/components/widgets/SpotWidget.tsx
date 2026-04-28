@@ -25,11 +25,12 @@ export const SpotComponent = React.memo(function SpotComponent() {
   const spotAlertActive = useDashboardStore(state => state.spotAlertActive);
 
   const [sparklineValues, setSparklineValues] = useState<number[]>([]);
-  const spotValue = useLastValidNumber(data?.Spot);
+  const computed = data?.Computed;
+  const spotInputValue = computed?.spot_level === 'idle' ? 0 : data?.Spot;
+  const spotValue = useLastValidNumber(spotInputValue);
 
   const missing = !Number.isFinite(data?.Spot);
-  const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : (data?.Spot ?? NaN);
-  const computed = data?.Computed;
+  const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : (spotInputValue ?? NaN);
   const spotState =
     mapSpotLevel(computed?.spot_level) ??
     getSpotState(spotDisplayValue, spotAlertActive, SPOT_WARN_TEMP, SPOT_HIGH_MIN, SPOT_NORMAL_MIN);
