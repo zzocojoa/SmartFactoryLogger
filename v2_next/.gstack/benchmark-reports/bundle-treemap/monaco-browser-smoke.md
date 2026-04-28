@@ -5,9 +5,9 @@
 - Date: 2026-04-28
 - Route: `http://127.0.0.1:4173/dashboard`
 - Preview command: `npm run preview -- --host 127.0.0.1 --port 4173`
-- Browser path: `C:/Program Files/Google/Chrome/Application/chrome.exe`
+- Browser path: local Chrome installation
 - Browser runner: Playwright with bundled Node `v24.14.0`
-- `@browser-use` status: blocked by Node REPL runtime check. The REPL resolved `C:\Program Files\nodejs\node.exe` as `v22.17.0`, but requires `>= v22.22.0`.
+- `@browser-use` status: blocked by Node REPL runtime check. The REPL resolved the system Node.js as `v22.17.0`, but requires `>= v22.22.0`.
 
 ## Result
 

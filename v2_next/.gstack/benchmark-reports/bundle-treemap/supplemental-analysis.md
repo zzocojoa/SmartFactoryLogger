@@ -155,7 +155,7 @@ frontend/src/App.tsx
 공통 측정 명령:
 
 ```powershell
-cd C:\Users\user\Documents\GitHub\SmartFactoryLogger\v2_next\frontend
+cd frontend
 npm run build
 node -e "const fs=require('fs'),zlib=require('zlib'); const f=fs.readdirSync('dist/assets').find(x=>/^App-.*\.js$/.test(x)); const b=fs.readFileSync('dist/assets/'+f); console.log({file:f, bytes:b.length, gzip:zlib.gzipSync(b).length});"
 npx vite build --sourcemap

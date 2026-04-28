@@ -5,13 +5,12 @@
     "command": "python -m uvicorn app:app --host 127.0.0.1 --port 8000",
     "mode": "CSV",
     "port": 8000,
-    "pid": 36308,
-    "csvPath": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v1_legacy\\logs\\Aligned_Results\\Factory_Integrated_Log_20251231_000000.csv"
+    "csvPath": "../v1_legacy/logs/Aligned_Results/Factory_Integrated_Log_20251231_000000.csv"
   },
   "browser": {
     "tool": "Playwright",
-    "node": "C:\\Users\\user\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
-    "browserPath": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+    "node": "bundled Codex runtime Node.js",
+    "browserPath": "local Chrome installation"
   },
   "build": {
     "appChunk": "App-Bz_Ymavl.js",

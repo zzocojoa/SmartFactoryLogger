@@ -2,7 +2,7 @@
 
 ## 측정 환경
 
-- 프로젝트: `C:\Users\user\Documents\GitHub\SmartFactoryLogger\v2_next`
+- 프로젝트: `v2_next`
 - 브랜치: `codex/benchmark-dashboard-performance`
 - Frontend: `frontend`
 - Vite: `7.3.0`

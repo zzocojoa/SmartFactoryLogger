@@ -5,13 +5,13 @@
   "browserUse": {
     "attempted": true,
     "available": false,
-    "blocker": "Node REPL resolved C:\\Program Files\\nodejs\\node.exe v22.17.0, but requires >= v22.22.0"
+    "blocker": "Node REPL resolved the system Node.js as v22.17.0, but requires >= v22.22.0"
   },
   "fallbackRunner": {
     "tool": "Playwright",
-    "node": "C:\\Users\\user\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+    "node": "bundled Codex runtime Node.js",
     "nodeVersion": "v24.14.0",
-    "browser": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+    "browser": "local Chrome installation"
   },
   "initialLoad": {
     "httpStatus": 200,

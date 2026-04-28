@@ -6,9 +6,9 @@
 - Route: `http://127.0.0.1:8000/dashboard`
 - Backend command: `python -m uvicorn app:app --host 127.0.0.1 --port 8000`
 - Backend mode: `V2_MODE=CSV`
-- CSV path: `C:\Users\user\Documents\GitHub\SmartFactoryLogger\v1_legacy\logs\Aligned_Results\Factory_Integrated_Log_20251231_000000.csv`
+- CSV path: `../v1_legacy/logs/Aligned_Results/Factory_Integrated_Log_20251231_000000.csv`
 - Browser: Chrome via Playwright
-- Current backend PID: `36308`
+- Backend process: local test process
 
 ## Result
 

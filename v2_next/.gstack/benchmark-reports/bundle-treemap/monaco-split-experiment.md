@@ -112,7 +112,7 @@ Monaco JS/CSS preload는 없다.
 실행한 명령:
 
 ```powershell
-cd C:\Users\user\Documents\GitHub\SmartFactoryLogger\v2_next\frontend
+cd frontend
 npm run build
 npx vite build --sourcemap
 ```
