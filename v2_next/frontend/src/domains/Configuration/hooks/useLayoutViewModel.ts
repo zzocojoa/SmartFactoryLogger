@@ -5,7 +5,7 @@ import type {
   LayoutSnapshot,
   LayoutSlotSummary,
 } from '../../../shared/types';
-import { DEFAULT_DASHBOARD_ITEMS } from '../../../scenes/DashboardScene';
+import { DEFAULT_DASHBOARD_ITEMS } from '../../../scenes/DashboardSceneModel';
 import {
   buildLayoutMapFromArray,
   buildLayoutMapFromObject,

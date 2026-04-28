@@ -2,7 +2,6 @@ import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { initScenesRuntime } from './scenes/ScenesRuntime';
 import { GlobalModalProvider } from './shared/context/GlobalModalContext';
 import { ThemeProvider } from './shared/context/ThemeContext';
 
@@ -126,8 +125,6 @@ const LoadingFallback = () => (
 
 console.log("Index.tsx: Booting...");
 
-initScenesRuntime();
-console.log("Index.tsx: Scenes Runtime Initialized.");
 registerChunkRecoveryHandlers();
 
 const root = ReactDOM.createRoot(

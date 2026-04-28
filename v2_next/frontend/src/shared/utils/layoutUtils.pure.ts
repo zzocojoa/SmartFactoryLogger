@@ -1,4 +1,4 @@
-import { DASHBOARD_LAYOUT_KEYS, type WidgetType } from '../../scenes/DashboardScene';
+import { DASHBOARD_LAYOUT_KEYS, type WidgetType } from '../../scenes/DashboardSceneModel';
 import { CURRENT_LAYOUT_COLS } from '../constants/logic';
 import type { LayoutEntry, LayoutMap } from '../types';
 import type { NormalizeLayoutResult } from './layoutUtils.types';

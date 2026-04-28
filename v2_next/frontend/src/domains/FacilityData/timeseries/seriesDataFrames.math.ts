@@ -1,13 +1,20 @@
-import { FieldType, MutableDataFrame, ThresholdsConfig } from '@grafana/data';
+import type { ThresholdsConfig } from '@grafana/data';
 import { TIME_SERIES_CATALOG } from './seriesCatalog';
 import type {
-  SeriesAxisGroup,
   SeriesUnit,
   TimeSeriesKey,
   TimeSeriesMeta,
 } from './seriesCatalog';
 import type { SeriesSample } from './seriesSampling';
-import type { SeriesAxisIdMap, SeriesAxisLabelMap } from './seriesDataFrames.types';
+import type {
+  SeriesAxisIdMap,
+  SeriesAxisLabelMap,
+  SeriesFrame,
+  SeriesFrameField,
+} from './seriesDataFrames.types';
+
+const TIME_FIELD_TYPE = 'time';
+const NUMBER_FIELD_TYPE = 'number';
 
 const UNIT_MAP: Partial<Record<SeriesUnit, string>> = {
   C: 'celsius',
@@ -36,12 +43,12 @@ export const buildTimeSeriesFrame = (
   samples: SeriesSample[],
   metas: TimeSeriesMeta[] = TIME_SERIES_CATALOG,
   thresholdsByKey?: Partial<Record<TimeSeriesKey, ThresholdsConfig>>
-): MutableDataFrame => {
+): SeriesFrame => {
   const timeValues = samples.map((sample) => sample.timestampMs);
-  const fields: any[] = [
+  const fields: SeriesFrameField[] = [
     {
       name: 'time',
-      type: FieldType.time,
+      type: TIME_FIELD_TYPE,
       values: timeValues,
     },
   ];
@@ -71,20 +78,20 @@ export const buildTimeSeriesFrame = (
     }
     fields.push({
       name: meta.key,
-      type: FieldType.number,
+      type: NUMBER_FIELD_TYPE,
       values,
       config,
     });
   }
 
-  return new MutableDataFrame({ fields });
+  return { fields };
 };
 
 export const buildGroupedFrames = (
   samples: SeriesSample[],
   metas: TimeSeriesMeta[] = TIME_SERIES_CATALOG,
   thresholdsByKey?: Partial<Record<TimeSeriesKey, ThresholdsConfig>>
-): Record<string, MutableDataFrame> => {
+): Record<string, SeriesFrame> => {
   const groups: Record<string, TimeSeriesMeta[]> = {};
   for (const meta of metas) {
     if (!groups[meta.group]) {
@@ -93,7 +100,7 @@ export const buildGroupedFrames = (
     groups[meta.group].push(meta);
   }
 
-  const frames: Record<string, MutableDataFrame> = {};
+  const frames: Record<string, SeriesFrame> = {};
   for (const group of Object.keys(groups)) {
     frames[group] = buildTimeSeriesFrame(samples, groups[group], thresholdsByKey);
   }

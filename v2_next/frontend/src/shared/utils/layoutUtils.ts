@@ -1,6 +1,6 @@
-import { SceneGridItemLike, SceneObjectBase } from '@grafana/scenes';
+import type { SceneGridItemLike, SceneObjectBase } from '@grafana/scenes';
 import { CURRENT_LAYOUT_COLS } from '../constants/logic';
-import type { WidgetType } from '../../scenes/DashboardScene';
+import type { WidgetType } from '../../scenes/DashboardSceneModel';
 import type { LayoutMap } from '../types';
 
 export type { NormalizeLayoutResult } from './layoutUtils.types';

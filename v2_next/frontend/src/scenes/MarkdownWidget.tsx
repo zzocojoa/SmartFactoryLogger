@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { LayoutEditContext } from '../domains/Configuration/context/LayoutEditContext';
 import { LABELS } from '../shared/constants/uiText';
-import type { DashboardItem } from './DashboardScene';
+import type { DashboardItem } from './DashboardSceneModel';
 import type { ReactWidget } from './ReactWidgetObject';
 
 interface MarkdownWidgetProps {

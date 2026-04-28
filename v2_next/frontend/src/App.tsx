@@ -1,6 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import 'react-grid-layout/css/styles.css';
-import 'react-resizable/css/styles.css';
 import {
   SpotConfig,
   HealthSnapshot,
@@ -26,29 +24,11 @@ import { DashboardHeader } from './domains/Layout/components/DashboardHeader/Das
 import './App.css';
 import packageJson from '../package.json';
 const NotificationDrawer = React.lazy(() => import('./domains/Layout/components/NotificationDrawer').then(m => ({ default: m.NotificationDrawer })));
-import type uPlot from 'uplot';
 
 // --- Widget Imports ---
-import { KpiComponent } from './domains/FacilityData/components/widgets/KpiWidget';
-import { SpotComponent } from './domains/FacilityData/components/widgets/SpotWidget';
-const TempsComponent = React.lazy(() => import('./domains/FacilityData/components/widgets/TempsWidget').then(m => ({ default: m.TempsComponent })));
-const MoldsComponent = React.lazy(() => import('./domains/FacilityData/components/widgets/MoldsWidget').then(m => ({ default: m.MoldsComponent })));
-const EnvComponent = React.lazy(() => import('./domains/FacilityData/components/widgets/EnvWidget').then(m => ({ default: m.EnvComponent })));
-const CameraComponent = React.lazy(() => import('./domains/FacilityData/components/widgets/CameraWidget').then(m => ({ default: m.CameraComponent })));
-const TimeSeriesWidget = React.lazy(() => import('./domains/FacilityData/components/widgets/TimeSeriesWidget').then(m => ({ default: m.TimeSeriesWidget })));
-
 // UPlot Series Colors Mapping - Moved to seriesCatalog.ts
 import { SERIES_COLORS } from './domains/FacilityData/timeseries/seriesCatalog';
 
-/* Recharts imports removed */
-import { initScenesRuntime } from './scenes/ScenesRuntime';
-import { getDashboardScene, WidgetType, WidgetRegistry, DASHBOARD_LAYOUT_KEYS } from './scenes/DashboardScene';
-import { SceneDataNode, SceneGridItemLike, SceneGridLayout, SceneGridItem, SceneObjectBase } from '@grafana/scenes';
-import { buildSeriesSample } from './domains/FacilityData/timeseries/seriesSampling';
-import { SeriesBuffer } from './domains/FacilityData/timeseries/seriesBuffer';
-import { buildGroupedFrames, buildTimeSeriesFrame, SeriesFrame } from './domains/FacilityData/timeseries/seriesDataFrames';
-import { TIME_SERIES_CATALOG } from './domains/FacilityData/timeseries/seriesCatalog';
-import { buildPanelData } from './domains/FacilityData/timeseries/seriesPanelData';
 import { buildSeriesThresholds } from './domains/FacilityData/timeseries/seriesThresholds';
 import {
   APP_TITLE,
@@ -67,17 +47,7 @@ const MAX_NOTIFICATIONS = 50;
 
 import { LayoutEditContext } from './domains/Configuration/context/LayoutEditContext';
 const SettingsModalContainer = React.lazy(() => import('./domains/Configuration/components/SettingsModal/SettingsModalContainer').then(m => ({ default: m.SettingsModalContainer })));
-const MarkdownWidget = React.lazy(() => import('./scenes/MarkdownWidget').then(m => ({ default: m.MarkdownWidget })));
-
-// Initialize Scenes Runtime (guarded for HMR)
-if (typeof window !== 'undefined') {
-  if (!(window as any).__SCENES_INIT__) {
-    initScenesRuntime();
-    (window as any).__SCENES_INIT__ = true;
-  }
-} else {
-  initScenesRuntime();
-}
+const DashboardSceneSurface = React.lazy(() => import('./scenes/DashboardSceneSurface').then(m => ({ default: m.DashboardSceneSurface })));
 
 import { safeGetItem, safeSetItem, safeRemoveItem } from './shared/utils/safeStorage';
 
@@ -140,7 +110,6 @@ const {
 
 
 
-import { buildLayoutMap } from './shared/utils/layoutUtils';
 import {
   calcRecoverySec,
   formatAgeSec,
@@ -214,9 +183,6 @@ function App() {
   }, []);
   const [seriesPaused, setSeriesPaused] = useState(false);
   const [showThresholds, setShowThresholds] = useState(true);
-
-  // timeSeriesDataNode stays in App for minimal change approach
-  const timeSeriesDataNode = useMemo(() => new SceneDataNode(), []);
 
   const {
     health,
@@ -349,7 +315,6 @@ function App() {
     pollingIntervalMs,
     pollingFailureCount,
     timeSeriesAllFrame,
-    getSeriesSamples,
     getSeriesStats,
   } = useMetricsViewModel({
     seriesPaused,
@@ -507,19 +472,6 @@ function App() {
   /* Polling and timeSeriesAllFrame computation moved to useMetricsViewModel */
 
   useEffect(() => {
-    if (!timeSeriesAllFrame) {
-      return;
-    }
-    if (seriesPaused) {
-      return;
-    }
-    const samples = getSeriesSamples();
-    const windowMs = seriesWindowMin * 60 * 1000;
-    const panelData = buildPanelData(timeSeriesAllFrame, samples, windowMs);
-    timeSeriesDataNode.setState({ data: panelData });
-  }, [timeSeriesAllFrame, timeSeriesDataNode, seriesPaused, seriesWindowMin, getSeriesSamples]);
-
-  useEffect(() => {
     const tick = window.setInterval(() => setNowTick(Date.now()), 500);
     return () => window.clearInterval(tick);
   }, []);
@@ -588,13 +540,7 @@ function App() {
     setMenuOpen,
     setLayoutRestoreError,
     setLayoutRestoreMessage,
-    captureCurrentLayout: () => {
-      const grid = scene.state.body;
-      if (!(grid instanceof SceneGridLayout)) {
-        return {};
-      }
-      return buildLayoutMap(grid.state.children);
-    },
+    captureCurrentLayout: () => layoutRef.current,
   });
 
   const handleSaveCurrentLayout = useCallback(async () => {
@@ -675,77 +621,6 @@ function App() {
     window.addEventListener('mousedown', handleClick);
     return () => window.removeEventListener('mousedown', handleClick);
   }, [menuOpen]);
-
-  // --- Widget Renderers ---
-  // --- Scene Creation ---
-  // Scene is created once; widget data is read from DataContext.
-  const scene = useMemo(() => {
-    const registry: WidgetRegistry = {
-      kpi: () => <KpiComponent />,
-      spot: () => <SpotComponent />,
-      temps: () => (
-        <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
-          <TempsComponent />
-        </React.Suspense>
-      ),
-      camera: () => (
-        <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
-          <CameraComponent
-            onSpotImageLoaded={handleSpotImageLoaded}
-            onSpotImageError={handleSpotImageError}
-            requestFocus={requestFocus}
-            focusBusy={focusBusy}
-          />
-        </React.Suspense>
-      ),
-      molds: () => (
-        <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
-          <MoldsComponent />
-        </React.Suspense>
-      ),
-      env: () => (
-        <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
-          <EnvComponent />
-        </React.Suspense>
-      ),
-      timeseries: () => (
-        <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
-          <TimeSeriesWidget />
-        </React.Suspense>
-      ),
-      markdown: (item, model) => (
-        <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
-          <MarkdownWidget item={item} model={model} />
-        </React.Suspense>
-      ),
-    };
-    return getDashboardScene(registry, layoutSnapshot?.layout ?? null);
-  }, [layoutSnapshot]);
-  // timeSeriesDataNode dep might need removal if unused 
-
-
-
-
-  useEffect(() => {
-    const grid = scene.state.body;
-    if (!(grid instanceof SceneGridLayout)) {
-      return;
-    }
-    grid.setState({ isDraggable: layoutEditing, isResizable: layoutEditing });
-  }, [scene, layoutEditing]);
-
-  // --- Layout Persistence (using ViewModel) ---
-  /* Layout handlers moved to useLayoutHandlers.ts */
-  useEffect(() => {
-    const grid = scene.state.body;
-    if (!(grid instanceof SceneGridLayout)) return;
-    const updateLayoutRef = () => {
-      layoutRef.current = buildLayoutMap(grid.state.children);
-    };
-    updateLayoutRef();
-    const sub = grid.subscribeToState(() => updateLayoutRef());
-    return () => sub.unsubscribe();
-  }, [scene, layoutRef]);
 
   // --- Status Panel Data Extraction (Phase 12 Step 4) ---
   const {
@@ -944,8 +819,6 @@ function App() {
     updateWidget: handleUpdateWidget
   }), [layoutEditing, handleRemoveWidget, handleUpdateWidget]);
 
-  const SceneRenderer = useMemo(() => <scene.Component model={scene} />, [scene]);
-
   return (
     <div className={`App ${layoutEditing ? 'layout-editing' : ''}`} style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <DashboardHeader
@@ -1109,7 +982,17 @@ function App() {
           <UIContext.Provider value={uiContextValue}>
             <SnapshotContext.Provider value={snapshotContextValue}>
               <LayoutEditContext.Provider value={layoutEditContextValue}>
-                {SceneRenderer}
+                <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
+                  <DashboardSceneSurface
+                    layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
+                    layoutEditing={layoutEditing}
+                    layoutRef={layoutRef}
+                    onSpotImageLoaded={handleSpotImageLoaded}
+                    onSpotImageError={handleSpotImageError}
+                    requestFocus={requestFocus}
+                    focusBusy={focusBusy}
+                  />
+                </React.Suspense>
               </LayoutEditContext.Provider>
             </SnapshotContext.Provider>
           </UIContext.Provider>
