@@ -822,6 +822,17 @@ body {
   flex: 1;
 }
 
+.notification-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5300;
+  pointer-events: none;
+}
+
+.notification-overlay.open {
+  pointer-events: auto;
+}
+
 .notification-drawer {
   position: fixed;
   top: calc(var(--header-height) + 10px);
@@ -838,7 +849,7 @@ body {
   transform: translateY(-6px);
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 2100;
+  z-index: 5310;
 }
 
 .notification-drawer.open {
