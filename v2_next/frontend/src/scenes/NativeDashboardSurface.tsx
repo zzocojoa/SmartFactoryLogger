@@ -3,7 +3,7 @@ import type { MutableRefObject, ReactNode } from 'react';
 import { CameraComponent } from '../domains/FacilityData/components/widgets/CameraWidget';
 import { KpiComponent } from '../domains/FacilityData/components/widgets/KpiWidget';
 import { SpotComponent } from '../domains/FacilityData/components/widgets/SpotWidget';
-import { CURRENT_LAYOUT_COLS } from '../shared/constants/logic';
+import { CURRENT_LAYOUT_COLS, DEFAULT_ROW_HEIGHT } from '../shared/constants/logic';
 import type { LayoutMap } from '../shared/types';
 import {
   type DashboardItem,
@@ -37,6 +37,7 @@ type DeferredWidgetContentProps = {
 
 const WIDGET_FALLBACK_TEXT = 'Loading...';
 const DEFERRED_WIDGET_TYPES = new Set<DashboardItem['type']>(['timeseries']);
+const GRID_GAP_PX = 4;
 
 const buildLayoutMapFromItems = (items: DashboardItem[]): LayoutMap => {
   return items.reduce<LayoutMap>((acc, item) => {
@@ -206,9 +207,9 @@ export const NativeDashboardSurface = ({
       style={{
         display: 'grid',
         gridTemplateColumns: `repeat(${CURRENT_LAYOUT_COLS}, minmax(0, 1fr))`,
-        gridAutoRows: 'var(--grid-row-height)',
-        gap: '4px',
-        padding: '4px',
+        gridAutoRows: `${DEFAULT_ROW_HEIGHT}px`,
+        gap: `${GRID_GAP_PX}px`,
+        padding: 0,
         alignItems: 'stretch',
       }}
     >
