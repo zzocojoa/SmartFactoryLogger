@@ -59,6 +59,14 @@ const resolveManualChunk = (id: string): string | undefined => {
     return 'vendor-common';
   }
 
+  if (normalizedId.includes('/node_modules/moment-timezone/')) {
+    return 'vendor-moment-timezone';
+  }
+
+  if (normalizedId.includes('/node_modules/moment/')) {
+    return 'vendor-moment';
+  }
+
   if (normalizedId.includes('/node_modules/@grafana/')) {
     return 'vendor-grafana';
   }
