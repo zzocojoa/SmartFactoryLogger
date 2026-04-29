@@ -21,6 +21,8 @@ import { useMetricsViewModel } from './domains/FacilityData/hooks/useMetricsView
 import { useViewportScale, applyRowHeightToCSS } from './domains/Configuration/hooks/useViewportScale';
 import { useStatusPanel } from './domains/Layout/hooks/useStatusPanel';
 import { DashboardHeader } from './domains/Layout/components/DashboardHeader/DashboardHeader';
+import { LayoutEditContext } from './domains/Configuration/context/LayoutEditContext';
+import { AIChatbotLauncher } from './AI/components/AIChatbotLauncher';
 import './App.css';
 import packageJson from '../package.json';
 const NotificationDrawer = React.lazy(() => import('./domains/Layout/components/NotificationDrawer').then(m => ({ default: m.NotificationDrawer })));
@@ -45,7 +47,6 @@ import { useTheme } from './shared/hooks/useThemeContext';
 
 const MAX_NOTIFICATIONS = 50;
 
-import { LayoutEditContext } from './domains/Configuration/context/LayoutEditContext';
 const SettingsModalContainer = React.lazy(() => import('./domains/Configuration/components/SettingsModal/SettingsModalContainer').then(m => ({ default: m.SettingsModalContainer })));
 const DashboardSceneSurface = React.lazy(() => import('./scenes/DashboardSceneSurface').then(m => ({ default: m.DashboardSceneSurface })));
 const NativeDashboardSurface = React.lazy(() => import('./scenes/NativeDashboardSurface').then(m => ({ default: m.NativeDashboardSurface })));
@@ -1009,6 +1010,7 @@ function App() {
             </SnapshotContext.Provider>
           </UIContext.Provider>
         </DataContext.Provider>
+        <AIChatbotLauncher />
         <footer className="app-footer">
           Copyright 癲?HOIHOU. All Rights Reserved. v{packageJson.version}
         </footer>

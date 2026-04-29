@@ -39,6 +39,33 @@ import { safeGetItem, safeRemoveItem } from '../../../shared/utils/safeStorage';
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const CURRENT_LAYOUT_VERSION = 'v2';
 
+const buildDefaultLayoutMap = (): LayoutMap => {
+  return DEFAULT_DASHBOARD_ITEMS.reduce<LayoutMap>((acc, item) => {
+    acc[item.key] = {
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+      type: item.type,
+      title: item.title,
+      properties: item.properties,
+    };
+    return acc;
+  }, {});
+};
+
+const materializeLayoutSnapshot = (snapshot: LayoutSnapshot | null): LayoutSnapshot => {
+  if (snapshot) {
+    return snapshot;
+  }
+
+  return {
+    layout: buildDefaultLayoutMap(),
+    cols: String(CURRENT_LAYOUT_COLS),
+    version: CURRENT_LAYOUT_VERSION,
+  };
+};
+
 export const useLayoutViewModel = (): UseLayoutViewModel => {
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [layoutSnapshot, setLayoutSnapshot] = useState<LayoutSnapshot | null>(null);
@@ -280,11 +307,9 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
 
   const updateWidget = useCallback((key: string, updates: Partial<LayoutEntry>) => {
     setLayoutSnapshot((prev) => {
-      if (!prev) {
-        return null;
-      }
+      const currentSnapshot = materializeLayoutSnapshot(prev);
 
-      const nextLayout = { ...prev.layout };
+      const nextLayout = { ...currentSnapshot.layout };
       const currentEntry = nextLayout[key];
       if (currentEntry) {
         const nextProperties =
@@ -301,19 +326,17 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
           properties: nextProperties,
         };
       }
-      return { ...prev, layout: nextLayout };
+      return { ...currentSnapshot, layout: nextLayout };
     });
   }, []);
 
   const deleteWidget = useCallback((key: string) => {
     setLayoutSnapshot((prev) => {
-      if (!prev) {
-        return null;
-      }
+      const currentSnapshot = materializeLayoutSnapshot(prev);
 
-      const nextLayout = { ...prev.layout };
+      const nextLayout = { ...currentSnapshot.layout };
       delete nextLayout[key];
-      return { ...prev, layout: nextLayout };
+      return { ...currentSnapshot, layout: nextLayout };
     });
   }, []);
 
@@ -322,14 +345,12 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
     const defaults = resolveDefaultWidgetSpec(type, DEFAULT_DASHBOARD_ITEMS);
 
     setLayoutSnapshot((prev) => {
-      if (!prev) {
-        return prev;
-      }
+      const currentSnapshot = materializeLayoutSnapshot(prev);
 
       return {
-        ...prev,
+        ...currentSnapshot,
         layout: {
-          ...prev.layout,
+          ...currentSnapshot.layout,
           [newKey]: {
             x: 0,
             y: 0,

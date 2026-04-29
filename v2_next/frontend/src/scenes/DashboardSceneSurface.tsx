@@ -42,10 +42,23 @@ type LayoutStateSubscription = {
   unsubscribe: () => void;
 };
 
+type LayoutStateSource = {
+  subscribeToState: (callback: () => void) => LayoutStateSubscription;
+};
+
 const CameraWidgetPropsContext = React.createContext<CameraWidgetProps | null>(null);
 
 const WidgetLoadingFallback = (): JSX.Element => {
   return <div className="widget-loading">Loading...</div>;
+};
+
+const isLayoutStateSource = (value: unknown): value is LayoutStateSource => {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'subscribeToState' in value &&
+      typeof (value as { subscribeToState?: unknown }).subscribeToState === 'function'
+  );
 };
 
 const CameraWidgetContainer = (): JSX.Element => {
@@ -151,7 +164,16 @@ export const DashboardSceneSurface = ({
     };
 
     const subscribeToGridItems = (items: SceneGridItemLike[]): LayoutStateSubscription[] => {
-      return items.map((item) => item.subscribeToState(() => updateLayoutRef()));
+      return items.flatMap((item) => {
+        const subscriptions: LayoutStateSubscription[] = [
+          item.subscribeToState(() => updateLayoutRef()),
+        ];
+        const body = (item as { state?: { body?: unknown } }).state?.body;
+        if (isLayoutStateSource(body)) {
+          subscriptions.push(body.subscribeToState(() => updateLayoutRef()));
+        }
+        return subscriptions;
+      });
     };
 
     updateLayoutRef();

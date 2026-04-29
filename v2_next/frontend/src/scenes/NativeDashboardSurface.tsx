@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useMemo } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject, ReactNode } from 'react';
 import { CameraComponent } from '../domains/FacilityData/components/widgets/CameraWidget';
 import { KpiComponent } from '../domains/FacilityData/components/widgets/KpiWidget';
@@ -30,7 +30,13 @@ type NativeWidgetProps = {
   children: ReactNode;
 };
 
+type DeferredWidgetContentProps = {
+  item: DashboardItem;
+  renderContent: () => ReactNode;
+};
+
 const WIDGET_FALLBACK_TEXT = 'Loading...';
+const DEFERRED_WIDGET_TYPES = new Set<DashboardItem['type']>(['timeseries']);
 
 const buildLayoutMapFromItems = (items: DashboardItem[]): LayoutMap => {
   return items.reduce<LayoutMap>((acc, item) => {
@@ -65,6 +71,58 @@ const NativeWidget = ({ item, children }: NativeWidgetProps): JSX.Element => {
           {children}
         </div>
       </div>
+    </div>
+  );
+};
+
+const DeferredWidgetContent = ({ item, renderContent }: DeferredWidgetContentProps): JSX.Element => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [shouldRender, setShouldRender] = useState(!DEFERRED_WIDGET_TYPES.has(item.type));
+
+  useEffect(() => {
+    if (shouldRender) {
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setShouldRender(true);
+      return;
+    }
+
+    let observer: IntersectionObserver | null = null;
+    const startObserver = (): void => {
+      if (observer) {
+        return;
+      }
+      observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldRender(true);
+          observer?.disconnect();
+        }
+      });
+      observer.observe(container);
+    };
+
+    window.addEventListener('scroll', startObserver, { passive: true, once: true });
+    window.addEventListener('wheel', startObserver, { passive: true, once: true });
+    window.addEventListener('touchmove', startObserver, { passive: true, once: true });
+
+    return () => {
+      window.removeEventListener('scroll', startObserver);
+      window.removeEventListener('wheel', startObserver);
+      window.removeEventListener('touchmove', startObserver);
+      observer?.disconnect();
+    };
+  }, [shouldRender]);
+
+  return (
+    <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
+      {shouldRender ? renderContent() : <div className="native-widget-placeholder" aria-label={`${item.title} 대기`} />}
     </div>
   );
 };
@@ -156,9 +214,14 @@ export const NativeDashboardSurface = ({
     >
       {items.map(item => (
         <NativeWidget key={item.key} item={item}>
-          <Suspense fallback={<div className="widget-loading">{WIDGET_FALLBACK_TEXT}</div>}>
-            {renderWidget(item, onSpotImageLoaded, onSpotImageError, requestFocus, focusBusy)}
-          </Suspense>
+          <DeferredWidgetContent
+            item={item}
+            renderContent={() => (
+              <Suspense fallback={<div className="widget-loading">{WIDGET_FALLBACK_TEXT}</div>}>
+                {renderWidget(item, onSpotImageLoaded, onSpotImageError, requestFocus, focusBusy)}
+              </Suspense>
+            )}
+          />
         </NativeWidget>
       ))}
     </div>

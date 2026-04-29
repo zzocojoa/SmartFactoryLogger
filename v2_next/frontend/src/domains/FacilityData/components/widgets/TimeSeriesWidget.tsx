@@ -12,7 +12,6 @@ import { TIME_SERIES_CATALOG, SERIES_COLORS } from '../../timeseries/seriesCatal
 import { THRESHOLD_LABELS } from '../../../../shared/utils/thresholds';
 import type { ThresholdKey } from '../../../../shared/types';
 import { LABELS } from '../../../../shared/constants/uiText';
-import { AIChatbotLauncher } from '../../../../AI/components/AIChatbotLauncher';
 const UPlotChart = React.lazy(() => import('../UPlotChart').then(m => ({ default: m.UPlotChart })));
 
   /* Chart Colors for Threshold Lines */
@@ -444,8 +443,6 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
             </div>
           )}
       </div>
-
-      <AIChatbotLauncher />
     </div>
   );
 });

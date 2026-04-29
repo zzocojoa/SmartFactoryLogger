@@ -77,6 +77,8 @@ export const normalizeLayoutMap = (
       : Number(colsValue);
   const maxExtent = getLayoutMaxExtent(layout);
   const isLegacy = maxExtent > 0 && maxExtent <= LEGACY_LAYOUT_COLS;
+  const isLikelyDoubleScaledCurrentLayout =
+    savedCols === CURRENT_LAYOUT_COLS && maxExtent > CURRENT_LAYOUT_COLS * 1.5;
   if (savedCols === LEGACY_LAYOUT_COLS || (!Number.isFinite(savedCols) && isLegacy)) {
     return {
       layout: scaleLayoutMap(layout, CURRENT_LAYOUT_COLS / LEGACY_LAYOUT_COLS),
@@ -84,7 +86,7 @@ export const normalizeLayoutMap = (
       scaled: true,
     };
   }
-  if (maxExtent > CURRENT_LAYOUT_COLS) {
+  if (isLikelyDoubleScaledCurrentLayout) {
     return {
       layout: scaleLayoutMap(layout, LEGACY_LAYOUT_COLS / CURRENT_LAYOUT_COLS),
       cols: CURRENT_LAYOUT_COLS,
