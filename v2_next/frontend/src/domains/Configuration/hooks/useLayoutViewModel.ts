@@ -66,6 +66,14 @@ const materializeLayoutSnapshot = (snapshot: LayoutSnapshot | null): LayoutSnaps
   };
 };
 
+const resolveMutationLayout = (snapshot: LayoutSnapshot, baseLayout?: LayoutMap): LayoutMap => {
+  if (baseLayout && Object.keys(baseLayout).length > 0) {
+    return baseLayout;
+  }
+
+  return snapshot.layout;
+};
+
 export const useLayoutViewModel = (): UseLayoutViewModel => {
   const [layoutEditing, setLayoutEditing] = useState(false);
   const [layoutSnapshot, setLayoutSnapshot] = useState<LayoutSnapshot | null>(null);
@@ -305,11 +313,11 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
     }
   };
 
-  const updateWidget = useCallback((key: string, updates: Partial<LayoutEntry>) => {
+  const updateWidget = useCallback((key: string, updates: Partial<LayoutEntry>, baseLayout?: LayoutMap) => {
     setLayoutSnapshot((prev) => {
       const currentSnapshot = materializeLayoutSnapshot(prev);
 
-      const nextLayout = { ...currentSnapshot.layout };
+      const nextLayout = { ...resolveMutationLayout(currentSnapshot, baseLayout) };
       const currentEntry = nextLayout[key];
       if (currentEntry) {
         const nextProperties =
@@ -330,27 +338,28 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
     });
   }, []);
 
-  const deleteWidget = useCallback((key: string) => {
+  const deleteWidget = useCallback((key: string, baseLayout?: LayoutMap) => {
     setLayoutSnapshot((prev) => {
       const currentSnapshot = materializeLayoutSnapshot(prev);
 
-      const nextLayout = { ...currentSnapshot.layout };
+      const nextLayout = { ...resolveMutationLayout(currentSnapshot, baseLayout) };
       delete nextLayout[key];
       return { ...currentSnapshot, layout: nextLayout };
     });
   }, []);
 
-  const addWidget = useCallback((type: string, title?: string) => {
+  const addWidget = useCallback((type: string, title?: string, baseLayout?: LayoutMap) => {
     const newKey = `${type}-${Date.now()}`;
     const defaults = resolveDefaultWidgetSpec(type, DEFAULT_DASHBOARD_ITEMS);
 
     setLayoutSnapshot((prev) => {
       const currentSnapshot = materializeLayoutSnapshot(prev);
+      const currentLayout = resolveMutationLayout(currentSnapshot, baseLayout);
 
       return {
         ...currentSnapshot,
         layout: {
-          ...currentSnapshot.layout,
+          ...currentLayout,
           [newKey]: {
             x: 0,
             y: 0,

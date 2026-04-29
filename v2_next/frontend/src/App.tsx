@@ -27,11 +27,6 @@ import './App.css';
 import packageJson from '../package.json';
 const NotificationDrawer = React.lazy(() => import('./domains/Layout/components/NotificationDrawer').then(m => ({ default: m.NotificationDrawer })));
 
-// --- Widget Imports ---
-// UPlot Series Colors Mapping - Moved to seriesCatalog.ts
-import { SERIES_COLORS } from './domains/FacilityData/timeseries/seriesCatalog';
-
-import { buildSeriesThresholds } from './domains/FacilityData/timeseries/seriesThresholds';
 import {
   APP_TITLE,
   NOTICE_BODY_PREFIX,
@@ -360,12 +355,6 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   ...
   */
-
-  // Time Series States
-  // Moved thresholdConfig to hook. But we need it for buildSeriesThresholds
-  const timeSeriesThresholds = useMemo(() =>
-    showThresholds ? buildSeriesThresholds(thresholdConfig) : undefined
-    , [thresholdConfig, showThresholds]);
 
   /*
   const [settingsRestartRequired, setSettingsRestartRequired] = useState(false);

@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { LayoutMap, WidgetType } from '../types';
+import { LayoutEntry, LayoutMap, WidgetType } from '../types';
 
 type LayoutSlot = {
   id: string;
@@ -18,9 +18,9 @@ export interface UseLayoutHandlersOptions {
   handleSaveLayout: (name: string, layout: LayoutMap) => Promise<void>;
   handleRestoreLayout: (slotId: string) => Promise<void>;
   handleDeleteLayout: (slotId: string) => Promise<void>;
-  addWidget: (type: WidgetType) => void;
-  deleteWidget: (key: string) => void;
-  updateWidget: (key: string, updates: unknown) => void;
+  addWidget: (type: WidgetType, title?: string, baseLayout?: LayoutMap) => void;
+  deleteWidget: (key: string, baseLayout?: LayoutMap) => void;
+  updateWidget: (key: string, updates: Partial<LayoutEntry>, baseLayout?: LayoutMap) => void;
   modal: ModalApi;
   pushNotification: (title: string, message: string, level: 'info' | 'warn' | 'error') => void;
   setMenuOpen: (open: boolean) => void;
@@ -125,7 +125,7 @@ export function useLayoutHandlers({
   };
 
   const handleAddWidget = (type: WidgetType) => {
-    addWidget(type);
+    addWidget(type, undefined, captureCurrentLayout());
     setMenuOpen(false);
   };
 
@@ -155,11 +155,11 @@ export function useLayoutHandlers({
   };
 
   const handleRemoveWidget = (key: string) => {
-    deleteWidget(key);
+    deleteWidget(key, captureCurrentLayout());
   };
 
-  const handleUpdateWidget = (key: string, updates: unknown) => {
-    updateWidget(key, updates);
+  const handleUpdateWidget = (key: string, updates: Partial<LayoutEntry>) => {
+    updateWidget(key, updates, captureCurrentLayout());
   };
 
   return {

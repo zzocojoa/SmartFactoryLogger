@@ -2,7 +2,8 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import type { DashboardLeaderState, FactoryData } from '../../../shared/types';
 import { SeriesBuffer } from '../timeseries/seriesBuffer';
 import type { SeriesSample } from '../timeseries/seriesSampling';
-import { buildTimeSeriesFrame, SeriesFrame } from '../timeseries/seriesDataFrames';
+import { buildTimeSeriesFrame } from '../timeseries/seriesDataFrames';
+import type { SeriesFrame } from '../timeseries/seriesDataFrames';
 import { TIME_SERIES_CATALOG } from '../timeseries/seriesCatalog';
 import { buildSeriesThresholds } from '../timeseries/seriesThresholds';
 import { filterSeriesSamplesByWindow } from './useMetricsViewModel.selectors';
@@ -86,7 +87,7 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
     }
 
     return filteredSamples;
-  }, [seriesFrameTick, seriesWindowMin, timeSeriesFrameActive]);
+  }, [seriesFrameTick, seriesPaused, seriesWindowMin, timeSeriesFrameActive]);
 
   // Time Series All Frame (for Grafana Scenes)
   const timeSeriesAllFrame = useMemo<SeriesFrame | null>(() => {

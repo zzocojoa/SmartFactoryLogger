@@ -825,7 +825,7 @@ body {
 .notification-overlay {
   position: fixed;
   inset: 0;
-  z-index: 5300;
+  z-index: 2100;
   pointer-events: none;
 }
 
@@ -849,7 +849,7 @@ body {
   transform: translateY(-6px);
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 5310;
+  z-index: 2110;
 }
 
 .notification-drawer.open {

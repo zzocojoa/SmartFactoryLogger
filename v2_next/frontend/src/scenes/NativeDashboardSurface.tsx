@@ -117,6 +117,7 @@ const DeferredWidgetContent = ({ item, renderContent, onTimeSeriesVisible }: Def
       observer.observe(container);
     };
 
+    startObserver();
     window.addEventListener('scroll', startObserver, { passive: true, once: true });
     window.addEventListener('wheel', startObserver, { passive: true, once: true });
     window.addEventListener('touchmove', startObserver, { passive: true, once: true });

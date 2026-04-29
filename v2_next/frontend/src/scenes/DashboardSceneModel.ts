@@ -65,7 +65,7 @@ export const resolveDashboardItems = (savedLayout: SavedLayoutMap | null): Dashb
 
     const type: WidgetType = saved?.type ?? defaultItem?.type ?? 'markdown';
     const title: string = saved?.title ?? defaultItem?.title ?? 'Widget';
-    const properties: unknown = saved?.properties ?? defaultItem?.properties ?? {};
+    const properties: Record<string, unknown> = saved?.properties ?? defaultItem?.properties ?? {};
     const x: number = saved?.x ?? defaultItem?.x ?? 0;
     const y: number = saved?.y ?? defaultItem?.y ?? 0;
     const width: number = saved?.width ?? defaultItem?.width ?? 10;
