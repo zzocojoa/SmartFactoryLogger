@@ -103,7 +103,7 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
     const result = buildTimeSeriesFrame(filteredSeriesSamples, TIME_SERIES_CATALOG, timeSeriesThresholds);
     frozenAllFrameRef.current = result;
     return result;
-  }, [filteredSeriesSamples, timeSeriesThresholds, seriesPaused]);
+  }, [filteredSeriesSamples, timeSeriesThresholds, seriesPaused, timeSeriesFrameActive]);
 
   const getSeriesSamples = useCallback(() => {
     return seriesBufferRef.current.getSamples();
