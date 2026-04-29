@@ -218,7 +218,8 @@ body {
   justify-content: space-between;
   position: sticky; /* Keep header visible */
   top: 0;
-  z-index: 2000; /* Ensure above grid items */
+  z-index: 5000; /* 대시보드 패널보다 위에 유지 */
+  isolation: isolate;
 }
 
 .app-header h1 {
@@ -473,6 +474,7 @@ body {
   position: relative;
   display: inline-flex;
   align-items: center;
+  z-index: 5100;
 }
 
 .menu-toggle::before {
@@ -501,7 +503,7 @@ body {
   transform: translateY(-6px);
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 2150;
+  z-index: 5200;
 }
 
 .menu-dropdown.open {
