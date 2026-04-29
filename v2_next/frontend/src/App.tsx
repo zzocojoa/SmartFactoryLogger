@@ -74,6 +74,14 @@ const {
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LEGACY_LAYOUT_COLS = 24;
 
+const hasLayoutTimeSeriesWidget = (layout: LayoutMap | null): boolean => {
+  if (!layout) {
+    return true;
+  }
+
+  return Object.values(layout).some((item) => item.type === 'timeseries');
+};
+
 const LazyModalFallback = ({ title }: { title: string }): JSX.Element => (
   <div className="custom-modal-overlay">
     <div className="custom-modal-content">
@@ -185,6 +193,10 @@ function App() {
   }, []);
   const [seriesPaused, setSeriesPaused] = useState(false);
   const [showThresholds, setShowThresholds] = useState(true);
+  const [timeSeriesVisible, setTimeSeriesVisible] = useState(false);
+  const handleTimeSeriesVisible = useCallback(() => {
+    setTimeSeriesVisible(true);
+  }, []);
 
   const {
     health,
@@ -308,6 +320,16 @@ function App() {
     fetchLayoutSlots
   } = useLayoutViewModel();
 
+  const hasTimeSeriesWidget = useMemo(() => {
+    return hasLayoutTimeSeriesWidget(layoutSnapshot?.layout ?? null);
+  }, [layoutSnapshot?.layout]);
+
+  useEffect(() => {
+    if (!hasTimeSeriesWidget) {
+      setTimeSeriesVisible(false);
+    }
+  }, [hasTimeSeriesWidget]);
+
   const {
     data,
     connected,
@@ -322,7 +344,8 @@ function App() {
     seriesPaused,
     seriesWindowMin,
     showThresholds,
-    thresholdConfig
+    thresholdConfig,
+    timeSeriesFrameActive: settingsOpen || (hasTimeSeriesWidget && (layoutEditing || timeSeriesVisible))
   });
 
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
@@ -1003,6 +1026,7 @@ function App() {
                       onSpotImageError={handleSpotImageError}
                       requestFocus={requestFocus}
                       focusBusy={focusBusy}
+                      onTimeSeriesVisible={handleTimeSeriesVisible}
                     />
                   )}
                 </React.Suspense>

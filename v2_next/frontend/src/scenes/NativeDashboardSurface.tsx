@@ -23,6 +23,7 @@ type NativeDashboardSurfaceProps = {
   onSpotImageError: () => void;
   requestFocus: (steps: number) => void;
   focusBusy: boolean;
+  onTimeSeriesVisible: () => void;
 };
 
 type NativeWidgetProps = {
@@ -33,6 +34,7 @@ type NativeWidgetProps = {
 type DeferredWidgetContentProps = {
   item: DashboardItem;
   renderContent: () => ReactNode;
+  onTimeSeriesVisible: () => void;
 };
 
 const WIDGET_FALLBACK_TEXT = 'Loading...';
@@ -76,9 +78,15 @@ const NativeWidget = ({ item, children }: NativeWidgetProps): JSX.Element => {
   );
 };
 
-const DeferredWidgetContent = ({ item, renderContent }: DeferredWidgetContentProps): JSX.Element => {
+const DeferredWidgetContent = ({ item, renderContent, onTimeSeriesVisible }: DeferredWidgetContentProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [shouldRender, setShouldRender] = useState(!DEFERRED_WIDGET_TYPES.has(item.type));
+
+  useEffect(() => {
+    if (shouldRender && item.type === 'timeseries') {
+      onTimeSeriesVisible();
+    }
+  }, [item.type, onTimeSeriesVisible, shouldRender]);
 
   useEffect(() => {
     if (shouldRender) {
@@ -194,6 +202,7 @@ export const NativeDashboardSurface = ({
   onSpotImageError,
   requestFocus,
   focusBusy,
+  onTimeSeriesVisible,
 }: NativeDashboardSurfaceProps): JSX.Element => {
   const items = useMemo(() => resolveDashboardItems(layoutSnapshotLayout), [layoutSnapshotLayout]);
 
@@ -218,6 +227,7 @@ export const NativeDashboardSurface = ({
           <DeferredWidgetContent
             key={`${item.key}:${item.type}`}
             item={item}
+            onTimeSeriesVisible={onTimeSeriesVisible}
             renderContent={() => (
               <Suspense fallback={<div className="widget-loading">{WIDGET_FALLBACK_TEXT}</div>}>
                 {renderWidget(item, onSpotImageLoaded, onSpotImageError, requestFocus, focusBusy)}

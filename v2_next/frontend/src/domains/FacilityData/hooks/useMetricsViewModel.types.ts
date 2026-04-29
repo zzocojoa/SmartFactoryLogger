@@ -7,6 +7,7 @@ export interface UseMetricsViewModelParams {
   seriesWindowMin: number;
   showThresholds: boolean;
   thresholdConfig: ThresholdState;
+  timeSeriesFrameActive: boolean;
 }
 
 export interface UseMetricsViewModel {
