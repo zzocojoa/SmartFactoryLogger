@@ -8,7 +8,7 @@ export interface DashboardItem {
   y: number;
   width: number;
   height: number;
-  properties?: any;
+  properties?: Record<string, unknown>;
 }
 
 export type SavedLayoutItem = {
@@ -18,7 +18,7 @@ export type SavedLayoutItem = {
   height?: number;
   type?: WidgetType;
   title?: string;
-  properties?: any;
+  properties?: Record<string, unknown>;
 };
 
 export type SavedLayoutMap = Record<string, SavedLayoutItem>;
