@@ -986,6 +986,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
   animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1599,15 +1600,22 @@ body {
 
 /* Premium Settings Toast */
 .settings-toast {
-  align-self: flex-end;
+  position: absolute;
+  top: 76px;
+  right: 32px;
+  z-index: 30;
+  max-width: min(420px, calc(100% - 64px));
   padding: 8px 14px;
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
   border: 1px solid transparent;
   display: flex;
   align-items: center;
   gap: 8px;
+  pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
