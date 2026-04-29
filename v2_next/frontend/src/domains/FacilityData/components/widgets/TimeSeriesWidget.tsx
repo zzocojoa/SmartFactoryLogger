@@ -12,9 +12,8 @@ import { TIME_SERIES_CATALOG, SERIES_COLORS } from '../../timeseries/seriesCatal
 import { THRESHOLD_LABELS } from '../../../../shared/utils/thresholds';
 import type { ThresholdKey } from '../../../../shared/types';
 import { LABELS } from '../../../../shared/constants/uiText';
+import { AIChatbotLauncher } from '../../../../AI/components/AIChatbotLauncher';
 const UPlotChart = React.lazy(() => import('../UPlotChart').then(m => ({ default: m.UPlotChart })));
-
-const AIChatbot = React.lazy(() => import('../../../../AI/components/AIChatbot').then(m => ({ default: m.AIChatbot })));
 
   /* Chart Colors for Threshold Lines */
   const THRESHOLD_LINE_COLORS: Partial<Record<ThresholdKey, string>> = {
@@ -446,7 +445,7 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
           )}
       </div>
 
-      <AIChatbot />
+      <AIChatbotLauncher />
     </div>
   );
 });

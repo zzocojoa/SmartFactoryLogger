@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useMemo } from 'react';
+import React, { Suspense, useContext, useEffect, useMemo } from 'react';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { SceneGridLayout } from '@grafana/scenes';
@@ -30,8 +30,27 @@ type DashboardSceneSurfaceProps = {
   focusBusy: boolean;
 };
 
+type CameraWidgetProps = {
+  onSpotImageLoaded: () => void;
+  onSpotImageError: () => void;
+  requestFocus: (steps: number) => void;
+  focusBusy: boolean;
+};
+
+const CameraWidgetPropsContext = React.createContext<CameraWidgetProps | null>(null);
+
 const WidgetLoadingFallback = (): JSX.Element => {
   return <div className="widget-loading">Loading...</div>;
+};
+
+const CameraWidgetContainer = (): JSX.Element => {
+  const cameraWidgetProps = useContext(CameraWidgetPropsContext);
+
+  if (!cameraWidgetProps) {
+    throw new Error('CameraWidgetContainer requires CameraWidgetPropsContext.');
+  }
+
+  return <CameraComponent {...cameraWidgetProps} />;
 };
 
 const ensureScenesRuntime = (): void => {
@@ -60,6 +79,16 @@ export const DashboardSceneSurface = ({
   requestFocus,
   focusBusy,
 }: DashboardSceneSurfaceProps): JSX.Element => {
+  const cameraWidgetProps = useMemo(
+    () => ({
+      onSpotImageLoaded,
+      onSpotImageError,
+      requestFocus,
+      focusBusy,
+    }),
+    [onSpotImageLoaded, onSpotImageError, requestFocus, focusBusy]
+  );
+
   const scene = useMemo(() => {
     const registry: WidgetRegistry = {
       kpi: () => <KpiComponent />,
@@ -71,12 +100,7 @@ export const DashboardSceneSurface = ({
       ),
       camera: () => (
         <Suspense fallback={<WidgetLoadingFallback />}>
-          <CameraComponent
-            onSpotImageLoaded={onSpotImageLoaded}
-            onSpotImageError={onSpotImageError}
-            requestFocus={requestFocus}
-            focusBusy={focusBusy}
-          />
+          <CameraWidgetContainer />
         </Suspense>
       ),
       molds: () => (
@@ -130,5 +154,9 @@ export const DashboardSceneSurface = ({
     return <scene.Component model={scene} />;
   }, [scene]);
 
-  return SceneRenderer;
+  return (
+    <CameraWidgetPropsContext.Provider value={cameraWidgetProps}>
+      {SceneRenderer}
+    </CameraWidgetPropsContext.Provider>
+  );
 };

@@ -10,8 +10,13 @@ import Wrench from 'lucide-react/dist/esm/icons/wrench';
 import { useAIAgent } from '../hooks/useAIAgent';
 import { ChatMessage } from './ChatMessage';
 
-export const AIChatbot: React.FC = () => {
-  const [isOpen, setIsOpen] = useState(false);
+type AIChatbotProps = {
+  initialOpen?: boolean;
+};
+
+export const AIChatbot: React.FC<AIChatbotProps> = ({ initialOpen }) => {
+  const shouldOpenInitially = initialOpen === true;
+  const [isOpen, setIsOpen] = useState(shouldOpenInitially);
   const [showSettings, setShowSettings] = useState(false);
   const [input, setInput] = useState('');
   
