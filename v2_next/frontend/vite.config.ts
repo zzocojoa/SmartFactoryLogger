@@ -177,7 +177,7 @@ export default defineConfig(({ mode }) => {
       ],
     },
     define: {
-      // Grafana libraries often check process.env
+      // Grafana 라이브러리는 process.env를 확인하는 경우가 있음
       'process.env': {},
     },
     build: {

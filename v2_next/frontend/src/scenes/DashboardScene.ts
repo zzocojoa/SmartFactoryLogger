@@ -36,7 +36,7 @@ export function getDashboardScene(
     const defaultItem = defaultItemMap.get(key);
     const saved = savedMap[key];
     
-    if (!defaultItem && !saved) return null; // Should not happen
+    if (!defaultItem && !saved) return null; // 정상 흐름에서는 발생하지 않음
     
     const type = saved?.type || defaultItem?.type || 'markdown';
     const title = saved?.title || defaultItem?.title || '새 위젯';

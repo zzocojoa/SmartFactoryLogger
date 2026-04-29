@@ -216,6 +216,7 @@ export const NativeDashboardSurface = ({
       {items.map(item => (
         <NativeWidget key={item.key} item={item}>
           <DeferredWidgetContent
+            key={`${item.key}:${item.type}`}
             item={item}
             renderContent={() => (
               <Suspense fallback={<div className="widget-loading">{WIDGET_FALLBACK_TEXT}</div>}>
