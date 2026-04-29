@@ -42,3 +42,45 @@ export const DASHBOARD_LAYOUT_KEYS = [
   'env',
   'timeseries',
 ] as const;
+
+export const resolveDashboardItems = (savedLayout: SavedLayoutMap | null): DashboardItem[] => {
+  const savedMap: SavedLayoutMap = savedLayout ?? {};
+  const defaultItemMap: Map<string, DashboardItem> = new Map(DEFAULT_DASHBOARD_ITEMS.map(item => [item.key, item]));
+  const keys: string[] = savedLayout
+    ? Object.keys(savedMap).filter(key => key !== 'notice')
+    : DEFAULT_DASHBOARD_ITEMS.reduce<string[]>((acc, item) => {
+        if (item.key !== 'notice') {
+          acc.push(item.key);
+        }
+        return acc;
+      }, []);
+
+  return keys.reduce<DashboardItem[]>((acc, key) => {
+    const defaultItem = defaultItemMap.get(key);
+    const saved = savedMap[key];
+
+    if (!defaultItem && !saved) {
+      return acc;
+    }
+
+    const type: WidgetType = saved?.type ?? defaultItem?.type ?? 'markdown';
+    const title: string = saved?.title ?? defaultItem?.title ?? 'Widget';
+    const properties: unknown = saved?.properties ?? defaultItem?.properties ?? {};
+    const x: number = saved?.x ?? defaultItem?.x ?? 0;
+    const y: number = saved?.y ?? defaultItem?.y ?? 0;
+    const width: number = saved?.width ?? defaultItem?.width ?? 10;
+    const height: number = saved?.height ?? defaultItem?.height ?? 4;
+
+    acc.push({
+      key,
+      type,
+      title,
+      x,
+      y,
+      width,
+      height,
+      properties,
+    });
+    return acc;
+  }, []);
+};

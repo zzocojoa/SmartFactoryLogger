@@ -48,6 +48,7 @@ const MAX_NOTIFICATIONS = 50;
 import { LayoutEditContext } from './domains/Configuration/context/LayoutEditContext';
 const SettingsModalContainer = React.lazy(() => import('./domains/Configuration/components/SettingsModal/SettingsModalContainer').then(m => ({ default: m.SettingsModalContainer })));
 const DashboardSceneSurface = React.lazy(() => import('./scenes/DashboardSceneSurface').then(m => ({ default: m.DashboardSceneSurface })));
+const NativeDashboardSurface = React.lazy(() => import('./scenes/NativeDashboardSurface').then(m => ({ default: m.NativeDashboardSurface })));
 
 import { safeGetItem, safeSetItem, safeRemoveItem } from './shared/utils/safeStorage';
 
@@ -983,15 +984,26 @@ function App() {
             <SnapshotContext.Provider value={snapshotContextValue}>
               <LayoutEditContext.Provider value={layoutEditContextValue}>
                 <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
-                  <DashboardSceneSurface
-                    layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
-                    layoutEditing={layoutEditing}
-                    layoutRef={layoutRef}
-                    onSpotImageLoaded={handleSpotImageLoaded}
-                    onSpotImageError={handleSpotImageError}
-                    requestFocus={requestFocus}
-                    focusBusy={focusBusy}
-                  />
+                  {layoutEditing ? (
+                    <DashboardSceneSurface
+                      layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
+                      layoutEditing={layoutEditing}
+                      layoutRef={layoutRef}
+                      onSpotImageLoaded={handleSpotImageLoaded}
+                      onSpotImageError={handleSpotImageError}
+                      requestFocus={requestFocus}
+                      focusBusy={focusBusy}
+                    />
+                  ) : (
+                    <NativeDashboardSurface
+                      layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
+                      layoutRef={layoutRef}
+                      onSpotImageLoaded={handleSpotImageLoaded}
+                      onSpotImageError={handleSpotImageError}
+                      requestFocus={requestFocus}
+                      focusBusy={focusBusy}
+                    />
+                  )}
                 </React.Suspense>
               </LayoutEditContext.Provider>
             </SnapshotContext.Provider>
