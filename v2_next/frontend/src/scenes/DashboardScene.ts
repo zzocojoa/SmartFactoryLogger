@@ -71,10 +71,6 @@ export function getDashboardScene(
         return acc;
       }, []);
   
-  // Scale factor: 60 (User) -> 24 (Scene) = 0.4
-  const SCALE_TO_SCENE = 24 / 60;
-
-  // Pre-build index map for O(1) lookups instead of O(N) .find() per key (Rule 7.11)
   const defaultItemMap = new Map(DEFAULT_DASHBOARD_ITEMS.map(i => [i.key, i]));
 
   const children = allKeys.map(key => {
@@ -92,8 +88,8 @@ export function getDashboardScene(
     const wBase = saved?.width ?? defaultItem?.width ?? 10;
     const h = saved?.height ?? defaultItem?.height ?? 4;
     
-    const x = Math.round(xBase * SCALE_TO_SCENE);
-    const width = Math.max(1, Math.round(wBase * SCALE_TO_SCENE));
+    const x = xBase;
+    const width = Math.max(1, wBase);
 
     const item: DashboardItem = {
       key,

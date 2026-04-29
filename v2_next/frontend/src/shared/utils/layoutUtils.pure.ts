@@ -84,6 +84,13 @@ export const normalizeLayoutMap = (
       scaled: true,
     };
   }
+  if (maxExtent > CURRENT_LAYOUT_COLS) {
+    return {
+      layout: scaleLayoutMap(layout, LEGACY_LAYOUT_COLS / CURRENT_LAYOUT_COLS),
+      cols: CURRENT_LAYOUT_COLS,
+      scaled: true,
+    };
+  }
   return {
     layout,
     cols: Number.isFinite(savedCols) ? savedCols : CURRENT_LAYOUT_COLS,

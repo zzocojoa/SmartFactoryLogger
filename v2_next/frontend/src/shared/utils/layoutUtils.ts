@@ -1,5 +1,4 @@
 import type { SceneGridItemLike, SceneObjectBase } from '@grafana/scenes';
-import { CURRENT_LAYOUT_COLS } from '../constants/logic';
 import type { WidgetType } from '../../scenes/DashboardSceneModel';
 import type { LayoutMap } from '../types';
 
@@ -17,7 +16,6 @@ export const buildLayoutMap = (
   children: (SceneGridItemLike | SceneObjectBase)[] | undefined
 ): LayoutMap => {
   const next: LayoutMap = {};
-  const SCENE_TO_USER = CURRENT_LAYOUT_COLS / 24;
 
   if (!children || !Array.isArray(children)) {
     console.warn('buildLayoutMap: Invalid children', children);
@@ -41,9 +39,9 @@ export const buildLayoutMap = (
     }
 
     next[key] = {
-      x: Math.round((x ?? 0) * SCENE_TO_USER),
+      x: x ?? 0,
       y: y ?? 0,
-      width: Math.round((width ?? 1) * SCENE_TO_USER),
+      width: width ?? 1,
       height: height ?? 1,
       ...metadata,
     };
