@@ -2,6 +2,7 @@ import React, { Suspense, useContext, useEffect, useMemo } from 'react';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { SceneGridLayout } from '@grafana/scenes';
+import type { SceneGridItemLike } from '@grafana/scenes';
 import { KpiComponent } from '../domains/FacilityData/components/widgets/KpiWidget';
 import { SpotComponent } from '../domains/FacilityData/components/widgets/SpotWidget';
 import type { LayoutMap } from '../shared/types';
@@ -35,6 +36,10 @@ type CameraWidgetProps = {
   onSpotImageError: () => void;
   requestFocus: (steps: number) => void;
   focusBusy: boolean;
+};
+
+type LayoutStateSubscription = {
+  unsubscribe: () => void;
 };
 
 const CameraWidgetPropsContext = React.createContext<CameraWidgetProps | null>(null);
@@ -145,9 +150,19 @@ export const DashboardSceneSurface = ({
       layoutRef.current = buildLayoutMap(grid.state.children);
     };
 
+    const subscribeToGridItems = (items: SceneGridItemLike[]): LayoutStateSubscription[] => {
+      return items.map((item) => item.subscribeToState(() => updateLayoutRef()));
+    };
+
     updateLayoutRef();
-    const sub = grid.subscribeToState(() => updateLayoutRef());
-    return () => sub.unsubscribe();
+    const subscriptions: LayoutStateSubscription[] = [
+      grid.subscribeToState(() => updateLayoutRef()),
+      ...subscribeToGridItems(grid.state.children),
+    ];
+
+    return () => {
+      subscriptions.forEach((subscription) => subscription.unsubscribe());
+    };
   }, [scene, layoutRef]);
 
   const SceneRenderer = useMemo(() => {

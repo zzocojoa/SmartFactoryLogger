@@ -50,7 +50,7 @@ const buildLayoutMapFromItems = (items: DashboardItem[]): LayoutMap => {
 const NativeWidget = ({ item, children }: NativeWidgetProps): JSX.Element => {
   return (
     <div
-      className="react-grid-item native-grid-item"
+      className="native-grid-item"
       style={{
         gridColumn: `${item.x + 1} / span ${item.width}`,
         gridRow: `${item.y + 1} / span ${item.height}`,
@@ -144,7 +144,7 @@ export const NativeDashboardSurface = ({
 
   return (
     <div
-      className="react-grid-layout native-dashboard-grid"
+      className="native-dashboard-grid"
       style={{
         display: 'grid',
         gridTemplateColumns: `repeat(${CURRENT_LAYOUT_COLS}, minmax(0, 1fr))`,
