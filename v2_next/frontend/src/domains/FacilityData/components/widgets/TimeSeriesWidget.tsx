@@ -14,8 +14,6 @@ import type { ThresholdKey } from '../../../../shared/types';
 import { LABELS } from '../../../../shared/constants/uiText';
 const UPlotChart = React.lazy(() => import('../UPlotChart').then(m => ({ default: m.UPlotChart })));
 
-const AIChatbot = React.lazy(() => import('../../../../AI/components/AIChatbot').then(m => ({ default: m.AIChatbot })));
-
   /* Chart Colors for Threshold Lines */
   const THRESHOLD_LINE_COLORS: Partial<Record<ThresholdKey, string>> = {
     speed: 'var(--color-speed)',
@@ -445,8 +443,6 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
             </div>
           )}
       </div>
-
-      <AIChatbot />
     </div>
   );
 });

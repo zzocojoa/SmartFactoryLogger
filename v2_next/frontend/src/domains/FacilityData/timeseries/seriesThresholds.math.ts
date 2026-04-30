@@ -1,6 +1,8 @@
-import { ThresholdsConfig, ThresholdsMode } from '@grafana/data';
+import type { ThresholdsConfig } from '@grafana/data';
 import type { TimeSeriesKey } from './seriesCatalog';
 import type { ThresholdKey } from './seriesThresholds.types';
+
+const ABSOLUTE_THRESHOLD_MODE = 'absolute' as ThresholdsConfig['mode'];
 
 export const THRESHOLD_KEY_MAP: Record<ThresholdKey, TimeSeriesKey> = {
   speed: 'Speed',
@@ -17,7 +19,7 @@ export const THRESHOLD_KEY_MAP: Record<ThresholdKey, TimeSeriesKey> = {
 };
 
 export const buildThresholdConfig = (value: number): ThresholdsConfig => ({
-  mode: ThresholdsMode.Absolute,
+  mode: ABSOLUTE_THRESHOLD_MODE,
   steps: [
     { value: Number.NEGATIVE_INFINITY, color: 'green' },
     { value, color: 'red' },

@@ -37,6 +37,73 @@ const readGrafanaScenesPackageJson = (packageJsonPath: string): GrafanaScenesPac
   return parsedPackageJson;
 };
 
+const normalizeModuleId = (id: string): string => {
+  return id.replace(/\\/g, '/');
+};
+
+const resolveManualChunk = (id: string): string | undefined => {
+  const normalizedId: string = normalizeModuleId(id);
+
+  if (normalizedId.includes('vite/preload-helper')) {
+    return 'vendor-vite';
+  }
+
+  if (normalizedId.includes('commonjsHelpers')) {
+    return 'vendor-common';
+  }
+
+  if (
+    normalizedId.includes('/node_modules/@babel/runtime/') ||
+    normalizedId.includes('/node_modules/tslib/')
+  ) {
+    return 'vendor-common';
+  }
+
+  if (normalizedId.includes('/node_modules/moment-timezone/')) {
+    return 'vendor-moment-timezone';
+  }
+
+  if (normalizedId.includes('/node_modules/moment/')) {
+    return 'vendor-moment';
+  }
+
+  if (normalizedId.includes('/node_modules/@grafana/')) {
+    return 'vendor-grafana';
+  }
+
+  if (
+    normalizedId.includes('/node_modules/react/') ||
+    normalizedId.includes('/node_modules/react-dom/') ||
+    normalizedId.includes('/node_modules/react-router/') ||
+    normalizedId.includes('/node_modules/react-router-dom/') ||
+    normalizedId.includes('/node_modules/scheduler/')
+  ) {
+    return 'vendor-react';
+  }
+
+  if (normalizedId.includes('/node_modules/monaco-editor/')) {
+    return 'vendor-monaco';
+  }
+
+  if (normalizedId.includes('/node_modules/uplot/')) {
+    return 'vendor-uplot';
+  }
+
+  if (
+    normalizedId.includes('/node_modules/react-grid-layout/') ||
+    normalizedId.includes('/node_modules/react-resizable/') ||
+    normalizedId.includes('/node_modules/react-draggable/') ||
+    normalizedId.includes('/node_modules/prop-types/') ||
+    normalizedId.includes('/node_modules/clsx/') ||
+    normalizedId.includes('/node_modules/fast-equals/') ||
+    normalizedId.includes('/node_modules/resize-observer-polyfill/')
+  ) {
+    return 'vendor-grid-layout';
+  }
+
+  return undefined;
+};
+
 const resolveGrafanaScenesEntry = (): string => {
   const packageRoot: string = resolve(__dirname, 'node_modules/@grafana/scenes');
   const packageJsonPath: string = resolve(packageRoot, 'package.json');
@@ -110,8 +177,17 @@ export default defineConfig(({ mode }) => {
       ],
     },
     define: {
-      // Grafana libraries often check process.env
+      // Grafana 라이브러리는 process.env를 확인하는 경우가 있음
       'process.env': {},
+    },
+    build: {
+      modulePreload: false,
+      rollupOptions: {
+        output: {
+          hoistTransitiveImports: false,
+          manualChunks: resolveManualChunk,
+        },
+      },
     },
   };
 });

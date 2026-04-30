@@ -1,4 +1,4 @@
-import type { DashboardItem } from '../../../scenes/DashboardScene';
+import type { DashboardItem } from '../../../scenes/DashboardSceneModel';
 import type { LayoutEntry } from '../../../shared/types';
 
 export const resolveDefaultWidgetSpec = (

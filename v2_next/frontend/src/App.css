@@ -218,7 +218,8 @@ body {
   justify-content: space-between;
   position: sticky; /* Keep header visible */
   top: 0;
-  z-index: 2000; /* Ensure above grid items */
+  z-index: 5000; /* 대시보드 패널보다 위에 유지 */
+  isolation: isolate;
 }
 
 .app-header h1 {
@@ -473,6 +474,7 @@ body {
   position: relative;
   display: inline-flex;
   align-items: center;
+  z-index: 5100;
 }
 
 .menu-toggle::before {
@@ -501,7 +503,7 @@ body {
   transform: translateY(-6px);
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 2150;
+  z-index: 5200;
 }
 
 .menu-dropdown.open {
@@ -820,6 +822,17 @@ body {
   flex: 1;
 }
 
+.notification-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  pointer-events: none;
+}
+
+.notification-overlay.open {
+  pointer-events: auto;
+}
+
 .notification-drawer {
   position: fixed;
   top: calc(var(--header-height) + 10px);
@@ -836,7 +849,7 @@ body {
   transform: translateY(-6px);
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 2100;
+  z-index: 2110;
 }
 
 .notification-drawer.open {
@@ -984,6 +997,7 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
   animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -1597,15 +1611,22 @@ body {
 
 /* Premium Settings Toast */
 .settings-toast {
-  align-self: flex-end;
+  position: absolute;
+  top: 76px;
+  right: 32px;
+  z-index: 30;
+  max-width: min(420px, calc(100% - 64px));
   padding: 8px 14px;
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
   border: 1px solid transparent;
   display: flex;
   align-items: center;
   gap: 8px;
+  pointer-events: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);

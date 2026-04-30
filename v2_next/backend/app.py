@@ -2158,18 +2158,18 @@ def list_client_layouts(client_id: str):
 
 
 @app.get("/api/layouts/client/{client_id}/latest")
-def get_client_latest_layout(client_id: str):
+def get_client_latest_layout(client_id: str) -> dict[str, Any] | None:
     """Get the 'last active' layout for automatic restoration."""
     try:
         client_dir = _get_client_dir(client_id)
         active_path = client_dir / "last_active.json"
         
         if not active_path.exists():
-             # Fallback: check legacy single-file format (migration)
+            # 저장된 레이아웃이 없는 새 클라이언트는 정상 빈 상태로 응답한다.
             legacy_path = _get_client_layouts_dir() / f"{client_id}.json"
             if legacy_path.exists():
                 return json.loads(legacy_path.read_text(encoding="utf-8"))
-            raise HTTPException(status_code=404, detail="No active layout")
+            return None
             
         data = json.loads(active_path.read_text(encoding="utf-8"))
         return data
