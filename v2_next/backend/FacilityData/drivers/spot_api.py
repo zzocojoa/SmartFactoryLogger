@@ -308,11 +308,14 @@ async def _refresh_spot_temperature(client: httpx.AsyncClient) -> None:
 def get_image_proxy_diagnostics() -> Dict[str, Any]:
     now = time.time()
     cache_age = _cache_age_sec(now) if _img_cache["data"] else None
-    retry_after = None
-    if _img_next_retry_at is not None:
-        retry_after = max(0.0, _img_next_retry_at - now)
+    cache_status = _cache_status(now)
+    retry_after = _retry_after_sec(now)
     return {
-        "cache_state": str(_img_cache_state),
+        "cache_state": _cache_state_for_status(cache_status),
+        "cache_status": cache_status,
+        "image_status": _image_status_for_cache_status(cache_status),
+        "proxy_state": _image_proxy_state(now),
+        "last_cache_state": str(_img_cache_state),
         "failure_count": int(_img_failure_count),
         "last_error_at": float(_img_last_error) if _img_last_error else None,
         "last_error_code": _img_last_error_code,
@@ -367,13 +370,56 @@ def _cache_age_sec(now: float) -> float:
     return max(0.0, now - float(_img_cache.get("time") or 0.0))
 
 
+def _cache_status(now: float) -> str:
+    if not _img_cache["data"]:
+        return "empty"
+    if _cache_age_sec(now) >= _max_stale_age_sec():
+        return "stale"
+    return "fresh"
+
+
+def _cache_state_for_status(cache_status: str) -> str:
+    if cache_status == "fresh":
+        return "cache"
+    return cache_status
+
+
+def _image_status_for_cache_status(cache_status: str) -> str:
+    if cache_status == "fresh":
+        return "ok"
+    return cache_status
+
+
+def _retry_after_sec(now: float) -> Optional[float]:
+    if _img_next_retry_at is None or _img_failure_count <= 0:
+        return None
+    return max(0.0, _img_next_retry_at - now)
+
+
+def _image_proxy_state(now: float) -> str:
+    retry_after = _retry_after_sec(now)
+    if retry_after is not None and retry_after > 0.0:
+        return "backoff"
+    if _img_last_error_code:
+        return "error"
+    return "ok"
+
+
 def _build_image_meta(now: float, status: str, source: str) -> Dict[str, Any]:
     captured_at = float(_img_cache.get("time") or 0.0)
+    cache_status = _cache_status(now)
     return {
         "status": status,
         "source": source,
         "captured_at": captured_at,
         "age_sec": _cache_age_sec(now),
+        "cache_status": cache_status,
+        "proxy_state": _image_proxy_state(now),
+        "failure_count": int(_img_failure_count),
+        "last_error_code": _img_last_error_code,
+        "max_stale_age_sec": _max_stale_age_sec(),
+        "next_retry_at": _img_next_retry_at,
+        "retry_after_sec": _retry_after_sec(now),
     }
 
 
@@ -396,8 +442,9 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     # 캐시에 이미지가 있으면 즉시 반환
     if _img_cache["data"]:
         age = _cache_age_sec(now)
-        status = "ok" if age < _max_stale_age_sec() else "stale"
-        next_cache_state = "cache" if status == "ok" else "stale"
+        cache_status = _cache_status(now)
+        status = _image_status_for_cache_status(cache_status)
+        next_cache_state = _cache_state_for_status(cache_status)
         if _img_cache_state != next_cache_state and _should_log_cache_state(now):
             if next_cache_state == "cache":
                 logger.info("Spot cache serve: age_sec=%.3f", age)
@@ -418,8 +465,9 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         if _img_cache["data"]:
             cached_now = time.time()
             cached_age = _cache_age_sec(cached_now)
-            cached_status = "ok" if cached_age < _max_stale_age_sec() else "stale"
-            next_cache_state = "cache" if cached_status == "ok" else "stale"
+            cached_cache_status = _cache_status(cached_now)
+            cached_status = _image_status_for_cache_status(cached_cache_status)
+            next_cache_state = _cache_state_for_status(cached_cache_status)
             _img_cache_state = next_cache_state
             return _img_cache["data"], _build_image_meta(cached_now, cached_status, next_cache_state)
         

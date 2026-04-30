@@ -11,6 +11,26 @@ export type CommBadge = {
   state: 'ok' | 'warn' | 'error' | 'idle';
 };
 
+type CameraStatus = {
+  type: 'error' | 'loading' | 'danger' | 'warn';
+  title: string;
+  detail: string;
+};
+
+const parseCameraStatusMessage = (message: string): CameraStatus => {
+  const [title, ...detailParts] = message.split('\n');
+  const normalizedTitle = title.trim();
+  const detail = detailParts.join(' ').trim();
+  const type = normalizedTitle === '이미지 상태 지연' || normalizedTitle === '이미지 요청 대기'
+    ? 'warn'
+    : 'error';
+  return {
+    type,
+    title: normalizedTitle || message,
+    detail,
+  };
+};
+
 export const buildCommBadge = (
   key: string,
   metrics?: CommChannelMetrics,
@@ -115,7 +135,7 @@ export const getCameraStatus = (params: {
   spotImageLoading: boolean;
   spotImageError: string | null;
   spotLastSuccessAt: number | null;
-}) => {
+}): CameraStatus | null => {
   const { spotConfig, spotImageUrl, spotImageLoading, spotImageError, spotLastSuccessAt } = params;
   if (!spotConfig) {
     return null;
@@ -126,7 +146,7 @@ export const getCameraStatus = (params: {
   const delayMs = spotLastSuccessAt ? now - spotLastSuccessAt : null;
 
   if (spotImageError) {
-    return { type: 'error' as const, title: spotImageError, detail: '' };
+    return parseCameraStatusMessage(spotImageError);
   }
   if (!spotImageUrl || spotImageLoading || spotLastSuccessAt === null) {
     return { type: 'loading' as const, title: '카메라 연결 중', detail: '' };

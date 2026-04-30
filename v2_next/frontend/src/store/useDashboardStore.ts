@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { FactoryData, SpotConfig, ThresholdState } from '../shared/types';
+import type { SpotImageResponseMetadata } from '../domains/FacilityData/api/spotService.types';
 
 interface DashboardState {
   // FactoryDataContext
@@ -14,6 +15,7 @@ interface DashboardState {
   spotImageLoading: boolean;
   spotImageError: string | null;
   spotLastSuccessAt: number | null;
+  spotImageMetadata: SpotImageResponseMetadata | null;
   spotAlertActive: boolean;
 
   // Actions
@@ -22,7 +24,13 @@ interface DashboardState {
   setIntervalSec: (intervalSec: number) => void;
   
   setSpotConfig: (config: SpotConfig | null) => void;
-  setSpotImageState: (url: string, loading: boolean, error: string | null, lastSuccessAt: number | null) => void;
+  setSpotImageState: (
+    url: string,
+    loading: boolean,
+    error: string | null,
+    lastSuccessAt: number | null,
+    metadata?: SpotImageResponseMetadata | null
+  ) => void;
   setSpotAlertActive: (active: boolean) => void;
 }
 
@@ -37,6 +45,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   spotImageLoading: false,
   spotImageError: null,
   spotLastSuccessAt: null,
+  spotImageMetadata: null,
   spotAlertActive: false,
 
   setData: (data, lastDataAt) => set({ data, lastDataAt }),
@@ -44,11 +53,18 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setIntervalSec: (intervalSec) => set({ intervalSec }),
   
   setSpotConfig: (spotConfig) => set({ spotConfig }),
-  setSpotImageState: (spotImageUrl, spotImageLoading, spotImageError, spotLastSuccessAt) => set((state) => ({
+  setSpotImageState: (
     spotImageUrl,
     spotImageLoading,
     spotImageError,
-    spotLastSuccessAt: spotLastSuccessAt !== null ? spotLastSuccessAt : state.spotLastSuccessAt
+    spotLastSuccessAt,
+    spotImageMetadata
+  ) => set((state) => ({
+    spotImageUrl,
+    spotImageLoading,
+    spotImageError,
+    spotLastSuccessAt: spotLastSuccessAt !== null ? spotLastSuccessAt : state.spotLastSuccessAt,
+    spotImageMetadata: spotImageMetadata !== undefined ? spotImageMetadata : state.spotImageMetadata,
   })),
   setSpotAlertActive: (spotAlertActive) => set({ spotAlertActive }),
 }));

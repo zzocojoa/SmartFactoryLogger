@@ -398,6 +398,13 @@ export interface FrontendErrorEntry {
 }
 
 export type NotificationLevel = 'info' | 'warn' | 'error';
+export type NotificationLifecycle = 'active' | 'resolved' | 'history';
+
+export interface NotificationPushOptions {
+  groupKey?: string;
+  lifecycle?: NotificationLifecycle;
+  detail?: string;
+}
 
 export interface NotificationItem {
   id: string;
@@ -405,6 +412,10 @@ export interface NotificationItem {
   title: string;
   message: string;
   level: NotificationLevel;
+  groupKey?: string;
+  lifecycle?: NotificationLifecycle;
+  detail?: string;
+  resolvedAt?: number;
 }
 
 export interface ConfigSnapshot {

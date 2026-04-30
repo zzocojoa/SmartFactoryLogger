@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { SpotConfig, SpotPollingDiagnostics } from '../../../shared/types';
 import { useDashboardStore } from '../../../store/useDashboardStore';
+import type { SpotImageResponseMetadata } from '../api/spotService.types';
 import {
   controlSpotAction,
   controlSpotActuator,
@@ -9,9 +10,11 @@ import {
   fetchSpotImageResponse,
 } from './useSpotViewModel.service';
 import {
-  resolveEffectiveSpotImageAt,
+  resolveSpotImageDiagnosticMessage,
   resolveSpotImageErrorMessage,
   resolveSpotImageLoadErrorMessage,
+  resolveSpotImageResponseMetadata,
+  resolveSpotImageSuccessAt,
   resolveSpotRefreshMs,
   type SpotProxyErrorDetail,
 } from './useSpotViewModel.selectors';
@@ -22,7 +25,16 @@ interface SpotImageState {
   imageUrl: string;
   imageError: string | null;
   lastSuccessAt: number | null;
+  metadata: SpotImageResponseMetadata | null;
 }
+
+type SpotPollingDiagnosticsWithImage = SpotPollingDiagnostics & {
+  last_image_status: string | null;
+  last_image_source: string | null;
+  last_image_age_sec: number | null;
+  last_image_latency_ms: number | null;
+  last_image_retry_after_sec: number | null;
+};
 
 const resolveSpotProxyErrorDetail = async (response: Response): Promise<SpotProxyErrorDetail | null> => {
   try {
@@ -40,7 +52,7 @@ const resolveSpotProxyErrorDetail = async (response: Response): Promise<SpotProx
   }
 };
 
-const INITIAL_SPOT_DIAGNOSTICS: SpotPollingDiagnostics = {
+const INITIAL_SPOT_DIAGNOSTICS: SpotPollingDiagnosticsWithImage = {
   in_flight: false,
   refresh_interval_ms: null,
   fetch_count: 0,
@@ -50,6 +62,11 @@ const INITIAL_SPOT_DIAGNOSTICS: SpotPollingDiagnostics = {
   last_fetch_latency_ms: null,
   next_fetch_scheduled_at: null,
   last_fetch_reason: null,
+  last_image_status: null,
+  last_image_source: null,
+  last_image_age_sec: null,
+  last_image_latency_ms: null,
+  last_image_retry_after_sec: null,
 };
 
 export const useSpotViewModel = (): UseSpotViewModel => {
@@ -59,7 +76,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   const [imageLoading, setImageLoading] = useState(false);
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
-  const [diagnostics, setDiagnostics] = useState<SpotPollingDiagnostics>(INITIAL_SPOT_DIAGNOSTICS);
+  const [diagnostics, setDiagnostics] = useState<SpotPollingDiagnosticsWithImage>(INITIAL_SPOT_DIAGNOSTICS);
 
   const hasImageRef = useRef(false);
   const prevUrlRef = useRef<string | null>(null);
@@ -70,6 +87,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     imageUrl: '',
     imageError: null,
     lastSuccessAt: null,
+    metadata: null,
   });
 
   const setDashboardSpotConfig = useDashboardStore((state) => state.setSpotConfig);
@@ -78,8 +96,14 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   configRef.current = config;
 
   const syncDashboardSpotImageState = useCallback(
-    (nextImageUrl: string, nextLoading: boolean, nextImageError: string | null, nextLastSuccessAt: number | null) => {
-      setDashboardSpotImageState(nextImageUrl, nextLoading, nextImageError, nextLastSuccessAt);
+    (
+      nextImageUrl: string,
+      nextLoading: boolean,
+      nextImageError: string | null,
+      nextLastSuccessAt: number | null,
+      nextMetadata: SpotImageResponseMetadata | null
+    ) => {
+      setDashboardSpotImageState(nextImageUrl, nextLoading, nextImageError, nextLastSuccessAt, nextMetadata);
     },
     [setDashboardSpotImageState]
   );
@@ -148,6 +172,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       const refreshIntervalMs = resolveSpotRefreshMs(currentConfig.refresh_interval);
       const startedAt = Date.now();
       const currentImageState = imageStateRef.current;
+      let latestResponseMetadata: SpotImageResponseMetadata | null = null;
 
       inFlightRef.current = true;
       setDiagnostics((prev) => ({
@@ -165,47 +190,64 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           currentImageState.imageUrl,
           true,
           currentImageState.imageError,
-          currentImageState.lastSuccessAt
+          currentImageState.lastSuccessAt,
+          currentImageState.metadata
         );
       }
 
       try {
         const response = await fetchSpotImageResponse();
+        const responseReceivedAt = Date.now();
+        const responseMetadata = resolveSpotImageResponseMetadata(
+          response.headers,
+          responseReceivedAt,
+          responseReceivedAt - startedAt
+        );
+        latestResponseMetadata = responseMetadata;
+        setDiagnostics((prev) => ({
+          ...prev,
+          last_image_status: responseMetadata.status,
+          last_image_source: responseMetadata.source,
+          last_image_age_sec: responseMetadata.age_sec,
+          last_image_latency_ms: responseMetadata.latency_ms,
+          last_image_retry_after_sec: responseMetadata.retry_after_sec,
+        }));
         if (!response.ok) {
           const detail = await resolveSpotProxyErrorDetail(response);
-          throw new Error(resolveSpotImageErrorMessage(response.status, detail));
+          const diagnosticMessage = resolveSpotImageDiagnosticMessage(responseMetadata);
+          throw new Error(diagnosticMessage ?? resolveSpotImageErrorMessage(response.status, detail));
         }
 
-        const capturedAtHeader = response.headers.get('X-Spot-Image-At');
-        const ageHeader = response.headers.get('X-Spot-Image-Age');
         const blob = await response.blob();
 
         if (prevUrlRef.current) {
           URL.revokeObjectURL(prevUrlRef.current);
         }
 
-        const receivedAt = Date.now();
-        const effectiveAt = resolveEffectiveSpotImageAt(capturedAtHeader, ageHeader, receivedAt);
+        const effectiveAt = resolveSpotImageSuccessAt(responseMetadata, responseReceivedAt);
+        const nextImageError = resolveSpotImageDiagnosticMessage(responseMetadata);
         const nextImageUrl = URL.createObjectURL(blob);
 
         prevUrlRef.current = nextImageUrl;
         imageStateRef.current = {
           imageUrl: nextImageUrl,
-          imageError: null,
+          imageError: nextImageError,
           lastSuccessAt: effectiveAt,
+          metadata: responseMetadata,
         };
         hasImageRef.current = true;
 
         setImageUrl(nextImageUrl);
-        setImageError(null);
+        setImageError(nextImageError);
         setLastSuccessAt(effectiveAt);
-        syncDashboardSpotImageState(nextImageUrl, false, null, effectiveAt);
+        syncDashboardSpotImageState(nextImageUrl, false, nextImageError, effectiveAt, responseMetadata);
       } catch (error) {
         console.error('Image fetch failed', error);
         const nextImageError = error instanceof Error ? error.message : resolveSpotImageErrorMessage(0, null);
         const nextImageState = {
           ...imageStateRef.current,
           imageError: nextImageError,
+          metadata: latestResponseMetadata ?? imageStateRef.current.metadata,
         };
         imageStateRef.current = nextImageState;
         setImageError(nextImageError);
@@ -213,7 +255,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           nextImageState.imageUrl,
           false,
           nextImageError,
-          nextImageState.lastSuccessAt
+          nextImageState.lastSuccessAt,
+          nextImageState.metadata
         );
         setDiagnostics((prev) => ({
           ...prev,
@@ -300,7 +343,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       currentImageState.imageUrl,
       false,
       currentImageState.imageError,
-      currentImageState.lastSuccessAt
+      currentImageState.lastSuccessAt,
+      currentImageState.metadata
     );
   }, [syncDashboardSpotImageState]);
 
@@ -318,7 +362,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         currentImageState.imageUrl,
         false,
         nextImageError,
-        currentImageState.lastSuccessAt
+        currentImageState.lastSuccessAt,
+        currentImageState.metadata
       );
       return;
     }
@@ -326,7 +371,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       currentImageState.imageUrl,
       false,
       currentImageState.imageError,
-      currentImageState.lastSuccessAt
+      currentImageState.lastSuccessAt,
+      currentImageState.metadata
     );
   }, [syncDashboardSpotImageState]);
 
