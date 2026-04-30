@@ -32,8 +32,8 @@ export const postDeleteLayout = async (payload: LayoutSlotActionPayload) => {
   return response.data;
 };
 
-export const fetchClientLatestLayout = async (clientId: string): Promise<LayoutSnapshot> => {
-  const response = await apiClient.get<LayoutSnapshot>(`/api/layouts/client/${clientId}/latest`);
+export const fetchClientLatestLayout = async (clientId: string): Promise<LayoutSnapshot | null> => {
+  const response = await apiClient.get<LayoutSnapshot | null>(`/api/layouts/client/${clientId}/latest`);
   return response.data;
 };
 
