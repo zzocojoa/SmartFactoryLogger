@@ -148,6 +148,12 @@ export const resolveSpotImageResponseMetadata = (
 export const resolveSpotImageDiagnosticMessage = (
   metadata: SpotImageResponseMetadata
 ): string | null => {
+  if (
+    metadata.cache_status === 'fresh' &&
+    (metadata.status === 'backoff' || metadata.status === 'error')
+  ) {
+    return null;
+  }
   if (metadata.status === 'stale') {
     return `이미지 상태 지연\n${formatSpotMetadataDetail(metadata)}`;
   }

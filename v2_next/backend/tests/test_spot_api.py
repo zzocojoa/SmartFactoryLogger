@@ -105,6 +105,46 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.upstream_status, 200)
         self.assertIn("http://spot.local/image.jpg", str(error))
 
+    async def test_image_text_html_response_with_body_is_accepted(self) -> None:
+        image_bytes = b"\xff\xd8image-data\xff\xd9"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=image_bytes,
+                headers={"Content-Type": "text/html"},
+                request=request,
+            )
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            data = await spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+
+        self.assertEqual(data, image_bytes)
+
+    async def test_image_html_payload_is_rejected(self) -> None:
+        html_body = b"<!doctype html><html><body>not an image</body></html>"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=html_body,
+                headers={"Content-Type": "text/html"},
+                request=request,
+            )
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+                await spot_api._request_spot_image(client, "http://spot.local/image.ssi")
+
+        error = raised.exception
+
+        self.assertEqual(error.code, "invalid-image-html")
+        self.assertEqual(error.upstream_status, 200)
+        self.assertIn("content_type=text/html", str(error))
+        self.assertIn("not an image", str(error))
+
     def test_image_backoff_diagnostics_include_retry_timing(self) -> None:
         spot_api._img_failure_count = 3
         spot_api._record_image_error("upstream-timeout", "timeout")
@@ -243,6 +283,35 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("Retry-After", response.headers)
         self.assertNotIn("X-Spot-Retry-After-Ms", response.headers)
+
+    async def test_proxy_image_response_ignores_non_finite_retry_after_metadata(self) -> None:
+        from backend import app as backend_app
+
+        for retry_after_sec in [float("nan"), float("inf")]:
+            fetch_mock: AsyncMock = AsyncMock(
+                return_value=(
+                    b"image-data",
+                    {
+                        "status": "ok",
+                        "source": "cache",
+                        "captured_at": 1_714_567_890.123,
+                        "age_sec": 0.333,
+                        "cache_status": "fresh",
+                        "proxy_state": "ok",
+                        "failure_count": 0,
+                        "last_error_code": None,
+                        "max_stale_age_sec": 15.0,
+                        "retry_after_sec": retry_after_sec,
+                    },
+                )
+            )
+
+            with self.subTest(retry_after_sec=retry_after_sec):
+                with patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock):
+                    response = await backend_app.proxy_spot_image()
+
+                self.assertNotIn("Retry-After", response.headers)
+                self.assertNotIn("X-Spot-Retry-After-Ms", response.headers)
 
     async def test_proxy_image_fetch_error_includes_diagnostics_payload(self) -> None:
         from backend import app as backend_app

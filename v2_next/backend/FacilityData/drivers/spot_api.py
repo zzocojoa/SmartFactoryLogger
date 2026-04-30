@@ -93,6 +93,61 @@ def _response_body_preview(response: httpx.Response, max_chars: int) -> str:
     return body[:max_chars]
 
 
+def _response_content_type(response: httpx.Response) -> str:
+    return str(response.headers.get("content-type") or "").strip()
+
+
+def _image_payload_type(data: bytes) -> Optional[str]:
+    if data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
+        return "jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+        return "gif"
+    if data.startswith(b"BM"):
+        return "bmp"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def _payload_looks_like_html(data: bytes) -> bool:
+    sample = data.lstrip()[:256].lower()
+    return (
+        sample.startswith(b"<!doctype html")
+        or sample.startswith(b"<html")
+        or sample.startswith(b"<head")
+        or sample.startswith(b"<body")
+        or b"<html" in sample[:80]
+    )
+
+
+def _validate_spot_image_response(response: httpx.Response, image_url: str, data: bytes) -> None:
+    content_type = _response_content_type(response)
+    if _payload_looks_like_html(data):
+        raise SpotImageFetchError(
+            "invalid-image-html",
+            (
+                "SPOT image upstream returned HTML instead of image bytes; "
+                f"url={image_url}; status_code={response.status_code}; "
+                f"content_type={content_type}; body={_response_body_preview(response, 200)}"
+            ),
+            image_url=image_url,
+            upstream_status=response.status_code,
+        )
+    if _image_payload_type(data) is None:
+        raise SpotImageFetchError(
+            "invalid-image-payload",
+            (
+                "SPOT image upstream returned a non-image payload; "
+                f"url={image_url}; status_code={response.status_code}; "
+                f"content_type={content_type}; body={_response_body_preview(response, 200)}"
+            ),
+            image_url=image_url,
+            upstream_status=response.status_code,
+        )
+
+
 def _resolve_spot_image_url() -> str:
     image_url = str(config.SPOT_IMAGE_URL or "").strip()
     if not image_url:
@@ -152,6 +207,7 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
             image_url=image_url,
             upstream_status=response.status_code,
         )
+    _validate_spot_image_response(response, image_url, data)
     return data
 
 

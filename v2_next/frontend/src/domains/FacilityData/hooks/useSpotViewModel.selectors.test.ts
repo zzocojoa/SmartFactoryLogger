@@ -1,4 +1,5 @@
 import {
+  resolveSpotImageDiagnosticMessage,
   resolveSpotImageResponseMetadata,
   resolveSpotImageSuccessAt,
 } from './useSpotViewModel.selectors';
@@ -24,6 +25,7 @@ describe('resolveSpotImageResponseMetadata', () => {
     expect(metadata.raw_proxy_state).toBe('backoff');
     expect(metadata.retry_after_sec).toBe(1.5);
     expect(resolveSpotImageSuccessAt(metadata, 10_000)).toBe(10_000);
+    expect(resolveSpotImageDiagnosticMessage(metadata)).toBeNull();
   });
 
   it('treats stale cache status as the effective status', () => {
@@ -40,5 +42,37 @@ describe('resolveSpotImageResponseMetadata', () => {
     expect(metadata.status).toBe('stale');
     expect(metadata.cache_status).toBe('stale');
     expect(resolveSpotImageSuccessAt(metadata, 20_000)).toBe(12_500);
+  });
+
+  it('uses proxy error as the effective status even when cached image is fresh', () => {
+    const headers = new Headers({
+      'X-Spot-Image-Status': 'ok',
+      'X-Spot-Cache-Status': 'fresh',
+      'X-Spot-Proxy-State': 'error',
+      'X-Spot-Image-Source': 'cache',
+      'X-Spot-Image-Age': '0.5',
+    });
+
+    const metadata = resolveSpotImageResponseMetadata(headers, 30_000, 32);
+
+    expect(metadata.status).toBe('error');
+    expect(metadata.cache_status).toBe('fresh');
+    expect(metadata.proxy_state).toBe('error');
+    expect(resolveSpotImageSuccessAt(metadata, 30_000)).toBe(30_000);
+    expect(resolveSpotImageDiagnosticMessage(metadata)).toBeNull();
+  });
+
+  it('ignores non-finite retry headers', () => {
+    const headers = new Headers({
+      'X-Spot-Image-Status': 'ok',
+      'X-Spot-Cache-Status': 'fresh',
+      'X-Spot-Proxy-State': 'ok',
+      'Retry-After': 'Infinity',
+      'X-Spot-Retry-After-Ms': 'NaN',
+    });
+
+    const metadata = resolveSpotImageResponseMetadata(headers, 40_000, 12);
+
+    expect(metadata.retry_after_sec).toBeNull();
   });
 });

@@ -220,13 +220,10 @@ export const useSpotViewModel = (): UseSpotViewModel => {
 
         const blob = await response.blob();
 
-        if (prevUrlRef.current) {
-          URL.revokeObjectURL(prevUrlRef.current);
-        }
-
         const effectiveAt = resolveSpotImageSuccessAt(responseMetadata, responseReceivedAt);
         const nextImageError = resolveSpotImageDiagnosticMessage(responseMetadata);
         const nextImageUrl = URL.createObjectURL(blob);
+        const previousImageUrl = prevUrlRef.current;
 
         prevUrlRef.current = nextImageUrl;
         imageStateRef.current = {
@@ -241,6 +238,9 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         setImageError(nextImageError);
         setLastSuccessAt(effectiveAt);
         syncDashboardSpotImageState(nextImageUrl, false, nextImageError, effectiveAt, responseMetadata);
+        if (previousImageUrl) {
+          URL.revokeObjectURL(previousImageUrl);
+        }
       } catch (error) {
         console.error('Image fetch failed', error);
         const nextImageError = error instanceof Error ? error.message : resolveSpotImageErrorMessage(0, null);
