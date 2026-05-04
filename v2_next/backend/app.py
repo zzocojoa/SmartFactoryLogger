@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 import base64
 import json
 import logging
+import math
 import re
 from logging.handlers import RotatingFileHandler
 import time
@@ -244,6 +245,8 @@ _ACCESS_LOG_SAMPLE_SEC = 5.0
 
 _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
+_SPOT_PROXY_IMAGE_PATH = "/api/spot/proxy_image"
+_SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 
 
 def _lifecycle_log_fields() -> str:
@@ -1470,7 +1473,13 @@ async def record_request_stats(request: Request, call_next):
         response = await call_next(request)
         status_code = response.status_code
         
-        if status_code >= 500:
+        is_spot_payload_rejection = _is_spot_proxy_payload_rejection_response(
+            request.url.path,
+            status_code,
+            dict(response.headers),
+        )
+
+        if status_code >= 500 and not is_spot_payload_rejection:
             try:
                 observability_service.record_error(
                     "api",
@@ -1508,7 +1517,7 @@ async def record_request_stats(request: Request, call_next):
             _stats_last_path = request.url.path
             _stats_last_status = status_code
             _stats_last_time = time.time()
-            if status_code >= 400:
+            if status_code >= 400 and not is_spot_payload_rejection:
                 _stats_error_count += 1
         trace_id_var.reset(token)
 
@@ -2497,6 +2506,7 @@ def spot_config():
         "widget_height": config.SPOT_WIDGET_HEIGHT,
         "focus_step": config.SPOT_ACTUATOR_STEP,
         "focus_enabled": bool(config.SPOT_ACTUATOR_URL),
+        "proxy": spot_control.get_image_proxy_diagnostics(),
     }
 
 @app.post("/api/spot/focus")
@@ -2507,12 +2517,69 @@ def spot_focus(steps: int = 0):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _ceil_positive_seconds(value: float) -> int:
+    seconds = int(value)
+    if value > float(seconds):
+        seconds += 1
+    return max(1, seconds)
+
+
+def _ceil_positive_milliseconds(value: float) -> int:
+    milliseconds = int(value * 1000.0)
+    if value * 1000.0 > float(milliseconds):
+        milliseconds += 1
+    return max(1, milliseconds)
+
+
+def _spot_retry_headers_from_value(retry_after_sec: float | None) -> dict[str, str]:
+    if (
+        retry_after_sec is None
+        or isinstance(retry_after_sec, bool)
+        or not math.isfinite(retry_after_sec)
+        or retry_after_sec <= 0.0
+    ):
+        return {}
+    return {
+        "Retry-After": str(_ceil_positive_seconds(retry_after_sec)),
+        "X-Spot-Retry-After-Ms": str(_ceil_positive_milliseconds(retry_after_sec)),
+    }
+
+
+def _spot_retry_headers_from_diagnostics(diagnostics: dict[str, Any]) -> dict[str, str]:
+    retry_after_sec = diagnostics.get("retry_after_sec")
+    if isinstance(retry_after_sec, bool) or not isinstance(retry_after_sec, (float, int)):
+        return {}
+    return _spot_retry_headers_from_value(float(retry_after_sec))
+
+
+def _is_spot_payload_rejection_headers(headers: dict[str, str] | None) -> bool:
+    if headers is None:
+        return False
+    for header_name, header_value in headers.items():
+        if header_name.lower() != "x-spot-payload-rejection":
+            continue
+        return str(header_value).strip() == "1"
+    return False
+
+
+def _is_spot_proxy_payload_rejection_response(
+    path: str,
+    status_code: int,
+    headers: dict[str, str] | None,
+) -> bool:
+    if path != _SPOT_PROXY_IMAGE_PATH:
+        return False
+    if status_code != 502:
+        return False
+    return _is_spot_payload_rejection_headers(headers)
+
+
 @app.get("/api/spot/proxy_image")
 async def proxy_spot_image():
     """Proxy the SPOT camera image for remote clients (Async + Cached)."""
     try:
         data, meta = await spot_control.fetch_image_async()
-        headers = {
+        headers: dict[str, str] = {
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
             "Expires": "0",
@@ -2520,14 +2587,27 @@ async def proxy_spot_image():
         captured_at = meta.get("captured_at") or 0.0
         age_sec = meta.get("age_sec")
         is_stale = str(meta.get("status") or "") == "stale"
+        retry_after_sec = meta.get("retry_after_sec")
         if captured_at:
             headers["X-Spot-Image-At"] = str(int(captured_at * 1000))
         if age_sec is not None:
             headers["X-Spot-Image-Age"] = f"{age_sec:.3f}"
+        if meta.get("max_stale_age_sec") is not None:
+            headers["X-Spot-Max-Stale-Age"] = f"{float(meta['max_stale_age_sec']):.3f}"
         if meta.get("status"):
             headers["X-Spot-Image-Status"] = str(meta["status"])
+        if meta.get("cache_status"):
+            headers["X-Spot-Cache-Status"] = str(meta["cache_status"])
+        if meta.get("proxy_state"):
+            headers["X-Spot-Proxy-State"] = str(meta["proxy_state"])
         if meta.get("source"):
             headers["X-Spot-Image-Source"] = str(meta["source"])
+        if meta.get("failure_count") is not None:
+            headers["X-Spot-Failure-Count"] = str(int(meta["failure_count"]))
+        if meta.get("last_error_code"):
+            headers["X-Spot-Last-Error-Code"] = str(meta["last_error_code"])
+        if not isinstance(retry_after_sec, bool) and isinstance(retry_after_sec, (float, int)):
+            headers.update(_spot_retry_headers_from_value(float(retry_after_sec)))
         observability_service.record_spot_proxy_result(200, float(age_sec) if age_sec is not None else None, is_stale)
         return Response(content=data, media_type="image/jpeg", headers=headers)
     except spot_control.SpotImageConfigError as exc:
@@ -2550,21 +2630,26 @@ async def proxy_spot_image():
                 "message": "SPOT 이미지 URL이 설정되지 않았습니다.",
                 "diagnostics": diagnostics,
             },
+            headers=_spot_retry_headers_from_diagnostics(diagnostics),
         ) from exc
     except spot_control.SpotImageFetchError as exc:
         diagnostics = spot_control.get_image_proxy_diagnostics()
-        observability_service.record_error(
-            "spot_proxy",
-            "SPOT image proxy upstream failure",
-            detail=str({
-                "code": exc.code,
-                "message": str(exc),
-                "upstream_status": exc.upstream_status,
-                "image_url": exc.image_url,
-                "diagnostics": diagnostics,
-            }),
-            path="/api/spot/proxy_image",
-        )
+        error_headers = _spot_retry_headers_from_diagnostics(diagnostics)
+        if exc.code in _SPOT_PAYLOAD_REJECTION_CODES:
+            error_headers["X-Spot-Payload-Rejection"] = "1"
+        if exc.code not in _SPOT_PAYLOAD_REJECTION_CODES:
+            observability_service.record_error(
+                "spot_proxy",
+                "SPOT image proxy upstream failure",
+                detail=str({
+                    "code": exc.code,
+                    "message": str(exc),
+                    "upstream_status": exc.upstream_status,
+                    "image_url": exc.image_url,
+                    "diagnostics": diagnostics,
+                }),
+                path="/api/spot/proxy_image",
+            )
         raise HTTPException(
             status_code=502,
             detail={
@@ -2574,6 +2659,7 @@ async def proxy_spot_image():
                 "image_url": exc.image_url,
                 "diagnostics": diagnostics,
             },
+            headers=error_headers,
         ) from exc
     except Exception as exc:
         diagnostics = spot_control.get_image_proxy_diagnostics()
@@ -2594,6 +2680,7 @@ async def proxy_spot_image():
                 "message": "SPOT 이미지 프록시 처리 중 알 수 없는 오류가 발생했습니다.",
                 "diagnostics": diagnostics,
             },
+            headers=_spot_retry_headers_from_diagnostics(diagnostics),
         ) from exc
 
 

@@ -6,8 +6,6 @@ import {
   ConfigUpdateResponse,
   ThresholdEntry,
   FrontendErrorEntry,
-  NotificationLevel,
-  NotificationItem,
   CentralStatus,
   LayoutSnapshot,
   LayoutSlotSummary,
@@ -40,8 +38,6 @@ import * as THEME from './shared/constants/theme';
 import { useModal } from './shared/hooks/useGlobalModalContext';
 import { useTheme } from './shared/hooks/useThemeContext';
 
-const MAX_NOTIFICATIONS = 50;
-
 const SettingsModalContainer = React.lazy(() => import('./domains/Configuration/components/SettingsModal/SettingsModalContainer').then(m => ({ default: m.SettingsModalContainer })));
 const DashboardSceneSurface = React.lazy(() => import('./scenes/DashboardSceneSurface').then(m => ({ default: m.DashboardSceneSurface })));
 const NativeDashboardSurface = React.lazy(() => import('./scenes/NativeDashboardSurface').then(m => ({ default: m.NativeDashboardSurface })));
@@ -68,6 +64,14 @@ const {
 
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LEGACY_LAYOUT_COLS = 24;
+const CAMERA_DELAY_NOTIFICATION_GROUP = 'spot-camera-delay';
+const CAMERA_STATUS_DEBOUNCE_MS = 3000;
+
+interface CameraNotificationSnapshot {
+  type: string;
+  title: string;
+  detail: string;
+}
 
 const hasLayoutTimeSeriesWidget = (layout: LayoutMap | null): boolean => {
   if (!layout) {
@@ -75,6 +79,66 @@ const hasLayoutTimeSeriesWidget = (layout: LayoutMap | null): boolean => {
   }
 
   return Object.values(layout).some((item) => item.type === 'timeseries');
+};
+
+const isCameraIssueType = (type: string | null): boolean => {
+  return type === 'warn' ||
+    type === 'danger' ||
+    type === 'error' ||
+    Boolean(type?.startsWith('warn:')) ||
+    Boolean(type?.startsWith('danger:')) ||
+    Boolean(type?.startsWith('error:'));
+};
+
+const getCameraStatusDetail = (status: unknown): string => {
+  if (status === null || typeof status !== 'object') {
+    return '';
+  }
+
+  const detail = (status as { detail?: unknown }).detail;
+  if (typeof detail !== 'string') {
+    return '';
+  }
+
+  return detail.trim();
+};
+
+const buildCameraNotificationDetail = (
+  snapshot: CameraNotificationSnapshot
+): string | undefined => {
+  const parts = [snapshot.title.trim(), snapshot.detail.trim()].filter((part) => part.length > 0);
+  if (parts.length === 0) {
+    return undefined;
+  }
+
+  return parts.join(' | ');
+};
+
+const buildCameraIssueNotification = (
+  snapshot: CameraNotificationSnapshot
+): { title: string; message: string } => {
+  if (snapshot.type === 'danger' && snapshot.title === '카메라 응답 지연') {
+    return {
+      title: '카메라 지연',
+      message: 'SPOT 카메라 응답 지연이 길어지고 있습니다.',
+    };
+  }
+  if (snapshot.title === '이미지 수신 지연') {
+    return {
+      title: '카메라 지연',
+      message: 'SPOT 카메라 응답이 지연됩니다.',
+    };
+  }
+  if (snapshot.title === '이미지 요청 대기') {
+    return {
+      title: '카메라 요청 대기',
+      message: 'SPOT 카메라 이미지 요청이 대기 중입니다.',
+    };
+  }
+  return {
+    title: '오래된 이미지',
+    message: 'SPOT 카메라 이미지가 오래되었습니다.',
+  };
 };
 
 const LazyModalFallback = ({ title }: { title: string }): JSX.Element => (
@@ -237,6 +301,7 @@ function App() {
     imageError: spotImageError,
     imageLoading: spotImageLoading,
     lastSuccessAt: spotLastSuccessAt,
+    metadata: spotImageMetadata,
     diagnostics: spotDiagnostics,
     focusBusy,
     handleImageLoad: handleSpotImageLoaded,
@@ -379,7 +444,13 @@ function App() {
   const statusRef = useRef<string | null>(null);
   const spotAlertRef = useRef(false);
   const cameraStatusRef = useRef<string | null>(null);
-  const cameraStatusTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const cameraStatusPendingRef = useRef<string | null>(null);
+  const cameraStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cameraStatusSnapshotRef = useRef<CameraNotificationSnapshot>({
+    type: 'ok',
+    title: '',
+    detail: '',
+  });
   const menuRef = useRef<HTMLDivElement | null>(null);
   const lastSpotValue = useLastValidNumber(data?.Spot);
   const spotAlertFallback = useSustainedFlag(
@@ -677,8 +748,19 @@ function App() {
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
     settingsBaseline,
   });
+
+  const cameraStatusType = cameraStatus?.type ?? 'ok';
+  const cameraStatusTitle = cameraStatus?.title ?? '';
+  const cameraStatusKey = `${cameraStatusType}:${cameraStatusTitle}`;
+  const cameraStatusDetail = getCameraStatusDetail(cameraStatus);
+  cameraStatusSnapshotRef.current = {
+    type: cameraStatusType,
+    title: cameraStatusTitle,
+    detail: cameraStatusDetail,
+  };
 
   useEffect(() => {
     if (!statusLabel) {
@@ -717,45 +799,105 @@ function App() {
   }, [spotAlertActive, pushNotification]);
 
   useEffect(() => {
-    const type = cameraStatus?.type ?? 'ok';
     if (cameraStatusRef.current === null) {
-      cameraStatusRef.current = type;
-      return;
+      cameraStatusRef.current = isCameraIssueType(cameraStatusType) ? 'ok:' : cameraStatusKey;
     }
     
-    if (cameraStatusRef.current === type) {
+    if (cameraStatusRef.current === cameraStatusKey) {
+      cameraStatusPendingRef.current = null;
+      if (cameraStatusTimerRef.current) {
+        clearTimeout(cameraStatusTimerRef.current);
+        cameraStatusTimerRef.current = null;
+      }
       return;
     }
 
-    // Status changed. Cancel any pending timer.
+    if (cameraStatusPendingRef.current === cameraStatusKey) {
+      return;
+    }
+
+    cameraStatusPendingRef.current = cameraStatusKey;
     if (cameraStatusTimerRef.current) {
       clearTimeout(cameraStatusTimerRef.current);
       cameraStatusTimerRef.current = null;
     }
 
-    // Start 3-second debounce timer
     cameraStatusTimerRef.current = setTimeout(() => {
-      // If we are here, status has been stable for 3 seconds
-      if (type === 'error') {
-        pushNotification('\uCE74\uBA54\uB77C \uC624\uB958', 'SPOT \uCE74\uBA54\uB77C ' + (cameraStatus?.title ?? '\uC624\uB958'), 'error');
-      } else if (type === 'danger') {
-        pushNotification('\uCE74\uBA54\uB77C \uC9C0\uC5F0', 'SPOT \uCE74\uBA54\uB77C ' + (cameraStatus?.title ?? '\uC9C0\uC5F0'), 'warn');
-      } else if (type === 'warn') {
-        pushNotification('\uCE74\uBA54\uB77C \uC9C0\uC5F0', 'SPOT \uCE74\uBA54\uB77C \uC751\uB2F5\uC774 \uC9C0\uC5F0\uB429\uB2C8\uB2E4.', 'warn');
-      } else if (type === 'ok' && cameraStatusRef.current !== 'ok') {
-        pushNotification('\uCE74\uBA54\uB77C \uC815\uC0C1', 'SPOT \uCE74\uBA54\uB77C\uAC00 \uC815\uC0C1\uD654\uB418\uC5C8\uC2B5\uB2C8\uB2E4.', 'info');
+      const snapshot = cameraStatusSnapshotRef.current;
+      const snapshotKey = `${snapshot.type}:${snapshot.title}`;
+      if (snapshotKey !== cameraStatusKey) {
+        return;
       }
-      // Update ref only after notification
-      cameraStatusRef.current = type;
-      cameraStatusTimerRef.current = null;
-    }, 3000);
 
+      const detail = buildCameraNotificationDetail(snapshot);
+      let shouldUpdateCameraStatusRef = true;
+
+      if (snapshot.type === 'error') {
+        pushNotification(
+          '\uCE74\uBA54\uB77C \uC624\uB958',
+          'SPOT \uCE74\uBA54\uB77C \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC138\uC694.',
+          'error',
+          {
+            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
+            lifecycle: 'active',
+            detail,
+          }
+        );
+      } else if (snapshot.type === 'danger') {
+        const notification = buildCameraIssueNotification(snapshot);
+        pushNotification(
+          notification.title,
+          notification.message,
+          'warn',
+          {
+            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
+            lifecycle: 'active',
+            detail,
+          }
+        );
+      } else if (snapshot.type === 'warn') {
+        const notification = buildCameraIssueNotification(snapshot);
+        pushNotification(
+          notification.title,
+          notification.message,
+          'warn',
+          {
+            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
+            lifecycle: 'active',
+            detail,
+          }
+        );
+      } else if (snapshot.type === 'ok' && isCameraIssueType(cameraStatusRef.current)) {
+        pushNotification(
+          '\uCE74\uBA54\uB77C \uC815\uC0C1',
+          'SPOT \uCE74\uBA54\uB77C\uAC00 \uC815\uC0C1\uD654\uB418\uC5C8\uC2B5\uB2C8\uB2E4.',
+          'info',
+          {
+            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
+            lifecycle: 'resolved',
+            detail: '\uC774\uC804 \uCE74\uBA54\uB77C \uC9C0\uC5F0 \uC54C\uB9BC\uC740 \uD574\uACB0\uB41C \uAE30\uB85D\uC785\uB2C8\uB2E4.',
+          }
+        );
+      } else if (snapshot.type !== 'ok') {
+        shouldUpdateCameraStatusRef = false;
+      }
+
+      if (shouldUpdateCameraStatusRef) {
+        cameraStatusRef.current = snapshotKey;
+      }
+      cameraStatusPendingRef.current = null;
+      cameraStatusTimerRef.current = null;
+    }, CAMERA_STATUS_DEBOUNCE_MS);
+  }, [cameraStatusKey, cameraStatusType, pushNotification]);
+
+  useEffect(() => {
     return () => {
       if (cameraStatusTimerRef.current) {
         clearTimeout(cameraStatusTimerRef.current);
+        cameraStatusTimerRef.current = null;
       }
     };
-  }, [cameraStatus, pushNotification]);
+  }, []);
 
   // FactoryDataContext and SpotContext values have been removed.
 
@@ -784,6 +926,7 @@ function App() {
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
     spotAlertActive,
     lastDataAt,
     onSpotImageLoaded: handleSpotImageLoaded,
@@ -809,6 +952,7 @@ function App() {
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
     spotAlertActive,
     lastDataAt,
     handleSpotImageLoaded,
@@ -959,6 +1103,7 @@ function App() {
         spotImageUrl={spotImageUrl}
         spotImageLoading={spotImageLoading}
         spotLastSuccessAt={spotLastSuccessAt}
+        spotImageMetadata={spotImageMetadata}
         spotDiagnostics={spotDiagnostics}
         commLogInfo={commLogInfo}
         loadCommLogInfo={loadCommLogInfo}

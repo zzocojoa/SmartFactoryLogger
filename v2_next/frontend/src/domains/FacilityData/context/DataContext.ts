@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import type { FactoryData, SpotConfig, ThresholdState } from '../../../shared/types';
+import type { SpotImageResponseMetadata } from '../api/spotService.types';
 import type { SeriesFrame } from '../timeseries/seriesDataFrames';
 import { buildThresholdStateFromConfig } from '../../../shared/utils/thresholds';
 
@@ -16,6 +17,7 @@ export type DataContextValue = {
   spotImageLoading: boolean;
   spotImageError: string | null;
   spotLastSuccessAt: number | null;
+  spotImageMetadata: SpotImageResponseMetadata | null;
   spotAlertActive: boolean;
   lastDataAt: number | null;
   onSpotImageLoaded: () => void;
@@ -43,6 +45,7 @@ export const DataContext = React.createContext<DataContextValue>({
   spotImageLoading: false,
   spotImageError: null,
   spotLastSuccessAt: null,
+  spotImageMetadata: null,
   spotAlertActive: false,
   lastDataAt: null,
   onSpotImageLoaded: () => undefined,

@@ -1,6 +1,7 @@
 /**
  * 통신 상태 배지와 카메라 상태 유틸리티
  */
+import type { SpotImageResponseMetadata } from '../../domains/FacilityData/api/spotService.types';
 import type { CommChannelMetrics, CommSpotMetrics, SpotConfig } from '../types';
 import { formatAgeSec, formatOptionalSeconds, formatTimeFromSec } from './formatters';
 
@@ -9,6 +10,32 @@ export type CommBadge = {
   text: string;
   title: string;
   state: 'ok' | 'warn' | 'error' | 'idle';
+};
+
+type CameraStatus = {
+  type: 'error' | 'loading' | 'danger' | 'warn';
+  title: string;
+  detail: string;
+};
+
+const isImageAgeDiagnosticTitle = (title: string): boolean => {
+  return title === '오래된 이미지 제공 중' || title === '이미지 상태 지연';
+};
+
+const parseCameraStatusMessage = (message: string): CameraStatus => {
+  const [title, ...detailParts] = message.split('\n');
+  const normalizedTitle = title.trim();
+  const detail = detailParts.join(' ').trim();
+  const type = normalizedTitle === '오래된 이미지 제공 중' ||
+    normalizedTitle === '이미지 상태 지연' ||
+    normalizedTitle === '이미지 요청 대기'
+    ? 'warn'
+    : 'error';
+  return {
+    type,
+    title: normalizedTitle || message,
+    detail,
+  };
 };
 
 export const buildCommBadge = (
@@ -115,35 +142,75 @@ export const getCameraStatus = (params: {
   spotImageLoading: boolean;
   spotImageError: string | null;
   spotLastSuccessAt: number | null;
-}) => {
-  const { spotConfig, spotImageUrl, spotImageLoading, spotImageError, spotLastSuccessAt } = params;
+  spotImageMetadata?: SpotImageResponseMetadata | null;
+}): CameraStatus | null => {
+  const { spotConfig, spotImageUrl, spotImageLoading, spotImageError, spotLastSuccessAt, spotImageMetadata } = params;
   if (!spotConfig) {
     return null;
   }
 
   const refreshMs = Math.max(500, Math.round(spotConfig.refresh_interval * 1000));
   const now = Date.now();
-  const delayMs = spotLastSuccessAt ? now - spotLastSuccessAt : null;
+  const responseDelayMs = spotLastSuccessAt ? now - spotLastSuccessAt : null;
+  const imageAgeMs = resolveSpotImageAgeMs(spotImageMetadata ?? null, now);
+  const parsedErrorStatus = spotImageError ? parseCameraStatusMessage(spotImageError) : null;
 
-  if (spotImageError) {
-    return { type: 'error' as const, title: spotImageError, detail: '' };
+  if (parsedErrorStatus && !isImageAgeDiagnosticTitle(parsedErrorStatus.title)) {
+    return parsedErrorStatus;
   }
   if (!spotImageUrl || spotImageLoading || spotLastSuccessAt === null) {
     return { type: 'loading' as const, title: '카메라 연결 중', detail: '' };
   }
-  if (delayMs !== null && delayMs > refreshMs * 5) {
+  if (imageAgeMs !== null && imageAgeMs > refreshMs * 5) {
     return {
       type: 'danger' as const,
       title: '오래된 이미지 제공 중',
-      detail: `지연 ${Math.round(delayMs / 1000)}초`,
+      detail: `이미지 나이 ${Math.round(imageAgeMs / 1000)}초`,
     };
   }
-  if (delayMs !== null && delayMs > refreshMs * 4) {
+  if (imageAgeMs !== null && imageAgeMs > refreshMs * 4) {
+    return {
+      type: 'warn' as const,
+      title: '이미지 오래됨',
+      detail: `이미지 나이 ${Math.round(imageAgeMs / 1000)}초`,
+    };
+  }
+  if (parsedErrorStatus) {
+    return parsedErrorStatus;
+  }
+  if (imageAgeMs !== null) {
+    return null;
+  }
+  if (responseDelayMs !== null && responseDelayMs > refreshMs * 5) {
+    return {
+      type: 'danger' as const,
+      title: '카메라 응답 지연',
+      detail: `응답 지연 ${Math.round(responseDelayMs / 1000)}초`,
+    };
+  }
+  if (responseDelayMs !== null && responseDelayMs > refreshMs * 4) {
     return {
       type: 'warn' as const,
       title: '이미지 수신 지연',
-      detail: `지연 ${Math.round(delayMs / 1000)}초`,
+      detail: `응답 지연 ${Math.round(responseDelayMs / 1000)}초`,
     };
+  }
+  return null;
+};
+
+const resolveSpotImageAgeMs = (
+  metadata: SpotImageResponseMetadata | null,
+  nowMs: number
+): number | null => {
+  if (!metadata) {
+    return null;
+  }
+  const elapsedSinceReceiveMs = Math.max(0, nowMs - metadata.received_at);
+  if (metadata.age_sec !== null && Number.isFinite(metadata.age_sec)) {
+    return Math.max(0, metadata.age_sec * 1000) + elapsedSinceReceiveMs;
+  }
+  if (metadata.captured_at !== null && Number.isFinite(metadata.captured_at)) {
+    return Math.max(0, nowMs - metadata.captured_at);
   }
   return null;
 };

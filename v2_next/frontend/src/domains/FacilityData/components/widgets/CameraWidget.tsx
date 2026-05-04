@@ -20,6 +20,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
   const spotImageLoading = useDashboardStore(state => state.spotImageLoading);
   const spotImageError = useDashboardStore(state => state.spotImageError);
   const spotLastSuccessAt = useDashboardStore(state => state.spotLastSuccessAt);
+  const spotImageMetadata = useDashboardStore(state => state.spotImageMetadata);
   if (!spotConfig) return <div>Loading Config...</div>;
 
   // Crosshair logic
@@ -44,6 +45,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
   });
   const moveStep = 1;
   const focusDisabled = !spotConfig.focus_enabled || !props.requestFocus || Boolean(props.focusBusy);

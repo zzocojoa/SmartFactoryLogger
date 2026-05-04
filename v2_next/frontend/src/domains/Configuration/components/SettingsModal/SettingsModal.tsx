@@ -30,6 +30,7 @@ import type {
   ThresholdKey,
   ThresholdState,
 } from '../../../../shared/types';
+import type { SpotImageResponseMetadata } from '../../../FacilityData/api/spotService.types';
 import { MemorySection } from './MemorySection';
 import {
   formatTime,
@@ -182,6 +183,7 @@ export interface SettingsModalProps {
   spotImageUrl: string;
   spotImageLoading: boolean;
   spotLastSuccessAt: number | null;
+  spotImageMetadata: SpotImageResponseMetadata | null;
   spotDiagnostics: SpotPollingDiagnostics;
 
   // Comm log
@@ -337,6 +339,7 @@ export function SettingsModal(props: SettingsModalProps) {
     spotImageUrl,
     spotImageLoading,
     spotLastSuccessAt,
+    spotImageMetadata,
     spotDiagnostics,
     commLogInfo,
     handleOpenCommLogPath,
@@ -1511,6 +1514,7 @@ export function SettingsModal(props: SettingsModalProps) {
                                 spotImageLoading,
                                 spotImageError,
                                 spotLastSuccessAt,
+                                spotImageMetadata,
                               });
                               if (!status) {
                                 return <span className="settings-spot-badge ok">{LABELS.NORMAL}</span>;

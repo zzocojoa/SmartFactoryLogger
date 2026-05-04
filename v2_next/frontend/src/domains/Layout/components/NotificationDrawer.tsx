@@ -8,6 +8,35 @@ export interface NotificationDrawerProps {
   clearNotifications: () => void;
 }
 
+const getNotificationStateText = (item: NotificationItem): string | null => {
+  if (item.lifecycle === 'active') {
+    return '진행 중';
+  }
+
+  if (item.lifecycle === 'resolved') {
+    return '해결됨';
+  }
+
+  if (item.lifecycle === 'history') {
+    return '기록';
+  }
+
+  return null;
+};
+
+const getNotificationTimeText = (item: NotificationItem): string => {
+  return new Date(item.time).toLocaleTimeString();
+};
+
+const getNotificationTitleText = (item: NotificationItem): string => {
+  const stateText = getNotificationStateText(item);
+  if (stateText === null) {
+    return item.title;
+  }
+
+  return `${item.title} [${stateText}]`;
+};
+
 export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
   notifications,
   notificationsOpen,
@@ -41,12 +70,15 @@ export const NotificationDrawer: React.FC<NotificationDrawerProps> = ({
             notifications.map((item) => (
               <div key={item.id} className={`notification-item ${item.level}`}>
                 <div className="notification-item-header">
-                  <span className="notification-title">{item.title}</span>
+                  <span className="notification-title">{getNotificationTitleText(item)}</span>
                   <span className="notification-time">
-                    {new Date(item.time).toLocaleTimeString()}
+                    {getNotificationTimeText(item)}
                   </span>
                 </div>
                 <div className="notification-message">{item.message}</div>
+                {item.detail ? (
+                  <div className="notification-message">{item.detail}</div>
+                ) : null}
               </div>
             ))
           )}
