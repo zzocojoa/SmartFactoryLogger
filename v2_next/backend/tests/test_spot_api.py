@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from backend.FacilityData.drivers import spot_api
 
@@ -144,6 +145,113 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.upstream_status, 200)
         self.assertIn("content_type=text/html", str(error))
         self.assertIn("not an image", str(error))
+
+    async def test_image_missing_extension_fallbacks_to_jpg(self) -> None:
+        image_bytes = b"\xff\xd8image-data\xff\xd9"
+        requests: list[str] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            if str(request.url).endswith("/image.jpg"):
+                return httpx.Response(
+                    200,
+                    content=image_bytes,
+                    headers={"Content-Type": "image/jpeg"},
+                    request=request,
+                )
+            return httpx.Response(404, text="not found", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            data = await spot_api._request_spot_image(client, "http://spot.local/image")
+
+        self.assertEqual(data, image_bytes)
+        self.assertEqual(requests, ["http://spot.local/image", "http://spot.local/image.jpg"])
+
+    async def test_image_jpg_path_fallbacks_to_image(self) -> None:
+        image_bytes = b"\xff\xd8alt-image\xff\xd9"
+        requests: list[str] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            if str(request.url).endswith("/image"):
+                return httpx.Response(
+                    200,
+                    content=image_bytes,
+                    headers={"Content-Type": "image/jpeg"},
+                    request=request,
+                )
+            return httpx.Response(404, text="not found", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            data = await spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+
+        self.assertEqual(data, image_bytes)
+        self.assertEqual(requests, ["http://spot.local/image.jpg", "http://spot.local/image"])
+
+    async def test_image_http_401_is_rejected_with_http_error(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, text="auth required", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+                await spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+
+        error = raised.exception
+
+        self.assertEqual(error.code, "upstream-http-error")
+        self.assertEqual(error.upstream_status, 401)
+        self.assertIn("HTTP 401", str(error))
+
+    async def test_image_http_403_is_rejected_with_http_error(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(403, text="forbidden", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+                await spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+
+        error = raised.exception
+
+        self.assertEqual(error.code, "upstream-http-error")
+        self.assertEqual(error.upstream_status, 403)
+        self.assertIn("HTTP 403", str(error))
+
+    async def test_image_query_string_is_preserved_in_fallback(self) -> None:
+        image_bytes = b"\xff\xd8query-image\xff\xd9"
+        requests: list[str] = []
+        query = "stream=1&quality=high"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            request_url = str(request.url)
+            requests.append(request_url)
+            if request_url == f"http://spot.local/image?{query}":
+                return httpx.Response(404, text="not found", request=request)
+            if request_url == f"http://spot.local/image.jpg?{query}":
+                return httpx.Response(
+                    200,
+                    content=image_bytes,
+                    headers={"Content-Type": "image/jpeg"},
+                    request=request,
+                )
+            return httpx.Response(
+                500,
+                text=f"unexpected path: {request_url}",
+                request=request,
+            )
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            data = await spot_api._request_spot_image(client, f"http://spot.local/image?{query}")
+
+        self.assertEqual(data, image_bytes)
+        self.assertEqual(
+            requests,
+            [f"http://spot.local/image?{query}", f"http://spot.local/image.jpg?{query}"],
+        )
 
     def test_image_backoff_diagnostics_include_retry_timing(self) -> None:
         spot_api._img_failure_count = 3
@@ -352,6 +460,128 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail["diagnostics"], diagnostics)
         self.assertEqual(exception.headers, {"Retry-After": "3", "X-Spot-Retry-After-Ms": "2001"})
         record_mock.assert_called_once()
+
+    async def test_proxy_image_payload_rejection_response_includes_payload_rejection_header(self) -> None:
+        from backend import app as backend_app
+
+        image_error = spot_api.SpotImageFetchError(
+            "invalid-image-html",
+            "SPOT image upstream returned HTML instead of image bytes; url=http://spot.local/image.jpg; status_code=200; content_type=text/html; body=<!doctype html><html><body>not an image</body></html>",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=200,
+        )
+        diagnostics: dict[str, Any] = {
+            "cache_state": "empty",
+            "cache_status": "empty",
+            "proxy_state": "error",
+            "failure_count": 1,
+            "last_error_code": "invalid-image-html",
+            "retry_after_sec": 2.001,
+        }
+        fetch_mock: AsyncMock = AsyncMock(side_effect=image_error)
+        diagnostics_mock: Mock = Mock(return_value=diagnostics)
+        record_mock: Mock = Mock()
+
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
+            patch.object(backend_app.spot_control, "get_image_proxy_diagnostics", diagnostics_mock),
+            patch.object(backend_app.observability_service, "record_error", record_mock),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.proxy_spot_image()
+
+        exception = raised.exception
+        detail: dict[str, Any] = exception.detail
+
+        self.assertEqual(exception.status_code, 502)
+        self.assertEqual(detail["code"], "invalid-image-html")
+        self.assertEqual(exception.headers.get("X-Spot-Payload-Rejection"), "1")
+        self.assertEqual(exception.headers.get("Retry-After"), "3")
+        self.assertEqual(exception.headers.get("X-Spot-Retry-After-Ms"), "2001")
+        record_mock.assert_not_called()
+
+    def test_proxy_image_payload_rejection_not_counted_as_request_error(self) -> None:
+        from backend import app as backend_app
+
+        image_error = spot_api.SpotImageFetchError(
+            "invalid-image-payload",
+            "SPOT image upstream returned invalid payload; url=http://spot.local/image.jpg; status_code=200; content_type=application/octet-stream",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=200,
+        )
+        diagnostics: dict[str, Any] = {
+            "cache_state": "empty",
+            "cache_status": "empty",
+            "proxy_state": "error",
+            "failure_count": 1,
+            "last_error_code": "invalid-image-payload",
+            "retry_after_sec": 2.001,
+        }
+
+        original_total_requests = backend_app._stats_total_requests
+        original_error_count = backend_app._stats_error_count
+
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(side_effect=image_error)),
+            patch.object(backend_app.spot_control, "get_image_proxy_diagnostics", Mock(return_value=diagnostics)),
+            patch.object(backend_app.observability_service, "record_error", Mock()),
+            TestClient(backend_app.app, raise_server_exceptions=False) as client,
+        ):
+            response = client.get("/api/spot/proxy_image")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.headers.get("X-Spot-Payload-Rejection"), "1")
+        self.assertEqual(backend_app._stats_total_requests, original_total_requests + 1)
+        self.assertEqual(backend_app._stats_error_count, original_error_count)
+        self.assertEqual(backend_app._stats_last_status, 502)
+
+    async def test_proxy_image_forbidden_and_unauthorized_are_counted_as_request_errors(self) -> None:
+        from backend import app as backend_app
+
+        for status in [401, 403]:
+            with self.subTest(status=status):
+                image_error = spot_api.SpotImageFetchError(
+                    "upstream-http-error",
+                    f"SPOT image upstream returned HTTP {status}; url=http://spot.local/image.jpg; body=denied",
+                    image_url="http://spot.local/image.jpg",
+                    upstream_status=status,
+                )
+                diagnostics: dict[str, Any] = {
+                    "cache_state": "error",
+                    "cache_status": "empty",
+                    "proxy_state": "error",
+                    "failure_count": 1,
+                    "last_error_code": "upstream-http-error",
+                    "retry_after_sec": 1.001,
+                }
+
+                original_total_requests = backend_app._stats_total_requests
+                original_error_count = backend_app._stats_error_count
+
+                with (
+                    patch.object(
+                        backend_app.spot_control,
+                        "fetch_image_async",
+                        AsyncMock(side_effect=image_error),
+                    ),
+                    patch.object(
+                        backend_app.spot_control,
+                        "get_image_proxy_diagnostics",
+                        Mock(return_value=diagnostics),
+                    ),
+                    patch.object(backend_app.observability_service, "record_error", Mock()),
+                    TestClient(backend_app.app, raise_server_exceptions=False) as client,
+                ):
+                    response = client.get("/api/spot/proxy_image")
+
+                self.assertEqual(response.status_code, 502)
+                detail: dict[str, Any] = response.json()["detail"]
+                self.assertEqual(detail["code"], "upstream-http-error")
+                self.assertEqual(detail["upstream_status"], status)
+                self.assertIsNone(response.headers.get("X-Spot-Payload-Rejection"))
+                self.assertEqual(backend_app._stats_total_requests, original_total_requests + 1)
+                self.assertEqual(backend_app._stats_error_count, original_error_count + 1)
+                self.assertEqual(backend_app._stats_last_status, 502)
 
 
 if __name__ == "__main__":

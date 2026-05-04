@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import type { SpotImageResponseMetadata } from '../../FacilityData/api/spotService.types';
 import type { HealthSnapshot, StatsSnapshot, SpotConfig, CommChannelMetrics } from '../../../shared/types';
 import { CommBadge, buildCommBadge, buildSpotCommBadge, getCameraStatus } from '../../../shared/utils/commBadge';
 import {
@@ -40,6 +41,7 @@ export interface StatusPanelInput {
   spotImageLoading: boolean;
   spotImageError: string | null;
   spotLastSuccessAt: number | null;
+  spotImageMetadata: SpotImageResponseMetadata | null;
   settingsBaseline: any;
 }
 
@@ -101,6 +103,7 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
     settingsBaseline,
   } = input;
 
@@ -286,6 +289,7 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
   });
 
   return {

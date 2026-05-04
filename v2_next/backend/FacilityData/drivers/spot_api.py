@@ -3,6 +3,7 @@ import re
 import threading
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 import httpx
@@ -32,6 +33,7 @@ _temp_last_error_message: Optional[str] = None
 _temp_last_upstream_status: Optional[int] = None
 _temp_last_url: Optional[str] = None
 _temp_last_success_at = 0.0
+_INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
 
 # 연결 풀 재사용을 위한 비동기 HTTP 클라이언트
 _http_client: Optional[httpx.AsyncClient] = None
@@ -122,6 +124,12 @@ def _payload_looks_like_html(data: bytes) -> bool:
     )
 
 
+def _is_spot_image_payload_rejection_code(error_code: str | None) -> bool:
+    if error_code is None:
+        return False
+    return error_code in _INVALID_IMAGE_PAYLOAD_REJECTION_CODES
+
+
 def _validate_spot_image_response(response: httpx.Response, image_url: str, data: bytes) -> None:
     content_type = _response_content_type(response)
     if _payload_looks_like_html(data):
@@ -155,6 +163,61 @@ def _resolve_spot_image_url() -> str:
     return image_url
 
 
+def _resolve_spot_image_url_candidates(image_url: str) -> list[str]:
+    stripped_url = image_url.rstrip("/")
+    try:
+        parsed = urlsplit(stripped_url)
+    except Exception as exc:
+        raise SpotImageFetchError(
+            "upstream-request-error",
+            (
+                "SPOT image upstream URL is malformed; "
+                f"url={image_url}; error={_format_exception_message(exc)}"
+            ),
+            image_url=image_url,
+            upstream_status=None,
+        ) from exc
+
+    if not parsed.scheme or not parsed.netloc:
+        return [image_url]
+
+    normalized_path = (parsed.path or "").rstrip("/")
+    if not normalized_path:
+        return [image_url]
+
+    normalized_lower = normalized_path.lower()
+    variant_paths: list[str] = []
+    if normalized_lower.endswith("/image"):
+        variant_paths.append(normalized_path + ".jpg")
+    elif normalized_lower.endswith("/image.jpg"):
+        variant_paths.append(normalized_path[:-4])
+    elif normalized_lower.endswith("/image.jpeg"):
+        variant_paths.append(normalized_path[:-5])
+    elif normalized_lower.endswith("/image.png"):
+        variant_paths.append(normalized_path[:-4])
+
+    candidates = [image_url]
+    for variant_path in variant_paths:
+        if variant_path == normalized_path:
+            continue
+        candidates.append(parsed._replace(path=variant_path).geturl())
+    seen: list[str] = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.append(candidate)
+    return seen
+
+
+def _is_retryable_spot_image_error(error: SpotImageFetchError, has_next_candidate: bool) -> bool:
+    if not has_next_candidate:
+        return False
+    if error.code == "upstream-http-error":
+        return error.upstream_status == 404
+    if error.code in {"invalid-image-html", "invalid-image-payload"}:
+        return True
+    return False
+
+
 def _resolve_spot_temperature_url() -> str:
     temp_url = str(config.SPOT_URL or "").strip()
     if not temp_url:
@@ -162,7 +225,7 @@ def _resolve_spot_temperature_url() -> str:
     return temp_url
 
 
-async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+async def _request_spot_image_from_url(client: httpx.AsyncClient, image_url: str) -> bytes:
     try:
         response = await client.get(image_url)
         response.raise_for_status()
@@ -209,6 +272,56 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
         )
     _validate_spot_image_response(response, image_url, data)
     return data
+
+
+async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+    from ...MESSync.logger import get_logger
+
+    logger = get_logger("spot_control")
+    candidates = _resolve_spot_image_url_candidates(image_url)
+    if len(candidates) == 1:
+        return await _request_spot_image_from_url(client, candidates[0])
+
+    last_error: Optional[SpotImageFetchError] = None
+    for index, candidate in enumerate(candidates):
+        try:
+            payload = await _request_spot_image_from_url(client, candidate)
+            if index > 0:
+                logger.warning(
+                    "SPOT image endpoint fallback succeeded",
+                    extra={
+                        "configured_image_url": image_url,
+                        "resolved_image_url": candidate,
+                        "attempted_paths": candidates,
+                    },
+                )
+            return payload
+        except SpotImageFetchError as exc:
+            last_error = exc
+            if _is_retryable_spot_image_error(exc, index < len(candidates) - 1):
+                logger.warning(
+                    "SPOT image endpoint candidate failed",
+                    extra={
+                        "configured_image_url": image_url,
+                        "attempted_image_url": candidate,
+                        "next_candidate": candidates[index + 1],
+                        "attempt": index + 1,
+                        "max_attempts": len(candidates),
+                        "error_code": exc.code,
+                        "upstream_status": exc.upstream_status,
+                    },
+                )
+                continue
+            break
+
+    if last_error is None:
+        last_error = SpotImageFetchError(
+            "upstream-request-error",
+            "SPOT image upstream failed for all configured endpoint candidates",
+            image_url=image_url,
+            upstream_status=None,
+        )
+    raise last_error
 
 
 async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) -> float:
@@ -531,6 +644,8 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         try:
             data = await _request_spot_image(client, image_url)
         except SpotImageFetchError as exc:
+            if _is_spot_image_payload_rejection_code(exc.code):
+                raise
             _record_image_error(exc.code, str(exc))
             raise
         _img_cache["data"] = data
@@ -620,6 +735,8 @@ async def _prefetch_loop():
             await asyncio.sleep(config_backoff)
             next_tick = time.time()
         except SpotImageFetchError as exc:
+            if _is_spot_image_payload_rejection_code(exc.code):
+                continue
             _record_image_error(exc.code, str(exc))
             _img_failure_count = min(_img_failure_count + 1, 10)
             backoff = _current_backoff_sec()

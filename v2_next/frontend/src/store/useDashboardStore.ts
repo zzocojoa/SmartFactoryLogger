@@ -2,6 +2,23 @@ import { create } from 'zustand';
 import type { FactoryData, SpotConfig, ThresholdState } from '../shared/types';
 import type { SpotImageResponseMetadata } from '../domains/FacilityData/api/spotService.types';
 
+const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => {
+  return (
+    first.image_url === second.image_url &&
+    first.refresh_interval === second.refresh_interval &&
+    first.crosshair_x === second.crosshair_x &&
+    first.crosshair_y === second.crosshair_y &&
+    first.crosshair_color === second.crosshair_color &&
+    first.crosshair_thickness === second.crosshair_thickness &&
+    first.crosshair_size === second.crosshair_size &&
+    first.crosshair_gap === second.crosshair_gap &&
+    first.widget_width === second.widget_width &&
+    first.widget_height === second.widget_height &&
+    first.focus_step === second.focus_step &&
+    first.focus_enabled === second.focus_enabled
+  );
+};
+
 interface DashboardState {
   // FactoryDataContext
   data: FactoryData | null;
@@ -52,19 +69,43 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setThresholds: (thresholds) => set({ thresholds }),
   setIntervalSec: (intervalSec) => set({ intervalSec }),
   
-  setSpotConfig: (spotConfig) => set({ spotConfig }),
+  setSpotConfig: (spotConfig) => {
+    set((state) => {
+      if (state.spotConfig === null && spotConfig === null) {
+        return state;
+      }
+      if (state.spotConfig !== null && spotConfig !== null && areSpotConfigsEqual(state.spotConfig, spotConfig)) {
+        return state;
+      }
+      return { spotConfig };
+    });
+  },
   setSpotImageState: (
     spotImageUrl,
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
     spotImageMetadata
-  ) => set((state) => ({
-    spotImageUrl,
-    spotImageLoading,
-    spotImageError,
-    spotLastSuccessAt: spotLastSuccessAt !== null ? spotLastSuccessAt : state.spotLastSuccessAt,
-    spotImageMetadata: spotImageMetadata !== undefined ? spotImageMetadata : state.spotImageMetadata,
-  })),
+  ) => set((state) => {
+    const nextSpotLastSuccessAt = spotLastSuccessAt !== null ? spotLastSuccessAt : state.spotLastSuccessAt;
+    const nextSpotImageMetadata = spotImageMetadata !== undefined ? spotImageMetadata : state.spotImageMetadata;
+    if (
+      state.spotImageUrl === spotImageUrl &&
+      state.spotImageLoading === spotImageLoading &&
+      state.spotImageError === spotImageError &&
+      state.spotLastSuccessAt === nextSpotLastSuccessAt &&
+      state.spotImageMetadata === nextSpotImageMetadata
+    ) {
+      return state;
+    }
+    return {
+      ...state,
+      spotImageUrl,
+      spotImageLoading,
+      spotImageError,
+      spotLastSuccessAt: nextSpotLastSuccessAt,
+      spotImageMetadata: nextSpotImageMetadata,
+    };
+  }),
   setSpotAlertActive: (spotAlertActive) => set({ spotAlertActive }),
 }));

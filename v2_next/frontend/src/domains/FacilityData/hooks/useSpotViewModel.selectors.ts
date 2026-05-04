@@ -2,6 +2,7 @@ import type {
   SpotImageHeaderStatus,
   SpotImageResponseMetadata,
 } from '../api/spotService.types';
+import { normalizeSpotImageAgeSec, normalizeSpotImageCapturedAt } from '../utils/spotImageMetadataNormalization.pure';
 
 export type SpotProxyDiagnostics = {
   cache_state?: string | null;
@@ -51,6 +52,16 @@ const parseFiniteNumber = (rawValue: string | null): number | null => {
   return Number.isFinite(parsedValue) ? parsedValue : null;
 };
 
+const clampRetryAfterSec = (rawValue: number): number | null => {
+  if (!Number.isFinite(rawValue)) {
+    return null;
+  }
+  if (rawValue <= 0) {
+    return 0;
+  }
+  return Math.min(rawValue, 60 * 60);
+};
+
 const parseRetryAfterSec = (
   rawValue: string | null,
   rawMilliseconds: string | null,
@@ -58,12 +69,12 @@ const parseRetryAfterSec = (
 ): number | null => {
   const millisecondsValue = parseFiniteNumber(rawMilliseconds);
   if (millisecondsValue !== null) {
-    return Math.max(0, millisecondsValue / 1000);
+    return clampRetryAfterSec(millisecondsValue / 1000);
   }
 
   const numericValue = parseFiniteNumber(rawValue);
   if (numericValue !== null) {
-    return Math.max(0, numericValue);
+    return clampRetryAfterSec(numericValue);
   }
   if (rawValue === null) {
     return null;
@@ -72,7 +83,7 @@ const parseRetryAfterSec = (
   if (!Number.isFinite(retryAt)) {
     return null;
   }
-  return Math.max(0, (retryAt - receivedAt) / 1000);
+  return clampRetryAfterSec((retryAt - receivedAt) / 1000);
 };
 
 const resolveEffectiveSpotHeaderStatus = (
@@ -136,9 +147,9 @@ export const resolveSpotImageResponseMetadata = (
     proxy_state: proxyState,
     raw_proxy_state: rawProxyState,
     source,
-    age_sec: parseFiniteNumber(headers.get('X-Spot-Image-Age')),
+    age_sec: normalizeSpotImageAgeSec(headers.get('X-Spot-Image-Age')),
     max_stale_age_sec: parseFiniteNumber(headers.get('X-Spot-Max-Stale-Age')),
-    captured_at: parseFiniteNumber(headers.get('X-Spot-Image-At')),
+    captured_at: normalizeSpotImageCapturedAt(headers.get('X-Spot-Image-At')),
     retry_after_sec: parseRetryAfterSec(headers.get('Retry-After'), headers.get('X-Spot-Retry-After-Ms'), receivedAt),
     received_at: receivedAt,
     latency_ms: latencyMs,

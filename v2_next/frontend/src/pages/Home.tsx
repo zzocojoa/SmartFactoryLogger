@@ -45,7 +45,7 @@ const Home: React.FC = () => {
       </div>
 
       <footer className="home-footer">
-        Copyright © HOIHOU. All Rights Reserved. v1.0.0
+        Copyright © HOIHOU. All Rights Reserved. v1.0.1
       </footer>
     </div>
   );

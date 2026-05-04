@@ -82,7 +82,12 @@ const hasLayoutTimeSeriesWidget = (layout: LayoutMap | null): boolean => {
 };
 
 const isCameraIssueType = (type: string | null): boolean => {
-  return type === 'warn' || type === 'danger' || type === 'error';
+  return type === 'warn' ||
+    type === 'danger' ||
+    type === 'error' ||
+    Boolean(type?.startsWith('warn:')) ||
+    Boolean(type?.startsWith('danger:')) ||
+    Boolean(type?.startsWith('error:'));
 };
 
 const getCameraStatusDetail = (status: unknown): string => {
@@ -107,6 +112,33 @@ const buildCameraNotificationDetail = (
   }
 
   return parts.join(' | ');
+};
+
+const buildCameraIssueNotification = (
+  snapshot: CameraNotificationSnapshot
+): { title: string; message: string } => {
+  if (snapshot.type === 'danger' && snapshot.title === '카메라 응답 지연') {
+    return {
+      title: '카메라 지연',
+      message: 'SPOT 카메라 응답 지연이 길어지고 있습니다.',
+    };
+  }
+  if (snapshot.title === '이미지 수신 지연') {
+    return {
+      title: '카메라 지연',
+      message: 'SPOT 카메라 응답이 지연됩니다.',
+    };
+  }
+  if (snapshot.title === '이미지 요청 대기') {
+    return {
+      title: '카메라 요청 대기',
+      message: 'SPOT 카메라 이미지 요청이 대기 중입니다.',
+    };
+  }
+  return {
+    title: '오래된 이미지',
+    message: 'SPOT 카메라 이미지가 오래되었습니다.',
+  };
 };
 
 const LazyModalFallback = ({ title }: { title: string }): JSX.Element => (
@@ -269,6 +301,7 @@ function App() {
     imageError: spotImageError,
     imageLoading: spotImageLoading,
     lastSuccessAt: spotLastSuccessAt,
+    metadata: spotImageMetadata,
     diagnostics: spotDiagnostics,
     focusBusy,
     handleImageLoad: handleSpotImageLoaded,
@@ -715,11 +748,13 @@ function App() {
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
     settingsBaseline,
   });
 
   const cameraStatusType = cameraStatus?.type ?? 'ok';
   const cameraStatusTitle = cameraStatus?.title ?? '';
+  const cameraStatusKey = `${cameraStatusType}:${cameraStatusTitle}`;
   const cameraStatusDetail = getCameraStatusDetail(cameraStatus);
   cameraStatusSnapshotRef.current = {
     type: cameraStatusType,
@@ -765,10 +800,10 @@ function App() {
 
   useEffect(() => {
     if (cameraStatusRef.current === null) {
-      cameraStatusRef.current = isCameraIssueType(cameraStatusType) ? 'ok' : cameraStatusType;
+      cameraStatusRef.current = isCameraIssueType(cameraStatusType) ? 'ok:' : cameraStatusKey;
     }
     
-    if (cameraStatusRef.current === cameraStatusType) {
+    if (cameraStatusRef.current === cameraStatusKey) {
       cameraStatusPendingRef.current = null;
       if (cameraStatusTimerRef.current) {
         clearTimeout(cameraStatusTimerRef.current);
@@ -777,11 +812,11 @@ function App() {
       return;
     }
 
-    if (cameraStatusPendingRef.current === cameraStatusType) {
+    if (cameraStatusPendingRef.current === cameraStatusKey) {
       return;
     }
 
-    cameraStatusPendingRef.current = cameraStatusType;
+    cameraStatusPendingRef.current = cameraStatusKey;
     if (cameraStatusTimerRef.current) {
       clearTimeout(cameraStatusTimerRef.current);
       cameraStatusTimerRef.current = null;
@@ -789,7 +824,8 @@ function App() {
 
     cameraStatusTimerRef.current = setTimeout(() => {
       const snapshot = cameraStatusSnapshotRef.current;
-      if (snapshot.type !== cameraStatusType) {
+      const snapshotKey = `${snapshot.type}:${snapshot.title}`;
+      if (snapshotKey !== cameraStatusKey) {
         return;
       }
 
@@ -808,9 +844,10 @@ function App() {
           }
         );
       } else if (snapshot.type === 'danger') {
+        const notification = buildCameraIssueNotification(snapshot);
         pushNotification(
-          '\uCE74\uBA54\uB77C \uC9C0\uC5F0',
-          'SPOT \uCE74\uBA54\uB77C \uC751\uB2F5 \uC9C0\uC5F0\uC774 \uAE38\uC5B4\uC9C0\uACE0 \uC788\uC2B5\uB2C8\uB2E4.',
+          notification.title,
+          notification.message,
           'warn',
           {
             groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
@@ -819,9 +856,10 @@ function App() {
           }
         );
       } else if (snapshot.type === 'warn') {
+        const notification = buildCameraIssueNotification(snapshot);
         pushNotification(
-          '\uCE74\uBA54\uB77C \uC9C0\uC5F0',
-          'SPOT \uCE74\uBA54\uB77C \uC751\uB2F5\uC774 \uC9C0\uC5F0\uB429\uB2C8\uB2E4.',
+          notification.title,
+          notification.message,
           'warn',
           {
             groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
@@ -845,12 +883,12 @@ function App() {
       }
 
       if (shouldUpdateCameraStatusRef) {
-        cameraStatusRef.current = snapshot.type;
+        cameraStatusRef.current = snapshotKey;
       }
       cameraStatusPendingRef.current = null;
       cameraStatusTimerRef.current = null;
     }, CAMERA_STATUS_DEBOUNCE_MS);
-  }, [cameraStatusType, pushNotification]);
+  }, [cameraStatusKey, cameraStatusType, pushNotification]);
 
   useEffect(() => {
     return () => {
@@ -888,6 +926,7 @@ function App() {
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
     spotAlertActive,
     lastDataAt,
     onSpotImageLoaded: handleSpotImageLoaded,
@@ -913,6 +952,7 @@ function App() {
     spotImageLoading,
     spotImageError,
     spotLastSuccessAt,
+    spotImageMetadata,
     spotAlertActive,
     lastDataAt,
     handleSpotImageLoaded,
@@ -1063,6 +1103,7 @@ function App() {
         spotImageUrl={spotImageUrl}
         spotImageLoading={spotImageLoading}
         spotLastSuccessAt={spotLastSuccessAt}
+        spotImageMetadata={spotImageMetadata}
         spotDiagnostics={spotDiagnostics}
         commLogInfo={commLogInfo}
         loadCommLogInfo={loadCommLogInfo}

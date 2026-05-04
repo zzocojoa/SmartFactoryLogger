@@ -245,6 +245,8 @@ _ACCESS_LOG_SAMPLE_SEC = 5.0
 
 _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
+_SPOT_PROXY_IMAGE_PATH = "/api/spot/proxy_image"
+_SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 
 
 def _lifecycle_log_fields() -> str:
@@ -1471,7 +1473,13 @@ async def record_request_stats(request: Request, call_next):
         response = await call_next(request)
         status_code = response.status_code
         
-        if status_code >= 500:
+        is_spot_payload_rejection = _is_spot_proxy_payload_rejection_response(
+            request.url.path,
+            status_code,
+            dict(response.headers),
+        )
+
+        if status_code >= 500 and not is_spot_payload_rejection:
             try:
                 observability_service.record_error(
                     "api",
@@ -1509,7 +1517,7 @@ async def record_request_stats(request: Request, call_next):
             _stats_last_path = request.url.path
             _stats_last_status = status_code
             _stats_last_time = time.time()
-            if status_code >= 400:
+            if status_code >= 400 and not is_spot_payload_rejection:
                 _stats_error_count += 1
         trace_id_var.reset(token)
 
@@ -2544,6 +2552,28 @@ def _spot_retry_headers_from_diagnostics(diagnostics: dict[str, Any]) -> dict[st
     return _spot_retry_headers_from_value(float(retry_after_sec))
 
 
+def _is_spot_payload_rejection_headers(headers: dict[str, str] | None) -> bool:
+    if headers is None:
+        return False
+    for header_name, header_value in headers.items():
+        if header_name.lower() != "x-spot-payload-rejection":
+            continue
+        return str(header_value).strip() == "1"
+    return False
+
+
+def _is_spot_proxy_payload_rejection_response(
+    path: str,
+    status_code: int,
+    headers: dict[str, str] | None,
+) -> bool:
+    if path != _SPOT_PROXY_IMAGE_PATH:
+        return False
+    if status_code != 502:
+        return False
+    return _is_spot_payload_rejection_headers(headers)
+
+
 @app.get("/api/spot/proxy_image")
 async def proxy_spot_image():
     """Proxy the SPOT camera image for remote clients (Async + Cached)."""
@@ -2604,18 +2634,22 @@ async def proxy_spot_image():
         ) from exc
     except spot_control.SpotImageFetchError as exc:
         diagnostics = spot_control.get_image_proxy_diagnostics()
-        observability_service.record_error(
-            "spot_proxy",
-            "SPOT image proxy upstream failure",
-            detail=str({
-                "code": exc.code,
-                "message": str(exc),
-                "upstream_status": exc.upstream_status,
-                "image_url": exc.image_url,
-                "diagnostics": diagnostics,
-            }),
-            path="/api/spot/proxy_image",
-        )
+        error_headers = _spot_retry_headers_from_diagnostics(diagnostics)
+        if exc.code in _SPOT_PAYLOAD_REJECTION_CODES:
+            error_headers["X-Spot-Payload-Rejection"] = "1"
+        if exc.code not in _SPOT_PAYLOAD_REJECTION_CODES:
+            observability_service.record_error(
+                "spot_proxy",
+                "SPOT image proxy upstream failure",
+                detail=str({
+                    "code": exc.code,
+                    "message": str(exc),
+                    "upstream_status": exc.upstream_status,
+                    "image_url": exc.image_url,
+                    "diagnostics": diagnostics,
+                }),
+                path="/api/spot/proxy_image",
+            )
         raise HTTPException(
             status_code=502,
             detail={
@@ -2625,7 +2659,7 @@ async def proxy_spot_image():
                 "image_url": exc.image_url,
                 "diagnostics": diagnostics,
             },
-            headers=_spot_retry_headers_from_diagnostics(diagnostics),
+            headers=error_headers,
         ) from exc
     except Exception as exc:
         diagnostics = spot_control.get_image_proxy_diagnostics()

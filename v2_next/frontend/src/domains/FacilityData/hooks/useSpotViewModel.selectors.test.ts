@@ -62,6 +62,35 @@ describe('resolveSpotImageResponseMetadata', () => {
     expect(resolveSpotImageDiagnosticMessage(metadata)).toBeNull();
   });
 
+  it('normalizes X-Spot-Image-Age from milliseconds', () => {
+    const headers = new Headers({
+      'X-Spot-Image-Status': 'ok',
+      'X-Spot-Cache-Status': 'stale',
+      'X-Spot-Proxy-State': 'ok',
+      'X-Spot-Image-Age': '15000',
+    });
+
+    const metadata = resolveSpotImageResponseMetadata(headers, 40_000, 18);
+
+    expect(metadata.age_sec).toBe(15);
+    expect(resolveSpotImageSuccessAt(metadata, 40_000)).toBe(25_000);
+  });
+
+  it('normalizes X-Spot-Image-At from seconds to milliseconds', () => {
+    const capturedAtSeconds = 1_700_000_004;
+    const headers = new Headers({
+      'X-Spot-Image-Status': 'ok',
+      'X-Spot-Cache-Status': 'stale',
+      'X-Spot-Proxy-State': 'ok',
+      'X-Spot-Image-At': String(capturedAtSeconds),
+    });
+
+    const metadata = resolveSpotImageResponseMetadata(headers, 40_000, 18);
+
+    expect(metadata.captured_at).toBe(capturedAtSeconds * 1000);
+    expect(resolveSpotImageSuccessAt(metadata, 40_000)).toBe(capturedAtSeconds * 1000);
+  });
+
   it('ignores non-finite retry headers', () => {
     const headers = new Headers({
       'X-Spot-Image-Status': 'ok',
