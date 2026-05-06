@@ -446,10 +446,44 @@ def update_config(
                 parser.set("SPOT", "imageurl", f"http://{payload.spot.ip}/image.jpg")
             if not old_focus_url or old_spot_ip in old_focus_url:
                 parser.set("SPOT", "focusurl", f"http://{payload.spot.ip}/control?p=focus")
+        if payload.spot.url is not None:
+            parser.set("SPOT", "url", payload.spot.url)
+        if payload.spot.image_url is not None:
+            parser.set("SPOT", "imageurl", payload.spot.image_url)
         if payload.spot.refresh_interval is not None:
             parser.set("SPOT", "refreshinterval", str(payload.spot.refresh_interval))
         if payload.spot.timeout is not None:
             parser.set("SPOT", "timeout", str(payload.spot.timeout))
+        if payload.spot.crosshair_x is not None:
+            parser.set("SPOT", "crosshairx", str(payload.spot.crosshair_x))
+        if payload.spot.crosshair_y is not None:
+            parser.set("SPOT", "crosshairy", str(payload.spot.crosshair_y))
+        if payload.spot.crosshair_color is not None:
+            parser.set("SPOT", "crosshaircolor", payload.spot.crosshair_color)
+        if payload.spot.crosshair_thickness is not None:
+            parser.set("SPOT", "crosshairthickness", str(payload.spot.crosshair_thickness))
+        if payload.spot.crosshair_size is not None:
+            parser.set("SPOT", "crosshairsize", str(payload.spot.crosshair_size))
+        if payload.spot.crosshair_gap is not None:
+            parser.set("SPOT", "crosshairgap", str(payload.spot.crosshair_gap))
+        if payload.spot.focus_url is not None:
+            parser.set("SPOT", "focusurl", payload.spot.focus_url)
+        if payload.spot.focus_step is not None:
+            if payload.spot.focus_step <= 0:
+                raise ValueError("SPOT focus_step must be a positive integer")
+            parser.set("SPOT", "focusstep", str(payload.spot.focus_step))
+        if payload.spot.actuator_ip is not None:
+            parser.set("SPOT", "actuatorip", payload.spot.actuator_ip)
+        if payload.spot.actuator_step is not None:
+            if payload.spot.actuator_step <= 0:
+                raise ValueError("SPOT actuator_step must be a positive integer")
+            parser.set("SPOT", "actuatorstep", str(payload.spot.actuator_step))
+        if payload.spot.actuator_url is not None:
+            parser.set("SPOT", "actuatorurl", payload.spot.actuator_url)
+        if payload.spot.widget_width is not None:
+            parser.set("SPOT", "widgetwidth", str(payload.spot.widget_width))
+        if payload.spot.widget_height is not None:
+            parser.set("SPOT", "widgetheight", str(payload.spot.widget_height))
 
     if payload.settings:
         _verify_settings_password_change(parser, payload)

@@ -2367,6 +2367,10 @@ async def save_config(payload: ConfigUpdate):
         if payload.spot:
             if payload.spot.ip: config.SPOT_IP = payload.spot.ip
             if payload.spot.refresh_interval: config.SPOT_REFRESH_INTERVAL = payload.spot.refresh_interval
+            if payload.spot.actuator_step is not None:
+                if payload.spot.actuator_step <= 0:
+                    raise ValueError("SPOT actuator_step must be a positive integer")
+                config.SPOT_ACTUATOR_STEP = payload.spot.actuator_step
             
         if payload.thresholds:
              # This part might involve more complex logic in update_config, 

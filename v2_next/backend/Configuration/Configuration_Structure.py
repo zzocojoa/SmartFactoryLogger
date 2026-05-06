@@ -9,8 +9,23 @@ class NetConfig(BaseModel):
 
 class SpotConfig(BaseModel):
     ip: Optional[str] = None
+    url: Optional[str] = None
+    image_url: Optional[str] = None
     refresh_interval: Optional[float] = None
     timeout: Optional[float] = None
+    crosshair_x: Optional[float] = None
+    crosshair_y: Optional[float] = None
+    crosshair_color: Optional[str] = None
+    crosshair_thickness: Optional[int] = None
+    crosshair_size: Optional[int] = None
+    crosshair_gap: Optional[int] = None
+    focus_url: Optional[str] = None
+    focus_step: Optional[int] = None
+    actuator_ip: Optional[str] = None
+    actuator_step: Optional[int] = None
+    actuator_url: Optional[str] = None
+    widget_width: Optional[int] = None
+    widget_height: Optional[int] = None
 
 
 class SettingsConfig(BaseModel):
