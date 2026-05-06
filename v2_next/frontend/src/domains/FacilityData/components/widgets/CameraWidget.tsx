@@ -47,8 +47,22 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
     spotLastSuccessAt,
     spotImageMetadata,
   });
-  const moveStep = 1;
-  const focusDisabled = !spotConfig.focus_enabled || !props.requestFocus || Boolean(props.focusBusy);
+  const actuatorStep = Math.abs(spotConfig.actuator_step);
+  const actuatorStepValid = Number.isFinite(actuatorStep) && actuatorStep > 0;
+  const focusDisabled = !spotConfig.focus_enabled || !props.requestFocus || Boolean(props.focusBusy) || !actuatorStepValid;
+  const focusDisabledReason = !spotConfig.focus_enabled
+    ? 'Focus control is disabled'
+    : !props.requestFocus
+      ? 'Focus control handler is missing'
+      : !actuatorStepValid
+        ? `Invalid actuator step: ${spotConfig.actuator_step}`
+        : undefined;
+  const requestFocusChange = (stepUnits: number): void => {
+    if (!props.requestFocus) {
+      throw new Error('SPOT focus request handler is missing');
+    }
+    props.requestFocus(stepUnits);
+  };
 
   return (
     <div className="card camera-card" style={{ height: '100%', position: 'relative' }}>
@@ -65,7 +79,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
             decoding="async"
           />
         )}
-        <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+        <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
           {lines.map((line, idx) => (
             <g key={idx}>
               <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="black" strokeWidth={thick + 2} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
@@ -76,7 +90,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
           <circle cx={cx} cy={cy} r={3} stroke={color} strokeWidth={1} fill="none" vectorEffect="non-scaling-stroke" />
         </svg>
         {cameraStatus && (
-          <div className={`camera-overlay ${cameraStatus.type}`}>
+          <div className={`camera-overlay ${cameraStatus.type}`} style={{ pointerEvents: 'none' }}>
             {cameraStatus.type === 'loading' && <span className="camera-spinner" aria-hidden="true" />}
             <div className="camera-status-text">
               <div className="camera-status-title">{cameraStatus.title}</div>
@@ -86,11 +100,23 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
         )}
       </div>
       <div className="camera-controls" style={{ marginTop: '4px' }}>
-        <button type="button" disabled={focusDisabled} onClick={() => props.requestFocus?.(moveStep)}>
+        <button
+          type="button"
+          disabled={focusDisabled}
+          title={focusDisabledReason}
+          aria-label={`Move SPOT focus actuator left ${actuatorStep}`}
+          onClick={() => requestFocusChange(-1)}
+        >
           &lt;-Focus
         </button>
-        <button type="button" disabled={focusDisabled} onClick={() => props.requestFocus?.(-moveStep)}>
-          Focus-&gt;
+        <button
+          type="button"
+          disabled={focusDisabled}
+          title={focusDisabledReason}
+          aria-label={`Move SPOT focus actuator right ${actuatorStep}`}
+          onClick={() => requestFocusChange(1)}
+        >
+          Focus -&gt;
         </button>
       </div>
     </div>

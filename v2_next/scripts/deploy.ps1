@@ -182,6 +182,8 @@ echo   Smart Factory Logger v$Version
 echo ============================================
 echo.
 
+cd /d "%~dp0"
+
 REM Set Playwright Browsers Path to local bundled folder
 set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
 
@@ -299,6 +301,13 @@ If Grafana is not configured:
 - ``stop.bat`` - Stop SmartFactory
 - ``setup_grafana.bat`` - Configure Grafana (run once as Admin)
 - ``mes_data/`` - Database folder
+
+## SPOT Actuator Config
+- Default ``[SPOT] actuatorstep`` is ``50`` for physical actuator movement.
+- Packaged config is loaded from ``config.ini`` or ``config\config.ini`` next to this launcher when present.
+- Otherwise existing machine config is loaded from ``%APPDATA%\SmartFactoryLogger\config.ini``.
+- ``[SPOT] actuatorip`` falls back to legacy ``[ACTUATOR] actuatorip`` and then ``[SPOT] ip``.
+- ``[SPOT] actuatorurl`` defaults to ``http://{actuatorip}/scan.cgi`` when omitted.
 "@
 Set-Content -Path (Join-Path $PortablePath "README.txt") -Value $ReadmeContent -Encoding UTF8
 Write-Host "    README.txt created" -ForegroundColor Green

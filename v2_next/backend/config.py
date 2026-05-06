@@ -42,7 +42,7 @@ DEFAULT_SPOT_CROSSHAIR_SIZE = 20
 DEFAULT_SPOT_CROSSHAIR_GAP = 5
 DEFAULT_SPOT_FOCUS_URL = f"http://{DEFAULT_SPOT_IP}/control?p=focus"
 DEFAULT_SPOT_FOCUS_STEP = 50
-DEFAULT_SPOT_ACTUATOR_STEP = 5
+DEFAULT_SPOT_ACTUATOR_STEP = 50
 DEFAULT_SPOT_WIDGET_WIDTH = 512
 DEFAULT_SPOT_WIDGET_HEIGHT = 288
 DEFAULT_LOG_PATH = "logs/data"
@@ -82,6 +82,16 @@ def _resolve_config_path() -> Optional[Path]:
     env_path = os.getenv("SFL_CONFIG_PATH") or os.getenv("SMARTFACTORY_CONFIG")
     if env_path:
         return Path(env_path)
+
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        packaged_candidates = [
+            executable_dir / "config.ini",
+            executable_dir / "config" / "config.ini",
+        ]
+        packaged_path = next((candidate for candidate in packaged_candidates if _safe_is_file(candidate)), None)
+        if packaged_path:
+            return packaged_path
 
     standard_dir = _get_user_data_dir()
     standard_path = standard_dir / "config.ini"
@@ -186,6 +196,12 @@ def _env_float(name: str, fallback: float) -> float:
         return float(val)
     except ValueError:
         return fallback
+
+
+def _positive_int(value: int, fallback: int) -> int:
+    if value > 0:
+        return value
+    return fallback
 
 
 def _get_bool(parser: configparser.ConfigParser, section: str, option: str, fallback: bool) -> bool:
@@ -327,6 +343,18 @@ if _safe_is_file(CONFIG_PATH):
             _updated = True
             _config_log("INFO", f"Auto-added missing SYSTEM.{_key} = {_default_val}")
 
+    if not CONFIG.has_section("SPOT"):
+        CONFIG.add_section("SPOT")
+        _updated = True
+    _spot_defaults = {
+        "actuatorstep": str(DEFAULT_SPOT_ACTUATOR_STEP),
+    }
+    for _key, _default_val in _spot_defaults.items():
+        if not CONFIG.has_option("SPOT", _key):
+            CONFIG.set("SPOT", _key, _default_val)
+            _updated = True
+            _config_log("INFO", f"Auto-added missing SPOT.{_key} = {_default_val}")
+
     if _updated:
         _save_config(CONFIG_PATH, CONFIG, CONFIG_ENCODING or "utf-8-sig")
 
@@ -399,13 +427,23 @@ SPOT_FOCUS_URL = os.getenv(
 )
 SPOT_FOCUS_STEP = _get_int(CONFIG, "SPOT", "focusstep", DEFAULT_SPOT_FOCUS_STEP)
 SPOT_FOCUS_STEP = _env_int("SPOT_FOCUS_STEP", SPOT_FOCUS_STEP)
+SPOT_FOCUS_STEP = _positive_int(SPOT_FOCUS_STEP, DEFAULT_SPOT_FOCUS_STEP)
 
-SPOT_ACTUATOR_IP = os.getenv("SPOT_ACTUATOR_IP", _get(CONFIG, "SPOT", "actuatorip", "") or "")
+_SPOT_LEGACY_ACTUATOR_IP = _get(CONFIG, "ACTUATOR", "actuatorip", "") or ""
+SPOT_ACTUATOR_IP = os.getenv(
+    "SPOT_ACTUATOR_IP",
+    _get(CONFIG, "SPOT", "actuatorip", _SPOT_LEGACY_ACTUATOR_IP) or _SPOT_LEGACY_ACTUATOR_IP,
+)
 if not SPOT_ACTUATOR_IP:
     SPOT_ACTUATOR_IP = SPOT_IP
 SPOT_ACTUATOR_STEP = _get_int(CONFIG, "SPOT", "actuatorstep", DEFAULT_SPOT_ACTUATOR_STEP)
 SPOT_ACTUATOR_STEP = _env_int("SPOT_ACTUATOR_STEP", SPOT_ACTUATOR_STEP)
-SPOT_ACTUATOR_URL = os.getenv("SPOT_ACTUATOR_URL", f"http://{SPOT_ACTUATOR_IP}/scan.cgi")
+SPOT_ACTUATOR_STEP = _positive_int(SPOT_ACTUATOR_STEP, DEFAULT_SPOT_ACTUATOR_STEP)
+SPOT_ACTUATOR_URL = os.getenv(
+    "SPOT_ACTUATOR_URL",
+    _get(CONFIG, "SPOT", "actuatorurl", f"http://{SPOT_ACTUATOR_IP}/scan.cgi")
+    or f"http://{SPOT_ACTUATOR_IP}/scan.cgi",
+)
 
 SPOT_WIDGET_WIDTH = _get_int(CONFIG, "SPOT", "widgetwidth", DEFAULT_SPOT_WIDGET_WIDTH)
 SPOT_WIDGET_WIDTH = _env_int("SPOT_WIDGET_WIDTH", SPOT_WIDGET_WIDTH)
@@ -490,6 +528,8 @@ def validate_config() -> List[str]:
         issues.append(f"Invalid LS_IP format: {LS_IP}")
     if not _is_valid_ip(SPOT_IP):
         issues.append(f"Invalid SPOT_IP format: {SPOT_IP}")
+    if not SPOT_ACTUATOR_STEP > 0:
+        issues.append(f"Invalid SPOT_ACTUATOR_STEP: {SPOT_ACTUATOR_STEP}. Expected positive integer.")
         
     # Validate Mode
     if MODE not in ("REAL", "MOCK", "CSV"):

@@ -16,6 +16,7 @@ describe('getCameraStatus', () => {
     widget_width: 512,
     widget_height: 288,
     focus_step: 5,
+    actuator_step: 5,
     focus_enabled: true,
   };
   const metadata: SpotImageResponseMetadata = {

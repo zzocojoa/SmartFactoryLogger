@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+﻿import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { configService } from '../api/configService';
 import type { ConfigSnapshot } from '../types';
 
 const CONFIG_AUTO_REFRESH_MS = 15000;
+let settingsInitialLoadPromise: Promise<void> | null = null;
 
 interface UseConfigAutoRefreshEffectParams {
   settingsOpen: boolean;
@@ -57,8 +58,15 @@ export const useConfigAutoRefreshEffect = ({
       if (disposed) {
         return;
       }
-      await loadSettings();
-      if (!isVisible()) {
+      if (!settingsFingerprintRef.current) {
+        if (!settingsInitialLoadPromise) {
+          settingsInitialLoadPromise = loadSettings().finally(() => {
+            settingsInitialLoadPromise = null;
+          });
+        }
+        await settingsInitialLoadPromise;
+      }
+      if (disposed || !isVisible()) {
         return;
       }
       await fetchCentralStatus();
@@ -77,7 +85,7 @@ export const useConfigAutoRefreshEffect = ({
 
         if (hasSettingsChangesRef.current) {
           if (settingsExternalNotifyRef.current !== fingerprint) {
-            showSettingsToast('?ㅼ젙 ?뚯씪???몃??먯꽌 蹂寃쎈릺?덉뒿?덈떎. (媛깆떊 蹂대쪟)', 'warn');
+            showSettingsToast('??쇱젟 ???뵬???紐??癒?퐣 癰궰野껋럥由??됰뮸??덈뼄. (揶쏄퉮??癰귣?履?', 'warn');
             settingsExternalNotifyRef.current = fingerprint;
             setExternalConfigPending(data);
             setExternalConfigPendingAt(Date.now());
@@ -153,3 +161,4 @@ export const useConfigInfoAutoDismissEffect = ({
     return () => clearTimeout(timer);
   }, [settingsInfo, setSettingsInfo]);
 };
+

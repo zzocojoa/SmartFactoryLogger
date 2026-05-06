@@ -32,6 +32,7 @@ import queue
 from logging.handlers import QueueHandler, QueueListener
 from pythonjsonlogger import jsonlogger
 import uuid
+from urllib.parse import urlsplit
 
 trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
 
@@ -148,6 +149,10 @@ class VerificationCompareRequest(BaseModel):
     interval_sec: float | None = None
 
 
+class SpotActuatorRequest(BaseModel):
+    step: int
+
+
 class ShutdownRequest(BaseModel):
     reason: str | None = None
 
@@ -247,6 +252,70 @@ _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
 _SPOT_PROXY_IMAGE_PATH = "/api/spot/proxy_image"
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
+_SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
+
+
+def _url_host(url: str) -> str | None:
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        return None
+    if host is None:
+        return None
+    return host.strip() or None
+
+
+def _url_path_with_query(url: str) -> str | None:
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    path = parsed.path or ""
+    if parsed.query:
+        return f"{path}?{parsed.query}"
+    return path or None
+
+
+def _spot_focus_diagnostics() -> dict[str, Any]:
+    focus_url = str(config.SPOT_FOCUS_URL or "").strip()
+    actuator_url = str(config.SPOT_ACTUATOR_URL or "").strip()
+    spot_ip = str(config.SPOT_IP or "").strip()
+    actuator_ip = str(config.SPOT_ACTUATOR_IP or "").strip()
+    focus_host = _url_host(focus_url)
+    actuator_host = _url_host(actuator_url)
+    return {
+        "focus_url": focus_url,
+        "focus_host": focus_host,
+        "focus_path": _url_path_with_query(focus_url),
+        "spot_ip": spot_ip,
+        "actuator_ip": actuator_ip,
+        "actuator_url": actuator_url,
+        "actuator_host": actuator_host,
+        "focus_points_to_spot_ip": focus_host == spot_ip if focus_host and spot_ip else None,
+        "focus_points_to_actuator_ip": focus_host == actuator_ip if focus_host and actuator_ip else None,
+        "actuator_url_points_to_actuator_ip": actuator_host == actuator_ip if actuator_host and actuator_ip else None,
+    }
+
+
+def _spot_focus_response(result: dict[str, Any]) -> dict[str, Any]:
+    before_readback = result.get("current")
+    target_value = result.get("new")
+    after_readback = result.get("after_readback")
+    if after_readback is None:
+        after_readback = result.get("readback")
+    if after_readback is None:
+        after_readback = result.get("verified")
+    response = dict(result)
+    response["diagnostics"] = {
+        **_spot_focus_diagnostics(),
+        "before_readback": before_readback,
+        "target_value": target_value,
+        "after_readback": after_readback,
+        "readback_verified": after_readback == target_value
+        if after_readback is not None and target_value is not None
+        else None,
+    }
+    return response
 
 
 def _lifecycle_log_fields() -> str:
@@ -2284,79 +2353,6 @@ def central_status():
         _logger.error("Central status failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-@app.post("/api/config")
-async def save_config(payload: ConfigUpdate):
-    try:
-        # 1. Update config object in memory and config.ini
-        # PLC/SPOT/Logging
-        if payload.extruder:
-            if payload.extruder.ip: config.EXTRUDER_IP = payload.extruder.ip
-            if payload.extruder.port: config.EXTRUDER_PORT = payload.extruder.port
-        if payload.ls_plc:
-            if payload.ls_plc.ip: config.LS_IP = payload.ls_plc.ip
-            if payload.ls_plc.port: config.LS_PORT = payload.ls_plc.port
-        if payload.spot:
-            if payload.spot.ip: config.SPOT_IP = payload.spot.ip
-            if payload.spot.refresh_interval: config.SPOT_REFRESH_INTERVAL = payload.spot.refresh_interval
-            
-        if payload.thresholds:
-             # This part might involve more complex logic in update_config, 
-             # but we follow the existing pattern if applicable.
-             pass
-             
-        if payload.settings:
-            if payload.settings.logpath: config.LOG_PATH = Path(payload.settings.logpath)
-            if payload.settings.snapshotpath: config.SNAPSHOT_PATH = Path(payload.settings.snapshotpath)
-            if payload.settings.autosave is not None: config.AUTO_SAVE = payload.settings.autosave
-            
-        if payload.logging:
-            if payload.logging.rotation_enabled is not None: config.ROTATION_ENABLED = payload.logging.rotation_enabled
-            if payload.logging.rotation_mode: config.ROTATION_MODE = payload.logging.rotation_mode
-            if payload.logging.cycle_idle_time: config.CYCLE_IDLE_TIME = int(payload.logging.cycle_idle_time)
-            
-        if payload.system:
-            if payload.system.interval_sec: config.INTERVAL_SEC = payload.system.interval_sec
-            if payload.system.status_warn_ms: config.STATUS_WARN_MS = payload.system.status_warn_ms
-            if payload.system.status_offline_ms: config.STATUS_OFFLINE_MS = payload.system.status_offline_ms
-            
-        mes_changed = False
-        if payload.mes:
-            if payload.mes.enabled is not None: 
-                if config.MES_ENABLED != payload.mes.enabled:
-                    config.MES_ENABLED = payload.mes.enabled
-                    mes_changed = True
-            if payload.mes.userid: 
-                if config.MES_USER_ID != payload.mes.userid:
-                    config.MES_USER_ID = payload.mes.userid
-                    mes_changed = True
-            if payload.mes.password: 
-                if config.MES_PASSWORD != payload.mes.password:
-                    config.MES_PASSWORD = payload.mes.password
-                    mes_changed = True
-            if payload.mes.starthour is not None:
-                config.MES_START_HOUR = payload.mes.starthour
-            if payload.mes.endhour is not None:
-                config.MES_END_HOUR = payload.mes.endhour
-            
-        # 2. Persist to config.ini
-        results = update_config(payload)
-        
-        # 3. Apply MES changes: restart or start/stop
-        if mes_changed:
-            if config.MES_ENABLED:
-                await mes_scheduler.restart()
-            else:
-                await mes_scheduler.stop()
-        
-        return results
-    except PermissionError as exc:
-        _logger.warning("Config save permission error: %s", exc)
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except Exception as exc:
-        _logger.error("Config save failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
 @app.post("/api/config/sync")
 def sync_central_config():
     try:
@@ -2504,17 +2500,50 @@ def spot_config():
         "crosshair_gap": config.SPOT_CROSSHAIR_GAP,
         "widget_width": config.SPOT_WIDGET_WIDTH,
         "widget_height": config.SPOT_WIDGET_HEIGHT,
-        "focus_step": config.SPOT_ACTUATOR_STEP,
+        "focus_url": config.SPOT_FOCUS_URL,
+        "focus_step": config.SPOT_FOCUS_STEP,
+        "actuator_step": config.SPOT_ACTUATOR_STEP,
         "focus_enabled": bool(config.SPOT_ACTUATOR_URL),
+        "actuator_ip": config.SPOT_ACTUATOR_IP,
+        "actuator_url": config.SPOT_ACTUATOR_URL,
+        "focus_diagnostics": _spot_focus_diagnostics(),
         "proxy": spot_control.get_image_proxy_diagnostics(),
     }
 
 @app.post("/api/spot/focus")
 def spot_focus(steps: int = 0):
     try:
-        return spot_control.move_focus(steps)
+        return _spot_focus_response(spot_control.move_focus(steps))
+    except spot_control.SpotFocusControlError as exc:
+        if exc.upstream_status in {401, 403}:
+            raise HTTPException(status_code=exc.upstream_status, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        if str(exc).strip() == _SPOT_FOCUS_CONFIG_ERROR:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/spot/actuator")
+def spot_actuator(payload: SpotActuatorRequest):
+    try:
+        return spot_control.move_actuator(payload.step)
+    except spot_control.SpotActuatorControlError as exc:
+        if exc.upstream_status in {401, 403}:
+            raise HTTPException(status_code=exc.upstream_status, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        if str(exc).strip() == "SPOT_ACTUATOR_URL is not configured":
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _ceil_positive_seconds(value: float) -> int:

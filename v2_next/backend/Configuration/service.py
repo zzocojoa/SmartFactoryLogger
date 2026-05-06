@@ -63,6 +63,21 @@ def _get_int(parser: configparser.ConfigParser, section: str, option: str, fallb
         return fallback
 
 
+def _get_positive_int(parser: configparser.ConfigParser, section: str, option: str, fallback: int) -> int:
+    if not parser.has_option(section, option):
+        return fallback
+    raw = parser.get(section, option).strip()
+    if raw == "":
+        raise ValueError(f"{section}.{option} must be a positive integer")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{section}.{option} must be a positive integer: raw={raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{section}.{option} must be a positive integer: value={value}")
+    return value
+
+
 def _get_float(parser: configparser.ConfigParser, section: str, option: str, fallback: float) -> float:
     raw = _get(parser, section, option, "")
     try:
@@ -117,10 +132,37 @@ def get_config_snapshot() -> dict:
         "port": _get_int(parser, "LS_PLC", "port", config.DEFAULT_LS_PORT),
     }
     spot_ip = _get(parser, "SPOT", "ip", config.DEFAULT_SPOT_IP)
+    legacy_actuator_ip = _get_text(parser, "ACTUATOR", "actuatorip")
+    if parser.has_option("SPOT", "actuatorip"):
+        spot_actuator_ip = _get_text(parser, "SPOT", "actuatorip")
+    elif legacy_actuator_ip:
+        spot_actuator_ip = legacy_actuator_ip
+    else:
+        spot_actuator_ip = spot_ip
     spot = {
         "ip": spot_ip,
+        "url": _get(parser, "SPOT", "url", f"http://{spot_ip}/output?p=temperature"),
+        "image_url": _get(parser, "SPOT", "imageurl", f"http://{spot_ip}/image.jpg"),
         "refresh_interval": _get_float(parser, "SPOT", "refreshinterval", config.DEFAULT_SPOT_REFRESH_INTERVAL),
         "timeout": _get_float(parser, "SPOT", "timeout", 0.5),
+        "crosshair_x": _get_float(parser, "SPOT", "crosshairx", config.DEFAULT_SPOT_CROSSHAIR_X),
+        "crosshair_y": _get_float(parser, "SPOT", "crosshairy", config.DEFAULT_SPOT_CROSSHAIR_Y),
+        "crosshair_color": _get(parser, "SPOT", "crosshaircolor", config.DEFAULT_SPOT_CROSSHAIR_COLOR),
+        "crosshair_thickness": _get_int(
+            parser,
+            "SPOT",
+            "crosshairthickness",
+            config.DEFAULT_SPOT_CROSSHAIR_THICKNESS,
+        ),
+        "crosshair_size": _get_int(parser, "SPOT", "crosshairsize", config.DEFAULT_SPOT_CROSSHAIR_SIZE),
+        "crosshair_gap": _get_int(parser, "SPOT", "crosshairgap", config.DEFAULT_SPOT_CROSSHAIR_GAP),
+        "focus_url": _get(parser, "SPOT", "focusurl", f"http://{spot_ip}/control?p=focus"),
+        "focus_step": _get_positive_int(parser, "SPOT", "focusstep", config.DEFAULT_SPOT_FOCUS_STEP),
+        "actuator_ip": spot_actuator_ip,
+        "actuator_step": _get_positive_int(parser, "SPOT", "actuatorstep", config.DEFAULT_SPOT_ACTUATOR_STEP),
+        "actuator_url": _get(parser, "SPOT", "actuatorurl", f"http://{spot_actuator_ip}/scan.cgi"),
+        "widget_width": _get_int(parser, "SPOT", "widgetwidth", config.DEFAULT_SPOT_WIDGET_WIDTH),
+        "widget_height": _get_int(parser, "SPOT", "widgetheight", config.DEFAULT_SPOT_WIDGET_HEIGHT),
     }
 
     settings = {
@@ -426,6 +468,9 @@ def update_config(
     old_spot_ip = _get(parser, "SPOT", "ip", config.DEFAULT_SPOT_IP)
     old_image_url = _get(parser, "SPOT", "imageurl", "")
     old_focus_url = _get(parser, "SPOT", "focusurl", "")
+    old_legacy_actuator_ip = _get_text(parser, "ACTUATOR", "actuatorip")
+    old_actuator_ip = _get(parser, "SPOT", "actuatorip", old_legacy_actuator_ip) or old_legacy_actuator_ip or old_spot_ip
+    old_actuator_url = _get(parser, "SPOT", "actuatorurl", "")
 
     if payload.extruder:
         if payload.extruder.ip:
@@ -446,10 +491,46 @@ def update_config(
                 parser.set("SPOT", "imageurl", f"http://{payload.spot.ip}/image.jpg")
             if not old_focus_url or old_spot_ip in old_focus_url:
                 parser.set("SPOT", "focusurl", f"http://{payload.spot.ip}/control?p=focus")
+        if payload.spot.url is not None:
+            parser.set("SPOT", "url", payload.spot.url)
+        if payload.spot.image_url is not None:
+            parser.set("SPOT", "imageurl", payload.spot.image_url)
         if payload.spot.refresh_interval is not None:
             parser.set("SPOT", "refreshinterval", str(payload.spot.refresh_interval))
         if payload.spot.timeout is not None:
             parser.set("SPOT", "timeout", str(payload.spot.timeout))
+        if payload.spot.crosshair_x is not None:
+            parser.set("SPOT", "crosshairx", str(payload.spot.crosshair_x))
+        if payload.spot.crosshair_y is not None:
+            parser.set("SPOT", "crosshairy", str(payload.spot.crosshair_y))
+        if payload.spot.crosshair_color is not None:
+            parser.set("SPOT", "crosshaircolor", payload.spot.crosshair_color)
+        if payload.spot.crosshair_thickness is not None:
+            parser.set("SPOT", "crosshairthickness", str(payload.spot.crosshair_thickness))
+        if payload.spot.crosshair_size is not None:
+            parser.set("SPOT", "crosshairsize", str(payload.spot.crosshair_size))
+        if payload.spot.crosshair_gap is not None:
+            parser.set("SPOT", "crosshairgap", str(payload.spot.crosshair_gap))
+        if payload.spot.focus_url is not None:
+            parser.set("SPOT", "focusurl", payload.spot.focus_url)
+        if payload.spot.focus_step is not None:
+            if payload.spot.focus_step <= 0:
+                raise ValueError("SPOT focus_step must be a positive integer")
+            parser.set("SPOT", "focusstep", str(payload.spot.focus_step))
+        if payload.spot.actuator_ip is not None:
+            parser.set("SPOT", "actuatorip", payload.spot.actuator_ip)
+            if not old_actuator_url or old_actuator_ip in old_actuator_url:
+                parser.set("SPOT", "actuatorurl", f"http://{payload.spot.actuator_ip}/scan.cgi")
+        if payload.spot.actuator_step is not None:
+            if payload.spot.actuator_step <= 0:
+                raise ValueError("SPOT actuator_step must be a positive integer")
+            parser.set("SPOT", "actuatorstep", str(payload.spot.actuator_step))
+        if payload.spot.actuator_url is not None:
+            parser.set("SPOT", "actuatorurl", payload.spot.actuator_url)
+        if payload.spot.widget_width is not None:
+            parser.set("SPOT", "widgetwidth", str(payload.spot.widget_width))
+        if payload.spot.widget_height is not None:
+            parser.set("SPOT", "widgetheight", str(payload.spot.widget_height))
 
     if payload.settings:
         _verify_settings_password_change(parser, payload)

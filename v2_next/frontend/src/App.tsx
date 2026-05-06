@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SpotConfig,
   HealthSnapshot,
@@ -37,8 +37,8 @@ import * as LOGIC from './shared/constants/logic';
 import * as THEME from './shared/constants/theme';
 import { useModal } from './shared/hooks/useGlobalModalContext';
 import { useTheme } from './shared/hooks/useThemeContext';
+import { SettingsModalContainer } from './domains/Configuration/components/SettingsModal/SettingsModalContainer';
 
-const SettingsModalContainer = React.lazy(() => import('./domains/Configuration/components/SettingsModal/SettingsModalContainer').then(m => ({ default: m.SettingsModalContainer })));
 const DashboardSceneSurface = React.lazy(() => import('./scenes/DashboardSceneSurface').then(m => ({ default: m.DashboardSceneSurface })));
 const NativeDashboardSurface = React.lazy(() => import('./scenes/NativeDashboardSurface').then(m => ({ default: m.NativeDashboardSurface })));
 
@@ -117,16 +117,16 @@ const buildCameraNotificationDetail = (
 const buildCameraIssueNotification = (
   snapshot: CameraNotificationSnapshot
 ): { title: string; message: string } => {
-  if (snapshot.type === 'danger' && snapshot.title === '카메라 응답 지연') {
+  if (snapshot.type === 'danger') {
     return {
       title: '카메라 지연',
       message: 'SPOT 카메라 응답 지연이 길어지고 있습니다.',
     };
   }
-  if (snapshot.title === '이미지 수신 지연') {
+  if (snapshot.title === '이미지 갱신 지연') {
     return {
       title: '카메라 지연',
-      message: 'SPOT 카메라 응답이 지연됩니다.',
+      message: 'SPOT 카메라 이미지 갱신이 지연되고 있습니다.',
     };
   }
   if (snapshot.title === '이미지 요청 대기') {
@@ -141,16 +141,6 @@ const buildCameraIssueNotification = (
   };
 };
 
-const LazyModalFallback = ({ title }: { title: string }): JSX.Element => (
-  <div className="custom-modal-overlay">
-    <div className="custom-modal-content">
-      <div className="custom-modal-header">
-        <div className="custom-modal-title">{title}</div>
-      </div>
-      <div className="custom-modal-body">로딩 중입니다.</div>
-    </div>
-  </div>
-);
 
 const {
   SERIES_SAMPLES_PER_SEC,
@@ -306,7 +296,7 @@ function App() {
     focusBusy,
     handleImageLoad: handleSpotImageLoaded,
     handleImageError: handleSpotImageError,
-    controlFocus: requestFocus
+    controlActuator: requestFocusActuator
   } = useSpotViewModel();
 
   const {
@@ -451,6 +441,7 @@ function App() {
     title: '',
     detail: '',
   });
+  const settingsBootstrapRef = useRef<boolean>(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const lastSpotValue = useLastValidNumber(data?.Spot);
   const spotAlertFallback = useSustainedFlag(
@@ -655,30 +646,42 @@ function App() {
   }, []);
 
   const handleOpenSettings = useCallback(async () => {
+    if (settingsBootstrapRef.current || settingsOpen) {
+      return;
+    }
+
+    settingsBootstrapRef.current = true;
+
     let passwordRequired: boolean;
     try {
       passwordRequired = await getSettingsPasswordRequired();
     } catch (error) {
       console.error('Settings password status check failed', error);
       await modal.alert('\uC124\uC815 \uBE44\uBC00\uBC88\uD638 \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.');
-      return;
-    }
-    if (!passwordRequired) {
-      await openSettingsAfterBootstrap();
+      settingsBootstrapRef.current = false;
       return;
     }
 
-    const password = await modal.prompt(
-      '\uC124\uC815\uC744 \uC5F4\uB824\uBA74 \uAD00\uB9AC\uC790 \uBE44\uBC00\uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694.',
-      '',
-      { inputType: 'password', title: '\uAD00\uB9AC\uC790 \uBE44\uBC00\uBC88\uD638' }
-    );
-    
-    if (password === null) {
+    if (!passwordRequired) {
+      try {
+        await openSettingsAfterBootstrap();
+      } finally {
+        settingsBootstrapRef.current = false;
+      }
       return;
     }
-    
+
     try {
+      const password = await modal.prompt(
+        '\uC124\uC815\uC744 \uC5F4\uB824\uBA74 \uAD00\uB9AC\uC790 \uBE44\uBC00\uBC88\uD638\uB97C \uC785\uB825\uD558\uC138\uC694.',
+        '',
+        { inputType: 'password', title: '\uAD00\uB9AC\uC790 \uBE44\uBC00\uBC88\uD638' }
+      );
+
+      if (password === null) {
+        return;
+      }
+
       const result = await configService.verifyPassword(password);
       if (result.ok) {
         await openSettingsAfterBootstrap();
@@ -686,8 +689,10 @@ function App() {
     } catch (err: any) {
       const errMsg = err?.response?.data?.detail || '\uBE44\uBC00\uBC88\uD638\uAC00 \uC62C\uBC14\uB974\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.';
       await modal.alert(errMsg);
+    } finally {
+      settingsBootstrapRef.current = false;
     }
-  }, [getSettingsPasswordRequired, modal, openSettingsAfterBootstrap]);
+  }, [getSettingsPasswordRequired, modal, openSettingsAfterBootstrap, settingsOpen]);
 
 
 
@@ -931,7 +936,7 @@ function App() {
     lastDataAt,
     onSpotImageLoaded: handleSpotImageLoaded,
     onSpotImageError: handleSpotImageError,
-    requestFocus,
+    requestFocus: requestFocusActuator,
     seriesWindowMin,
     seriesPaused,
     showThresholds,
@@ -957,7 +962,7 @@ function App() {
     lastDataAt,
     handleSpotImageLoaded,
     handleSpotImageError,
-    requestFocus,
+    requestFocusActuator,
     seriesWindowMin,
     seriesPaused,
     showThresholds,
@@ -1039,8 +1044,7 @@ function App() {
         </React.Suspense>
       ) : null}
       {settingsOpen ? (
-        <React.Suspense fallback={<LazyModalFallback title="설정" />}>
-          <SettingsModalContainer
+        <SettingsModalContainer
             settingsOpen={settingsOpen}
             setSettingsOpen={setSettingsOpen}
         settingsLoading={settingsLoading}
@@ -1133,7 +1137,6 @@ function App() {
         spotImageError={spotImageError}
             showSettingsToast={showSettingsToast}
           />
-        </React.Suspense>
       ) : null}
       <div className="scene-container" style={{ flexGrow: 1 }}>
         {/* The ReactWidget will be rendered *inside* this provider hierarchy. */}
@@ -1149,7 +1152,7 @@ function App() {
                       layoutRef={layoutRef}
                       onSpotImageLoaded={handleSpotImageLoaded}
                       onSpotImageError={handleSpotImageError}
-                      requestFocus={requestFocus}
+                      requestFocus={requestFocusActuator}
                       focusBusy={focusBusy}
                     />
                   ) : (
@@ -1158,7 +1161,7 @@ function App() {
                       layoutRef={layoutRef}
                       onSpotImageLoaded={handleSpotImageLoaded}
                       onSpotImageError={handleSpotImageError}
-                      requestFocus={requestFocus}
+                      requestFocus={requestFocusActuator}
                       focusBusy={focusBusy}
                       onTimeSeriesVisible={handleTimeSeriesVisible}
                     />
@@ -1170,7 +1173,7 @@ function App() {
         </DataContext.Provider>
         <AIChatbotLauncher />
         <footer className="app-footer">
-          Copyright © HOIHOU. All Rights Reserved. v{packageJson.version}
+          Copyright 짤 HOIHOU. All Rights Reserved. v{packageJson.version}
         </footer>
       </div>
     </div>
@@ -1178,3 +1181,5 @@ function App() {
 }
 
 export default App;
+
+

@@ -19,6 +19,7 @@ import {
   type SpotProxyErrorDetail,
 } from './useSpotViewModel.selectors';
 import { useSpotViewModelEffects } from './useSpotViewModelEffects';
+import type { SpotFocusResponse } from '../../../shared/api/transport/spotService.transport';
 import {
   SpotImagePayloadValidationError,
   buildSpotImageValidationLog,
@@ -48,6 +49,7 @@ const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => 
     first.widget_width === second.widget_width &&
     first.widget_height === second.widget_height &&
     first.focus_step === second.focus_step &&
+    first.actuator_step === second.actuator_step &&
     first.focus_enabled === second.focus_enabled
   );
 };
@@ -91,6 +93,81 @@ const INITIAL_SPOT_DIAGNOSTICS: SpotPollingDiagnosticsWithImage = {
   last_image_age_sec: null,
   last_image_latency_ms: null,
   last_image_retry_after_sec: null,
+};
+
+const resolveSpotControlErrorMessage = (error: unknown, fallbackMessage: string): string => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallbackMessage;
+};
+
+const buildSpotControlImageState = (
+  currentImageState: SpotImageState,
+  imageError: string
+): SpotImageState => {
+  return {
+    ...currentImageState,
+    imageError,
+  };
+};
+
+const isNoMovementFocusStatus = (status: string): boolean => {
+  const normalizedStatus = status.trim().toLowerCase();
+  return (
+    normalizedStatus === 'noop' ||
+    normalizedStatus === 'no-op' ||
+    normalizedStatus === 'limit' ||
+    normalizedStatus === 'limited' ||
+    normalizedStatus === 'unchanged' ||
+    normalizedStatus.includes('limit')
+  );
+};
+
+const isNoMovementFocusMessage = (message: string | undefined): boolean => {
+  if (!message) {
+    return false;
+  }
+  const normalizedMessage = message.trim().toLowerCase();
+  return (
+    normalizedMessage.includes('limit') ||
+    normalizedMessage.includes('no-op') ||
+    normalizedMessage.includes('noop') ||
+    normalizedMessage.includes('unchanged') ||
+    normalizedMessage.includes('clamp')
+  );
+};
+
+const buildSpotFocusResponseContext = (steps: number, response: SpotFocusResponse): string => {
+  const values = [
+    `requested_steps=${steps}`,
+    `status=${response.status}`,
+    response.request_steps === undefined ? null : `response_steps=${response.request_steps}`,
+    response.focus_step === undefined ? null : `focus_step=${response.focus_step}`,
+    response.current === undefined ? null : `current=${response.current}`,
+    response.new === undefined ? null : `new=${response.new}`,
+    response.message?.trim() ? `message=${response.message.trim()}` : null,
+  ];
+  return values.filter((value): value is string => value !== null).join('; ');
+};
+
+const resolveSpotFocusResponseMessage = (steps: number, response: SpotFocusResponse): string | null => {
+  const normalizedStatus = response.status.trim().toLowerCase();
+  const hasNoPositionChange =
+    response.current !== undefined &&
+    response.new !== undefined &&
+    response.current === response.new;
+  const hasNoMovementStatus = isNoMovementFocusStatus(response.status);
+  const hasNoMovementMessage = isNoMovementFocusMessage(response.message);
+  const responseContext = buildSpotFocusResponseContext(steps, response);
+
+  if (normalizedStatus !== 'ok' && normalizedStatus !== 'success') {
+    return `SPOT focus response was not successful; ${responseContext}`;
+  }
+  if (hasNoPositionChange || hasNoMovementStatus || hasNoMovementMessage) {
+    return `SPOT focus did not move; ${responseContext}`;
+  }
+  return null;
 };
 
 export const useSpotViewModel = (): UseSpotViewModel => {
@@ -386,23 +463,70 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       }
       setFocusBusy(true);
       try {
-        await controlSpotFocus(steps);
+        const response = await controlSpotFocus(steps);
+        const responseMessage = resolveSpotFocusResponseMessage(steps, response);
+        if (responseMessage) {
+          const nextImageState = {
+            ...imageStateRef.current,
+            imageError: responseMessage,
+          };
+          imageStateRef.current = nextImageState;
+          setImageError(responseMessage);
+          syncDashboardSpotImageState(
+            nextImageState.imageUrl,
+            false,
+            responseMessage,
+            nextImageState.lastSuccessAt,
+            nextImageState.metadata
+          );
+        }
       } catch (error) {
+        const nextImageError = resolveSpotControlErrorMessage(error, 'SPOT focus control failed');
+        const nextImageState = buildSpotControlImageState(imageStateRef.current, nextImageError);
         console.error('Spot focus failed', error);
+        imageStateRef.current = nextImageState;
+        setImageError(nextImageError);
+        syncDashboardSpotImageState(
+          nextImageState.imageUrl,
+          false,
+          nextImageError,
+          nextImageState.lastSuccessAt,
+          nextImageState.metadata
+        );
       } finally {
         setFocusBusy(false);
       }
     },
-    [focusBusy]
+    [focusBusy, syncDashboardSpotImageState]
   );
 
-  const controlActuator = useCallback(async (step: number) => {
-    try {
-      await controlSpotActuator(step);
-    } catch (error) {
-      console.error('Spot actuator failed', error);
-    }
-  }, []);
+  const controlActuator = useCallback(
+    async (step: number) => {
+      if (focusBusy) {
+        return;
+      }
+      setFocusBusy(true);
+      try {
+        await controlSpotActuator(step);
+      } catch (error) {
+        const nextImageError = resolveSpotControlErrorMessage(error, 'SPOT actuator control failed');
+        const nextImageState = buildSpotControlImageState(imageStateRef.current, nextImageError);
+        console.error('Spot actuator failed', error);
+        imageStateRef.current = nextImageState;
+        setImageError(nextImageError);
+        syncDashboardSpotImageState(
+          nextImageState.imageUrl,
+          false,
+          nextImageError,
+          nextImageState.lastSuccessAt,
+          nextImageState.metadata
+        );
+      } finally {
+        setFocusBusy(false);
+      }
+    },
+    [focusBusy, syncDashboardSpotImageState]
+  );
 
   useEffect(() => {
     return () => {

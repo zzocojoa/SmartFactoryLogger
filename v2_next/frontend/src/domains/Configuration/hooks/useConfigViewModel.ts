@@ -29,6 +29,52 @@ import type {
   SaveSettingsOptions,
   UseConfigViewModel,
 } from './useConfigViewModel.types';
+import type { ConfigPayload } from '../api/configService.types';
+
+const isPositiveIntegerInput = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return false;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed > 0;
+};
+
+const toOptionalNumberText = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value);
+};
+
+const toInt = (value: string): number | undefined => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (!/^-?\d+$/.test(trimmed)) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const toPositiveInt = (value: string): number | undefined => {
+  const parsed = toInt(value);
+  if (parsed === undefined || parsed <= 0) {
+    return undefined;
+  }
+  return parsed;
+};
+
+const toFloat = (value: string): number | undefined => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  const parsed = Number.parseFloat(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
 
 export const useConfigViewModel = (): UseConfigViewModel => {
   const modal = useModal();
@@ -89,6 +135,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       lsPort: values.ls_plc.port?.toString() ?? '',
       spotIp: values.spot.ip ?? '',
       spotRefreshInterval: values.spot.refresh_interval?.toString() ?? '',
+      spotActuatorStep: toOptionalNumberText(values.spot.actuator_step),
       thresholdMasterOn: toBool(thresholdsEnable.master_on),
       thresholdSpeedEnabled: toBool(thresholdsEnable.speed),
       thresholdSpeedValue: toStr(thresholdsValues.speed),
@@ -267,6 +314,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     if (!isValidIp(settingsForm.spotIp)) {
       errors.spotIp = 'IPv4 ?筌먦끇六???熬곣뫀六???덈펲.';
     }
+    if (!isPositiveIntegerInput(settingsForm.spotActuatorStep)) {
+      errors.spotActuatorStep = '양의 정수를 입력하세요.';
+    }
     const thresholdValueFields: Array<keyof SettingsFormState> = [
       'thresholdSpeedValue',
       'thresholdPressValue',
@@ -376,21 +426,19 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     // Let's proceed without coupling to pathHealth for now, as it's separate. 
     // If essential, we will add it to the hook arguments later.
 
+    const spotActuatorStep = toPositiveInt(settingsForm.spotActuatorStep);
+    if (spotActuatorStep === undefined) {
+      if (!isAuto) setSettingsError('?묒쓽 ?뺤닔瑜??낅젰?섏꽭??');
+      return false;
+    }
+
     setSettingsLoading(true);
     setSettingsError(null);
     setSettingsInfo(null);
 
-    const toInt = (value: string) => {
-      const parsed = Number.parseInt(value, 10);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    };
-    const toFloat = (value: string) => {
-      const parsed = Number.parseFloat(value);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    };
     const toThresholdValue = (value: string) => value.trim();
 
-    const payload = {
+    const payload: ConfigPayload = {
       extruder: {
         ip: settingsForm.extruderIp.trim() || undefined,
         port: toInt(settingsForm.extruderPort),
@@ -402,6 +450,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       spot: {
         ip: settingsForm.spotIp.trim() || undefined,
         refresh_interval: toFloat(settingsForm.spotRefreshInterval),
+        actuator_step: spotActuatorStep,
       },
       thresholds: {
         enable: {

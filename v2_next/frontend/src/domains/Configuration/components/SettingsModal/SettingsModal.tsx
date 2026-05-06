@@ -786,27 +786,6 @@ export function SettingsModal(props: SettingsModalProps) {
                             <span className="settings-field-help error">{validationErrors.lsPort}</span>
                           )}
                         </label>
-                        <label
-                          className={`settings-field ${isSettingsFieldDirty('spotIp') ? 'changed' : ''} ${validationErrors.spotIp ? 'error' : ''}`}
-                        >
-                          SPOT IP
-                          <input
-                            value={settingsForm.spotIp}
-                            onChange={(e) => updateSettingsField('spotIp', e.target.value)}
-                          />
-                          {validationErrors.spotIp && (
-                            <span className="settings-field-help error">{validationErrors.spotIp}</span>
-                          )}
-                        </label>
-                        <label
-                          className={`settings-field ${isSettingsFieldDirty('spotRefreshInterval') ? 'changed' : ''}`}
-                        >
-                          SPOT Refresh (sec)
-                          <input
-                            value={settingsForm.spotRefreshInterval}
-                            onChange={(e) => updateSettingsField('spotRefreshInterval', e.target.value)}
-                          />
-                        </label>
                       </div>
                       <div className="settings-test-grid">
                         {connectionTestTargets
@@ -1501,6 +1480,19 @@ export function SettingsModal(props: SettingsModalProps) {
                             value={settingsForm.spotRefreshInterval}
                             onChange={(e) => updateSettingsField('spotRefreshInterval', e.target.value)}
                           />
+                        </label>
+                        <label
+                          className={`settings-field ${isSettingsFieldDirty('spotActuatorStep') ? 'changed' : ''} ${validationErrors.spotActuatorStep ? 'error' : ''}`}
+                        >
+                          {CONFIG_LABELS.SPOT_ACTUATOR_STEP}
+                          <input
+                            inputMode="numeric"
+                            value={settingsForm.spotActuatorStep}
+                            onChange={(e) => updateSettingsField('spotActuatorStep', e.target.value)}
+                          />
+                          {validationErrors.spotActuatorStep && (
+                            <span className="settings-field-help error">{validationErrors.spotActuatorStep}</span>
+                          )}
                         </label>
                       </div>
                       <div className="settings-spot-preview">
