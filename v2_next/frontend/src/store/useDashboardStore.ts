@@ -15,6 +15,7 @@ const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => 
     first.widget_width === second.widget_width &&
     first.widget_height === second.widget_height &&
     first.focus_step === second.focus_step &&
+    first.actuator_step === second.actuator_step &&
     first.focus_enabled === second.focus_enabled
   );
 };

@@ -30,6 +30,15 @@ import type {
   UseConfigViewModel,
 } from './useConfigViewModel.types';
 
+const isPositiveIntegerInput = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return false;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed > 0;
+};
+
 export const useConfigViewModel = (): UseConfigViewModel => {
   const modal = useModal();
   // State
@@ -89,6 +98,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       lsPort: values.ls_plc.port?.toString() ?? '',
       spotIp: values.spot.ip ?? '',
       spotRefreshInterval: values.spot.refresh_interval?.toString() ?? '',
+      spotActuatorStep: values.spot.actuator_step?.toString() ?? '',
       thresholdMasterOn: toBool(thresholdsEnable.master_on),
       thresholdSpeedEnabled: toBool(thresholdsEnable.speed),
       thresholdSpeedValue: toStr(thresholdsValues.speed),
@@ -267,6 +277,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     if (!isValidIp(settingsForm.spotIp)) {
       errors.spotIp = 'IPv4 ?筌먦끇六???熬곣뫀六???덈펲.';
     }
+    if (!isPositiveIntegerInput(settingsForm.spotActuatorStep)) {
+      errors.spotActuatorStep = '양의 정수를 입력하세요.';
+    }
     const thresholdValueFields: Array<keyof SettingsFormState> = [
       'thresholdSpeedValue',
       'thresholdPressValue',
@@ -402,6 +415,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       spot: {
         ip: settingsForm.spotIp.trim() || undefined,
         refresh_interval: toFloat(settingsForm.spotRefreshInterval),
+        actuator_step: toInt(settingsForm.spotActuatorStep),
       },
       thresholds: {
         enable: {

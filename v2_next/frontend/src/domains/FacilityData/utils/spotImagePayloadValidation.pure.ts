@@ -66,9 +66,8 @@ export class SpotImagePayloadValidationError extends Error {
 
 const MIN_IMAGE_BYTES = 16;
 const MAX_IMAGE_BYTES = 15_728_640;
-const MAX_CAPTURE_AGE_SEC = 60 * 60;
 const MAX_CLOCK_DRIFT_MS = 60_000;
-const MAX_REPORTED_TIMESTAMP_DRIFT_MS = 5000;
+const MILLISECONDS_PER_SECOND = 1000;
 
 const ALLOWED_MIME_TYPES = new Set([
   'image/jpeg',
@@ -113,6 +112,18 @@ const parseContentType = (rawContentType: string | null): string | null => {
 
 const parseContentLength = (headers: Headers): number | null => {
   return parseFloatHeader(headers.get('content-length'));
+};
+
+const parseAgeSec = (ageSec: number | null): number | null => {
+  if (ageSec === null || !Number.isFinite(ageSec) || ageSec < 0) {
+    return null;
+  }
+  const normalizedAgeSec = normalizeSpotImageAgeSec(ageSec.toString());
+  return normalizedAgeSec === null ? ageSec / MILLISECONDS_PER_SECOND : normalizedAgeSec;
+};
+
+const isValidContentLength = (contentLength: number): boolean => {
+  return Number.isInteger(contentLength) && contentLength >= 0;
 };
 
 const isLikelyHtml = (bytes: Uint8Array): boolean => {
@@ -280,6 +291,16 @@ export const validateSpotImagePayload = ({
   }
 
   const contentLength = parseContentLength(headers);
+  const rawContentLength = headers.get('content-length');
+  if (rawContentLength !== null && (contentLength === null || !isValidContentLength(contentLength))) {
+    const context = buildValidationContext(requestUrl, status, headers, metadata, bytes.byteLength);
+    throw new SpotImagePayloadValidationError(
+      'invalid-array-length',
+      context,
+      `Invalid Content-Length header: ${rawContentLength}`
+    );
+  }
+
   if (contentLength !== null && contentLength >= 0 && contentLength !== bytes.byteLength) {
     const context = buildValidationContext(requestUrl, status, headers, metadata, bytes.byteLength);
     throw new SpotImagePayloadValidationError(
@@ -316,7 +337,7 @@ export const validateSpotImagePayload = ({
     );
   }
 
-  const normalizedAgeSec = metadata.age_sec === null ? null : normalizeSpotImageAgeSec(metadata.age_sec.toString());
+  const normalizedAgeSec = parseAgeSec(metadata.age_sec);
   const normalizedCapturedAt = metadata.captured_at === null ? null : normalizeSpotImageCapturedAt(metadata.captured_at.toString());
   if (normalizedAgeSec === null && normalizedCapturedAt === null) {
     const context = buildValidationContext(requestUrl, status, headers, metadata, bytes.byteLength);
@@ -327,15 +348,6 @@ export const validateSpotImagePayload = ({
     );
   }
 
-  if (normalizedAgeSec !== null && normalizedAgeSec > MAX_CAPTURE_AGE_SEC) {
-    const context = buildValidationContext(requestUrl, status, headers, metadata, bytes.byteLength);
-    throw new SpotImagePayloadValidationError(
-      'invalid-timestamp',
-      context,
-      `Captured age is invalid: ${metadata.age_sec}`
-    );
-  }
-
   const ageSec = resolveAge(normalizedAgeSec, normalizedCapturedAt, receivedAt);
   if (ageSec === null) {
     const context = buildValidationContext(requestUrl, status, headers, metadata, bytes.byteLength);
@@ -343,15 +355,6 @@ export const validateSpotImagePayload = ({
       'invalid-timestamp',
       context,
       'Unable to resolve image timestamp metadata'
-    );
-  }
-
-  if (ageSec > MAX_CAPTURE_AGE_SEC) {
-    const context = buildValidationContext(requestUrl, status, headers, metadata, bytes.byteLength);
-    throw new SpotImagePayloadValidationError(
-      'invalid-timestamp',
-      context,
-      `Captured age is too old: ${ageSec}`
     );
   }
 
@@ -366,21 +369,6 @@ export const validateSpotImagePayload = ({
       context,
       `Captured timestamp is too far in the future: ${capturedAt}`
     );
-  }
-
-  if (normalizedCapturedAt !== null && normalizedAgeSec !== null) {
-    const ageByCapturedAt = (receivedAt - capturedAt) / 1000;
-    if (Number.isFinite(ageByCapturedAt)) {
-      const driftMs = Math.abs(ageByCapturedAt - normalizedAgeSec) * 1000;
-      if (driftMs > MAX_REPORTED_TIMESTAMP_DRIFT_MS) {
-        const context = buildValidationContext(requestUrl, status, headers, metadata, bytes.byteLength);
-        throw new SpotImagePayloadValidationError(
-          'invalid-timestamp',
-          context,
-          `Captured age and timestamp are inconsistent: drift=${driftMs}`
-        );
-      }
-    }
   }
 
   return {

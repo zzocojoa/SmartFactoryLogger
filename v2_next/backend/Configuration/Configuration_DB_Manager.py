@@ -190,13 +190,9 @@ class ConfigManager:
             _get(parser, "SPOT", "focusurl", f"http://{spot_ip}/control?p=focus")
             or f"http://{spot_ip}/control?p=focus",
         )
-        spot_focus_step_fallback = _env_int(
-            "SPOT_ACTUATOR_STEP",
-            _get_int(parser, "SPOT", "actuatorstep", config.DEFAULT_SPOT_FOCUS_STEP),
-        )
         spot_focus_step = _env_int(
             "SPOT_FOCUS_STEP",
-            _get_int(parser, "SPOT", "focusstep", spot_focus_step_fallback),
+            _get_int(parser, "SPOT", "focusstep", config.DEFAULT_SPOT_FOCUS_STEP),
         )
         spot_focus_step = _positive_int(spot_focus_step, config.DEFAULT_SPOT_FOCUS_STEP)
         spot_url = os.getenv("SPOT_URL", f"http://{spot_ip}/output?p=temperature")
@@ -226,14 +222,23 @@ class ConfigManager:
             "SPOT_CROSSHAIR_GAP",
             _get_int(parser, "SPOT", "crosshairgap", config.DEFAULT_SPOT_CROSSHAIR_GAP),
         )
-        spot_actuator_ip = os.getenv("SPOT_ACTUATOR_IP", _get(parser, "SPOT", "actuatorip", "") or "")
+        legacy_actuator_ip = _get(parser, "ACTUATOR", "actuatorip", "") or ""
+        spot_actuator_ip = os.getenv(
+            "SPOT_ACTUATOR_IP",
+            _get(parser, "SPOT", "actuatorip", legacy_actuator_ip) or legacy_actuator_ip,
+        )
         if not spot_actuator_ip:
             spot_actuator_ip = spot_ip
         spot_actuator_step = _env_int(
             "SPOT_ACTUATOR_STEP",
             _get_int(parser, "SPOT", "actuatorstep", config.DEFAULT_SPOT_ACTUATOR_STEP),
         )
-        spot_actuator_url = os.getenv("SPOT_ACTUATOR_URL", f"http://{spot_actuator_ip}/scan.cgi")
+        spot_actuator_step = _positive_int(spot_actuator_step, config.DEFAULT_SPOT_ACTUATOR_STEP)
+        spot_actuator_url = os.getenv(
+            "SPOT_ACTUATOR_URL",
+            _get(parser, "SPOT", "actuatorurl", f"http://{spot_actuator_ip}/scan.cgi")
+            or f"http://{spot_actuator_ip}/scan.cgi",
+        )
         spot_widget_width = _env_int(
             "SPOT_WIDGET_WIDTH",
             _get_int(parser, "SPOT", "widgetwidth", config.DEFAULT_SPOT_WIDGET_WIDTH),
@@ -480,6 +485,10 @@ class ConfigManager:
                 config.SPOT_ACTUATOR_IP = str(spot_cfg.get("actuator_ip", spot_ip))
                 config.SPOT_ACTUATOR_STEP = int(
                     spot_cfg.get("actuator_step", config.DEFAULT_SPOT_ACTUATOR_STEP)
+                )
+                config.SPOT_ACTUATOR_STEP = _positive_int(
+                    config.SPOT_ACTUATOR_STEP,
+                    config.DEFAULT_SPOT_ACTUATOR_STEP,
                 )
                 config.SPOT_ACTUATOR_URL = str(
                     spot_cfg.get("actuator_url", f"http://{config.SPOT_ACTUATOR_IP}/scan.cgi")

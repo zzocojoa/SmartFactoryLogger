@@ -34,6 +34,7 @@ const BASE_SPOT_CONFIG: SpotConfig = {
   widget_width: 320,
   widget_height: 240,
   focus_step: 10,
+  actuator_step: 50,
   focus_enabled: true,
 };
 

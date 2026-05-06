@@ -299,6 +299,12 @@ If Grafana is not configured:
 - ``stop.bat`` - Stop SmartFactory
 - ``setup_grafana.bat`` - Configure Grafana (run once as Admin)
 - ``mes_data/`` - Database folder
+
+## SPOT Actuator Config
+- Default ``[SPOT] actuatorstep`` is ``50`` for physical actuator movement.
+- Existing machine config is loaded from ``%APPDATA%\SmartFactoryLogger\config.ini``.
+- ``[SPOT] actuatorip`` falls back to legacy ``[ACTUATOR] actuatorip`` and then ``[SPOT] ip``.
+- ``[SPOT] actuatorurl`` defaults to ``http://{actuatorip}/scan.cgi`` when omitted.
 "@
 Set-Content -Path (Join-Path $PortablePath "README.txt") -Value $ReadmeContent -Encoding UTF8
 Write-Host "    README.txt created" -ForegroundColor Green

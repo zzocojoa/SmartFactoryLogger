@@ -75,6 +75,7 @@ export interface SpotConfig {
     widget_width: number;
     widget_height: number;
     focus_step: number;
+    actuator_step: number;
     focus_enabled: boolean;
 }
 
@@ -445,7 +446,7 @@ export interface ConfigSnapshot {
   values: {
     extruder: { ip: string; port: number };
     ls_plc: { ip: string; port: number };
-    spot: { ip: string; refresh_interval: number };
+    spot: { ip: string; refresh_interval: number; actuator_step: number };
     thresholds?: {
       values?: {
         speed?: string;
@@ -509,6 +510,7 @@ export interface SettingsFormState {
   lsPort: string;
   spotIp: string;
   spotRefreshInterval: string;
+  spotActuatorStep: string;
   thresholdMasterOn: boolean;
   thresholdSpeedEnabled: boolean;
   thresholdSpeedValue: string;

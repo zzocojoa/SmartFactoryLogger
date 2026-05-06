@@ -306,7 +306,7 @@ function App() {
     focusBusy,
     handleImageLoad: handleSpotImageLoaded,
     handleImageError: handleSpotImageError,
-    controlFocus: requestFocus
+    controlActuator: requestFocusActuator
   } = useSpotViewModel();
 
   const {
@@ -931,7 +931,7 @@ function App() {
     lastDataAt,
     onSpotImageLoaded: handleSpotImageLoaded,
     onSpotImageError: handleSpotImageError,
-    requestFocus,
+    requestFocus: requestFocusActuator,
     seriesWindowMin,
     seriesPaused,
     showThresholds,
@@ -957,7 +957,7 @@ function App() {
     lastDataAt,
     handleSpotImageLoaded,
     handleSpotImageError,
-    requestFocus,
+    requestFocusActuator,
     seriesWindowMin,
     seriesPaused,
     showThresholds,
@@ -1149,7 +1149,7 @@ function App() {
                       layoutRef={layoutRef}
                       onSpotImageLoaded={handleSpotImageLoaded}
                       onSpotImageError={handleSpotImageError}
-                      requestFocus={requestFocus}
+                      requestFocus={requestFocusActuator}
                       focusBusy={focusBusy}
                     />
                   ) : (
@@ -1158,7 +1158,7 @@ function App() {
                       layoutRef={layoutRef}
                       onSpotImageLoaded={handleSpotImageLoaded}
                       onSpotImageError={handleSpotImageError}
-                      requestFocus={requestFocus}
+                      requestFocus={requestFocusActuator}
                       focusBusy={focusBusy}
                       onTimeSeriesVisible={handleTimeSeriesVisible}
                     />

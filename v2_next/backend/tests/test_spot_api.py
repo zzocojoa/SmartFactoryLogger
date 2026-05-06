@@ -38,6 +38,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.original_spot_refresh_interval: float = float(spot_api.config.SPOT_REFRESH_INTERVAL)
         self.original_spot_focus_url: str = str(spot_api.config.SPOT_FOCUS_URL)
         self.original_spot_focus_step: int = int(spot_api.config.SPOT_FOCUS_STEP)
+        self.original_spot_actuator_url: str = str(spot_api.config.SPOT_ACTUATOR_URL)
+        self.original_spot_actuator_step: int = int(spot_api.config.SPOT_ACTUATOR_STEP)
         self.reset_spot_state()
 
     def tearDown(self) -> None:
@@ -46,6 +48,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api.config.SPOT_REFRESH_INTERVAL = self.original_spot_refresh_interval
         spot_api.config.SPOT_FOCUS_URL = self.original_spot_focus_url
         spot_api.config.SPOT_FOCUS_STEP = self.original_spot_focus_step
+        spot_api.config.SPOT_ACTUATOR_URL = self.original_spot_actuator_url
+        spot_api.config.SPOT_ACTUATOR_STEP = self.original_spot_actuator_step
         self.reset_spot_state()
 
     def reset_spot_state(self) -> None:
@@ -628,6 +632,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 "status": "ok",
                 "current": 700,
                 "new": 750,
+                "verified": 750,
                 "request_steps": 1,
                 "focus_step": 50,
             },
@@ -639,6 +644,144 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.full_url, "http://spot.local/control?p=focus")
         self.assertEqual(request.data, b"750")
         self.assertEqual(request.get_method(), "PUT")
+        self.assertEqual(calls[2], "http://spot.local/control?p=focus")
+
+    def test_move_actuator_uses_scan_cgi_move_endpoint(self) -> None:
+        spot_api.config.SPOT_ACTUATOR_URL = "http://actuator.local/scan.cgi"
+        spot_api.config.SPOT_ACTUATOR_STEP = 5
+        calls: list[FocusUrlopenTarget] = []
+
+        def fake_urlopen(target: FocusUrlopenTarget, timeout: int) -> UrlopenResponse:
+            calls.append(target)
+            if len(calls) == 1:
+                return UrlopenResponse(b"<html>Pos--> 100</html>", 200)
+            if len(calls) == 2:
+                return UrlopenResponse(b"OK", 200)
+            return UrlopenResponse(b"<html>Pos--> 95</html>", 200)
+
+        with patch("backend.FacilityData.drivers.spot_api.urlopen", fake_urlopen):
+            result = spot_api.move_actuator(-1)
+
+        self.assertEqual(
+            {
+                "status": "ok",
+                "current": 100,
+                "new": 95,
+                "verified": 95,
+                "request_steps": -1,
+                "actuator_step": 5,
+            },
+            result,
+        )
+        self.assertEqual(
+            calls,
+            [
+                "http://actuator.local/scan.cgi?scan=3",
+                "http://actuator.local/scan.cgi?scan=3&move=95",
+                "http://actuator.local/scan.cgi?scan=3",
+            ],
+        )
+
+    def test_move_actuator_rejects_unchanged_readback_after_successful_move(self) -> None:
+        spot_api.config.SPOT_ACTUATOR_URL = "http://actuator.local/scan.cgi"
+        spot_api.config.SPOT_ACTUATOR_STEP = 5
+        calls: list[FocusUrlopenTarget] = []
+
+        def fake_urlopen(target: FocusUrlopenTarget, timeout: int) -> UrlopenResponse:
+            calls.append(target)
+            if len(calls) == 1:
+                return UrlopenResponse(b"<html>Pos--> 100</html>", 200)
+            if len(calls) == 2:
+                return UrlopenResponse(b"OK", 200)
+            return UrlopenResponse(b"<html>Pos--> 100</html>", 200)
+
+        with (
+            patch("backend.FacilityData.drivers.spot_api.urlopen", fake_urlopen),
+            patch.object(spot_api, "_SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC", 0.001),
+            patch.object(spot_api, "_SPOT_ACTUATOR_VERIFY_INTERVAL_SEC", 0.001),
+        ):
+            with self.assertRaises(spot_api.SpotActuatorControlError) as raised:
+                spot_api.move_actuator(-1)
+
+        self.assertIn("SPOT actuator write did not reach requested position", str(raised.exception))
+        self.assertIn("http://actuator.local/scan.cgi", str(raised.exception))
+        self.assertEqual(calls[0], "http://actuator.local/scan.cgi?scan=3")
+        self.assertEqual(calls[1], "http://actuator.local/scan.cgi?scan=3&move=95")
+
+    def test_move_focus_accepts_previous_value_write_ack_when_readback_matches(self) -> None:
+        spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
+        spot_api.config.SPOT_FOCUS_STEP = 200
+        calls: list[FocusUrlopenTarget] = []
+
+        def fake_urlopen(target: FocusUrlopenTarget, timeout: int) -> UrlopenResponse:
+            calls.append(target)
+            if len(calls) == 1:
+                return UrlopenResponse(b"6071", 200)
+            if len(calls) == 2:
+                return UrlopenResponse(b"6071", 200)
+            return UrlopenResponse(b"5871", 200)
+
+        with patch("backend.FacilityData.drivers.spot_api.urlopen", fake_urlopen):
+            result = spot_api.move_focus(-1)
+
+        self.assertEqual(
+            {
+                "status": "ok",
+                "current": 6071,
+                "new": 5871,
+                "verified": 5871,
+                "request_steps": -1,
+                "focus_step": 200,
+            },
+            result,
+        )
+        self.assertEqual(len(calls), 3)
+
+    def test_move_focus_rejects_unchanged_readback_after_successful_put(self) -> None:
+        spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
+        spot_api.config.SPOT_FOCUS_STEP = 50
+        calls: list[FocusUrlopenTarget] = []
+
+        def fake_urlopen(target: FocusUrlopenTarget, timeout: int) -> UrlopenResponse:
+            calls.append(target)
+            if len(calls) == 1:
+                return UrlopenResponse(b"700", 200)
+            if len(calls) == 2:
+                return UrlopenResponse(b"750", 200)
+            return UrlopenResponse(b"700", 200)
+
+        with patch.object(spot_api, "urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(spot_api.SpotFocusControlError) as raised:
+                spot_api.move_focus(1)
+
+        self.assertIn("SPOT focus write did not reach requested position", str(raised.exception))
+        self.assertEqual(calls[0], "http://spot.local/control?p=focus")
+        write_request = calls[1]
+        if not isinstance(write_request, UrlRequest):
+            self.fail("Expected focus write to use urllib.request.Request")
+        self.assertEqual(write_request.data, b"750")
+        self.assertEqual(calls[2], "http://spot.local/control?p=focus")
+
+    def test_move_focus_zero_steps_is_noop_without_put(self) -> None:
+        spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
+        spot_api.config.SPOT_FOCUS_STEP = 50
+        calls: list[FocusUrlopenTarget] = []
+
+        def fake_urlopen(target: FocusUrlopenTarget, timeout: int) -> UrlopenResponse:
+            calls.append(target)
+            return UrlopenResponse(b"700", 200)
+
+        with patch.object(spot_api, "urlopen", side_effect=fake_urlopen):
+            result = spot_api.move_focus(0)
+
+        self.assertEqual(
+            result,
+            {
+                "status": "noop",
+                "message": "steps=0",
+            },
+        )
+        self.assertEqual(calls, [])
 
     def test_move_focus_clamps_ametek_focus_value_to_document_range(self) -> None:
         spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
@@ -740,6 +883,36 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 spot_api.move_focus(1)
 
         self.assertIn("SPOT focus response is not an integer", str(raised.exception))
+
+    def test_move_focus_secure_mode_read_status_is_preserved(self) -> None:
+        spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
+
+        with patch.object(spot_api, "urlopen", return_value=UrlopenResponse(b"secure mode", 403)):
+            with self.assertRaises(spot_api.SpotFocusControlError) as raised:
+                spot_api.move_focus(1)
+
+        self.assertEqual(raised.exception.upstream_status, 403)
+        self.assertIn("HTTP 403", str(raised.exception))
+        self.assertIn("secure mode", str(raised.exception))
+
+    def test_move_focus_secure_mode_write_status_is_preserved(self) -> None:
+        spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
+        spot_api.config.SPOT_FOCUS_STEP = 50
+        calls: list[FocusUrlopenTarget] = []
+
+        def fake_urlopen(target: FocusUrlopenTarget, timeout: int) -> UrlopenResponse:
+            calls.append(target)
+            if len(calls) == 1:
+                return UrlopenResponse(b"700", 200)
+            return UrlopenResponse(b"secure mode", 403)
+
+        with patch.object(spot_api, "urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(spot_api.SpotFocusControlError) as raised:
+                spot_api.move_focus(1)
+
+        self.assertEqual(raised.exception.upstream_status, 403)
+        self.assertIn("HTTP 403", str(raised.exception))
+        self.assertIn("secure mode", str(raised.exception))
 
     def test_spot_focus_bad_upstream_body_maps_to_bad_gateway(self) -> None:
         from backend import app as backend_app

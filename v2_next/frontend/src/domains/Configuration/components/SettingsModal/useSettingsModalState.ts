@@ -30,7 +30,7 @@ const SECTION_FIELD_MAP: Record<string, Array<keyof SettingsFormState>> = {
   'settings-comm': ['extruderIp', 'extruderPort', 'lsIp', 'lsPort'],
   'settings-observability': [],
   'settings-memory': [],
-  'settings-spot': ['spotIp', 'spotRefreshInterval'],
+  'settings-spot': ['spotIp', 'spotRefreshInterval', 'spotActuatorStep'],
   'settings-storage': [
     'logPath',
     'snapshotPath',
@@ -89,6 +89,7 @@ const LABEL_MAP: Record<keyof SettingsFormState, string> = {
   lsPort: 'LS PLC Port',
   spotIp: 'SPOT IP',
   spotRefreshInterval: 'SPOT Refresh (sec)',
+  spotActuatorStep: CONFIG_LABELS.SPOT_ACTUATOR_STEP,
   thresholdMasterOn: '알림 마스터',
   thresholdSpeedEnabled: '속도 알림 사용',
   thresholdSpeedValue: '속도 임계값',
@@ -139,6 +140,7 @@ const DIRTY_KEYS: Array<keyof SettingsFormState> = [
   'lsPort',
   'spotIp',
   'spotRefreshInterval',
+  'spotActuatorStep',
   'thresholdMasterOn',
   'thresholdSpeedEnabled',
   'thresholdSpeedValue',
@@ -195,6 +197,7 @@ const CHANGE_SUMMARY_KEYS: Array<keyof SettingsFormState> = [
   'lsPort',
   'spotIp',
   'spotRefreshInterval',
+  'spotActuatorStep',
   'logPath',
   'snapshotPath',
   'autoSave',
@@ -355,6 +358,7 @@ export function useSettingsModalState(opts: SettingsModalStateOptions) {
         items: [
           `IP: ${settingsForm.spotIp || '-'}`,
           `새로고침: ${settingsForm.spotRefreshInterval || '-'}초`,
+          `액추에이터 스텝: ${settingsForm.spotActuatorStep || '-'}`,
         ],
       },
       {

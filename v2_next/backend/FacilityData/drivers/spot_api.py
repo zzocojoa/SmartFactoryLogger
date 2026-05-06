@@ -21,6 +21,11 @@ _IMG_BACKOFF_MAX_SEC = 5.0
 _TEMP_CACHE_TTL_SEC = 15.0
 _SPOT_FOCUS_MIN_MM = 300
 _SPOT_FOCUS_MAX_MM = 10000
+_SPOT_FOCUS_VERIFY_TIMEOUT_SEC = 4.0
+_SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
+_SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
+_SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
+_ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 _img_fetch_lock = asyncio.Lock()
 _img_last_error = 0.0
 _img_failure_count = 0
@@ -93,6 +98,19 @@ class SpotFocusControlError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.focus_url = focus_url
+        self.upstream_status = upstream_status
+
+
+class SpotActuatorControlError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        actuator_url: str,
+        upstream_status: Optional[int],
+    ) -> None:
+        super().__init__(message)
+        self.actuator_url = actuator_url
         self.upstream_status = upstream_status
 
 
@@ -854,8 +872,18 @@ def _parse_spot_focus_position(
             f"url={focus_url}; status_code={upstream_status}; body={raw_focus[:200]}",
             focus_url=focus_url,
             upstream_status=upstream_status,
-        )
+    )
     return int(raw_focus)
+
+
+def _validate_spot_focus_write_ack(
+    raw_focus: str,
+    focus_url: str,
+    upstream_status: Optional[int],
+) -> None:
+    if raw_focus.upper() == "OK":
+        return
+    _parse_spot_focus_position(raw_focus, focus_url, upstream_status)
 
 
 def _raise_spot_focus_request_error(action: str, focus_url: str, exc: BaseException) -> None:
@@ -898,7 +926,7 @@ def _write_spot_focus_position(focus_url: str, new_val: int) -> None:
     request = Request(
         focus_url,
         data=str(new_val).encode("ascii"),
-        headers={"Content-Type": "text/plain"},
+        headers={"Content-Type": "application/json;charset=utf-8"},
         method="PUT",
     )
     try:
@@ -924,14 +952,26 @@ def _write_spot_focus_position(focus_url: str, new_val: int) -> None:
             upstream_status=code,
         )
     raw_focus = _decode_spot_focus_body(content, focus_url, code)
-    written_value = _parse_spot_focus_position(raw_focus, focus_url, code)
-    if written_value != new_val:
-        raise SpotFocusControlError(
-            "SPOT focus write returned unexpected value; "
-            f"url={focus_url}; status_code={code}; value={new_val}; body={raw_focus[:200]}",
-            focus_url=focus_url,
-            upstream_status=code,
-        )
+    _validate_spot_focus_write_ack(raw_focus, focus_url, code)
+
+
+def _wait_for_spot_focus_position(focus_url: str, expected_value: int, previous_value: int) -> int:
+    deadline = time.monotonic() + _SPOT_FOCUS_VERIFY_TIMEOUT_SEC
+    last_value = previous_value
+
+    while time.monotonic() <= deadline:
+        last_value = _read_spot_focus_position(focus_url)
+        if last_value == expected_value:
+            return last_value
+        time.sleep(_SPOT_FOCUS_VERIFY_INTERVAL_SEC)
+
+    raise SpotFocusControlError(
+        "SPOT focus write did not reach requested position; "
+        f"url={focus_url}; previous={previous_value}; expected={expected_value}; "
+        f"last_read={last_value}; timeout_sec={_SPOT_FOCUS_VERIFY_TIMEOUT_SEC}",
+        focus_url=focus_url,
+        upstream_status=None,
+    )
 
 
 def move_focus(steps: int) -> Dict[str, Any]:
@@ -957,11 +997,141 @@ def move_focus(steps: int) -> Dict[str, Any]:
             }
 
         _write_spot_focus_position(focus_url, new_val)
+        verified = _wait_for_spot_focus_position(focus_url, new_val, current)
 
         return {
             "status": "ok",
             "current": current,
             "new": new_val,
+            "verified": verified,
             "request_steps": steps,
             "focus_step": config.SPOT_FOCUS_STEP,
+        }
+
+
+def _resolve_spot_actuator_url() -> str:
+    actuator_url = str(config.SPOT_ACTUATOR_URL or "").strip()
+    if not actuator_url:
+        raise RuntimeError("SPOT_ACTUATOR_URL is not configured")
+    return actuator_url
+
+
+def _read_spot_actuator_position(actuator_url: str) -> int:
+    read_url = f"{actuator_url}?scan=3"
+    try:
+        with urlopen(read_url, timeout=3) as resp:
+            code = resp.getcode()
+            content = resp.read()
+    except HTTPError as exc:
+        body = _preview_spot_focus_body(exc.read())
+        raise SpotActuatorControlError(
+            f"SPOT actuator read failed: HTTP {exc.code}; url={read_url}; body={body[:200]}",
+            actuator_url=actuator_url,
+            upstream_status=exc.code,
+        ) from exc
+    except (TimeoutError, URLError, ValueError) as exc:
+        raise SpotActuatorControlError(
+            "SPOT actuator request failed; "
+            f"action=read; url={read_url}; error_type={exc.__class__.__name__}; "
+            f"error={_format_exception_message(exc)}",
+            actuator_url=actuator_url,
+            upstream_status=None,
+        ) from exc
+
+    if code != 200:
+        raise SpotActuatorControlError(
+            f"SPOT actuator read failed: HTTP {code}; url={read_url}; body={_preview_spot_focus_body(content)}",
+            actuator_url=actuator_url,
+            upstream_status=code,
+        )
+
+    match = _ACTUATOR_POS_PATTERN.search(content)
+    if not match:
+        raise SpotActuatorControlError(
+            f"SPOT actuator position not found in response; url={read_url}; body={_preview_spot_focus_body(content)}",
+            actuator_url=actuator_url,
+            upstream_status=code,
+        )
+    return int(match.group(1).decode("ascii"))
+
+
+def _write_spot_actuator_position(actuator_url: str, new_val: int) -> None:
+    write_url = f"{actuator_url}?scan=3&move={new_val}"
+    try:
+        with urlopen(write_url, timeout=3) as resp:
+            code = resp.getcode()
+            content = resp.read()
+    except HTTPError as exc:
+        body = _preview_spot_focus_body(exc.read())
+        raise SpotActuatorControlError(
+            f"SPOT actuator write failed: HTTP {exc.code}; url={write_url}; body={body[:200]}",
+            actuator_url=actuator_url,
+            upstream_status=exc.code,
+        ) from exc
+    except (TimeoutError, URLError, ValueError) as exc:
+        raise SpotActuatorControlError(
+            "SPOT actuator request failed; "
+            f"action=write; url={write_url}; error_type={exc.__class__.__name__}; "
+            f"error={_format_exception_message(exc)}",
+            actuator_url=actuator_url,
+            upstream_status=None,
+        ) from exc
+
+    if code != 200:
+        raise SpotActuatorControlError(
+            f"SPOT actuator write failed: HTTP {code}; url={write_url}; body={_preview_spot_focus_body(content)}",
+            actuator_url=actuator_url,
+            upstream_status=code,
+        )
+
+
+def _wait_for_spot_actuator_position(actuator_url: str, expected_value: int, previous_value: int) -> int:
+    deadline = time.monotonic() + _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC
+    last_value = previous_value
+
+    while time.monotonic() <= deadline:
+        last_value = _read_spot_actuator_position(actuator_url)
+        if last_value == expected_value:
+            return last_value
+        time.sleep(_SPOT_ACTUATOR_VERIFY_INTERVAL_SEC)
+
+    raise SpotActuatorControlError(
+        "SPOT actuator write did not reach requested position; "
+        f"url={actuator_url}; previous={previous_value}; expected={expected_value}; "
+        f"last_read={last_value}; timeout_sec={_SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC}",
+        actuator_url=actuator_url,
+        upstream_status=None,
+    )
+
+
+def move_actuator(steps: int) -> Dict[str, Any]:
+    if steps == 0:
+        return {"status": "noop", "message": "steps=0"}
+
+    actuator_url = _resolve_spot_actuator_url()
+
+    with _ACTUATOR_LOCK:
+        current = _read_spot_actuator_position(actuator_url)
+        delta = steps * max(1, config.SPOT_ACTUATOR_STEP)
+        new_val = current + delta
+        new_val = max(0, min(1000, new_val))
+        if new_val == current:
+            return {
+                "status": "limit",
+                "current": current,
+                "new": new_val,
+                "request_steps": steps,
+                "actuator_step": config.SPOT_ACTUATOR_STEP,
+            }
+
+        _write_spot_actuator_position(actuator_url, new_val)
+        verified = _wait_for_spot_actuator_position(actuator_url, new_val, current)
+
+        return {
+            "status": "ok",
+            "current": current,
+            "new": new_val,
+            "verified": verified,
+            "request_steps": steps,
+            "actuator_step": config.SPOT_ACTUATOR_STEP,
         }

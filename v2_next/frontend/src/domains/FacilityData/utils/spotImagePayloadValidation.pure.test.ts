@@ -162,6 +162,44 @@ describe('validateSpotImagePayload', () => {
     expect(result.ageSec).toBe(15);
   });
 
+  it('accepts valid image bytes when captured_at is old due to clock skew', () => {
+    const bytes = createValidJpegBytes();
+    const headers = buildHeaders('image/jpeg', bytes.length);
+    const metadata = createMetadata({
+      age_sec: null,
+      captured_at: receivedAt - 2 * 60 * 60 * 1000,
+    });
+    const result = validateSpotImagePayload({
+      bytes,
+      status: 200,
+      headers,
+      metadata,
+      requestUrl: '/spot-image',
+      receivedAt,
+    });
+    expect(result.format).toBe('jpeg');
+    expect(result.capturedAt).toBe(receivedAt - 2 * 60 * 60 * 1000);
+  });
+
+  it('accepts valid image bytes when age metadata exceeds local freshness limits', () => {
+    const bytes = createValidJpegBytes();
+    const headers = buildHeaders('image/jpeg', bytes.length);
+    const metadata = createMetadata({
+      age_sec: 3_700_000,
+      captured_at: null,
+    });
+    const result = validateSpotImagePayload({
+      bytes,
+      status: 200,
+      headers,
+      metadata,
+      requestUrl: '/spot-image',
+      receivedAt,
+    });
+    expect(result.format).toBe('jpeg');
+    expect(result.ageSec).toBe(3_700);
+  });
+
   it('rejects plain text payload as non-image', () => {
     const bytes = makePaddedPayload(Array.from(toBytes('<plain>not an image</plain>')), 32);
     const headers = buildHeaders('text/plain', bytes.length);
@@ -207,6 +245,39 @@ describe('validateSpotImagePayload', () => {
       receivedAt,
       expectedCode: 'invalid-array-length',
       expectedMessagePart: 'Content-Length mismatch',
+    });
+  });
+
+  it('rejects malformed content-length header', () => {
+    const bytes = createValidJpegBytes();
+    const headers = buildHeaders('image/jpeg', null);
+    headers.set('content-length', 'not-a-number');
+    const metadata = createMetadata();
+    expectPayloadValidationError({
+      bytes,
+      status: 200,
+      headers,
+      metadata,
+      requestUrl: '/spot-image',
+      receivedAt,
+      expectedCode: 'invalid-array-length',
+      expectedMessagePart: 'Invalid Content-Length',
+    });
+  });
+
+  it('rejects negative content-length header', () => {
+    const bytes = createValidJpegBytes();
+    const headers = buildHeaders('image/jpeg', -1);
+    const metadata = createMetadata();
+    expectPayloadValidationError({
+      bytes,
+      status: 200,
+      headers,
+      metadata,
+      requestUrl: '/spot-image',
+      receivedAt,
+      expectedCode: 'invalid-array-length',
+      expectedMessagePart: 'Invalid Content-Length',
     });
   });
 
@@ -257,20 +328,20 @@ describe('validateSpotImagePayload', () => {
     });
   });
 
-  it('rejects age timestamp inconsistency', () => {
+  it('accepts age timestamp drift from external client clock skew', () => {
     const bytes = createValidJpegBytes();
     const headers = buildHeaders('image/jpeg', bytes.length);
-    const metadata = createMetadata({ age_sec: 0, captured_at: 1_699_999_998_120 });
-    expectPayloadValidationError({
+    const metadata = createMetadata({ age_sec: 0, captured_at: receivedAt - 90 * 60 * 1000 });
+    const result = validateSpotImagePayload({
       bytes,
       status: 200,
       headers,
       metadata,
       requestUrl: '/spot-image',
       receivedAt,
-      expectedCode: 'invalid-timestamp',
-      expectedMessagePart: 'inconsistent',
     });
+    expect(result.format).toBe('jpeg');
+    expect(result.ageSec).toBe(0);
   });
 
   it('rejects missing image timing metadata', () => {
