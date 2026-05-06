@@ -116,6 +116,12 @@ def _env_float(name: str, fallback: float) -> float:
         return fallback
 
 
+def _positive_int(value: int, fallback: int) -> int:
+    if value > 0:
+        return value
+    return fallback
+
+
 def _load_ls_targets(parser: configparser.ConfigParser) -> list[tuple[str, str]]:
     if parser.has_section("LS_PLC_TARGETS"):
         targets: list[tuple[str, str]] = []
@@ -184,6 +190,15 @@ class ConfigManager:
             _get(parser, "SPOT", "focusurl", f"http://{spot_ip}/control?p=focus")
             or f"http://{spot_ip}/control?p=focus",
         )
+        spot_focus_step_fallback = _env_int(
+            "SPOT_ACTUATOR_STEP",
+            _get_int(parser, "SPOT", "actuatorstep", config.DEFAULT_SPOT_FOCUS_STEP),
+        )
+        spot_focus_step = _env_int(
+            "SPOT_FOCUS_STEP",
+            _get_int(parser, "SPOT", "focusstep", spot_focus_step_fallback),
+        )
+        spot_focus_step = _positive_int(spot_focus_step, config.DEFAULT_SPOT_FOCUS_STEP)
         spot_url = os.getenv("SPOT_URL", f"http://{spot_ip}/output?p=temperature")
 
         spot_crosshair_x = _env_float(
@@ -265,6 +280,7 @@ class ConfigManager:
                 "crosshair_size": spot_crosshair_size,
                 "crosshair_gap": spot_crosshair_gap,
                 "focus_url": spot_focus_url,
+                "focus_step": spot_focus_step,
                 "actuator_ip": spot_actuator_ip,
                 "actuator_step": spot_actuator_step,
                 "actuator_url": spot_actuator_url,
@@ -342,6 +358,7 @@ class ConfigManager:
             "spot.crosshair_size",
             "spot.crosshair_gap",
             "spot.focus_url",
+            "spot.focus_step",
             "spot.actuator_ip",
             "spot.actuator_step",
             "spot.actuator_url",
@@ -458,6 +475,8 @@ class ConfigManager:
                     spot_cfg.get("crosshair_gap", config.DEFAULT_SPOT_CROSSHAIR_GAP)
                 )
                 config.SPOT_FOCUS_URL = str(spot_cfg.get("focus_url", config.SPOT_FOCUS_URL))
+                focus_step = int(spot_cfg.get("focus_step", config.SPOT_FOCUS_STEP))
+                config.SPOT_FOCUS_STEP = _positive_int(focus_step, config.DEFAULT_SPOT_FOCUS_STEP)
                 config.SPOT_ACTUATOR_IP = str(spot_cfg.get("actuator_ip", spot_ip))
                 config.SPOT_ACTUATOR_STEP = int(
                     spot_cfg.get("actuator_step", config.DEFAULT_SPOT_ACTUATOR_STEP)

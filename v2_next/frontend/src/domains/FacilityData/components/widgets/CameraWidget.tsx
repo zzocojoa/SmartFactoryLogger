@@ -87,10 +87,10 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
       </div>
       <div className="camera-controls" style={{ marginTop: '4px' }}>
         <button type="button" disabled={focusDisabled} onClick={() => props.requestFocus?.(moveStep)}>
-          &lt;-Focus
+          Focus +
         </button>
         <button type="button" disabled={focusDisabled} onClick={() => props.requestFocus?.(-moveStep)}>
-          Focus-&gt;
+          Focus -
         </button>
       </div>
     </div>

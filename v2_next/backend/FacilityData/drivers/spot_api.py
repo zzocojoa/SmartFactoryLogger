@@ -3,15 +3,15 @@ import re
 import threading
 import time
 from typing import Any, Dict, Optional
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import httpx
 
 from backend import config
 
 _ACTUATOR_LOCK = threading.Lock()
-_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 
 # 이미지 프록시 단기 캐시
 _img_cache: Dict[str, Any] = {"data": None, "time": 0.0, "temp": 0.0, "temp_time": 0.0}
@@ -19,6 +19,8 @@ _IMG_CACHE_TTL_SEC = 2.0
 _IMG_BACKOFF_BASE_SEC = 0.5
 _IMG_BACKOFF_MAX_SEC = 5.0
 _TEMP_CACHE_TTL_SEC = 15.0
+_SPOT_FOCUS_MIN_MM = 300
+_SPOT_FOCUS_MAX_MM = 10000
 _img_fetch_lock = asyncio.Lock()
 _img_last_error = 0.0
 _img_failure_count = 0
@@ -78,6 +80,19 @@ class SpotTemperatureFetchError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.temp_url = temp_url
+        self.upstream_status = upstream_status
+
+
+class SpotFocusControlError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        focus_url: str,
+        upstream_status: Optional[int],
+    ) -> None:
+        super().__init__(message)
+        self.focus_url = focus_url
         self.upstream_status = upstream_status
 
 
@@ -805,48 +820,148 @@ def get_cached_spot_temp() -> float:
     return _img_cache["temp"]
 
 
+def _resolve_spot_focus_url() -> str:
+    focus_url = str(config.SPOT_FOCUS_URL or "").strip()
+    if not focus_url:
+        raise RuntimeError("SPOT_FOCUS_URL is not configured")
+    return focus_url
+
+
+def _preview_spot_focus_body(content: bytes) -> str:
+    return content.decode("utf-8", errors="replace").strip()[:200]
+
+
+def _decode_spot_focus_body(content: bytes, focus_url: str, upstream_status: Optional[int]) -> str:
+    try:
+        return content.decode("utf-8", errors="strict").strip()
+    except UnicodeDecodeError as exc:
+        raise SpotFocusControlError(
+            "SPOT focus response is not UTF-8; "
+            f"url={focus_url}; status_code={upstream_status}; body={_preview_spot_focus_body(content)}",
+            focus_url=focus_url,
+            upstream_status=upstream_status,
+        ) from exc
+
+
+def _parse_spot_focus_position(
+    raw_focus: str,
+    focus_url: str,
+    upstream_status: Optional[int],
+) -> int:
+    if not re.fullmatch(r"\d+", raw_focus):
+        raise SpotFocusControlError(
+            "SPOT focus response is not an integer; "
+            f"url={focus_url}; status_code={upstream_status}; body={raw_focus[:200]}",
+            focus_url=focus_url,
+            upstream_status=upstream_status,
+        )
+    return int(raw_focus)
+
+
+def _raise_spot_focus_request_error(action: str, focus_url: str, exc: BaseException) -> None:
+    raise SpotFocusControlError(
+        "SPOT focus request failed; "
+        f"action={action}; url={focus_url}; error_type={exc.__class__.__name__}; "
+        f"error={_format_exception_message(exc)}",
+        focus_url=focus_url,
+        upstream_status=None,
+    ) from exc
+
+
+def _read_spot_focus_position(focus_url: str) -> int:
+    try:
+        with urlopen(focus_url, timeout=3) as resp:
+            code = resp.getcode()
+            content = resp.read()
+    except HTTPError as exc:
+        body = _preview_spot_focus_body(exc.read())
+        raise SpotFocusControlError(
+            f"SPOT focus read failed: HTTP {exc.code}; url={focus_url}; body={body[:200]}",
+            focus_url=focus_url,
+            upstream_status=exc.code,
+        ) from exc
+    except (TimeoutError, URLError, ValueError) as exc:
+        _raise_spot_focus_request_error("read", focus_url, exc)
+
+    if code != 200:
+        raise SpotFocusControlError(
+            f"SPOT focus read failed: HTTP {code}; url={focus_url}; body={_preview_spot_focus_body(content)}",
+            focus_url=focus_url,
+            upstream_status=code,
+        )
+
+    raw_focus = _decode_spot_focus_body(content, focus_url, code)
+    return _parse_spot_focus_position(raw_focus, focus_url, code)
+
+
+def _write_spot_focus_position(focus_url: str, new_val: int) -> None:
+    request = Request(
+        focus_url,
+        data=str(new_val).encode("ascii"),
+        headers={"Content-Type": "text/plain"},
+        method="PUT",
+    )
+    try:
+        with urlopen(request, timeout=3) as resp:
+            code = resp.getcode()
+            content = resp.read()
+    except HTTPError as exc:
+        body = _preview_spot_focus_body(exc.read())
+        raise SpotFocusControlError(
+            "SPOT focus write failed: "
+            f"HTTP {exc.code}; url={focus_url}; value={new_val}; body={body[:200]}",
+            focus_url=focus_url,
+            upstream_status=exc.code,
+        ) from exc
+    except (TimeoutError, URLError, ValueError) as exc:
+        _raise_spot_focus_request_error("write", focus_url, exc)
+
+    if code != 200:
+        raise SpotFocusControlError(
+            f"SPOT focus write failed: HTTP {code}; url={focus_url}; "
+            f"value={new_val}; body={_preview_spot_focus_body(content)}",
+            focus_url=focus_url,
+            upstream_status=code,
+        )
+    raw_focus = _decode_spot_focus_body(content, focus_url, code)
+    written_value = _parse_spot_focus_position(raw_focus, focus_url, code)
+    if written_value != new_val:
+        raise SpotFocusControlError(
+            "SPOT focus write returned unexpected value; "
+            f"url={focus_url}; status_code={code}; value={new_val}; body={raw_focus[:200]}",
+            focus_url=focus_url,
+            upstream_status=code,
+        )
+
+
 def move_focus(steps: int) -> Dict[str, Any]:
     if steps == 0:
         return {"status": "noop", "message": "steps=0"}
 
-    if not config.SPOT_ACTUATOR_URL:
-        raise RuntimeError("SPOT_ACTUATOR_URL is not configured")
+    focus_url = _resolve_spot_focus_url()
 
     with _ACTUATOR_LOCK:
-        read_url = f"{config.SPOT_ACTUATOR_URL}?scan=3"
-        with urlopen(read_url, timeout=3) as resp:
-            content = resp.read()
-
-        match = _POS_PATTERN.search(content)
-        if not match:
-            raise ValueError("Actuator position not found in response")
-
-        current = int(match.group(1).decode("ascii"))
-        delta = steps * max(1, config.SPOT_ACTUATOR_STEP)
+        current = _read_spot_focus_position(focus_url)
+        delta = steps * max(1, config.SPOT_FOCUS_STEP)
         new_val = current + delta
 
         # v1 동작에 맞춰 범위를 제한한다.
-        new_val = max(0, min(1000, new_val))
+        new_val = max(_SPOT_FOCUS_MIN_MM, min(_SPOT_FOCUS_MAX_MM, new_val))
         if new_val == current:
             return {
                 "status": "limit",
                 "current": current,
                 "new": new_val,
                 "request_steps": steps,
-                "actuator_step": config.SPOT_ACTUATOR_STEP,
+                "focus_step": config.SPOT_FOCUS_STEP,
             }
 
-        write_url = f"{config.SPOT_ACTUATOR_URL}?scan=3&move={new_val}"
-        with urlopen(write_url, timeout=3) as resp:
-            code = resp.getcode()
-
-        if code != 200:
-            raise RuntimeError(f"Actuator write failed: HTTP {code}")
+        _write_spot_focus_position(focus_url, new_val)
 
         return {
             "status": "ok",
             "current": current,
             "new": new_val,
             "request_steps": steps,
-            "actuator_step": config.SPOT_ACTUATOR_STEP,
+            "focus_step": config.SPOT_FOCUS_STEP,
         }

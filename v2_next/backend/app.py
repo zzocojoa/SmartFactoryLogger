@@ -247,6 +247,7 @@ _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
 _SPOT_PROXY_IMAGE_PATH = "/api/spot/proxy_image"
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
+_SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
 
 
 def _lifecycle_log_fields() -> str:
@@ -2504,8 +2505,8 @@ def spot_config():
         "crosshair_gap": config.SPOT_CROSSHAIR_GAP,
         "widget_width": config.SPOT_WIDGET_WIDTH,
         "widget_height": config.SPOT_WIDGET_HEIGHT,
-        "focus_step": config.SPOT_ACTUATOR_STEP,
-        "focus_enabled": bool(config.SPOT_ACTUATOR_URL),
+        "focus_step": config.SPOT_FOCUS_STEP,
+        "focus_enabled": bool(config.SPOT_FOCUS_URL),
         "proxy": spot_control.get_image_proxy_diagnostics(),
     }
 
@@ -2513,8 +2514,18 @@ def spot_config():
 def spot_focus(steps: int = 0):
     try:
         return spot_control.move_focus(steps)
+    except spot_control.SpotFocusControlError as exc:
+        if exc.upstream_status in {401, 403}:
+            raise HTTPException(status_code=exc.upstream_status, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        if str(exc).strip() == _SPOT_FOCUS_CONFIG_ERROR:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _ceil_positive_seconds(value: float) -> int:

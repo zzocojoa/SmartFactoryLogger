@@ -93,6 +93,13 @@ const INITIAL_SPOT_DIAGNOSTICS: SpotPollingDiagnosticsWithImage = {
   last_image_retry_after_sec: null,
 };
 
+const resolveSpotControlErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return 'SPOT focus control failed';
+};
+
 export const useSpotViewModel = (): UseSpotViewModel => {
   const [config, setConfig] = useState<SpotConfig | null>(null);
   const [imageUrl, setImageUrl] = useState<string>('');
@@ -388,12 +395,26 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       try {
         await controlSpotFocus(steps);
       } catch (error) {
+        const nextImageError = resolveSpotControlErrorMessage(error);
+        const nextImageState = {
+          ...imageStateRef.current,
+          imageError: nextImageError,
+        };
         console.error('Spot focus failed', error);
+        imageStateRef.current = nextImageState;
+        setImageError(nextImageError);
+        syncDashboardSpotImageState(
+          nextImageState.imageUrl,
+          false,
+          nextImageError,
+          nextImageState.lastSuccessAt,
+          nextImageState.metadata
+        );
       } finally {
         setFocusBusy(false);
       }
     },
-    [focusBusy]
+    [focusBusy, syncDashboardSpotImageState]
   );
 
   const controlActuator = useCallback(async (step: number) => {

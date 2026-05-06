@@ -188,6 +188,12 @@ def _env_float(name: str, fallback: float) -> float:
         return fallback
 
 
+def _positive_int(value: int, fallback: int) -> int:
+    if value > 0:
+        return value
+    return fallback
+
+
 def _get_bool(parser: configparser.ConfigParser, section: str, option: str, fallback: bool) -> bool:
     val = _get(parser, section, option, None)
     if val is None:
@@ -397,8 +403,11 @@ SPOT_FOCUS_URL = os.getenv(
     "SPOT_FOCUS_URL",
     _get(CONFIG, "SPOT", "focusurl", DEFAULT_SPOT_FOCUS_URL) or DEFAULT_SPOT_FOCUS_URL,
 )
-SPOT_FOCUS_STEP = _get_int(CONFIG, "SPOT", "focusstep", DEFAULT_SPOT_FOCUS_STEP)
+_SPOT_FOCUS_STEP_FALLBACK = _get_int(CONFIG, "SPOT", "actuatorstep", DEFAULT_SPOT_FOCUS_STEP)
+_SPOT_FOCUS_STEP_FALLBACK = _env_int("SPOT_ACTUATOR_STEP", _SPOT_FOCUS_STEP_FALLBACK)
+SPOT_FOCUS_STEP = _get_int(CONFIG, "SPOT", "focusstep", _SPOT_FOCUS_STEP_FALLBACK)
 SPOT_FOCUS_STEP = _env_int("SPOT_FOCUS_STEP", SPOT_FOCUS_STEP)
+SPOT_FOCUS_STEP = _positive_int(SPOT_FOCUS_STEP, DEFAULT_SPOT_FOCUS_STEP)
 
 SPOT_ACTUATOR_IP = os.getenv("SPOT_ACTUATOR_IP", _get(CONFIG, "SPOT", "actuatorip", "") or "")
 if not SPOT_ACTUATOR_IP:
