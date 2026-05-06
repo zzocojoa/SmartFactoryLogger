@@ -63,6 +63,21 @@ def _get_int(parser: configparser.ConfigParser, section: str, option: str, fallb
         return fallback
 
 
+def _get_positive_int(parser: configparser.ConfigParser, section: str, option: str, fallback: int) -> int:
+    if not parser.has_option(section, option):
+        return fallback
+    raw = parser.get(section, option).strip()
+    if raw == "":
+        raise ValueError(f"{section}.{option} must be a positive integer")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{section}.{option} must be a positive integer: raw={raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"{section}.{option} must be a positive integer: value={value}")
+    return value
+
+
 def _get_float(parser: configparser.ConfigParser, section: str, option: str, fallback: float) -> float:
     raw = _get(parser, section, option, "")
     try:
@@ -117,8 +132,13 @@ def get_config_snapshot() -> dict:
         "port": _get_int(parser, "LS_PLC", "port", config.DEFAULT_LS_PORT),
     }
     spot_ip = _get(parser, "SPOT", "ip", config.DEFAULT_SPOT_IP)
-    legacy_actuator_ip = _get(parser, "ACTUATOR", "actuatorip", "") or ""
-    spot_actuator_ip = _get(parser, "SPOT", "actuatorip", legacy_actuator_ip) or legacy_actuator_ip or spot_ip
+    legacy_actuator_ip = _get_text(parser, "ACTUATOR", "actuatorip")
+    if parser.has_option("SPOT", "actuatorip"):
+        spot_actuator_ip = _get_text(parser, "SPOT", "actuatorip")
+    elif legacy_actuator_ip:
+        spot_actuator_ip = legacy_actuator_ip
+    else:
+        spot_actuator_ip = spot_ip
     spot = {
         "ip": spot_ip,
         "url": _get(parser, "SPOT", "url", f"http://{spot_ip}/output?p=temperature"),
@@ -137,9 +157,9 @@ def get_config_snapshot() -> dict:
         "crosshair_size": _get_int(parser, "SPOT", "crosshairsize", config.DEFAULT_SPOT_CROSSHAIR_SIZE),
         "crosshair_gap": _get_int(parser, "SPOT", "crosshairgap", config.DEFAULT_SPOT_CROSSHAIR_GAP),
         "focus_url": _get(parser, "SPOT", "focusurl", f"http://{spot_ip}/control?p=focus"),
-        "focus_step": _get_int(parser, "SPOT", "focusstep", config.DEFAULT_SPOT_FOCUS_STEP),
+        "focus_step": _get_positive_int(parser, "SPOT", "focusstep", config.DEFAULT_SPOT_FOCUS_STEP),
         "actuator_ip": spot_actuator_ip,
-        "actuator_step": _get_int(parser, "SPOT", "actuatorstep", config.DEFAULT_SPOT_ACTUATOR_STEP),
+        "actuator_step": _get_positive_int(parser, "SPOT", "actuatorstep", config.DEFAULT_SPOT_ACTUATOR_STEP),
         "actuator_url": _get(parser, "SPOT", "actuatorurl", f"http://{spot_actuator_ip}/scan.cgi"),
         "widget_width": _get_int(parser, "SPOT", "widgetwidth", config.DEFAULT_SPOT_WIDGET_WIDTH),
         "widget_height": _get_int(parser, "SPOT", "widgetheight", config.DEFAULT_SPOT_WIDGET_HEIGHT),

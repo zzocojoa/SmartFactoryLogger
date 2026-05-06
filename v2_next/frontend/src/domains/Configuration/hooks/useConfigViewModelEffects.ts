@@ -57,7 +57,9 @@ export const useConfigAutoRefreshEffect = ({
       if (disposed) {
         return;
       }
-      await loadSettings();
+      if (!settingsFingerprintRef.current) {
+        await loadSettings();
+      }
       if (!isVisible()) {
         return;
       }

@@ -57,11 +57,11 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
       : !actuatorStepValid
         ? `Invalid actuator step: ${spotConfig.actuator_step}`
         : undefined;
-  const requestFocusChange = (steps: number): void => {
+  const requestFocusChange = (stepUnits: number): void => {
     if (!props.requestFocus) {
       throw new Error('SPOT focus request handler is missing');
     }
-    props.requestFocus(steps);
+    props.requestFocus(stepUnits);
   };
 
   return (
@@ -105,7 +105,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
           disabled={focusDisabled}
           title={focusDisabledReason}
           aria-label={`Move SPOT focus actuator left ${actuatorStep}`}
-          onClick={() => requestFocusChange(-actuatorStep)}
+          onClick={() => requestFocusChange(1)}
         >
           &lt;-Focus
         </button>
@@ -114,7 +114,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
           disabled={focusDisabled}
           title={focusDisabledReason}
           aria-label={`Move SPOT focus actuator right ${actuatorStep}`}
-          onClick={() => requestFocusChange(actuatorStep)}
+          onClick={() => requestFocusChange(-1)}
         >
           Focus -&gt;
         </button>

@@ -37,8 +37,8 @@ import * as LOGIC from './shared/constants/logic';
 import * as THEME from './shared/constants/theme';
 import { useModal } from './shared/hooks/useGlobalModalContext';
 import { useTheme } from './shared/hooks/useThemeContext';
+import { SettingsModalContainer } from './domains/Configuration/components/SettingsModal/SettingsModalContainer';
 
-const SettingsModalContainer = React.lazy(() => import('./domains/Configuration/components/SettingsModal/SettingsModalContainer').then(m => ({ default: m.SettingsModalContainer })));
 const DashboardSceneSurface = React.lazy(() => import('./scenes/DashboardSceneSurface').then(m => ({ default: m.DashboardSceneSurface })));
 const NativeDashboardSurface = React.lazy(() => import('./scenes/NativeDashboardSurface').then(m => ({ default: m.NativeDashboardSurface })));
 

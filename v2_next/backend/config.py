@@ -83,6 +83,16 @@ def _resolve_config_path() -> Optional[Path]:
     if env_path:
         return Path(env_path)
 
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        packaged_candidates = [
+            executable_dir / "config.ini",
+            executable_dir / "config" / "config.ini",
+        ]
+        packaged_path = next((candidate for candidate in packaged_candidates if _safe_is_file(candidate)), None)
+        if packaged_path:
+            return packaged_path
+
     standard_dir = _get_user_data_dir()
     standard_path = standard_dir / "config.ini"
     if _safe_is_file(standard_path):

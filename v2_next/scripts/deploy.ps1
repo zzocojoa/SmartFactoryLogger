@@ -182,6 +182,8 @@ echo   Smart Factory Logger v$Version
 echo ============================================
 echo.
 
+cd /d "%~dp0"
+
 REM Set Playwright Browsers Path to local bundled folder
 set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
 
@@ -302,7 +304,8 @@ If Grafana is not configured:
 
 ## SPOT Actuator Config
 - Default ``[SPOT] actuatorstep`` is ``50`` for physical actuator movement.
-- Existing machine config is loaded from ``%APPDATA%\SmartFactoryLogger\config.ini``.
+- Packaged config is loaded from ``config.ini`` or ``config\config.ini`` next to this launcher when present.
+- Otherwise existing machine config is loaded from ``%APPDATA%\SmartFactoryLogger\config.ini``.
 - ``[SPOT] actuatorip`` falls back to legacy ``[ACTUATOR] actuatorip`` and then ``[SPOT] ip``.
 - ``[SPOT] actuatorurl`` defaults to ``http://{actuatorip}/scan.cgi`` when omitted.
 "@
