@@ -117,10 +117,32 @@ def get_config_snapshot() -> dict:
         "port": _get_int(parser, "LS_PLC", "port", config.DEFAULT_LS_PORT),
     }
     spot_ip = _get(parser, "SPOT", "ip", config.DEFAULT_SPOT_IP)
+    legacy_actuator_ip = _get(parser, "ACTUATOR", "actuatorip", "") or ""
+    spot_actuator_ip = _get(parser, "SPOT", "actuatorip", legacy_actuator_ip) or legacy_actuator_ip or spot_ip
     spot = {
         "ip": spot_ip,
+        "url": _get(parser, "SPOT", "url", f"http://{spot_ip}/output?p=temperature"),
+        "image_url": _get(parser, "SPOT", "imageurl", f"http://{spot_ip}/image.jpg"),
         "refresh_interval": _get_float(parser, "SPOT", "refreshinterval", config.DEFAULT_SPOT_REFRESH_INTERVAL),
         "timeout": _get_float(parser, "SPOT", "timeout", 0.5),
+        "crosshair_x": _get_float(parser, "SPOT", "crosshairx", config.DEFAULT_SPOT_CROSSHAIR_X),
+        "crosshair_y": _get_float(parser, "SPOT", "crosshairy", config.DEFAULT_SPOT_CROSSHAIR_Y),
+        "crosshair_color": _get(parser, "SPOT", "crosshaircolor", config.DEFAULT_SPOT_CROSSHAIR_COLOR),
+        "crosshair_thickness": _get_int(
+            parser,
+            "SPOT",
+            "crosshairthickness",
+            config.DEFAULT_SPOT_CROSSHAIR_THICKNESS,
+        ),
+        "crosshair_size": _get_int(parser, "SPOT", "crosshairsize", config.DEFAULT_SPOT_CROSSHAIR_SIZE),
+        "crosshair_gap": _get_int(parser, "SPOT", "crosshairgap", config.DEFAULT_SPOT_CROSSHAIR_GAP),
+        "focus_url": _get(parser, "SPOT", "focusurl", f"http://{spot_ip}/control?p=focus"),
+        "focus_step": _get_int(parser, "SPOT", "focusstep", config.DEFAULT_SPOT_FOCUS_STEP),
+        "actuator_ip": spot_actuator_ip,
+        "actuator_step": _get_int(parser, "SPOT", "actuatorstep", config.DEFAULT_SPOT_ACTUATOR_STEP),
+        "actuator_url": _get(parser, "SPOT", "actuatorurl", f"http://{spot_actuator_ip}/scan.cgi"),
+        "widget_width": _get_int(parser, "SPOT", "widgetwidth", config.DEFAULT_SPOT_WIDGET_WIDTH),
+        "widget_height": _get_int(parser, "SPOT", "widgetheight", config.DEFAULT_SPOT_WIDGET_HEIGHT),
     }
 
     settings = {
