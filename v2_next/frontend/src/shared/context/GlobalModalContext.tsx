@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback, useRef } from 'react';
+﻿import React, { createContext, useState, useCallback, useRef } from 'react';
 import {
   buildInitialModalState,
   buildModalState,
@@ -16,9 +16,11 @@ export const GlobalModalProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [state, setState] = useState(buildInitialModalState);
 
   const resolver = useRef<((value: unknown) => void) | null>(null);
+  const modalIdRef = useRef<number>(0);
 
-  const openModal = useCallback((type: ModalType, message: string, options: ModalOptions = {}) => {
-    setState(buildModalState(type, message, options));
+  const openModal = useCallback((type: ModalType, message: string, options: ModalOptions) => {
+    modalIdRef.current += 1;
+    setState(buildModalState(type, message, options, modalIdRef.current));
 
     return new Promise<unknown>((resolve) => {
       resolver.current = resolve;
@@ -26,16 +28,16 @@ export const GlobalModalProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const alert = useCallback((message: string, options?: ModalOptions | string) => {
-    return openModal('alert', message, normalizeModalOptions(options));
+    return openModal<void>('alert', message, normalizeModalOptions(options));
   }, [openModal]);
 
   const confirm = useCallback((message: string, options?: ModalOptions | string) => {
-    return openModal('confirm', message, normalizeModalOptions(options));
+    return openModal<boolean>('confirm', message, normalizeModalOptions(options));
   }, [openModal]);
 
   const prompt = useCallback((message: string, defaultValue?: string, options?: ModalOptions | string) => {
     const opts = normalizeModalOptions(options);
-    return openModal('prompt', message, { ...opts, defaultValue });
+    return openModal<string | null>('prompt', message, { ...opts, defaultValue });
   }, [openModal]);
 
   const close = useCallback((result?: unknown) => {
@@ -60,3 +62,4 @@ export const GlobalModalProvider: React.FC<{ children: React.ReactNode }> = ({ c
     </ModalContext.Provider>
   );
 };
+

@@ -105,7 +105,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
           disabled={focusDisabled}
           title={focusDisabledReason}
           aria-label={`Move SPOT focus actuator left ${actuatorStep}`}
-          onClick={() => requestFocusChange(1)}
+          onClick={() => requestFocusChange(-1)}
         >
           &lt;-Focus
         </button>
@@ -114,7 +114,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
           disabled={focusDisabled}
           title={focusDisabledReason}
           aria-label={`Move SPOT focus actuator right ${actuatorStep}`}
-          onClick={() => requestFocusChange(-1)}
+          onClick={() => requestFocusChange(1)}
         >
           Focus -&gt;
         </button>

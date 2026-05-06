@@ -2,15 +2,17 @@ import { act, renderHook } from '@testing-library/react';
 import { useSpotViewModel } from './useSpotViewModel';
 import { useDashboardStore } from '../../../store/useDashboardStore';
 import type { SpotConfig } from '../../../shared/types';
+import type { SpotFocusResponse } from '../../../shared/api/transport/spotService.transport';
 
 const mockFetchSpotConfig = jest.fn<[], Promise<SpotConfig>>();
 const mockFetchSpotImageResponse = jest.fn<[], Promise<Response>>();
+const mockControlSpotFocus: jest.MockedFunction<(steps: number) => Promise<SpotFocusResponse>> = jest.fn();
 
 jest.mock('./useSpotViewModel.service', () => ({
   fetchSpotConfig: (...args: unknown[]) => mockFetchSpotConfig(...args),
   fetchSpotImageResponse: (...args: unknown[]) => mockFetchSpotImageResponse(...args),
   controlSpotAction: () => Promise.resolve(undefined),
-  controlSpotFocus: () => Promise.resolve(undefined),
+  controlSpotFocus: (steps: number) => mockControlSpotFocus(steps),
   controlSpotActuator: () => Promise.resolve(undefined),
 }));
 
@@ -85,6 +87,21 @@ const buildRejectionResponse = (): Response =>
   );
 
 describe('useSpotViewModel integration', () => {
+  beforeEach(() => {
+    mockControlSpotFocus.mockResolvedValue({
+      status: 'ok',
+      current: 100,
+      new: 95,
+      verified: 95,
+      request_steps: -1,
+      focus_step: 5,
+    });
+  });
+
+  afterEach(() => {
+    mockControlSpotFocus.mockReset();
+  });
+
   it('does not call setSpotImageState when spot image fetch payload is rejected', async () => {
     const originalCreateObjectURL = global.URL.createObjectURL;
     const originalRevokeObjectURL = global.URL.revokeObjectURL;
@@ -157,5 +174,16 @@ describe('useSpotViewModel integration', () => {
         setSpotImageState: originalSetSpotImageState,
       });
     }
+  });
+
+  it('sends focus controls as signed unit steps without multiplying by actuator_step', async () => {
+    const { result } = renderHook(() => useSpotViewModel());
+
+    await act(async () => {
+      await result.current.controlFocus(-1);
+    });
+
+    expect(mockControlSpotFocus).toHaveBeenCalledTimes(1);
+    expect(mockControlSpotFocus).toHaveBeenCalledWith(-1);
   });
 });

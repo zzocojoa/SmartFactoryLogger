@@ -1,32 +1,33 @@
-﻿import React, { useRef, useEffect } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { useGlobalModalContext } from '../hooks/useGlobalModalContext';
 
 export const CustomDialog: React.FC = () => {
   const { state, close } = useGlobalModalContext();
   const inputRef = useRef<HTMLInputElement>(null);
   const didSubmitRef = useRef<boolean>(false);
+  const [promptValue, setPromptValue] = useState<string>('');
 
   // 프롬프트가 열리면 입력창에 포커스
   useEffect(() => {
     didSubmitRef.current = false;
+    setPromptValue(state.defaultValue ?? '');
 
     if (state.isOpen && state.type === 'prompt' && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 50);
+      const timer = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => clearTimeout(timer);
     }
-  }, [state.isOpen, state.type]);
+  }, [state.defaultValue, state.isOpen, state.modalId, state.type]);
 
   if (!state.isOpen) return null;
 
   const handleConfirm = (): void => {
     if (didSubmitRef.current) return;
 
-    if (state.type === 'prompt') {
-      if (!inputRef.current) return;
+    didSubmitRef.current = true;
 
-      didSubmitRef.current = true;
-      close(inputRef.current.value);
+    if (state.type === 'prompt') {
+      close(promptValue);
     } else {
-      didSubmitRef.current = true;
       close(true);
     }
   };
@@ -63,7 +64,8 @@ export const CustomDialog: React.FC = () => {
               ref={inputRef}
               type={state.inputType || 'text'}
               className="custom-modal-input"
-              defaultValue={state.defaultValue || ''}
+              value={promptValue}
+              onChange={(event) => setPromptValue(event.target.value)}
               onKeyDown={handleKeyDown}
             />
           )}

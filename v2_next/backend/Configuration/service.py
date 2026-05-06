@@ -468,6 +468,9 @@ def update_config(
     old_spot_ip = _get(parser, "SPOT", "ip", config.DEFAULT_SPOT_IP)
     old_image_url = _get(parser, "SPOT", "imageurl", "")
     old_focus_url = _get(parser, "SPOT", "focusurl", "")
+    old_legacy_actuator_ip = _get_text(parser, "ACTUATOR", "actuatorip")
+    old_actuator_ip = _get(parser, "SPOT", "actuatorip", old_legacy_actuator_ip) or old_legacy_actuator_ip or old_spot_ip
+    old_actuator_url = _get(parser, "SPOT", "actuatorurl", "")
 
     if payload.extruder:
         if payload.extruder.ip:
@@ -516,6 +519,8 @@ def update_config(
             parser.set("SPOT", "focusstep", str(payload.spot.focus_step))
         if payload.spot.actuator_ip is not None:
             parser.set("SPOT", "actuatorip", payload.spot.actuator_ip)
+            if not old_actuator_url or old_actuator_ip in old_actuator_url:
+                parser.set("SPOT", "actuatorurl", f"http://{payload.spot.actuator_ip}/scan.cgi")
         if payload.spot.actuator_step is not None:
             if payload.spot.actuator_step <= 0:
                 raise ValueError("SPOT actuator_step must be a positive integer")

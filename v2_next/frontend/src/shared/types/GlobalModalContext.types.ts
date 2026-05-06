@@ -1,4 +1,4 @@
-export type ModalType = 'alert' | 'confirm' | 'prompt';
+﻿export type ModalType = 'alert' | 'confirm' | 'prompt';
 
 export interface ModalOptions {
   title?: string;
@@ -11,6 +11,7 @@ export interface ModalState {
   isOpen: boolean;
   type: ModalType;
   message: string;
+  modalId: number;
   title?: string;
   defaultValue?: string;
   variant?: 'info' | 'warning' | 'error' | 'success';

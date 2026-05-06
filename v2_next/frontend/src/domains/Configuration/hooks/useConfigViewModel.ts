@@ -29,6 +29,7 @@ import type {
   SaveSettingsOptions,
   UseConfigViewModel,
 } from './useConfigViewModel.types';
+import type { ConfigPayload } from '../api/configService.types';
 
 const isPositiveIntegerInput = (value: string): boolean => {
   const trimmed = value.trim();
@@ -49,6 +50,9 @@ const toOptionalNumberText = (value: number | null | undefined): string => {
 const toInt = (value: string): number | undefined => {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (!/^-?\d+$/.test(trimmed)) {
     return undefined;
   }
   const parsed = Number.parseInt(trimmed, 10);
@@ -434,7 +438,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
 
     const toThresholdValue = (value: string) => value.trim();
 
-    const payload = {
+    const payload: ConfigPayload = {
       extruder: {
         ip: settingsForm.extruderIp.trim() || undefined,
         port: toInt(settingsForm.extruderPort),

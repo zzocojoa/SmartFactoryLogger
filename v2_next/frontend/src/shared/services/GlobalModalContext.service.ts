@@ -1,9 +1,10 @@
-import type { ModalOptions, ModalState, ModalType } from '../types/GlobalModalContext.types';
+﻿import type { ModalOptions, ModalState, ModalType } from '../types/GlobalModalContext.types';
 
 export const buildInitialModalState = (): ModalState => ({
   isOpen: false,
   type: 'alert',
   message: '',
+  modalId: 0,
 });
 
 export const normalizeModalOptions = (options?: ModalOptions | string): ModalOptions => {
@@ -16,11 +17,13 @@ export const normalizeModalOptions = (options?: ModalOptions | string): ModalOpt
 export const buildModalState = (
   type: ModalType,
   message: string,
-  options: ModalOptions = {}
+  options: ModalOptions,
+  modalId: number
 ): ModalState => ({
   isOpen: true,
   type,
   message,
+  modalId,
   title: options.title,
   defaultValue: options.defaultValue,
   variant: options.variant,
