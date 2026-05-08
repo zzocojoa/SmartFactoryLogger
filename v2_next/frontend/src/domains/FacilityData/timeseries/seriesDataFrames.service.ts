@@ -29,6 +29,10 @@ export const buildGroupedFrames = (
   thresholdsByKey?: Partial<Record<TimeSeriesKey, ThresholdsConfig>>
 ): Record<string, SeriesFrame> => buildGroupedFramesMath(samples, metas, thresholdsByKey);
 
+const cloneSeriesFrameWithSharedValues = (frame: SeriesFrame): SeriesFrame => ({
+  fields: frame.fields.map((field) => ({ ...field })),
+});
+
 const buildFullIncrementalFrame = (params: IncrementalSeriesFrameParams): IncrementalSeriesFrameResult => {
   const firstSequence = params.snapshot.firstSequence + params.range.startIndex;
   const nextSequence = params.snapshot.firstSequence + params.range.endIndex;
@@ -42,7 +46,7 @@ const buildFullIncrementalFrame = (params: IncrementalSeriesFrameParams): Increm
   return {
     frame,
     cache: {
-      frame,
+      frame: cloneSeriesFrameWithSharedValues(frame),
       firstSequence,
       nextSequence,
       generation: params.snapshot.generation,
@@ -52,9 +56,21 @@ const buildFullIncrementalFrame = (params: IncrementalSeriesFrameParams): Increm
   };
 };
 
-const cloneSeriesFrameWithSharedValues = (frame: SeriesFrame): SeriesFrame => ({
-  fields: frame.fields.map((field) => ({ ...field })),
-});
+const validateSeriesFrameRange = (params: IncrementalSeriesFrameParams): void => {
+  const { startIndex, endIndex } = params.range;
+  const sampleCount = params.snapshot.samples.length;
+  if (
+    !Number.isInteger(startIndex) ||
+    !Number.isInteger(endIndex) ||
+    startIndex < 0 ||
+    endIndex < startIndex ||
+    endIndex > sampleCount
+  ) {
+    throw new RangeError(
+      `Invalid series frame range: startIndex=${startIndex}, endIndex=${endIndex}, sampleCount=${sampleCount}, firstSequence=${params.snapshot.firstSequence}, nextSequence=${params.snapshot.nextSequence}.`,
+    );
+  }
+};
 
 const shouldRebuildIncrementalFrame = (
   params: IncrementalSeriesFrameParams,
@@ -65,6 +81,9 @@ const shouldRebuildIncrementalFrame = (
   if (!previousCache) {
     return true;
   }
+  if (!params.snapshot.chronological) {
+    return true;
+  }
   if (previousCache.generation !== params.snapshot.generation) {
     return true;
   }
@@ -72,6 +91,9 @@ const shouldRebuildIncrementalFrame = (
     return true;
   }
   if (previousCache.metas !== params.metas) {
+    return true;
+  }
+  if (previousCache.frame.fields.length !== params.metas.length + 1) {
     return true;
   }
   if (firstSequence < previousCache.firstSequence) {
@@ -86,9 +108,22 @@ const shouldRebuildIncrementalFrame = (
   return previousCache.nextSequence < params.snapshot.firstSequence;
 };
 
+const validateIncrementalOperation = (
+  params: IncrementalSeriesFrameParams,
+  trimCount: number,
+  appendStartIndex: number,
+): void => {
+  if (trimCount < 0 || appendStartIndex < params.range.startIndex || appendStartIndex > params.range.endIndex) {
+    throw new RangeError(
+      `Invalid incremental series frame operation: trimCount=${trimCount}, appendStartIndex=${appendStartIndex}, startIndex=${params.range.startIndex}, endIndex=${params.range.endIndex}, snapshotFirstSequence=${params.snapshot.firstSequence}.`,
+    );
+  }
+};
+
 export const buildIncrementalTimeSeriesFrame = (
   params: IncrementalSeriesFrameParams,
 ): IncrementalSeriesFrameResult => {
+  validateSeriesFrameRange(params);
   const firstSequence = params.snapshot.firstSequence + params.range.startIndex;
   const nextSequence = params.snapshot.firstSequence + params.range.endIndex;
   if (shouldRebuildIncrementalFrame(params, firstSequence, nextSequence)) {
@@ -98,6 +133,7 @@ export const buildIncrementalTimeSeriesFrame = (
   const previousCache = params.previousCache as IncrementalSeriesFrameCache;
   const trimCount = firstSequence - previousCache.firstSequence;
   const appendStartIndex = previousCache.nextSequence - params.snapshot.firstSequence;
+  validateIncrementalOperation(params, trimCount, appendStartIndex);
   trimTimeSeriesFrameHead(previousCache.frame, trimCount);
   appendTimeSeriesFrameSamples(previousCache.frame, params.snapshot.samples, appendStartIndex, params.range.endIndex, params.metas);
   applyTimeSeriesFrameConfig(previousCache.frame, params.metas, params.thresholdsByKey);
@@ -106,7 +142,7 @@ export const buildIncrementalTimeSeriesFrame = (
   return {
     frame,
     cache: {
-      frame,
+      frame: cloneSeriesFrameWithSharedValues(previousCache.frame),
       firstSequence,
       nextSequence,
       generation: params.snapshot.generation,

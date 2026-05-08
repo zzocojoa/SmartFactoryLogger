@@ -2,6 +2,12 @@ import type { SeriesSample } from './seriesSampling';
 import { countTrimmedSeriesSamples } from './seriesBuffer.service';
 import type { SeriesBufferSnapshot } from './seriesBuffer.types';
 
+const buildBufferedSeriesSample = (sample: SeriesSample): SeriesSample =>
+  Object.freeze({
+    timestampMs: sample.timestampMs,
+    values: Object.freeze({ ...sample.values }),
+  }) as SeriesSample;
+
 export class SeriesBuffer {
   private samples: SeriesSample[] = [];
   private windowMs: number;
@@ -30,14 +36,15 @@ export class SeriesBuffer {
   }
 
   append(sample: SeriesSample): void {
-    if (this.lastTimestampMs !== null && sample.timestampMs < this.lastTimestampMs && this.chronological) {
+    const bufferedSample = buildBufferedSeriesSample(sample);
+    if (this.lastTimestampMs !== null && bufferedSample.timestampMs < this.lastTimestampMs && this.chronological) {
       this.chronological = false;
       this.generation += 1;
     }
-    this.samples.push(sample);
+    this.samples.push(bufferedSample);
     this.nextSequence += 1;
-    this.lastTimestampMs = sample.timestampMs;
-    this.trimHead(sample.timestampMs);
+    this.lastTimestampMs = bufferedSample.timestampMs;
+    this.trimHead(bufferedSample.timestampMs);
   }
 
   getSamples(): SeriesSample[] {
@@ -46,7 +53,7 @@ export class SeriesBuffer {
 
   getSnapshot(): SeriesBufferSnapshot {
     return {
-      samples: this.samples,
+      samples: Object.freeze(this.samples.slice()),
       firstSequence: this.firstSequence,
       nextSequence: this.nextSequence,
       generation: this.generation,

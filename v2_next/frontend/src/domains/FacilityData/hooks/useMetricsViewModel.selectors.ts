@@ -6,9 +6,13 @@ export interface SeriesSamplesWindowRange {
   cutoffMs: number;
 }
 
-export const filterSeriesSamplesByWindow = (samples: readonly SeriesSample[], seriesWindowMin: number): SeriesSample[] => {
-  const cutoff = Date.now() - (seriesWindowMin * 60 * 1000);
-  return samples.filter((sample) => sample.timestampMs >= cutoff);
+export const filterSeriesSamplesByWindow = (
+  samples: readonly SeriesSample[],
+  seriesWindowMin: number,
+  nowMs: number,
+): SeriesSample[] => {
+  const cutoffMs = nowMs - (seriesWindowMin * 60 * 1000);
+  return samples.filter((sample) => sample.timestampMs >= cutoffMs);
 };
 
 export const getSeriesSamplesWindowRange = (

@@ -21,7 +21,7 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
   const [data, setData] = useState<FactoryData | null>(null);
   const [connected, setConnected] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
-  const [seriesFrameTick, setSeriesFrameTick] = useState(0);
+  const [seriesFrameTick, setSeriesFrameTick] = useState<number>(() => Date.now());
   
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [pollingDegraded, setPollingDegraded] = useState(false);
@@ -73,6 +73,12 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
 
   // Grafana Scenes용 전체 시계열 프레임
   const timeSeriesAllFrame = useMemo<SeriesFrame | null>(() => {
+    const clearFrameCache = (): null => {
+      frozenAllFrameRef.current = null;
+      incrementalAllFrameCacheRef.current = null;
+      return null;
+    };
+
     if (!timeSeriesFrameActive) {
       return frozenAllFrameRef.current;
     }
@@ -81,13 +87,13 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
     }
     const snapshot = seriesBufferRef.current.getSnapshot();
     if (!snapshot.samples.length) {
-      return null;
+      return clearFrameCache();
     }
 
     if (!snapshot.chronological) {
-      const filteredSamples = filterSeriesSamplesByWindow(snapshot.samples, seriesWindowMin);
+      const filteredSamples = filterSeriesSamplesByWindow(snapshot.samples, seriesWindowMin, seriesFrameTick);
       if (!filteredSamples.length) {
-        return null;
+        return clearFrameCache();
       }
       incrementalAllFrameCacheRef.current = null;
       const result = buildTimeSeriesFrame(filteredSamples, TIME_SERIES_CATALOG, timeSeriesThresholds);
@@ -95,9 +101,9 @@ export const useMetricsViewModel = (params: UseMetricsViewModelParams): UseMetri
       return result;
     }
 
-    const range = getSeriesSamplesWindowRange(snapshot.samples, seriesWindowMin, Date.now());
+    const range = getSeriesSamplesWindowRange(snapshot.samples, seriesWindowMin, seriesFrameTick);
     if (range.startIndex >= range.endIndex) {
-      return null;
+      return clearFrameCache();
     }
 
     const result = buildIncrementalTimeSeriesFrame({

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import uPlot from 'uplot';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useTheme } from '../../../../shared/hooks/useThemeContext';
@@ -30,23 +30,25 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
   const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
   const [activeSeries, setActiveSeries] = useState<Record<string, boolean>>(buildInitialActiveSeries);
 
-  const toggleSeries = useCallback((key: string) => {
+  useEffect(() => {
     if (uPlotInst === null) {
       return;
     }
 
+    TIME_SERIES_CATALOG.forEach((meta, catalogIndex) => {
+      uPlotInst.setSeries(catalogIndex + 1, { show: activeSeries[meta.key] });
+    });
+  }, [activeSeries, uPlotInst]);
+
+  const toggleSeries = useCallback((key: string) => {
     const catalogIndex = TIME_SERIES_CATALOG.findIndex((meta) => meta.key === key);
 
     if (catalogIndex === -1) {
       return;
     }
 
-    const uPlotIndex = catalogIndex + 1;
-    const nextShow = !activeSeries[key];
-
-    uPlotInst.setSeries(uPlotIndex, { show: nextShow });
-    setActiveSeries((prev) => ({ ...prev, [key]: nextShow }));
-  }, [activeSeries, uPlotInst]);
+    setActiveSeries((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   if (timeSeriesAllFrame === null) {
     return <div style={{ color: 'white', padding: '16px' }}>Loading data...</div>;

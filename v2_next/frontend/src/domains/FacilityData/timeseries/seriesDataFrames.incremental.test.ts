@@ -204,6 +204,7 @@ describe('buildIncrementalTimeSeriesFrame', () => {
     ];
     appendSamples(buffer, samples);
     const initialResult = buildIncrementalResult(buffer, null, undefined);
+    const initialSpotField = initialResult.frame.fields.find((field) => field.name === 'Spot');
     const spotValues = getFieldValues(initialResult.frame, 'Spot');
     const thresholdsByKey: Partial<Record<TimeSeriesKey, ThresholdsConfig>> = {
       Spot: {
@@ -218,8 +219,82 @@ describe('buildIncrementalTimeSeriesFrame', () => {
     const result = buildIncrementalResult(buffer, initialResult.cache, thresholdsByKey);
 
     expect(getFieldValues(result.frame, 'Spot')).toBe(spotValues);
+    expect(initialSpotField?.config?.thresholds).toBeUndefined();
     expect(result.frame.fields.find((field) => field.name === 'Spot')?.config?.thresholds).toEqual(
       thresholdsByKey.Spot
     );
+  });
+
+  it('fully rebuilds when the catalog changes', () => {
+    const buffer = new SeriesBuffer(10_000, 10);
+    appendSamples(buffer, [
+      buildSample(1_000, 10, 100),
+      buildSample(2_000, 20, 200),
+    ]);
+    const initialResult = buildIncrementalResult(buffer, null, undefined);
+    const spotValues = getFieldValues(initialResult.frame, 'Spot');
+    const nextMetas: TimeSeriesMeta[] = [TEST_METAS[0]];
+
+    const result = buildIncrementalTimeSeriesFrame({
+      snapshot: buffer.getSnapshot(),
+      range: buildRange(buffer),
+      previousCache: initialResult.cache,
+      metas: nextMetas,
+      thresholdsByKey: undefined,
+    });
+
+    expect(getFieldValues(result.frame, 'Spot')).not.toBe(spotValues);
+    expect(result.frame.fields.map((field) => field.name)).toEqual(['time', 'Spot']);
+    expect(result.frame).toEqual(buildTimeSeriesFrame(buffer.getSamples(), nextMetas, undefined));
+  });
+
+  it('fully rebuilds after a buffer generation change', () => {
+    const buffer = new SeriesBuffer(10_000, 10);
+    const nowMs = Date.now();
+    appendSamples(buffer, [
+      buildSample(nowMs - 2_000, 10, 100),
+      buildSample(nowMs - 1_000, 20, 200),
+    ]);
+    const initialResult = buildIncrementalResult(buffer, null, undefined);
+    const spotValues = getFieldValues(initialResult.frame, 'Spot');
+
+    buffer.setMaxPoints(10);
+    const result = buildIncrementalResult(buffer, initialResult.cache, undefined);
+
+    expect(getFieldValues(result.frame, 'Spot')).not.toBe(spotValues);
+    expect(result.frame).toEqual(buildTimeSeriesFrame(buffer.getSamples(), TEST_METAS, undefined));
+  });
+
+  it('uses full rebuild fallback while samples are not chronological', () => {
+    const buffer = new SeriesBuffer(10_000, 10);
+    appendSamples(buffer, [
+      buildSample(1_000, 10, 100),
+      buildSample(3_000, 30, 300),
+      buildSample(2_000, 20, 200),
+    ]);
+    const initialResult = buildIncrementalResult(buffer, null, undefined);
+    const spotValues = getFieldValues(initialResult.frame, 'Spot');
+
+    buffer.append(buildSample(4_000, 40, 400));
+    const result = buildIncrementalResult(buffer, initialResult.cache, undefined);
+
+    expect(buffer.getSnapshot().chronological).toBe(false);
+    expect(getFieldValues(result.frame, 'Spot')).not.toBe(spotValues);
+    expect(result.frame).toEqual(buildTimeSeriesFrame(buffer.getSamples(), TEST_METAS, undefined));
+  });
+
+  it('raises explicit range errors for invalid sample ranges', () => {
+    const buffer = new SeriesBuffer(10_000, 10);
+    appendSamples(buffer, [
+      buildSample(1_000, 10, 100),
+      buildSample(2_000, 20, 200),
+    ]);
+
+    expect(() => {
+      buildIncrementalResultForRange(buffer, { startIndex: -1, endIndex: 2 }, null, undefined);
+    }).toThrow(RangeError);
+    expect(() => {
+      buildIncrementalResultForRange(buffer, { startIndex: 0, endIndex: 3 }, null, undefined);
+    }).toThrow(RangeError);
   });
 });

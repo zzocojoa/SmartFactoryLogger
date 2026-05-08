@@ -78,21 +78,19 @@ describe('filterSeriesSamplesByWindow', () => {
   it.each(selectorWindowCases)(
     'includes samples exactly on the $label cutoff boundary',
     ({ seriesWindowMin, nowMs, cutoffMs }: SelectorWindowCase) => {
-      jest.spyOn(Date, 'now').mockReturnValue(nowMs);
       const samples: SeriesSample[] = [
         buildSample(cutoffMs - 1, 1),
         buildSample(cutoffMs, 2),
         buildSample(nowMs, 3),
       ];
 
-      const result = filterSeriesSamplesByWindow(samples, seriesWindowMin);
+      const result = filterSeriesSamplesByWindow(samples, seriesWindowMin, nowMs);
 
       expect(getTimestamps(result)).toEqual([cutoffMs, nowMs]);
     }
   );
 
   it('filters out-of-order fallback samples without relying on sorted input', () => {
-    jest.spyOn(Date, 'now').mockReturnValue(100_000);
     const samples: SeriesSample[] = [
       buildSample(70_000, 1),
       buildSample(39_999, 2),
@@ -100,36 +98,46 @@ describe('filterSeriesSamplesByWindow', () => {
       buildSample(40_000, 4),
     ];
 
-    const result = filterSeriesSamplesByWindow(samples, 1);
+    const result = filterSeriesSamplesByWindow(samples, 1, 100_000);
 
     expect(getTimestamps(result)).toEqual([70_000, 100_000, 40_000]);
     expect(result.map((sample) => sample.values.Spot)).toEqual([1, 3, 4]);
   });
 
   it('keeps duplicate timestamps within the window in input order', () => {
-    jest.spyOn(Date, 'now').mockReturnValue(100_000);
     const samples: SeriesSample[] = [
       buildSample(40_000, 1),
       buildSample(40_000, 2),
       buildSample(70_000, 3),
     ];
 
-    const result = filterSeriesSamplesByWindow(samples, 1);
+    const result = filterSeriesSamplesByWindow(samples, 1, 100_000);
 
     expect(getTimestamps(result)).toEqual([40_000, 40_000, 70_000]);
     expect(result.map((sample) => sample.values.Spot)).toEqual([1, 2, 3]);
   });
 
   it('returns an empty array when no samples are inside the window', () => {
-    jest.spyOn(Date, 'now').mockReturnValue(100_000);
     const samples: SeriesSample[] = [
       buildSample(1_000, 1),
       buildSample(39_999, 2),
     ];
 
-    const result = filterSeriesSamplesByWindow(samples, 1);
+    const result = filterSeriesSamplesByWindow(samples, 1, 100_000);
 
     expect(result).toEqual([]);
+  });
+
+  it('uses the provided frame time instead of the current wall clock', () => {
+    jest.spyOn(Date, 'now').mockReturnValue(100_001);
+    const samples: SeriesSample[] = [
+      buildSample(40_000, 1),
+      buildSample(100_000, 2),
+    ];
+
+    const result = filterSeriesSamplesByWindow(samples, 1, 100_000);
+
+    expect(getTimestamps(result)).toEqual([40_000, 100_000]);
   });
 });
 
