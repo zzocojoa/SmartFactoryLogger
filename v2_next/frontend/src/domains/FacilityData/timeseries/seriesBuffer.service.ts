@@ -1,11 +1,34 @@
 import type { SeriesSample } from './seriesSampling';
 
-export const pruneSeriesSamples = (samples: SeriesSample[], nowMs: number, windowMs: number): SeriesSample[] => {
+export const countPrunedSeriesSamples = (samples: readonly SeriesSample[], nowMs: number, windowMs: number): number => {
   const cutoff = nowMs - windowMs;
   let index = 0;
   while (index < samples.length && samples[index].timestampMs < cutoff) {
     index += 1;
   }
+  return index;
+};
+
+export const countCappedSeriesSamples = (sampleCount: number, maxPoints: number | undefined): number => {
+  if (!maxPoints || sampleCount <= maxPoints) {
+    return 0;
+  }
+  return sampleCount - maxPoints;
+};
+
+export const countTrimmedSeriesSamples = (
+  samples: readonly SeriesSample[],
+  nowMs: number,
+  windowMs: number,
+  maxPoints: number | undefined,
+): number => {
+  const prunedCount = countPrunedSeriesSamples(samples, nowMs, windowMs);
+  const remainingCount = samples.length - prunedCount;
+  return prunedCount + countCappedSeriesSamples(remainingCount, maxPoints);
+};
+
+export const pruneSeriesSamples = (samples: SeriesSample[], nowMs: number, windowMs: number): SeriesSample[] => {
+  const index = countPrunedSeriesSamples(samples, nowMs, windowMs);
   return index > 0 ? samples.slice(index) : samples;
 };
 

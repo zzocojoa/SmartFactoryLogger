@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import type { FactoryData, SpotConfig, ThresholdState } from '../shared/types';
 import type { SpotImageResponseMetadata } from '../domains/FacilityData/api/spotService.types';
+import type { SeriesFrame } from '../domains/FacilityData/timeseries/seriesDataFrames';
+import { buildThresholdStateFromConfig } from '../shared/utils/thresholds';
+
+interface DashboardTimeSeriesState {
+  timeSeriesAllFrame: SeriesFrame | null;
+  thresholds: ThresholdState;
+  intervalSec: number;
+}
 
 const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => {
   return (
@@ -21,13 +29,14 @@ const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => 
 };
 
 interface DashboardState {
-  // FactoryDataContext
+  // 공장 데이터 상태
   data: FactoryData | null;
-  thresholds: ThresholdState | null;
+  timeSeriesAllFrame: SeriesFrame | null;
+  thresholds: ThresholdState;
   lastDataAt: number | null;
   intervalSec: number;
   
-  // SpotContext
+  // SPOT 상태
   spotConfig: SpotConfig | null;
   spotImageUrl: string;
   spotImageLoading: boolean;
@@ -36,10 +45,12 @@ interface DashboardState {
   spotImageMetadata: SpotImageResponseMetadata | null;
   spotAlertActive: boolean;
 
-  // Actions
+  // 상태 갱신 함수
   setData: (data: FactoryData | null, lastDataAt: number | null) => void;
+  setTimeSeriesFrame: (timeSeriesAllFrame: SeriesFrame | null) => void;
   setThresholds: (thresholds: ThresholdState) => void;
   setIntervalSec: (intervalSec: number) => void;
+  setTimeSeriesState: (timeSeriesState: DashboardTimeSeriesState) => void;
   
   setSpotConfig: (config: SpotConfig | null) => void;
   setSpotImageState: (
@@ -54,7 +65,8 @@ interface DashboardState {
 
 export const useDashboardStore = create<DashboardState>((set) => ({
   data: null,
-  thresholds: null,
+  timeSeriesAllFrame: null,
+  thresholds: buildThresholdStateFromConfig(),
   lastDataAt: null,
   intervalSec: 0.2,
 
@@ -66,9 +78,44 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   spotImageMetadata: null,
   spotAlertActive: false,
 
-  setData: (data, lastDataAt) => set({ data, lastDataAt }),
-  setThresholds: (thresholds) => set({ thresholds }),
-  setIntervalSec: (intervalSec) => set({ intervalSec }),
+  setData: (data, lastDataAt) => set((state) => {
+    if (state.data === data && state.lastDataAt === lastDataAt) {
+      return state;
+    }
+    return { data, lastDataAt };
+  }),
+  setTimeSeriesFrame: (timeSeriesAllFrame) => set((state) => {
+    if (state.timeSeriesAllFrame === timeSeriesAllFrame) {
+      return state;
+    }
+    return { timeSeriesAllFrame };
+  }),
+  setThresholds: (thresholds) => set((state) => {
+    if (state.thresholds === thresholds) {
+      return state;
+    }
+    return { thresholds };
+  }),
+  setIntervalSec: (intervalSec) => set((state) => {
+    if (state.intervalSec === intervalSec) {
+      return state;
+    }
+    return { intervalSec };
+  }),
+  setTimeSeriesState: (timeSeriesState) => set((state) => {
+    if (
+      state.timeSeriesAllFrame === timeSeriesState.timeSeriesAllFrame &&
+      state.thresholds === timeSeriesState.thresholds &&
+      state.intervalSec === timeSeriesState.intervalSec
+    ) {
+      return state;
+    }
+    return {
+      timeSeriesAllFrame: timeSeriesState.timeSeriesAllFrame,
+      thresholds: timeSeriesState.thresholds,
+      intervalSec: timeSeriesState.intervalSec,
+    };
+  }),
   
   setSpotConfig: (spotConfig) => {
     set((state) => {
@@ -108,5 +155,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       spotImageMetadata: nextSpotImageMetadata,
     };
   }),
-  setSpotAlertActive: (spotAlertActive) => set({ spotAlertActive }),
+  setSpotAlertActive: (spotAlertActive) => set((state) => {
+    if (state.spotAlertActive === spotAlertActive) {
+      return state;
+    }
+    return { spotAlertActive };
+  }),
 }));
