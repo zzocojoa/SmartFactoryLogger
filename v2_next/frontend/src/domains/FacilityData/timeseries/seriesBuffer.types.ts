@@ -5,3 +5,11 @@ export interface SeriesBufferState {
   windowMs: number;
   maxPoints?: number;
 }
+
+export interface SeriesBufferSnapshot {
+  samples: readonly SeriesSample[];
+  firstSequence: number;
+  nextSequence: number;
+  generation: number;
+  chronological: boolean;
+}
