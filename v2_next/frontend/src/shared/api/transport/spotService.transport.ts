@@ -9,6 +9,7 @@ export interface SpotFocusResponse {
   status: string;
   current?: number;
   new?: number;
+  verified?: number;
   request_steps?: number;
   focus_step?: number;
   message?: string;
@@ -55,6 +56,7 @@ const isSpotFocusResponse = (data: unknown): data is SpotFocusResponse => {
     status?: unknown;
     current?: unknown;
     new?: unknown;
+    verified?: unknown;
     request_steps?: unknown;
     focus_step?: unknown;
     message?: unknown;
@@ -63,6 +65,7 @@ const isSpotFocusResponse = (data: unknown): data is SpotFocusResponse => {
     typeof candidate.status === 'string' &&
     isOptionalNumber(candidate.current) &&
     isOptionalNumber(candidate.new) &&
+    isOptionalNumber(candidate.verified) &&
     isOptionalNumber(candidate.request_steps) &&
     isOptionalNumber(candidate.focus_step) &&
     isOptionalString(candidate.message)

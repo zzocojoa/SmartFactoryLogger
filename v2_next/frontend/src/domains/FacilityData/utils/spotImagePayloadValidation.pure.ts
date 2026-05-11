@@ -277,7 +277,7 @@ export const validateSpotImagePayload = ({
   }
 
   if (!(bytes instanceof Uint8Array)) {
-    const context = buildValidationContext(requestUrl, status, headers, metadata, bytes ? bytes.length : 0);
+    const context = buildValidationContext(requestUrl, status, headers, metadata, 0);
     throw new SpotImagePayloadValidationError('invalid-type', context, 'Payload type must be Uint8Array');
   }
 

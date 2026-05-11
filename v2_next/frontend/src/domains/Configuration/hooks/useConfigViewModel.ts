@@ -258,7 +258,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     }
   }, []);
 
-  const loadSettings = useCallback(async () => {
+  const loadSettings = useCallback(async (): Promise<void> => {
     setSettingsLoading(true);
     setSettingsError(null);
     setSettingsConfigPath(null);
@@ -277,11 +277,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       settingsExternalNotifyRef.current = null;
       setExternalConfigPending(null);
       setExternalConfigPendingAt(null);
-      return true;
     } catch (error) {
       console.error('Config load failed', error);
       setSettingsError('???깆젧???釉띾쐞???? 嶺뚮쪇沅?쭛???鍮??');
-      return false;
     } finally {
       setSettingsLoading(false);
     }
@@ -561,6 +559,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       } catch (ignore) { }
 
       settingsExternalNotifyRef.current = null;
+      return true;
     } catch (error) {
       console.error('Config save failed', error);
       const detail = (error as { response?: { data?: { detail?: string } } }).response?.data?.detail;
@@ -581,7 +580,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     }
   };
 
-  const handleRestoreDefaults = async () => {
+  const handleRestoreDefaults = async (): Promise<void> => {
     setSettingsLoading(true);
     setSettingsError(null);
     try {
@@ -599,7 +598,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     }
   };
 
-  const handleRestoreBackup = async () => {
+  const handleRestoreBackup = async (): Promise<void> => {
     setSettingsLoading(true);
     setSettingsError(null);
     try {

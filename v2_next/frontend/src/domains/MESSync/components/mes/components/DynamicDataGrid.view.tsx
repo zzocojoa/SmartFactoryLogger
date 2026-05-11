@@ -93,7 +93,7 @@ export const DynamicDataGridView: React.FC<DynamicDataGridViewProps> = ({
   return (
     <div style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <AutoSizer>
-        {({ height, width }) => {
+        {({ height, width }: { height: number; width: number }) => {
           const { bodyHeight, finalColumnWidths, totalScrollWidth } = calculateResponsiveLayout({
             width,
             height,

@@ -11,12 +11,11 @@
     "@grafana/ui": "^12.3.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.1",
+    "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^13.5.0",
     "@types/html2canvas": "^0.5.35",
-    "@types/jest": "^27.5.2",
-    "@types/node": "^22.12.0",
-    "@types/react": "^18.3.1",
+    "@types/node": "^22.19.18",
+    "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.1",
     "@types/react-grid-layout": "^1.3.6",
     "axios": "^1.13.2",
@@ -30,27 +29,20 @@
     "react-grid-layout": "^2.2.2",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^6.30.3",
-    "react-scripts": "5.0.1",
     "recharts": "^3.6.0",
-    "typescript": "^4.9.5",
+    "typescript": "5.0.4",
     "uplot": "^1.6.32",
     "web-vitals": "^2.1.4",
-    "zustand": "^5.0.11"
+    "zustand": "^5.0.13"
   },
   "scripts": {
     "start": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject",
+    "test": "node scripts/run_vitest_tests.cjs",
+    "test:ci": "node scripts/run_vitest_tests.cjs",
     "patch:scenes-grid": "node scripts/patch_grafana_scenes_grid.js",
     "postinstall": "npm run patch:scenes-grid"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
   },
   "browserslist": {
     "production": [
@@ -66,10 +58,12 @@
   },
   "devDependencies": {
     "@types/react-window": "^1.8.8",
-    "@vitejs/plugin-react": "^5.1.2",
-    "autoprefixer": "^10.4.23",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.17",
-    "vite": "^7.3.0"
+    "@vitejs/plugin-react": "^5.2.0",
+    "autoprefixer": "^10.5.0",
+    "jsdom": "^26.1.0",
+    "postcss": "^8.5.14",
+    "tailwindcss": "^3.4.19",
+    "vite": "^7.3.3",
+    "vitest": "^3.2.4"
   }
 }

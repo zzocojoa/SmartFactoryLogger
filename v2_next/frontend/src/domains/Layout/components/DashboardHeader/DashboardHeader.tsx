@@ -2,9 +2,29 @@ import {
   LayoutSlotSummary,
   SettingsFormState,
 } from '../../../../shared/types';
+import type { WidgetType } from '../../../../scenes/DashboardSceneModel';
+import type { LayoutPresetId } from '../../../../shared/constants/layoutPresets';
 import { APP_TITLE } from '../../../../shared/constants/uiText';
 import { CommBadge } from '../../../../shared/utils/commBadge';
 import { formatMetaTime } from '../../../../shared/utils/formatters';
+
+const resolvePublicAssetPath = (assetPath: string): string => {
+  const normalizedAssetPath = assetPath.replace(/^\/+/, '');
+
+  if (window.location.protocol === 'file:') {
+    return `./${normalizedAssetPath}`;
+  }
+
+  return `/${normalizedAssetPath}`;
+};
+
+const resolveLogoSource = (activeCycle: string): string => {
+  const logoPath = activeCycle === 'day' || activeCycle === 'sunset'
+    ? 'assets/logo_color.png'
+    : 'assets/logo_white.png';
+
+  return resolvePublicAssetPath(logoPath);
+};
 
 export interface DashboardHeaderProps {
   activeCycle: string;
@@ -50,8 +70,8 @@ export interface DashboardHeaderProps {
   layoutSaveMessage: string | null;
   layoutSaveError: string | null;
   layoutRestoreError: string | null;
-  handleAddWidget: (type: string) => void;
-  applyPreset: (preset: string) => void;
+  handleAddWidget: (type: WidgetType) => void;
+  applyPreset: (preset: LayoutPresetId) => void;
   themeMode: 'light' | 'dark' | 'auto';
   setThemeMode: (mode: 'light' | 'dark' | 'auto') => void;
   handleOpenSettings: () => void;
@@ -108,11 +128,11 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 }) => {
   return (
     <header className="app-header">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="app-brand">
         <img
-          src={activeCycle === 'day' || activeCycle === 'sunset' ? '/assets/logo_color.png' : '/assets/logo_white.png'}
+          src={resolveLogoSource(activeCycle)}
           alt="Company Logo"
-          style={{ height: '32px', objectFit: 'contain' }}
+          className="app-logo"
         />
         <h1>{appTitle}</h1>
       </div>
@@ -152,7 +172,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           )}
         </div>
 
-        <div style={{ marginLeft: '16px', paddingLeft: '16px', borderLeft: '1px solid var(--border-muted)' }}>
+        <div className="snapshot-control">
           <button
             className={`status-action ${snapshotLoading ? 'loading' : ''}`}
             onClick={handleSnapshot}

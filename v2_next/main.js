@@ -86,7 +86,7 @@ function startBackend() {
   let args = [];
 
   if (isPackaged) {
-    backendPath = path.join(process.resourcesPath, 'backend', 'backend_server.exe');
+    backendPath = path.join(process.resourcesPath, 'backend', 'SmartFactoryBackend.exe');
   } else {
     backendPath = 'python';
     const backendPort = process.env.BACKEND_PORT || '8000';
