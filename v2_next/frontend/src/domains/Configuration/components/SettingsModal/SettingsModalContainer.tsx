@@ -94,7 +94,7 @@ interface SeriesStatsSnapshot {
 
 export interface SettingsModalContainerProps
   extends Omit<SettingsModalProps, ManagedSettingsModalProps> {
-  runConnectionTest: (payload: unknown) => Promise<void>;
+  runConnectionTest: (payload?: Record<string, unknown>) => Promise<void>;
   checkPathsHealth: (payload: Array<{ key: string; path: string }>) => Promise<PathHealthResponse>;
   createPath: (path: string) => Promise<boolean>;
   setPathHealth: React.Dispatch<React.SetStateAction<PathHealthState>>;

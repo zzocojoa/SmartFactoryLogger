@@ -130,6 +130,8 @@ export const useMetricsPollingEffects = ({
         setPollingDegraded,
         setPollingIntervalMs,
         setPollingFailureCount,
+        setDashboardLeaderState,
+        setPollingPausedByVisibility,
       });
     };
 

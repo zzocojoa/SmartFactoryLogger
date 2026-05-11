@@ -20,15 +20,28 @@
   },
   "build": {
     "appId": "com.smartfactory.logger",
+    "files": [
+      "main.js",
+      "package.json",
+      "node_modules/**/*",
+      "!sf-health-*",
+      "!.tmp_*",
+      "!_tmp_*",
+      "!qa_evidence",
+      "!server_stdout.zip",
+      "!*.pdf",
+      "!*.csv",
+      "!tmp_*.bin"
+    ],
     "win": {
       "target": "nsis",
-      "icon": "assets/icon.ico"
+      "icon": "backend/assets/icon.ico"
     },
     "asar": true,
     "extraResources": [
       {
-        "from": "backend/dist/backend_server",
-        "to": "backend"
+        "from": "backend/dist/SmartFactoryBackend.exe",
+        "to": "backend/SmartFactoryBackend.exe"
       },
       {
         "from": "frontend/dist",

@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import { GlobalModalProvider } from './shared/context/GlobalModalContext';
 import { ThemeProvider } from './shared/context/ThemeContext';
 
@@ -130,13 +130,14 @@ registerChunkRecoveryHandlers();
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
+const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
 
 console.log("Index.tsx: Rendering App...");
 root.render(
   <React.StrictMode>
     <GlobalModalProvider>
       <ThemeProvider>
-        <BrowserRouter>
+        <Router>
           <Suspense fallback={<LoadingFallback />}>
             <Routes>
               <Route path="/" element={<Home />} />
@@ -145,7 +146,7 @@ root.render(
             </Routes>
             <CustomDialog />
           </Suspense>
-        </BrowserRouter>
+        </Router>
       </ThemeProvider>
     </GlobalModalProvider>
   </React.StrictMode>

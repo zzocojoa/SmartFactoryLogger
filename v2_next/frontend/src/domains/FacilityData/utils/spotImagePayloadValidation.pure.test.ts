@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import type { SpotImageResponseMetadata } from '../api/spotService.types';
 import {
   SpotImagePayloadValidationCode,

@@ -262,6 +262,7 @@ function App() {
     applyCommLogInfoSnapshot,
     healthPolling,
     statsPolling,
+    dashboardLeaderState,
     pollingPausedByVisibility,
     fetchHealth,
     fetchStats,
@@ -341,8 +342,6 @@ function App() {
     setSettingsError,
     setSettingsInfo,
     fetchCentralStatus,
-    settingsLeaderState,
-    settingsPollingPausedByVisibility,
     isSettingsFieldDirty,
     externalConfigPending,
     externalConfigPendingAt,
@@ -793,7 +792,7 @@ function App() {
     const prev = statusRef.current;
     
     // Log status change to backend
-    fetch('/api/log/status', {
+    fetch(`${API_BASE}/api/log/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ previous: prev, current: statusLabel }),
@@ -1128,8 +1127,8 @@ function App() {
         frontErrors={frontErrors}
         clearFrontErrors={clearFrontErrors}
         thresholdState={thresholdState}
-        settingsLeaderState={settingsLeaderState}
-        settingsPollingPausedByVisibility={settingsPollingPausedByVisibility}
+        settingsLeaderState={dashboardLeaderState}
+        settingsPollingPausedByVisibility={pollingPausedByVisibility}
         pollingPausedByVisibility={pollingPausedByVisibility}
         setSettingsError={setSettingsError}
         pushNotification={pushNotification}

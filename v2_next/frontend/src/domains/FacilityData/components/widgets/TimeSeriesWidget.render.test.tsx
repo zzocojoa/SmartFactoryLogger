@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react';
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import type uPlot from 'uplot';
 import type { FactoryData } from '../../../../shared/types';
 import { buildThresholdStateFromConfig } from '../../../../shared/utils/thresholds';
@@ -21,14 +22,19 @@ type MockSetSeriesOptions = {
 };
 
 type MockUPlotInstance = {
-  setSeries: jest.Mock<void, [number, MockSetSeriesOptions]>;
+  setSeries: MockedFunction<(seriesIndex: number, options: MockSetSeriesOptions) => void>;
 };
 
-const mockUPlotChartRender = jest.fn<void, [UPlotChartMockProps]>();
-const mockUPlotChartCreate = jest.fn<void, [MockUPlotInstance]>();
+const mocks = vi.hoisted(() => ({
+  uPlotChartRender: vi.fn<(props: UPlotChartMockProps) => void>(),
+  uPlotChartCreate: vi.fn<(instance: MockUPlotInstance) => void>(),
+}));
 
-jest.mock('../UPlotChart', () => {
-  const ReactModule = jest.requireActual('react') as typeof import('react');
+const mockUPlotChartRender = mocks.uPlotChartRender;
+const mockUPlotChartCreate = mocks.uPlotChartCreate;
+
+vi.mock('../UPlotChart', async () => {
+  const ReactModule = await vi.importActual<typeof import('react')>('react');
 
   return {
     UPlotChart: (props: UPlotChartMockProps) => {
@@ -36,7 +42,7 @@ jest.mock('../UPlotChart', () => {
 
       ReactModule.useLayoutEffect(() => {
         const instance: MockUPlotInstance = {
-          setSeries: jest.fn<void, [number, MockSetSeriesOptions]>(),
+          setSeries: vi.fn<(seriesIndex: number, options: MockSetSeriesOptions) => void>(),
         };
         mockUPlotChartCreate(instance);
         props.onCreate?.(instance as unknown as uPlot);
@@ -48,7 +54,7 @@ jest.mock('../UPlotChart', () => {
   };
 });
 
-jest.mock('../../../../shared/hooks/useThemeContext', () => ({
+vi.mock('../../../../shared/hooks/useThemeContext', () => ({
   useTheme: () => ({ mode: 'dark' }),
 }));
 

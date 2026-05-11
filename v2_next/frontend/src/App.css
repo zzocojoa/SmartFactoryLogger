@@ -229,12 +229,91 @@ body {
   font-weight: 700;
 }
 
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-logo {
+  height: 32px;
+  object-fit: contain;
+}
+
 .header-controls {
   display: flex;
   gap: 10px;
   align-items: center;
   margin-left: auto;
   margin-right: 20px;
+}
+
+.snapshot-control {
+  margin-left: 16px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border-muted);
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    height: auto;
+    min-height: var(--header-height);
+    align-items: stretch;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .app-brand {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .app-header h1 {
+    min-width: 0;
+    font-size: 1rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .header-controls {
+    width: 100%;
+    margin: 0;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .snapshot-control {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .status-panel {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .status-meta,
+  .status-comm {
+    flex-wrap: wrap;
+    white-space: normal;
+    row-gap: 4px;
+  }
+
+  .status-meta-value {
+    min-width: auto;
+  }
+
+  .status-actions {
+    flex-wrap: wrap;
+  }
+
+  .menu-wrapper {
+    margin-left: auto;
+  }
 }
 
 .edit-toggle,
@@ -3188,6 +3267,32 @@ body {
   flex: 1;
   position: relative;
   background-color: var(--bg-main);
+}
+
+@media (max-width: 768px) {
+  .scene-container {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .native-dashboard-grid {
+    width: 100%;
+    box-sizing: border-box;
+    grid-template-columns: 1fr !important;
+    grid-auto-rows: minmax(140px, auto) !important;
+    gap: 8px !important;
+    padding: 8px !important;
+  }
+
+  .native-grid-item {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+    min-height: 140px;
+  }
+
+  .native-grid-item .scene-react-widget {
+    min-height: 140px;
+  }
 }
 
 .layout-editing .scene-container {

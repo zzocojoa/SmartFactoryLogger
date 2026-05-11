@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   filterSeriesSamplesByWindow,
   getSeriesSamplesWindowRange,
@@ -72,7 +73,7 @@ const selectorWindowCases: SelectorWindowCase[] = [
 
 describe('filterSeriesSamplesByWindow', () => {
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it.each(selectorWindowCases)(
@@ -129,7 +130,7 @@ describe('filterSeriesSamplesByWindow', () => {
   });
 
   it('uses the provided frame time instead of the current wall clock', () => {
-    jest.spyOn(Date, 'now').mockReturnValue(100_001);
+    vi.spyOn(Date, 'now').mockReturnValue(100_001);
     const samples: SeriesSample[] = [
       buildSample(40_000, 1),
       buildSample(100_000, 2),

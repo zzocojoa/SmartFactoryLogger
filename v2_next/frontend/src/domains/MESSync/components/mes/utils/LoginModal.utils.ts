@@ -1,6 +1,7 @@
 import type { VerifyAuthResponse } from '../types/LoginModal.types';
+import { API_BASE } from '../../../../../shared/api/client';
 
-const VERIFY_AUTH_ENDPOINT = '/api/mes/auth/verify';
+const VERIFY_AUTH_ENDPOINT = `${API_BASE}/api/mes/auth/verify`;
 
 export const verifyMesPassword = async (password: string): Promise<VerifyAuthResponse> => {
   const response = await fetch(VERIFY_AUTH_ENDPOINT, {

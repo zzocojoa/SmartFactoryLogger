@@ -1,3 +1,5 @@
+/// <reference types="vitest/config" />
+
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import { defineConfig, loadEnv } from 'vite';
@@ -179,6 +181,11 @@ export default defineConfig(({ mode }) => {
     define: {
       // Grafana 라이브러리는 process.env를 확인하는 경우가 있음
       'process.env': {},
+    },
+    test: {
+      environment: 'jsdom',
+      globals: false,
+      include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     },
     build: {
       modulePreload: false,

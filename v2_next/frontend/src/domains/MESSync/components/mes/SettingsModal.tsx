@@ -6,13 +6,12 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2';
 import Calculator from 'lucide-react/dist/esm/icons/calculator';
 import Settings from 'lucide-react/dist/esm/icons/settings';
+import { API_BASE } from '../../../../shared/api/client';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<'general' | 'sync'>('sync');
@@ -65,7 +64,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch(`/api/mes/sync/status`);
+      const res = await fetch(`${API_BASE}/api/mes/sync/status`);
       const data = await res.json();
       setSyncStatus(data);
       if (data.status === 'running') {
@@ -87,7 +86,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setIsSyncing(true);
     
     try {
-      const res = await fetch(`/api/mes/sync/manual`, {
+      const res = await fetch(`${API_BASE}/api/mes/sync/manual`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ from_date: startDate, to_date: endDate })

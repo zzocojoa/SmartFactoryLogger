@@ -18,12 +18,12 @@ export const GlobalModalProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const resolver = useRef<((value: unknown) => void) | null>(null);
   const modalIdRef = useRef<number>(0);
 
-  const openModal = useCallback((type: ModalType, message: string, options: ModalOptions) => {
+  const openModal = useCallback(<T,>(type: ModalType, message: string, options: ModalOptions): Promise<T> => {
     modalIdRef.current += 1;
     setState(buildModalState(type, message, options, modalIdRef.current));
 
-    return new Promise<unknown>((resolve) => {
-      resolver.current = resolve;
+    return new Promise<T>((resolve) => {
+      resolver.current = (value: unknown) => resolve(value as T);
     });
   }, []);
 

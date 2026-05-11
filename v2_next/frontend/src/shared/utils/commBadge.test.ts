@@ -1,3 +1,4 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCameraStatus } from './commBadge';
 import type { SpotConfig } from '../types';
 import type { SpotImageResponseMetadata } from '../../domains/FacilityData/api/spotService.types';
@@ -36,7 +37,7 @@ describe('getCameraStatus', () => {
   };
 
   beforeEach(() => {
-    Date.now = jest.fn((): number => 10_000);
+    Date.now = vi.fn((): number => 10_000);
   });
 
   afterEach(() => {

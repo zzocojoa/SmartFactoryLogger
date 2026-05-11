@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
 import { configService } from '../api/configService';
-import type { ConfigSnapshot } from '../types';
+import type { ConfigSnapshot } from '../../../shared/types';
 
 const CONFIG_AUTO_REFRESH_MS = 15000;
 let settingsInitialLoadPromise: Promise<void> | null = null;

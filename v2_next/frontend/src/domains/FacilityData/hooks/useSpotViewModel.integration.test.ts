@@ -1,26 +1,33 @@
 import { act, renderHook } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import { useSpotViewModel } from './useSpotViewModel';
 import { useDashboardStore } from '../../../store/useDashboardStore';
 import type { SpotConfig } from '../../../shared/types';
 import type { SpotFocusResponse } from '../../../shared/api/transport/spotService.transport';
 
-const mockFetchSpotConfig = jest.fn<[], Promise<SpotConfig>>();
-const mockFetchSpotImageResponse = jest.fn<[], Promise<Response>>();
-const mockControlSpotFocus: jest.MockedFunction<(steps: number) => Promise<SpotFocusResponse>> = jest.fn();
+const mocks = vi.hoisted(() => ({
+  fetchSpotConfig: vi.fn<() => Promise<SpotConfig>>(),
+  fetchSpotImageResponse: vi.fn<() => Promise<Response>>(),
+  controlSpotFocus: vi.fn<(steps: number) => Promise<SpotFocusResponse>>(),
+}));
 
-jest.mock('./useSpotViewModel.service', () => ({
-  fetchSpotConfig: (...args: unknown[]) => mockFetchSpotConfig(...args),
-  fetchSpotImageResponse: (...args: unknown[]) => mockFetchSpotImageResponse(...args),
+const mockFetchSpotConfig = mocks.fetchSpotConfig;
+const mockFetchSpotImageResponse = mocks.fetchSpotImageResponse;
+const mockControlSpotFocus: MockedFunction<(steps: number) => Promise<SpotFocusResponse>> = mocks.controlSpotFocus;
+
+vi.mock('./useSpotViewModel.service', () => ({
+  fetchSpotConfig: () => mockFetchSpotConfig(),
+  fetchSpotImageResponse: () => mockFetchSpotImageResponse(),
   controlSpotAction: () => Promise.resolve(undefined),
   controlSpotFocus: (steps: number) => mockControlSpotFocus(steps),
   controlSpotActuator: () => Promise.resolve(undefined),
 }));
 
-jest.mock('../../../shared/api/client', () => ({
+vi.mock('../../../shared/api/client', () => ({
   API_BASE: '/api',
 }));
 
-jest.mock('./useSpotViewModelEffects', () => ({
+vi.mock('./useSpotViewModelEffects', () => ({
   useSpotViewModelEffects: () => undefined,
 }));
 
@@ -105,11 +112,11 @@ describe('useSpotViewModel integration', () => {
   it('does not call setSpotImageState when spot image fetch payload is rejected', async () => {
     const originalCreateObjectURL = global.URL.createObjectURL;
     const originalRevokeObjectURL = global.URL.revokeObjectURL;
-    global.URL.createObjectURL = jest.fn(() => 'blob:mocked-spot-image');
-    global.URL.revokeObjectURL = jest.fn();
-    const consoleErrorMock = jest.spyOn(console, 'error').mockImplementation((): void => undefined);
+    global.URL.createObjectURL = vi.fn(() => 'blob:mocked-spot-image');
+    global.URL.revokeObjectURL = vi.fn();
+    const consoleErrorMock = vi.spyOn(console, 'error').mockImplementation((): void => undefined);
 
-    const setSpotImageStateMock = jest.fn();
+    const setSpotImageStateMock = vi.fn();
     const originalSetSpotImageState = useDashboardStore.getState().setSpotImageState;
     useDashboardStore.setState({
       ...useDashboardStore.getState(),

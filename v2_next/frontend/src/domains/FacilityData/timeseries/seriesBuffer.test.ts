@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { SeriesBuffer } from './seriesBuffer';
 import type { TimeSeriesKey } from './seriesCatalog';
 import type { SeriesSample } from './seriesSampling';
