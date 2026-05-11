@@ -1,12 +1,28 @@
-# Deploy Script for Smart Factory Logger V2
-# Usage: .\deploy.ps1
-# Creates a portable deployment package (uses system-installed Grafana)
+﻿# Smart Factory Logger V2 배포 스크립트
+# 사용법: .\deploy.ps1
+# 시스템에 설치된 Grafana를 사용하는 포터블 배포 패키지를 생성한다.
 
 Write-Host ">>> Starting Deployment Process..." -ForegroundColor Cyan
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = (Get-Item "$(Split-Path -Parent $MyInvocation.MyCommand.Path)\..").FullName
 Set-Location $ScriptDir
+$BackendDir = Join-Path $ScriptDir "backend"
+$BackendVenvDir = Join-Path $BackendDir ".venv"
+$BackendVenvPython = Join-Path $BackendVenvDir "Scripts\python.exe"
+
+function Invoke-CheckedCommand {
+    param(
+        [scriptblock]$Command,
+        [string]$ErrorMessage
+    )
+
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error $ErrorMessage
+        exit 1
+    }
+}
 
 function Test-PortableFrontendPattern {
     param(
@@ -40,61 +56,72 @@ function Get-FrontendEntryAssets {
 }
 
 # =============================================================================
-# 1. Build Frontend
+# 1. 프론트엔드 빌드
 # =============================================================================
 Write-Host ">>> Cleaning Frontend dist..." -ForegroundColor Yellow
 if (Test-Path "frontend/dist") { Remove-Item "frontend/dist" -Recurse -Force }
 
 Write-Host ">>> Building Frontend..." -ForegroundColor Yellow
 Set-Location "frontend"
-npm run build
-if ($LASTEXITCODE -ne 0) { Write-Error "Frontend Build Failed"; exit 1 }
+Invoke-CheckedCommand -Command { npm run build } -ErrorMessage "Frontend Build Failed"
 Set-Location ".."
 
 # =============================================================================
-# 2. Update Backend Dependencies
+# 2. 백엔드 가상 환경 준비
+# =============================================================================
+Write-Host ">>> Preparing Backend Python Virtual Environment..." -ForegroundColor Yellow
+if (-not (Test-Path $BackendVenvPython)) {
+    Invoke-CheckedCommand -Command { python -m venv $BackendVenvDir } -ErrorMessage "Backend venv creation failed"
+}
+if (-not (Test-Path $BackendVenvPython)) {
+    Write-Error "Backend venv python not found: $BackendVenvPython"
+    exit 1
+}
+
+$env:PYTHONNOUSERSITE = "1"
+Write-Host "    Using Python: $BackendVenvPython" -ForegroundColor Cyan
+
+# =============================================================================
+# 3. 백엔드 의존성 갱신
 # =============================================================================
 Write-Host ">>> Updating Backend Dependencies..." -ForegroundColor Yellow
 Set-Location "backend"
-python -m pip install -r requirements.txt
-if ($LASTEXITCODE -ne 0) { Write-Error "Backend Dependency Install Failed"; exit 1 }
+Invoke-CheckedCommand -Command { & $BackendVenvPython -m pip install --disable-pip-version-check --require-virtualenv -r requirements-build.txt } -ErrorMessage "Backend Dependency Install Failed"
 
 # =============================================================================
-# 3. Install Playwright Browsers (Local for bundling)
+# 4. 번들링용 Playwright 브라우저 설치
 # =============================================================================
 Write-Host ">>> Installing Playwright Browsers (Local)..." -ForegroundColor Yellow
-# Use Absolute Path to avoid alignment issues with Set-Location
+# Set-Location 위치 차이를 피하기 위해 절대 경로를 사용한다.
 $BrowsersDir = Join-Path $ScriptDir "backend\browsers"
 if (Test-Path $BrowsersDir) { Remove-Item $BrowsersDir -Recurse -Force }
 New-Item -ItemType Directory -Path $BrowsersDir -Force | Out-Null
 
 $env:PLAYWRIGHT_BROWSERS_PATH = $BrowsersDir
-python -m playwright install chromium
-if ($LASTEXITCODE -ne 0) { Write-Error "Playwright Install Failed"; exit 1 }
+Invoke-CheckedCommand -Command { & $BackendVenvPython -m playwright install chromium } -ErrorMessage "Playwright Install Failed"
 Write-Host "    Browsers installed to: $BrowsersDir" -ForegroundColor Green
 
 
 # =============================================================================
-# 4. Package Backend with PyInstaller
+# 5. PyInstaller 백엔드 패키징
 # =============================================================================
 Write-Host ">>> Packaging Backend (PyInstaller)..." -ForegroundColor Yellow
 if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
 if (Test-Path "build") { Remove-Item "build" -Recurse -Force }
 
-# Extract Version
+# 버전 추출
 Write-Host ">>> Extracting Version from frontend/package.json..." -ForegroundColor Yellow
 $PackageJson = Get-Content -Raw -Path "../frontend/package.json" | ConvertFrom-Json
 $Version = $PackageJson.version
 Write-Host "    Detected Version: $Version" -ForegroundColor Cyan
 
-# Build EXE
-python -m PyInstaller --noconfirm --clean build_specs\SmartFactoryBackend.spec
-if ($LASTEXITCODE -ne 0) { Write-Error "Backend Packaging Failed"; exit 1 }
+# EXE 빌드
+Invoke-CheckedCommand -Command { & $BackendVenvPython -m PyInstaller --noconfirm --clean build_specs\SmartFactoryBackend.spec } -ErrorMessage "Backend Packaging Failed"
 
 Set-Location ".."
 
 # =============================================================================
-# 5. Create Portable Directory Structure
+# 6. 포터블 디렉터리 구조 생성
 # =============================================================================
 Write-Host ">>> Creating Portable Directory Structure..." -ForegroundColor Yellow
 $PortableDir = "dist\SmartFactory_Portable"
@@ -103,14 +130,14 @@ $PortablePath = Join-Path $ScriptDir $PortableDir
 if (Test-Path $PortablePath) { Remove-Item $PortablePath -Recurse -Force }
 New-Item -ItemType Directory -Path $PortablePath -Force | Out-Null
 
-# Copy EXE
+# EXE 복사
 $ExeName = "SmartFactory_v$Version.exe"
 $SourceExe = "backend\dist\SmartFactoryBackend.exe"
 $DestExe = Join-Path $PortablePath $ExeName
 Copy-Item -Path $SourceExe -Destination $DestExe -Force
 Write-Host "    Copied EXE: $ExeName" -ForegroundColor Green
 
-# Copy mes_data folder (database)
+# mes_data 폴더 복사
 $MesDataSource = "mes_data"
 $MesDataDest = Join-Path $PortablePath "mes_data"
 if (Test-Path $MesDataSource) {
@@ -118,7 +145,7 @@ if (Test-Path $MesDataSource) {
     Write-Host "    Copied mes_data folder" -ForegroundColor Green
 }
 
-# Copy browsers folder
+# 브라우저 폴더 복사
 $BrowsersSource = Join-Path $ScriptDir "backend\browsers"
 $BrowsersDest = Join-Path $PortablePath "browsers"
 if (Test-Path $BrowsersSource) {
@@ -169,11 +196,11 @@ if ($MissingFrontendPatterns.Count -gt 0) {
 Write-Host "    Verified frontend dist sidecar" -ForegroundColor Green
 
 # =============================================================================
-# 6. Create Launcher Scripts (Uses System Grafana)
+# 7. 시스템 Grafana를 사용하는 실행 스크립트 생성
 # =============================================================================
 Write-Host ">>> Creating Launcher Scripts..." -ForegroundColor Yellow
 
-# start.bat - Uses Windows Grafana Service
+# start.bat - Windows Grafana 서비스를 사용한다.
 $StartBatContent = @"
 @echo off
 title Smart Factory Logger
@@ -233,7 +260,7 @@ pause
 Set-Content -Path (Join-Path $PortablePath "stop.bat") -Value $StopBatContent -Encoding ASCII
 Write-Host "    stop.bat created" -ForegroundColor Green
 
-# setup_grafana.bat - Grafana configuration helper
+# setup_grafana.bat - Grafana 설정 도우미
 $SetupGrafanaBatContent = @"
 @echo off
 title Grafana Setup for SmartFactory
@@ -278,7 +305,7 @@ Set-Content -Path (Join-Path $PortablePath "setup_grafana.bat") -Value $SetupGra
 Write-Host "    setup_grafana.bat created (run once on target machine)" -ForegroundColor Green
 
 # =============================================================================
-# 7. Create README
+# 8. README 생성
 # =============================================================================
 $ReadmeContent = @"
 # SmartFactory Logger v$Version
@@ -313,7 +340,7 @@ Set-Content -Path (Join-Path $PortablePath "README.txt") -Value $ReadmeContent -
 Write-Host "    README.txt created" -ForegroundColor Green
 
 # =============================================================================
-# 8. Create Final ZIP
+# 9. 최종 ZIP 생성
 # =============================================================================
 Write-Host ">>> Creating Final ZIP Package..." -ForegroundColor Yellow
 $ZipName = "SmartFactory_v$Version`_Portable.zip"
@@ -324,7 +351,7 @@ Compress-Archive -Path $PortablePath -DestinationPath $ZipPath -Force
 Write-Host "    ZIP created: $ZipName" -ForegroundColor Green
 
 # =============================================================================
-# Complete
+# 완료
 # =============================================================================
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green

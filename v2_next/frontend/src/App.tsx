@@ -18,6 +18,7 @@ import { useLayoutViewModel } from './domains/Configuration/hooks/useLayoutViewM
 import { useMetricsViewModel } from './domains/FacilityData/hooks/useMetricsViewModel';
 import { useViewportScale, applyRowHeightToCSS } from './domains/Configuration/hooks/useViewportScale';
 import { useStatusPanel } from './domains/Layout/hooks/useStatusPanel';
+import { useDashboardStore } from './store/useDashboardStore';
 import { DashboardHeader } from './domains/Layout/components/DashboardHeader/DashboardHeader';
 import { LayoutEditContext } from './domains/Configuration/context/LayoutEditContext';
 import { AIChatbotLauncher } from './AI/components/AIChatbotLauncher';
@@ -396,6 +397,16 @@ function App() {
     thresholdConfig,
     timeSeriesFrameActive: settingsOpen || (hasTimeSeriesWidget && (layoutEditing || timeSeriesVisible))
   });
+  const intervalSec = Number(settingsForm?.intervalSec ?? '0.2') || 0.2;
+  const setDashboardTimeSeriesState = useDashboardStore((state) => state.setTimeSeriesState);
+
+  useEffect(() => {
+    setDashboardTimeSeriesState({
+      timeSeriesAllFrame,
+      thresholds: thresholdState,
+      intervalSec,
+    });
+  }, [intervalSec, setDashboardTimeSeriesState, thresholdState, timeSeriesAllFrame]);
 
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
@@ -946,7 +957,7 @@ function App() {
     snapshotLoading,
     layoutEditing,
     setLayoutEditing,
-    intervalSec: Number(settingsForm?.intervalSec ?? '0.2') || 0.2,
+    intervalSec,
   }), [
     data,
     thresholdState,
@@ -972,7 +983,7 @@ function App() {
     snapshotLoading,
     layoutEditing,
     setLayoutEditing,
-    settingsForm?.intervalSec,
+    intervalSec,
   ]);
 
   const layoutEditContextValue = useMemo(() => ({

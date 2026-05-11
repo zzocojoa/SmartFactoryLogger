@@ -114,6 +114,7 @@ describe('useSpotViewModel integration', () => {
     const originalRevokeObjectURL = global.URL.revokeObjectURL;
     global.URL.createObjectURL = vi.fn(() => 'blob:mocked-spot-image');
     global.URL.revokeObjectURL = vi.fn();
+    const consoleErrorMock = vi.spyOn(console, 'error').mockImplementation((): void => undefined);
 
     const setSpotImageStateMock = vi.fn();
     const originalSetSpotImageState = useDashboardStore.getState().setSpotImageState;
@@ -170,10 +171,19 @@ describe('useSpotViewModel integration', () => {
       const errorStateCalls = setSpotImageStateMock.mock.calls.filter(([, ,imageError]) => imageError !== null);
       expect(errorStateCalls).toHaveLength(0);
       expect(result.current.imageError).toBeTruthy();
+      expect(consoleErrorMock).toHaveBeenCalledWith(
+        'Spot image payload validation failed',
+        expect.objectContaining({
+          event: 'spot_image_payload_rejected',
+          code: 'invalid-image-format',
+          responseStatus: 502,
+        })
+      );
     } finally {
       unmount();
       mockFetchSpotConfig.mockReset();
       mockFetchSpotImageResponse.mockReset();
+      consoleErrorMock.mockRestore();
       global.URL.createObjectURL = originalCreateObjectURL;
       global.URL.revokeObjectURL = originalRevokeObjectURL;
       useDashboardStore.setState({
