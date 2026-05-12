@@ -4782,6 +4782,161 @@ body {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
+/* 타임 시리즈 위젯 전용 보정 */
+.timeseries-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-width: 0;
+}
+
+.timeseries-legend {
+  display: flex;
+  flex: 1 1 420px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.timeseries-legend-chip,
+.timeseries-legend button,
+.timeseries-legend-button {
+  box-sizing: border-box;
+  display: inline-flex !important;
+  align-items: center;
+  flex: 0 1 172px;
+  min-width: 112px;
+  max-width: 172px;
+  min-height: 28px;
+  padding: 4px 8px !important;
+  overflow: hidden;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.timeseries-legend-label,
+.timeseries-legend button span:first-of-type,
+.timeseries-legend-button span:first-of-type {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeseries-legend-value,
+.timeseries-legend button span:last-of-type,
+.timeseries-legend-button span:last-of-type {
+  flex: 0 0 auto;
+  min-width: 4.5ch;
+  margin-left: auto !important;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.timeseries-legend-more {
+  flex: 0 1 auto;
+  min-width: 88px;
+  max-width: 128px;
+  justify-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-secondary) !important;
+}
+
+.timeseries-controls {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.timeseries-controls > .series-group {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.timeseries-controls .status-action {
+  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 32px;
+  height: 32px !important;
+  padding: 0 10px !important;
+}
+
+.timeseries-controls > .series-group .status-action {
+  min-width: 40px !important;
+  padding: 0 8px !important;
+}
+
+.timeseries-controls .status-action.loading {
+  width: 76px !important;
+  height: 32px !important;
+}
+
+.timeseries-controls .series-density-badge {
+  box-sizing: border-box;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.timeseries-threshold-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.timeseries-controls-divider {
+  flex: 0 0 1px;
+}
+
+@container card (max-width: 640px) {
+  .timeseries-header {
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .timeseries-legend,
+  .timeseries-controls {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
+  .timeseries-legend-chip,
+  .timeseries-legend button,
+  .timeseries-legend-button {
+    flex: 1 1 128px;
+    max-width: 100%;
+  }
+
+  .timeseries-legend-more {
+    flex-basis: 96px;
+  }
+
+  .timeseries-controls-divider {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .timeseries-card {
+    min-height: 320px;
+  }
+}
+
 /* Widget Header Controls (Edit/Delete) */
 .widget-header-controls {
   display: flex;
@@ -5197,6 +5352,7 @@ body {
 /* uPlot Tooltip */
 .uplot-tooltip {
   position: absolute;
+  box-sizing: border-box;
   background: var(--bg-card);
   border: 1px solid var(--border-main);
   border-radius: 8px;
@@ -5208,6 +5364,10 @@ body {
   font-size: 0.75rem;
   color: var(--text-primary);
   min-width: 140px;
+  max-width: min(360px, calc(100vw - 32px));
+  max-height: min(280px, calc(100vh - 96px));
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .uplot-tooltip-time {
@@ -5230,6 +5390,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .uplot-tooltip-dot {
@@ -5241,4 +5402,7 @@ body {
 .uplot-tooltip-value {
   font-family: var(--font-number);
   font-weight: 600;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
