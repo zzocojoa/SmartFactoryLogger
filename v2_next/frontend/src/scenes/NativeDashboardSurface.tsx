@@ -40,6 +40,8 @@ type DeferredWidgetContentProps = {
 const WIDGET_FALLBACK_TEXT = 'Loading...';
 const DEFERRED_WIDGET_TYPES = new Set<DashboardItem['type']>(['timeseries']);
 const GRID_GAP_PX = 4;
+const WIDGET_PLACEHOLDER_CLASS_NAME = 'native-widget-placeholder';
+const TIMESERIES_PLACEHOLDER_CLASS_NAME = `${WIDGET_PLACEHOLDER_CLASS_NAME} timeseries-card`;
 
 const buildLayoutMapFromItems = (items: DashboardItem[]): LayoutMap => {
   return items.reduce<LayoutMap>((acc, item) => {
@@ -76,6 +78,14 @@ const NativeWidget = ({ item, children }: NativeWidgetProps): JSX.Element => {
       </div>
     </div>
   );
+};
+
+const resolvePlaceholderClassName = (item: DashboardItem): string => {
+  if (item.type === 'timeseries') {
+    return TIMESERIES_PLACEHOLDER_CLASS_NAME;
+  }
+
+  return WIDGET_PLACEHOLDER_CLASS_NAME;
 };
 
 const DeferredWidgetContent = ({ item, renderContent, onTimeSeriesVisible }: DeferredWidgetContentProps): JSX.Element => {
@@ -132,7 +142,7 @@ const DeferredWidgetContent = ({ item, renderContent, onTimeSeriesVisible }: Def
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
-      {shouldRender ? renderContent() : <div className="native-widget-placeholder" aria-label={`${item.title} 대기`} />}
+      {shouldRender ? renderContent() : <div className={resolvePlaceholderClassName(item)} aria-label={`${item.title} 대기`} />}
     </div>
   );
 };

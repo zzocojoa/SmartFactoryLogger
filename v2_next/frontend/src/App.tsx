@@ -67,12 +67,18 @@ const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LEGACY_LAYOUT_COLS = 24;
 const CAMERA_DELAY_NOTIFICATION_GROUP = 'spot-camera-delay';
 const CAMERA_STATUS_DEBOUNCE_MS = 3000;
+const DEFAULT_SERIES_WINDOW_MIN = 30;
+const SERIES_WINDOW_MIN_OPTIONS: readonly number[] = [1, 5, 10, 30, 60];
 
 interface CameraNotificationSnapshot {
   type: string;
   title: string;
   detail: string;
 }
+
+const normalizeSeriesWindowMin = (value: number): number => {
+  return SERIES_WINDOW_MIN_OPTIONS.includes(value) ? value : DEFAULT_SERIES_WINDOW_MIN;
+};
 
 const hasLayoutTimeSeriesWidget = (layout: LayoutMap | null): boolean => {
   if (!layout) {
@@ -234,12 +240,13 @@ function App() {
   const [seriesWindowMin, setSeriesWindowMinState] = useState(() => {
     try {
       const saved = safeGetItem('seriesWindowMin');
-      return saved ? parseInt(saved, 10) : 30;
-    } catch { return 30; }
+      return saved ? normalizeSeriesWindowMin(Number(saved)) : DEFAULT_SERIES_WINDOW_MIN;
+    } catch { return DEFAULT_SERIES_WINDOW_MIN; }
   });
   const setSeriesWindowMin = useCallback((min: number) => {
-    setSeriesWindowMinState(min);
-    safeSetItem('seriesWindowMin', String(min));
+    const normalizedMin = normalizeSeriesWindowMin(min);
+    setSeriesWindowMinState(normalizedMin);
+    safeSetItem('seriesWindowMin', String(normalizedMin));
   }, []);
   const [seriesPaused, setSeriesPaused] = useState(false);
   const [showThresholds, setShowThresholds] = useState(true);

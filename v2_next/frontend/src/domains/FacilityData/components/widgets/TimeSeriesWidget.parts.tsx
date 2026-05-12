@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import uPlot from 'uplot';
+import React, { useMemo, useRef, useState } from 'react';
+import type uPlot from 'uplot';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import type { FactoryData, ThresholdKey, ThresholdState } from '../../../../shared/types';
 import { LABELS } from '../../../../shared/constants/uiText';
@@ -82,6 +82,79 @@ const getThresholdColor = (key: ThresholdKey): string | null => {
   return seriesKey !== null ? SERIES_COLORS[seriesKey] : null;
 };
 
+type TooltipBounds = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+type TooltipPosition = {
+  x: number;
+  y: number;
+};
+
+const clampNumber = (value: number, min: number, max: number): number => {
+  return Math.min(Math.max(value, min), max);
+};
+
+const buildClampedTooltipPosition = (
+  left: number,
+  top: number,
+  tooltipWidth: number,
+  tooltipHeight: number,
+  bounds: TooltipBounds
+): TooltipPosition => {
+  const padding = 8;
+  const requestedX = left + 20;
+  const requestedY = top;
+  const minX = bounds.left + padding;
+  const minY = bounds.top + padding;
+  const maxX = bounds.left + bounds.width - tooltipWidth - padding;
+  const maxY = bounds.top + bounds.height - tooltipHeight - padding;
+
+  return {
+    x: clampNumber(requestedX, minX, Math.max(minX, maxX)),
+    y: clampNumber(requestedY, minY, Math.max(minY, maxY)),
+  };
+};
+
+const buildWrapperLocalTooltipPosition = (
+  cursorLeft: number,
+  cursorTop: number,
+  tooltipWidth: number,
+  tooltipHeight: number,
+  plotRect: TooltipBounds,
+  wrapperRect: TooltipBounds
+): TooltipPosition => {
+  const plotLeft = plotRect.left - wrapperRect.left;
+  const plotTop = plotRect.top - wrapperRect.top;
+
+  return buildClampedTooltipPosition(
+    plotLeft + cursorLeft,
+    plotTop + cursorTop,
+    tooltipWidth,
+    tooltipHeight,
+    {
+      left: 0,
+      top: 0,
+      width: wrapperRect.width,
+      height: wrapperRect.height,
+    }
+  );
+};
+
+const buildPlotRectFromCanvasBbox = (plot: uPlot, wrapperRect: TooltipBounds): TooltipBounds => {
+  const pixelRatio = window.devicePixelRatio;
+
+  return {
+    left: wrapperRect.left + plot.bbox.left / pixelRatio,
+    top: wrapperRect.top + plot.bbox.top / pixelRatio,
+    width: plot.bbox.width / pixelRatio,
+    height: plot.bbox.height / pixelRatio,
+  };
+};
+
 type TimeSeriesLegendProps = {
   activeSeries: Record<string, boolean>;
   onToggleSeries: (key: string) => void;
@@ -92,16 +165,22 @@ export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
   onToggleSeries,
 }: TimeSeriesLegendProps) {
   const factoryData = useDashboardStore((state) => state.data);
+  const [showAllSeries, setShowAllSeries] = useState<boolean>(false);
+  const legendSeries = showAllSeries ? TIME_SERIES_CATALOG : LEGEND_SERIES;
+  const hiddenActiveSeriesCount: number = Array.from(HIDDEN_BY_DEFAULT_SERIES).filter((key) => activeSeries[key]).length;
+  const showHiddenActiveSeriesCount: boolean = !showAllSeries && hiddenActiveSeriesCount > 0;
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-      {LEGEND_SERIES.map((meta) => {
+    <div className="timeseries-legend" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+      {legendSeries.map((meta) => {
         const isActive = activeSeries[meta.key];
         const color = SERIES_COLORS[meta.key] || '#888';
 
         return (
           <button
             key={meta.key}
+            className={`timeseries-legend-button ${isActive ? 'active' : 'inactive'}`}
+            aria-pressed={isActive}
             onClick={() => onToggleSeries(meta.key)}
             style={{
               display: 'flex',
@@ -119,6 +198,7 @@ export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
             }}
           >
             <div
+              className="timeseries-legend-dot"
               style={{
                 width: '8px',
                 height: '8px',
@@ -126,13 +206,35 @@ export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
                 backgroundColor: isActive ? color : 'var(--text-muted)',
               }}
             />
-            <span>{meta.label}</span>
-            <span style={{ fontWeight: 600, marginLeft: '4px' }}>
+            <span className="timeseries-legend-label">{meta.label}</span>
+            <span className="timeseries-legend-value" style={{ fontWeight: 600, marginLeft: '4px' }}>
               {formatCurrentValue(factoryData, meta.key)}
             </span>
           </button>
         );
       })}
+      <button
+        className={`timeseries-legend-button timeseries-legend-more ${showAllSeries ? 'active' : 'inactive'}`}
+        aria-expanded={showAllSeries}
+        onClick={() => setShowAllSeries((current) => !current)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '2px 8px',
+          borderRadius: '12px',
+          border: '1px solid var(--border-muted)',
+          background: showAllSeries ? 'var(--bg-card)' : 'transparent',
+          fontSize: '11px',
+          color: showAllSeries ? 'var(--text-primary)' : 'var(--text-muted)',
+          cursor: 'pointer',
+          transition: 'all 0.2s ease',
+          opacity: showAllSeries ? 1 : 0.75,
+        }}
+      >
+        <span>{showAllSeries ? '기본 범례' : '더 보기'}</span>
+        {showHiddenActiveSeriesCount ? <span>(활성 {hiddenActiveSeriesCount})</span> : null}
+      </button>
     </div>
   );
 });
@@ -166,31 +268,35 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
 }: TimeSeriesHeaderProps) {
   return (
     <div
+      className="timeseries-header"
       style={{
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'center',
         padding: '6px 8px',
         borderBottom: '1px solid var(--border-muted)',
         background: 'var(--bg-card-muted)',
-        gap: '16px',
       }}
     >
       <TimeSeriesLegend activeSeries={activeSeries} onToggleSeries={onToggleSeries} />
 
       <div
         className="timeseries-controls"
+        role="toolbar"
+        aria-label="타임 시리즈 제어"
+        title="타임 시리즈 제어"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
         }}
       >
-        <div className="series-group">
+        <div className="series-group timeseries-window-group" role="group" aria-label="표시 시간 범위" title="표시 시간 범위">
           {SERIES_WINDOW_OPTIONS.map((min) => (
             <button
               key={min}
               className={`status-action ${seriesWindowMin === min ? 'active' : ''}`}
+              aria-pressed={seriesWindowMin === min}
+              title={`${min}분 보기`}
               style={{
                 minWidth: '32px',
                 padding: '0 4px',
@@ -205,7 +311,7 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
           ))}
         </div>
         <span
-          className="series-density-badge"
+          className="series-density-badge timeseries-density-badge"
           title="현재 수집 간격 기준 데이터 밀도"
           style={{
             fontSize: '10px',
@@ -219,11 +325,22 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
         >
           {(1 / intervalSec).toFixed(0)}pt/s
         </span>
-        <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }} />
-        <button className={`status-action ${seriesPaused ? 'warn' : ''}`} onClick={() => setSeriesPaused((prev) => !prev)}>
-          {seriesPaused ? 'Pause' : 'Live'}
+        <div
+          className="timeseries-controls-divider"
+          aria-hidden="true"
+          style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}
+        />
+        <button
+          className={`status-action timeseries-pause-button ${seriesPaused ? 'warn' : ''}`}
+          aria-pressed={seriesPaused}
+          title={seriesPaused ? '실시간 업데이트 재개' : '실시간 업데이트 일시정지'}
+          onClick={() => setSeriesPaused((prev) => !prev)}
+        >
+          {seriesPaused ? 'Paused' : 'Live'}
         </button>
         <label
+          className="timeseries-threshold-label"
+          title={LABELS.THRESHOLDS}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -234,15 +351,26 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
             color: 'var(--text-secondary)',
           }}
         >
-          <input type="checkbox" checked={showThresholds} onChange={(event) => setShowThresholds(event.target.checked)} />
+          <input
+            type="checkbox"
+            aria-label={LABELS.THRESHOLDS}
+            checked={showThresholds}
+            onChange={(event) => setShowThresholds(event.target.checked)}
+          />
           {LABELS.THRESHOLDS}
         </label>
-        <div style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }} />
+        <div
+          className="timeseries-controls-divider"
+          aria-hidden="true"
+          style={{ width: '1px', height: '16px', background: 'var(--border-muted)', margin: '0 4px' }}
+        />
         <button
-          className={`status-action ${snapshotLoading ? 'loading' : ''}`}
+          className={`status-action timeseries-snapshot-button ${snapshotLoading ? 'loading' : ''}`}
           onClick={onSnapshot}
           disabled={snapshotLoading}
-          title={LABELS.SAVE_SNAPSHOT}
+          aria-busy={snapshotLoading}
+          aria-label="전체 대시보드 스냅샷 저장"
+          title="전체 대시보드 스냅샷 저장"
         >
           스냅샷
         </button>
@@ -268,6 +396,8 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   timeSeriesAllFrame,
   onCreate,
 }: TimeSeriesChartProps) {
+  const chartWrapperRef = useRef<HTMLDivElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
   const uPlotData = useMemo<uPlot.AlignedData | null>(() => {
     if (timeSeriesAllFrame === null) {
       return null;
@@ -396,9 +526,10 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
               return;
             }
 
-            const tooltip = document.getElementById('uplot-tooltip');
+            const tooltip = tooltipRef.current;
+            const chartWrapper = chartWrapperRef.current;
 
-            if (tooltip === null) {
+            if (tooltip === null || chartWrapper === null) {
               return;
             }
 
@@ -429,7 +560,17 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
 
             tooltip.innerHTML = `<div class="uplot-tooltip-time">${timeLabel}</div>${itemsHtml}`;
             tooltip.style.display = 'block';
-            tooltip.style.transform = `translate(${left + 20}px, ${top}px)`;
+            const wrapperRect = chartWrapper.getBoundingClientRect();
+            const plotRect = plot.over?.getBoundingClientRect() ?? buildPlotRectFromCanvasBbox(plot, wrapperRect);
+            const tooltipPosition = buildWrapperLocalTooltipPosition(
+              left,
+              top,
+              tooltip.offsetWidth,
+              tooltip.offsetHeight,
+              plotRect,
+              wrapperRect
+            );
+            tooltip.style.transform = `translate(${tooltipPosition.x}px, ${tooltipPosition.y}px)`;
           },
         ],
       },
@@ -449,7 +590,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   }
 
   return (
-    <div style={{ position: 'relative', height: '100%', width: '100%' }}>
+    <div ref={chartWrapperRef} style={{ position: 'relative', height: '100%', width: '100%' }}>
       <UPlotChart
         key={chartKey}
         data={uPlotData}
@@ -458,7 +599,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
         className="uplot-container"
         onCreate={onCreate}
       />
-      <div id="uplot-tooltip" className="uplot-tooltip" style={{ top: 0, left: 0 }} />
+      <div ref={tooltipRef} className="uplot-tooltip" style={{ top: 0, left: 0 }} />
     </div>
   );
 });
