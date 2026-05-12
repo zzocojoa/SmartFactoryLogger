@@ -126,6 +126,12 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   setThemeMode,
   handleOpenSettings,
 }) => {
+  const handleApplyPreset = (preset: LayoutPresetId): void => {
+    applyPreset(preset);
+    setPresetOpen(false);
+    setMenuOpen(false);
+  };
+
   return (
     <header className="app-header">
       <div className="app-brand">
@@ -362,16 +368,16 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                   </button>
                   {presetOpen && (
                     <div className="menu-accordion-content">
-                      <button className="menu-item" onClick={() => applyPreset('16:9')}>
+                      <button className="menu-item" onClick={() => handleApplyPreset('16:9')}>
                         16:9 일반
                       </button>
-                      <button className="menu-item" onClick={() => applyPreset('21:9')}>
+                      <button className="menu-item" onClick={() => handleApplyPreset('21:9')}>
                         21:9 와이드
                       </button>
-                      <button className="menu-item" onClick={() => applyPreset('4:3')}>
+                      <button className="menu-item" onClick={() => handleApplyPreset('4:3')}>
                         4:3 클래식
                       </button>
-                      <button className="menu-item" onClick={() => applyPreset('compact')}>
+                      <button className="menu-item" onClick={() => handleApplyPreset('compact')}>
                         컴팩트
                       </button>
                     </div>

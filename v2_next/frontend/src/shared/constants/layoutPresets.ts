@@ -31,9 +31,9 @@ const PRESET_21_9: LayoutMap = {
   spot: { x: 12, y: 0, width: 16, height: 4, type: 'spot', title: 'SPOT 온도' },
   temps: { x: 12, y: 4, width: 16, height: 4, type: 'temps', title: '보조 온도' },
   camera: { x: 12, y: 8, width: 16, height: 8, type: 'camera', title: 'SPOT 카메라' },
-  molds: { x: 28, y: 0, width: 16, height: 8, type: 'molds', title: '몰드 존' },
-  env: { x: 28, y: 8, width: 16, height: 4, type: 'env', title: '환경' },
-  timeseries: { x: 44, y: 0, width: 16, height: 16, type: 'timeseries', title: '타임 시리즈' },
+  molds: { x: 28, y: 0, width: 32, height: 12, type: 'molds', title: '몰드 존' },
+  env: { x: 28, y: 12, width: 32, height: 4, type: 'env', title: '환경' },
+  timeseries: { x: 0, y: 16, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
 };
 
 /**
