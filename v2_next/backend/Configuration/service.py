@@ -143,6 +143,12 @@ def get_config_snapshot() -> dict:
         "ip": spot_ip,
         "url": _get(parser, "SPOT", "url", f"http://{spot_ip}/output?p=temperature"),
         "image_url": _get(parser, "SPOT", "imageurl", f"http://{spot_ip}/image.jpg"),
+        "internal_temperature_url": _get(
+            parser,
+            "SPOT",
+            "internaltemperatureurl",
+            f"http://{spot_ip}/output?p=itemperature",
+        ),
         "refresh_interval": _get_float(parser, "SPOT", "refreshinterval", config.DEFAULT_SPOT_REFRESH_INTERVAL),
         "timeout": _get_float(parser, "SPOT", "timeout", 0.5),
         "crosshair_x": _get_float(parser, "SPOT", "crosshairx", config.DEFAULT_SPOT_CROSSHAIR_X),
@@ -467,6 +473,7 @@ def update_config(
 
     old_spot_ip = _get(parser, "SPOT", "ip", config.DEFAULT_SPOT_IP)
     old_image_url = _get(parser, "SPOT", "imageurl", "")
+    old_internal_temperature_url = _get(parser, "SPOT", "internaltemperatureurl", "")
     old_focus_url = _get(parser, "SPOT", "focusurl", "")
     old_legacy_actuator_ip = _get_text(parser, "ACTUATOR", "actuatorip")
     old_actuator_ip = _get(parser, "SPOT", "actuatorip", old_legacy_actuator_ip) or old_legacy_actuator_ip or old_spot_ip
@@ -489,12 +496,16 @@ def update_config(
             parser.set("SPOT", "ip", payload.spot.ip)
             if not old_image_url or old_spot_ip in old_image_url:
                 parser.set("SPOT", "imageurl", f"http://{payload.spot.ip}/image.jpg")
+            if not old_internal_temperature_url or old_spot_ip in old_internal_temperature_url:
+                parser.set("SPOT", "internaltemperatureurl", f"http://{payload.spot.ip}/output?p=itemperature")
             if not old_focus_url or old_spot_ip in old_focus_url:
                 parser.set("SPOT", "focusurl", f"http://{payload.spot.ip}/control?p=focus")
         if payload.spot.url is not None:
             parser.set("SPOT", "url", payload.spot.url)
         if payload.spot.image_url is not None:
             parser.set("SPOT", "imageurl", payload.spot.image_url)
+        if payload.spot.internal_temperature_url is not None:
+            parser.set("SPOT", "internaltemperatureurl", payload.spot.internal_temperature_url)
         if payload.spot.refresh_interval is not None:
             parser.set("SPOT", "refreshinterval", str(payload.spot.refresh_interval))
         if payload.spot.timeout is not None:

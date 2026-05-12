@@ -2,7 +2,7 @@ import asyncio
 import re
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -13,8 +13,14 @@ from backend import config
 
 _ACTUATOR_LOCK = threading.Lock()
 
+
+class _TemperatureCache(TypedDict):
+    temp: float
+    temp_time: float
+
 # 이미지 프록시 단기 캐시
 _img_cache: Dict[str, Any] = {"data": None, "time": 0.0, "temp": 0.0, "temp_time": 0.0}
+_internal_temp_cache: _TemperatureCache = {"temp": 0.0, "temp_time": 0.0}
 _IMG_CACHE_TTL_SEC = 2.0
 _IMG_BACKOFF_BASE_SEC = 0.5
 _IMG_BACKOFF_MAX_SEC = 5.0
@@ -40,6 +46,12 @@ _temp_last_error_message: Optional[str] = None
 _temp_last_upstream_status: Optional[int] = None
 _temp_last_url: Optional[str] = None
 _temp_last_success_at = 0.0
+_internal_temp_last_error = 0.0
+_internal_temp_last_error_code: Optional[str] = None
+_internal_temp_last_error_message: Optional[str] = None
+_internal_temp_last_upstream_status: Optional[int] = None
+_internal_temp_last_url: Optional[str] = None
+_internal_temp_last_success_at = 0.0
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
 
 # 연결 풀 재사용을 위한 비동기 HTTP 클라이언트
@@ -74,6 +86,27 @@ class SpotTemperatureConfigError(ValueError):
 
 
 class SpotTemperatureFetchError(RuntimeError):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        temp_url: str,
+        upstream_status: Optional[int],
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.temp_url = temp_url
+        self.upstream_status = upstream_status
+
+
+class SpotInternalTemperatureConfigError(ValueError):
+    def __init__(self, temp_url: str) -> None:
+        super().__init__("SPOT_INTERNAL_TEMPERATURE_URL is not configured")
+        self.temp_url = temp_url
+
+
+class SpotInternalTemperatureFetchError(RuntimeError):
     def __init__(
         self,
         code: str,
@@ -258,6 +291,13 @@ def _resolve_spot_temperature_url() -> str:
     return temp_url
 
 
+def _resolve_spot_internal_temperature_url() -> str:
+    temp_url = str(config.SPOT_INTERNAL_TEMPERATURE_URL or "").strip()
+    if not temp_url:
+        raise SpotInternalTemperatureConfigError(temp_url)
+    return temp_url
+
+
 async def _request_spot_image_from_url(client: httpx.AsyncClient, image_url: str) -> bytes:
     try:
         response = await client.get(image_url)
@@ -417,6 +457,24 @@ async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) ->
         ) from exc
 
 
+async def _request_spot_internal_temperature(client: httpx.AsyncClient, temp_url: str) -> float:
+    try:
+        return await _request_spot_temperature(client, temp_url)
+    except SpotTemperatureFetchError as exc:
+        code = exc.code
+        if code.startswith("temperature-"):
+            code = f"internal-{code}"
+        raise SpotInternalTemperatureFetchError(
+            code,
+            (
+                "SPOT internal temperature upstream request failed; "
+                f"url={temp_url}; upstream_status={exc.upstream_status}; error={str(exc)}"
+            ),
+            temp_url=exc.temp_url,
+            upstream_status=exc.upstream_status,
+        ) from exc
+
+
 def _record_image_error(code: str, message: str) -> None:
     global _img_last_error
     global _img_last_error_code
@@ -481,6 +539,39 @@ def _record_temperature_success(temp_url: str) -> None:
     _temp_last_success_at = time.time()
 
 
+def _record_internal_temperature_error(
+    code: str,
+    message: str,
+    temp_url: str,
+    upstream_status: Optional[int],
+) -> None:
+    global _internal_temp_last_error
+    global _internal_temp_last_error_code
+    global _internal_temp_last_error_message
+    global _internal_temp_last_upstream_status
+    global _internal_temp_last_url
+
+    _internal_temp_last_error = time.time()
+    _internal_temp_last_error_code = code
+    _internal_temp_last_error_message = message
+    _internal_temp_last_upstream_status = upstream_status
+    _internal_temp_last_url = temp_url
+
+
+def _record_internal_temperature_success(temp_url: str) -> None:
+    global _internal_temp_last_error_code
+    global _internal_temp_last_error_message
+    global _internal_temp_last_upstream_status
+    global _internal_temp_last_url
+    global _internal_temp_last_success_at
+
+    _internal_temp_last_error_code = None
+    _internal_temp_last_error_message = None
+    _internal_temp_last_upstream_status = None
+    _internal_temp_last_url = temp_url
+    _internal_temp_last_success_at = time.time()
+
+
 def _temperature_cache_age_sec(now: float) -> Optional[float]:
     temp_time = float(_img_cache.get("temp_time") or 0.0)
     if temp_time <= 0.0:
@@ -499,6 +590,34 @@ def _temperature_cache_status(now: float) -> str:
     return "ok"
 
 
+def _internal_temperature_cache_age_sec(now: float) -> Optional[float]:
+    temp_time = float(_internal_temp_cache.get("temp_time") or 0.0)
+    if temp_time <= 0.0:
+        return None
+    return max(0.0, now - temp_time)
+
+
+def _internal_temperature_cache_status(now: float) -> str:
+    age = _internal_temperature_cache_age_sec(now)
+    if age is None:
+        if _internal_temp_last_error_code:
+            return "error"
+        return "empty"
+    if age > _TEMP_CACHE_TTL_SEC:
+        return "stale"
+    return "ok"
+
+
+def _cached_internal_temperature(now: float) -> Optional[float]:
+    age = _internal_temperature_cache_age_sec(now)
+    if age is None or age > _TEMP_CACHE_TTL_SEC:
+        return None
+    temperature = _internal_temp_cache.get("temp")
+    if isinstance(temperature, bool) or not isinstance(temperature, (float, int)):
+        return None
+    return float(temperature)
+
+
 async def _refresh_spot_temperature(client: httpx.AsyncClient) -> None:
     temp_url = _resolve_spot_temperature_url()
     temperature = await _request_spot_temperature(client, temp_url)
@@ -507,11 +626,52 @@ async def _refresh_spot_temperature(client: httpx.AsyncClient) -> None:
     _record_temperature_success(temp_url)
 
 
+async def _refresh_spot_internal_temperature(client: httpx.AsyncClient) -> None:
+    temp_url = _resolve_spot_internal_temperature_url()
+    temperature = await _request_spot_internal_temperature(client, temp_url)
+    _internal_temp_cache["temp"] = temperature
+    _internal_temp_cache["temp_time"] = time.time()
+    _record_internal_temperature_success(temp_url)
+
+
+async def _refresh_spot_internal_temperature_safely(client: httpx.AsyncClient, logger: Any) -> None:
+    try:
+        await _refresh_spot_internal_temperature(client)
+    except SpotInternalTemperatureConfigError as exc:
+        _record_internal_temperature_error(
+            "internal-temperature-config-missing",
+            str(exc),
+            exc.temp_url,
+            None,
+        )
+        logger.warning(
+            "Spot internal temperature fetch misconfigured",
+            extra={
+                "code": "internal-temperature-config-missing",
+                "temp_url": exc.temp_url,
+                "error": str(exc),
+            },
+        )
+    except SpotInternalTemperatureFetchError as exc:
+        _record_internal_temperature_error(exc.code, str(exc), exc.temp_url, exc.upstream_status)
+        logger.warning(
+            "Spot internal temperature fetch failed",
+            extra={
+                "code": exc.code,
+                "temp_url": exc.temp_url,
+                "upstream_status": exc.upstream_status,
+                "error": str(exc),
+            },
+        )
+
+
 def get_image_proxy_diagnostics() -> Dict[str, Any]:
     now = time.time()
     cache_age = _cache_age_sec(now) if _img_cache["data"] else None
     cache_status = _cache_status(now)
     retry_after = _retry_after_sec(now)
+    internal_temperature = _cached_internal_temperature(now)
+    internal_temperature_at = float(_internal_temp_cache.get("temp_time") or 0.0)
     return {
         "cache_state": _cache_state_for_status(cache_status),
         "cache_status": cache_status,
@@ -539,6 +699,49 @@ def get_image_proxy_diagnostics() -> Dict[str, Any]:
         "temperature_last_error_message": _temp_last_error_message,
         "temperature_last_upstream_status": _temp_last_upstream_status,
         "temperature_last_url": _temp_last_url,
+        "internal_temperature_url_configured": bool(str(config.SPOT_INTERNAL_TEMPERATURE_URL or "").strip()),
+        "internal_temperature": internal_temperature,
+        "internal_temperature_at": internal_temperature_at if internal_temperature is not None else None,
+        "internal_temperature_cache_status": _internal_temperature_cache_status(now),
+        "internal_temperature_cache_age_sec": _internal_temperature_cache_age_sec(now),
+        "internal_temperature_last_success_at": (
+            float(_internal_temp_last_success_at) if _internal_temp_last_success_at else None
+        ),
+        "internal_temperature_last_error_at": (
+            float(_internal_temp_last_error) if _internal_temp_last_error else None
+        ),
+        "internal_temperature_last_error_code": _internal_temp_last_error_code,
+        "internal_temperature_last_error_message": _internal_temp_last_error_message,
+        "internal_temperature_last_upstream_status": _internal_temp_last_upstream_status,
+        "internal_temperature_last_url": _internal_temp_last_url,
+    }
+
+
+def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
+    now = time.time()
+    internal_temperature = _cached_internal_temperature(now)
+    internal_temperature_at = float(_internal_temp_cache.get("temp_time") or 0.0)
+    return {
+        "internal_temperature_url_configured": bool(str(config.SPOT_INTERNAL_TEMPERATURE_URL or "").strip()),
+        "internal_temperature": internal_temperature,
+        "internal_temperature_at": internal_temperature_at if internal_temperature is not None else None,
+        "internal_temperature_cache_status": _internal_temperature_cache_status(now),
+        "internal_temperature_cache_age_sec": _internal_temperature_cache_age_sec(now),
+        "internal_temperature_cached_at": (
+            float(_internal_temp_cache.get("temp_time") or 0.0)
+            if _internal_temp_cache.get("temp_time")
+            else None
+        ),
+        "internal_temperature_last_success_at": (
+            float(_internal_temp_last_success_at) if _internal_temp_last_success_at else None
+        ),
+        "internal_temperature_last_error_at": (
+            float(_internal_temp_last_error) if _internal_temp_last_error else None
+        ),
+        "internal_temperature_last_error_code": _internal_temp_last_error_code,
+        "internal_temperature_last_error_message": _internal_temp_last_error_message,
+        "internal_temperature_last_upstream_status": _internal_temp_last_upstream_status,
+        "internal_temperature_last_url": _internal_temp_last_url,
     }
 
 
@@ -690,12 +893,13 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
 
 # --- 백그라운드 프리페칭 ---
 _prefetch_task: Optional[asyncio.Task] = None
+_internal_temp_prefetch_task: Optional[asyncio.Task] = None
 _prefetch_running = False
 
 
 async def _prefetch_loop():
     """백그라운드에서 지속적으로 SPOT 이미지 프리페칭 (드리프트 방지 로직 적용)."""
-    global _img_cache_state, _img_failure_count, _img_last_error, _prefetch_running
+    global _img_cache_state, _img_failure_count, _img_last_error, _internal_temp_prefetch_task, _prefetch_running
     _prefetch_running = True
     
     from ...MESSync.logger import get_logger
@@ -747,6 +951,13 @@ async def _prefetch_loop():
                             "error": str(exc),
                         },
                     )
+
+            if config.SPOT_INTERNAL_TEMPERATURE_URL and (
+                _internal_temp_prefetch_task is None or _internal_temp_prefetch_task.done()
+            ):
+                _internal_temp_prefetch_task = asyncio.create_task(
+                    _refresh_spot_internal_temperature_safely(client, logger)
+                )
                     
         except asyncio.CancelledError:
             break
@@ -817,7 +1028,7 @@ async def start_prefetch_loop():
 
 async def stop_prefetch_loop():
     """백그라운드 프리페칭 중지."""
-    global _prefetch_task, _prefetch_running
+    global _internal_temp_prefetch_task, _prefetch_task, _prefetch_running
     _prefetch_running = False
     
     if _prefetch_task:
@@ -827,6 +1038,13 @@ async def stop_prefetch_loop():
         except asyncio.CancelledError:
             pass
         _prefetch_task = None
+    if _internal_temp_prefetch_task:
+        _internal_temp_prefetch_task.cancel()
+        try:
+            await _internal_temp_prefetch_task
+        except asyncio.CancelledError:
+            pass
+        _internal_temp_prefetch_task = None
 
 
 def get_cached_spot_temp() -> float:
@@ -836,6 +1054,15 @@ def get_cached_spot_temp() -> float:
     if not _img_cache["temp_time"] or (now - _img_cache["temp_time"] > _TEMP_CACHE_TTL_SEC):
         return 0.0
     return _img_cache["temp"]
+
+
+def get_cached_spot_internal_temp() -> float:
+    now = time.time()
+    if not _internal_temp_cache["temp_time"] or (
+        now - _internal_temp_cache["temp_time"] > _TEMP_CACHE_TTL_SEC
+    ):
+        return 0.0
+    return _internal_temp_cache["temp"]
 
 
 def _resolve_spot_focus_url() -> str:

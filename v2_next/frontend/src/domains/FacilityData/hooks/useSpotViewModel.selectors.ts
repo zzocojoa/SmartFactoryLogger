@@ -52,6 +52,19 @@ const parseFiniteNumber = (rawValue: string | null): number | null => {
   return Number.isFinite(parsedValue) ? parsedValue : null;
 };
 
+const parseSpotInternalTemperatureAt = (rawValue: string | null): number | null => {
+  const numericTimestamp = parseFiniteNumber(rawValue);
+  if (numericTimestamp !== null) {
+    return normalizeSpotImageCapturedAt(rawValue);
+  }
+  const normalizedValue = rawValue?.trim() ?? '';
+  if (normalizedValue === '') {
+    return null;
+  }
+  const parsedTimestamp = Date.parse(normalizedValue);
+  return Number.isFinite(parsedTimestamp) ? parsedTimestamp : null;
+};
+
 const clampRetryAfterSec = (rawValue: number): number | null => {
   if (!Number.isFinite(rawValue)) {
     return null;
@@ -150,6 +163,9 @@ export const resolveSpotImageResponseMetadata = (
     age_sec: normalizeSpotImageAgeSec(headers.get('X-Spot-Image-Age')),
     max_stale_age_sec: parseFiniteNumber(headers.get('X-Spot-Max-Stale-Age')),
     captured_at: normalizeSpotImageCapturedAt(headers.get('X-Spot-Image-At')),
+    internal_temperature: parseFiniteNumber(headers.get('X-Spot-Internal-Temperature')),
+    internal_temperature_at: parseSpotInternalTemperatureAt(headers.get('X-Spot-Internal-Temperature-At')),
+    internal_temperature_status: headers.get('X-Spot-Internal-Temperature-Status'),
     retry_after_sec: parseRetryAfterSec(headers.get('Retry-After'), headers.get('X-Spot-Retry-After-Ms'), receivedAt),
     received_at: receivedAt,
     latency_ms: latencyMs,

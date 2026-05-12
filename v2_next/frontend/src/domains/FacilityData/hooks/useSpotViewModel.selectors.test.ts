@@ -105,4 +105,21 @@ describe('resolveSpotImageResponseMetadata', () => {
 
     expect(metadata.retry_after_sec).toBeNull();
   });
+
+  it('parses SPOT internal temperature headers', () => {
+    const headers = new Headers({
+      'X-Spot-Image-Status': 'ok',
+      'X-Spot-Cache-Status': 'fresh',
+      'X-Spot-Proxy-State': 'ok',
+      'X-Spot-Internal-Temperature': '41.2',
+      'X-Spot-Internal-Temperature-At': '1700000004',
+      'X-Spot-Internal-Temperature-Status': 'ok',
+    });
+
+    const metadata = resolveSpotImageResponseMetadata(headers, 40_000, 12);
+
+    expect(metadata.internal_temperature).toBe(41.2);
+    expect(metadata.internal_temperature_at).toBe(1_700_000_004_000);
+    expect(metadata.internal_temperature_status).toBe('ok');
+  });
 });

@@ -36,6 +36,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.original_spot_url: str = str(spot_api.config.SPOT_URL)
         self.original_spot_image_url: str = str(spot_api.config.SPOT_IMAGE_URL)
         self.original_spot_refresh_interval: float = float(spot_api.config.SPOT_REFRESH_INTERVAL)
+        self.original_spot_internal_temperature_url: str = str(spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL)
         self.original_spot_focus_url: str = str(spot_api.config.SPOT_FOCUS_URL)
         self.original_spot_focus_step: int = int(spot_api.config.SPOT_FOCUS_STEP)
         self.original_spot_actuator_url: str = str(spot_api.config.SPOT_ACTUATOR_URL)
@@ -46,6 +47,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api.config.SPOT_URL = self.original_spot_url
         spot_api.config.SPOT_IMAGE_URL = self.original_spot_image_url
         spot_api.config.SPOT_REFRESH_INTERVAL = self.original_spot_refresh_interval
+        spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = self.original_spot_internal_temperature_url
         spot_api.config.SPOT_FOCUS_URL = self.original_spot_focus_url
         spot_api.config.SPOT_FOCUS_STEP = self.original_spot_focus_step
         spot_api.config.SPOT_ACTUATOR_URL = self.original_spot_actuator_url
@@ -54,6 +56,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
     def reset_spot_state(self) -> None:
         spot_api._img_cache = {"data": None, "time": 0.0, "temp": 0.0, "temp_time": 0.0}
+        spot_api._internal_temp_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._img_last_error = 0.0
         spot_api._img_failure_count = 0
         spot_api._img_cache_state = "empty"
@@ -67,6 +70,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api._temp_last_upstream_status = None
         spot_api._temp_last_url = None
         spot_api._temp_last_success_at = 0.0
+        spot_api._internal_temp_last_error = 0.0
+        spot_api._internal_temp_last_error_code = None
+        spot_api._internal_temp_last_error_message = None
+        spot_api._internal_temp_last_upstream_status = None
+        spot_api._internal_temp_last_url = None
+        spot_api._internal_temp_last_success_at = 0.0
 
     async def test_temperature_timeout_diagnostics_have_non_empty_message_and_status(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
@@ -104,6 +113,27 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.upstream_status, 200)
         self.assertIn("not-a-number", str(error))
         self.assertIn("http://spot.local/temp", str(error))
+
+    async def test_internal_temperature_refresh_parses_and_caches_itemperature(self) -> None:
+        spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = "http://spot.local/output?p=itemperature"
+        requests: list[str] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            return httpx.Response(200, text="41.25", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            await spot_api._refresh_spot_internal_temperature(client)
+
+        diagnostics: dict[str, Any] = spot_api.get_spot_internal_temperature_diagnostics()
+
+        self.assertEqual(requests, ["http://spot.local/output?p=itemperature"])
+        self.assertEqual(spot_api._internal_temp_cache["temp"], 41.25)
+        self.assertGreater(float(spot_api._internal_temp_cache["temp_time"]), 0.0)
+        self.assertEqual(diagnostics["internal_temperature"], 41.25)
+        self.assertEqual(diagnostics["internal_temperature_cache_status"], "ok")
+        self.assertEqual(diagnostics["internal_temperature_last_url"], "http://spot.local/output?p=itemperature")
 
     async def test_image_timeout_diagnostics_include_url_and_error_type(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
@@ -354,6 +384,41 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers["Retry-After"], "2")
         self.assertEqual(response.headers["X-Spot-Retry-After-Ms"], "1235")
         record_mock.assert_called_once_with(200, 0.333, False)
+
+    async def test_proxy_image_response_includes_internal_temperature_headers_from_cache(self) -> None:
+        from backend import app as backend_app
+
+        measured_at = time.time()
+        spot_api._internal_temp_cache = {"temp": 41.25, "temp_time": measured_at}
+        fetch_mock: AsyncMock = AsyncMock(
+            return_value=(
+                b"image-data",
+                {
+                    "status": "ok",
+                    "source": "cache",
+                    "captured_at": measured_at,
+                    "age_sec": 0.333,
+                    "cache_status": "fresh",
+                    "proxy_state": "ok",
+                    "failure_count": 0,
+                    "last_error_code": None,
+                    "max_stale_age_sec": 15.0,
+                    "retry_after_sec": None,
+                },
+            )
+        )
+        record_mock: Mock = Mock()
+
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
+            patch.object(backend_app.observability_service, "record_spot_proxy_result", record_mock),
+        ):
+            response = await backend_app.proxy_spot_image()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-Spot-Internal-Temperature"], "41.250")
+        self.assertEqual(response.headers["X-Spot-Internal-Temperature-At"], str(int(measured_at * 1000)))
+        self.assertEqual(response.headers["X-Spot-Internal-Temperature-Status"], "ok")
 
     async def test_proxy_image_response_records_stale_metadata(self) -> None:
         from backend import app as backend_app
