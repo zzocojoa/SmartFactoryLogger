@@ -9,13 +9,16 @@ import Bot from 'lucide-react/dist/esm/icons/bot';
 import Wrench from 'lucide-react/dist/esm/icons/wrench';
 import { useAIAgent } from '../hooks/useAIAgent';
 import { ChatMessage } from './ChatMessage';
+import { useGlobalModalContext } from '../../shared/hooks/useGlobalModalContext';
 
 type AIChatbotProps = {
   initialOpen?: boolean;
 };
 
 export const AIChatbot: React.FC<AIChatbotProps> = ({ initialOpen }) => {
-  const shouldOpenInitially = initialOpen === true;
+  const { state: modalState } = useGlobalModalContext();
+  const modalActive = modalState.isOpen;
+  const shouldOpenInitially = initialOpen === true && !modalActive;
   const [isOpen, setIsOpen] = useState(shouldOpenInitially);
   const [showSettings, setShowSettings] = useState(false);
   const [input, setInput] = useState('');
@@ -35,6 +38,15 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({ initialOpen }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [tempKey, setTempKey] = useState(apiKey);
   const [tempModel, setTempModel] = useState(model);
+
+  useEffect(() => {
+    if (!modalActive) {
+      return;
+    }
+
+    setIsOpen(false);
+    setShowSettings(false);
+  }, [modalActive]);
 
   // Sync temp settings when dialog opens
   useEffect(() => {
@@ -73,12 +85,19 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({ initialOpen }) => {
   if (typeof document === 'undefined') return null;
 
   return ReactDOM.createPortal(
-    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col items-end pointer-events-none">
+    <div className="fixed bottom-6 right-6 z-[9000] flex flex-col items-end pointer-events-none">
       {/* Floating Action Button */}
       <div className="pointer-events-auto">
         <button
-          onClick={() => setIsOpen(!isOpen)}
-          className={`w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 ${
+          onClick={() => {
+            if (modalActive) {
+              return;
+            }
+            setIsOpen(!isOpen);
+          }}
+          disabled={modalActive}
+          aria-label={modalActive ? 'AI 챗봇 열기 비활성화' : isOpen ? 'AI 챗봇 닫기' : 'AI 챗봇 열기'}
+          className={`w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 disabled:opacity-40 disabled:hover:scale-100 ${
             isOpen 
               ? 'bg-gray-800 rotate-90 scale-90 text-gray-400' 
               : 'bg-gradient-to-r from-blue-600 to-cyan-500 hover:scale-105 hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] text-white'
@@ -106,12 +125,14 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({ initialOpen }) => {
             <div className="flex space-x-2">
               <button 
                 onClick={() => setShowSettings(!showSettings)}
+                aria-label={showSettings ? 'AI 챗봇 설정 닫기' : 'AI 챗봇 설정 열기'}
                 className={`p-2 rounded-lg transition-colors ${showSettings ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
               >
                 <Settings size={18} />
               </button>
               <button 
                 onClick={clearChat}
+                aria-label="AI 챗봇 대화 지우기"
                 title="대화 지우기"
                 className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
               >
@@ -226,6 +247,7 @@ export const AIChatbot: React.FC<AIChatbotProps> = ({ initialOpen }) => {
                   <button
                     onClick={handleSend}
                     disabled={!input.trim() || isLoading}
+                    aria-label="AI 챗봇 메시지 보내기"
                     className="absolute right-2 bottom-2 p-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors text-white shadow-md active:scale-95 flex items-center justify-center m-1"
                   >
                     <Send size={18} className="translate-x-0.5" />
