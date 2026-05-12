@@ -12,6 +12,10 @@
   --state-danger: #f66b6b;
   --state-offline: #7a7a7a;
   --state-cool: #56a6dc;
+  --camera-internal-temperature-text: #f8fafc;
+  --camera-internal-temperature-bg: rgba(0, 0, 0, 0.66);
+  --camera-internal-temperature-border: rgba(255, 255, 255, 0.24);
+  --camera-internal-temperature-shadow: rgba(0, 0, 0, 0.32);
 
   --bg-dark: #121417;
   --accent-main: #6366f1;
@@ -59,6 +63,10 @@
   --text-primary: #1f2328;
   --text-secondary: #4d535e;
   --text-muted: #6e7781;
+  --camera-internal-temperature-text: #ffffff;
+  --camera-internal-temperature-bg: rgba(15, 23, 42, 0.74);
+  --camera-internal-temperature-border: rgba(255, 255, 255, 0.34);
+  --camera-internal-temperature-shadow: rgba(15, 23, 42, 0.28);
   --bg-dark: #ffffff;
 
   /* Semantic Overrides for Light Mode */
@@ -95,6 +103,10 @@
   --text-primary: #3d3b38;
   --text-secondary: #6e6863;
   --text-muted: #948d86;
+  --camera-internal-temperature-text: #ffffff;
+  --camera-internal-temperature-bg: rgba(61, 59, 56, 0.76);
+  --camera-internal-temperature-border: rgba(255, 255, 255, 0.34);
+  --camera-internal-temperature-shadow: rgba(61, 59, 56, 0.26);
   --bg-dark: #fffdf9;
 
   /* Semantic Overrides for Sunset */
@@ -119,6 +131,10 @@
   --text-primary: #e6edf3;
   --text-secondary: #b0bac4;
   --text-muted: #7b8794;
+  --camera-internal-temperature-text: #f8fafc;
+  --camera-internal-temperature-bg: rgba(0, 0, 0, 0.66);
+  --camera-internal-temperature-border: rgba(255, 255, 255, 0.24);
+  --camera-internal-temperature-shadow: rgba(0, 0, 0, 0.32);
   --bg-dark: #010409;
 }
 
@@ -4248,9 +4264,29 @@ body {
   pointer-events: none;
 }
 
+.camera-internal-temperature-badge {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
+  pointer-events: none;
+  max-width: calc(100% - var(--space-2) * 2);
+  padding: calc(var(--space-1) * 0.8) var(--space-2);
+  border: 1px solid var(--camera-internal-temperature-border);
+  border-radius: var(--radius-1);
+  background: var(--camera-internal-temperature-bg);
+  color: var(--camera-internal-temperature-text);
+  font-size: clamp(10px, calc(var(--cq) * 1.2), 14px);
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px var(--camera-internal-temperature-shadow);
+}
+
 .camera-overlay {
   position: absolute;
   inset: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;

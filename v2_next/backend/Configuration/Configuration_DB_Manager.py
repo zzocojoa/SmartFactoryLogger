@@ -185,6 +185,11 @@ class ConfigManager:
             "SPOT_IMAGE_URL",
             _get(parser, "SPOT", "imageurl", f"http://{spot_ip}/image.jpg") or f"http://{spot_ip}/image.jpg",
         )
+        spot_internal_temperature_url = os.getenv(
+            "SPOT_INTERNAL_TEMPERATURE_URL",
+            _get(parser, "SPOT", "internaltemperatureurl", f"http://{spot_ip}/output?p=itemperature")
+            or f"http://{spot_ip}/output?p=itemperature",
+        )
         spot_focus_url = os.getenv(
             "SPOT_FOCUS_URL",
             _get(parser, "SPOT", "focusurl", f"http://{spot_ip}/control?p=focus")
@@ -277,6 +282,7 @@ class ConfigManager:
                 "ip": spot_ip,
                 "url": spot_url,
                 "image_url": spot_image_url,
+                "internal_temperature_url": spot_internal_temperature_url,
                 "refresh_interval": spot_refresh,
                 "crosshair_x": spot_crosshair_x,
                 "crosshair_y": spot_crosshair_y,
@@ -355,6 +361,7 @@ class ConfigManager:
             "spot.ip",
             "spot.url",
             "spot.image_url",
+            "spot.internal_temperature_url",
             "spot.refresh_interval",
             "spot.crosshair_x",
             "spot.crosshair_y",
@@ -457,6 +464,9 @@ class ConfigManager:
                 config.SPOT_IP = spot_ip
                 config.SPOT_URL = spot_cfg.get("url") or f"http://{spot_ip}/output?p=temperature"
                 config.SPOT_IMAGE_URL = spot_cfg.get("image_url") or f"http://{spot_ip}/image.jpg"
+                config.SPOT_INTERNAL_TEMPERATURE_URL = (
+                    spot_cfg.get("internal_temperature_url") or f"http://{spot_ip}/output?p=itemperature"
+                )
                 refresh_value = spot_cfg.get("refresh_interval", config.DEFAULT_SPOT_REFRESH_INTERVAL)
                 try:
                     refresh_float = float(refresh_value)

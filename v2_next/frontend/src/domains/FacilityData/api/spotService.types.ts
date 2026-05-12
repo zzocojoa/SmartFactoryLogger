@@ -13,6 +13,9 @@ export interface SpotImageResponseMetadata {
   age_sec: number | null;
   max_stale_age_sec: number | null;
   captured_at: number | null;
+  internal_temperature: number | null;
+  internal_temperature_at: number | null;
+  internal_temperature_status: string | null;
   retry_after_sec: number | null;
   received_at: number;
   latency_ms: number;

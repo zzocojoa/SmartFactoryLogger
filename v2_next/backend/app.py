@@ -253,6 +253,10 @@ _NETWORK_WARN_MS = 200
 _SPOT_PROXY_IMAGE_PATH = "/api/spot/proxy_image"
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 _SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
+_SPOT_INTERNAL_TEMPERATURE_HEADER = "X-Spot-Internal-Temperature"
+_SPOT_INTERNAL_TEMPERATURE_AT_HEADER = "X-Spot-Internal-Temperature-At"
+_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER = "X-Spot-Internal-Temperature-Status"
+_SPOT_INTERNAL_TEMPERATURE_STALE_STATUSES = {"empty", "error", "missing", "stale", "unavailable"}
 
 
 def _url_host(url: str) -> str | None:
@@ -2581,6 +2585,99 @@ def _spot_retry_headers_from_diagnostics(diagnostics: dict[str, Any]) -> dict[st
     return _spot_retry_headers_from_value(float(retry_after_sec))
 
 
+def _finite_float_from_value(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (float, int)):
+        parsed: float = float(value)
+        if math.isfinite(parsed):
+            return parsed
+        return None
+    if isinstance(value, str):
+        stripped_value: str = value.strip()
+        if not stripped_value:
+            return None
+        try:
+            parsed = float(stripped_value)
+        except ValueError:
+            return None
+        if math.isfinite(parsed):
+            return parsed
+    return None
+
+
+def _spot_internal_temperature_snapshot(meta: dict[str, Any]) -> dict[str, Any]:
+    snapshot = dict(meta)
+    getter: Any = getattr(spot_control, "get_spot_internal_temperature_diagnostics", None)
+    if callable(getter):
+        diagnostics: Any = getter()
+        if isinstance(diagnostics, dict):
+            snapshot.update(diagnostics)
+    return snapshot
+
+
+def _spot_internal_temperature_status(snapshot: dict[str, Any], temperature: float | None) -> str | None:
+    raw_status: Any = snapshot.get("internal_temperature_cache_status")
+    if raw_status is not None:
+        normalized_status: str = str(raw_status).strip().lower()
+        if normalized_status:
+            return normalized_status
+    if temperature is None:
+        return "missing"
+    return None
+
+
+def _spot_internal_temperature_ttl_sec() -> float | None:
+    raw_ttl: Any = getattr(
+        spot_control,
+        "_INTERNAL_TEMP_CACHE_TTL_SEC",
+        getattr(spot_control, "_TEMP_CACHE_TTL_SEC", None),
+    )
+    ttl_sec: float | None = _finite_float_from_value(raw_ttl)
+    if ttl_sec is None or ttl_sec <= 0.0:
+        return None
+    return ttl_sec
+
+
+def _is_spot_internal_temperature_stale(measured_at: float | None) -> bool:
+    if measured_at is None or measured_at <= 0.0:
+        return False
+    ttl_sec: float | None = _spot_internal_temperature_ttl_sec()
+    if ttl_sec is None:
+        return False
+    return time.time() - measured_at > ttl_sec
+
+
+def _spot_internal_temperature_headers(meta: dict[str, Any]) -> dict[str, str]:
+    try:
+        snapshot: dict[str, Any] = _spot_internal_temperature_snapshot(meta)
+        temperature: float | None = _finite_float_from_value(snapshot.get("internal_temperature"))
+        status: str | None = _spot_internal_temperature_status(snapshot, temperature)
+        measured_at: float | None = _finite_float_from_value(snapshot.get("internal_temperature_at"))
+        if status in _SPOT_INTERNAL_TEMPERATURE_STALE_STATUSES:
+            return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: status}
+        if _is_spot_internal_temperature_stale(measured_at):
+            return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: "stale"}
+        if temperature is None:
+            return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: "missing"}
+
+        headers: dict[str, str] = {_SPOT_INTERNAL_TEMPERATURE_HEADER: f"{temperature:.3f}"}
+        if measured_at is not None and measured_at > 0.0:
+            headers[_SPOT_INTERNAL_TEMPERATURE_AT_HEADER] = str(int(measured_at * 1000))
+        if status is not None:
+            headers[_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER] = status
+        return headers
+    except Exception as exc:
+        _logger.warning(
+            "SPOT internal temperature header unavailable",
+            extra={
+                "error_type": exc.__class__.__name__,
+                "error": str(exc),
+            },
+        )
+        return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: "error"}
+
+
 def _is_spot_payload_rejection_headers(headers: dict[str, str] | None) -> bool:
     if headers is None:
         return False
@@ -2637,6 +2734,7 @@ async def proxy_spot_image():
             headers["X-Spot-Last-Error-Code"] = str(meta["last_error_code"])
         if not isinstance(retry_after_sec, bool) and isinstance(retry_after_sec, (float, int)):
             headers.update(_spot_retry_headers_from_value(float(retry_after_sec)))
+        headers.update(_spot_internal_temperature_headers(meta))
         observability_service.record_spot_proxy_result(200, float(age_sec) if age_sec is not None else None, is_stale)
         return Response(content=data, media_type="image/jpeg", headers=headers)
     except spot_control.SpotImageConfigError as exc:

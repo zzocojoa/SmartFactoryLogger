@@ -5,7 +5,7 @@
 import React from 'react';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { getCameraStatus } from '../../../../shared/utils/commBadge';
-import { LABELS } from '../../../../shared/constants/uiText';
+import { LABELS, SPOT_UNIT } from '../../../../shared/constants/uiText';
 
 interface CameraComponentProps {
   onSpotImageLoaded?: () => void;
@@ -13,6 +13,16 @@ interface CameraComponentProps {
   requestFocus?: (steps: number) => void;
   focusBusy?: boolean;
 }
+
+const formatSpotInternalTemperatureBadge = (temperature: number | null, status: string | null): string | null => {
+  if (status !== null && status.trim().toLowerCase() !== 'ok') {
+    return null;
+  }
+  if (temperature === null || !Number.isFinite(temperature)) {
+    return null;
+  }
+  return `내부 ${temperature.toFixed(1)}${SPOT_UNIT}`;
+};
 
 export const CameraComponent = React.memo(function CameraComponent(props: CameraComponentProps) {
   const spotConfig = useDashboardStore(state => state.spotConfig);
@@ -47,6 +57,12 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
     spotLastSuccessAt,
     spotImageMetadata,
   });
+  const internalTemperatureBadgeText: string | null = cameraStatus
+    ? null
+    : formatSpotInternalTemperatureBadge(
+        spotImageMetadata?.internal_temperature ?? null,
+        spotImageMetadata?.internal_temperature_status ?? null
+      );
   const actuatorStep = Math.abs(spotConfig.actuator_step);
   const actuatorStepValid = Number.isFinite(actuatorStep) && actuatorStep > 0;
   const focusDisabled = !spotConfig.focus_enabled || !props.requestFocus || Boolean(props.focusBusy) || !actuatorStepValid;
@@ -89,6 +105,11 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
           <circle cx={cx} cy={cy} r={3} stroke="black" strokeWidth={3} fill="none" vectorEffect="non-scaling-stroke" />
           <circle cx={cx} cy={cy} r={3} stroke={color} strokeWidth={1} fill="none" vectorEffect="non-scaling-stroke" />
         </svg>
+        {internalTemperatureBadgeText && (
+          <div className="camera-internal-temperature-badge">
+            {internalTemperatureBadgeText}
+          </div>
+        )}
         {cameraStatus && (
           <div className={`camera-overlay ${cameraStatus.type}`} style={{ pointerEvents: 'none' }}>
             {cameraStatus.type === 'loading' && <span className="camera-spinner" aria-hidden="true" />}
