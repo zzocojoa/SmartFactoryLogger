@@ -38,6 +38,7 @@ export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, height = 
             // Use contentRect for precise content box size
             const width = entry.contentRect.width;
             const height = entry.contentRect.height;
+            if (width <= 0 || height <= 0) return;
             uPlotRef.current.setSize({ width, height });
         });
         ro.observe(chartRef.current);

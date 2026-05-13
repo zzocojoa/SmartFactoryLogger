@@ -5080,7 +5080,17 @@ body {
 
 @media (max-width: 768px) {
   .timeseries-card {
-    min-height: 320px;
+    min-height: 560px;
+  }
+
+  .timeseries-card .timeseries-chart-wrapper {
+    flex-basis: 220px;
+    min-height: 220px !important;
+  }
+
+  .native-grid-item-timeseries,
+  .native-grid-item-timeseries .scene-react-widget {
+    min-height: 600px;
   }
 }
 

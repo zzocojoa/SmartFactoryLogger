@@ -43,6 +43,14 @@ const GRID_GAP_PX = 4;
 const WIDGET_PLACEHOLDER_CLASS_NAME = 'native-widget-placeholder';
 const TIMESERIES_PLACEHOLDER_CLASS_NAME = `${WIDGET_PLACEHOLDER_CLASS_NAME} timeseries-card`;
 
+const resolveNativeGridItemClassName = (itemType: DashboardItem['type']): string => {
+  if (itemType === 'timeseries') {
+    return 'native-grid-item native-grid-item-timeseries';
+  }
+
+  return 'native-grid-item';
+};
+
 const buildLayoutMapFromItems = (items: DashboardItem[]): LayoutMap => {
   return items.reduce<LayoutMap>((acc, item) => {
     acc[item.key] = {
@@ -61,11 +69,11 @@ const buildLayoutMapFromItems = (items: DashboardItem[]): LayoutMap => {
 const NativeWidget = ({ item, children }: NativeWidgetProps): JSX.Element => {
   return (
     <div
-      className="native-grid-item"
+      className={resolveNativeGridItemClassName(item.type)}
       style={{
         gridColumn: `${item.x + 1} / span ${item.width}`,
         gridRow: `${item.y + 1} / span ${item.height}`,
-        minHeight: 0,
+        minHeight: item.type === 'timeseries' ? undefined : 0,
       }}
     >
       <div className="scene-react-widget" style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
