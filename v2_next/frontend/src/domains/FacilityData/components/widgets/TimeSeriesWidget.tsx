@@ -70,7 +70,7 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
         setShowThresholds={setShowThresholds}
       />
 
-      <div style={{ flexGrow: 1, minHeight: 0 }}>
+      <div className="timeseries-chart-wrapper" style={{ flexGrow: 1, minHeight: 0 }}>
         <TimeSeriesChart
           activeSeries={activeSeries}
           mode={mode}

@@ -56,7 +56,7 @@ export const KpiComponent = React.memo(function KpiComponent() {
   const pressState = mapPressLevel(computed?.press_level) ?? getPressState(safePress);
 
   return (
-    <div className={`card kpi-card ${kpiAlertClass}`} style={{ height: '100%' }}>
+    <div className={`card kpi-card ${kpiAlertClass}`}>
       <div className="kpi-metric">
         <div className="kpi-header">
           <span className="kpi-title">속도</span>

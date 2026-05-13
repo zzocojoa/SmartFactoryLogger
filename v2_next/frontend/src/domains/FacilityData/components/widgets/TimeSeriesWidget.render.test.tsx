@@ -412,6 +412,18 @@ describe('TimeSeriesWidget render', () => {
     expect(mockUPlotChartRender).toHaveBeenCalledTimes(initialChartRenderCount);
   });
 
+  it('renders the uPlot chart inside the responsive time-series chart wrapper', async () => {
+    seedTimeSeriesData(11);
+
+    renderTimeSeriesWidget();
+
+    const chart = await screen.findByTestId('uplot-chart');
+    const chartWrapper = chart.closest('.timeseries-chart-wrapper');
+
+    expect(chartWrapper).toBeInTheDocument();
+    expect(chartWrapper).toContainElement(chart);
+  });
+
   it('preserves uPlot instance and zoom state when toggling thresholds', async () => {
     const timeSeriesAllFrame = buildSeriesFrame(11);
     useDashboardStore.setState({

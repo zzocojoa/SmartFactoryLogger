@@ -733,10 +733,11 @@ body {
     padding: 0;
     border-radius: 8px;
     font-size: 0;
+    gap: 0;
   }
 
   .menu-toggle::before {
-    width: 16px;
+    width: 18px;
   }
 
   .mobile-menu-backdrop {
@@ -3636,7 +3637,7 @@ body {
 .kpi-card {
   --kpi-gap: clamp(4px, calc(var(--cq) * 1.1), 8px);
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(min-content, 1fr) minmax(min-content, 1fr) auto auto;
   gap: var(--kpi-gap);
   height: 100%;
   min-height: 0;
@@ -4797,6 +4798,91 @@ body {
   padding-top: clamp(2px, calc(var(--cq) * 0.8), 6px);
 }
 
+@media (max-width: 768px) {
+  .kpi-card {
+    grid-template-rows: auto auto auto;
+    gap: 24px;
+    height: auto;
+    min-height: 660px;
+    align-content: start;
+    overflow: visible;
+  }
+
+  .kpi-metric {
+    gap: 14px;
+    min-height: 180px;
+  }
+
+  .kpi-header {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+  }
+
+  .kpi-title {
+    font-size: clamp(40px, 13vw, 56px);
+    line-height: 1.05;
+  }
+
+  .kpi-state {
+    font-size: clamp(24px, 8vw, 36px);
+    line-height: 1.1;
+    padding: 8px 14px;
+  }
+
+  .kpi-value-row {
+    flex-wrap: nowrap;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .kpi-value {
+    min-width: 0;
+    font-size: clamp(68px, 21vw, 96px);
+    line-height: 0.95;
+  }
+
+  .kpi-unit {
+    font-size: clamp(28px, 8vw, 38px);
+    line-height: 1;
+  }
+
+  .kpi-bar {
+    height: 12px;
+    margin-top: 0;
+  }
+
+  .kpi-secondary {
+    align-self: stretch;
+    gap: 12px;
+  }
+
+  .kpi-mini {
+    min-height: 118px;
+    padding: 16px 12px;
+  }
+
+  .kpi-mini-label {
+    font-size: clamp(26px, 7vw, 34px);
+    line-height: 1.1;
+  }
+
+  .kpi-mini-value {
+    min-width: 0;
+    font-size: clamp(34px, 9vw, 46px);
+    line-height: 1;
+  }
+
+  .kpi-mini-unit {
+    font-size: clamp(18px, 5vw, 22px);
+    line-height: 1;
+  }
+
+  .kpi-mini-value-row {
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+}
+
 .settings-path-label {
   font-weight: 600;
   color: var(--text-secondary);
@@ -5080,7 +5166,17 @@ body {
 
 @media (max-width: 768px) {
   .timeseries-card {
-    min-height: 320px;
+    min-height: 560px;
+  }
+
+  .timeseries-card .timeseries-chart-wrapper {
+    flex-basis: 220px;
+    min-height: 220px !important;
+  }
+
+  .native-grid-item-timeseries,
+  .native-grid-item-timeseries .scene-react-widget {
+    min-height: 600px;
   }
 }
 
