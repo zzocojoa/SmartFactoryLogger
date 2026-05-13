@@ -1,6 +1,6 @@
 {
   "name": "smart-factory-logger-v2",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Smart Factory Logger V2 Dashboard",
   "main": "main.js",
   "scripts": {
