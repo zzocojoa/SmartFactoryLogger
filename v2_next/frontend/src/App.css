@@ -8,6 +8,9 @@
   --text-muted: #7b8794;
   --dashboard-tile-label: #cbd5e1;
   --dashboard-tile-unit: #cbd5e1;
+  --dashboard-tile-bg: #1f2328;
+  --dashboard-tile-border: rgba(148, 163, 184, 0.14);
+  --dashboard-tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   --dashboard-mold-alert-border: rgba(242, 201, 76, 0.66);
   --dashboard-mold-alert-bg: rgba(242, 201, 76, 0.12);
 
@@ -69,6 +72,9 @@
   --text-muted: #6e7781;
   --dashboard-tile-label: #475569;
   --dashboard-tile-unit: #64748b;
+  --dashboard-tile-bg: #f8fafc;
+  --dashboard-tile-border: rgba(208, 215, 222, 0.92);
+  --dashboard-tile-shadow: 0 1px 2px rgba(31, 35, 40, 0.04);
   --dashboard-mold-alert-border: rgba(245, 158, 11, 0.62);
   --dashboard-mold-alert-bg: rgba(245, 158, 11, 0.12);
   --camera-internal-temperature-text: #ffffff;
@@ -113,6 +119,9 @@
   --text-muted: #948d86;
   --dashboard-tile-label: #5f5851;
   --dashboard-tile-unit: #746d65;
+  --dashboard-tile-bg: #fffaf2;
+  --dashboard-tile-border: rgba(214, 197, 174, 0.88);
+  --dashboard-tile-shadow: 0 1px 2px rgba(61, 59, 56, 0.04);
   --dashboard-mold-alert-border: rgba(217, 119, 6, 0.58);
   --dashboard-mold-alert-bg: rgba(217, 119, 6, 0.12);
   --camera-internal-temperature-text: #ffffff;
@@ -145,6 +154,9 @@
   --text-muted: #7b8794;
   --dashboard-tile-label: #cbd5e1;
   --dashboard-tile-unit: #cbd5e1;
+  --dashboard-tile-bg: color-mix(in srgb, #010409 94%, #6366f1);
+  --dashboard-tile-border: rgba(148, 163, 184, 0.14);
+  --dashboard-tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
   --dashboard-mold-alert-border: rgba(242, 201, 76, 0.66);
   --dashboard-mold-alert-bg: rgba(242, 201, 76, 0.12);
   --camera-internal-temperature-text: #f8fafc;
@@ -3763,9 +3775,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  background: var(--bg-card-muted);
+  background: var(--dashboard-tile-bg);
+  border: 1px solid var(--dashboard-tile-border);
   border-radius: var(--radius-2);
   padding: var(--space-2) var(--space-3);
+  box-shadow: var(--dashboard-tile-shadow);
   min-width: 0;
 }
 
@@ -4178,9 +4192,11 @@ body {
 }
 
 .temp-tile {
-  background: var(--bg-card-muted);
+  background: var(--dashboard-tile-bg);
+  border: 1px solid var(--dashboard-tile-border);
   border-radius: var(--radius-2);
   padding: var(--space-2) var(--space-3);
+  box-shadow: var(--dashboard-tile-shadow);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -4254,9 +4270,11 @@ body {
 }
 
 .mold-tile {
-  background-color: var(--bg-card-muted);
+  background-color: var(--dashboard-tile-bg);
+  border: 1px solid var(--dashboard-tile-border);
   padding: var(--space-2);
   border-radius: var(--radius-1);
+  box-shadow: var(--dashboard-tile-shadow);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -4308,9 +4326,11 @@ body {
 }
 
 .env-tile {
-  background: var(--bg-card-muted);
+  background: var(--dashboard-tile-bg);
+  border: 1px solid var(--dashboard-tile-border);
   border-radius: var(--radius-2);
   padding: var(--space-2) var(--space-3);
+  box-shadow: var(--dashboard-tile-shadow);
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
