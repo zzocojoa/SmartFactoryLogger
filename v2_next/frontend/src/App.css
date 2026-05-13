@@ -6,6 +6,10 @@
   --text-primary: #e6edf3;
   --text-secondary: #b0bac4;
   --text-muted: #7b8794;
+  --dashboard-tile-label: #cbd5e1;
+  --dashboard-tile-unit: #cbd5e1;
+  --dashboard-mold-alert-border: rgba(242, 201, 76, 0.66);
+  --dashboard-mold-alert-bg: rgba(242, 201, 76, 0.12);
 
   --state-ok: #25c49a;
   --state-warn: #f2c94c;
@@ -63,6 +67,10 @@
   --text-primary: #1f2328;
   --text-secondary: #4d535e;
   --text-muted: #6e7781;
+  --dashboard-tile-label: #475569;
+  --dashboard-tile-unit: #64748b;
+  --dashboard-mold-alert-border: rgba(245, 158, 11, 0.62);
+  --dashboard-mold-alert-bg: rgba(245, 158, 11, 0.12);
   --camera-internal-temperature-text: #ffffff;
   --camera-internal-temperature-bg: rgba(15, 23, 42, 0.74);
   --camera-internal-temperature-border: rgba(255, 255, 255, 0.34);
@@ -103,6 +111,10 @@
   --text-primary: #3d3b38;
   --text-secondary: #6e6863;
   --text-muted: #948d86;
+  --dashboard-tile-label: #5f5851;
+  --dashboard-tile-unit: #746d65;
+  --dashboard-mold-alert-border: rgba(217, 119, 6, 0.58);
+  --dashboard-mold-alert-bg: rgba(217, 119, 6, 0.12);
   --camera-internal-temperature-text: #ffffff;
   --camera-internal-temperature-bg: rgba(61, 59, 56, 0.76);
   --camera-internal-temperature-border: rgba(255, 255, 255, 0.34);
@@ -131,6 +143,10 @@
   --text-primary: #e6edf3;
   --text-secondary: #b0bac4;
   --text-muted: #7b8794;
+  --dashboard-tile-label: #cbd5e1;
+  --dashboard-tile-unit: #cbd5e1;
+  --dashboard-mold-alert-border: rgba(242, 201, 76, 0.66);
+  --dashboard-mold-alert-bg: rgba(242, 201, 76, 0.12);
   --camera-internal-temperature-text: #f8fafc;
   --camera-internal-temperature-bg: rgba(0, 0, 0, 0.66);
   --camera-internal-temperature-border: rgba(255, 255, 255, 0.24);
@@ -4196,7 +4212,7 @@ body {
 
 .temp-label {
   font-size: clamp(12px, calc(var(--cq) * 5), 40px);
-  color: var(--text-dim);
+  color: var(--dashboard-tile-label);
 }
 
 .temp-value-row {
@@ -4218,7 +4234,7 @@ body {
 
 .temp-unit {
   font-size: clamp(12px, calc(var(--cq) * 5), 36px);
-  color: var(--text-dim);
+  color: var(--dashboard-tile-unit);
   white-space: nowrap;
 }
 
@@ -4250,7 +4266,7 @@ body {
 
 .mold-label {
   font-size: clamp(12px, calc(var(--cq) * 5), 40px);
-  color: var(--text-dim);
+  color: var(--dashboard-tile-label);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -4266,8 +4282,8 @@ body {
 }
 
 .mold-alert {
-  border: 1px solid rgba(241, 76, 76, 0.6);
-  background: rgba(241, 76, 76, 0.12);
+  border: 1px solid var(--dashboard-mold-alert-border);
+  background: var(--dashboard-mold-alert-bg);
 }
 
 .mold-muted {
@@ -4316,7 +4332,7 @@ body {
 
 .env-label {
   font-size: clamp(12px, calc(var(--cq) * 5), 40px);
-  color: var(--text-dim);
+  color: var(--dashboard-tile-label);
 }
 
 .env-value-row {
@@ -4338,7 +4354,7 @@ body {
 
 .env-unit {
   font-size: clamp(12px, calc(var(--cq) * 5), 36px);
-  color: var(--text-dim);
+  color: var(--dashboard-tile-unit);
   white-space: nowrap;
 }
 

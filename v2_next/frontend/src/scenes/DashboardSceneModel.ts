@@ -43,6 +43,20 @@ export const DASHBOARD_LAYOUT_KEYS = [
   'timeseries',
 ] as const;
 
+const OPERATOR_CHECK_TITLE = 'OPERATOR CHECK';
+const LEGACY_MEMO_TITLES = new Set<string>(['new memo']);
+
+export const normalizeDashboardItemTitle = (
+  title: string,
+  type: WidgetType
+): string => {
+  if (type === 'markdown' && LEGACY_MEMO_TITLES.has(title.trim().toLowerCase())) {
+    return OPERATOR_CHECK_TITLE;
+  }
+
+  return title;
+};
+
 export const resolveDashboardItems = (savedLayout: SavedLayoutMap | null): DashboardItem[] => {
   const savedMap: SavedLayoutMap = savedLayout ?? {};
   const defaultItemMap: Map<string, DashboardItem> = new Map(DEFAULT_DASHBOARD_ITEMS.map(item => [item.key, item]));
@@ -64,7 +78,8 @@ export const resolveDashboardItems = (savedLayout: SavedLayoutMap | null): Dashb
     }
 
     const type: WidgetType = saved?.type ?? defaultItem?.type ?? 'markdown';
-    const title: string = saved?.title ?? defaultItem?.title ?? 'Widget';
+    const rawTitle: string = saved?.title ?? defaultItem?.title ?? 'Widget';
+    const title: string = normalizeDashboardItemTitle(rawTitle, type);
     const properties: Record<string, unknown> = saved?.properties ?? defaultItem?.properties ?? {};
     const x: number = saved?.x ?? defaultItem?.x ?? 0;
     const y: number = saved?.y ?? defaultItem?.y ?? 0;
