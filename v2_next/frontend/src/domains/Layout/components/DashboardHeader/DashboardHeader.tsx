@@ -1,3 +1,4 @@
+import React, { useEffect, useRef } from 'react';
 import {
   LayoutSlotSummary,
   SettingsFormState,
@@ -24,6 +25,10 @@ const resolveLogoSource = (activeCycle: string): string => {
     : 'assets/logo_white.png';
 
   return resolvePublicAssetPath(logoPath);
+};
+
+const getMobileCommLabel = (badge: CommBadge): string => {
+  return badge.key || badge.text.split(' ')[0] || badge.text;
 };
 
 export interface DashboardHeaderProps {
@@ -126,6 +131,42 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   setThemeMode,
   handleOpenSettings,
 }) => {
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      setMenuOpen(false);
+      menuButtonRef.current?.focus();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpen, setMenuOpen]);
+
+  const handleToggleNotifications = (): void => {
+    const nextState = !notificationsOpen;
+    setNotificationsOpen(nextState);
+    if (nextState) {
+      setUnreadCount(0);
+    }
+  };
+
+  const handleToggleMobileNotifications = (): void => {
+    handleToggleNotifications();
+    setMenuOpen(false);
+  };
+
   const handleApplyPreset = (preset: LayoutPresetId): void => {
     applyPreset(preset);
     setPresetOpen(false);
@@ -170,8 +211,10 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                   key={badge.key}
                   className={`status-comm-item ${badge.state}`}
                   title={badge.title}
+                  aria-label={badge.text}
                 >
-                  {badge.text}
+                  <span className="status-comm-label-full">{badge.text}</span>
+                  <span className="status-comm-label-mobile" aria-hidden="true">{getMobileCommLabel(badge)}</span>
                 </span>
               ))}
             </div>
@@ -211,14 +254,9 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 
         <button
           className="notify-bell"
-          onClick={() => {
-            const nextState = !notificationsOpen;
-            setNotificationsOpen(nextState);
-            if (nextState) {
-              setUnreadCount(0);
-            }
-          }}
+          onClick={handleToggleNotifications}
           aria-pressed={notificationsOpen}
+          aria-label="알림"
         >
           알림
           {unreadCount > 0 && <span className="notify-badge">{unreadCount}</span>}
@@ -226,13 +264,97 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 
         <div className="menu-wrapper" ref={menuRef as React.RefObject<HTMLDivElement>}>
           <button
+            ref={menuButtonRef}
             className="menu-toggle"
             onClick={() => setMenuOpen((prev) => !prev)}
-            aria-pressed={menuOpen}
+            aria-expanded={menuOpen}
+            aria-controls="dashboard-menu-drawer"
+            aria-label={menuOpen ? '상세 메뉴 닫기' : '상세 메뉴 열기'}
           >
             MENU
           </button>
-          <div className={`menu-dropdown ${menuOpen ? 'open' : ''}`}>
+          {menuOpen && (
+            <div
+              className="mobile-menu-backdrop"
+              onClick={() => setMenuOpen(false)}
+              aria-hidden="true"
+            />
+          )}
+          <div
+            id="dashboard-menu-drawer"
+            className={`menu-dropdown ${menuOpen ? 'open' : ''}`}
+            role="region"
+            aria-label="상세 메뉴"
+            aria-hidden={!menuOpen}
+            hidden={!menuOpen}
+          >
+            <div className="mobile-menu-details" aria-label="모바일 상세 상태">
+              <div className="mobile-menu-title">{appTitle}</div>
+              <div className="mobile-menu-status">
+                <span className={`status-badge ${statusClass}`}>{statusLabel}</span>
+              </div>
+              <div className="mobile-menu-metrics">
+                <span>
+                  <span className="mobile-menu-metric-label">Last</span>
+                  <span className="mobile-menu-metric-value">{lastUpdateText}</span>
+                </span>
+                <span>
+                  <span className="mobile-menu-metric-label">Avg</span>
+                  <span className="mobile-menu-metric-value">{avgLatencyText}</span>
+                </span>
+                <span>
+                  <span className="mobile-menu-metric-label">Errors</span>
+                  <span className="mobile-menu-metric-value">{errorCountText}</span>
+                </span>
+                <span title={errorQueueTitle}>
+                  <span className="mobile-menu-metric-label">ErrQ</span>
+                  <span className="mobile-menu-metric-value">{errorQueueText}</span>
+                </span>
+              </div>
+              {commBadges.length > 0 && (
+                <div className="mobile-menu-comm">
+                  {commBadges.map((badge) => (
+                    <span key={badge.key} className={`status-comm-item ${badge.state}`} title={badge.title}>
+                      {badge.text}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="mobile-menu-actions">
+                <button
+                  className="menu-item"
+                  onClick={handleSnapshot}
+                  disabled={snapshotLoading}
+                  aria-disabled={snapshotLoading}
+                >
+                  Snapshot
+                </button>
+                <button
+                  className="menu-item"
+                  onClick={handleReconnect}
+                  disabled={reconnectBusy}
+                  aria-disabled={reconnectBusy}
+                >
+                  Reconnect
+                </button>
+                <button
+                  className="menu-item"
+                  onClick={handleDiagnosis}
+                  disabled={diagnosisBusy}
+                  aria-disabled={diagnosisBusy}
+                >
+                  Diagnosis
+                </button>
+                <button
+                  className="menu-item"
+                  onClick={handleToggleMobileNotifications}
+                  aria-pressed={notificationsOpen}
+                >
+                  알림{unreadCount > 0 ? ` ${unreadCount}` : ''}
+                </button>
+              </div>
+              <div className="menu-divider" />
+            </div>
             <button
               className="menu-item"
               onClick={() => {
