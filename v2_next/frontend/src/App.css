@@ -4801,18 +4801,80 @@ body {
 @media (max-width: 768px) {
   .kpi-card {
     grid-template-rows: auto auto auto;
-    gap: 14px;
+    gap: 24px;
     height: auto;
-    min-height: 520px;
+    min-height: 660px;
     align-content: start;
+    overflow: visible;
   }
 
   .kpi-metric {
-    gap: 8px;
+    gap: 14px;
+    min-height: 180px;
+  }
+
+  .kpi-header {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+  }
+
+  .kpi-title {
+    font-size: clamp(40px, 13vw, 56px);
+    line-height: 1.05;
+  }
+
+  .kpi-state {
+    font-size: clamp(24px, 8vw, 36px);
+    line-height: 1.1;
+    padding: 8px 14px;
+  }
+
+  .kpi-value-row {
+    flex-wrap: nowrap;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .kpi-value {
+    min-width: 0;
+    font-size: clamp(68px, 21vw, 96px);
+    line-height: 0.95;
+  }
+
+  .kpi-unit {
+    font-size: clamp(28px, 8vw, 38px);
+    line-height: 1;
+  }
+
+  .kpi-bar {
+    height: 12px;
+    margin-top: 0;
   }
 
   .kpi-secondary {
     align-self: stretch;
+    gap: 12px;
+  }
+
+  .kpi-mini {
+    min-height: 118px;
+    padding: 18px 20px;
+  }
+
+  .kpi-mini-label {
+    font-size: clamp(26px, 7vw, 34px);
+    line-height: 1.1;
+  }
+
+  .kpi-mini-value {
+    min-width: 0;
+    font-size: clamp(46px, 13vw, 62px);
+    line-height: 1;
+  }
+
+  .kpi-mini-unit {
+    font-size: clamp(24px, 7vw, 32px);
+    line-height: 1;
   }
 }
 
