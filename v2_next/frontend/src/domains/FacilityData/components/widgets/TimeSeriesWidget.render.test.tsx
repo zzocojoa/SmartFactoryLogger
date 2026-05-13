@@ -3,7 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import type uPlot from 'uplot';
-import type { FactoryData } from '../../../../shared/types';
+import type { FactoryData, ThresholdState } from '../../../../shared/types';
 import { buildThresholdStateFromConfig } from '../../../../shared/utils/thresholds';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { UIContext } from '../../context/UIContext';
@@ -22,8 +22,40 @@ type MockSetSeriesOptions = {
   show: boolean | undefined;
 };
 
+type MockUPlotScales = {
+  x: {
+    min: number;
+    max: number;
+  };
+};
+
 type MockUPlotInstance = {
   setSeries: MockedFunction<(seriesIndex: number, options: MockSetSeriesOptions) => void>;
+  redraw: MockedFunction<(rebuildPaths?: boolean, recalcAxes?: boolean) => void>;
+  scales: MockUPlotScales;
+};
+
+type MockThresholdContext = {
+  save: MockedFunction<() => void>;
+  beginPath: MockedFunction<() => void>;
+  setLineDash: MockedFunction<(segments: number[]) => void>;
+  moveTo: MockedFunction<(x: number, y: number) => void>;
+  lineTo: MockedFunction<(x: number, y: number) => void>;
+  stroke: MockedFunction<() => void>;
+  fillText: MockedFunction<(text: string, x: number, y: number) => void>;
+  restore: MockedFunction<() => void>;
+  lineWidth: number;
+  strokeStyle: string | CanvasGradient | CanvasPattern;
+  fillStyle: string | CanvasGradient | CanvasPattern;
+  font: string;
+  textAlign: CanvasTextAlign;
+  textBaseline: CanvasTextBaseline;
+};
+
+type ThresholdDrawPlotFixture = {
+  plot: uPlot;
+  context: MockThresholdContext;
+  valToPos: MockedFunction<(value: number, scaleKey: string, canvasPixels: boolean) => number>;
 };
 
 const mocks = vi.hoisted(() => ({
@@ -45,6 +77,13 @@ vi.mock('../UPlotChart', async () => {
       ReactModule.useLayoutEffect(() => {
         const instance: MockUPlotInstance = {
           setSeries: vi.fn<(seriesIndex: number, options: MockSetSeriesOptions) => void>(),
+          redraw: vi.fn<(rebuildPaths?: boolean, recalcAxes?: boolean) => void>(),
+          scales: {
+            x: {
+              min: 1_777_660_800,
+              max: 1_777_661_100,
+            },
+          },
         };
         mockUPlotChartCreate(instance);
         props.onCreate?.(instance as unknown as uPlot);
@@ -152,6 +191,32 @@ const seedTimeSeriesData = (spotValue: number): void => {
     lastDataAt: 1,
     intervalSec: 0.2,
   });
+};
+
+const seedTimeSeriesDataWithThresholds = (spotValue: number, thresholds: ThresholdState): void => {
+  useDashboardStore.setState({
+    data: buildFactoryData(spotValue),
+    timeSeriesAllFrame: buildSeriesFrame(spotValue),
+    thresholds,
+    lastDataAt: 1,
+    intervalSec: 0.2,
+  });
+};
+
+const buildSpotThresholdState = (value: number, enabled: boolean): ThresholdState => {
+  const baseThresholds = buildThresholdStateFromConfig();
+
+  return {
+    ...baseThresholds,
+    masterOn: true,
+    entries: {
+      ...baseThresholds.entries,
+      spot: {
+        enabled,
+        value,
+      },
+    },
+  };
 };
 
 const getCatalogSeriesIndex = (key: TimeSeriesKey): number => {
@@ -269,6 +334,43 @@ const getSetCursorHook = (props: UPlotChartMockProps): ((plot: uPlot) => void) =
   return setCursorHook;
 };
 
+const getDrawHook = (props: UPlotChartMockProps): ((plot: uPlot) => void) => {
+  const drawHook = props.options.hooks?.draw?.[0];
+
+  if (drawHook === undefined) {
+    throw new Error('draw hook was not found');
+  }
+
+  return drawHook;
+};
+
+const buildThresholdDrawPlot = (): ThresholdDrawPlotFixture => {
+  const context: MockThresholdContext = {
+    save: vi.fn<() => void>(),
+    beginPath: vi.fn<() => void>(),
+    setLineDash: vi.fn<(segments: number[]) => void>(),
+    moveTo: vi.fn<(x: number, y: number) => void>(),
+    lineTo: vi.fn<(x: number, y: number) => void>(),
+    stroke: vi.fn<() => void>(),
+    fillText: vi.fn<(text: string, x: number, y: number) => void>(),
+    restore: vi.fn<() => void>(),
+    lineWidth: 0,
+    strokeStyle: '',
+    fillStyle: '',
+    font: '',
+    textAlign: 'left',
+    textBaseline: 'alphabetic',
+  };
+  const valToPos = vi.fn<(value: number, scaleKey: string, canvasPixels: boolean) => number>().mockReturnValue(100);
+  const plot = {
+    ctx: context as unknown as CanvasRenderingContext2D,
+    bbox: { left: 80, top: 40, width: 420, height: 180 },
+    valToPos,
+  } as unknown as uPlot;
+
+  return { plot, context, valToPos };
+};
+
 describe('TimeSeriesWidget render', () => {
   afterEach(() => {
     cleanup();
@@ -310,7 +412,7 @@ describe('TimeSeriesWidget render', () => {
     expect(mockUPlotChartRender).toHaveBeenCalledTimes(initialChartRenderCount);
   });
 
-  it('syncs legend visibility to uPlot and preserves it after threshold remount', async () => {
+  it('preserves uPlot instance and zoom state when toggling thresholds', async () => {
     const timeSeriesAllFrame = buildSeriesFrame(11);
     useDashboardStore.setState({
       data: buildFactoryData(11),
@@ -326,6 +428,7 @@ describe('TimeSeriesWidget render', () => {
     const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
     const initialUPlotInstance = getLatestUPlotInstance();
     const spotSeriesIndex = getCatalogSeriesIndex('Spot');
+    const initialZoomState = { ...initialUPlotInstance.scales.x };
 
     fireEvent.click(getLegendButtonByValue('11.0'));
 
@@ -333,17 +436,90 @@ describe('TimeSeriesWidget render', () => {
       expect(initialUPlotInstance.setSeries).toHaveBeenCalledWith(spotSeriesIndex, { show: false });
     });
     expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
+    initialUPlotInstance.redraw.mockClear();
+    expect(initialUPlotInstance.redraw).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('checkbox'));
 
     await waitFor(() => {
-      expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount + 1);
+      expect(initialUPlotInstance.redraw).toHaveBeenCalledTimes(1);
+    });
+    expect(initialUPlotInstance.redraw).toHaveBeenCalledWith(false, false);
+
+    const latestUPlotInstance = getLatestUPlotInstance();
+    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
+    expect(latestUPlotInstance).toBe(initialUPlotInstance);
+    expect(latestUPlotInstance.scales.x).toEqual(initialZoomState);
+    expect(initialUPlotInstance.setSeries).toHaveBeenCalledWith(spotSeriesIndex, { show: false });
+  });
+
+  it('redraws threshold overlay from latest threshold toggle state without remounting', async () => {
+    seedTimeSeriesDataWithThresholds(11, buildSpotThresholdState(10, true));
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
+    const initialUPlotInstance = getLatestUPlotInstance();
+    const drawHook = getDrawHook(getLatestUPlotProps());
+    const { plot, context } = buildThresholdDrawPlot();
+
+    drawHook(plot);
+
+    expect(context.stroke).toHaveBeenCalledTimes(1);
+    context.stroke.mockClear();
+    initialUPlotInstance.redraw.mockClear();
+    expect(initialUPlotInstance.redraw).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('checkbox'));
+
+    await waitFor(() => {
+      expect(initialUPlotInstance.redraw).toHaveBeenCalledTimes(1);
+    });
+    expect(initialUPlotInstance.redraw).toHaveBeenCalledWith(false, false);
+
+    drawHook(plot);
+
+    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
+    expect(getLatestUPlotInstance()).toBe(initialUPlotInstance);
+    expect(context.stroke).not.toHaveBeenCalled();
+  });
+
+  it('redraws threshold overlay from latest threshold value without remounting', async () => {
+    seedTimeSeriesDataWithThresholds(11, buildSpotThresholdState(10, true));
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
+    const initialUPlotInstance = getLatestUPlotInstance();
+    const drawHook = getDrawHook(getLatestUPlotProps());
+    const { plot, context, valToPos } = buildThresholdDrawPlot();
+
+    drawHook(plot);
+
+    expect(valToPos).toHaveBeenCalledWith(10, 'y', true);
+    valToPos.mockClear();
+    context.stroke.mockClear();
+    initialUPlotInstance.redraw.mockClear();
+
+    act(() => {
+      useDashboardStore.setState({
+        thresholds: buildSpotThresholdState(20, true),
+      });
     });
 
-    const latestUPlotProps = getLatestUPlotProps();
-    const latestUPlotInstance = getLatestUPlotInstance();
-    expect(latestUPlotProps.options.series[spotSeriesIndex].show).toBe(false);
-    expect(latestUPlotInstance.setSeries).toHaveBeenCalledWith(spotSeriesIndex, { show: false });
+    await waitFor(() => {
+      expect(initialUPlotInstance.redraw).toHaveBeenCalledTimes(1);
+    });
+    expect(initialUPlotInstance.redraw).toHaveBeenCalledWith(false, false);
+
+    drawHook(plot);
+
+    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
+    expect(getLatestUPlotInstance()).toBe(initialUPlotInstance);
+    expect(valToPos).toHaveBeenCalledWith(20, 'y', true);
+    expect(context.stroke).toHaveBeenCalledTimes(1);
   });
 
   it('toggles live mode to paused with pressed state', async () => {

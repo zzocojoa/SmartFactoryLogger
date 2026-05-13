@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type uPlot from 'uplot';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import type { FactoryData, ThresholdKey, ThresholdState } from '../../../../shared/types';
@@ -388,6 +388,11 @@ type TimeSeriesChartProps = {
   onCreate: (uPlotInst: uPlot) => void;
 };
 
+type ThresholdDrawState = {
+  showThresholds: boolean;
+  thresholds: ThresholdState | null;
+};
+
 export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   activeSeries,
   mode,
@@ -398,6 +403,24 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
 }: TimeSeriesChartProps) {
   const chartWrapperRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const thresholdDrawStateRef = useRef<ThresholdDrawState>({ showThresholds, thresholds });
+  const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
+  thresholdDrawStateRef.current = { showThresholds, thresholds };
+
+  const thresholdRevision = useMemo(() => buildThresholdRevision(thresholds), [thresholds]);
+  const handleCreate = useCallback((createdUPlotInst: uPlot): void => {
+    setUPlotInst(createdUPlotInst);
+    onCreate(createdUPlotInst);
+  }, [onCreate]);
+
+  useEffect(() => {
+    if (uPlotInst === null) {
+      return;
+    }
+
+    uPlotInst.redraw(false, false);
+  }, [showThresholds, thresholdRevision, uPlotInst]);
+
   const uPlotData = useMemo<uPlot.AlignedData | null>(() => {
     if (timeSeriesAllFrame === null) {
       return null;
@@ -472,7 +495,9 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
       hooks: {
         draw: [
           (plot: uPlot) => {
-            if (!showThresholds || thresholds === null || !thresholds.masterOn) {
+            const thresholdDrawState = thresholdDrawStateRef.current;
+
+            if (!thresholdDrawState.showThresholds || thresholdDrawState.thresholds === null || !thresholdDrawState.thresholds.masterOn) {
               return;
             }
 
@@ -483,10 +508,10 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
             ctx.beginPath();
 
             THRESHOLD_KEYS.forEach((key) => {
-              const entry = thresholds.entries[key];
+              const entry = thresholdDrawState.thresholds?.entries[key];
               const color = getThresholdColor(key);
 
-              if (!entry.enabled || entry.value === null || color === null) {
+              if (entry === undefined || !entry.enabled || entry.value === null || color === null) {
                 return;
               }
 
@@ -575,11 +600,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
         ],
       },
     };
-  }, [activeSeries, mode, showThresholds, thresholds]);
-
-  const chartKey = useMemo(() => {
-    return `${mode}:${showThresholds ? 'thresholds-on' : 'thresholds-off'}:${buildThresholdRevision(thresholds)}`;
-  }, [mode, showThresholds, thresholds]);
+  }, [activeSeries, mode]);
 
   if (uPlotData === null) {
     return (
@@ -592,12 +613,12 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   return (
     <div ref={chartWrapperRef} style={{ position: 'relative', height: '100%', width: '100%' }}>
       <UPlotChart
-        key={chartKey}
+        key={mode}
         data={uPlotData}
         options={uPlotOptions}
         height={400}
         className="uplot-container"
-        onCreate={onCreate}
+        onCreate={handleCreate}
       />
       <div ref={tooltipRef} className="uplot-tooltip" style={{ top: 0, left: 0 }} />
     </div>

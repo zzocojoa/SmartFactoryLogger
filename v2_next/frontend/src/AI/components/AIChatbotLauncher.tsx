@@ -1,12 +1,13 @@
 import React, { Suspense, useState } from 'react';
 import ReactDOM from 'react-dom';
 import MessageSquare from 'lucide-react/dist/esm/icons/message-square';
+import { useGlobalModalContext } from '../../shared/hooks/useGlobalModalContext';
 
 const AIChatbot = React.lazy(() => import('./AIChatbot').then(m => ({ default: m.AIChatbot })));
 
 const ChatbotLoadingButton = (): JSX.Element => {
   return ReactDOM.createPortal(
-    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col items-end pointer-events-none">
+    <div className="fixed bottom-6 right-6 z-[9000] flex flex-col items-end pointer-events-none">
       <div className="pointer-events-auto">
         <button
           className="w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 bg-gradient-to-r from-blue-600 to-cyan-500 text-white opacity-70"
@@ -23,6 +24,8 @@ const ChatbotLoadingButton = (): JSX.Element => {
 
 export const AIChatbotLauncher = (): JSX.Element | null => {
   const [enabled, setEnabled] = useState(false);
+  const { state: modalState } = useGlobalModalContext();
+  const modalActive = modalState.isOpen;
 
   if (typeof document === 'undefined') {
     return null;
@@ -37,12 +40,18 @@ export const AIChatbotLauncher = (): JSX.Element | null => {
   }
 
   return ReactDOM.createPortal(
-    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col items-end pointer-events-none">
+    <div className="fixed bottom-6 right-6 z-[9000] flex flex-col items-end pointer-events-none">
       <div className="pointer-events-auto">
         <button
-          onClick={() => setEnabled(true)}
-          className="w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 bg-gradient-to-r from-blue-600 to-cyan-500 hover:scale-105 hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] text-white"
-          aria-label={'AI \uCC57\uBD07 \uC5F4\uAE30'}
+          onClick={() => {
+            if (modalActive) {
+              return;
+            }
+            setEnabled(true);
+          }}
+          disabled={modalActive}
+          className="w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all duration-300 bg-gradient-to-r from-blue-600 to-cyan-500 hover:scale-105 hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] text-white disabled:opacity-40 disabled:hover:scale-100 disabled:hover:shadow-2xl"
+          aria-label={modalActive ? 'AI 챗봇 열기 비활성화' : 'AI 챗봇 열기'}
         >
           <MessageSquare size={26} />
         </button>
