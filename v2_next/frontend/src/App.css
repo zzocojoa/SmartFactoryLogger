@@ -733,10 +733,11 @@ body {
     padding: 0;
     border-radius: 8px;
     font-size: 0;
+    gap: 0;
   }
 
   .menu-toggle::before {
-    width: 16px;
+    width: 18px;
   }
 
   .mobile-menu-backdrop {
@@ -3636,7 +3637,7 @@ body {
 .kpi-card {
   --kpi-gap: clamp(4px, calc(var(--cq) * 1.1), 8px);
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(min-content, 1fr) minmax(min-content, 1fr) auto auto;
   gap: var(--kpi-gap);
   height: 100%;
   min-height: 0;
@@ -4795,6 +4796,24 @@ body {
 .kpi-card > .missing-note {
   margin-top: auto;
   padding-top: clamp(2px, calc(var(--cq) * 0.8), 6px);
+}
+
+@media (max-width: 768px) {
+  .kpi-card {
+    grid-template-rows: auto auto auto;
+    gap: 14px;
+    height: auto;
+    min-height: 520px;
+    align-content: start;
+  }
+
+  .kpi-metric {
+    gap: 8px;
+  }
+
+  .kpi-secondary {
+    align-self: stretch;
+  }
 }
 
 .settings-path-label {
