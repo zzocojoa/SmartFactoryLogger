@@ -1190,7 +1190,7 @@ function App() {
         </DataContext.Provider>
         <AIChatbotLauncher />
         <footer className="app-footer">
-          Copyright 짤 HOIHOU. All Rights Reserved. v{packageJson.version}
+          Copyright © HOIHOU. All Rights Reserved. v{packageJson.version}
         </footer>
       </div>
     </div>
