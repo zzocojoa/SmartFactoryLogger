@@ -21,6 +21,7 @@ const HIDDEN_BY_DEFAULT_SERIES: ReadonlySet<TimeSeriesKey> = new Set<TimeSeriesK
 
 const LEGEND_SERIES = TIME_SERIES_CATALOG.filter((meta) => !HIDDEN_BY_DEFAULT_SERIES.has(meta.key));
 const SERIES_WINDOW_OPTIONS: number[] = [1, 5, 10, 30, 60];
+export const TIME_SERIES_DIMMED_ALPHA = 0.26;
 const THRESHOLD_KEYS: ThresholdKey[] = [
   'speed',
   'press',
@@ -80,6 +81,16 @@ const buildThresholdRevision = (thresholds: ThresholdState | null): string => {
 const getThresholdColor = (key: ThresholdKey): string | null => {
   const seriesKey = THRESHOLD_SERIES_KEYS[key];
   return seriesKey !== null ? SERIES_COLORS[seriesKey] : null;
+};
+
+const getTooltipSeriesColor = (seriesIndex: number, series: uPlot.Series): string => {
+  const meta = TIME_SERIES_CATALOG[seriesIndex - 1];
+
+  if (meta !== undefined) {
+    return SERIES_COLORS[meta.key] ?? '#888';
+  }
+
+  return typeof series.stroke === 'string' ? series.stroke : '#888';
 };
 
 type TooltipBounds = {
@@ -157,11 +168,17 @@ const buildPlotRectFromCanvasBbox = (plot: uPlot, wrapperRect: TooltipBounds): T
 
 type TimeSeriesLegendProps = {
   activeSeries: Record<string, boolean>;
-  onToggleSeries: (key: string) => void;
+  highlightedSeriesKey: TimeSeriesKey | null;
+  onClearHighlightedSeries: () => void;
+  onHighlightSeries: (key: TimeSeriesKey) => void;
+  onToggleSeries: (key: TimeSeriesKey) => void;
 };
 
 export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
   activeSeries,
+  highlightedSeriesKey,
+  onClearHighlightedSeries,
+  onHighlightSeries,
   onToggleSeries,
 }: TimeSeriesLegendProps) {
   const factoryData = useDashboardStore((state) => state.data);
@@ -174,15 +191,20 @@ export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
     <div className="timeseries-legend" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
       {legendSeries.map((meta) => {
         const isActive = activeSeries[meta.key];
+        const isHighlighted = highlightedSeriesKey === meta.key && isActive;
         const color = SERIES_COLORS[meta.key] || '#888';
 
         return (
           <button
             key={meta.key}
-            className={`timeseries-legend-button ${isActive ? 'active' : 'inactive'}`}
+            className={`timeseries-legend-button ${isActive ? 'active' : 'inactive'} ${isHighlighted ? 'highlighted' : ''}`}
             aria-pressed={isActive}
+            aria-current={isHighlighted ? 'true' : undefined}
             onClick={() => onToggleSeries(meta.key)}
+            onFocus={() => onHighlightSeries(meta.key)}
+            onMouseEnter={() => onHighlightSeries(meta.key)}
             style={{
+              '--timeseries-series-color': color,
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
@@ -195,7 +217,7 @@ export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
               cursor: 'pointer',
               transition: 'all 0.2s ease',
               opacity: isActive ? 1 : 0.6,
-            }}
+            } as React.CSSProperties}
           >
             <div
               className="timeseries-legend-dot"
@@ -235,19 +257,45 @@ export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
         <span>{showAllSeries ? '기본 범례' : '더 보기'}</span>
         {showHiddenActiveSeriesCount ? <span>(활성 {hiddenActiveSeriesCount})</span> : null}
       </button>
+      {highlightedSeriesKey !== null ? (
+        <button
+          className="timeseries-legend-button timeseries-highlight-clear"
+          type="button"
+          onClick={onClearHighlightedSeries}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            padding: '2px 8px',
+            borderRadius: '12px',
+            border: '1px solid var(--border-muted)',
+            background: 'transparent',
+            fontSize: '11px',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+        >
+          강조 해제
+        </button>
+      ) : null}
     </div>
   );
 });
 
 type TimeSeriesHeaderProps = {
   activeSeries: Record<string, boolean>;
+  highlightedSeriesKey: TimeSeriesKey | null;
   intervalSec: number;
   seriesPaused: boolean;
   seriesWindowMin: number;
   showThresholds: boolean;
   snapshotLoading: boolean;
+  onClearHighlightedSeries: () => void;
+  onHighlightSeries: (key: TimeSeriesKey) => void;
   onSnapshot: () => void;
-  onToggleSeries: (key: string) => void;
+  onToggleSeries: (key: TimeSeriesKey) => void;
   setSeriesPaused: React.Dispatch<React.SetStateAction<boolean>>;
   setSeriesWindowMin: (min: number) => void;
   setShowThresholds: (show: boolean) => void;
@@ -255,11 +303,14 @@ type TimeSeriesHeaderProps = {
 
 export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
   activeSeries,
+  highlightedSeriesKey,
   intervalSec,
   seriesPaused,
   seriesWindowMin,
   showThresholds,
   snapshotLoading,
+  onClearHighlightedSeries,
+  onHighlightSeries,
   onSnapshot,
   onToggleSeries,
   setSeriesPaused,
@@ -277,7 +328,13 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
         background: 'var(--bg-card-muted)',
       }}
     >
-      <TimeSeriesLegend activeSeries={activeSeries} onToggleSeries={onToggleSeries} />
+      <TimeSeriesLegend
+        activeSeries={activeSeries}
+        highlightedSeriesKey={highlightedSeriesKey}
+        onClearHighlightedSeries={onClearHighlightedSeries}
+        onHighlightSeries={onHighlightSeries}
+        onToggleSeries={onToggleSeries}
+      />
 
       <div
         className="timeseries-controls"
@@ -381,6 +438,7 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
 
 type TimeSeriesChartProps = {
   activeSeries: Record<string, boolean>;
+  highlightedSeriesKey: TimeSeriesKey | null;
   mode: string;
   showThresholds: boolean;
   thresholds: ThresholdState | null;
@@ -395,6 +453,7 @@ type ThresholdDrawState = {
 
 export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   activeSeries,
+  highlightedSeriesKey,
   mode,
   showThresholds,
   thresholds,
@@ -404,8 +463,10 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   const chartWrapperRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const thresholdDrawStateRef = useRef<ThresholdDrawState>({ showThresholds, thresholds });
+  const highlightedSeriesKeyRef = useRef<TimeSeriesKey | null>(highlightedSeriesKey);
   const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
   thresholdDrawStateRef.current = { showThresholds, thresholds };
+  highlightedSeriesKeyRef.current = highlightedSeriesKey;
 
   const thresholdRevision = useMemo(() => buildThresholdRevision(thresholds), [thresholds]);
   const handleCreate = useCallback((createdUPlotInst: uPlot): void => {
@@ -488,9 +549,11 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
       legend: {
         show: false,
       },
+      focus: {
+        alpha: TIME_SERIES_DIMMED_ALPHA,
+      },
       cursor: {
         drag: { x: true, y: true },
-        points: { show: false },
       },
       hooks: {
         draw: [
@@ -566,14 +629,29 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
             const xVal = plot.data[0][idx];
             const timeLabel = typeof xVal === 'number' ? new Date(xVal * 1000).toLocaleTimeString('en-GB', { hour12: false }) : '-';
             const activeSeriesIndices = plot.series.map((series, index) => (series.show ? index : -1)).filter((index) => index > 0);
-            const itemsHtml = activeSeriesIndices.map((seriesIndex) => {
+            const highlightedSeriesIndex = highlightedSeriesKeyRef.current === null
+              ? null
+              : TIME_SERIES_CATALOG.findIndex((meta) => meta.key === highlightedSeriesKeyRef.current) + 1;
+            const tooltipSeriesIndices = [...activeSeriesIndices].sort((leftSeriesIndex, rightSeriesIndex) => {
+              if (leftSeriesIndex === highlightedSeriesIndex) {
+                return -1;
+              }
+
+              if (rightSeriesIndex === highlightedSeriesIndex) {
+                return 1;
+              }
+
+              return leftSeriesIndex - rightSeriesIndex;
+            });
+            const itemsHtml = tooltipSeriesIndices.map((seriesIndex) => {
               const series = plot.series[seriesIndex];
               const value = plot.data[seriesIndex][idx];
               const valueText = typeof value === 'number' ? value.toFixed(1) : '-';
-              const color = String(series.stroke);
+              const color = getTooltipSeriesColor(seriesIndex, series);
+              const isHighlighted = seriesIndex === highlightedSeriesIndex;
 
               return `
-                <div class="uplot-tooltip-item">
+                <div class="uplot-tooltip-item ${isHighlighted ? 'is-highlighted' : ''}" style="--uplot-series-color: ${color}">
                   <div class="uplot-tooltip-label">
                     <div class="uplot-tooltip-dot" style="background-color: ${color}"></div>
                     <span>${series.label}</span>
