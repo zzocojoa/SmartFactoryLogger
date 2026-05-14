@@ -5216,6 +5216,16 @@ body {
   height: 32px !important;
 }
 
+.timeseries-speed-axis-button {
+  min-width: 72px !important;
+  color: var(--text-secondary);
+}
+
+.timeseries-speed-axis-button.active {
+  border-color: #10b981 !important;
+  color: #10b981;
+}
+
 .timeseries-controls .series-density-badge {
   box-sizing: border-box;
   min-height: 24px;

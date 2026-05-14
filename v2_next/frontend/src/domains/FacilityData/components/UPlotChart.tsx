@@ -5,14 +5,36 @@ import 'uplot/dist/uPlot.min.css';
 interface UPlotChartProps {
     data: uPlot.AlignedData;
     options: uPlot.Options;
+    configKey?: string;
     height?: number;
     className?: string; // For additional styling
     onCreate?: (u: uPlot) => void;
 }
 
-export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, height = 300, className, onCreate }) => {
+type PreservedXScale = {
+    min: number;
+    max: number;
+};
+
+const buildPreservedXScale = (u: uPlot): PreservedXScale | null => {
+    const xScale = u.scales.x;
+    const min = xScale.min;
+    const max = xScale.max;
+
+    if (typeof min !== 'number' || typeof max !== 'number' || !Number.isFinite(min) || !Number.isFinite(max)) {
+        return null;
+    }
+
+    return {
+        min,
+        max,
+    };
+};
+
+export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, configKey, height = 300, className, onCreate }) => {
     const chartRef = useRef<HTMLDivElement>(null);
     const uPlotRef = useRef<uPlot | null>(null);
+    const preservedXScaleRef = useRef<PreservedXScale | null>(null);
 
     // Initial Create
     useLayoutEffect(() => {
@@ -30,6 +52,11 @@ export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, height = 
         
         const u = new uPlot(finalOptions, data, chartRef.current);
         uPlotRef.current = u;
+
+        if (preservedXScaleRef.current !== null) {
+            u.setScale('x', preservedXScaleRef.current);
+        }
+
         if (onCreate) onCreate(u);
 
         const ro = new ResizeObserver(entries => {
@@ -45,12 +72,13 @@ export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, height = 
 
         return () => {
             if (uPlotRef.current) {
+                preservedXScaleRef.current = buildPreservedXScale(uPlotRef.current);
                 uPlotRef.current.destroy();
                 uPlotRef.current = null;
             }
             ro.disconnect();
         };
-    }, []); // Empty deps: Recreating uPlot is expensive. Options should be stable.
+    }, [configKey]); // 구조 옵션은 configKey 변경 시에만 다시 만든다.
 
     // Data Update
     useEffect(() => {
