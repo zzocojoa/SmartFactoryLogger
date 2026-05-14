@@ -19,7 +19,13 @@ type UPlotChartMockProps = {
 };
 
 type MockSetSeriesOptions = {
-  show: boolean | undefined;
+  focus?: boolean;
+  show?: boolean;
+};
+
+type MockUPlotSeries = Partial<uPlot.Series> & {
+  alpha?: number;
+  width?: number;
 };
 
 type MockUPlotScales = {
@@ -30,8 +36,9 @@ type MockUPlotScales = {
 };
 
 type MockUPlotInstance = {
-  setSeries: MockedFunction<(seriesIndex: number, options: MockSetSeriesOptions) => void>;
+  setSeries: MockedFunction<(seriesIndex: number | null, options: MockSetSeriesOptions) => void>;
   redraw: MockedFunction<(rebuildPaths?: boolean, recalcAxes?: boolean) => void>;
+  series: MockUPlotSeries[];
   scales: MockUPlotScales;
 };
 
@@ -75,9 +82,20 @@ vi.mock('../UPlotChart', async () => {
       mockUPlotChartRender(props);
 
       ReactModule.useLayoutEffect(() => {
+        const series = (props.options.series ?? []).map((seriesOption) => ({ ...seriesOption })) as MockUPlotSeries[];
         const instance: MockUPlotInstance = {
-          setSeries: vi.fn<(seriesIndex: number, options: MockSetSeriesOptions) => void>(),
+          setSeries: vi.fn<(seriesIndex: number | null, options: MockSetSeriesOptions) => void>((seriesIndex, options) => {
+            if (seriesIndex === null) {
+              return;
+            }
+
+            series[seriesIndex] = {
+              ...series[seriesIndex],
+              ...options,
+            };
+          }),
           redraw: vi.fn<(rebuildPaths?: boolean, recalcAxes?: boolean) => void>(),
+          series,
           scales: {
             x: {
               min: 1_777_660_800,
@@ -304,7 +322,23 @@ const buildTooltipPlot = (cursorLeft: number, cursorTop: number, spotValue: numb
     },
     series: [
       { show: true, stroke: '#aaa', label: 'Time' },
-      { show: true, stroke: '#f00', label: 'Spot' },
+      { show: true, stroke: () => '#f00', label: 'Spot' },
+    ],
+  } as unknown as uPlot;
+};
+
+const buildMultiSeriesTooltipPlot = (cursorLeft: number, cursorTop: number): uPlot => {
+  return {
+    bbox: { left: 80, top: 40, width: 420, height: 180 },
+    cursor: { left: cursorLeft, top: cursorTop, idx: 0 },
+    data: [[1_777_660_800], [11], [22]],
+    over: {
+      getBoundingClientRect: () => ({ left: 90, top: 60, width: 420, height: 180 }),
+    },
+    series: [
+      { show: true, stroke: '#aaa', label: 'Time' },
+      { show: true, stroke: () => '#f00', label: getCatalogSeriesLabel('Spot') },
+      { show: true, stroke: () => '#fa0', label: getCatalogSeriesLabel('Press') },
     ],
   } as unknown as uPlot;
 };
@@ -319,7 +353,7 @@ const buildHiddenTooltipPlot = (cursorLeft: number, cursorTop: number): uPlot =>
     },
     series: [
       { show: true, stroke: '#aaa', label: 'Time' },
-      { show: true, stroke: '#f00', label: 'Spot' },
+      { show: true, stroke: () => '#f00', label: 'Spot' },
     ],
   } as unknown as uPlot;
 };
@@ -439,8 +473,11 @@ describe('TimeSeriesWidget render', () => {
     await screen.findByTestId('uplot-chart');
     const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
     const initialUPlotInstance = getLatestUPlotInstance();
+    const latestUPlotProps = getLatestUPlotProps();
     const spotSeriesIndex = getCatalogSeriesIndex('Spot');
     const initialZoomState = { ...initialUPlotInstance.scales.x };
+
+    expect(latestUPlotProps.options.cursor?.points).toBeUndefined();
 
     fireEvent.click(getLegendButtonByValue('11.0'));
 
@@ -463,6 +500,48 @@ describe('TimeSeriesWidget render', () => {
     expect(latestUPlotInstance).toBe(initialUPlotInstance);
     expect(latestUPlotInstance.scales.x).toEqual(initialZoomState);
     expect(initialUPlotInstance.setSeries).toHaveBeenCalledWith(spotSeriesIndex, { show: false });
+  });
+
+  it('highlights a focused legend series without remounting the chart', async () => {
+    seedTimeSeriesData(11);
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
+    const initialUPlotInstance = getLatestUPlotInstance();
+    const spotSeriesIndex = getCatalogSeriesIndex('Spot');
+    const pressSeriesIndex = getCatalogSeriesIndex('Press');
+
+    initialUPlotInstance.setSeries.mockClear();
+    initialUPlotInstance.redraw.mockClear();
+
+    fireEvent.mouseEnter(getButtonByText(getCatalogSeriesLabel('Press')));
+
+    await waitFor(() => {
+      expect(initialUPlotInstance.redraw).toHaveBeenCalledWith(false, false);
+    });
+
+    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
+    expect(initialUPlotInstance.series[pressSeriesIndex].width).toBe(4);
+    expect(initialUPlotInstance.series[pressSeriesIndex].alpha).toBe(1);
+    expect(initialUPlotInstance.series[spotSeriesIndex].width).toBe(2);
+    expect(initialUPlotInstance.series[spotSeriesIndex].alpha).toBe(0.26);
+    expect(initialUPlotInstance.setSeries).toHaveBeenCalledWith(pressSeriesIndex, { focus: true });
+    expect(screen.getByRole('button', { name: '강조 해제' })).toBeInTheDocument();
+
+    initialUPlotInstance.redraw.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '강조 해제' }));
+
+    await waitFor(() => {
+      expect(initialUPlotInstance.setSeries).toHaveBeenCalledWith(null, { focus: true });
+    });
+
+    expect(initialUPlotInstance.series[pressSeriesIndex].width).toBe(2);
+    expect(initialUPlotInstance.series[pressSeriesIndex].alpha).toBe(1);
+    expect(initialUPlotInstance.series[spotSeriesIndex].alpha).toBe(1);
+    expect(initialUPlotInstance.redraw).toHaveBeenCalledWith(false, false);
+    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
   });
 
   it('redraws threshold overlay from latest threshold toggle state without remounting', async () => {
@@ -666,6 +745,15 @@ describe('TimeSeriesWidget render', () => {
 
     expect(tooltips[0].style.display).toBe('block');
     expect(tooltips[0]).toHaveTextContent('11.0');
+    const firstTooltipItem = tooltips[0].querySelector<HTMLElement>('.uplot-tooltip-item');
+    const firstTooltipDot = tooltips[0].querySelector<HTMLElement>('.uplot-tooltip-dot');
+    const firstTooltipValue = tooltips[0].querySelector<HTMLElement>('.uplot-tooltip-value');
+
+    expect(firstTooltipItem).not.toBeNull();
+    expect(firstTooltipDot).not.toBeNull();
+    expect(firstTooltipValue).not.toBeNull();
+    expect(firstTooltipItem?.style.getPropertyValue('--uplot-series-color')).toBe('#ef4444');
+    expect(firstTooltipDot?.getAttribute('style')).toContain('background-color: #ef4444');
     expect(tooltips[1].style.display).not.toBe('block');
     expect(tooltips[1]).not.toHaveTextContent('11.0');
 
@@ -676,6 +764,49 @@ describe('TimeSeriesWidget render', () => {
     expect(tooltips[0]).not.toHaveTextContent('22.0');
     expect(tooltips[1].style.display).toBe('block');
     expect(tooltips[1]).toHaveTextContent('22.0');
+  });
+
+  it('moves highlighted series to the top of the tooltip', async () => {
+    seedTimeSeriesData(11);
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    fireEvent.focus(getButtonByText(getCatalogSeriesLabel('Press')));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '강조 해제' })).toBeInTheDocument();
+    });
+
+    const latestUPlotProps = getLatestUPlotProps();
+    const tooltip = document.querySelector<HTMLDivElement>('.uplot-tooltip');
+    const setCursorHook = getSetCursorHook(latestUPlotProps);
+
+    if (tooltip === null) {
+      throw new Error('Tooltip element was not found');
+    }
+
+    Object.defineProperty(tooltip, 'offsetWidth', { configurable: true, value: 120 });
+    Object.defineProperty(tooltip, 'offsetHeight', { configurable: true, value: 40 });
+    const chartWrapper = tooltip.parentElement;
+
+    if (chartWrapper === null) {
+      throw new Error('Chart wrapper was not found');
+    }
+
+    Object.defineProperty(chartWrapper, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 10, top: 20, width: 500, height: 260 }),
+    });
+
+    setCursorHook(buildMultiSeriesTooltipPlot(100, 80));
+
+    const tooltipItems = Array.from(tooltip.querySelectorAll<HTMLElement>('.uplot-tooltip-item'));
+    expect(tooltipItems).toHaveLength(2);
+    expect(tooltipItems[0]).toHaveTextContent(getCatalogSeriesLabel('Press'));
+    expect(tooltipItems[0]).toHaveTextContent('22.0');
+    expect(tooltipItems[0]).toHaveClass('is-highlighted');
+    expect(tooltipItems[1]).toHaveTextContent(getCatalogSeriesLabel('Spot'));
   });
 
   it('clamps tooltip position using wrapper-local css coordinates', async () => {

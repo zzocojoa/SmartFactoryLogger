@@ -5149,6 +5149,39 @@ body {
   color: var(--text-secondary) !important;
 }
 
+.timeseries-legend-button.highlighted {
+  border-color: var(--timeseries-series-color) !important;
+  background: color-mix(in srgb, var(--timeseries-series-color) 22%, var(--bg-card)) !important;
+  color: var(--text-primary) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--timeseries-series-color) 54%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--timeseries-series-color) 16%, transparent);
+  opacity: 1 !important;
+}
+
+.timeseries-legend-button.active:not(.highlighted):has(~ .timeseries-highlight-clear) {
+  opacity: 0.7 !important;
+}
+
+.timeseries-legend-button:focus-visible {
+  outline: 2px solid var(--timeseries-series-color, var(--accent));
+  outline-offset: 2px;
+}
+
+.timeseries-highlight-clear {
+  flex: 0 0 auto;
+  min-width: 74px;
+  max-width: 96px;
+  border-color: var(--border-subtle) !important;
+  color: var(--text-secondary) !important;
+}
+
+.timeseries-highlight-clear:hover,
+.timeseries-highlight-clear:focus-visible {
+  color: var(--text-primary) !important;
+  border-color: var(--accent) !important;
+}
+
 .timeseries-controls {
   display: flex;
   flex: 0 1 auto;
@@ -5686,11 +5719,25 @@ body {
 }
 
 .uplot-tooltip-item {
+  --uplot-series-color: var(--text-muted);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  border-left: 3px solid var(--uplot-series-color);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--uplot-series-color) 12%, transparent);
+}
+
+.uplot-tooltip-item.is-highlighted {
+  background: color-mix(in srgb, var(--uplot-series-color) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uplot-series-color) 44%, transparent);
+}
+
+.uplot-tooltip-item.is-highlighted .uplot-tooltip-value {
+  font-weight: 800;
 }
 
 .uplot-tooltip-label {
@@ -5704,11 +5751,13 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--uplot-series-color) 60%, var(--bg-card));
 }
 
 .uplot-tooltip-value {
   font-family: var(--font-number);
   font-weight: 600;
+  color: var(--uplot-series-color);
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
