@@ -5696,7 +5696,7 @@ body {
   background: var(--bg-card);
   border: 1px solid var(--border-main);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   z-index: 100;
@@ -5704,8 +5704,8 @@ body {
   font-size: 0.75rem;
   color: var(--text-primary);
   min-width: 140px;
-  max-width: min(360px, calc(100vw - 32px));
-  max-height: min(280px, calc(100vh - 96px));
+  max-width: min(460px, calc(100vw - 32px));
+  max-height: min(420px, calc(100vh - 96px));
   overflow: hidden;
   overflow-wrap: anywhere;
 }
@@ -5718,13 +5718,24 @@ body {
   padding-bottom: 4px;
 }
 
+.uplot-tooltip-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.uplot-tooltip-items.is-dense {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(132px, 1fr));
+  gap: 4px 6px;
+}
+
 .uplot-tooltip-item {
   --uplot-series-color: var(--text-muted);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-bottom: 4px;
   padding: 4px 6px;
   border-left: 3px solid var(--uplot-series-color);
   border-radius: 4px;
@@ -5745,6 +5756,13 @@ body {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.uplot-tooltip-label span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .uplot-tooltip-dot {
