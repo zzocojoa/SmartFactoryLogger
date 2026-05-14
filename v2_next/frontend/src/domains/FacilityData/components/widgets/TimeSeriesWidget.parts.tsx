@@ -22,6 +22,8 @@ const HIDDEN_BY_DEFAULT_SERIES: ReadonlySet<TimeSeriesKey> = new Set<TimeSeriesK
 const LEGEND_SERIES = TIME_SERIES_CATALOG.filter((meta) => !HIDDEN_BY_DEFAULT_SERIES.has(meta.key));
 const SERIES_WINDOW_OPTIONS: number[] = [1, 5, 10, 30, 60];
 export const TIME_SERIES_DIMMED_ALPHA = 0.26;
+const SPEED_SERIES_KEY: TimeSeriesKey = 'Speed';
+const SPEED_RIGHT_SCALE_KEY = 'speedRight';
 const THRESHOLD_KEYS: ThresholdKey[] = [
   'speed',
   'press',
@@ -81,6 +83,14 @@ const buildThresholdRevision = (thresholds: ThresholdState | null): string => {
 const getThresholdColor = (key: ThresholdKey): string | null => {
   const seriesKey = THRESHOLD_SERIES_KEYS[key];
   return seriesKey !== null ? SERIES_COLORS[seriesKey] : null;
+};
+
+const getSeriesScaleKey = (key: TimeSeriesKey, speedRightAxisEnabled: boolean): string => {
+  return speedRightAxisEnabled && key === SPEED_SERIES_KEY ? SPEED_RIGHT_SCALE_KEY : 'y';
+};
+
+const getThresholdScaleKey = (key: ThresholdKey, speedRightAxisEnabled: boolean): string => {
+  return speedRightAxisEnabled && key === 'speed' ? SPEED_RIGHT_SCALE_KEY : 'y';
 };
 
 const getTooltipSeriesColor = (seriesIndex: number, series: uPlot.Series): string => {
@@ -290,6 +300,7 @@ type TimeSeriesHeaderProps = {
   intervalSec: number;
   seriesPaused: boolean;
   seriesWindowMin: number;
+  speedRightAxisEnabled: boolean;
   showThresholds: boolean;
   snapshotLoading: boolean;
   onClearHighlightedSeries: () => void;
@@ -298,6 +309,7 @@ type TimeSeriesHeaderProps = {
   onToggleSeries: (key: TimeSeriesKey) => void;
   setSeriesPaused: React.Dispatch<React.SetStateAction<boolean>>;
   setSeriesWindowMin: (min: number) => void;
+  setSpeedRightAxisEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   setShowThresholds: (show: boolean) => void;
 };
 
@@ -307,6 +319,7 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
   intervalSec,
   seriesPaused,
   seriesWindowMin,
+  speedRightAxisEnabled,
   showThresholds,
   snapshotLoading,
   onClearHighlightedSeries,
@@ -315,6 +328,7 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
   onToggleSeries,
   setSeriesPaused,
   setSeriesWindowMin,
+  setSpeedRightAxisEnabled,
   setShowThresholds,
 }: TimeSeriesHeaderProps) {
   return (
@@ -395,6 +409,15 @@ export const TimeSeriesHeader = React.memo(function TimeSeriesHeader({
         >
           {seriesPaused ? 'Paused' : 'Live'}
         </button>
+        <button
+          className={`status-action timeseries-speed-axis-button ${speedRightAxisEnabled ? 'active' : ''}`}
+          aria-label="압출 속도 오른쪽 Y축"
+          aria-pressed={speedRightAxisEnabled}
+          title={speedRightAxisEnabled ? '압출 속도를 왼쪽 Y축으로 표시' : '압출 속도만 오른쪽 Y축으로 표시'}
+          onClick={() => setSpeedRightAxisEnabled((current) => !current)}
+        >
+          속도 Y2
+        </button>
         <label
           className="timeseries-threshold-label"
           title={LABELS.THRESHOLDS}
@@ -441,6 +464,7 @@ type TimeSeriesChartProps = {
   highlightedSeriesKey: TimeSeriesKey | null;
   mode: string;
   showThresholds: boolean;
+  speedRightAxisEnabled: boolean;
   thresholds: ThresholdState | null;
   timeSeriesAllFrame: SeriesFrame | null;
   onCreate: (uPlotInst: uPlot) => void;
@@ -448,6 +472,7 @@ type TimeSeriesChartProps = {
 
 type ThresholdDrawState = {
   showThresholds: boolean;
+  speedRightAxisEnabled: boolean;
   thresholds: ThresholdState | null;
 };
 
@@ -456,16 +481,17 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   highlightedSeriesKey,
   mode,
   showThresholds,
+  speedRightAxisEnabled,
   thresholds,
   timeSeriesAllFrame,
   onCreate,
 }: TimeSeriesChartProps) {
   const chartWrapperRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
-  const thresholdDrawStateRef = useRef<ThresholdDrawState>({ showThresholds, thresholds });
+  const thresholdDrawStateRef = useRef<ThresholdDrawState>({ showThresholds, speedRightAxisEnabled, thresholds });
   const highlightedSeriesKeyRef = useRef<TimeSeriesKey | null>(highlightedSeriesKey);
   const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
-  thresholdDrawStateRef.current = { showThresholds, thresholds };
+  thresholdDrawStateRef.current = { showThresholds, speedRightAxisEnabled, thresholds };
   highlightedSeriesKeyRef.current = highlightedSeriesKey;
 
   const thresholdRevision = useMemo(() => buildThresholdRevision(thresholds), [thresholds]);
@@ -512,6 +538,11 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
         y: {
           auto: true,
         },
+        ...(speedRightAxisEnabled ? {
+          [SPEED_RIGHT_SCALE_KEY]: {
+            auto: true,
+          },
+        } : {}),
       },
       series: [
         {
@@ -521,6 +552,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
         },
         ...TIME_SERIES_CATALOG.map((meta) => ({
           label: meta.label,
+          scale: getSeriesScaleKey(meta.key, speedRightAxisEnabled),
           stroke: SERIES_COLORS[meta.key] || '#888',
           width: 2,
           points: { show: false },
@@ -545,6 +577,17 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
           ticks: { show: true, stroke: axisColor, width: 1 },
           values: (_u, values) => values.map((value) => value.toFixed(1)),
         },
+        ...(speedRightAxisEnabled ? [
+          {
+            scale: SPEED_RIGHT_SCALE_KEY,
+            side: 1,
+            size: 56,
+            stroke: SERIES_COLORS[SPEED_SERIES_KEY],
+            grid: { show: false },
+            ticks: { show: true, stroke: SERIES_COLORS[SPEED_SERIES_KEY], width: 1 },
+            values: (_u: uPlot, values: number[]) => values.map((value) => value.toFixed(1)),
+          },
+        ] : []),
       ],
       legend: {
         show: false,
@@ -578,9 +621,10 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
                 return;
               }
 
-              const yPos = plot.valToPos(entry.value, 'y', true);
+              const scaleKey = getThresholdScaleKey(key, thresholdDrawState.speedRightAxisEnabled);
+              const yPos = plot.valToPos(entry.value, scaleKey, true);
 
-              if (yPos < top || yPos > top + height) {
+              if (!Number.isFinite(yPos) || yPos < top || yPos > top + height) {
                 return;
               }
 
@@ -682,7 +726,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
         ],
       },
     };
-  }, [activeSeries, mode]);
+  }, [activeSeries, mode, speedRightAxisEnabled]);
 
   if (uPlotData === null) {
     return (
@@ -695,7 +739,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   return (
     <div ref={chartWrapperRef} style={{ position: 'relative', height: '100%', width: '100%' }}>
       <UPlotChart
-        key={mode}
+        configKey={`${mode}:${speedRightAxisEnabled ? SPEED_RIGHT_SCALE_KEY : 'singleY'}`}
         data={uPlotData}
         options={uPlotOptions}
         height={400}

@@ -70,6 +70,7 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
   const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
   const [activeSeries, setActiveSeries] = useState<Record<string, boolean>>(buildInitialActiveSeries);
   const [highlightedSeriesKey, setHighlightedSeriesKey] = useState<TimeSeriesKey | null>(null);
+  const [speedRightAxisEnabled, setSpeedRightAxisEnabled] = useState<boolean>(false);
 
   useEffect(() => {
     if (uPlotInst === null) {
@@ -124,6 +125,7 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
         seriesPaused={seriesPaused}
         seriesWindowMin={seriesWindowMin}
         highlightedSeriesKey={highlightedSeriesKey}
+        speedRightAxisEnabled={speedRightAxisEnabled}
         showThresholds={showThresholds}
         snapshotLoading={snapshotLoading}
         onClearHighlightedSeries={clearHighlightedSeries}
@@ -132,6 +134,7 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
         onToggleSeries={toggleSeries}
         setSeriesPaused={setSeriesPaused}
         setSeriesWindowMin={setSeriesWindowMin}
+        setSpeedRightAxisEnabled={setSpeedRightAxisEnabled}
         setShowThresholds={setShowThresholds}
       />
 
@@ -141,6 +144,7 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
           highlightedSeriesKey={highlightedSeriesKey}
           mode={mode}
           showThresholds={showThresholds}
+          speedRightAxisEnabled={speedRightAxisEnabled}
           thresholds={thresholds}
           timeSeriesAllFrame={timeSeriesAllFrame}
           onCreate={setUPlotInst}

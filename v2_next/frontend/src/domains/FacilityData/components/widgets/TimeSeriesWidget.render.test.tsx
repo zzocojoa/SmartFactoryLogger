@@ -15,6 +15,7 @@ import { TimeSeriesWidget } from './TimeSeriesWidget';
 type UPlotChartMockProps = {
   data: uPlot.AlignedData;
   options: uPlot.Options;
+  configKey?: string;
   onCreate?: (uPlotInst: uPlot) => void;
 };
 
@@ -73,6 +74,7 @@ const mocks = vi.hoisted(() => ({
 const mockUPlotChartRender = mocks.uPlotChartRender;
 const mockUPlotChartCreate = mocks.uPlotChartCreate;
 const MOLD_SERIES_KEYS: readonly TimeSeriesKey[] = ['Mold1', 'Mold2', 'Mold3', 'Mold4', 'Mold5', 'Mold6'];
+const SPEED_RIGHT_SCALE_KEY = 'speedRight';
 
 vi.mock('../UPlotChart', async () => {
   const ReactModule = await vi.importActual<typeof import('react')>('react');
@@ -106,7 +108,7 @@ vi.mock('../UPlotChart', async () => {
         mockUPlotChartCreate(instance);
         props.onCreate?.(instance as unknown as uPlot);
         return () => undefined;
-      }, []);
+      }, [props.configKey]);
 
       return ReactModule.createElement('div', { 'data-testid': 'uplot-chart' });
     },
@@ -237,6 +239,26 @@ const buildSpotThresholdState = (value: number, enabled: boolean): ThresholdStat
   };
 };
 
+const buildSpeedAndSpotThresholdState = (speedValue: number, spotValue: number): ThresholdState => {
+  const baseThresholds = buildThresholdStateFromConfig();
+
+  return {
+    ...baseThresholds,
+    masterOn: true,
+    entries: {
+      ...baseThresholds.entries,
+      speed: {
+        enabled: true,
+        value: speedValue,
+      },
+      spot: {
+        enabled: true,
+        value: spotValue,
+      },
+    },
+  };
+};
+
 const getCatalogSeriesIndex = (key: TimeSeriesKey): number => {
   const catalogIndex = TIME_SERIES_CATALOG.findIndex((meta) => meta.key === key);
 
@@ -255,6 +277,26 @@ const getCatalogSeriesLabel = (key: TimeSeriesKey): string => {
   }
 
   return meta.label;
+};
+
+const getSeriesOptionByKey = (props: UPlotChartMockProps, key: TimeSeriesKey): uPlot.Series => {
+  const seriesOption = props.options.series?.[getCatalogSeriesIndex(key)];
+
+  if (seriesOption === undefined) {
+    throw new Error(`Series option was not found: ${key}`);
+  }
+
+  return seriesOption;
+};
+
+const getAxisOptionByScale = (props: UPlotChartMockProps, scaleKey: string): uPlot.Axis => {
+  const axisOption = props.options.axes?.find((axis) => axis.scale === scaleKey);
+
+  if (axisOption === undefined) {
+    throw new Error(`Axis option was not found: ${scaleKey}`);
+  }
+
+  return axisOption;
 };
 
 const getLatestUPlotProps = (): UPlotChartMockProps => {
@@ -560,6 +602,69 @@ describe('TimeSeriesWidget render', () => {
     expect(initialUPlotInstance.series[spotSeriesIndex].alpha).toBe(1);
     expect(initialUPlotInstance.redraw).toHaveBeenCalledWith(false, false);
     expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
+  });
+
+  it('moves only extrusion speed to the right y axis when enabled', async () => {
+    seedTimeSeriesData(11);
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
+    const initialUPlotProps = getLatestUPlotProps();
+
+    expect(initialUPlotProps.options.scales?.[SPEED_RIGHT_SCALE_KEY]).toBeUndefined();
+    expect(getSeriesOptionByKey(initialUPlotProps, 'Speed').scale).toBe('y');
+    expect(() => getAxisOptionByScale(initialUPlotProps, SPEED_RIGHT_SCALE_KEY)).toThrow();
+
+    fireEvent.click(screen.getByRole('button', { name: '압출 속도 오른쪽 Y축' }));
+
+    await waitFor(() => {
+      expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount + 1);
+    });
+
+    const rightAxisUPlotProps = getLatestUPlotProps();
+    const speedAxis = getAxisOptionByScale(rightAxisUPlotProps, SPEED_RIGHT_SCALE_KEY);
+
+    expect(rightAxisUPlotProps.configKey).toContain(SPEED_RIGHT_SCALE_KEY);
+    expect(rightAxisUPlotProps.options.scales?.[SPEED_RIGHT_SCALE_KEY]).toEqual({ auto: true });
+    expect(getSeriesOptionByKey(rightAxisUPlotProps, 'Speed').scale).toBe(SPEED_RIGHT_SCALE_KEY);
+    expect(getSeriesOptionByKey(rightAxisUPlotProps, 'Spot').scale).toBe('y');
+    expect(getSeriesOptionByKey(rightAxisUPlotProps, 'Press').scale).toBe('y');
+    expect(speedAxis.side).toBe(1);
+    expect(speedAxis.stroke).toBe('#10b981');
+
+    fireEvent.click(screen.getByRole('button', { name: '압출 속도 오른쪽 Y축' }));
+
+    await waitFor(() => {
+      expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount + 2);
+    });
+
+    const restoredUPlotProps = getLatestUPlotProps();
+    expect(restoredUPlotProps.options.scales?.[SPEED_RIGHT_SCALE_KEY]).toBeUndefined();
+    expect(getSeriesOptionByKey(restoredUPlotProps, 'Speed').scale).toBe('y');
+    expect(() => getAxisOptionByScale(restoredUPlotProps, SPEED_RIGHT_SCALE_KEY)).toThrow();
+  });
+
+  it('draws speed threshold on the right y axis when speed axis is enabled', async () => {
+    seedTimeSeriesDataWithThresholds(11, buildSpeedAndSpotThresholdState(3, 10));
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    fireEvent.click(screen.getByRole('button', { name: '압출 속도 오른쪽 Y축' }));
+
+    await waitFor(() => {
+      expect(getLatestUPlotProps().options.scales?.[SPEED_RIGHT_SCALE_KEY]).toEqual({ auto: true });
+    });
+
+    const drawHook = getDrawHook(getLatestUPlotProps());
+    const { plot, valToPos } = buildThresholdDrawPlot();
+
+    drawHook(plot);
+
+    expect(valToPos).toHaveBeenCalledWith(3, SPEED_RIGHT_SCALE_KEY, true);
+    expect(valToPos).toHaveBeenCalledWith(10, 'y', true);
   });
 
   it('redraws threshold overlay from latest threshold toggle state without remounting', async () => {
