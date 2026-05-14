@@ -643,6 +643,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
 
               return leftSeriesIndex - rightSeriesIndex;
             });
+            const useDenseTooltip = tooltipSeriesIndices.length > 8;
             const itemsHtml = tooltipSeriesIndices.map((seriesIndex) => {
               const series = plot.series[seriesIndex];
               const value = plot.data[seriesIndex][idx];
@@ -661,7 +662,10 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
               `;
             }).join('');
 
-            tooltip.innerHTML = `<div class="uplot-tooltip-time">${timeLabel}</div>${itemsHtml}`;
+            tooltip.innerHTML = `
+              <div class="uplot-tooltip-time">${timeLabel}</div>
+              <div class="uplot-tooltip-items ${useDenseTooltip ? 'is-dense' : ''}">${itemsHtml}</div>
+            `;
             tooltip.style.display = 'block';
             const wrapperRect = chartWrapper.getBoundingClientRect();
             const plotRect = plot.over?.getBoundingClientRect() ?? buildPlotRectFromCanvasBbox(plot, wrapperRect);

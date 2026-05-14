@@ -343,6 +343,24 @@ const buildMultiSeriesTooltipPlot = (cursorLeft: number, cursorTop: number): uPl
   } as unknown as uPlot;
 };
 
+const buildDenseTooltipPlot = (cursorLeft: number, cursorTop: number): uPlot => {
+  const visibleMetas = TIME_SERIES_CATALOG.filter((meta) => !MOLD_SERIES_KEYS.includes(meta.key));
+  const values = visibleMetas.map((_meta, index) => 100 + index);
+
+  return {
+    bbox: { left: 80, top: 40, width: 420, height: 180 },
+    cursor: { left: cursorLeft, top: cursorTop, idx: 0 },
+    data: [[1_777_660_800], ...values.map((value) => [value])],
+    over: {
+      getBoundingClientRect: () => ({ left: 90, top: 60, width: 420, height: 180 }),
+    },
+    series: [
+      { show: true, stroke: '#aaa', label: 'Time' },
+      ...visibleMetas.map((meta) => ({ show: true, stroke: () => '#f00', label: meta.label })),
+    ],
+  } as unknown as uPlot;
+};
+
 const buildHiddenTooltipPlot = (cursorLeft: number, cursorTop: number): uPlot => {
   return {
     bbox: { left: 80, top: 40, width: 420, height: 180 },
@@ -807,6 +825,47 @@ describe('TimeSeriesWidget render', () => {
     expect(tooltipItems[0]).toHaveTextContent('22.0');
     expect(tooltipItems[0]).toHaveClass('is-highlighted');
     expect(tooltipItems[1]).toHaveTextContent(getCatalogSeriesLabel('Spot'));
+  });
+
+  it('uses dense tooltip layout when many active series are visible', async () => {
+    seedTimeSeriesData(11);
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const latestUPlotProps = getLatestUPlotProps();
+    const tooltip = document.querySelector<HTMLDivElement>('.uplot-tooltip');
+    const setCursorHook = getSetCursorHook(latestUPlotProps);
+
+    if (tooltip === null) {
+      throw new Error('Tooltip element was not found');
+    }
+
+    Object.defineProperty(tooltip, 'offsetWidth', { configurable: true, value: 360 });
+    Object.defineProperty(tooltip, 'offsetHeight', { configurable: true, value: 260 });
+    const chartWrapper = tooltip.parentElement;
+
+    if (chartWrapper === null) {
+      throw new Error('Chart wrapper was not found');
+    }
+
+    Object.defineProperty(chartWrapper, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 10, top: 20, width: 500, height: 420 }),
+    });
+
+    setCursorHook(buildDenseTooltipPlot(100, 80));
+
+    const tooltipItemsContainer = tooltip.querySelector<HTMLElement>('.uplot-tooltip-items');
+    const tooltipItems = Array.from(tooltip.querySelectorAll<HTMLElement>('.uplot-tooltip-item'));
+
+    expect(tooltip.style.display).toBe('block');
+    expect(tooltipItemsContainer).not.toBeNull();
+    expect(tooltipItemsContainer).toHaveClass('is-dense');
+    expect(tooltipItems).toHaveLength(TIME_SERIES_CATALOG.length - MOLD_SERIES_KEYS.length);
+    expect(tooltip).toHaveTextContent(getCatalogSeriesLabel('Billet_Temp'));
+    expect(tooltip).toHaveTextContent(getCatalogSeriesLabel('At_Temp'));
+    expect(tooltip).toHaveTextContent(getCatalogSeriesLabel('At_Pre'));
   });
 
   it('clamps tooltip position using wrapper-local css coordinates', async () => {
