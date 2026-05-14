@@ -184,17 +184,37 @@
   --success-color: var(--state-ok);
   --danger-color: var(--state-danger);
   --warning-color: var(--state-warn);
+  --status-normal-color: var(--state-ok);
+  --status-normal-border: rgba(78, 201, 176, 0.6);
+  --status-normal-bg: rgba(78, 201, 176, 0.12);
+  --status-comfort-color: var(--state-ok);
+  --status-comfort-border: rgba(78, 201, 176, 0.6);
+  --status-comfort-bg: rgba(78, 201, 176, 0.12);
+  --status-neutral-color: var(--state-cool);
+  --status-neutral-border: rgba(86, 166, 220, 0.6);
+  --status-neutral-bg: rgba(86, 166, 220, 0.12);
+  --status-hot-color: var(--state-warn);
+  --status-hot-border: rgba(242, 201, 76, 0.6);
+  --status-hot-bg: rgba(242, 201, 76, 0.12);
+  --status-high-color: var(--state-warn);
+  --status-high-border: rgba(242, 201, 76, 0.6);
+  --status-high-bg: rgba(242, 201, 76, 0.12);
+  --status-danger-color: var(--state-danger);
+  --status-danger-border: rgba(241, 76, 76, 0.6);
+  --status-danger-bg: rgba(241, 76, 76, 0.12);
+  --status-muted-color: var(--text-muted);
+  --status-muted-border: rgba(123, 135, 148, 0.45);
+  --status-muted-bg: rgba(123, 135, 148, 0.1);
 
-  /* Speed state colors need no change usually, but ensure contrast if needed */
-  --state-speed-very-fast: var(--state-danger);
-  --state-speed-fast: var(--state-warn);
-  --state-speed-normal: var(--state-ok);
-  --state-speed-slow: var(--state-cool);
-  --state-speed-very-slow: var(--text-muted);
-  --state-press-high: var(--state-warn);
-  --state-press-normal: var(--state-ok);
-  --state-press-low: var(--state-cool);
-  --state-idle: var(--text-muted);
+  --state-speed-very-fast: var(--status-danger-color);
+  --state-speed-fast: var(--status-high-color);
+  --state-speed-normal: var(--status-normal-color);
+  --state-speed-slow: var(--status-neutral-color);
+  --state-speed-very-slow: var(--status-muted-color);
+  --state-press-high: var(--status-high-color);
+  --state-press-normal: var(--status-normal-color);
+  --state-press-low: var(--status-neutral-color);
+  --state-idle: var(--status-muted-color);
   --header-height: 60px;
 }
 
@@ -3588,13 +3608,15 @@ body {
 }
 
 .card-warning {
-  border: 1px solid var(--state-warn);
+  border: 1px solid var(--status-high-border);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-high-color) 18%, transparent);
 }
 .card-danger {
-  border: 2px solid var(--state-danger);
+  border: 1px solid var(--status-danger-border);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-danger-color) 22%, transparent);
 }
 .card-danger-tint {
-  background: color-mix(in srgb, var(--bg-card) 85%, var(--state-danger));
+  background: color-mix(in srgb, var(--bg-card) 92%, var(--status-danger-color));
 }
 
 .panel-header {
@@ -3703,9 +3725,9 @@ body {
   font-weight: 700;
   padding: calc(var(--space-1) * 0.5) calc(var(--space-2) * 0.6);
   border-radius: 999px;
-  border: 1px solid rgba(242, 201, 76, 0.6);
-  color: var(--warning-color);
-  background: rgba(242, 201, 76, 0.15);
+  border: 1px solid var(--status-high-border);
+  color: var(--status-high-color);
+  background: var(--status-high-bg);
   white-space: nowrap;
 }
 
@@ -3791,8 +3813,8 @@ body {
 }
 
 .kpi-mini-threshold {
-  border: 1px solid rgba(242, 201, 76, 0.6);
-  background: rgba(242, 201, 76, 0.08);
+  border: 1px solid var(--status-high-border);
+  background: color-mix(in srgb, var(--dashboard-tile-bg) 82%, var(--status-high-color));
 }
 
 .kpi-mini-label {
@@ -3827,62 +3849,62 @@ body {
 
 .speed-very-fast {
   color: var(--state-speed-very-fast);
-  border-color: rgba(241, 76, 76, 0.6);
-  background: rgba(241, 76, 76, 0.12);
+  border-color: var(--status-danger-border);
+  background: var(--status-danger-bg);
 }
 
 .speed-fast {
   color: var(--state-speed-fast);
-  border-color: rgba(242, 201, 76, 0.6);
-  background: rgba(242, 201, 76, 0.12);
+  border-color: var(--status-high-border);
+  background: var(--status-high-bg);
 }
 
 .speed-normal {
   color: var(--state-speed-normal);
-  border-color: rgba(78, 201, 176, 0.6);
-  background: rgba(78, 201, 176, 0.12);
+  border-color: var(--status-normal-border);
+  background: var(--status-normal-bg);
 }
 
 .speed-slow {
   color: var(--state-speed-slow);
-  border-color: rgba(86, 166, 220, 0.6);
-  background: rgba(86, 166, 220, 0.12);
+  border-color: var(--status-neutral-border);
+  background: var(--status-neutral-bg);
 }
 
 .speed-very-slow {
   color: var(--state-speed-very-slow);
-  border-color: rgba(123, 135, 148, 0.6);
-  background: rgba(123, 135, 148, 0.12);
+  border-color: var(--status-muted-border);
+  background: var(--status-muted-bg);
 }
 
 .speed-idle {
   color: var(--state-idle);
-  border-color: rgba(123, 135, 148, 0.4);
-  background: rgba(123, 135, 148, 0.08);
+  border-color: var(--status-muted-border);
+  background: var(--status-muted-bg);
 }
 
 .press-high {
   color: var(--state-press-high);
-  border-color: rgba(242, 201, 76, 0.6);
-  background: rgba(242, 201, 76, 0.12);
+  border-color: var(--status-high-border);
+  background: var(--status-high-bg);
 }
 
 .press-normal {
   color: var(--state-press-normal);
-  border-color: rgba(78, 201, 176, 0.6);
-  background: rgba(78, 201, 176, 0.12);
+  border-color: var(--status-normal-border);
+  background: var(--status-normal-bg);
 }
 
 .press-low {
   color: var(--state-press-low);
-  border-color: rgba(86, 166, 220, 0.6);
-  background: rgba(86, 166, 220, 0.12);
+  border-color: var(--status-neutral-border);
+  background: var(--status-neutral-bg);
 }
 
 .press-idle {
   color: var(--state-idle);
-  border-color: rgba(123, 135, 148, 0.4);
-  background: rgba(123, 135, 148, 0.08);
+  border-color: var(--status-muted-border);
+  background: var(--status-muted-bg);
 }
 
 .kpi-bar-fill.speed-very-fast {
@@ -3937,13 +3959,13 @@ body {
 }
 
 .spot-danger {
-  border: 2px solid rgba(241, 76, 76, 0.8);
-  box-shadow: 0 0 0 1px rgba(241, 76, 76, 0.3);
+  border: 1px solid var(--status-danger-border);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-danger-color) 22%, transparent);
 }
 
 .spot-threshold {
-  border: 2px solid rgba(242, 201, 76, 0.7);
-  box-shadow: 0 0 0 1px rgba(242, 201, 76, 0.25);
+  border: 1px solid var(--status-high-border);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-high-color) 20%, transparent);
 }
 
 .spot-gauge {
@@ -3985,23 +4007,23 @@ body {
 }
 
 .spot-fill-normal {
-  stroke: var(--success-color);
+  stroke: var(--status-normal-color);
 }
 
 .spot-fill-danger {
-  stroke: var(--danger-color);
+  stroke: var(--status-danger-color);
 }
 
 .spot-fill-low {
-  stroke: var(--state-cool);
+  stroke: var(--status-neutral-color);
 }
 
 .spot-fill-high {
-  stroke: var(--warning-color);
+  stroke: var(--status-high-color);
 }
 
 .spot-fill-warning {
-  stroke: var(--danger-color);
+  stroke: var(--status-danger-color);
 }
 
 .spot-value {
@@ -4045,39 +4067,39 @@ body {
 }
 
 .spot-status-normal {
-  color: var(--success-color);
-  border-color: rgba(78, 201, 176, 0.5);
-  background: rgba(78, 201, 176, 0.12);
+  color: var(--status-normal-color);
+  border-color: var(--status-normal-border);
+  background: var(--status-normal-bg);
 }
 
 .spot-status-low {
-  color: var(--state-cool);
-  border-color: rgba(86, 166, 220, 0.6);
-  background: rgba(86, 166, 220, 0.12);
+  color: var(--status-neutral-color);
+  border-color: var(--status-neutral-border);
+  background: var(--status-neutral-bg);
 }
 
 .spot-status-high {
-  color: var(--warning-color);
-  border-color: rgba(242, 201, 76, 0.6);
-  background: rgba(242, 201, 76, 0.12);
+  color: var(--status-high-color);
+  border-color: var(--status-high-border);
+  background: var(--status-high-bg);
 }
 
 .spot-status-warning {
-  color: var(--danger-color);
-  border-color: rgba(241, 76, 76, 0.6);
-  background: rgba(241, 76, 76, 0.12);
+  color: var(--status-danger-color);
+  border-color: var(--status-danger-border);
+  background: var(--status-danger-bg);
 }
 
 .spot-status-idle {
   color: var(--state-idle);
-  border-color: rgba(123, 135, 148, 0.4);
-  background: rgba(123, 135, 148, 0.08);
+  border-color: var(--status-muted-border);
+  background: var(--status-muted-bg);
 }
 .spot-fill-idle {
   stroke: var(--state-idle);
 }
 .sparkline-idle {
-  --sparkline-color: var(--state-idle);
+  --sparkline-color: var(--status-muted-color);
 }
 
 .spot-alert-icon {
@@ -4101,7 +4123,7 @@ body {
   height: clamp(60px, calc(var(--cq) * 10), 150px);
   position: relative;
   overflow: hidden;
-  --sparkline-color: var(--success-color);
+  --sparkline-color: var(--status-normal-color);
 }
 
 .sparkline svg {
@@ -4138,19 +4160,19 @@ body {
 }
 
 .sparkline-threshold-normal {
-  stroke: rgba(78, 201, 176, 0.35);
+  stroke: color-mix(in srgb, var(--status-normal-color) 40%, transparent);
 }
 
 .sparkline-threshold-high {
-  stroke: rgba(242, 201, 76, 0.4);
+  stroke: color-mix(in srgb, var(--status-high-color) 45%, transparent);
 }
 
 .sparkline-threshold-warn {
-  stroke: rgba(241, 76, 76, 0.45);
+  stroke: color-mix(in srgb, var(--status-danger-color) 45%, transparent);
 }
 
 .sparkline-threshold-config {
-  stroke: rgba(242, 201, 76, 0.85);
+  stroke: color-mix(in srgb, var(--status-high-color) 86%, transparent);
   stroke-width: clamp(1.2px, calc(var(--cq) * 0.25), 1.8px);
   stroke-dasharray: 6 2;
 }
@@ -4167,19 +4189,19 @@ body {
 }
 
 .sparkline-low {
-  --sparkline-color: var(--state-cool);
+  --sparkline-color: var(--status-neutral-color);
 }
 
 .sparkline-normal {
-  --sparkline-color: var(--success-color);
+  --sparkline-color: var(--status-normal-color);
 }
 
 .sparkline-high {
-  --sparkline-color: var(--warning-color);
+  --sparkline-color: var(--status-high-color);
 }
 
 .sparkline-warning {
-  --sparkline-color: var(--danger-color);
+  --sparkline-color: var(--status-danger-color);
 }
 
 /* Secondary Temps */
@@ -4212,18 +4234,18 @@ body {
 }
 
 .temp-threshold {
-  border: 1px solid rgba(242, 201, 76, 0.6);
-  background: rgba(242, 201, 76, 0.08);
+  border: 1px solid var(--status-high-border);
+  background: color-mix(in srgb, var(--dashboard-tile-bg) 84%, var(--status-high-color));
 }
 
 .temp-warn {
-  border: 1px solid rgba(242, 201, 76, 0.6);
-  background: rgba(242, 201, 76, 0.08);
+  border: 1px solid var(--status-high-border);
+  background: color-mix(in srgb, var(--dashboard-tile-bg) 84%, var(--status-high-color));
 }
 
 .temp-danger {
-  border: 1px solid rgba(241, 76, 76, 0.6);
-  background: rgba(241, 76, 76, 0.1);
+  border: 1px solid var(--status-danger-border);
+  background: color-mix(in srgb, var(--dashboard-tile-bg) 86%, var(--status-danger-color));
 }
 
 .temp-label {
@@ -4300,12 +4322,18 @@ body {
 }
 
 .mold-alert {
-  border: 1px solid var(--dashboard-mold-alert-border);
-  background: var(--dashboard-mold-alert-bg);
+  border: 1px solid var(--status-high-border);
+  background: color-mix(in srgb, var(--dashboard-tile-bg) 86%, var(--status-high-color));
+}
+
+.mold-normal {
+  border-color: var(--dashboard-tile-border);
+  background: var(--dashboard-tile-bg);
 }
 
 .mold-muted {
   opacity: 0.7;
+  border-color: var(--status-muted-border);
 }
 
 /* Environment */
@@ -4346,8 +4374,8 @@ body {
 }
 
 .env-threshold {
-  border: 1px solid rgba(242, 201, 76, 0.6);
-  background: rgba(242, 201, 76, 0.08);
+  border: 1px solid var(--status-high-border);
+  background: color-mix(in srgb, var(--dashboard-tile-bg) 84%, var(--status-high-color));
 }
 
 .env-label {
@@ -4390,34 +4418,34 @@ body {
 }
 
 .env-comfort {
-  color: var(--success-color);
-  border-color: rgba(78, 201, 176, 0.6);
-  background: rgba(78, 201, 176, 0.12);
+  color: var(--status-comfort-color);
+  border-color: var(--status-comfort-border);
+  background: var(--status-comfort-bg);
 }
 
 .env-cold,
 .env-humid {
-  color: var(--state-cool);
-  border-color: rgba(86, 166, 220, 0.6);
-  background: rgba(86, 166, 220, 0.12);
+  color: var(--status-neutral-color);
+  border-color: var(--status-neutral-border);
+  background: var(--status-neutral-bg);
 }
 
 .env-hot {
-  color: var(--danger-color);
-  border-color: rgba(241, 76, 76, 0.6);
-  background: rgba(241, 76, 76, 0.12);
+  color: var(--status-hot-color);
+  border-color: var(--status-hot-border);
+  background: var(--status-hot-bg);
 }
 
 .env-dry {
-  color: var(--warning-color);
-  border-color: rgba(242, 201, 76, 0.6);
-  background: rgba(242, 201, 76, 0.12);
+  color: var(--status-high-color);
+  border-color: var(--status-high-border);
+  background: var(--status-high-bg);
 }
 
 .env-muted {
-  color: var(--text-dim);
-  border-color: rgba(123, 135, 148, 0.5);
-  background: rgba(123, 135, 148, 0.12);
+  color: var(--status-muted-color);
+  border-color: var(--status-muted-border);
+  background: var(--status-muted-bg);
 }
 
 /* Camera */
