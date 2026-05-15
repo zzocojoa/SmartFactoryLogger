@@ -5,8 +5,9 @@ import type { FactoryData, ThresholdKey, ThresholdState } from '../../../../shar
 import { LABELS } from '../../../../shared/constants/uiText';
 import { THRESHOLD_LABELS } from '../../../../shared/utils/thresholds';
 import { SERIES_COLORS, TIME_SERIES_CATALOG } from '../../timeseries/seriesCatalog';
-import type { TimeSeriesKey } from '../../timeseries/seriesCatalog';
+import type { TimeSeriesKey, TimeSeriesMeta } from '../../timeseries/seriesCatalog';
 import type { SeriesFrame } from '../../timeseries/seriesDataFrames';
+import type { SeriesFrameField } from '../../timeseries/seriesDataFrames.types';
 
 const UPlotChart = React.lazy(() => import('../UPlotChart').then((module) => ({ default: module.UPlotChart })));
 
@@ -22,6 +23,10 @@ const HIDDEN_BY_DEFAULT_SERIES: ReadonlySet<TimeSeriesKey> = new Set<TimeSeriesK
 const LEGEND_SERIES = TIME_SERIES_CATALOG.filter((meta) => !HIDDEN_BY_DEFAULT_SERIES.has(meta.key));
 const SERIES_WINDOW_OPTIONS: number[] = [1, 5, 10, 30, 60];
 export const TIME_SERIES_DIMMED_ALPHA = 0.26;
+const DEFAULT_CHART_PIXEL_WIDTH = 800;
+const MIN_RENDER_POINTS = 300;
+const MAX_RENDER_POINTS = 4000;
+const RENDER_POINTS_PER_PIXEL = 2;
 const SPEED_SERIES_KEY: TimeSeriesKey = 'Speed';
 const SPEED_RIGHT_SCALE_KEY = 'speedRight';
 const THRESHOLD_KEYS: ThresholdKey[] = [
@@ -61,6 +66,207 @@ export const buildInitialActiveSeries = (): Record<string, boolean> => {
   }, {});
 };
 
+export const getActiveTimeSeriesMetas = (activeSeries: Record<string, boolean>): TimeSeriesMeta[] => {
+  return TIME_SERIES_CATALOG.filter((meta) => activeSeries[meta.key] ?? !HIDDEN_BY_DEFAULT_SERIES.has(meta.key));
+};
+
+const buildChartSeriesSignature = (metas: readonly TimeSeriesMeta[]): string => {
+  return metas.map((meta) => meta.key).join(',');
+};
+
+const getFieldBySeriesKey = (timeSeriesAllFrame: SeriesFrame, key: TimeSeriesKey): SeriesFrameField => {
+  const field = timeSeriesAllFrame.fields.find((candidate) => candidate.name === key);
+
+  if (field === undefined) {
+    throw new Error(`Time series field was not found: key=${key}`);
+  }
+
+  return field;
+};
+
+const buildRenderPointLimit = (chartPixelWidth: number): number => {
+  const finiteWidth = Number.isFinite(chartPixelWidth) && chartPixelWidth > 0 ? chartPixelWidth : DEFAULT_CHART_PIXEL_WIDTH;
+  const widthLimit = Math.floor(finiteWidth * RENDER_POINTS_PER_PIXEL);
+  return Math.max(MIN_RENDER_POINTS, Math.min(MAX_RENDER_POINTS, widthLimit));
+};
+
+const getNumericDataSeries = (uPlotData: uPlot.AlignedData): Array<Array<number | null>> => {
+  const dataSeries: Array<Array<number | null>> = [];
+
+  for (let seriesIndex = 1; seriesIndex < uPlotData.length; seriesIndex += 1) {
+    const values = uPlotData[seriesIndex] as Array<number | null>;
+
+    if (values.some((value) => typeof value === 'number' && Number.isFinite(value))) {
+      dataSeries.push(values);
+    }
+  }
+
+  return dataSeries;
+};
+
+const buildBucketExtremaIndices = (
+  dataSeries: Array<Array<number | null>>,
+  startIndex: number,
+  endIndex: number
+): number[] => {
+  const selectedIndices = new Set<number>();
+
+  dataSeries.forEach((values) => {
+    let minIndex = -1;
+    let maxIndex = -1;
+    let minValue = Number.POSITIVE_INFINITY;
+    let maxValue = Number.NEGATIVE_INFINITY;
+
+    for (let index = startIndex; index < endIndex; index += 1) {
+      const value = values[index];
+
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        continue;
+      }
+
+      if (value < minValue) {
+        minValue = value;
+        minIndex = index;
+      }
+
+      if (value > maxValue) {
+        maxValue = value;
+        maxIndex = index;
+      }
+    }
+
+    if (minIndex !== -1) {
+      selectedIndices.add(minIndex);
+    }
+
+    if (maxIndex !== -1) {
+      selectedIndices.add(maxIndex);
+    }
+  });
+
+  if (selectedIndices.size === 0) {
+    return [Math.floor((startIndex + endIndex - 1) / 2)];
+  }
+
+  return Array.from(selectedIndices).sort((left, right) => left - right);
+};
+
+const buildDownsampledIndices = (uPlotData: uPlot.AlignedData, maxPoints: number): number[] => {
+  const timeValues = uPlotData[0];
+  const pointCount = timeValues.length;
+
+  if (pointCount <= maxPoints) {
+    return Array.from(timeValues, (_value, index) => index);
+  }
+
+  const dataSeries = getNumericDataSeries(uPlotData);
+
+  if (dataSeries.length === 0) {
+    const step = pointCount <= 1 ? 1 : (pointCount - 1) / (maxPoints - 1);
+    const selectedIndices = new Set<number>([0, pointCount - 1]);
+
+    for (let index = 1; index < maxPoints - 1; index += 1) {
+      selectedIndices.add(Math.round(index * step));
+    }
+
+    return Array.from(selectedIndices).sort((left, right) => left - right);
+  }
+
+  const maxIndicesPerBucket = Math.max(1, dataSeries.length * 2);
+  const bucketCount = Math.max(1, Math.floor((maxPoints - 2) / maxIndicesPerBucket));
+  const bucketSize = (pointCount - 2) / bucketCount;
+  const selectedIndices = new Set<number>([0, pointCount - 1]);
+
+  for (let bucketIndex = 0; bucketIndex < bucketCount; bucketIndex += 1) {
+    const startIndex = Math.max(1, Math.floor(1 + bucketIndex * bucketSize));
+    const endIndex = Math.min(pointCount - 1, Math.floor(1 + (bucketIndex + 1) * bucketSize));
+    const safeEndIndex = Math.max(startIndex + 1, endIndex);
+
+    buildBucketExtremaIndices(dataSeries, startIndex, safeEndIndex).forEach((index) => {
+      selectedIndices.add(index);
+    });
+  }
+
+  return Array.from(selectedIndices).sort((left, right) => left - right).slice(0, maxPoints);
+};
+
+const downsampleUPlotData = (uPlotData: uPlot.AlignedData, maxPoints: number): uPlot.AlignedData => {
+  const selectedIndices = buildDownsampledIndices(uPlotData, maxPoints);
+
+  if (selectedIndices.length === uPlotData[0].length) {
+    return uPlotData;
+  }
+
+  return uPlotData.map((values) => selectedIndices.map((index) => values[index] ?? null)) as uPlot.AlignedData;
+};
+
+const assertAlignedUPlotData = (uPlotData: uPlot.AlignedData): void => {
+  const pointCount = uPlotData[0].length;
+
+  uPlotData.forEach((values, seriesIndex) => {
+    if (values.length !== pointCount) {
+      throw new Error(`Time series aligned data length mismatch: seriesIndex=${seriesIndex}, expected=${pointCount}, actual=${values.length}.`);
+    }
+  });
+};
+
+const isChronologicalUPlotData = (uPlotData: uPlot.AlignedData): boolean => {
+  const timeValues = uPlotData[0];
+
+  for (let index = 1; index < timeValues.length; index += 1) {
+    const previousValue = timeValues[index - 1];
+    const currentValue = timeValues[index];
+
+    if (typeof previousValue === 'number' && typeof currentValue === 'number' && currentValue < previousValue) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const sortUPlotDataByTime = (uPlotData: uPlot.AlignedData): uPlot.AlignedData => {
+  if (isChronologicalUPlotData(uPlotData)) {
+    return uPlotData;
+  }
+
+  const sortedIndices = Array.from(uPlotData[0], (_value, index) => index).sort((leftIndex, rightIndex) => {
+    const leftValue = uPlotData[0][leftIndex];
+    const rightValue = uPlotData[0][rightIndex];
+    const leftTime = typeof leftValue === 'number' && Number.isFinite(leftValue) ? leftValue : Number.POSITIVE_INFINITY;
+    const rightTime = typeof rightValue === 'number' && Number.isFinite(rightValue) ? rightValue : Number.POSITIVE_INFINITY;
+
+    if (leftTime === rightTime) {
+      return leftIndex - rightIndex;
+    }
+
+    return leftTime - rightTime;
+  });
+
+  return uPlotData.map((values) => sortedIndices.map((index) => values[index] ?? null)) as uPlot.AlignedData;
+};
+
+const buildVisibleUPlotData = (
+  timeSeriesAllFrame: SeriesFrame,
+  metas: readonly TimeSeriesMeta[],
+  chartPixelWidth: number
+): uPlot.AlignedData => {
+  const timeField = timeSeriesAllFrame.fields[0];
+
+  if (timeField === undefined || timeField.type !== 'time') {
+    throw new Error('Time series frame must include a time field at index 0.');
+  }
+
+  const projectedData = [
+    timeField.values.map((value) => (value ?? 0) / 1000),
+    ...metas.map((meta) => getFieldBySeriesKey(timeSeriesAllFrame, meta.key).values),
+  ] as uPlot.AlignedData;
+
+  assertAlignedUPlotData(projectedData);
+
+  return downsampleUPlotData(sortUPlotDataByTime(projectedData), buildRenderPointLimit(chartPixelWidth));
+};
+
 const formatCurrentValue = (factoryData: FactoryData | null, key: TimeSeriesKey): string => {
   const value = factoryData !== null ? factoryData[key] : null;
   return typeof value === 'number' ? value.toFixed(1) : '-';
@@ -93,8 +299,8 @@ const getThresholdScaleKey = (key: ThresholdKey, speedRightAxisEnabled: boolean)
   return speedRightAxisEnabled && key === 'speed' ? SPEED_RIGHT_SCALE_KEY : 'y';
 };
 
-const getTooltipSeriesColor = (seriesIndex: number, series: uPlot.Series): string => {
-  const meta = TIME_SERIES_CATALOG[seriesIndex - 1];
+const getTooltipSeriesColor = (seriesIndex: number, series: uPlot.Series, chartSeriesMetas: readonly TimeSeriesMeta[]): string => {
+  const meta = chartSeriesMetas[seriesIndex - 1];
 
   if (meta !== undefined) {
     return SERIES_COLORS[meta.key] ?? '#888';
@@ -467,7 +673,7 @@ type TimeSeriesChartProps = {
   speedRightAxisEnabled: boolean;
   thresholds: ThresholdState | null;
   timeSeriesAllFrame: SeriesFrame | null;
-  onCreate: (uPlotInst: uPlot) => void;
+  onCreate: (uPlotInst: uPlot | null) => void;
 };
 
 type ThresholdDrawState = {
@@ -491,14 +697,53 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   const thresholdDrawStateRef = useRef<ThresholdDrawState>({ showThresholds, speedRightAxisEnabled, thresholds });
   const highlightedSeriesKeyRef = useRef<TimeSeriesKey | null>(highlightedSeriesKey);
   const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
+  const [chartPixelWidth, setChartPixelWidth] = useState<number>(DEFAULT_CHART_PIXEL_WIDTH);
   thresholdDrawStateRef.current = { showThresholds, speedRightAxisEnabled, thresholds };
   highlightedSeriesKeyRef.current = highlightedSeriesKey;
 
+  const chartSeriesMetas = useMemo<TimeSeriesMeta[]>(() => getActiveTimeSeriesMetas(activeSeries), [activeSeries]);
+  const chartSeriesSignature = useMemo<string>(() => buildChartSeriesSignature(chartSeriesMetas), [chartSeriesMetas]);
+  const showSpeedRightAxis = speedRightAxisEnabled && chartSeriesMetas.some((meta) => meta.key === SPEED_SERIES_KEY);
   const thresholdRevision = useMemo(() => buildThresholdRevision(thresholds), [thresholds]);
   const handleCreate = useCallback((createdUPlotInst: uPlot): void => {
     setUPlotInst(createdUPlotInst);
     onCreate(createdUPlotInst);
   }, [onCreate]);
+
+  useEffect(() => {
+    if (chartSeriesMetas.length > 0) {
+      return;
+    }
+
+    setUPlotInst(null);
+    onCreate(null);
+  }, [chartSeriesMetas.length, onCreate]);
+
+  useEffect(() => {
+    const chartWrapper = chartWrapperRef.current;
+
+    if (chartWrapper === null) {
+      return undefined;
+    }
+
+    const updateChartPixelWidth = (): void => {
+      const nextWidth = chartWrapper.clientWidth || chartWrapper.getBoundingClientRect().width || DEFAULT_CHART_PIXEL_WIDTH;
+      setChartPixelWidth((currentWidth) => (Math.round(currentWidth) === Math.round(nextWidth) ? currentWidth : nextWidth));
+    };
+
+    updateChartPixelWidth();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return undefined;
+    }
+
+    const resizeObserver = new ResizeObserver(updateChartPixelWidth);
+    resizeObserver.observe(chartWrapper);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (uPlotInst === null) {
@@ -513,14 +758,8 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
       return null;
     }
 
-    return timeSeriesAllFrame.fields.map((field, index) => {
-      if (index === 0) {
-        return field.values.map((value) => (value ?? 0) / 1000);
-      }
-
-      return field.values;
-    }) as uPlot.AlignedData;
-  }, [timeSeriesAllFrame]);
+    return buildVisibleUPlotData(timeSeriesAllFrame, chartSeriesMetas, chartPixelWidth);
+  }, [chartPixelWidth, chartSeriesMetas, timeSeriesAllFrame]);
 
   const uPlotOptions = useMemo<uPlot.Options>(() => {
     const isDark = mode === 'dark' || document.body.getAttribute('data-theme') === 'night';
@@ -538,7 +777,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
         y: {
           auto: true,
         },
-        ...(speedRightAxisEnabled ? {
+        ...(showSpeedRightAxis ? {
           [SPEED_RIGHT_SCALE_KEY]: {
             auto: true,
           },
@@ -550,13 +789,13 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
           value: (_u, value) => (value == null ? '-' : new Date(value * 1000).toLocaleTimeString()),
           stroke: axisColor,
         },
-        ...TIME_SERIES_CATALOG.map((meta) => ({
+        ...chartSeriesMetas.map((meta) => ({
           label: meta.label,
-          scale: getSeriesScaleKey(meta.key, speedRightAxisEnabled),
+          scale: getSeriesScaleKey(meta.key, showSpeedRightAxis),
           stroke: SERIES_COLORS[meta.key] || '#888',
           width: 2,
           points: { show: false },
-          show: activeSeries[meta.key] ?? !HIDDEN_BY_DEFAULT_SERIES.has(meta.key),
+          show: true,
           spanGaps: true,
         })),
       ],
@@ -577,7 +816,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
           ticks: { show: true, stroke: axisColor, width: 1 },
           values: (_u, values) => values.map((value) => value.toFixed(1)),
         },
-        ...(speedRightAxisEnabled ? [
+        ...(showSpeedRightAxis ? [
           {
             scale: SPEED_RIGHT_SCALE_KEY,
             side: 1,
@@ -616,8 +855,15 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
             THRESHOLD_KEYS.forEach((key) => {
               const entry = thresholdDrawState.thresholds?.entries[key];
               const color = getThresholdColor(key);
+              const seriesKey = THRESHOLD_SERIES_KEYS[key];
 
-              if (entry === undefined || !entry.enabled || entry.value === null || color === null) {
+              if (
+                entry === undefined ||
+                !entry.enabled ||
+                entry.value === null ||
+                color === null ||
+                (seriesKey !== null && !chartSeriesMetas.some((meta) => meta.key === seriesKey))
+              ) {
                 return;
               }
 
@@ -675,7 +921,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
             const activeSeriesIndices = plot.series.map((series, index) => (series.show ? index : -1)).filter((index) => index > 0);
             const highlightedSeriesIndex = highlightedSeriesKeyRef.current === null
               ? null
-              : TIME_SERIES_CATALOG.findIndex((meta) => meta.key === highlightedSeriesKeyRef.current) + 1;
+              : chartSeriesMetas.findIndex((meta) => meta.key === highlightedSeriesKeyRef.current) + 1;
             const tooltipSeriesIndices = [...activeSeriesIndices].sort((leftSeriesIndex, rightSeriesIndex) => {
               if (leftSeriesIndex === highlightedSeriesIndex) {
                 return -1;
@@ -692,7 +938,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
               const series = plot.series[seriesIndex];
               const value = plot.data[seriesIndex][idx];
               const valueText = typeof value === 'number' ? value.toFixed(1) : '-';
-              const color = getTooltipSeriesColor(seriesIndex, series);
+              const color = getTooltipSeriesColor(seriesIndex, series, chartSeriesMetas);
               const isHighlighted = seriesIndex === highlightedSeriesIndex;
 
               return `
@@ -726,7 +972,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
         ],
       },
     };
-  }, [activeSeries, mode, speedRightAxisEnabled]);
+  }, [chartSeriesMetas, mode, showSpeedRightAxis]);
 
   if (uPlotData === null) {
     return (
@@ -736,10 +982,18 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
     );
   }
 
+  if (chartSeriesMetas.length === 0) {
+    return (
+      <div style={{ color: 'var(--text-muted)', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+        표시할 시리즈를 선택하세요.
+      </div>
+    );
+  }
+
   return (
     <div ref={chartWrapperRef} style={{ position: 'relative', height: '100%', width: '100%' }}>
       <UPlotChart
-        configKey={`${mode}:${speedRightAxisEnabled ? SPEED_RIGHT_SCALE_KEY : 'singleY'}`}
+        configKey={`${mode}:${showSpeedRightAxis ? SPEED_RIGHT_SCALE_KEY : 'singleY'}:${chartSeriesSignature}`}
         data={uPlotData}
         options={uPlotOptions}
         height={400}

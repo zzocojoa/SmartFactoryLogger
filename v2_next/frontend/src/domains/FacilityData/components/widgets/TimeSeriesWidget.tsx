@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import uPlot from 'uplot';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useTheme } from '../../../../shared/hooks/useThemeContext';
@@ -8,6 +8,7 @@ import { TIME_SERIES_CATALOG } from '../../timeseries/seriesCatalog';
 import type { TimeSeriesKey } from '../../timeseries/seriesCatalog';
 import {
   buildInitialActiveSeries,
+  getActiveTimeSeriesMetas,
   TIME_SERIES_DIMMED_ALPHA,
   TimeSeriesChart,
   TimeSeriesHeader,
@@ -22,17 +23,17 @@ const HIGHLIGHT_SERIES_WIDTH = 4;
 
 const applyHighlightedSeriesStyle = (
   uPlotInst: uPlot,
-  activeSeries: Record<string, boolean>,
+  chartSeriesMetas: readonly { key: TimeSeriesKey }[],
   highlightedSeriesKey: TimeSeriesKey | null
 ): void => {
-  const highlightActive = highlightedSeriesKey !== null && activeSeries[highlightedSeriesKey] === true;
+  const highlightActive = highlightedSeriesKey !== null && chartSeriesMetas.some((meta) => meta.key === highlightedSeriesKey);
 
   if (!highlightActive) {
     uPlotInst.setSeries(null, { focus: true });
   }
 
-  TIME_SERIES_CATALOG.forEach((meta, catalogIndex) => {
-    const seriesIndex = catalogIndex + 1;
+  chartSeriesMetas.forEach((meta, chartSeriesIndex) => {
+    const seriesIndex = chartSeriesIndex + 1;
     const series = uPlotInst.series[seriesIndex] as MutableUPlotSeries | undefined;
 
     if (series === undefined) {
@@ -71,24 +72,15 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
   const [activeSeries, setActiveSeries] = useState<Record<string, boolean>>(buildInitialActiveSeries);
   const [highlightedSeriesKey, setHighlightedSeriesKey] = useState<TimeSeriesKey | null>(null);
   const [speedRightAxisEnabled, setSpeedRightAxisEnabled] = useState<boolean>(false);
+  const chartSeriesMetas = useMemo(() => getActiveTimeSeriesMetas(activeSeries), [activeSeries]);
 
   useEffect(() => {
     if (uPlotInst === null) {
       return;
     }
 
-    TIME_SERIES_CATALOG.forEach((meta, catalogIndex) => {
-      uPlotInst.setSeries(catalogIndex + 1, { show: activeSeries[meta.key] });
-    });
-  }, [activeSeries, uPlotInst]);
-
-  useEffect(() => {
-    if (uPlotInst === null) {
-      return;
-    }
-
-    applyHighlightedSeriesStyle(uPlotInst, activeSeries, highlightedSeriesKey);
-  }, [activeSeries, highlightedSeriesKey, uPlotInst]);
+    applyHighlightedSeriesStyle(uPlotInst, chartSeriesMetas, highlightedSeriesKey);
+  }, [chartSeriesMetas, highlightedSeriesKey, uPlotInst]);
 
   const toggleSeries = useCallback((key: TimeSeriesKey) => {
     const catalogIndex = TIME_SERIES_CATALOG.findIndex((meta) => meta.key === key);
