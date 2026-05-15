@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 
@@ -7,80 +7,92 @@ interface UPlotChartProps {
     options: uPlot.Options;
     configKey?: string;
     height?: number;
-    className?: string; // For additional styling
+    className?: string;
     onCreate?: (u: uPlot) => void;
 }
 
-type PreservedXScale = {
+type PreservedScale = {
     min: number;
     max: number;
 };
 
-const buildPreservedXScale = (u: uPlot): PreservedXScale | null => {
-    const xScale = u.scales.x;
-    const min = xScale.min;
-    const max = xScale.max;
+type PreservedScaleMap = Record<string, PreservedScale>;
 
-    if (typeof min !== 'number' || typeof max !== 'number' || !Number.isFinite(min) || !Number.isFinite(max)) {
-        return null;
-    }
+const buildPreservedScales = (u: uPlot): PreservedScaleMap => {
+    return Object.entries(u.scales).reduce<PreservedScaleMap>((preservedScales, [scaleKey, scale]) => {
+        const min = scale.min;
+        const max = scale.max;
 
-    return {
-        min,
-        max,
-    };
+        if (typeof min !== 'number' || typeof max !== 'number' || !Number.isFinite(min) || !Number.isFinite(max)) {
+            return preservedScales;
+        }
+
+        return {
+            ...preservedScales,
+            [scaleKey]: {
+                min,
+                max,
+            },
+        };
+    }, {});
 };
 
 export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, configKey, height = 300, className, onCreate }) => {
     const chartRef = useRef<HTMLDivElement>(null);
     const uPlotRef = useRef<uPlot | null>(null);
-    const preservedXScaleRef = useRef<PreservedXScale | null>(null);
+    const preservedScalesRef = useRef<PreservedScaleMap>({});
 
-    // Initial Create
     useLayoutEffect(() => {
-        if (!chartRef.current) return;
-        
-        // Initial size (will be updated by ResizeObserver)
+        if (!chartRef.current) {
+            return undefined;
+        }
+
         const initWidth = chartRef.current.clientWidth || 800;
-        
-        // Merge options with dynamic width/height
-        const finalOptions: uPlot.Options = { 
-            ...options, 
+        const finalOptions: uPlot.Options = {
+            ...options,
             width: initWidth,
-            height: height 
+            height,
         };
-        
+
         const u = new uPlot(finalOptions, data, chartRef.current);
         uPlotRef.current = u;
 
-        if (preservedXScaleRef.current !== null) {
-            u.setScale('x', preservedXScaleRef.current);
-        }
+        Object.entries(preservedScalesRef.current).forEach(([scaleKey, scale]) => {
+            if (u.scales[scaleKey] !== undefined) {
+                u.setScale(scaleKey, scale);
+            }
+        });
 
-        if (onCreate) onCreate(u);
+        onCreate?.(u);
 
-        const ro = new ResizeObserver(entries => {
-            if (!uPlotRef.current) return;
+        const ro = new ResizeObserver((entries) => {
+            if (!uPlotRef.current) {
+                return;
+            }
+
             const entry = entries[0];
-            // Use contentRect for precise content box size
             const width = entry.contentRect.width;
-            const height = entry.contentRect.height;
-            if (width <= 0 || height <= 0) return;
-            uPlotRef.current.setSize({ width, height });
+            const nextHeight = entry.contentRect.height;
+
+            if (width <= 0 || nextHeight <= 0) {
+                return;
+            }
+
+            uPlotRef.current.setSize({ width, height: nextHeight });
         });
         ro.observe(chartRef.current);
 
         return () => {
             if (uPlotRef.current) {
-                preservedXScaleRef.current = buildPreservedXScale(uPlotRef.current);
+                preservedScalesRef.current = buildPreservedScales(uPlotRef.current);
                 uPlotRef.current.destroy();
                 uPlotRef.current = null;
             }
+
             ro.disconnect();
         };
-    }, [configKey]); // 구조 옵션은 configKey 변경 시에만 다시 만든다.
+    }, [configKey]);
 
-    // Data Update
     useEffect(() => {
         if (uPlotRef.current) {
             uPlotRef.current.setData(data);
@@ -88,10 +100,10 @@ export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, configKey
     }, [data]);
 
     return (
-        <div 
-            ref={chartRef} 
-            className={className} 
-            style={{ width: '100%', height: '100%', position: 'relative' }} 
+        <div
+            ref={chartRef}
+            className={className}
+            style={{ width: '100%', height: '100%', position: 'relative' }}
         />
     );
 };

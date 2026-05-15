@@ -156,6 +156,28 @@ const buildSeriesFrame = (spotValue: number): SeriesFrame => ({
   ],
 });
 
+const buildSeriesFrameWithPointCount = (
+  pointCount: number,
+  getValue: (key: TimeSeriesKey, index: number) => number | null
+): SeriesFrame => {
+  const timeValues = Array.from({ length: pointCount }, (_value, index) => 1_777_660_800_000 + index * 1000);
+
+  return {
+    fields: [
+      {
+        name: 'time',
+        type: 'time',
+        values: timeValues,
+      },
+      ...TIME_SERIES_CATALOG.map((meta): SeriesFrame['fields'][number] => ({
+        name: meta.key,
+        type: 'number',
+        values: timeValues.map((_timeValue, index) => getValue(meta.key, index)),
+      })),
+    ],
+  };
+};
+
 type TestUIProviderProps = {
   children: React.ReactNode;
 };
@@ -280,13 +302,25 @@ const getCatalogSeriesLabel = (key: TimeSeriesKey): string => {
 };
 
 const getSeriesOptionByKey = (props: UPlotChartMockProps, key: TimeSeriesKey): uPlot.Series => {
-  const seriesOption = props.options.series?.[getCatalogSeriesIndex(key)];
+  const label = getCatalogSeriesLabel(key);
+  const seriesOption = props.options.series?.find((option) => option.label === label);
 
   if (seriesOption === undefined) {
     throw new Error(`Series option was not found: ${key}`);
   }
 
   return seriesOption;
+};
+
+const getSeriesOptionIndexByKey = (props: UPlotChartMockProps, key: TimeSeriesKey): number => {
+  const label = getCatalogSeriesLabel(key);
+  const seriesOptionIndex = props.options.series?.findIndex((option) => option.label === label) ?? -1;
+
+  if (seriesOptionIndex === -1) {
+    throw new Error(`Series option index was not found: ${key}`);
+  }
+
+  return seriesOptionIndex;
 };
 
 const getAxisOptionByScale = (props: UPlotChartMockProps, scaleKey: string): uPlot.Axis => {
@@ -518,6 +552,105 @@ describe('TimeSeriesWidget render', () => {
     expect(chartWrapper).toContainElement(chart);
   });
 
+  it('passes only active series and downsampled render points to uPlot', async () => {
+    const pointCount = 2_000;
+    const timeSeriesAllFrame = buildSeriesFrameWithPointCount(pointCount, (key, index) => (key === 'Spot' ? index : null));
+    useDashboardStore.setState({
+      data: buildFactoryData(11),
+      timeSeriesAllFrame,
+      thresholds: buildThresholdStateFromConfig(),
+      lastDataAt: 1,
+      intervalSec: 0.2,
+    });
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const latestUPlotProps = getLatestUPlotProps();
+
+    expect(latestUPlotProps.data).toHaveLength(TIME_SERIES_CATALOG.length - MOLD_SERIES_KEYS.length + 1);
+    expect(latestUPlotProps.options.series).toHaveLength(latestUPlotProps.data.length);
+    expect(latestUPlotProps.data[0].length).toBeLessThan(pointCount);
+    expect(latestUPlotProps.data[0].length).toBeLessThanOrEqual(1_600);
+    expect(timeSeriesAllFrame.fields[0].values).toHaveLength(pointCount);
+  });
+
+  it('caps render points even when every visible series value is null', async () => {
+    const pointCount = 2_000;
+    const timeSeriesAllFrame = buildSeriesFrameWithPointCount(pointCount, () => null);
+    useDashboardStore.setState({
+      data: buildFactoryData(11),
+      timeSeriesAllFrame,
+      thresholds: buildThresholdStateFromConfig(),
+      lastDataAt: 1,
+      intervalSec: 0.2,
+    });
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const latestUPlotProps = getLatestUPlotProps();
+
+    expect(latestUPlotProps.data[0].length).toBeLessThan(pointCount);
+    expect(latestUPlotProps.data[0].length).toBeLessThanOrEqual(1_600);
+  });
+
+  it('preserves visible secondary series spikes while downsampling', async () => {
+    const pointCount = 2_000;
+    const pressSpikeValue = 999;
+    const pressSpikeIndex = 997;
+    const timeSeriesAllFrame = buildSeriesFrameWithPointCount(pointCount, (key, index) => {
+      if (key === 'Spot') {
+        return 500;
+      }
+
+      if (key === 'Press' && index === pressSpikeIndex) {
+        return pressSpikeValue;
+      }
+
+      return key === 'Press' ? 0 : null;
+    });
+
+    useDashboardStore.setState({
+      data: buildFactoryData(11),
+      timeSeriesAllFrame,
+      thresholds: buildThresholdStateFromConfig(),
+      lastDataAt: 1,
+      intervalSec: 0.2,
+    });
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const latestUPlotProps = getLatestUPlotProps();
+    const pressSeriesIndex = latestUPlotProps.options.series?.findIndex((series) => series.label === getCatalogSeriesLabel('Press')) ?? -1;
+
+    expect(pressSeriesIndex).toBeGreaterThan(0);
+    expect(latestUPlotProps.data[pressSeriesIndex]).toContain(pressSpikeValue);
+    expect(latestUPlotProps.data[0].length).toBeLessThanOrEqual(1_600);
+  });
+
+  it('sorts projected render data by timestamp before passing it to uPlot', async () => {
+    const timeSeriesAllFrame = buildSeriesFrameWithPointCount(3, (key, index) => (key === 'Spot' ? index : null));
+    timeSeriesAllFrame.fields[0].values = [1_777_660_803_000, 1_777_660_801_000, 1_777_660_802_000];
+
+    useDashboardStore.setState({
+      data: buildFactoryData(11),
+      timeSeriesAllFrame,
+      thresholds: buildThresholdStateFromConfig(),
+      lastDataAt: 1,
+      intervalSec: 0.2,
+    });
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const latestUPlotProps = getLatestUPlotProps();
+
+    expect(latestUPlotProps.data[0]).toEqual([1_777_660_801, 1_777_660_802, 1_777_660_803]);
+    expect(latestUPlotProps.data[getSeriesOptionIndexByKey(latestUPlotProps, 'Spot')]).toEqual([1, 2, 0]);
+  });
+
   it('preserves uPlot instance and zoom state when toggling thresholds', async () => {
     const timeSeriesAllFrame = buildSeriesFrame(11);
     useDashboardStore.setState({
@@ -534,32 +667,34 @@ describe('TimeSeriesWidget render', () => {
     const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
     const initialUPlotInstance = getLatestUPlotInstance();
     const latestUPlotProps = getLatestUPlotProps();
-    const spotSeriesIndex = getCatalogSeriesIndex('Spot');
     const initialZoomState = { ...initialUPlotInstance.scales.x };
 
     expect(latestUPlotProps.options.cursor?.points).toBeUndefined();
+    expect(getSeriesOptionByKey(latestUPlotProps, 'Spot')).toBeDefined();
 
     fireEvent.click(getLegendButtonByValue('11.0'));
 
     await waitFor(() => {
-      expect(initialUPlotInstance.setSeries).toHaveBeenCalledWith(spotSeriesIndex, { show: false });
+      expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount + 1);
     });
-    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
-    initialUPlotInstance.redraw.mockClear();
-    expect(initialUPlotInstance.redraw).not.toHaveBeenCalled();
+    const hiddenSpotProps = getLatestUPlotProps();
+    const hiddenSpotInstance = getLatestUPlotInstance();
+    expect(() => getSeriesOptionByKey(hiddenSpotProps, 'Spot')).toThrow();
+    expect(hiddenSpotProps.data).toHaveLength(latestUPlotProps.data.length - 1);
+    hiddenSpotInstance.redraw.mockClear();
+    expect(hiddenSpotInstance.redraw).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('checkbox'));
 
     await waitFor(() => {
-      expect(initialUPlotInstance.redraw).toHaveBeenCalledTimes(1);
+      expect(hiddenSpotInstance.redraw).toHaveBeenCalledTimes(1);
     });
-    expect(initialUPlotInstance.redraw).toHaveBeenCalledWith(false, false);
+    expect(hiddenSpotInstance.redraw).toHaveBeenCalledWith(false, false);
 
     const latestUPlotInstance = getLatestUPlotInstance();
-    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
-    expect(latestUPlotInstance).toBe(initialUPlotInstance);
+    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount + 1);
+    expect(latestUPlotInstance).toBe(hiddenSpotInstance);
     expect(latestUPlotInstance.scales.x).toEqual(initialZoomState);
-    expect(initialUPlotInstance.setSeries).toHaveBeenCalledWith(spotSeriesIndex, { show: false });
   });
 
   it('highlights a focused legend series without remounting the chart', async () => {
@@ -751,12 +886,20 @@ describe('TimeSeriesWidget render', () => {
   });
 
   it('keeps mold series out of the default legend and toggles them from the expanded series list', async () => {
-    seedTimeSeriesData(11);
+    const moldValue = 321;
+    useDashboardStore.setState({
+      data: buildFactoryData(11),
+      timeSeriesAllFrame: buildSeriesFrameWithPointCount(1, (key) => (key === 'Mold1' ? moldValue : null)),
+      thresholds: buildThresholdStateFromConfig(),
+      lastDataAt: 1,
+      intervalSec: 0.2,
+    });
 
     renderTimeSeriesWidget();
 
     await screen.findByTestId('uplot-chart');
-    const initialUPlotInstance = getLatestUPlotInstance();
+    const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
+    const initialUPlotProps = getLatestUPlotProps();
     const moreButton = getButtonByText('더 보기');
 
     MOLD_SERIES_KEYS.forEach((key) => {
@@ -780,9 +923,29 @@ describe('TimeSeriesWidget render', () => {
     fireEvent.click(mold1Button);
 
     await waitFor(() => {
-      expect(initialUPlotInstance.setSeries).toHaveBeenCalledWith(getCatalogSeriesIndex('Mold1'), { show: true });
+      expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount + 1);
     });
+    const moldEnabledProps = getLatestUPlotProps();
+    const moldSeriesIndex = getSeriesOptionIndexByKey(moldEnabledProps, 'Mold1');
+
+    expect(getSeriesOptionByKey(moldEnabledProps, 'Mold1')).toBeDefined();
+    expect(moldEnabledProps.data).toHaveLength(initialUPlotProps.data.length + 1);
+    expect(moldEnabledProps.data[moldSeriesIndex]).toContain(moldValue);
     expect(mold1Button).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('shows an empty chart state when all series are hidden', async () => {
+    seedTimeSeriesData(11);
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+
+    TIME_SERIES_CATALOG.filter((meta) => !MOLD_SERIES_KEYS.includes(meta.key)).forEach((meta) => {
+      fireEvent.click(getButtonByText(meta.label));
+    });
+
+    expect(await screen.findByText('표시할 시리즈를 선택하세요.')).toBeInTheDocument();
   });
 
   it('shows hidden active mold series state after collapsing the expanded list', async () => {
