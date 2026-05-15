@@ -15,7 +15,7 @@ import { useSystemViewModel } from './domains/Observability/hooks/useSystemViewM
 import { useSpotViewModel } from './domains/FacilityData/hooks/useSpotViewModel';
 import { useConfigViewModel } from './domains/Configuration/hooks/useConfigViewModel';
 import { useLayoutViewModel } from './domains/Configuration/hooks/useLayoutViewModel';
-import { useMetricsViewModel } from './domains/FacilityData/hooks/useMetricsViewModel';
+import { MetricsDataController } from './domains/FacilityData/components/MetricsDataController';
 import { useViewportScale, applyRowHeightToCSS } from './domains/Configuration/hooks/useViewportScale';
 import { useStatusPanel } from './domains/Layout/hooks/useStatusPanel';
 import { useDashboardStore } from './store/useDashboardStore';
@@ -53,10 +53,6 @@ import { DataContext } from './domains/FacilityData/context/DataContext';
 import { SnapshotContext } from './domains/FacilityData/context/SnapshotContext';
 
 const {
-  SPOT_WARN_TEMP,
-  SPOT_NORMAL_MIN,
-  SPOT_HIGH_MIN,
-  SPOT_MAX_TEMP,
   SPARKLINE_POINTS,
   LAYOUT_STORAGE_KEY,
   LAYOUT_BACKUP_KEY,
@@ -68,6 +64,7 @@ const LEGACY_LAYOUT_COLS = 24;
 const CAMERA_DELAY_NOTIFICATION_GROUP = 'spot-camera-delay';
 const CAMERA_STATUS_DEBOUNCE_MS = 3000;
 const DEFAULT_SERIES_WINDOW_MIN = 30;
+const STATUS_PANEL_TICK_MS = 1000;
 const SERIES_WINDOW_MIN_OPTIONS: readonly number[] = [1, 5, 10, 30, 60];
 
 interface CameraNotificationSnapshot {
@@ -157,7 +154,6 @@ const {
   SPEED_MAX,
   PRESS_MAX,
   PRESS_RUNNING_THRESHOLD,
-  ALERT_HOLD_MS,
   ALERT_HOLD_LONG_MS,
   STATUS_WARN_MS,
   STATUS_OFFLINE_MS,
@@ -217,8 +213,6 @@ import type { ThresholdLevel } from './shared/utils/thresholds';
 import { buildCommBadge, buildSpotCommBadge, getCameraStatus } from './shared/utils/commBadge';
 import type { CommBadge } from './shared/utils/commBadge';
 import { useThresholdLevel } from './shared/hooks/useThresholdLevel';
-import { useSustainedFlag } from './shared/hooks/useSustainedFlag';
-import { useLastValidNumber } from './shared/hooks/useLastValidNumber';
 import { useNotifications } from './shared/hooks/useNotifications';
 import { useSnapshotManager } from './shared/hooks/useSnapshotManager';
 import { useObservabilityHandlers } from './shared/hooks/useObservabilityHandlers';
@@ -269,8 +263,6 @@ function App() {
     applyCommLogInfoSnapshot,
     healthPolling,
     statsPolling,
-    dashboardLeaderState,
-    pollingPausedByVisibility,
     fetchHealth,
     fetchStats,
     loadObservabilityErrors,
@@ -387,33 +379,22 @@ function App() {
     }
   }, [hasTimeSeriesWidget]);
 
-  const {
-    data,
-    connected,
-    lastDataAt,
-    latencyMs,
-    pollingDegraded,
-    pollingIntervalMs,
-    pollingFailureCount,
-    timeSeriesAllFrame,
-    getSeriesStats,
-  } = useMetricsViewModel({
-    seriesPaused,
-    seriesWindowMin,
-    showThresholds,
-    thresholdConfig,
-    timeSeriesFrameActive: settingsOpen || (hasTimeSeriesWidget && (layoutEditing || timeSeriesVisible))
-  });
   const intervalSec = Number(settingsForm?.intervalSec ?? '0.2') || 0.2;
-  const setDashboardTimeSeriesState = useDashboardStore((state) => state.setTimeSeriesState);
-
-  useEffect(() => {
-    setDashboardTimeSeriesState({
-      timeSeriesAllFrame,
-      thresholds: thresholdState,
-      intervalSec,
-    });
-  }, [intervalSec, setDashboardTimeSeriesState, thresholdState, timeSeriesAllFrame]);
+  const connected = useDashboardStore((state) => state.connected);
+  const pollingDegraded = useDashboardStore((state) => state.pollingDegraded);
+  const pollingIntervalMs = useDashboardStore((state) => state.pollingIntervalMs);
+  const pollingFailureCount = useDashboardStore((state) => state.pollingFailureCount);
+  const dashboardLeaderState = useDashboardStore((state) => (
+    settingsOpen ? state.dashboardLeaderState : null
+  ));
+  const pollingPausedByVisibility = useDashboardStore((state) => (
+    settingsOpen ? state.pollingPausedByVisibility : false
+  ));
+  const timeSeriesAllFrame = useDashboardStore((state) => (
+    settingsOpen ? state.timeSeriesAllFrame : null
+  ));
+  const lastDataAt = useDashboardStore.getState().lastDataAt;
+  const getSeriesStats = useCallback(() => useDashboardStore.getState().seriesStats, []);
 
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
@@ -460,12 +441,7 @@ function App() {
   });
   const settingsBootstrapRef = useRef<boolean>(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const lastSpotValue = useLastValidNumber(data?.Spot);
-  const spotAlertFallback = useSustainedFlag(
-    lastSpotValue !== null && lastSpotValue >= SPOT_WARN_TEMP,
-    ALERT_HOLD_MS
-  );
-  const spotAlertActive = data?.Computed?.spot_warning ?? spotAlertFallback;
+  const spotAlertActive = useDashboardStore((state) => state.spotAlertActive);
   const loadFrontErrors = useCallback(() => {
     if (typeof window === 'undefined') {
       return [] as FrontendErrorEntry[];
@@ -562,10 +538,10 @@ function App() {
     fetchLayoutSlots();
   }, [layoutEditing, menuOpen, fetchLayoutSlots]);
 
-  /* Polling and timeSeriesAllFrame computation moved to useMetricsViewModel */
+  /* Polling and timeSeriesAllFrame computation moved to MetricsDataController */
 
   useEffect(() => {
-    const tick = window.setInterval(() => setNowTick(Date.now()), 500);
+    const tick = window.setInterval(() => setNowTick(Date.now()), STATUS_PANEL_TICK_MS);
     return () => window.clearInterval(tick);
   }, []);
 
@@ -940,7 +916,7 @@ function App() {
   }), [handleSnapshot, snapshotLoading]);
 
   const dataContextValue = useMemo(() => ({
-    data,
+    data: null,
     thresholds: thresholdState,
     timeSeriesAllFrame,
     spotConfig,
@@ -966,7 +942,6 @@ function App() {
     setLayoutEditing,
     intervalSec,
   }), [
-    data,
     thresholdState,
     timeSeriesAllFrame,
     spotConfig,
@@ -1001,6 +976,15 @@ function App() {
 
   return (
     <div className={`App ${layoutEditing ? 'layout-editing' : ''}`} style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <MetricsDataController
+        seriesPaused={seriesPaused}
+        seriesWindowMin={seriesWindowMin}
+        showThresholds={showThresholds}
+        thresholdConfig={thresholdConfig}
+        timeSeriesFrameActive={settingsOpen || (hasTimeSeriesWidget && (layoutEditing || timeSeriesVisible))}
+        intervalSec={intervalSec}
+        thresholdState={thresholdState}
+      />
       <DashboardHeader
         activeCycle={activeCycle}
         statusLabel={statusLabel}

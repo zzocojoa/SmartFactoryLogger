@@ -214,7 +214,7 @@ const renderWidget = (
   return <NativeMarkdown item={item} />;
 };
 
-export const NativeDashboardSurface = ({
+const NativeDashboardSurfaceComponent = ({
   layoutSnapshotLayout,
   layoutRef,
   onSpotImageLoaded,
@@ -258,3 +258,5 @@ export const NativeDashboardSurface = ({
     </div>
   );
 };
+
+export const NativeDashboardSurface = React.memo(NativeDashboardSurfaceComponent);
