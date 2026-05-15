@@ -135,6 +135,7 @@ export const TimeSeriesWidget = React.memo(function TimeSeriesWidget() {
           activeSeries={activeSeries}
           highlightedSeriesKey={highlightedSeriesKey}
           mode={mode}
+          seriesWindowMin={seriesWindowMin}
           showThresholds={showThresholds}
           speedRightAxisEnabled={speedRightAxisEnabled}
           thresholds={thresholds}

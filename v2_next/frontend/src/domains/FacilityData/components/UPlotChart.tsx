@@ -6,6 +6,7 @@ interface UPlotChartProps {
     data: uPlot.AlignedData;
     options: uPlot.Options;
     configKey?: string;
+    resetScalesKey?: string | number;
     height?: number;
     className?: string;
     onCreate?: (u: uPlot) => void;
@@ -37,7 +38,15 @@ const buildPreservedScales = (u: uPlot): PreservedScaleMap => {
     }, {});
 };
 
-export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, configKey, height = 300, className, onCreate }) => {
+export const UPlotChart: React.FC<UPlotChartProps> = ({
+    data,
+    options,
+    configKey,
+    resetScalesKey,
+    height = 300,
+    className,
+    onCreate,
+}) => {
     const chartRef = useRef<HTMLDivElement>(null);
     const uPlotRef = useRef<uPlot | null>(null);
     const preservedScalesRef = useRef<PreservedScaleMap>({});
@@ -95,9 +104,9 @@ export const UPlotChart: React.FC<UPlotChartProps> = ({ data, options, configKey
 
     useEffect(() => {
         if (uPlotRef.current) {
-            uPlotRef.current.setData(data);
+            uPlotRef.current.setData(data, true);
         }
-    }, [data]);
+    }, [data, resetScalesKey]);
 
     return (
         <div

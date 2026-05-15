@@ -16,6 +16,7 @@ type UPlotChartMockProps = {
   data: uPlot.AlignedData;
   options: uPlot.Options;
   configKey?: string;
+  resetScalesKey?: string | number;
   onCreate?: (uPlotInst: uPlot) => void;
 };
 
@@ -39,6 +40,7 @@ type MockUPlotScales = {
 type MockUPlotInstance = {
   setSeries: MockedFunction<(seriesIndex: number | null, options: MockSetSeriesOptions) => void>;
   redraw: MockedFunction<(rebuildPaths?: boolean, recalcAxes?: boolean) => void>;
+  options: uPlot.Options;
   series: MockUPlotSeries[];
   scales: MockUPlotScales;
 };
@@ -97,6 +99,7 @@ vi.mock('../UPlotChart', async () => {
             };
           }),
           redraw: vi.fn<(rebuildPaths?: boolean, recalcAxes?: boolean) => void>(),
+          options: props.options,
           series,
           scales: {
             x: {
@@ -331,6 +334,20 @@ const getAxisOptionByScale = (props: UPlotChartMockProps, scaleKey: string): uPl
   }
 
   return axisOption;
+};
+
+const getXScaleRangeFromOptions = (options: uPlot.Options): uPlot.Range.Function => {
+  const range = options.scales?.x?.range;
+
+  if (typeof range !== 'function') {
+    throw new Error('X scale range function was not found');
+  }
+
+  return range;
+};
+
+const getXScaleRange = (props: UPlotChartMockProps): uPlot.Range.Function => {
+  return getXScaleRangeFromOptions(props.options);
 };
 
 const getLatestUPlotProps = (): UPlotChartMockProps => {
@@ -649,6 +666,49 @@ describe('TimeSeriesWidget render', () => {
 
     expect(latestUPlotProps.data[0]).toEqual([1_777_660_801, 1_777_660_802, 1_777_660_803]);
     expect(latestUPlotProps.data[getSeriesOptionIndexByKey(latestUPlotProps, 'Spot')]).toEqual([1, 2, 0]);
+  });
+
+  it('sets the x scale range from the selected time window without remounting', async () => {
+    const timeSeriesAllFrame = buildSeriesFrameWithPointCount(20, (key, index) => (key === 'Spot' ? index : null));
+    useDashboardStore.setState({
+      data: buildFactoryData(11),
+      timeSeriesAllFrame,
+      thresholds: buildThresholdStateFromConfig(),
+      lastDataAt: 1,
+      intervalSec: 0.2,
+    });
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const initialCreateCount = mockUPlotChartCreate.mock.calls.length;
+    const initialUPlotProps = getLatestUPlotProps();
+    const initialUPlotInstance = getLatestUPlotInstance();
+    const latestTimestampSec = 1_777_660_819;
+
+    expect(initialUPlotProps.resetScalesKey).toBe(30);
+    expect(getXScaleRange(initialUPlotProps)({} as uPlot, 0, 1, 'x')).toEqual([
+      latestTimestampSec - 30 * 60,
+      latestTimestampSec,
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: '5m' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '5m' })).toHaveAttribute('aria-pressed', 'true');
+    });
+    const fiveMinuteUPlotProps = getLatestUPlotProps();
+
+    expect(mockUPlotChartCreate).toHaveBeenCalledTimes(initialCreateCount);
+    expect(fiveMinuteUPlotProps.resetScalesKey).toBe(5);
+    expect(getXScaleRangeFromOptions(initialUPlotInstance.options)({} as uPlot, 0, 1, 'x')).toEqual([
+      latestTimestampSec - 5 * 60,
+      latestTimestampSec,
+    ]);
+    expect(getXScaleRange(fiveMinuteUPlotProps)({} as uPlot, 0, 1, 'x')).toEqual([
+      latestTimestampSec - 5 * 60,
+      latestTimestampSec,
+    ]);
   });
 
   it('preserves uPlot instance and zoom state when toggling thresholds', async () => {
