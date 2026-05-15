@@ -29,6 +29,7 @@ const MAX_RENDER_POINTS = 4000;
 const RENDER_POINTS_PER_PIXEL = 2;
 const SPEED_SERIES_KEY: TimeSeriesKey = 'Speed';
 const SPEED_RIGHT_SCALE_KEY = 'speedRight';
+type TimeWindowRange = [number, number];
 const THRESHOLD_KEYS: ThresholdKey[] = [
   'speed',
   'press',
@@ -344,6 +345,26 @@ const buildClampedTooltipPosition = (
     x: clampNumber(requestedX, minX, Math.max(minX, maxX)),
     y: clampNumber(requestedY, minY, Math.max(minY, maxY)),
   };
+};
+
+export const buildTimeWindowRange = (
+  uPlotData: uPlot.AlignedData | null,
+  seriesWindowMin: number
+): TimeWindowRange | null => {
+  const timeValues = uPlotData?.[0] as ArrayLike<number | null> | undefined;
+  const windowSec = seriesWindowMin * 60;
+
+  if (timeValues === undefined || timeValues.length === 0 || !Number.isFinite(windowSec) || windowSec <= 0) {
+    return null;
+  }
+
+  const latestValue = timeValues[timeValues.length - 1];
+
+  if (typeof latestValue !== 'number' || !Number.isFinite(latestValue)) {
+    return null;
+  }
+
+  return [latestValue - windowSec, latestValue];
 };
 
 const buildWrapperLocalTooltipPosition = (
@@ -669,6 +690,7 @@ type TimeSeriesChartProps = {
   activeSeries: Record<string, boolean>;
   highlightedSeriesKey: TimeSeriesKey | null;
   mode: string;
+  seriesWindowMin: number;
   showThresholds: boolean;
   speedRightAxisEnabled: boolean;
   thresholds: ThresholdState | null;
@@ -686,6 +708,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   activeSeries,
   highlightedSeriesKey,
   mode,
+  seriesWindowMin,
   showThresholds,
   speedRightAxisEnabled,
   thresholds,
@@ -696,6 +719,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const thresholdDrawStateRef = useRef<ThresholdDrawState>({ showThresholds, speedRightAxisEnabled, thresholds });
   const highlightedSeriesKeyRef = useRef<TimeSeriesKey | null>(highlightedSeriesKey);
+  const timeWindowRangeRef = useRef<TimeWindowRange | null>(null);
   const [uPlotInst, setUPlotInst] = useState<uPlot | null>(null);
   const [chartPixelWidth, setChartPixelWidth] = useState<number>(DEFAULT_CHART_PIXEL_WIDTH);
   thresholdDrawStateRef.current = { showThresholds, speedRightAxisEnabled, thresholds };
@@ -760,6 +784,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
 
     return buildVisibleUPlotData(timeSeriesAllFrame, chartSeriesMetas, chartPixelWidth);
   }, [chartPixelWidth, chartSeriesMetas, timeSeriesAllFrame]);
+  timeWindowRangeRef.current = buildTimeWindowRange(uPlotData, seriesWindowMin);
 
   const uPlotOptions = useMemo<uPlot.Options>(() => {
     const isDark = mode === 'dark' || document.body.getAttribute('data-theme') === 'night';
@@ -773,6 +798,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
       scales: {
         x: {
           time: true,
+          range: (_plot, initMin, initMax) => timeWindowRangeRef.current ?? [initMin, initMax],
         },
         y: {
           auto: true,
@@ -996,6 +1022,7 @@ export const TimeSeriesChart = React.memo(function TimeSeriesChart({
         configKey={`${mode}:${showSpeedRightAxis ? SPEED_RIGHT_SCALE_KEY : 'singleY'}:${chartSeriesSignature}`}
         data={uPlotData}
         options={uPlotOptions}
+        resetScalesKey={seriesWindowMin}
         height={400}
         className="uplot-container"
         onCreate={handleCreate}
