@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { FactoryData, SpotConfig, ThresholdState } from '../shared/types';
+import type { DashboardLeaderState, FactoryData, SpotConfig, ThresholdState } from '../shared/types';
 import type { SpotImageResponseMetadata } from '../domains/FacilityData/api/spotService.types';
 import type { SeriesFrame } from '../domains/FacilityData/timeseries/seriesDataFrames';
 import { buildThresholdStateFromConfig } from '../shared/utils/thresholds';
@@ -8,6 +8,23 @@ interface DashboardTimeSeriesState {
   timeSeriesAllFrame: SeriesFrame | null;
   thresholds: ThresholdState;
   intervalSec: number;
+}
+
+interface DashboardSeriesStats {
+  count: number;
+  windowMs: number;
+  maxPoints: number | null;
+}
+
+interface DashboardMetricsStatus {
+  connected: boolean;
+  latencyMs: number | null;
+  pollingDegraded: boolean;
+  pollingIntervalMs: number;
+  pollingFailureCount: number;
+  dashboardLeaderState: DashboardLeaderState | null;
+  pollingPausedByVisibility: boolean;
+  seriesStats: DashboardSeriesStats;
 }
 
 const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => {
@@ -28,14 +45,74 @@ const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => 
   );
 };
 
-interface DashboardState {
+const areDashboardLeaderStatesEqual = (
+  first: DashboardLeaderState | null,
+  second: DashboardLeaderState | null
+): boolean => {
+  if (first === null || second === null) {
+    return first === second;
+  }
+  return (
+    first.tab_id === second.tab_id &&
+    first.mode === second.mode &&
+    first.leader_tab_id === second.leader_tab_id &&
+    first.last_broadcast_at === second.last_broadcast_at
+  );
+};
+
+const areSeriesStatsEqual = (first: DashboardSeriesStats, second: DashboardSeriesStats): boolean => {
+  return (
+    first.count === second.count &&
+    first.windowMs === second.windowMs &&
+    first.maxPoints === second.maxPoints
+  );
+};
+
+const hasMetricsStatusChanged = (
+  state: DashboardMetricsStatus,
+  status: Partial<DashboardMetricsStatus>
+): boolean => {
+  if (status.connected !== undefined && state.connected !== status.connected) {
+    return true;
+  }
+  if (status.latencyMs !== undefined && state.latencyMs !== status.latencyMs) {
+    return true;
+  }
+  if (status.pollingDegraded !== undefined && state.pollingDegraded !== status.pollingDegraded) {
+    return true;
+  }
+  if (status.pollingIntervalMs !== undefined && state.pollingIntervalMs !== status.pollingIntervalMs) {
+    return true;
+  }
+  if (status.pollingFailureCount !== undefined && state.pollingFailureCount !== status.pollingFailureCount) {
+    return true;
+  }
+  if (
+    status.dashboardLeaderState !== undefined &&
+    !areDashboardLeaderStatesEqual(state.dashboardLeaderState, status.dashboardLeaderState)
+  ) {
+    return true;
+  }
+  if (
+    status.pollingPausedByVisibility !== undefined &&
+    state.pollingPausedByVisibility !== status.pollingPausedByVisibility
+  ) {
+    return true;
+  }
+  if (status.seriesStats !== undefined && !areSeriesStatsEqual(state.seriesStats, status.seriesStats)) {
+    return true;
+  }
+  return false;
+};
+
+interface DashboardState extends DashboardMetricsStatus {
   // 공장 데이터 상태
   data: FactoryData | null;
   timeSeriesAllFrame: SeriesFrame | null;
   thresholds: ThresholdState;
   lastDataAt: number | null;
   intervalSec: number;
-  
+
   // SPOT 상태
   spotConfig: SpotConfig | null;
   spotImageUrl: string;
@@ -51,6 +128,7 @@ interface DashboardState {
   setThresholds: (thresholds: ThresholdState) => void;
   setIntervalSec: (intervalSec: number) => void;
   setTimeSeriesState: (timeSeriesState: DashboardTimeSeriesState) => void;
+  setMetricsStatus: (status: Partial<DashboardMetricsStatus>) => void;
   
   setSpotConfig: (config: SpotConfig | null) => void;
   setSpotImageState: (
@@ -69,6 +147,15 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   thresholds: buildThresholdStateFromConfig(),
   lastDataAt: null,
   intervalSec: 0.2,
+
+  connected: false,
+  latencyMs: null,
+  pollingDegraded: false,
+  pollingIntervalMs: 500,
+  pollingFailureCount: 0,
+  dashboardLeaderState: null,
+  pollingPausedByVisibility: false,
+  seriesStats: { count: 0, windowMs: 0, maxPoints: null },
 
   spotConfig: null,
   spotImageUrl: '',
@@ -115,6 +202,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       thresholds: timeSeriesState.thresholds,
       intervalSec: timeSeriesState.intervalSec,
     };
+  }),
+  setMetricsStatus: (status) => set((state) => {
+    if (!hasMetricsStatusChanged(state, status)) {
+      return state;
+    }
+    return status;
   }),
   
   setSpotConfig: (spotConfig) => {
