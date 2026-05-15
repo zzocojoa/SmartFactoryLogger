@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type uPlot from 'uplot';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
-import type { FactoryData, ThresholdKey, ThresholdState } from '../../../../shared/types';
+import type { ThresholdKey, ThresholdState } from '../../../../shared/types';
 import { LABELS } from '../../../../shared/constants/uiText';
 import { THRESHOLD_LABELS } from '../../../../shared/utils/thresholds';
 import { SERIES_COLORS, TIME_SERIES_CATALOG } from '../../timeseries/seriesCatalog';
@@ -268,8 +268,7 @@ const buildVisibleUPlotData = (
   return downsampleUPlotData(sortUPlotDataByTime(projectedData), buildRenderPointLimit(chartPixelWidth));
 };
 
-const formatCurrentValue = (factoryData: FactoryData | null, key: TimeSeriesKey): string => {
-  const value = factoryData !== null ? factoryData[key] : null;
+const formatCurrentValue = (value: number | null): string => {
   return typeof value === 'number' ? value.toFixed(1) : '-';
 };
 
@@ -411,6 +410,22 @@ type TimeSeriesLegendProps = {
   onToggleSeries: (key: TimeSeriesKey) => void;
 };
 
+type TimeSeriesLegendValueProps = {
+  seriesKey: TimeSeriesKey;
+};
+
+const TimeSeriesLegendValue = React.memo(function TimeSeriesLegendValue({
+  seriesKey,
+}: TimeSeriesLegendValueProps) {
+  const currentValue = useDashboardStore((state) => state.data?.[seriesKey] ?? null);
+
+  return (
+    <span className="timeseries-legend-value" style={{ fontWeight: 600, marginLeft: '4px' }}>
+      {formatCurrentValue(currentValue)}
+    </span>
+  );
+});
+
 export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
   activeSeries,
   highlightedSeriesKey,
@@ -418,7 +433,6 @@ export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
   onHighlightSeries,
   onToggleSeries,
 }: TimeSeriesLegendProps) {
-  const factoryData = useDashboardStore((state) => state.data);
   const [showAllSeries, setShowAllSeries] = useState<boolean>(false);
   const legendSeries = showAllSeries ? TIME_SERIES_CATALOG : LEGEND_SERIES;
   const hiddenActiveSeriesCount: number = Array.from(HIDDEN_BY_DEFAULT_SERIES).filter((key) => activeSeries[key]).length;
@@ -466,9 +480,7 @@ export const TimeSeriesLegend = React.memo(function TimeSeriesLegend({
               }}
             />
             <span className="timeseries-legend-label">{meta.label}</span>
-            <span className="timeseries-legend-value" style={{ fontWeight: 600, marginLeft: '4px' }}>
-              {formatCurrentValue(factoryData, meta.key)}
-            </span>
+            <TimeSeriesLegendValue seriesKey={meta.key} />
           </button>
         );
       })}
