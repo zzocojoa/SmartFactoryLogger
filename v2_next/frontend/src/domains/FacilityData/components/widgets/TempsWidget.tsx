@@ -6,37 +6,68 @@ import React from 'react';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { useThresholdLevel } from '../../../../shared/hooks/useThresholdLevel';
-import { isThresholdHit } from '../../../../shared/utils/thresholds';
 import { formatNumber, formatTime } from '../../../../shared/utils/formatters';
 import { ALERT_HOLD_MS } from '../../../../shared/constants/logic';
 import { LABELS, SPOT_UNIT } from '../../../../shared/constants/uiText';
 
 export const TempsComponent = React.memo(function TempsComponent() {
-  const data = useDashboardStore(state => state.data);
-  const lastDataAt = useDashboardStore(state => state.lastDataAt);
-  const thresholds = useDashboardStore(state => state.thresholds);
+  const hasData = useDashboardStore(state => state.data !== null);
+  const tempF = useDashboardStore(state => state.data?.Temp_F);
+  const tempB = useDashboardStore(state => state.data?.Temp_B);
+  const billetTemp = useDashboardStore(state => state.data?.Billet_Temp);
+  const billetLength = useDashboardStore(state => state.data?.Billet_Length);
+  const computedTempFThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.temp_f);
+  const computedTempBThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.temp_b);
+  const computedBilletTempThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.billet_temp);
+  const computedBilletLengthThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.billet);
+  const lastDataAt = useDashboardStore(state => {
+    const tempF = state.data?.Temp_F;
+    const tempB = state.data?.Temp_B;
+    const billetTemp = state.data?.Billet_Temp;
+    const billetLength = state.data?.Billet_Length;
+    return !Number.isFinite(tempF) ||
+      !Number.isFinite(tempB) ||
+      !Number.isFinite(billetTemp) ||
+      !Number.isFinite(billetLength)
+      ? state.lastDataAt
+      : null;
+  });
+  const thresholdMasterOn = useDashboardStore(state => state.thresholds.masterOn);
+  const thresholdTempFEnabled = useDashboardStore(state => state.thresholds.entries.temp_f.enabled);
+  const thresholdTempFValue = useDashboardStore(state => state.thresholds.entries.temp_f.value);
+  const thresholdTempBEnabled = useDashboardStore(state => state.thresholds.entries.temp_b.enabled);
+  const thresholdTempBValue = useDashboardStore(state => state.thresholds.entries.temp_b.value);
+  const thresholdBilletTempEnabled = useDashboardStore(state => state.thresholds.entries.billet_temp.enabled);
+  const thresholdBilletTempValue = useDashboardStore(state => state.thresholds.entries.billet_temp.value);
+  const thresholdBilletLengthEnabled = useDashboardStore(state => state.thresholds.entries.billet.enabled);
+  const thresholdBilletLengthValue = useDashboardStore(state => state.thresholds.entries.billet.value);
 
   const missing =
-    !Number.isFinite(data?.Temp_F) ||
-    !Number.isFinite(data?.Temp_B) ||
-    !Number.isFinite(data?.Billet_Temp) ||
-    !Number.isFinite(data?.Billet_Length);
-  const tempFValue = useLastValidNumber(data?.Temp_F);
-  const tempBValue = useLastValidNumber(data?.Temp_B);
-  const billetTempValue = useLastValidNumber(data?.Billet_Temp);
-  const billetLengthValue = useLastValidNumber(data?.Billet_Length);
+    !Number.isFinite(tempF) ||
+    !Number.isFinite(tempB) ||
+    !Number.isFinite(billetTemp) ||
+    !Number.isFinite(billetLength);
+  const tempFValue = useLastValidNumber(tempF);
+  const tempBValue = useLastValidNumber(tempB);
+  const billetTempValue = useLastValidNumber(billetTemp);
+  const billetLengthValue = useLastValidNumber(billetLength);
   const tempFLevel = useThresholdLevel(tempFValue ?? NaN, 350, 450, ALERT_HOLD_MS);
   const tempBLevel = useThresholdLevel(tempBValue ?? NaN, 350, 450, ALERT_HOLD_MS);
   const billetTempLevel = useThresholdLevel(billetTempValue ?? NaN, 440, 480, ALERT_HOLD_MS);
-  const computedThresholds = data?.Computed?.thresholds;
-  const tempFThresholdHit = computedThresholds?.temp_f ?? (thresholds ? isThresholdHit(thresholds, 'temp_f', tempFValue) : false);
-  const tempBThresholdHit = computedThresholds?.temp_b ?? (thresholds ? isThresholdHit(thresholds, 'temp_b', tempBValue) : false);
+  const tempFThresholdHit =
+    computedTempFThresholdHit ??
+    (thresholdMasterOn && thresholdTempFEnabled && thresholdTempFValue !== null && typeof tempFValue === 'number' && Number.isFinite(tempFValue) && tempFValue >= thresholdTempFValue);
+  const tempBThresholdHit =
+    computedTempBThresholdHit ??
+    (thresholdMasterOn && thresholdTempBEnabled && thresholdTempBValue !== null && typeof tempBValue === 'number' && Number.isFinite(tempBValue) && tempBValue >= thresholdTempBValue);
   const billetTempThresholdHit =
-    computedThresholds?.billet_temp ?? (thresholds ? isThresholdHit(thresholds, 'billet_temp', billetTempValue) : false);
+    computedBilletTempThresholdHit ??
+    (thresholdMasterOn && thresholdBilletTempEnabled && thresholdBilletTempValue !== null && typeof billetTempValue === 'number' && Number.isFinite(billetTempValue) && billetTempValue >= thresholdBilletTempValue);
   const billetLengthThresholdHit =
-    computedThresholds?.billet ?? (thresholds ? isThresholdHit(thresholds, 'billet', billetLengthValue) : false);
+    computedBilletLengthThresholdHit ??
+    (thresholdMasterOn && thresholdBilletLengthEnabled && thresholdBilletLengthValue !== null && typeof billetLengthValue === 'number' && Number.isFinite(billetLengthValue) && billetLengthValue >= thresholdBilletLengthValue);
 
-  if (!data) return <div>Loading...</div>;
+  if (!hasData) return <div>Loading...</div>;
   const tempFClass = [
     tempFLevel === 'danger' ? 'temp-danger' : tempFLevel === 'warn' ? 'temp-warn' : '',
     tempFThresholdHit ? 'temp-threshold' : '',
@@ -65,7 +96,7 @@ export const TempsComponent = React.memo(function TempsComponent() {
             {tempFThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
           </div>
           <div className="temp-value-row">
-            <span className="temp-value">{formatNumber(data.Temp_F ?? NaN, 1)}</span>
+            <span className="temp-value">{formatNumber(tempF ?? NaN, 1)}</span>
             <span className="temp-unit">{SPOT_UNIT}</span>
           </div>
         </div>
@@ -75,7 +106,7 @@ export const TempsComponent = React.memo(function TempsComponent() {
             {tempBThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
           </div>
           <div className="temp-value-row">
-            <span className="temp-value">{formatNumber(data.Temp_B ?? NaN, 1)}</span>
+            <span className="temp-value">{formatNumber(tempB ?? NaN, 1)}</span>
             <span className="temp-unit">{SPOT_UNIT}</span>
           </div>
         </div>
@@ -85,7 +116,7 @@ export const TempsComponent = React.memo(function TempsComponent() {
             {billetTempThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
           </div>
           <div className="temp-value-row">
-            <span className="temp-value">{formatNumber(data.Billet_Temp ?? NaN, 1)}</span>
+            <span className="temp-value">{formatNumber(billetTemp ?? NaN, 1)}</span>
             <span className="temp-unit">{SPOT_UNIT}</span>
           </div>
         </div>
@@ -95,7 +126,7 @@ export const TempsComponent = React.memo(function TempsComponent() {
             {billetLengthThresholdHit && <span className="threshold-badge">{LABELS.THRESHOLD}</span>}
           </div>
           <div className="temp-value-row">
-            <span className="temp-value">{formatNumber(data.Billet_Length ?? NaN, 1)}</span>
+            <span className="temp-value">{formatNumber(billetLength ?? NaN, 1)}</span>
             <span className="temp-unit">mm</span>
           </div>
         </div>

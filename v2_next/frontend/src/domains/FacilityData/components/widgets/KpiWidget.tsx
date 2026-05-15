@@ -7,7 +7,6 @@ import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { useSustainedFlag } from '../../../../shared/hooks/useSustainedFlag';
 import { calcPercent } from '../../../../shared/utils/sparkline';
-import { isThresholdHit } from '../../../../shared/utils/thresholds';
 import { formatNumber, formatInteger, formatTime } from '../../../../shared/utils/formatters';
 import { mapSpeedLevel, mapPressLevel, getSpeedState, getPressState } from '../../../../shared/utils/stateMappers';
 import {
@@ -19,41 +18,70 @@ import {
 } from '../../../../shared/constants/logic';
 
 export const KpiComponent = React.memo(function KpiComponent() {
-  const data = useDashboardStore(state => state.data);
-  const lastDataAt = useDashboardStore(state => state.lastDataAt);
-  const thresholds = useDashboardStore(state => state.thresholds);
+  const hasData = useDashboardStore(state => state.data !== null);
+  const speed = useDashboardStore(state => state.data?.Speed);
+  const press = useDashboardStore(state => state.data?.Press);
+  const count = useDashboardStore(state => state.data?.Count);
+  const endPos = useDashboardStore(state => state.data?.EndPos);
+  const computedSpeedLevel = useDashboardStore(state => state.data?.Computed?.speed_level);
+  const computedPressLevel = useDashboardStore(state => state.data?.Computed?.press_level);
+  const computedJamLevel = useDashboardStore(state => state.data?.Computed?.jam_level);
+  const computedSpeedThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.speed);
+  const computedPressThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.press);
+  const computedCountThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.count);
+  const computedEndPosThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.endpos);
+  const lastDataAt = useDashboardStore(state => {
+    const speed = state.data?.Speed;
+    const press = state.data?.Press;
+    return !Number.isFinite(speed) || !Number.isFinite(press) ? state.lastDataAt : null;
+  });
+  const thresholdMasterOn = useDashboardStore(state => state.thresholds.masterOn);
+  const thresholdSpeedEnabled = useDashboardStore(state => state.thresholds.entries.speed.enabled);
+  const thresholdSpeedValue = useDashboardStore(state => state.thresholds.entries.speed.value);
+  const thresholdPressEnabled = useDashboardStore(state => state.thresholds.entries.press.enabled);
+  const thresholdPressValue = useDashboardStore(state => state.thresholds.entries.press.value);
+  const thresholdCountEnabled = useDashboardStore(state => state.thresholds.entries.count.enabled);
+  const thresholdCountValue = useDashboardStore(state => state.thresholds.entries.count.value);
+  const thresholdEndPosEnabled = useDashboardStore(state => state.thresholds.entries.endpos.enabled);
+  const thresholdEndPosValue = useDashboardStore(state => state.thresholds.entries.endpos.value);
 
-  const speedValue = useLastValidNumber(data?.Speed);
-  const pressValue = useLastValidNumber(data?.Press);
-  const countValue = useLastValidNumber(data?.Count);
-  const endPosValue = useLastValidNumber(data?.EndPos);
+  const speedValue = useLastValidNumber(speed);
+  const pressValue = useLastValidNumber(press);
+  const countValue = useLastValidNumber(count);
+  const endPosValue = useLastValidNumber(endPos);
 
-  const missing = !Number.isFinite(data?.Speed) || !Number.isFinite(data?.Press);
-  const speedForLogic = speedValue ?? data?.Speed;
-  const pressForLogic = pressValue ?? data?.Press;
+  const missing = !Number.isFinite(speed) || !Number.isFinite(press);
+  const speedForLogic = speedValue ?? speed;
+  const pressForLogic = pressValue ?? press;
   const safeSpeed = (typeof speedForLogic === 'number' && Number.isFinite(speedForLogic)) ? speedForLogic : 0;
   const safePress = (typeof pressForLogic === 'number' && Number.isFinite(pressForLogic)) ? pressForLogic : 0;
   const jamCondition = safeSpeed === 0 && safePress >= PRESS_RUNNING_THRESHOLD;
   const jamWarnFallback = useSustainedFlag(jamCondition, ALERT_HOLD_MS);
   const jamDangerFallback = useSustainedFlag(jamCondition, ALERT_HOLD_LONG_MS);
-  const computed = data?.Computed;
-  const jamLevel = computed?.jam_level;
+  const jamLevel = computedJamLevel;
   const jamWarn = jamLevel ? jamLevel === 'warn' : jamWarnFallback;
   const jamDanger = jamLevel ? jamLevel === 'danger' : jamDangerFallback;
   const speedPercent = calcPercent(safeSpeed, SPEED_MAX);
   const pressPercent = calcPercent(safePress, PRESS_MAX);
-  const computedThresholds = computed?.thresholds;
-  const speedThresholdHit = computedThresholds?.speed ?? (thresholds ? isThresholdHit(thresholds, 'speed', speedValue) : false);
-  const pressThresholdHit = computedThresholds?.press ?? (thresholds ? isThresholdHit(thresholds, 'press', pressValue) : false);
-  const countThresholdHit = computedThresholds?.count ?? (thresholds ? isThresholdHit(thresholds, 'count', countValue) : false);
-  const endPosThresholdHit = computedThresholds?.endpos ?? (thresholds ? isThresholdHit(thresholds, 'endpos', endPosValue) : false);
+  const speedThresholdHit =
+    computedSpeedThresholdHit ??
+    (thresholdMasterOn && thresholdSpeedEnabled && thresholdSpeedValue !== null && typeof speedValue === 'number' && Number.isFinite(speedValue) && speedValue >= thresholdSpeedValue);
+  const pressThresholdHit =
+    computedPressThresholdHit ??
+    (thresholdMasterOn && thresholdPressEnabled && thresholdPressValue !== null && typeof pressValue === 'number' && Number.isFinite(pressValue) && pressValue >= thresholdPressValue);
+  const countThresholdHit =
+    computedCountThresholdHit ??
+    (thresholdMasterOn && thresholdCountEnabled && thresholdCountValue !== null && typeof countValue === 'number' && Number.isFinite(countValue) && countValue >= thresholdCountValue);
+  const endPosThresholdHit =
+    computedEndPosThresholdHit ??
+    (thresholdMasterOn && thresholdEndPosEnabled && thresholdEndPosValue !== null && typeof endPosValue === 'number' && Number.isFinite(endPosValue) && endPosValue >= thresholdEndPosValue);
   const thresholdWarn = speedThresholdHit || pressThresholdHit || countThresholdHit || endPosThresholdHit;
 
-  if (!data) return <div>Loading...</div>;
+  if (!hasData) return <div>Loading...</div>;
 
   const kpiAlertClass = jamDanger ? 'card-danger' : jamWarn || thresholdWarn ? 'card-warning' : '';
-  const speedState = mapSpeedLevel(computed?.speed_level) ?? getSpeedState(safeSpeed);
-  const pressState = mapPressLevel(computed?.press_level) ?? getPressState(safePress);
+  const speedState = mapSpeedLevel(computedSpeedLevel) ?? getSpeedState(safeSpeed);
+  const pressState = mapPressLevel(computedPressLevel) ?? getPressState(safePress);
 
   return (
     <div className={`card kpi-card ${kpiAlertClass}`}>
@@ -66,7 +94,7 @@ export const KpiComponent = React.memo(function KpiComponent() {
           </div>
         </div>
         <div className="kpi-value-row">
-          <span className="kpi-value">{formatNumber(data.Speed ?? NaN, 1)}</span>
+          <span className="kpi-value">{formatNumber(speed ?? NaN, 1)}</span>
           <span className="kpi-unit">mm/s</span>
         </div>
         <div className="kpi-bar">
@@ -83,7 +111,7 @@ export const KpiComponent = React.memo(function KpiComponent() {
           </div>
         </div>
         <div className="kpi-value-row">
-          <span className="kpi-value">{formatNumber(data.Press ?? NaN, 1)}</span>
+          <span className="kpi-value">{formatNumber(press ?? NaN, 1)}</span>
           <span className="kpi-unit">bar</span>
         </div>
         <div className="kpi-bar">
@@ -97,7 +125,7 @@ export const KpiComponent = React.memo(function KpiComponent() {
             <span className="kpi-mini-label">카운트</span>
             {countThresholdHit && <span className="threshold-badge">임계</span>}
           </div>
-          <span className="kpi-mini-value">{formatInteger(data.Count ?? 0)}</span>
+          <span className="kpi-mini-value">{formatInteger(count ?? 0)}</span>
         </div>
         <div className={`kpi-mini ${endPosThresholdHit ? 'kpi-mini-threshold' : ''}`}>
           <div className="kpi-mini-header">
@@ -105,7 +133,7 @@ export const KpiComponent = React.memo(function KpiComponent() {
             {endPosThresholdHit && <span className="threshold-badge">임계</span>}
           </div>
           <div className="kpi-mini-value-row">
-            <span className="kpi-mini-value">{formatNumber(data.EndPos ?? NaN, 1)}</span>
+            <span className="kpi-mini-value">{formatNumber(endPos ?? NaN, 1)}</span>
             <span className="kpi-mini-unit">mm</span>
           </div>
         </div>

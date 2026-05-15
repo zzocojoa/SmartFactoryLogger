@@ -6,7 +6,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { buildSparklinePaths, calcPercent } from '../../../../shared/utils/sparkline';
-import { isThresholdHit, getThresholdValue } from '../../../../shared/utils/thresholds';
 import { formatNumber, formatTime } from '../../../../shared/utils/formatters';
 import { mapSpotLevel, getSpotState } from '../../../../shared/utils/stateMappers';
 import {
@@ -19,23 +18,36 @@ import {
 import { SPOT_UNIT } from '../../../../shared/constants/uiText';
 
 export const SpotComponent = React.memo(function SpotComponent() {
-  const data = useDashboardStore(state => state.data);
-  const lastDataAt = useDashboardStore(state => state.lastDataAt);
-  const thresholds = useDashboardStore(state => state.thresholds);
+  const dataReady = useDashboardStore(state => state.data !== null);
+  const spotRaw = useDashboardStore(state => state.data?.Spot);
+  const computedSpotLevel = useDashboardStore(state => state.data?.Computed?.spot_level);
+  const computedSpotThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.spot);
+  const lastDataAt = useDashboardStore(state => (
+    !Number.isFinite(state.data?.Spot) ? state.lastDataAt : null
+  ));
+  const thresholdMasterOn = useDashboardStore(state => state.thresholds.masterOn);
+  const thresholdSpotEnabled = useDashboardStore(state => state.thresholds.entries.spot.enabled);
+  const thresholdSpotValue = useDashboardStore(state => state.thresholds.entries.spot.value);
   const spotAlertActive = useDashboardStore(state => state.spotAlertActive);
 
   const [sparklineValues, setSparklineValues] = useState<number[]>([]);
-  const computed = data?.Computed;
-  const spotInputValue = computed?.spot_level === 'idle' ? 0 : data?.Spot;
+  const spotInputValue = computedSpotLevel === 'idle' ? 0 : spotRaw;
   const spotValue = useLastValidNumber(spotInputValue);
 
-  const missing = !Number.isFinite(data?.Spot);
+  const missing = !Number.isFinite(spotRaw);
   const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : (spotInputValue ?? NaN);
   const spotState =
-    mapSpotLevel(computed?.spot_level) ??
+    mapSpotLevel(computedSpotLevel) ??
     getSpotState(spotDisplayValue, spotAlertActive, SPOT_WARN_TEMP, SPOT_HIGH_MIN, SPOT_NORMAL_MIN);
-  const spotThresholdHit = computed?.thresholds?.spot ?? (thresholds ? isThresholdHit(thresholds, 'spot', spotValue) : false);
-  const spotConfigThreshold = thresholds ? getThresholdValue(thresholds, 'spot') : null;
+  const configSpotThresholdHit =
+    thresholdMasterOn &&
+    thresholdSpotEnabled &&
+    thresholdSpotValue !== null &&
+    typeof spotValue === 'number' &&
+    Number.isFinite(spotValue) &&
+    spotValue >= thresholdSpotValue;
+  const spotThresholdHit = computedSpotThresholdHit ?? configSpotThresholdHit;
+  const spotConfigThreshold = thresholdMasterOn && thresholdSpotEnabled ? thresholdSpotValue : null;
   const spotPercent = calcPercent(spotDisplayValue, SPOT_MAX_TEMP);
   const sparklineThresholds = useMemo(() => {
     const list = [SPOT_NORMAL_MIN, SPOT_HIGH_MIN, SPOT_WARN_TEMP];
@@ -72,7 +84,7 @@ export const SpotComponent = React.memo(function SpotComponent() {
     });
   }, [spotDisplayValue]);
 
-  if (!data) return <div>Loading...</div>;
+  if (!dataReady) return <div>Loading...</div>;
 
   return (
     <div

@@ -5,30 +5,52 @@
 import React from 'react';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
-import { isThresholdHit } from '../../../../shared/utils/thresholds';
 import { formatNumber, formatTime } from '../../../../shared/utils/formatters';
 import { mapEnvTempLevel, mapEnvPreLevel, getEnvTempState, getEnvHumidityState } from '../../../../shared/utils/stateMappers';
 import { LABELS, SPOT_UNIT } from '../../../../shared/constants/uiText';
 
 export const EnvComponent = React.memo(function EnvComponent() {
-  const data = useDashboardStore(state => state.data);
-  const lastDataAt = useDashboardStore(state => state.lastDataAt);
-  const thresholds = useDashboardStore(state => state.thresholds);
+  const tempRaw = useDashboardStore(state => state.data?.At_Temp);
+  const humidityRaw = useDashboardStore(state => state.data?.At_Pre);
+  const computedEnvTempLevel = useDashboardStore(state => state.data?.Computed?.env_temp_level);
+  const computedEnvPreLevel = useDashboardStore(state => state.data?.Computed?.env_pre_level);
+  const computedTempThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.at_temp);
+  const computedHumidityThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.at_pre);
+  const lastDataAt = useDashboardStore(state => {
+    const atTemp = state.data?.At_Temp;
+    const atPre = state.data?.At_Pre;
+    return !Number.isFinite(atTemp) || !Number.isFinite(atPre) ? state.lastDataAt : null;
+  });
+  const thresholdMasterOn = useDashboardStore(state => state.thresholds.masterOn);
+  const thresholdAtTempEnabled = useDashboardStore(state => state.thresholds.entries.at_temp.enabled);
+  const thresholdAtTempValue = useDashboardStore(state => state.thresholds.entries.at_temp.value);
+  const thresholdAtPreEnabled = useDashboardStore(state => state.thresholds.entries.at_pre.enabled);
+  const thresholdAtPreValue = useDashboardStore(state => state.thresholds.entries.at_pre.value);
 
-  const envTempValue = useLastValidNumber(data?.At_Temp);
-  const envHumidityValue = useLastValidNumber(data?.At_Pre);
-  const tempRaw = data?.At_Temp;
-  const humidityRaw = data?.At_Pre;
+  const envTempValue = useLastValidNumber(tempRaw);
+  const envHumidityValue = useLastValidNumber(humidityRaw);
   const tempDisplay = envTempValue ?? tempRaw ?? NaN;
   const humidityDisplay = envHumidityValue ?? humidityRaw ?? NaN;
   const missing = !Number.isFinite(tempRaw) || !Number.isFinite(humidityRaw);
-  const computed = data?.Computed;
-  const tempState = mapEnvTempLevel(computed?.env_temp_level) ?? getEnvTempState(tempDisplay);
-  const humidityState = mapEnvPreLevel(computed?.env_pre_level) ?? getEnvHumidityState(humidityDisplay);
-  const computedThresholds = computed?.thresholds;
-  const tempThresholdHit = computedThresholds?.at_temp ?? (thresholds ? isThresholdHit(thresholds, 'at_temp', envTempValue) : false);
+  const tempState = mapEnvTempLevel(computedEnvTempLevel) ?? getEnvTempState(tempDisplay);
+  const humidityState = mapEnvPreLevel(computedEnvPreLevel) ?? getEnvHumidityState(humidityDisplay);
+  const configTempThresholdHit =
+    thresholdMasterOn &&
+    thresholdAtTempEnabled &&
+    thresholdAtTempValue !== null &&
+    typeof envTempValue === 'number' &&
+    Number.isFinite(envTempValue) &&
+    envTempValue >= thresholdAtTempValue;
+  const configHumidityThresholdHit =
+    thresholdMasterOn &&
+    thresholdAtPreEnabled &&
+    thresholdAtPreValue !== null &&
+    typeof envHumidityValue === 'number' &&
+    Number.isFinite(envHumidityValue) &&
+    envHumidityValue >= thresholdAtPreValue;
+  const tempThresholdHit = computedTempThresholdHit ?? configTempThresholdHit;
   const humidityThresholdHit =
-    computedThresholds?.at_pre ?? (thresholds ? isThresholdHit(thresholds, 'at_pre', envHumidityValue) : false);
+    computedHumidityThresholdHit ?? configHumidityThresholdHit;
   return (
     <div className="card env-card" style={{ height: '100%' }}>
       <div className="env-grid">
