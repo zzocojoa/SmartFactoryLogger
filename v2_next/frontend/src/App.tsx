@@ -17,7 +17,6 @@ import { useConfigViewModel } from './domains/Configuration/hooks/useConfigViewM
 import { useLayoutViewModel } from './domains/Configuration/hooks/useLayoutViewModel';
 import { MetricsDataController } from './domains/FacilityData/components/MetricsDataController';
 import { useViewportScale, applyRowHeightToCSS } from './domains/Configuration/hooks/useViewportScale';
-import { useStatusPanel } from './domains/Layout/hooks/useStatusPanel';
 import { useDashboardStore } from './store/useDashboardStore';
 import { DashboardHeader } from './domains/Layout/components/DashboardHeader/DashboardHeader';
 import { LayoutEditContext } from './domains/Configuration/context/LayoutEditContext';
@@ -45,7 +44,7 @@ const NativeDashboardSurface = React.lazy(() => import('./scenes/NativeDashboard
 
 import { safeGetItem, safeSetItem, safeRemoveItem } from './shared/utils/safeStorage';
 
-import { apiClient, API_BASE } from './shared/api/client';
+import { apiClient } from './shared/api/client';
 import { configService } from './domains/Configuration/api/configService';
 // Data Contexts
 import { UIContext } from './domains/FacilityData/context/UIContext';
@@ -61,17 +60,8 @@ const {
 
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LEGACY_LAYOUT_COLS = 24;
-const CAMERA_DELAY_NOTIFICATION_GROUP = 'spot-camera-delay';
-const CAMERA_STATUS_DEBOUNCE_MS = 3000;
 const DEFAULT_SERIES_WINDOW_MIN = 30;
-const STATUS_PANEL_TICK_MS = 1000;
 const SERIES_WINDOW_MIN_OPTIONS: readonly number[] = [1, 5, 10, 30, 60];
-
-interface CameraNotificationSnapshot {
-  type: string;
-  title: string;
-  detail: string;
-}
 
 const normalizeSeriesWindowMin = (value: number): number => {
   return SERIES_WINDOW_MIN_OPTIONS.includes(value) ? value : DEFAULT_SERIES_WINDOW_MIN;
@@ -83,66 +73,6 @@ const hasLayoutTimeSeriesWidget = (layout: LayoutMap | null): boolean => {
   }
 
   return Object.values(layout).some((item) => item.type === 'timeseries');
-};
-
-const isCameraIssueType = (type: string | null): boolean => {
-  return type === 'warn' ||
-    type === 'danger' ||
-    type === 'error' ||
-    Boolean(type?.startsWith('warn:')) ||
-    Boolean(type?.startsWith('danger:')) ||
-    Boolean(type?.startsWith('error:'));
-};
-
-const getCameraStatusDetail = (status: unknown): string => {
-  if (status === null || typeof status !== 'object') {
-    return '';
-  }
-
-  const detail = (status as { detail?: unknown }).detail;
-  if (typeof detail !== 'string') {
-    return '';
-  }
-
-  return detail.trim();
-};
-
-const buildCameraNotificationDetail = (
-  snapshot: CameraNotificationSnapshot
-): string | undefined => {
-  const parts = [snapshot.title.trim(), snapshot.detail.trim()].filter((part) => part.length > 0);
-  if (parts.length === 0) {
-    return undefined;
-  }
-
-  return parts.join(' | ');
-};
-
-const buildCameraIssueNotification = (
-  snapshot: CameraNotificationSnapshot
-): { title: string; message: string } => {
-  if (snapshot.type === 'danger') {
-    return {
-      title: '카메라 지연',
-      message: 'SPOT 카메라 응답 지연이 길어지고 있습니다.',
-    };
-  }
-  if (snapshot.title === '이미지 갱신 지연') {
-    return {
-      title: '카메라 지연',
-      message: 'SPOT 카메라 이미지 갱신이 지연되고 있습니다.',
-    };
-  }
-  if (snapshot.title === '이미지 요청 대기') {
-    return {
-      title: '카메라 요청 대기',
-      message: 'SPOT 카메라 이미지 요청이 대기 중입니다.',
-    };
-  }
-  return {
-    title: '오래된 이미지',
-    message: 'SPOT 카메라 이미지가 오래되었습니다.',
-  };
 };
 
 
@@ -173,16 +103,9 @@ const {
 
 
 import {
-  calcRecoverySec,
-  formatAgeSec,
   formatInteger,
-  formatMetaTime,
   formatNumber,
-  formatOptionalNumber,
-  formatOptionalSeconds,
   formatOptionalText,
-  formatTime,
-  formatTimeFromSec,
 } from './shared/utils/formatters';
 import { isValidIp, isValidNumberInput, isValidPort, parseThresholdValue } from './shared/utils/validators';
 import {
@@ -210,8 +133,6 @@ import {
   THRESHOLD_LABELS,
 } from './shared/utils/thresholds';
 import type { ThresholdLevel } from './shared/utils/thresholds';
-import { buildCommBadge, buildSpotCommBadge, getCameraStatus } from './shared/utils/commBadge';
-import type { CommBadge } from './shared/utils/commBadge';
 import { useThresholdLevel } from './shared/hooks/useThresholdLevel';
 import { useNotifications } from './shared/hooks/useNotifications';
 import { useSnapshotManager } from './shared/hooks/useSnapshotManager';
@@ -380,10 +301,6 @@ function App() {
   }, [hasTimeSeriesWidget]);
 
   const intervalSec = Number(settingsForm?.intervalSec ?? '0.2') || 0.2;
-  const connected = useDashboardStore((state) => state.connected);
-  const pollingDegraded = useDashboardStore((state) => state.pollingDegraded);
-  const pollingIntervalMs = useDashboardStore((state) => state.pollingIntervalMs);
-  const pollingFailureCount = useDashboardStore((state) => state.pollingFailureCount);
   const dashboardLeaderState = useDashboardStore((state) => (
     settingsOpen ? state.dashboardLeaderState : null
   ));
@@ -400,8 +317,6 @@ function App() {
   const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
   const [layoutRestoreMessage, setLayoutRestoreMessage] = useState<string | null>(null);
   /* centralSyncBusy moved to useConfigViewModel */
-
-  const [nowTick, setNowTick] = useState(() => Date.now());
 
   // Settings State moved to useConfigViewModel
   /*
@@ -429,16 +344,7 @@ function App() {
   /* Layout state moved to useLayoutViewModel */
 
   // const spotHasImage = useRef(false);
-  const statusRef = useRef<string | null>(null);
   const spotAlertRef = useRef(false);
-  const cameraStatusRef = useRef<string | null>(null);
-  const cameraStatusPendingRef = useRef<string | null>(null);
-  const cameraStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cameraStatusSnapshotRef = useRef<CameraNotificationSnapshot>({
-    type: 'ok',
-    title: '',
-    detail: '',
-  });
   const settingsBootstrapRef = useRef<boolean>(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const spotAlertActive = useDashboardStore((state) => state.spotAlertActive);
@@ -539,12 +445,6 @@ function App() {
   }, [layoutEditing, menuOpen, fetchLayoutSlots]);
 
   /* Polling and timeSeriesAllFrame computation moved to MetricsDataController */
-
-  useEffect(() => {
-    const tick = window.setInterval(() => setNowTick(Date.now()), STATUS_PANEL_TICK_MS);
-    return () => window.clearInterval(tick);
-  }, []);
-
 
   // --- 1. Notification Management ---
   const {
@@ -705,36 +605,9 @@ function App() {
     return () => window.removeEventListener('mousedown', handleClick);
   }, [menuOpen]);
 
-  // --- Status Panel Data Extraction (Phase 12 Step 4) ---
-  const {
-    statusLabel,
-    statusClass,
-    statusTitle,
-    lastUpdateText,
-    avgLatencyText,
-    errorCountText,
-    errorQueueText,
-    errorQueueTitle,
-    commSnapshot,
-    commBadges,
-    commDetail,
-    commSummaryItems,
-    statsWindow,
-    windowErrorRate,
-    hasWindowIssue,
-    windowP95Text,
-    errorQueueSize,
-    lastErrorAt,
-    cameraStatus,
-  } = useStatusPanel({
+  const statusPanelSource = useMemo(() => ({
     health,
     stats,
-    nowTick,
-    lastDataAt,
-    connected,
-    dataPollingDegraded: pollingDegraded,
-    dataPollingIntervalMs: pollingIntervalMs,
-    dataPollingFailureCount: pollingFailureCount,
     healthPollingDegraded: healthPolling.degraded,
     healthPollingIntervalMs: healthPolling.intervalMs,
     healthPollingFailureCount: healthPolling.failureCount,
@@ -748,43 +621,23 @@ function App() {
     spotLastSuccessAt,
     spotImageMetadata,
     settingsBaseline,
-  });
-
-  const cameraStatusType = cameraStatus?.type ?? 'ok';
-  const cameraStatusTitle = cameraStatus?.title ?? '';
-  const cameraStatusKey = `${cameraStatusType}:${cameraStatusTitle}`;
-  const cameraStatusDetail = getCameraStatusDetail(cameraStatus);
-  cameraStatusSnapshotRef.current = {
-    type: cameraStatusType,
-    title: cameraStatusTitle,
-    detail: cameraStatusDetail,
-  };
-
-  useEffect(() => {
-    if (!statusLabel) {
-      return;
-    }
-    if (statusRef.current === null) {
-      statusRef.current = statusLabel;
-      return;
-    }
-    if (statusRef.current === statusLabel) {
-      return;
-    }
-    
-    const prev = statusRef.current;
-    
-    // Log status change to backend
-    fetch(`${API_BASE}/api/log/status`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ previous: prev, current: statusLabel }),
-    }).catch(() => {
-      // Ignore logging errors
-    });
-    
-    statusRef.current = statusLabel;
-  }, [statusLabel]);
+  }), [
+    health,
+    stats,
+    healthPolling.degraded,
+    healthPolling.intervalMs,
+    healthPolling.failureCount,
+    statsPolling.degraded,
+    statsPolling.intervalMs,
+    statsPolling.failureCount,
+    spotConfig,
+    spotImageUrl,
+    spotImageLoading,
+    spotImageError,
+    spotLastSuccessAt,
+    spotImageMetadata,
+    settingsBaseline,
+  ]);
 
   useEffect(() => {
     if (spotAlertRef.current === false && spotAlertActive) {
@@ -795,107 +648,6 @@ function App() {
     }
     spotAlertRef.current = spotAlertActive;
   }, [spotAlertActive, pushNotification]);
-
-  useEffect(() => {
-    if (cameraStatusRef.current === null) {
-      cameraStatusRef.current = isCameraIssueType(cameraStatusType) ? 'ok:' : cameraStatusKey;
-    }
-    
-    if (cameraStatusRef.current === cameraStatusKey) {
-      cameraStatusPendingRef.current = null;
-      if (cameraStatusTimerRef.current) {
-        clearTimeout(cameraStatusTimerRef.current);
-        cameraStatusTimerRef.current = null;
-      }
-      return;
-    }
-
-    if (cameraStatusPendingRef.current === cameraStatusKey) {
-      return;
-    }
-
-    cameraStatusPendingRef.current = cameraStatusKey;
-    if (cameraStatusTimerRef.current) {
-      clearTimeout(cameraStatusTimerRef.current);
-      cameraStatusTimerRef.current = null;
-    }
-
-    cameraStatusTimerRef.current = setTimeout(() => {
-      const snapshot = cameraStatusSnapshotRef.current;
-      const snapshotKey = `${snapshot.type}:${snapshot.title}`;
-      if (snapshotKey !== cameraStatusKey) {
-        return;
-      }
-
-      const detail = buildCameraNotificationDetail(snapshot);
-      let shouldUpdateCameraStatusRef = true;
-
-      if (snapshot.type === 'error') {
-        pushNotification(
-          '\uCE74\uBA54\uB77C \uC624\uB958',
-          'SPOT \uCE74\uBA54\uB77C \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC138\uC694.',
-          'error',
-          {
-            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
-            lifecycle: 'active',
-            detail,
-          }
-        );
-      } else if (snapshot.type === 'danger') {
-        const notification = buildCameraIssueNotification(snapshot);
-        pushNotification(
-          notification.title,
-          notification.message,
-          'warn',
-          {
-            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
-            lifecycle: 'active',
-            detail,
-          }
-        );
-      } else if (snapshot.type === 'warn') {
-        const notification = buildCameraIssueNotification(snapshot);
-        pushNotification(
-          notification.title,
-          notification.message,
-          'warn',
-          {
-            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
-            lifecycle: 'active',
-            detail,
-          }
-        );
-      } else if (snapshot.type === 'ok' && isCameraIssueType(cameraStatusRef.current)) {
-        pushNotification(
-          '\uCE74\uBA54\uB77C \uC815\uC0C1',
-          'SPOT \uCE74\uBA54\uB77C\uAC00 \uC815\uC0C1\uD654\uB418\uC5C8\uC2B5\uB2C8\uB2E4.',
-          'info',
-          {
-            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
-            lifecycle: 'resolved',
-            detail: '\uC774\uC804 \uCE74\uBA54\uB77C \uC9C0\uC5F0 \uC54C\uB9BC\uC740 \uD574\uACB0\uB41C \uAE30\uB85D\uC785\uB2C8\uB2E4.',
-          }
-        );
-      } else if (snapshot.type !== 'ok') {
-        shouldUpdateCameraStatusRef = false;
-      }
-
-      if (shouldUpdateCameraStatusRef) {
-        cameraStatusRef.current = snapshotKey;
-      }
-      cameraStatusPendingRef.current = null;
-      cameraStatusTimerRef.current = null;
-    }, CAMERA_STATUS_DEBOUNCE_MS);
-  }, [cameraStatusKey, cameraStatusType, pushNotification]);
-
-  useEffect(() => {
-    return () => {
-      if (cameraStatusTimerRef.current) {
-        clearTimeout(cameraStatusTimerRef.current);
-        cameraStatusTimerRef.current = null;
-      }
-    };
-  }, []);
 
   // FactoryDataContext and SpotContext values have been removed.
 
@@ -987,15 +739,7 @@ function App() {
       />
       <DashboardHeader
         activeCycle={activeCycle}
-        statusLabel={statusLabel}
-        statusClass={statusClass}
-        statusTitle={statusTitle}
-        lastUpdateText={lastUpdateText}
-        avgLatencyText={avgLatencyText}
-        errorCountText={errorCountText}
-        errorQueueText={errorQueueText}
-        errorQueueTitle={errorQueueTitle}
-        commBadges={commBadges}
+        statusPanelSource={statusPanelSource}
         handleSnapshot={handleSnapshot}
         snapshotLoading={snapshotLoading}
         handleReconnect={handleReconnect}
@@ -1008,6 +752,7 @@ function App() {
         setNotificationsOpen={setNotificationsOpen}
         setUnreadCount={setUnreadCount}
         clearNotifications={clearNotifications}
+        pushNotification={pushNotification}
         menuOpen={menuOpen}
         setMenuOpen={setMenuOpen}
         menuRef={menuRef}
@@ -1123,19 +868,8 @@ function App() {
         pollingPausedByVisibility={pollingPausedByVisibility}
         setSettingsError={setSettingsError}
         pushNotification={pushNotification}
-        getCameraStatus={getCameraStatus}
-        nowTick={nowTick}
-        commSnapshot={commSnapshot}
-        commDetail={commDetail}
-        commSummaryItems={commSummaryItems}
-        statsWindow={statsWindow}
-        windowErrorRate={windowErrorRate}
-        hasWindowIssue={hasWindowIssue}
-        windowP95Text={windowP95Text}
-        errorQueueSize={errorQueueSize}
-        errorQueueText={errorQueueText}
-        lastErrorAt={lastErrorAt}
         spotImageError={spotImageError}
+        statusPanelSource={statusPanelSource}
             showSettingsToast={showSettingsToast}
           />
       ) : null}

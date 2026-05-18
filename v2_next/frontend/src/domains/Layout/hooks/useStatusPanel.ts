@@ -45,6 +45,16 @@ export interface StatusPanelInput {
   settingsBaseline: any;
 }
 
+export type StatusPanelSource = Omit<
+  StatusPanelInput,
+  | 'nowTick'
+  | 'lastDataAt'
+  | 'connected'
+  | 'dataPollingDegraded'
+  | 'dataPollingIntervalMs'
+  | 'dataPollingFailureCount'
+>;
+
 export interface StatusPanelOutput {
   // Status badge
   statusLabel: string;
@@ -77,7 +87,7 @@ export interface StatusPanelOutput {
   lastErrorAt: number | null;
 
   // Camera
-  cameraStatus: { type: string; title: string } | null;
+  cameraStatus: { type: string; title: string; detail?: string } | null;
 }
 
 /* ─── Hook ─────────────────────────────────────────────────── */

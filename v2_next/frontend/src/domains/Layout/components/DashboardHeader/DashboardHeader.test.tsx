@@ -2,25 +2,75 @@ import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { HealthSnapshot, StatsSnapshot } from '../../../../shared/types';
+import type { StatusPanelSource } from '../../hooks/useStatusPanel';
 import type { DashboardHeaderProps } from './DashboardHeader';
 import { DashboardHeader } from './DashboardHeader';
+
+const buildHealthSnapshot = (): HealthSnapshot => ({
+  running: true,
+  thread_alive: true,
+  last_update: Math.floor(Date.now() / 1000),
+  driver_connected: true,
+  mode: 'auto',
+  comm: {
+    extruder: { connected: true, last_success_time: Date.now() / 1000 },
+    ls_plc: { connected: true, last_success_time: Date.now() / 1000 },
+    spot: { last_value: 18, last_success_time: Date.now() / 1000 },
+  },
+});
+
+const buildStatsSnapshot = (): StatsSnapshot => ({
+  uptime_sec: 10,
+  total_requests: 10,
+  avg_latency_ms: 2,
+  error_count: 0,
+  last: {
+    latency_ms: 2,
+    path: '/api/latest',
+    status: 200,
+    timestamp: Date.now() / 1000,
+  },
+  window: {
+    window_sec: 60,
+    request_count: 10,
+    error_count: 0,
+    http_error_count: 0,
+    http_4xx_count: 0,
+    http_5xx_count: 0,
+    error_rate: 0,
+    avg_latency_ms: 2,
+    p95_latency_ms: 3,
+  },
+  errors: {
+    queue_size: 0,
+    last_error_at: null,
+    source_counts: {},
+  },
+});
+
+const buildStatusPanelSource = (): StatusPanelSource => ({
+  health: buildHealthSnapshot(),
+  stats: buildStatsSnapshot(),
+  healthPollingDegraded: false,
+  healthPollingIntervalMs: 1000,
+  healthPollingFailureCount: 0,
+  statsPollingDegraded: false,
+  statsPollingIntervalMs: 1000,
+  statsPollingFailureCount: 0,
+  spotConfig: null,
+  spotImageUrl: '',
+  spotImageLoading: false,
+  spotImageError: null,
+  spotLastSuccessAt: null,
+  spotImageMetadata: null,
+  settingsBaseline: null,
+});
 
 const buildProps = (overrides: Partial<DashboardHeaderProps> = {}): DashboardHeaderProps => ({
   activeCycle: 'day',
   appTitle: '창녕 2호기 Smart Factory',
-  statusLabel: 'Running',
-  statusClass: 'status-ok',
-  statusTitle: 'System running',
-  lastUpdateText: '14:19:47',
-  avgLatencyText: '2ms',
-  errorCountText: '0',
-  errorQueueText: '0',
-  errorQueueTitle: 'No queued errors',
-  commBadges: [
-    { key: 'EX', text: 'EX OK', title: 'EX OK', state: 'ok' },
-    { key: 'LS', text: 'LS OK', title: 'LS OK', state: 'ok' },
-    { key: 'SPOT', text: 'SPOT OK', title: 'SPOT OK', state: 'ok' },
-  ],
+  statusPanelSource: buildStatusPanelSource(),
   handleSnapshot: vi.fn(),
   snapshotLoading: false,
   handleReconnect: vi.fn(),
@@ -33,6 +83,7 @@ const buildProps = (overrides: Partial<DashboardHeaderProps> = {}): DashboardHea
   setNotificationsOpen: vi.fn(),
   setUnreadCount: vi.fn(),
   clearNotifications: vi.fn(),
+  pushNotification: vi.fn(),
   menuOpen: false,
   setMenuOpen: vi.fn(),
   menuRef: React.createRef<HTMLDivElement>(),

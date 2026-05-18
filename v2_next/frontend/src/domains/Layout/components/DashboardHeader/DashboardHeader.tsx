@@ -1,13 +1,89 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   LayoutSlotSummary,
+  NotificationLevel,
+  NotificationPushOptions,
   SettingsFormState,
 } from '../../../../shared/types';
 import type { WidgetType } from '../../../../scenes/DashboardSceneModel';
 import type { LayoutPresetId } from '../../../../shared/constants/layoutPresets';
 import { APP_TITLE } from '../../../../shared/constants/uiText';
+import { API_BASE } from '../../../../shared/api/client';
 import { CommBadge } from '../../../../shared/utils/commBadge';
 import { formatMetaTime } from '../../../../shared/utils/formatters';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
+import type { StatusPanelSource } from '../../hooks/useStatusPanel';
+import { useStatusPanel } from '../../hooks/useStatusPanel';
+
+const CAMERA_DELAY_NOTIFICATION_GROUP = 'spot-camera-delay';
+const CAMERA_STATUS_DEBOUNCE_MS = 3000;
+const STATUS_PANEL_TICK_MS = 1000;
+
+interface CameraNotificationSnapshot {
+  type: string;
+  title: string;
+  detail: string;
+}
+
+const isCameraIssueType = (type: string | null): boolean => {
+  return type === 'warn' ||
+    type === 'danger' ||
+    type === 'error' ||
+    Boolean(type?.startsWith('warn:')) ||
+    Boolean(type?.startsWith('danger:')) ||
+    Boolean(type?.startsWith('error:'));
+};
+
+const getCameraStatusDetail = (status: unknown): string => {
+  if (status === null || typeof status !== 'object') {
+    return '';
+  }
+
+  const detail = (status as { detail?: unknown }).detail;
+  if (typeof detail !== 'string') {
+    return '';
+  }
+
+  return detail.trim();
+};
+
+const buildCameraNotificationDetail = (
+  snapshot: CameraNotificationSnapshot
+): string | undefined => {
+  const parts = [snapshot.title.trim(), snapshot.detail.trim()].filter((part) => part.length > 0);
+  if (parts.length === 0) {
+    return undefined;
+  }
+
+  return parts.join(' | ');
+};
+
+const buildCameraIssueNotification = (
+  snapshot: CameraNotificationSnapshot
+): { title: string; message: string } => {
+  if (snapshot.type === 'danger') {
+    return {
+      title: '카메라 지연',
+      message: 'SPOT 카메라 응답 지연이 길어지고 있습니다.',
+    };
+  }
+  if (snapshot.title === '이미지 갱신 지연') {
+    return {
+      title: '카메라 지연',
+      message: 'SPOT 카메라 이미지 갱신이 지연되고 있습니다.',
+    };
+  }
+  if (snapshot.title === '이미지 요청 대기') {
+    return {
+      title: '카메라 요청 대기',
+      message: 'SPOT 카메라 이미지 요청이 대기 중입니다.',
+    };
+  }
+  return {
+    title: '오래된 이미지',
+    message: 'SPOT 카메라 이미지가 오래되었습니다.',
+  };
+};
 
 const resolvePublicAssetPath = (assetPath: string): string => {
   const normalizedAssetPath = assetPath.replace(/^\/+/, '');
@@ -34,15 +110,7 @@ const getMobileCommLabel = (badge: CommBadge): string => {
 export interface DashboardHeaderProps {
   activeCycle: string;
   appTitle?: string;
-  statusLabel: string;
-  statusClass: string;
-  statusTitle: string;
-  lastUpdateText: string;
-  avgLatencyText: string;
-  errorCountText: string;
-  errorQueueText: string;
-  errorQueueTitle: string;
-  commBadges: CommBadge[];
+  statusPanelSource: StatusPanelSource;
   handleSnapshot: () => void;
   snapshotLoading: boolean;
   handleReconnect: () => void;
@@ -55,6 +123,12 @@ export interface DashboardHeaderProps {
   setNotificationsOpen: (open: boolean) => void;
   setUnreadCount: (count: number) => void;
   clearNotifications: () => void;
+  pushNotification: (
+    title: string,
+    message: string,
+    level: NotificationLevel,
+    options?: NotificationPushOptions
+  ) => void;
   menuOpen: boolean;
   setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   menuRef: React.RefObject<HTMLDivElement | null>;
@@ -85,15 +159,7 @@ export interface DashboardHeaderProps {
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   activeCycle,
   appTitle = APP_TITLE,
-  statusLabel,
-  statusClass,
-  statusTitle,
-  lastUpdateText,
-  avgLatencyText,
-  errorCountText,
-  errorQueueText,
-  errorQueueTitle,
-  commBadges,
+  statusPanelSource,
   handleSnapshot,
   snapshotLoading,
   handleReconnect,
@@ -105,6 +171,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   notificationsOpen,
   setNotificationsOpen,
   setUnreadCount,
+  pushNotification,
   menuOpen,
   setMenuOpen,
   menuRef,
@@ -132,6 +199,180 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   handleOpenSettings,
 }) => {
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const statusRef = useRef<string | null>(null);
+  const cameraStatusRef = useRef<string | null>(null);
+  const cameraStatusPendingRef = useRef<string | null>(null);
+  const cameraStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cameraStatusSnapshotRef = useRef<CameraNotificationSnapshot>({
+    type: 'ok',
+    title: '',
+    detail: '',
+  });
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  const lastDataAt = useDashboardStore((state) => state.lastDataAt);
+  const connected = useDashboardStore((state) => state.connected);
+  const dataPollingDegraded = useDashboardStore((state) => state.pollingDegraded);
+  const dataPollingIntervalMs = useDashboardStore((state) => state.pollingIntervalMs);
+  const dataPollingFailureCount = useDashboardStore((state) => state.pollingFailureCount);
+
+  const {
+    statusLabel,
+    statusClass,
+    statusTitle,
+    lastUpdateText,
+    avgLatencyText,
+    errorCountText,
+    errorQueueText,
+    errorQueueTitle,
+    commBadges,
+    cameraStatus,
+  } = useStatusPanel({
+    ...statusPanelSource,
+    nowTick,
+    lastDataAt,
+    connected,
+    dataPollingDegraded,
+    dataPollingIntervalMs,
+    dataPollingFailureCount,
+  });
+
+  useEffect(() => {
+    const tick = window.setInterval(() => setNowTick(Date.now()), STATUS_PANEL_TICK_MS);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    if (!statusLabel) {
+      return;
+    }
+    if (statusRef.current === null) {
+      statusRef.current = statusLabel;
+      return;
+    }
+    if (statusRef.current === statusLabel) {
+      return;
+    }
+
+    const previousStatus = statusRef.current;
+    fetch(`${API_BASE}/api/log/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ previous: previousStatus, current: statusLabel }),
+    }).catch(() => undefined);
+
+    statusRef.current = statusLabel;
+  }, [statusLabel]);
+
+  const cameraStatusType = cameraStatus?.type ?? 'ok';
+  const cameraStatusTitle = cameraStatus?.title ?? '';
+  const cameraStatusKey = `${cameraStatusType}:${cameraStatusTitle}`;
+  const cameraStatusDetail = getCameraStatusDetail(cameraStatus);
+  cameraStatusSnapshotRef.current = {
+    type: cameraStatusType,
+    title: cameraStatusTitle,
+    detail: cameraStatusDetail,
+  };
+
+  useEffect(() => {
+    if (cameraStatusRef.current === null) {
+      cameraStatusRef.current = isCameraIssueType(cameraStatusType) ? 'ok:' : cameraStatusKey;
+    }
+
+    if (cameraStatusRef.current === cameraStatusKey) {
+      cameraStatusPendingRef.current = null;
+      if (cameraStatusTimerRef.current) {
+        clearTimeout(cameraStatusTimerRef.current);
+        cameraStatusTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (cameraStatusPendingRef.current === cameraStatusKey) {
+      return;
+    }
+
+    cameraStatusPendingRef.current = cameraStatusKey;
+    if (cameraStatusTimerRef.current) {
+      clearTimeout(cameraStatusTimerRef.current);
+      cameraStatusTimerRef.current = null;
+    }
+
+    cameraStatusTimerRef.current = setTimeout(() => {
+      const snapshot = cameraStatusSnapshotRef.current;
+      const snapshotKey = `${snapshot.type}:${snapshot.title}`;
+      if (snapshotKey !== cameraStatusKey) {
+        return;
+      }
+
+      const detail = buildCameraNotificationDetail(snapshot);
+      let shouldUpdateCameraStatusRef = true;
+
+      if (snapshot.type === 'error') {
+        pushNotification(
+          '카메라 오류',
+          'SPOT 카메라 상태를 확인하세요.',
+          'error',
+          {
+            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
+            lifecycle: 'active',
+            detail,
+          }
+        );
+      } else if (snapshot.type === 'danger') {
+        const notification = buildCameraIssueNotification(snapshot);
+        pushNotification(
+          notification.title,
+          notification.message,
+          'warn',
+          {
+            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
+            lifecycle: 'active',
+            detail,
+          }
+        );
+      } else if (snapshot.type === 'warn') {
+        const notification = buildCameraIssueNotification(snapshot);
+        pushNotification(
+          notification.title,
+          notification.message,
+          'warn',
+          {
+            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
+            lifecycle: 'active',
+            detail,
+          }
+        );
+      } else if (snapshot.type === 'ok' && isCameraIssueType(cameraStatusRef.current)) {
+        pushNotification(
+          '카메라 정상',
+          'SPOT 카메라가 정상화되었습니다.',
+          'info',
+          {
+            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
+            lifecycle: 'resolved',
+            detail: '이전 카메라 지연 알림은 해결된 기록입니다.',
+          }
+        );
+      } else if (snapshot.type !== 'ok') {
+        shouldUpdateCameraStatusRef = false;
+      }
+
+      if (shouldUpdateCameraStatusRef) {
+        cameraStatusRef.current = snapshotKey;
+      }
+      cameraStatusPendingRef.current = null;
+      cameraStatusTimerRef.current = null;
+    }, CAMERA_STATUS_DEBOUNCE_MS);
+  }, [cameraStatusKey, cameraStatusType, pushNotification]);
+
+  useEffect(() => {
+    return () => {
+      if (cameraStatusTimerRef.current) {
+        clearTimeout(cameraStatusTimerRef.current);
+        cameraStatusTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) {
