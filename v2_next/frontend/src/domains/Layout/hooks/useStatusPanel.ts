@@ -45,6 +45,16 @@ export interface StatusPanelInput {
   settingsBaseline: any;
 }
 
+export type StatusPanelSource = Omit<
+  StatusPanelInput,
+  | 'nowTick'
+  | 'lastDataAt'
+  | 'connected'
+  | 'dataPollingDegraded'
+  | 'dataPollingIntervalMs'
+  | 'dataPollingFailureCount'
+>;
+
 export interface StatusPanelOutput {
   // Status badge
   statusLabel: string;

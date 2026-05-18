@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   DashboardLeaderState,
   LayoutSnapshot,
@@ -12,9 +12,15 @@ import { useModal } from '../../../../shared/hooks/useGlobalModalContext';
 import { useSettingsFormHandlers } from '../../../../shared/hooks/useSettingsFormHandlers';
 import { useMemoryViewModel } from '../../../Observability/hooks/useMemoryViewModel';
 import { useCommLogInfoEffects } from '../../../Observability/hooks/useSystemViewModelEffects';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
+import { getCameraStatus } from '../../../../shared/utils/commBadge';
+import type { StatusPanelSource } from '../../../Layout/hooks/useStatusPanel';
+import { useStatusPanel } from '../../../Layout/hooks/useStatusPanel';
 import { useSettingsModalState } from './useSettingsModalState';
 import { SettingsModal } from './SettingsModal';
 import type { SettingsModalProps } from './SettingsModal';
+
+const SETTINGS_STATUS_PANEL_TICK_MS: number = 1000;
 
 type ManagedSettingsModalProps =
   | 'configReadOnly'
@@ -80,7 +86,18 @@ type ManagedSettingsModalProps =
   | 'setShowNewPassword'
   | 'showConfirmPassword'
   | 'setShowConfirmPassword'
-  | 'thresholdItems';
+  | 'thresholdItems'
+  | 'getCameraStatus'
+  | 'commSnapshot'
+  | 'commDetail'
+  | 'commSummaryItems'
+  | 'statsWindow'
+  | 'windowErrorRate'
+  | 'hasWindowIssue'
+  | 'windowP95Text'
+  | 'errorQueueSize'
+  | 'errorQueueText'
+  | 'lastErrorAt';
 
 interface PathHealthResponse {
   results?: Record<string, PathHealthResult>;
@@ -111,7 +128,19 @@ export interface SettingsModalContainerProps
   openCommLogPath: () => Promise<void>;
   openCommLogFile: () => Promise<void>;
   pushNotification: (title: string, message: string, level: 'info' | 'warn' | 'error') => void;
+  statusPanelSource: StatusPanelSource;
 }
+
+type SettingsModalContainerRuntimeProps = SettingsModalContainerProps & { nowTick?: number };
+
+const omitRuntimeProps = (
+  props: SettingsModalContainerRuntimeProps
+): Omit<SettingsModalContainerProps, 'statusPanelSource'> => {
+  const { nowTick, statusPanelSource, ...externalProps } = props;
+  void nowTick;
+  void statusPanelSource;
+  return externalProps;
+};
 
 const settingsSections: Array<{ id: string; label: string }> = [
   { id: 'settings-summary', label: LABELS.SUMMARY },
@@ -227,6 +256,35 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
     settingsForm: props.settingsForm,
     settingsPending: props.settingsPending,
     externalConfigPending: props.externalConfigPending,
+  });
+  const [statusPanelNowTick, setStatusPanelNowTick] = useState<number>(() => Date.now());
+  const lastDataAt = useDashboardStore((state) => state.lastDataAt);
+  const connected = useDashboardStore((state) => state.connected);
+  const dataPollingDegraded = useDashboardStore((state) => state.pollingDegraded);
+  const dataPollingIntervalMs = useDashboardStore((state) => state.pollingIntervalMs);
+  const dataPollingFailureCount = useDashboardStore((state) => state.pollingFailureCount);
+
+  useEffect(() => {
+    if (!props.settingsOpen) {
+      return undefined;
+    }
+
+    setStatusPanelNowTick(Date.now());
+    const tick = window.setInterval(
+      () => setStatusPanelNowTick(Date.now()),
+      SETTINGS_STATUS_PANEL_TICK_MS
+    );
+    return () => window.clearInterval(tick);
+  }, [props.settingsOpen]);
+
+  const statusPanel = useStatusPanel({
+    ...props.statusPanelSource,
+    nowTick: statusPanelNowTick,
+    lastDataAt,
+    connected,
+    dataPollingDegraded,
+    dataPollingIntervalMs,
+    dataPollingFailureCount,
   });
 
   const handleCopyCommLogPath = useCallback((): void => {
@@ -346,7 +404,7 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
 
   const forwardedProps = useMemo(
     () => ({
-      ...props,
+      ...omitRuntimeProps(props as SettingsModalContainerRuntimeProps),
       configReadOnly,
       settingsDirtyCount,
       settingsSectionFieldMap,
@@ -392,6 +450,17 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
       showConfirmPassword,
       setShowConfirmPassword,
       thresholdItems,
+      getCameraStatus,
+      commSnapshot: statusPanel.commSnapshot,
+      commDetail: statusPanel.commDetail,
+      commSummaryItems: statusPanel.commSummaryItems,
+      statsWindow: statusPanel.statsWindow,
+      windowErrorRate: statusPanel.windowErrorRate,
+      hasWindowIssue: statusPanel.hasWindowIssue,
+      windowP95Text: statusPanel.windowP95Text,
+      errorQueueSize: statusPanel.errorQueueSize,
+      errorQueueText: statusPanel.errorQueueText,
+      lastErrorAt: statusPanel.lastErrorAt,
     }),
     [
       props,
@@ -432,6 +501,7 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
       showCurrentPassword,
       showNewPassword,
       showConfirmPassword,
+      statusPanel,
     ]
   );
 

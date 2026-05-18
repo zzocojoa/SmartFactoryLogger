@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   LayoutSlotSummary,
   SettingsFormState,
@@ -6,8 +6,14 @@ import {
 import type { WidgetType } from '../../../../scenes/DashboardSceneModel';
 import type { LayoutPresetId } from '../../../../shared/constants/layoutPresets';
 import { APP_TITLE } from '../../../../shared/constants/uiText';
+import { API_BASE } from '../../../../shared/api/client';
 import { CommBadge } from '../../../../shared/utils/commBadge';
 import { formatMetaTime } from '../../../../shared/utils/formatters';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
+import type { StatusPanelSource } from '../../hooks/useStatusPanel';
+import { useStatusPanel } from '../../hooks/useStatusPanel';
+
+const STATUS_PANEL_TICK_MS = 1000;
 
 const resolvePublicAssetPath = (assetPath: string): string => {
   const normalizedAssetPath = assetPath.replace(/^\/+/, '');
@@ -34,15 +40,7 @@ const getMobileCommLabel = (badge: CommBadge): string => {
 export interface DashboardHeaderProps {
   activeCycle: string;
   appTitle?: string;
-  statusLabel: string;
-  statusClass: string;
-  statusTitle: string;
-  lastUpdateText: string;
-  avgLatencyText: string;
-  errorCountText: string;
-  errorQueueText: string;
-  errorQueueTitle: string;
-  commBadges: CommBadge[];
+  statusPanelSource: StatusPanelSource;
   handleSnapshot: () => void;
   snapshotLoading: boolean;
   handleReconnect: () => void;
@@ -85,15 +83,7 @@ export interface DashboardHeaderProps {
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   activeCycle,
   appTitle = APP_TITLE,
-  statusLabel,
-  statusClass,
-  statusTitle,
-  lastUpdateText,
-  avgLatencyText,
-  errorCountText,
-  errorQueueText,
-  errorQueueTitle,
-  commBadges,
+  statusPanelSource,
   handleSnapshot,
   snapshotLoading,
   handleReconnect,
@@ -132,6 +122,60 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   handleOpenSettings,
 }) => {
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const statusRef = useRef<string | null>(null);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  const lastDataAt = useDashboardStore((state) => state.lastDataAt);
+  const connected = useDashboardStore((state) => state.connected);
+  const dataPollingDegraded = useDashboardStore((state) => state.pollingDegraded);
+  const dataPollingIntervalMs = useDashboardStore((state) => state.pollingIntervalMs);
+  const dataPollingFailureCount = useDashboardStore((state) => state.pollingFailureCount);
+
+  const {
+    statusLabel,
+    statusClass,
+    statusTitle,
+    lastUpdateText,
+    avgLatencyText,
+    errorCountText,
+    errorQueueText,
+    errorQueueTitle,
+    commBadges,
+  } = useStatusPanel({
+    ...statusPanelSource,
+    nowTick,
+    lastDataAt,
+    connected,
+    dataPollingDegraded,
+    dataPollingIntervalMs,
+    dataPollingFailureCount,
+  });
+
+  useEffect(() => {
+    const tick = window.setInterval(() => setNowTick(Date.now()), STATUS_PANEL_TICK_MS);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    if (!statusLabel) {
+      return;
+    }
+    if (statusRef.current === null) {
+      statusRef.current = statusLabel;
+      return;
+    }
+    if (statusRef.current === statusLabel) {
+      return;
+    }
+
+    const previousStatus = statusRef.current;
+    fetch(`${API_BASE}/api/log/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ previous: previousStatus, current: statusLabel }),
+    }).catch(() => undefined);
+
+    statusRef.current = statusLabel;
+  }, [statusLabel]);
 
   useEffect(() => {
     if (!menuOpen) {

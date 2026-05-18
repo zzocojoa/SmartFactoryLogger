@@ -4,7 +4,7 @@
  * Pure presentational component for the full Settings Modal.
  * All state and handlers are passed in via props from App.tsx.
  */
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type {
   SettingsFormState,
   ConnectionTestResult,
@@ -58,6 +58,8 @@ import {
 } from './settingsModalHelpers';
 import type { SaveSettingsOptions } from '../../hooks/useConfigViewModel.types';
 import packageJson from '../../../../../package.json';
+
+const SETTINGS_MODAL_CLOCK_TICK_MS: number = 1000;
 
 /* ─── Props ────────────────────────────────────────────────────── */
 
@@ -214,7 +216,6 @@ export interface SettingsModalProps {
 
   // Misc helpers used in JSX
   getCameraStatus: (params: any) => any;
-  nowTick: number;
 
   // Computed render-time values passed from App.tsx
   commSnapshot: any;
@@ -360,7 +361,6 @@ export function SettingsModal(props: SettingsModalProps) {
     thresholdItems,
     thresholdState,
     getCameraStatus,
-    nowTick,
     commSnapshot,
     commDetail,
     commSummaryItems,
@@ -374,6 +374,21 @@ export function SettingsModal(props: SettingsModalProps) {
     spotImageError,
     showSettingsToast,
   } = props;
+
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
+
+    setNowTick(Date.now());
+    const tick: number = window.setInterval(
+      () => setNowTick(Date.now()),
+      SETTINGS_MODAL_CLOCK_TICK_MS
+    );
+    return () => window.clearInterval(tick);
+  }, [settingsOpen]);
 
   useEffect(() => {
     if (!settingsOpen) {
