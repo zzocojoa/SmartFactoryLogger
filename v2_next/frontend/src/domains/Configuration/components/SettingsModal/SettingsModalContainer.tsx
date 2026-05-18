@@ -109,6 +109,8 @@ interface SeriesStatsSnapshot {
   maxPoints: number | null;
 }
 
+const EMPTY_SERIES_STATS: SeriesStatsSnapshot = { count: 0, windowMs: 0, maxPoints: null };
+
 export interface SettingsModalContainerProps
   extends Omit<SettingsModalProps, ManagedSettingsModalProps> {
   runConnectionTest: (payload?: Record<string, unknown>) => Promise<void>;
@@ -122,8 +124,6 @@ export interface SettingsModalContainerProps
   pollingPausedByVisibility: boolean;
   loadCommLogInfo: () => Promise<SettingsModalProps['commLogInfo'] | null>;
   applyCommLogInfoSnapshot: (next: SettingsModalProps['commLogInfo']) => void;
-  getSeriesStats: () => SeriesStatsSnapshot;
-  timeSeriesAllFrame: unknown | null;
   layoutSnapshot: LayoutSnapshot | null;
   openCommLogPath: () => Promise<void>;
   openCommLogFile: () => Promise<void>;
@@ -244,10 +244,18 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
     applyCommLogInfoSnapshot: props.applyCommLogInfoSnapshot,
   });
 
+  const memoryPanelActive = props.settingsOpen && activeSettingsSection === 'settings-memory';
+  const seriesStats = useDashboardStore((state) => (
+    memoryPanelActive ? state.seriesStats : EMPTY_SERIES_STATS
+  ));
+  const timeSeriesAllFrame = useDashboardStore((state) => (
+    memoryPanelActive ? state.timeSeriesAllFrame : null
+  ));
+
   const memory = useMemoryViewModel({
-    enabled: props.settingsOpen && activeSettingsSection === 'settings-memory',
-    seriesStats: props.getSeriesStats(),
-    timeSeriesAllFrame: props.timeSeriesAllFrame,
+    enabled: memoryPanelActive,
+    seriesStats,
+    timeSeriesAllFrame,
     layoutSnapshot: props.layoutSnapshot,
     observabilityErrors: props.observabilityErrors,
     frontErrors: props.frontErrors,

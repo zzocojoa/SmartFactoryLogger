@@ -48,7 +48,6 @@ import { apiClient } from './shared/api/client';
 import { configService } from './domains/Configuration/api/configService';
 // Data Contexts
 import { UIContext } from './domains/FacilityData/context/UIContext';
-import { DataContext } from './domains/FacilityData/context/DataContext';
 import { SnapshotContext } from './domains/FacilityData/context/SnapshotContext';
 
 const {
@@ -307,12 +306,6 @@ function App() {
   const pollingPausedByVisibility = useDashboardStore((state) => (
     settingsOpen ? state.pollingPausedByVisibility : false
   ));
-  const timeSeriesAllFrame = useDashboardStore((state) => (
-    settingsOpen ? state.timeSeriesAllFrame : null
-  ));
-  const lastDataAt = useDashboardStore.getState().lastDataAt;
-  const getSeriesStats = useCallback(() => useDashboardStore.getState().seriesStats, []);
-
   const [frontErrors, setFrontErrors] = useState<FrontendErrorEntry[]>([]);
   const [layoutRestoreError, setLayoutRestoreError] = useState<string | null>(null);
   const [layoutRestoreMessage, setLayoutRestoreMessage] = useState<string | null>(null);
@@ -649,8 +642,6 @@ function App() {
     spotAlertRef.current = spotAlertActive;
   }, [spotAlertActive, pushNotification]);
 
-  // FactoryDataContext and SpotContext values have been removed.
-
   const uiContextValue = useMemo(() => ({
     seriesWindowMin,
     seriesPaused,
@@ -666,59 +657,6 @@ function App() {
     handleSnapshot,
     snapshotLoading,
   }), [handleSnapshot, snapshotLoading]);
-
-  const dataContextValue = useMemo(() => ({
-    data: null,
-    thresholds: thresholdState,
-    timeSeriesAllFrame,
-    spotConfig,
-    spotImageUrl,
-    spotImageLoading,
-    spotImageError,
-    spotLastSuccessAt,
-    spotImageMetadata,
-    spotAlertActive,
-    lastDataAt,
-    onSpotImageLoaded: handleSpotImageLoaded,
-    onSpotImageError: handleSpotImageError,
-    requestFocus: requestFocusActuator,
-    seriesWindowMin,
-    seriesPaused,
-    showThresholds,
-    setSeriesWindowMin,
-    setSeriesPaused,
-    setShowThresholds,
-    handleSnapshot,
-    snapshotLoading,
-    layoutEditing,
-    setLayoutEditing,
-    intervalSec,
-  }), [
-    thresholdState,
-    timeSeriesAllFrame,
-    spotConfig,
-    spotImageUrl,
-    spotImageLoading,
-    spotImageError,
-    spotLastSuccessAt,
-    spotImageMetadata,
-    spotAlertActive,
-    lastDataAt,
-    handleSpotImageLoaded,
-    handleSpotImageError,
-    requestFocusActuator,
-    seriesWindowMin,
-    seriesPaused,
-    showThresholds,
-    setSeriesWindowMin,
-    setSeriesPaused,
-    setShowThresholds,
-    handleSnapshot,
-    snapshotLoading,
-    layoutEditing,
-    setLayoutEditing,
-    intervalSec,
-  ]);
 
   const layoutEditContextValue = useMemo(() => ({
     isEditing: layoutEditing,
@@ -846,8 +784,6 @@ function App() {
         handleClearObservabilityErrors={handleClearObservabilityErrors}
         lastExportPath={lastExportPath}
         exportBusy={exportBusy}
-        getSeriesStats={getSeriesStats}
-        timeSeriesAllFrame={timeSeriesAllFrame}
         layoutSnapshot={layoutSnapshot}
         spotConfig={spotConfig}
         spotImageUrl={spotImageUrl}
@@ -875,37 +811,35 @@ function App() {
       ) : null}
       <div className="scene-container" style={{ flexGrow: 1 }}>
         {/* The ReactWidget will be rendered *inside* this provider hierarchy. */}
-        <DataContext.Provider value={dataContextValue}>
-          <UIContext.Provider value={uiContextValue}>
-            <SnapshotContext.Provider value={snapshotContextValue}>
-              <LayoutEditContext.Provider value={layoutEditContextValue}>
-                <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
-                  {layoutEditing ? (
-                    <DashboardSceneSurface
-                      layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
-                      layoutEditing={layoutEditing}
-                      layoutRef={layoutRef}
-                      onSpotImageLoaded={handleSpotImageLoaded}
-                      onSpotImageError={handleSpotImageError}
-                      requestFocus={requestFocusActuator}
-                      focusBusy={focusBusy}
-                    />
-                  ) : (
-                    <NativeDashboardSurface
-                      layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
-                      layoutRef={layoutRef}
-                      onSpotImageLoaded={handleSpotImageLoaded}
-                      onSpotImageError={handleSpotImageError}
-                      requestFocus={requestFocusActuator}
-                      focusBusy={focusBusy}
-                      onTimeSeriesVisible={handleTimeSeriesVisible}
-                    />
-                  )}
-                </React.Suspense>
-              </LayoutEditContext.Provider>
-            </SnapshotContext.Provider>
-          </UIContext.Provider>
-        </DataContext.Provider>
+        <UIContext.Provider value={uiContextValue}>
+          <SnapshotContext.Provider value={snapshotContextValue}>
+            <LayoutEditContext.Provider value={layoutEditContextValue}>
+              <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
+                {layoutEditing ? (
+                  <DashboardSceneSurface
+                    layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
+                    layoutEditing={layoutEditing}
+                    layoutRef={layoutRef}
+                    onSpotImageLoaded={handleSpotImageLoaded}
+                    onSpotImageError={handleSpotImageError}
+                    requestFocus={requestFocusActuator}
+                    focusBusy={focusBusy}
+                  />
+                ) : (
+                  <NativeDashboardSurface
+                    layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
+                    layoutRef={layoutRef}
+                    onSpotImageLoaded={handleSpotImageLoaded}
+                    onSpotImageError={handleSpotImageError}
+                    requestFocus={requestFocusActuator}
+                    focusBusy={focusBusy}
+                    onTimeSeriesVisible={handleTimeSeriesVisible}
+                  />
+                )}
+              </React.Suspense>
+            </LayoutEditContext.Provider>
+          </SnapshotContext.Provider>
+        </UIContext.Provider>
         <AIChatbotLauncher />
         <footer className="app-footer">
           Copyright © HOIHOU. All Rights Reserved. v{packageJson.version}
