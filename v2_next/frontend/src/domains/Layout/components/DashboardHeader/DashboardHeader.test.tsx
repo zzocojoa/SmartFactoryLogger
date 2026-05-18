@@ -83,6 +83,7 @@ const buildProps = (overrides: Partial<DashboardHeaderProps> = {}): DashboardHea
   setNotificationsOpen: vi.fn(),
   setUnreadCount: vi.fn(),
   clearNotifications: vi.fn(),
+  pushNotification: vi.fn(),
   menuOpen: false,
   setMenuOpen: vi.fn(),
   menuRef: React.createRef<HTMLDivElement>(),

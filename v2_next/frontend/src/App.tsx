@@ -60,16 +60,8 @@ const {
 
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const LEGACY_LAYOUT_COLS = 24;
-const CAMERA_DELAY_NOTIFICATION_GROUP = 'spot-camera-delay';
-const CAMERA_STATUS_DEBOUNCE_MS = 3000;
 const DEFAULT_SERIES_WINDOW_MIN = 30;
 const SERIES_WINDOW_MIN_OPTIONS: readonly number[] = [1, 5, 10, 30, 60];
-
-interface CameraNotificationSnapshot {
-  type: string;
-  title: string;
-  detail: string;
-}
 
 const normalizeSeriesWindowMin = (value: number): number => {
   return SERIES_WINDOW_MIN_OPTIONS.includes(value) ? value : DEFAULT_SERIES_WINDOW_MIN;
@@ -81,66 +73,6 @@ const hasLayoutTimeSeriesWidget = (layout: LayoutMap | null): boolean => {
   }
 
   return Object.values(layout).some((item) => item.type === 'timeseries');
-};
-
-const isCameraIssueType = (type: string | null): boolean => {
-  return type === 'warn' ||
-    type === 'danger' ||
-    type === 'error' ||
-    Boolean(type?.startsWith('warn:')) ||
-    Boolean(type?.startsWith('danger:')) ||
-    Boolean(type?.startsWith('error:'));
-};
-
-const getCameraStatusDetail = (status: unknown): string => {
-  if (status === null || typeof status !== 'object') {
-    return '';
-  }
-
-  const detail = (status as { detail?: unknown }).detail;
-  if (typeof detail !== 'string') {
-    return '';
-  }
-
-  return detail.trim();
-};
-
-const buildCameraNotificationDetail = (
-  snapshot: CameraNotificationSnapshot
-): string | undefined => {
-  const parts = [snapshot.title.trim(), snapshot.detail.trim()].filter((part) => part.length > 0);
-  if (parts.length === 0) {
-    return undefined;
-  }
-
-  return parts.join(' | ');
-};
-
-const buildCameraIssueNotification = (
-  snapshot: CameraNotificationSnapshot
-): { title: string; message: string } => {
-  if (snapshot.type === 'danger') {
-    return {
-      title: '카메라 지연',
-      message: 'SPOT 카메라 응답 지연이 길어지고 있습니다.',
-    };
-  }
-  if (snapshot.title === '이미지 갱신 지연') {
-    return {
-      title: '카메라 지연',
-      message: 'SPOT 카메라 이미지 갱신이 지연되고 있습니다.',
-    };
-  }
-  if (snapshot.title === '이미지 요청 대기') {
-    return {
-      title: '카메라 요청 대기',
-      message: 'SPOT 카메라 이미지 요청이 대기 중입니다.',
-    };
-  }
-  return {
-    title: '오래된 이미지',
-    message: 'SPOT 카메라 이미지가 오래되었습니다.',
-  };
 };
 
 
@@ -201,7 +133,6 @@ import {
   THRESHOLD_LABELS,
 } from './shared/utils/thresholds';
 import type { ThresholdLevel } from './shared/utils/thresholds';
-import { getCameraStatus } from './shared/utils/commBadge';
 import { useThresholdLevel } from './shared/hooks/useThresholdLevel';
 import { useNotifications } from './shared/hooks/useNotifications';
 import { useSnapshotManager } from './shared/hooks/useSnapshotManager';
@@ -414,14 +345,6 @@ function App() {
 
   // const spotHasImage = useRef(false);
   const spotAlertRef = useRef(false);
-  const cameraStatusRef = useRef<string | null>(null);
-  const cameraStatusPendingRef = useRef<string | null>(null);
-  const cameraStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cameraStatusSnapshotRef = useRef<CameraNotificationSnapshot>({
-    type: 'ok',
-    title: '',
-    detail: '',
-  });
   const settingsBootstrapRef = useRef<boolean>(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const spotAlertActive = useDashboardStore((state) => state.spotAlertActive);
@@ -716,25 +639,6 @@ function App() {
     settingsBaseline,
   ]);
 
-  const cameraStatus = getCameraStatus({
-    spotConfig,
-    spotImageUrl,
-    spotImageLoading,
-    spotImageError,
-    spotLastSuccessAt,
-    spotImageMetadata,
-  });
-
-  const cameraStatusType = cameraStatus?.type ?? 'ok';
-  const cameraStatusTitle = cameraStatus?.title ?? '';
-  const cameraStatusKey = `${cameraStatusType}:${cameraStatusTitle}`;
-  const cameraStatusDetail = getCameraStatusDetail(cameraStatus);
-  cameraStatusSnapshotRef.current = {
-    type: cameraStatusType,
-    title: cameraStatusTitle,
-    detail: cameraStatusDetail,
-  };
-
   useEffect(() => {
     if (spotAlertRef.current === false && spotAlertActive) {
       pushNotification('SPOT \uACBD\uACE0', 'SPOT \uC628\uB3C4 \uACBD\uACE0 \uC0C1\uD0DC\uC785\uB2C8\uB2E4.', 'error');
@@ -744,107 +648,6 @@ function App() {
     }
     spotAlertRef.current = spotAlertActive;
   }, [spotAlertActive, pushNotification]);
-
-  useEffect(() => {
-    if (cameraStatusRef.current === null) {
-      cameraStatusRef.current = isCameraIssueType(cameraStatusType) ? 'ok:' : cameraStatusKey;
-    }
-    
-    if (cameraStatusRef.current === cameraStatusKey) {
-      cameraStatusPendingRef.current = null;
-      if (cameraStatusTimerRef.current) {
-        clearTimeout(cameraStatusTimerRef.current);
-        cameraStatusTimerRef.current = null;
-      }
-      return;
-    }
-
-    if (cameraStatusPendingRef.current === cameraStatusKey) {
-      return;
-    }
-
-    cameraStatusPendingRef.current = cameraStatusKey;
-    if (cameraStatusTimerRef.current) {
-      clearTimeout(cameraStatusTimerRef.current);
-      cameraStatusTimerRef.current = null;
-    }
-
-    cameraStatusTimerRef.current = setTimeout(() => {
-      const snapshot = cameraStatusSnapshotRef.current;
-      const snapshotKey = `${snapshot.type}:${snapshot.title}`;
-      if (snapshotKey !== cameraStatusKey) {
-        return;
-      }
-
-      const detail = buildCameraNotificationDetail(snapshot);
-      let shouldUpdateCameraStatusRef = true;
-
-      if (snapshot.type === 'error') {
-        pushNotification(
-          '\uCE74\uBA54\uB77C \uC624\uB958',
-          'SPOT \uCE74\uBA54\uB77C \uC0C1\uD0DC\uB97C \uD655\uC778\uD558\uC138\uC694.',
-          'error',
-          {
-            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
-            lifecycle: 'active',
-            detail,
-          }
-        );
-      } else if (snapshot.type === 'danger') {
-        const notification = buildCameraIssueNotification(snapshot);
-        pushNotification(
-          notification.title,
-          notification.message,
-          'warn',
-          {
-            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
-            lifecycle: 'active',
-            detail,
-          }
-        );
-      } else if (snapshot.type === 'warn') {
-        const notification = buildCameraIssueNotification(snapshot);
-        pushNotification(
-          notification.title,
-          notification.message,
-          'warn',
-          {
-            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
-            lifecycle: 'active',
-            detail,
-          }
-        );
-      } else if (snapshot.type === 'ok' && isCameraIssueType(cameraStatusRef.current)) {
-        pushNotification(
-          '\uCE74\uBA54\uB77C \uC815\uC0C1',
-          'SPOT \uCE74\uBA54\uB77C\uAC00 \uC815\uC0C1\uD654\uB418\uC5C8\uC2B5\uB2C8\uB2E4.',
-          'info',
-          {
-            groupKey: CAMERA_DELAY_NOTIFICATION_GROUP,
-            lifecycle: 'resolved',
-            detail: '\uC774\uC804 \uCE74\uBA54\uB77C \uC9C0\uC5F0 \uC54C\uB9BC\uC740 \uD574\uACB0\uB41C \uAE30\uB85D\uC785\uB2C8\uB2E4.',
-          }
-        );
-      } else if (snapshot.type !== 'ok') {
-        shouldUpdateCameraStatusRef = false;
-      }
-
-      if (shouldUpdateCameraStatusRef) {
-        cameraStatusRef.current = snapshotKey;
-      }
-      cameraStatusPendingRef.current = null;
-      cameraStatusTimerRef.current = null;
-    }, CAMERA_STATUS_DEBOUNCE_MS);
-  }, [cameraStatusKey, cameraStatusType, pushNotification]);
-
-  useEffect(() => {
-    return () => {
-      if (cameraStatusTimerRef.current) {
-        clearTimeout(cameraStatusTimerRef.current);
-        cameraStatusTimerRef.current = null;
-      }
-    };
-  }, []);
 
   // FactoryDataContext and SpotContext values have been removed.
 
@@ -949,6 +752,7 @@ function App() {
         setNotificationsOpen={setNotificationsOpen}
         setUnreadCount={setUnreadCount}
         clearNotifications={clearNotifications}
+        pushNotification={pushNotification}
         menuOpen={menuOpen}
         setMenuOpen={setMenuOpen}
         menuRef={menuRef}

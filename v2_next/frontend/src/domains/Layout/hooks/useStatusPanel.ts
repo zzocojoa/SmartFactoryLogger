@@ -87,7 +87,7 @@ export interface StatusPanelOutput {
   lastErrorAt: number | null;
 
   // Camera
-  cameraStatus: { type: string; title: string } | null;
+  cameraStatus: { type: string; title: string; detail?: string } | null;
 }
 
 /* ─── Hook ─────────────────────────────────────────────────── */
