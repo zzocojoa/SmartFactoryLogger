@@ -6,14 +6,17 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "profile:react": "node scripts/collect_react_profiler.cjs",
+    "profile:react:mock": "node scripts/react_profiler_mock_backend.cjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "electron": "^33.2.1",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "playwright": "^1.60.0"
   },
   "dependencies": {
     "tree-kill": "^1.2.2"

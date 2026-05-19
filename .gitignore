@@ -14,3 +14,4 @@ v2_next/backend/tests/*
 mes_data/
 browsers/
 .gstack/
+.codex_worktrees/

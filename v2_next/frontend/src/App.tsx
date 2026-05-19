@@ -137,6 +137,7 @@ import { useNotifications } from './shared/hooks/useNotifications';
 import { useSnapshotManager } from './shared/hooks/useSnapshotManager';
 import { useObservabilityHandlers } from './shared/hooks/useObservabilityHandlers';
 import { useLayoutHandlers } from './shared/hooks/useLayoutHandlers';
+import { ProfilerProbe } from './shared/profiling/reactRenderProfiler';
 
 function App() {
   const { mode, activeCycle, setMode } = useTheme();
@@ -665,6 +666,7 @@ function App() {
   }), [layoutEditing, handleRemoveWidget, handleUpdateWidget]);
 
   return (
+    <ProfilerProbe id="App">
     <div className={`App ${layoutEditing ? 'layout-editing' : ''}`} style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
       <MetricsDataController
         seriesPaused={seriesPaused}
@@ -675,48 +677,50 @@ function App() {
         intervalSec={intervalSec}
         thresholdState={thresholdState}
       />
-      <DashboardHeader
-        activeCycle={activeCycle}
-        statusPanelSource={statusPanelSource}
-        handleSnapshot={handleSnapshot}
-        snapshotLoading={snapshotLoading}
-        handleReconnect={handleReconnect}
-        reconnectBusy={reconnectBusy}
-        handleDiagnosis={handleDiagnosis}
-        diagnosisBusy={diagnosisBusy}
-        settingsForm={settingsForm}
-        unreadCount={unreadCount}
-        notificationsOpen={notificationsOpen}
-        setNotificationsOpen={setNotificationsOpen}
-        setUnreadCount={setUnreadCount}
-        clearNotifications={clearNotifications}
-        pushNotification={pushNotification}
-        menuOpen={menuOpen}
-        setMenuOpen={setMenuOpen}
-        menuRef={menuRef}
-        widgetAddOpen={widgetAddOpen}
-        setWidgetAddOpen={setWidgetAddOpen}
-        presetOpen={presetOpen}
-        setPresetOpen={setPresetOpen}
-        layoutEditing={layoutEditing}
-        setLayoutEditing={setLayoutEditing}
-        storageMode={storageMode}
-        setStorageMode={setStorageMode}
-        saveLayout={handleSaveCurrentLayout}
-        restoreLayout={restoreLayout}
-        deleteLayoutSlot={deleteLayoutSlot}
-        layoutSlots={layoutSlots}
-        layoutActiveId={layoutActiveId}
-        layoutRestoreMessage={layoutRestoreMessage}
-        layoutSaveMessage={layoutSaveMessage}
-        layoutSaveError={layoutSaveError}
-        layoutRestoreError={layoutRestoreError}
-        handleAddWidget={handleAddWidget}
-        applyPreset={applyPreset}
-        themeMode={mode}
-        setThemeMode={setMode}
-        handleOpenSettings={handleOpenSettings}
-      />
+      <ProfilerProbe id="DashboardHeader">
+        <DashboardHeader
+          activeCycle={activeCycle}
+          statusPanelSource={statusPanelSource}
+          handleSnapshot={handleSnapshot}
+          snapshotLoading={snapshotLoading}
+          handleReconnect={handleReconnect}
+          reconnectBusy={reconnectBusy}
+          handleDiagnosis={handleDiagnosis}
+          diagnosisBusy={diagnosisBusy}
+          settingsForm={settingsForm}
+          unreadCount={unreadCount}
+          notificationsOpen={notificationsOpen}
+          setNotificationsOpen={setNotificationsOpen}
+          setUnreadCount={setUnreadCount}
+          clearNotifications={clearNotifications}
+          pushNotification={pushNotification}
+          menuOpen={menuOpen}
+          setMenuOpen={setMenuOpen}
+          menuRef={menuRef}
+          widgetAddOpen={widgetAddOpen}
+          setWidgetAddOpen={setWidgetAddOpen}
+          presetOpen={presetOpen}
+          setPresetOpen={setPresetOpen}
+          layoutEditing={layoutEditing}
+          setLayoutEditing={setLayoutEditing}
+          storageMode={storageMode}
+          setStorageMode={setStorageMode}
+          saveLayout={handleSaveCurrentLayout}
+          restoreLayout={restoreLayout}
+          deleteLayoutSlot={deleteLayoutSlot}
+          layoutSlots={layoutSlots}
+          layoutActiveId={layoutActiveId}
+          layoutRestoreMessage={layoutRestoreMessage}
+          layoutSaveMessage={layoutSaveMessage}
+          layoutSaveError={layoutSaveError}
+          layoutRestoreError={layoutRestoreError}
+          handleAddWidget={handleAddWidget}
+          applyPreset={applyPreset}
+          themeMode={mode}
+          setThemeMode={setMode}
+          handleOpenSettings={handleOpenSettings}
+        />
+      </ProfilerProbe>
       {notificationsOpen ? (
         <React.Suspense fallback={null}>
           <NotificationDrawer
@@ -816,25 +820,29 @@ function App() {
             <LayoutEditContext.Provider value={layoutEditContextValue}>
               <React.Suspense fallback={<div className="widget-loading">Loading...</div>}>
                 {layoutEditing ? (
-                  <DashboardSceneSurface
-                    layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
-                    layoutEditing={layoutEditing}
-                    layoutRef={layoutRef}
-                    onSpotImageLoaded={handleSpotImageLoaded}
-                    onSpotImageError={handleSpotImageError}
-                    requestFocus={requestFocusActuator}
-                    focusBusy={focusBusy}
-                  />
+                  <ProfilerProbe id="DashboardSceneSurface">
+                    <DashboardSceneSurface
+                      layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
+                      layoutEditing={layoutEditing}
+                      layoutRef={layoutRef}
+                      onSpotImageLoaded={handleSpotImageLoaded}
+                      onSpotImageError={handleSpotImageError}
+                      requestFocus={requestFocusActuator}
+                      focusBusy={focusBusy}
+                    />
+                  </ProfilerProbe>
                 ) : (
-                  <NativeDashboardSurface
-                    layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
-                    layoutRef={layoutRef}
-                    onSpotImageLoaded={handleSpotImageLoaded}
-                    onSpotImageError={handleSpotImageError}
-                    requestFocus={requestFocusActuator}
-                    focusBusy={focusBusy}
-                    onTimeSeriesVisible={handleTimeSeriesVisible}
-                  />
+                  <ProfilerProbe id="NativeDashboardSurface">
+                    <NativeDashboardSurface
+                      layoutSnapshotLayout={layoutSnapshot?.layout ?? null}
+                      layoutRef={layoutRef}
+                      onSpotImageLoaded={handleSpotImageLoaded}
+                      onSpotImageError={handleSpotImageError}
+                      requestFocus={requestFocusActuator}
+                      focusBusy={focusBusy}
+                      onTimeSeriesVisible={handleTimeSeriesVisible}
+                    />
+                  </ProfilerProbe>
                 )}
               </React.Suspense>
             </LayoutEditContext.Provider>
@@ -846,6 +854,7 @@ function App() {
         </footer>
       </div>
     </div>
+    </ProfilerProbe>
   );
 }
 
