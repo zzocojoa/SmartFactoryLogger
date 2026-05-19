@@ -518,6 +518,7 @@ const buildThresholdDrawPlot = (): ThresholdDrawPlotFixture => {
 
 describe('TimeSeriesWidget render', () => {
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
     mockUPlotChartRender.mockClear();
     mockUPlotChartCreate.mockClear();
@@ -530,13 +531,13 @@ describe('TimeSeriesWidget render', () => {
     });
   });
 
-  it('updates legend values without rerendering chart when only store data changes', async () => {
+  it('coalesces legend value updates to the data timestamp second without rerendering chart', async () => {
     const timeSeriesAllFrame = buildSeriesFrame(11);
     useDashboardStore.setState({
       data: buildFactoryData(11),
       timeSeriesAllFrame,
       thresholds: buildThresholdStateFromConfig(),
-      lastDataAt: 1,
+      lastDataAt: 1_000,
       intervalSec: 0.2,
     });
 
@@ -547,13 +548,50 @@ describe('TimeSeriesWidget render', () => {
     const initialChartRenderCount = mockUPlotChartRender.mock.calls.length;
 
     act(() => {
-      useDashboardStore.getState().setData(buildFactoryData(22), 2);
+      useDashboardStore.getState().setData(buildFactoryData(22), 1_500);
+    });
+
+    expect(screen.getByText('11.0')).toBeInTheDocument();
+    expect(screen.queryByText('22.0')).not.toBeInTheDocument();
+    expect(mockUPlotChartRender).toHaveBeenCalledTimes(initialChartRenderCount);
+
+    act(() => {
+      useDashboardStore.getState().setData(buildFactoryData(33), 2_000);
     });
 
     await waitFor(() => {
-      expect(screen.getByText('22.0')).toBeInTheDocument();
+      expect(screen.getByText('33.0')).toBeInTheDocument();
     });
     expect(screen.queryByText('11.0')).not.toBeInTheDocument();
+    expect(mockUPlotChartRender).toHaveBeenCalledTimes(initialChartRenderCount);
+  });
+
+  it('flushes the latest same-second legend value when no next-second sample arrives', async () => {
+    const timeSeriesAllFrame = buildSeriesFrame(11);
+    useDashboardStore.setState({
+      data: buildFactoryData(11),
+      timeSeriesAllFrame,
+      thresholds: buildThresholdStateFromConfig(),
+      lastDataAt: 1_000,
+      intervalSec: 0.2,
+    });
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    expect(screen.getByText('11.0')).toBeInTheDocument();
+    const initialChartRenderCount = mockUPlotChartRender.mock.calls.length;
+
+    act(() => {
+      useDashboardStore.getState().setData(buildFactoryData(22), 1_500);
+    });
+
+    expect(screen.getByText('11.0')).toBeInTheDocument();
+    expect(screen.queryByText('22.0')).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('22.0')).toBeInTheDocument();
+    }, { timeout: 2_000 });
     expect(mockUPlotChartRender).toHaveBeenCalledTimes(initialChartRenderCount);
   });
 

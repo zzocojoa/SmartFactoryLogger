@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type uPlot from 'uplot';
-import { useDashboardStore } from '../../../../store/useDashboardStore';
+import { selectLastDataAtSecond, useDashboardStore } from '../../../../store/useDashboardStore';
 import type { ThresholdKey, ThresholdState } from '../../../../shared/types';
 import { LABELS } from '../../../../shared/constants/uiText';
 import { THRESHOLD_LABELS } from '../../../../shared/utils/thresholds';
@@ -23,6 +23,7 @@ const HIDDEN_BY_DEFAULT_SERIES: ReadonlySet<TimeSeriesKey> = new Set<TimeSeriesK
 const LEGEND_SERIES = TIME_SERIES_CATALOG.filter((meta) => !HIDDEN_BY_DEFAULT_SERIES.has(meta.key));
 const SERIES_WINDOW_OPTIONS: number[] = [1, 5, 10, 30, 60];
 export const TIME_SERIES_DIMMED_ALPHA = 0.26;
+const LEGEND_VALUE_COALESCE_MS = 1000;
 const DEFAULT_CHART_PIXEL_WIDTH = 800;
 const MIN_RENDER_POINTS = 300;
 const MAX_RENDER_POINTS = 4000;
@@ -417,7 +418,25 @@ type TimeSeriesLegendValueProps = {
 const TimeSeriesLegendValue = React.memo(function TimeSeriesLegendValue({
   seriesKey,
 }: TimeSeriesLegendValueProps) {
-  const currentValue = useDashboardStore((state) => state.data?.[seriesKey] ?? null);
+  const lastDataAtSecond = useDashboardStore(selectLastDataAtSecond);
+  const [flushRevision, setFlushRevision] = useState<number>(0);
+
+  useEffect(() => {
+    if (lastDataAtSecond === null) {
+      return undefined;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setFlushRevision((current) => current + 1);
+    }, LEGEND_VALUE_COALESCE_MS);
+
+    return () => window.clearTimeout(timerId);
+  }, [lastDataAtSecond]);
+
+  const currentValue = useMemo(
+    () => useDashboardStore.getState().data?.[seriesKey] ?? null,
+    [flushRevision, lastDataAtSecond, seriesKey]
+  );
 
   return (
     <span className="timeseries-legend-value" style={{ fontWeight: 600, marginLeft: '4px' }}>
