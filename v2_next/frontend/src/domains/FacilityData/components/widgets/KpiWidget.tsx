@@ -3,11 +3,12 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React from 'react';
-import { useDashboardStore } from '../../../../store/useDashboardStore';
+import { useShallow } from 'zustand/react/shallow';
+import { selectDashboardKpiSlice, useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { useSustainedFlag } from '../../../../shared/hooks/useSustainedFlag';
 import { calcPercent } from '../../../../shared/utils/sparkline';
-import { formatNumber, formatInteger, formatTime } from '../../../../shared/utils/formatters';
+import { formatNumber, formatInteger } from '../../../../shared/utils/formatters';
 import { mapSpeedLevel, mapPressLevel, getSpeedState, getPressState } from '../../../../shared/utils/stateMappers';
 import {
   SPEED_MAX,
@@ -16,41 +17,39 @@ import {
   ALERT_HOLD_MS,
   ALERT_HOLD_LONG_MS,
 } from '../../../../shared/constants/logic';
+import { MissingDataNote } from './MissingDataNote';
 
 export const KpiComponent = React.memo(function KpiComponent() {
-  const hasData = useDashboardStore(state => state.data !== null);
-  const speed = useDashboardStore(state => state.data?.Speed);
-  const press = useDashboardStore(state => state.data?.Press);
-  const count = useDashboardStore(state => state.data?.Count);
-  const endPos = useDashboardStore(state => state.data?.EndPos);
-  const computedSpeedLevel = useDashboardStore(state => state.data?.Computed?.speed_level);
-  const computedPressLevel = useDashboardStore(state => state.data?.Computed?.press_level);
-  const computedJamLevel = useDashboardStore(state => state.data?.Computed?.jam_level);
-  const computedSpeedThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.speed);
-  const computedPressThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.press);
-  const computedCountThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.count);
-  const computedEndPosThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.endpos);
-  const lastDataAt = useDashboardStore(state => {
-    const speed = state.data?.Speed;
-    const press = state.data?.Press;
-    return !Number.isFinite(speed) || !Number.isFinite(press) ? state.lastDataAt : null;
-  });
-  const thresholdMasterOn = useDashboardStore(state => state.thresholds.masterOn);
-  const thresholdSpeedEnabled = useDashboardStore(state => state.thresholds.entries.speed.enabled);
-  const thresholdSpeedValue = useDashboardStore(state => state.thresholds.entries.speed.value);
-  const thresholdPressEnabled = useDashboardStore(state => state.thresholds.entries.press.enabled);
-  const thresholdPressValue = useDashboardStore(state => state.thresholds.entries.press.value);
-  const thresholdCountEnabled = useDashboardStore(state => state.thresholds.entries.count.enabled);
-  const thresholdCountValue = useDashboardStore(state => state.thresholds.entries.count.value);
-  const thresholdEndPosEnabled = useDashboardStore(state => state.thresholds.entries.endpos.enabled);
-  const thresholdEndPosValue = useDashboardStore(state => state.thresholds.entries.endpos.value);
+  const {
+    hasData,
+    speed,
+    press,
+    count,
+    endPos,
+    computedSpeedLevel,
+    computedPressLevel,
+    computedJamLevel,
+    computedSpeedThresholdHit,
+    computedPressThresholdHit,
+    computedCountThresholdHit,
+    computedEndPosThresholdHit,
+    missing,
+    thresholdMasterOn,
+    thresholdSpeedEnabled,
+    thresholdSpeedValue,
+    thresholdPressEnabled,
+    thresholdPressValue,
+    thresholdCountEnabled,
+    thresholdCountValue,
+    thresholdEndPosEnabled,
+    thresholdEndPosValue,
+  } = useDashboardStore(useShallow(selectDashboardKpiSlice));
 
   const speedValue = useLastValidNumber(speed);
   const pressValue = useLastValidNumber(press);
   const countValue = useLastValidNumber(count);
   const endPosValue = useLastValidNumber(endPos);
 
-  const missing = !Number.isFinite(speed) || !Number.isFinite(press);
   const speedForLogic = speedValue ?? speed;
   const pressForLogic = pressValue ?? press;
   const safeSpeed = (typeof speedForLogic === 'number' && Number.isFinite(speedForLogic)) ? speedForLogic : 0;
@@ -138,11 +137,7 @@ export const KpiComponent = React.memo(function KpiComponent() {
           </div>
         </div>
       </div>
-      {missing && (
-        <div className="missing-note">
-          마지막 갱신 {formatTime(lastDataAt)}
-        </div>
-      )}
+      {missing && <MissingDataNote />}
     </div>
   );
 }
