@@ -3,10 +3,11 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { useDashboardStore } from '../../../../store/useDashboardStore';
+import { useShallow } from 'zustand/react/shallow';
+import { selectDashboardSpotSlice, useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { buildSparklinePaths, calcPercent } from '../../../../shared/utils/sparkline';
-import { formatNumber, formatTime } from '../../../../shared/utils/formatters';
+import { formatNumber } from '../../../../shared/utils/formatters';
 import { mapSpotLevel, getSpotState } from '../../../../shared/utils/stateMappers';
 import {
   SPOT_WARN_TEMP,
@@ -16,25 +17,25 @@ import {
   SPARKLINE_POINTS,
 } from '../../../../shared/constants/logic';
 import { SPOT_UNIT } from '../../../../shared/constants/uiText';
+import { MissingDataNote } from './MissingDataNote';
 
 export const SpotComponent = React.memo(function SpotComponent() {
-  const dataReady = useDashboardStore(state => state.data !== null);
-  const spotRaw = useDashboardStore(state => state.data?.Spot);
-  const computedSpotLevel = useDashboardStore(state => state.data?.Computed?.spot_level);
-  const computedSpotThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.spot);
-  const lastDataAt = useDashboardStore(state => (
-    !Number.isFinite(state.data?.Spot) ? state.lastDataAt : null
-  ));
-  const thresholdMasterOn = useDashboardStore(state => state.thresholds.masterOn);
-  const thresholdSpotEnabled = useDashboardStore(state => state.thresholds.entries.spot.enabled);
-  const thresholdSpotValue = useDashboardStore(state => state.thresholds.entries.spot.value);
-  const spotAlertActive = useDashboardStore(state => state.spotAlertActive);
+  const {
+    dataReady,
+    spotRaw,
+    computedSpotLevel,
+    computedSpotThresholdHit,
+    missing,
+    thresholdMasterOn,
+    thresholdSpotEnabled,
+    thresholdSpotValue,
+    spotAlertActive,
+  } = useDashboardStore(useShallow(selectDashboardSpotSlice));
 
   const [sparklineValues, setSparklineValues] = useState<number[]>([]);
   const spotInputValue = computedSpotLevel === 'idle' ? 0 : spotRaw;
   const spotValue = useLastValidNumber(spotInputValue);
 
-  const missing = !Number.isFinite(spotRaw);
   const spotDisplayValue = Number.isFinite(spotValue ?? NaN) ? spotValue! : (spotInputValue ?? NaN);
   const spotState =
     mapSpotLevel(computedSpotLevel) ??
@@ -170,11 +171,7 @@ export const SpotComponent = React.memo(function SpotComponent() {
           ))}
         </svg>
       </div>
-      {missing && (
-        <div className="missing-note">
-          마지막 갱신 {formatTime(lastDataAt)}
-        </div>
-      )}
+      {missing && <MissingDataNote />}
     </div>
   );
 }

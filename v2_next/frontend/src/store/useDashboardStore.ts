@@ -4,6 +4,97 @@ import type { SpotImageResponseMetadata } from '../domains/FacilityData/api/spot
 import type { SeriesFrame } from '../domains/FacilityData/timeseries/seriesDataFrames';
 import { buildThresholdStateFromConfig } from '../shared/utils/thresholds';
 
+export interface DashboardKpiSlice {
+  hasData: boolean;
+  speed: number | null | undefined;
+  press: number | null | undefined;
+  count: number | null | undefined;
+  endPos: number | null | undefined;
+  computedSpeedLevel: string | undefined;
+  computedPressLevel: string | undefined;
+  computedJamLevel: string | undefined;
+  computedSpeedThresholdHit: boolean | undefined;
+  computedPressThresholdHit: boolean | undefined;
+  computedCountThresholdHit: boolean | undefined;
+  computedEndPosThresholdHit: boolean | undefined;
+  missing: boolean;
+  thresholdMasterOn: boolean;
+  thresholdSpeedEnabled: boolean;
+  thresholdSpeedValue: number | null;
+  thresholdPressEnabled: boolean;
+  thresholdPressValue: number | null;
+  thresholdCountEnabled: boolean;
+  thresholdCountValue: number | null;
+  thresholdEndPosEnabled: boolean;
+  thresholdEndPosValue: number | null;
+}
+
+export interface DashboardSpotSlice {
+  dataReady: boolean;
+  spotRaw: number | null | undefined;
+  computedSpotLevel: string | undefined;
+  computedSpotThresholdHit: boolean | undefined;
+  missing: boolean;
+  thresholdMasterOn: boolean;
+  thresholdSpotEnabled: boolean;
+  thresholdSpotValue: number | null;
+  spotAlertActive: boolean;
+}
+
+export interface DashboardEnvSlice {
+  tempRaw: number | null | undefined;
+  humidityRaw: number | null | undefined;
+  computedEnvTempLevel: string | undefined;
+  computedEnvPreLevel: string | undefined;
+  computedTempThresholdHit: boolean | undefined;
+  computedHumidityThresholdHit: boolean | undefined;
+  missing: boolean;
+  thresholdMasterOn: boolean;
+  thresholdAtTempEnabled: boolean;
+  thresholdAtTempValue: number | null;
+  thresholdAtPreEnabled: boolean;
+  thresholdAtPreValue: number | null;
+}
+
+export interface DashboardTempsSlice {
+  hasData: boolean;
+  tempF: number | null | undefined;
+  tempB: number | null | undefined;
+  billetTemp: number | null | undefined;
+  billetLength: number | null | undefined;
+  computedTempFThresholdHit: boolean | undefined;
+  computedTempBThresholdHit: boolean | undefined;
+  computedBilletTempThresholdHit: boolean | undefined;
+  computedBilletLengthThresholdHit: boolean | undefined;
+  missing: boolean;
+  thresholdMasterOn: boolean;
+  thresholdTempFEnabled: boolean;
+  thresholdTempFValue: number | null;
+  thresholdTempBEnabled: boolean;
+  thresholdTempBValue: number | null;
+  thresholdBilletTempEnabled: boolean;
+  thresholdBilletTempValue: number | null;
+  thresholdBilletLengthEnabled: boolean;
+  thresholdBilletLengthValue: number | null;
+}
+
+export interface DashboardMoldsSlice {
+  hasData: boolean;
+  moldValue1: number | null | undefined;
+  moldValue2: number | null | undefined;
+  moldValue3: number | null | undefined;
+  moldValue4: number | null | undefined;
+  moldValue5: number | null | undefined;
+  moldValue6: number | null | undefined;
+  computedMoldLevel1: string | undefined;
+  computedMoldLevel2: string | undefined;
+  computedMoldLevel3: string | undefined;
+  computedMoldLevel4: string | undefined;
+  computedMoldLevel5: string | undefined;
+  computedMoldLevel6: string | undefined;
+  missing: boolean;
+}
+
 interface DashboardTimeSeriesState {
   timeSeriesAllFrame: SeriesFrame | null;
   thresholds: ThresholdState;
@@ -105,7 +196,7 @@ const hasMetricsStatusChanged = (
   return false;
 };
 
-interface DashboardState extends DashboardMetricsStatus {
+export interface DashboardState extends DashboardMetricsStatus {
   // 공장 데이터 상태
   data: FactoryData | null;
   timeSeriesAllFrame: SeriesFrame | null;
@@ -140,6 +231,139 @@ interface DashboardState extends DashboardMetricsStatus {
   ) => void;
   setSpotAlertActive: (active: boolean) => void;
 }
+
+export const selectDashboardKpiSlice = (state: DashboardState): DashboardKpiSlice => {
+  const speed = state.data?.Speed;
+  const press = state.data?.Press;
+  return {
+    hasData: state.data !== null,
+    speed,
+    press,
+    count: state.data?.Count,
+    endPos: state.data?.EndPos,
+    computedSpeedLevel: state.data?.Computed?.speed_level,
+    computedPressLevel: state.data?.Computed?.press_level,
+    computedJamLevel: state.data?.Computed?.jam_level,
+    computedSpeedThresholdHit: state.data?.Computed?.thresholds?.speed,
+    computedPressThresholdHit: state.data?.Computed?.thresholds?.press,
+    computedCountThresholdHit: state.data?.Computed?.thresholds?.count,
+    computedEndPosThresholdHit: state.data?.Computed?.thresholds?.endpos,
+    missing: !Number.isFinite(speed) || !Number.isFinite(press),
+    thresholdMasterOn: state.thresholds.masterOn,
+    thresholdSpeedEnabled: state.thresholds.entries.speed.enabled,
+    thresholdSpeedValue: state.thresholds.entries.speed.value,
+    thresholdPressEnabled: state.thresholds.entries.press.enabled,
+    thresholdPressValue: state.thresholds.entries.press.value,
+    thresholdCountEnabled: state.thresholds.entries.count.enabled,
+    thresholdCountValue: state.thresholds.entries.count.value,
+    thresholdEndPosEnabled: state.thresholds.entries.endpos.enabled,
+    thresholdEndPosValue: state.thresholds.entries.endpos.value,
+  };
+};
+
+export const selectDashboardSpotSlice = (state: DashboardState): DashboardSpotSlice => {
+  const spotRaw = state.data?.Spot;
+  return {
+    dataReady: state.data !== null,
+    spotRaw,
+    computedSpotLevel: state.data?.Computed?.spot_level,
+    computedSpotThresholdHit: state.data?.Computed?.thresholds?.spot,
+    missing: !Number.isFinite(spotRaw),
+    thresholdMasterOn: state.thresholds.masterOn,
+    thresholdSpotEnabled: state.thresholds.entries.spot.enabled,
+    thresholdSpotValue: state.thresholds.entries.spot.value,
+    spotAlertActive: state.spotAlertActive,
+  };
+};
+
+export const selectDashboardEnvSlice = (state: DashboardState): DashboardEnvSlice => {
+  const tempRaw = state.data?.At_Temp;
+  const humidityRaw = state.data?.At_Pre;
+  return {
+    tempRaw,
+    humidityRaw,
+    computedEnvTempLevel: state.data?.Computed?.env_temp_level,
+    computedEnvPreLevel: state.data?.Computed?.env_pre_level,
+    computedTempThresholdHit: state.data?.Computed?.thresholds?.at_temp,
+    computedHumidityThresholdHit: state.data?.Computed?.thresholds?.at_pre,
+    missing: !Number.isFinite(tempRaw) || !Number.isFinite(humidityRaw),
+    thresholdMasterOn: state.thresholds.masterOn,
+    thresholdAtTempEnabled: state.thresholds.entries.at_temp.enabled,
+    thresholdAtTempValue: state.thresholds.entries.at_temp.value,
+    thresholdAtPreEnabled: state.thresholds.entries.at_pre.enabled,
+    thresholdAtPreValue: state.thresholds.entries.at_pre.value,
+  };
+};
+
+export const selectDashboardTempsSlice = (state: DashboardState): DashboardTempsSlice => {
+  const tempF = state.data?.Temp_F;
+  const tempB = state.data?.Temp_B;
+  const billetTemp = state.data?.Billet_Temp;
+  const billetLength = state.data?.Billet_Length;
+  return {
+    hasData: state.data !== null,
+    tempF,
+    tempB,
+    billetTemp,
+    billetLength,
+    computedTempFThresholdHit: state.data?.Computed?.thresholds?.temp_f,
+    computedTempBThresholdHit: state.data?.Computed?.thresholds?.temp_b,
+    computedBilletTempThresholdHit: state.data?.Computed?.thresholds?.billet_temp,
+    computedBilletLengthThresholdHit: state.data?.Computed?.thresholds?.billet,
+    missing:
+      !Number.isFinite(tempF) ||
+      !Number.isFinite(tempB) ||
+      !Number.isFinite(billetTemp) ||
+      !Number.isFinite(billetLength),
+    thresholdMasterOn: state.thresholds.masterOn,
+    thresholdTempFEnabled: state.thresholds.entries.temp_f.enabled,
+    thresholdTempFValue: state.thresholds.entries.temp_f.value,
+    thresholdTempBEnabled: state.thresholds.entries.temp_b.enabled,
+    thresholdTempBValue: state.thresholds.entries.temp_b.value,
+    thresholdBilletTempEnabled: state.thresholds.entries.billet_temp.enabled,
+    thresholdBilletTempValue: state.thresholds.entries.billet_temp.value,
+    thresholdBilletLengthEnabled: state.thresholds.entries.billet.enabled,
+    thresholdBilletLengthValue: state.thresholds.entries.billet.value,
+  };
+};
+
+export const selectDashboardMoldsSlice = (state: DashboardState): DashboardMoldsSlice => {
+  const moldValue1 = state.data?.Mold1;
+  const moldValue2 = state.data?.Mold2;
+  const moldValue3 = state.data?.Mold3;
+  const moldValue4 = state.data?.Mold4;
+  const moldValue5 = state.data?.Mold5;
+  const moldValue6 = state.data?.Mold6;
+  return {
+    hasData: state.data !== null,
+    moldValue1,
+    moldValue2,
+    moldValue3,
+    moldValue4,
+    moldValue5,
+    moldValue6,
+    computedMoldLevel1: state.data?.Computed?.mold_levels?.Mold1,
+    computedMoldLevel2: state.data?.Computed?.mold_levels?.Mold2,
+    computedMoldLevel3: state.data?.Computed?.mold_levels?.Mold3,
+    computedMoldLevel4: state.data?.Computed?.mold_levels?.Mold4,
+    computedMoldLevel5: state.data?.Computed?.mold_levels?.Mold5,
+    computedMoldLevel6: state.data?.Computed?.mold_levels?.Mold6,
+    missing:
+      !Number.isFinite(moldValue1) ||
+      !Number.isFinite(moldValue2) ||
+      !Number.isFinite(moldValue3) ||
+      !Number.isFinite(moldValue4) ||
+      !Number.isFinite(moldValue5) ||
+      !Number.isFinite(moldValue6),
+  };
+};
+
+export const selectLastDataAtSecond = (state: DashboardState): number | null => {
+  if (state.lastDataAt === null) {
+    return null;
+  }
+  return Math.floor(state.lastDataAt / 1000);
+};
 
 export const useDashboardStore = create<DashboardState>((set) => ({
   data: null,

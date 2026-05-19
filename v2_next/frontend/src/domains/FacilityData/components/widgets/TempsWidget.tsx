@@ -3,50 +3,38 @@
  * Phase 9 Step 2에서 App.tsx로부터 추출
  */
 import React from 'react';
-import { useDashboardStore } from '../../../../store/useDashboardStore';
+import { useShallow } from 'zustand/react/shallow';
+import { selectDashboardTempsSlice, useDashboardStore } from '../../../../store/useDashboardStore';
 import { useLastValidNumber } from '../../../../shared/hooks/useLastValidNumber';
 import { useThresholdLevel } from '../../../../shared/hooks/useThresholdLevel';
-import { formatNumber, formatTime } from '../../../../shared/utils/formatters';
+import { formatNumber } from '../../../../shared/utils/formatters';
 import { ALERT_HOLD_MS } from '../../../../shared/constants/logic';
 import { LABELS, SPOT_UNIT } from '../../../../shared/constants/uiText';
+import { MissingDataNote } from './MissingDataNote';
 
 export const TempsComponent = React.memo(function TempsComponent() {
-  const hasData = useDashboardStore(state => state.data !== null);
-  const tempF = useDashboardStore(state => state.data?.Temp_F);
-  const tempB = useDashboardStore(state => state.data?.Temp_B);
-  const billetTemp = useDashboardStore(state => state.data?.Billet_Temp);
-  const billetLength = useDashboardStore(state => state.data?.Billet_Length);
-  const computedTempFThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.temp_f);
-  const computedTempBThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.temp_b);
-  const computedBilletTempThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.billet_temp);
-  const computedBilletLengthThresholdHit = useDashboardStore(state => state.data?.Computed?.thresholds?.billet);
-  const lastDataAt = useDashboardStore(state => {
-    const tempF = state.data?.Temp_F;
-    const tempB = state.data?.Temp_B;
-    const billetTemp = state.data?.Billet_Temp;
-    const billetLength = state.data?.Billet_Length;
-    return !Number.isFinite(tempF) ||
-      !Number.isFinite(tempB) ||
-      !Number.isFinite(billetTemp) ||
-      !Number.isFinite(billetLength)
-      ? state.lastDataAt
-      : null;
-  });
-  const thresholdMasterOn = useDashboardStore(state => state.thresholds.masterOn);
-  const thresholdTempFEnabled = useDashboardStore(state => state.thresholds.entries.temp_f.enabled);
-  const thresholdTempFValue = useDashboardStore(state => state.thresholds.entries.temp_f.value);
-  const thresholdTempBEnabled = useDashboardStore(state => state.thresholds.entries.temp_b.enabled);
-  const thresholdTempBValue = useDashboardStore(state => state.thresholds.entries.temp_b.value);
-  const thresholdBilletTempEnabled = useDashboardStore(state => state.thresholds.entries.billet_temp.enabled);
-  const thresholdBilletTempValue = useDashboardStore(state => state.thresholds.entries.billet_temp.value);
-  const thresholdBilletLengthEnabled = useDashboardStore(state => state.thresholds.entries.billet.enabled);
-  const thresholdBilletLengthValue = useDashboardStore(state => state.thresholds.entries.billet.value);
+  const {
+    hasData,
+    tempF,
+    tempB,
+    billetTemp,
+    billetLength,
+    computedTempFThresholdHit,
+    computedTempBThresholdHit,
+    computedBilletTempThresholdHit,
+    computedBilletLengthThresholdHit,
+    missing,
+    thresholdMasterOn,
+    thresholdTempFEnabled,
+    thresholdTempFValue,
+    thresholdTempBEnabled,
+    thresholdTempBValue,
+    thresholdBilletTempEnabled,
+    thresholdBilletTempValue,
+    thresholdBilletLengthEnabled,
+    thresholdBilletLengthValue,
+  } = useDashboardStore(useShallow(selectDashboardTempsSlice));
 
-  const missing =
-    !Number.isFinite(tempF) ||
-    !Number.isFinite(tempB) ||
-    !Number.isFinite(billetTemp) ||
-    !Number.isFinite(billetLength);
   const tempFValue = useLastValidNumber(tempF);
   const tempBValue = useLastValidNumber(tempB);
   const billetTempValue = useLastValidNumber(billetTemp);
@@ -131,11 +119,7 @@ export const TempsComponent = React.memo(function TempsComponent() {
           </div>
         </div>
       </div>
-      {missing && (
-        <div className="missing-note">
-          마지막 갱신 {formatTime(lastDataAt)}
-        </div>
-      )}
+      {missing && <MissingDataNote />}
     </div>
   );
 }
