@@ -9,6 +9,7 @@ import {
   type DashboardItem,
   resolveDashboardItems,
 } from './DashboardSceneModel';
+import { ProfilerProbe } from '../shared/profiling/reactRenderProfiler';
 
 const TempsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/TempsWidget').then(m => ({ default: m.TempsComponent })));
 const MoldsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/MoldsWidget').then(m => ({ default: m.MoldsComponent })));
@@ -177,41 +178,43 @@ const renderWidget = (
   focusBusy: boolean
 ): JSX.Element => {
   if (item.type === 'kpi') {
-    return <KpiComponent />;
+    return <ProfilerProbe id="Widget:kpi"><KpiComponent /></ProfilerProbe>;
   }
 
   if (item.type === 'spot') {
-    return <SpotComponent />;
+    return <ProfilerProbe id="Widget:spot"><SpotComponent /></ProfilerProbe>;
   }
 
   if (item.type === 'temps') {
-    return <TempsComponent />;
+    return <ProfilerProbe id="Widget:temps"><TempsComponent /></ProfilerProbe>;
   }
 
   if (item.type === 'camera') {
     return (
-      <CameraComponent
-        onSpotImageLoaded={onSpotImageLoaded}
-        onSpotImageError={onSpotImageError}
-        requestFocus={requestFocus}
-        focusBusy={focusBusy}
-      />
+      <ProfilerProbe id="Widget:camera">
+        <CameraComponent
+          onSpotImageLoaded={onSpotImageLoaded}
+          onSpotImageError={onSpotImageError}
+          requestFocus={requestFocus}
+          focusBusy={focusBusy}
+        />
+      </ProfilerProbe>
     );
   }
 
   if (item.type === 'molds') {
-    return <MoldsComponent />;
+    return <ProfilerProbe id="Widget:molds"><MoldsComponent /></ProfilerProbe>;
   }
 
   if (item.type === 'env') {
-    return <EnvComponent />;
+    return <ProfilerProbe id="Widget:env"><EnvComponent /></ProfilerProbe>;
   }
 
   if (item.type === 'timeseries') {
-    return <TimeSeriesWidget />;
+    return <ProfilerProbe id="Widget:timeseries"><TimeSeriesWidget /></ProfilerProbe>;
   }
 
-  return <NativeMarkdown item={item} />;
+  return <ProfilerProbe id="Widget:markdown"><NativeMarkdown item={item} /></ProfilerProbe>;
 };
 
 const NativeDashboardSurfaceComponent = ({
