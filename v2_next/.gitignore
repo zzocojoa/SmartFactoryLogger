@@ -47,6 +47,18 @@ scripts/test_spot_drift.py
 scripts/test_spot_unified.py
 docs/optimization/
 
+# Local QA / Codex artifacts
+.tmp_*
+.tmp_*/
+_tmp_*
+_tmp_*/
+_server_stdout*/
+sf-health-*/
+qa_evidence/
+server_stdout.zip
+tmp/
+tmp_.bin
+
 # Config & Environment
 .env
 .env.local

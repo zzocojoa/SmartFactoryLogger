@@ -1,0 +1,32 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+include = [
+  "backend/FacilityData/drivers/spot_api.py",
+  "backend/app.py",
+  "backend/tests/test_spot_api.py",
+]
+extend-exclude = [
+  ".tmp_*",
+  "_tmp_*",
+  "backend/.venv",
+  "backend/build",
+  "backend/dist",
+  "frontend",
+  "node_modules",
+]
+
+[tool.ruff.lint]
+select = ["E9", "F821"]
+
+[tool.mypy]
+python_version = "3.12"
+files = [
+  "backend/FacilityData/drivers/spot_api.py",
+]
+ignore_missing_imports = true
+follow_imports = "silent"
+check_untyped_defs = true
+disallow_untyped_defs = false
+warn_return_any = false
+no_implicit_optional = false
