@@ -64,7 +64,7 @@ export const useAIAgent = () => {
     setMessages(newContext);
     setIsLoading(true);
 
-    let currentMessages = [...newContext];
+    const currentMessages = [...newContext];
 
     try {
       while (true) {

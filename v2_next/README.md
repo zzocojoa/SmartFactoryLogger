@@ -38,6 +38,15 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
 
+## 검증
+
+브랜치 배포 전 프론트엔드 타입 검사, 린트, 테스트와 백엔드 린트, 타입 검사,
+unittest를 한 번에 실행합니다.
+
+```powershell
+npm run health
+```
+
 ## React 렌더 계측
 
 대시보드 렌더 commit count와 duration을 비교할 때는 mock 백엔드와 React Profiler

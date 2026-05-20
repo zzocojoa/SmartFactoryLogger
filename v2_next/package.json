@@ -8,7 +8,14 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "profile:react": "node scripts/collect_react_profiler.cjs",
-    "profile:react:mock": "node scripts/react_profiler_mock_backend.cjs"
+    "profile:react:mock": "node scripts/react_profiler_mock_backend.cjs",
+    "health": "npm run health:frontend:typecheck && npm run health:frontend:lint && npm run health:frontend:test && npm run health:backend:lint && npm run health:backend:typecheck && npm run health:backend:test",
+    "health:frontend:typecheck": "npm --prefix frontend run typecheck",
+    "health:frontend:lint": "npm --prefix frontend run lint",
+    "health:frontend:test": "npm --prefix frontend run test",
+    "health:backend:lint": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m ruff check",
+    "health:backend:typecheck": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m mypy",
+    "health:backend:test": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m unittest discover -s backend/tests"
   },
   "keywords": [],
   "author": "",

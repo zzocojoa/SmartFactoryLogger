@@ -1,5 +1,8 @@
+import asyncio
 import time
 import unittest
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 from urllib.request import Request as UrlRequest
 from unittest.mock import AsyncMock, Mock, patch
@@ -326,6 +329,181 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(float(diagnostics["retry_after_sec"]), 0.0)
         self.assertLessEqual(float(diagnostics["retry_after_sec"]), 2.0)
 
+    async def test_cold_cache_backoff_fast_fails_without_upstream_call(self) -> None:
+        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+        spot_api._img_failure_count = 1
+        spot_api._record_image_error("upstream-timeout", "timeout")
+        spot_api._record_image_backoff(2.0)
+        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
+
+        with patch.object(spot_api, "_request_spot_image", request_mock):
+            with self.assertRaises(spot_api.SpotImageBackoffError) as raised:
+                await spot_api.fetch_image_async()
+
+        error = raised.exception
+
+        self.assertEqual(error.code, "retry-backoff-active")
+        self.assertEqual(error.image_url, "http://spot.local/image.jpg")
+        self.assertIsNone(error.upstream_status)
+        self.assertGreater(error.retry_after_sec, 0.0)
+        request_mock.assert_not_awaited()
+
+    async def test_cold_cache_fetch_failure_sets_backoff_for_next_request(self) -> None:
+        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+        image_error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "SPOT image upstream timed out; url=http://spot.local/image.jpg",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=None,
+        )
+        request_mock: AsyncMock = AsyncMock(side_effect=[image_error, b"unexpected"])
+
+        with patch.object(spot_api, "_request_spot_image", request_mock):
+            with self.assertRaises(spot_api.SpotImageFetchError):
+                await spot_api.fetch_image_async()
+
+            diagnostics = spot_api.get_image_proxy_diagnostics()
+
+            with self.assertRaises(spot_api.SpotImageBackoffError):
+                await spot_api.fetch_image_async()
+
+        self.assertEqual(diagnostics["failure_count"], 1)
+        self.assertEqual(diagnostics["cache_status"], "empty")
+        self.assertEqual(diagnostics["proxy_state"], "backoff")
+        self.assertGreater(float(diagnostics["retry_after_sec"]), 0.0)
+        self.assertEqual(request_mock.await_count, 1)
+
+    async def test_cached_image_backoff_still_returns_cache_without_upstream_call(self) -> None:
+        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+        spot_api._img_cache["data"] = b"cached-image"
+        spot_api._img_cache["time"] = time.time()
+        spot_api._img_failure_count = 2
+        spot_api._record_image_error("upstream-timeout", "timeout")
+        spot_api._record_image_backoff(2.0)
+        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
+
+        with patch.object(spot_api, "_request_spot_image", request_mock):
+            data, meta = await spot_api.fetch_image_async()
+
+        self.assertEqual(data, b"cached-image")
+        self.assertEqual(meta["status"], "ok")
+        self.assertEqual(meta["source"], "cache")
+        self.assertEqual(meta["cache_status"], "fresh")
+        self.assertEqual(meta["proxy_state"], "backoff")
+        self.assertGreater(float(meta["retry_after_sec"]), 0.0)
+        request_mock.assert_not_awaited()
+
+    async def test_stale_cached_image_backoff_still_returns_cache_without_upstream_call(self) -> None:
+        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        spot_api._img_cache["data"] = b"stale-image"
+        spot_api._img_cache["time"] = time.time() - 20.0
+        spot_api._img_failure_count = 2
+        spot_api._record_image_error("upstream-timeout", "timeout")
+        spot_api._record_image_backoff(2.0)
+        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
+
+        with patch.object(spot_api, "_request_spot_image", request_mock):
+            data, meta = await spot_api.fetch_image_async()
+
+        self.assertEqual(data, b"stale-image")
+        self.assertEqual(meta["status"], "stale")
+        self.assertEqual(meta["source"], "stale")
+        self.assertEqual(meta["cache_status"], "stale")
+        self.assertEqual(meta["proxy_state"], "backoff")
+        self.assertGreater(float(meta["retry_after_sec"]), 0.0)
+        request_mock.assert_not_awaited()
+
+    async def test_cold_cache_backoff_rechecked_after_lock_wait(self) -> None:
+        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+        lock_entered = asyncio.Event()
+        release_lock = asyncio.Event()
+        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
+
+        @asynccontextmanager
+        async def delayed_fetch_lock() -> AsyncIterator[None]:
+            lock_entered.set()
+            await release_lock.wait()
+            yield
+
+        with (
+            patch.object(spot_api, "_img_fetch_lock", delayed_fetch_lock()),
+            patch.object(spot_api, "_request_spot_image", request_mock),
+        ):
+            fetch_task = asyncio.create_task(spot_api.fetch_image_async())
+            await lock_entered.wait()
+            spot_api._img_failure_count = 1
+            spot_api._record_image_error("upstream-timeout", "timeout")
+            spot_api._record_image_backoff(2.0)
+            release_lock.set()
+
+            with self.assertRaises(spot_api.SpotImageBackoffError):
+                await fetch_task
+
+        request_mock.assert_not_awaited()
+
+    async def test_prefetch_payload_rejection_uses_loop_pacing_without_backoff(self) -> None:
+        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+        spot_api.config.SPOT_URL = ""
+        spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = ""
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.25
+        image_error = spot_api.SpotImageFetchError(
+            "invalid-image-html",
+            "SPOT image upstream returned HTML instead of image bytes; url=http://spot.local/image.jpg",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=200,
+        )
+        request_mock: AsyncMock = AsyncMock(side_effect=image_error)
+        sleep_delays: list[float] = []
+
+        async def sleep_once(delay: float) -> None:
+            sleep_delays.append(delay)
+            spot_api._prefetch_running = False
+
+        with (
+            patch.object(spot_api, "_get_http_client", Mock(return_value=object())),
+            patch.object(spot_api, "_request_spot_image", request_mock),
+            patch.object(spot_api.asyncio, "sleep", AsyncMock(side_effect=sleep_once)),
+        ):
+            await spot_api._prefetch_loop()
+
+        self.assertEqual(request_mock.await_count, 1)
+        self.assertEqual(sleep_delays, [1.25])
+        self.assertEqual(spot_api._img_failure_count, 0)
+        self.assertIsNone(spot_api._img_last_error_code)
+        self.assertIsNone(spot_api._img_next_retry_at)
+
+    async def test_prefetch_fetch_error_sleeps_backoff_without_extra_interval(self) -> None:
+        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+        spot_api.config.SPOT_URL = ""
+        spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = ""
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.25
+        image_error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "SPOT image upstream timed out; url=http://spot.local/image.jpg",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=None,
+        )
+        request_mock: AsyncMock = AsyncMock(side_effect=image_error)
+        sleep_delays: list[float] = []
+
+        async def sleep_once(delay: float) -> None:
+            sleep_delays.append(delay)
+            spot_api._prefetch_running = False
+
+        with (
+            patch.object(spot_api, "_get_http_client", Mock(return_value=object())),
+            patch.object(spot_api, "_request_spot_image", request_mock),
+            patch.object(spot_api.asyncio, "sleep", AsyncMock(side_effect=sleep_once)),
+        ):
+            await spot_api._prefetch_loop()
+
+        self.assertEqual(request_mock.await_count, 1)
+        self.assertEqual(spot_api._img_failure_count, 1)
+        self.assertEqual(sleep_delays, [spot_api._current_backoff_sec()])
+        self.assertEqual(spot_api._img_last_error_code, "upstream-timeout")
+        self.assertIsNotNone(spot_api._img_next_retry_at)
+
     async def test_stale_cache_diagnostics_include_policy_threshold(self) -> None:
         spot_api.config.SPOT_REFRESH_INTERVAL = 3.0
         spot_api._img_cache["data"] = b"image-data"
@@ -555,6 +733,42 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exception.headers, {"Retry-After": "3", "X-Spot-Retry-After-Ms": "2001"})
         record_mock.assert_called_once()
 
+    async def test_proxy_image_backoff_error_returns_503_with_retry_headers(self) -> None:
+        from backend import app as backend_app
+
+        image_error = spot_api.SpotImageBackoffError("http://spot.local/image.jpg", 2.001)
+        diagnostics: dict[str, Any] = {
+            "cache_state": "empty",
+            "cache_status": "empty",
+            "proxy_state": "backoff",
+            "failure_count": 1,
+            "last_error_code": "upstream-timeout",
+            "retry_after_sec": 1.0,
+        }
+        fetch_mock: AsyncMock = AsyncMock(side_effect=image_error)
+        diagnostics_mock: Mock = Mock(return_value=diagnostics)
+
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
+            patch.object(backend_app.spot_control, "get_image_proxy_diagnostics", diagnostics_mock),
+            patch.object(backend_app.observability_service, "record_error", Mock()) as record_mock,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.proxy_spot_image()
+
+        exception = raised.exception
+        detail: dict[str, Any] = exception.detail
+
+        self.assertEqual(exception.status_code, 503)
+        self.assertEqual(detail["code"], "retry-backoff-active")
+        self.assertIsNone(detail["upstream_status"])
+        self.assertEqual(detail["image_url"], "http://spot.local/image.jpg")
+        self.assertEqual(detail["diagnostics"]["cache_status"], "empty")
+        self.assertEqual(detail["diagnostics"]["proxy_state"], "backoff")
+        self.assertEqual(detail["diagnostics"]["retry_after_sec"], 2.001)
+        self.assertEqual(exception.headers, {"Retry-After": "3", "X-Spot-Retry-After-Ms": "2001"})
+        record_mock.assert_not_called()
+
     async def test_proxy_image_payload_rejection_response_includes_payload_rejection_header(self) -> None:
         from backend import app as backend_app
 
@@ -619,15 +833,47 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(side_effect=image_error)),
             patch.object(backend_app.spot_control, "get_image_proxy_diagnostics", Mock(return_value=diagnostics)),
             patch.object(backend_app.observability_service, "record_error", Mock()),
-            TestClient(backend_app.app, raise_server_exceptions=False) as client,
         ):
-            response = client.get("/api/spot/proxy_image")
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/proxy_image")
+            finally:
+                client.close()
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.headers.get("X-Spot-Payload-Rejection"), "1")
         self.assertEqual(backend_app._stats_total_requests, original_total_requests + 1)
         self.assertEqual(backend_app._stats_error_count, original_error_count)
         self.assertEqual(backend_app._stats_last_status, 502)
+
+    async def test_request_stats_call_next_exception_keeps_original_error_and_counts_500(self) -> None:
+        from backend import app as backend_app
+        from starlette.requests import Request as StarletteRequest
+
+        request = StarletteRequest(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/boom",
+                "headers": [],
+                "client": ("testclient", 50000),
+                "scheme": "http",
+                "server": ("testserver", 80),
+                "query_string": b"",
+            }
+        )
+        original_total_requests = backend_app._stats_total_requests
+        original_error_count = backend_app._stats_error_count
+
+        async def raise_runtime_error(_: object) -> None:
+            raise RuntimeError("boom")
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            await backend_app.record_request_stats(request, raise_runtime_error)
+
+        self.assertEqual(backend_app._stats_total_requests, original_total_requests + 1)
+        self.assertEqual(backend_app._stats_error_count, original_error_count + 1)
+        self.assertEqual(backend_app._stats_last_status, 500)
 
     async def test_proxy_image_forbidden_and_unauthorized_are_counted_as_request_errors(self) -> None:
         from backend import app as backend_app
@@ -664,9 +910,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                         Mock(return_value=diagnostics),
                     ),
                     patch.object(backend_app.observability_service, "record_error", Mock()),
-                    TestClient(backend_app.app, raise_server_exceptions=False) as client,
                 ):
-                    response = client.get("/api/spot/proxy_image")
+                    client = TestClient(backend_app.app, raise_server_exceptions=False)
+                    try:
+                        response = client.get("/api/spot/proxy_image")
+                    finally:
+                        client.close()
 
                 self.assertEqual(response.status_code, 502)
                 detail: dict[str, Any] = response.json()["detail"]
@@ -990,9 +1239,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(backend_app.spot_control, "move_focus", Mock(side_effect=focus_error)),
-            TestClient(backend_app.app, raise_server_exceptions=False) as client,
         ):
-            response = client.post("/api/spot/focus?steps=1")
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.post("/api/spot/focus?steps=1")
+            finally:
+                client.close()
 
         self.assertEqual(response.status_code, 502)
         self.assertIn("not an integer", response.json()["detail"])
@@ -1006,9 +1258,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 "move_focus",
                 Mock(side_effect=RuntimeError("SPOT_FOCUS_URL is not configured")),
             ),
-            TestClient(backend_app.app, raise_server_exceptions=False) as client,
         ):
-            response = client.post("/api/spot/focus?steps=1")
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.post("/api/spot/focus?steps=1")
+            finally:
+                client.close()
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("SPOT_FOCUS_URL is not configured", response.json()["detail"])
@@ -1024,9 +1279,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(backend_app.spot_control, "move_focus", Mock(side_effect=focus_error)),
-            TestClient(backend_app.app, raise_server_exceptions=False) as client,
         ):
-            response = client.post("/api/spot/focus?steps=1")
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.post("/api/spot/focus?steps=1")
+            finally:
+                client.close()
 
         self.assertEqual(response.status_code, 403)
         self.assertIn("HTTP 403", response.json()["detail"])
