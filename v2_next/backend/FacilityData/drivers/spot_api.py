@@ -79,6 +79,15 @@ class SpotImageFetchError(RuntimeError):
         self.upstream_status = upstream_status
 
 
+class SpotImageBackoffError(RuntimeError):
+    def __init__(self, image_url: str, retry_after_sec: float) -> None:
+        super().__init__(f"SPOT image retry backoff is active; retry_after_sec={retry_after_sec:.3f}")
+        self.code = "retry-backoff-active"
+        self.image_url = image_url
+        self.upstream_status: Optional[int] = None
+        self.retry_after_sec = retry_after_sec
+
+
 class SpotTemperatureConfigError(ValueError):
     def __init__(self, temp_url: str) -> None:
         super().__init__("SPOT_URL is not configured")
@@ -838,6 +847,7 @@ def _should_log_cache_state(now: float) -> bool:
 
 async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     """캐시에서 즉시 반환 (백그라운드 프리페칭된 이미지)."""
+    global _img_failure_count
     global _img_cache_state
     from ...MESSync.logger import get_logger
 
@@ -864,6 +874,17 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     except SpotImageConfigError as exc:
         _record_image_error("config-missing", str(exc))
         raise
+
+    retry_after = _retry_after_sec(time.time())
+    if retry_after is not None and retry_after > 0.0:
+        if _img_cache["data"]:
+            backoff_cached_now = time.time()
+            backoff_cache_status = _cache_status(backoff_cached_now)
+            backoff_status = _image_status_for_cache_status(backoff_cache_status)
+            next_cache_state = _cache_state_for_status(backoff_cache_status)
+            _img_cache_state = next_cache_state
+            return _img_cache["data"], _build_image_meta(backoff_cached_now, backoff_status, next_cache_state)
+        raise SpotImageBackoffError(image_url, retry_after)
     
     async with _img_fetch_lock:
         # 잠금 획득 후 캐시를 다시 확인한다.
@@ -875,6 +896,10 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             next_cache_state = _cache_state_for_status(cached_cache_status)
             _img_cache_state = next_cache_state
             return _img_cache["data"], _build_image_meta(cached_now, cached_status, next_cache_state)
+
+        locked_retry_after = _retry_after_sec(time.time())
+        if locked_retry_after is not None and locked_retry_after > 0.0:
+            raise SpotImageBackoffError(image_url, locked_retry_after)
         
         client = _get_http_client()
         try:
@@ -883,6 +908,8 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             if _is_spot_image_payload_rejection_code(exc.code):
                 raise
             _record_image_error(exc.code, str(exc))
+            _img_failure_count = min(_img_failure_count + 1, 10)
+            _record_image_backoff(_current_backoff_sec())
             raise
         _img_cache["data"] = data
         _img_cache["time"] = time.time()
@@ -980,28 +1007,32 @@ async def _prefetch_loop():
             next_tick = time.time()
         except SpotImageFetchError as exc:
             if _is_spot_image_payload_rejection_code(exc.code):
-                continue
-            _record_image_error(exc.code, str(exc))
-            _img_failure_count = min(_img_failure_count + 1, 10)
-            backoff = _current_backoff_sec()
-            _record_image_backoff(backoff)
-            if _img_failure_count == 1 or _img_failure_count >= 6:
-                logger.warning(
-                    "Spot image fetch failed",
-                    extra={
-                        "code": exc.code,
-                        "error": str(exc),
-                        "failure_count": _img_failure_count,
-                        "next_backoff_sec": backoff,
-                        "next_retry_at": _img_next_retry_at,
-                        "image_url": exc.image_url,
-                        "upstream_status": exc.upstream_status,
-                    },
-                )
-            
-            if backoff > 0:
-                await asyncio.sleep(backoff)
+                await asyncio.sleep(interval)
                 next_tick = time.time()
+                continue
+            else:
+                _record_image_error(exc.code, str(exc))
+                _img_failure_count = min(_img_failure_count + 1, 10)
+                backoff = _current_backoff_sec()
+                _record_image_backoff(backoff)
+                if _img_failure_count == 1 or _img_failure_count >= 6:
+                    logger.warning(
+                        "Spot image fetch failed",
+                        extra={
+                            "code": exc.code,
+                            "error": str(exc),
+                            "failure_count": _img_failure_count,
+                            "next_backoff_sec": backoff,
+                            "next_retry_at": _img_next_retry_at,
+                            "image_url": exc.image_url,
+                            "upstream_status": exc.upstream_status,
+                        },
+                    )
+
+                if backoff > 0:
+                    await asyncio.sleep(backoff)
+                    next_tick = time.time()
+                    continue
         
         # 드리프트 방지: 다음 실행 시간 계산
         next_tick += interval

@@ -1538,6 +1538,7 @@ async def record_request_stats(request: Request, call_next):
     start = time.perf_counter()
     status_code = 500
     client_host = request.client.host if request.client else "unknown"
+    is_spot_payload_rejection = False
     response = None
     try:
         if _should_log_access_start(request.url.path):
@@ -2755,6 +2756,23 @@ async def proxy_spot_image():
             detail={
                 "code": "config-missing",
                 "message": "SPOT 이미지 URL이 설정되지 않았습니다.",
+                "diagnostics": diagnostics,
+            },
+            headers=_spot_retry_headers_from_diagnostics(diagnostics),
+        ) from exc
+    except spot_control.SpotImageBackoffError as exc:
+        diagnostics: dict[str, Any] = dict(spot_control.get_image_proxy_diagnostics())
+        diagnostics["cache_state"] = "empty"
+        diagnostics["cache_status"] = "empty"
+        diagnostics["proxy_state"] = "backoff"
+        diagnostics["retry_after_sec"] = exc.retry_after_sec
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": exc.code,
+                "message": "SPOT 이미지 캐시가 비어 있고 재시도 대기 시간이 활성화되어 있습니다.",
+                "upstream_status": exc.upstream_status,
+                "image_url": exc.image_url,
                 "diagnostics": diagnostics,
             },
             headers=_spot_retry_headers_from_diagnostics(diagnostics),
