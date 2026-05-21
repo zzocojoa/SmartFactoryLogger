@@ -5,6 +5,7 @@ class FactoryData(BaseModel):
     # System
     Time: str
     Status: str = "Running"
+    timestamp_ms: Optional[int] = None
     
     # KPIs
     Speed: Optional[float] = None
@@ -107,3 +108,16 @@ class SystemStatus(BaseModel):
     connection: bool
     mode: str  # REAL / MOCK
     message: str
+
+
+class FactoryDataHistorySample(BaseModel):
+    timestamp_ms: int
+    data: FactoryData
+
+
+class FactoryDataHistoryResponse(BaseModel):
+    samples: list[FactoryDataHistorySample]
+    oldest_timestamp_ms: Optional[int] = None
+    newest_timestamp_ms: Optional[int] = None
+    history_instance_id: str
+    truncated: bool

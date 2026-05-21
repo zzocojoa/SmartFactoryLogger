@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { DashboardLeaderState, FactoryData } from '../../../shared/types';
-import { buildSeriesSample } from '../timeseries/seriesSampling';
+import { buildSeriesSampleAt } from '../timeseries/seriesSampling';
 import type { SeriesBuffer } from '../timeseries/seriesBuffer';
 import type { WorkerDataPayload, WorkerOutboundMessage } from '../workers/polling.worker.types';
 import {
   createPollingWorker,
+  fetchMetricHistorySinceOnMainThreadWithLatency,
   fetchLatestMetricOnMainThreadWithLatency,
   releasePollingWorker,
   startPollingWorker,
@@ -58,7 +59,7 @@ const handleWorkerDataMessage = (
   params.setPollingDegraded(payload.failure_count > 0);
   params.setPollingIntervalMs(payload.poll_interval_ms);
   params.setPollingFailureCount(payload.failure_count);
-  params.seriesBufferRef.current.append(buildSeriesSample(data, timestamp));
+  params.seriesBufferRef.current.append(buildSeriesSampleAt(data, timestamp));
 };
 
 const resolveIntervalMs = (requestedIntervalMs: number, failureCount: number): number => {
@@ -91,6 +92,8 @@ export const useMetricsPollingEffects = ({
     let heartbeatTimerId: number | null = null;
     let mainThreadFailureCount = 0;
     let pollingPaused = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    let backfillBlockingPolling = false;
+    let historyBackfillPromise: Promise<void> | null = null;
     const tabId = readOrCreateDashboardTabId(DASHBOARD_TAB_ID_KEY);
     let leaderState: DashboardLeaderState = {
       tab_id: tabId,
@@ -105,6 +108,7 @@ export const useMetricsPollingEffects = ({
     };
 
     const isLeader = (): boolean => leaderState.mode === 'leader' || leaderState.mode === 'standalone';
+    const isPollingBlocked = (): boolean => pollingPaused || backfillBlockingPolling;
 
     const clearMainThreadTimer = (): void => {
       if (mainThreadTimerId !== null) {
@@ -154,7 +158,7 @@ export const useMetricsPollingEffects = ({
     };
 
     const scheduleMainThreadPoll = (delayMs: number): void => {
-      if (disposed || !usingMainThreadFallback || pollingPaused || !isLeader()) {
+      if (disposed || !usingMainThreadFallback || isPollingBlocked() || !isLeader()) {
         return;
       }
       clearMainThreadTimer();
@@ -164,12 +168,15 @@ export const useMetricsPollingEffects = ({
     };
 
     const runMainThreadPoll = async (): Promise<void> => {
-      if (disposed || !usingMainThreadFallback || pollingPaused || !isLeader()) {
+      if (disposed || !usingMainThreadFallback || isPollingBlocked() || !isLeader()) {
         return;
       }
 
       try {
         const payload = await fetchLatestMetricOnMainThreadWithLatency();
+        if (disposed || isPollingBlocked() || !isLeader()) {
+          return;
+        }
         mainThreadFailureCount = 0;
         const nextPayload = {
           ...payload,
@@ -179,6 +186,9 @@ export const useMetricsPollingEffects = ({
         applyDataPayload(nextPayload);
         broadcastPayload(nextPayload);
       } catch (error) {
+        if (disposed || isPollingBlocked() || !isLeader()) {
+          return;
+        }
         mainThreadFailureCount += 1;
         const nextIntervalMs = resolveIntervalMs(pollIntervalMs, mainThreadFailureCount);
         console.error('API Error (MainThread)', error);
@@ -209,7 +219,7 @@ export const useMetricsPollingEffects = ({
         releasePollingWorker(worker);
         worker = null;
       }
-      if (!pollingPaused) {
+      if (!isPollingBlocked()) {
         scheduleMainThreadPoll(0);
       }
     };
@@ -226,7 +236,7 @@ export const useMetricsPollingEffects = ({
     };
 
     const startPolling = (): void => {
-      if (disposed || pollingPaused || !isLeader()) {
+      if (disposed || isPollingBlocked() || !isLeader()) {
         return;
       }
       if (usingMainThreadFallback) {
@@ -243,6 +253,9 @@ export const useMetricsPollingEffects = ({
         }
         worker.onmessage = (event: MessageEvent<WorkerOutboundMessage>) => {
           const { type, payload } = event.data;
+          if (disposed || isPollingBlocked() || !isLeader()) {
+            return;
+          }
           if (type === 'DATA') {
             applyDataPayload(payload);
             broadcastPayload(payload);
@@ -270,6 +283,47 @@ export const useMetricsPollingEffects = ({
       if (worker) {
         startPollingWorker(worker, pollIntervalMs);
       }
+    };
+
+    const runHistoryBackfill = async (): Promise<void> => {
+      const sinceMs = seriesBufferRef.current.getLatestTimestampMs();
+      if (sinceMs === null) {
+        return;
+      }
+
+      try {
+        const payload = await fetchMetricHistorySinceOnMainThreadWithLatency(sinceMs);
+        if (disposed) {
+          return;
+        }
+        if (payload.data.truncated) {
+          seriesBufferRef.current.clear();
+        }
+        if (!payload.data.samples.length) {
+          return;
+        }
+        const samples = payload.data.samples.map((item) => buildSeriesSampleAt(item.data, item.timestamp_ms));
+        seriesBufferRef.current.appendHistory(samples);
+      } catch (error) {
+        console.warn('Metric history backfill failed', {
+          since_ms: sinceMs,
+          error,
+        });
+      }
+    };
+
+    const runVisibleHistoryBackfill = async (): Promise<void> => {
+      if (historyBackfillPromise !== null) {
+        return historyBackfillPromise;
+      }
+
+      backfillBlockingPolling = true;
+      stopPolling();
+      historyBackfillPromise = runHistoryBackfill().finally(() => {
+        historyBackfillPromise = null;
+        backfillBlockingPolling = false;
+      });
+      return historyBackfillPromise;
     };
 
     const reconcileLeadership = (): void => {
@@ -352,6 +406,21 @@ export const useMetricsPollingEffects = ({
     }
 
     const handleVisibility = (): void => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        backfillBlockingPolling = true;
+        reconcileLeadership();
+        const shouldRestartPolling = isLeader();
+        void runVisibleHistoryBackfill().finally(() => {
+          if (!disposed) {
+            if (shouldRestartPolling || isLeader()) {
+              startPolling();
+              return;
+            }
+            reconcileLeadership();
+          }
+        });
+        return;
+      }
       reconcileLeadership();
     };
 
