@@ -4,7 +4,7 @@
  * Pure presentational component for the full Settings Modal.
  * All state and handlers are passed in via props from App.tsx.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type {
   SettingsFormState,
   ConnectionTestResult,
@@ -32,6 +32,7 @@ import type {
 } from '../../../../shared/types';
 import type { SpotImageResponseMetadata } from '../../../FacilityData/api/spotService.types';
 import { MemorySection } from './MemorySection';
+import { PasswordInput, PasswordStrengthIndicator } from './PasswordInput';
 import {
   formatTime,
   formatMetaTime,
@@ -1955,34 +1956,13 @@ export function SettingsModal(props: SettingsModalProps) {
                         {settingsForm.passwordSet && (
                           <label className="settings-field">
                             현재 비밀번호
-                            <div style={{ position: 'relative' }}>
-                              <input
-                                type={showCurrentPassword ? 'text' : 'password'}
-                                placeholder="현재 비밀번호 입력"
-                                value={currentPassword}
-                                onChange={(e) => setCurrentPassword(e.target.value)}
-                                style={{ paddingRight: '40px' }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                                style={{
-                                  position: 'absolute',
-                                  right: '8px',
-                                  top: '50%',
-                                  transform: 'translateY(-50%)',
-                                  background: 'none',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  padding: '4px',
-                                  opacity: 0.7,
-                                  fontSize: '1rem'
-                                }}
-                                title={showCurrentPassword ? '숨기기' : '표시'}
-                              >
-                                {showCurrentPassword ? '🙈' : '👁️'}
-                              </button>
-                            </div>
+                            <PasswordInput
+                              value={currentPassword}
+                              visible={showCurrentPassword}
+                              placeholder="현재 비밀번호 입력"
+                              onChange={setCurrentPassword}
+                              onToggleVisible={() => setShowCurrentPassword(!showCurrentPassword)}
+                            />
                             <span className="settings-field-help">비밀번호를 변경할 때만 현재 비밀번호를 입력합니다.</span>
                           </label>
                         )}
@@ -1990,76 +1970,18 @@ export function SettingsModal(props: SettingsModalProps) {
                         {/* New Password - only enable input when current password is provided (if password was set) */}
                         <label className={`settings-field ${isSettingsFieldDirty('password') ? 'changed' : ''}`}>
                           {newPasswordLabel}
-                          <div style={{ position: 'relative' }}>
-                            <input
-                              type={showNewPassword ? 'text' : 'password'}
-                              placeholder={newPasswordPlaceholder}
-                              value={settingsForm.password}
-                              onChange={(e) => updateSettingsField('password', e.target.value)}
-                              disabled={settingsForm.passwordSet && currentPassword.trim().length === 0}
-                              style={{ 
-                                paddingRight: '40px',
-                                opacity: settingsForm.passwordSet && currentPassword.trim().length === 0 ? 0.6 : 1
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowNewPassword(!showNewPassword)}
-                              style={{
-                                position: 'absolute',
-                                right: '8px',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                background: 'none',
-                                border: 'none',
-                                cursor: 'pointer',
-                                padding: '4px',
-                                opacity: 0.7,
-                                fontSize: '1rem'
-                              }}
-                              title={showNewPassword ? '숨기기' : '표시'}
-                            >
-                              {showNewPassword ? '🙈' : '👁️'}
-                            </button>
-                          </div>
-                          
-                          {/* Password Strength Indicator */}
-                          {settingsForm.password.trim().length > 0 && (
-                            <div style={{ marginTop: '6px' }}>
-                              <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
-                                {[1, 2, 3].map((level) => {
-                                  const strength = (() => {
-                                    const pw = settingsForm.password.trim();
-                                    if (pw.length < 4) return 1;
-                                    if (pw.length < 8) return 2;
-                                    return 3;
-                                  })();
-                                  const active = level <= strength;
-                                  const colors = ['#ef4444', '#f59e0b', '#22c55e'];
-                                  return (
-                                    <div
-                                      key={level}
-                                      style={{
-                                        flex: 1,
-                                        height: '4px',
-                                        borderRadius: '2px',
-                                        backgroundColor: active ? colors[strength - 1] : 'var(--border-muted)',
-                                        transition: 'background-color 0.2s'
-                                      }}
-                                    />
-                                  );
-                                })}
-                              </div>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                {(() => {
-                                  const pw = settingsForm.password.trim();
-                                  if (pw.length < 4) return '강도: 약함 (4자 이상 권장)';
-                                  if (pw.length < 8) return '강도: 보통 (8자 이상 권장)';
-                                  return '강도: 강함';
-                                })()}
-                              </span>
-                            </div>
-                          )}
+                          <PasswordInput
+                            value={settingsForm.password}
+                            visible={showNewPassword}
+                            placeholder={newPasswordPlaceholder}
+                            onChange={(value) => updateSettingsField('password', value)}
+                            onToggleVisible={() => setShowNewPassword(!showNewPassword)}
+                            disabled={settingsForm.passwordSet && currentPassword.trim().length === 0}
+                            style={{
+                              opacity: settingsForm.passwordSet && currentPassword.trim().length === 0 ? 0.6 : 1,
+                            }}
+                          />
+                          <PasswordStrengthIndicator password={settingsForm.password} />
                           <span className="settings-field-help">{newPasswordHelpText}</span>
                         </label>
                         
@@ -2067,37 +1989,16 @@ export function SettingsModal(props: SettingsModalProps) {
                         {settingsForm.password.trim().length > 0 && (
                           <label className="settings-field">
                             비밀번호 확인
-                            <div style={{ position: 'relative' }}>
-                              <input
-                                type={showConfirmPassword ? 'text' : 'password'}
-                                placeholder={confirmPasswordPlaceholder}
-                                value={passwordConfirm}
-                                onChange={(e) => setPasswordConfirm(e.target.value)}
-                                style={{ 
-                                  paddingRight: '40px',
-                                  borderColor: passwordConfirm.length > 0 && passwordConfirm !== settingsForm.password ? '#ef4444' : undefined
-                                }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                style={{
-                                  position: 'absolute',
-                                  right: '8px',
-                                  top: '50%',
-                                  transform: 'translateY(-50%)',
-                                  background: 'none',
-                                  border: 'none',
-                                  cursor: 'pointer',
-                                  padding: '4px',
-                                  opacity: 0.7,
-                                  fontSize: '1rem'
-                                }}
-                                title={showConfirmPassword ? '숨기기' : '표시'}
-                              >
-                                {showConfirmPassword ? '🙈' : '👁️'}
-                              </button>
-                            </div>
+                            <PasswordInput
+                              value={passwordConfirm}
+                              visible={showConfirmPassword}
+                              placeholder={confirmPasswordPlaceholder}
+                              onChange={setPasswordConfirm}
+                              onToggleVisible={() => setShowConfirmPassword(!showConfirmPassword)}
+                              style={{
+                                borderColor: passwordConfirm.length > 0 && passwordConfirm !== settingsForm.password ? '#ef4444' : undefined,
+                              }}
+                            />
                             {passwordConfirm.length > 0 && passwordConfirm !== settingsForm.password && (
                               <span className="settings-field-help error">비밀번호가 일치하지 않습니다.</span>
                             )}
