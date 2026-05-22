@@ -1,7 +1,9 @@
+from collections import deque
 from typing import Optional, Dict, Any
 import threading
 import time
-from backend.FacilityData.schemas import FactoryData
+import uuid
+from backend.FacilityData.schemas import FactoryData, FactoryDataHistoryResponse, FactoryDataHistorySample
 from .drivers.base import BasePLCDriver
 from .drivers.mock_plc import MockPLCDriver
 from .drivers.real_plc import RealPLCDriver
@@ -12,6 +14,9 @@ from backend.Observability.Observability_Logic_Status import StatusEvaluator
 from backend.Observability.service import observability_service
 
 class PLCService:
+    HISTORY_MAX_AGE_MS = 60 * 60 * 1000
+    HISTORY_MAX_SAMPLES = 36_000
+
     def __init__(self, use_mock: bool = True):
         if use_mock:
             import os
@@ -37,6 +42,9 @@ class PLCService:
         self.lock = threading.Lock()
         self.driver_state_lock = threading.Lock()
         self.interval_lock = threading.Lock()
+        self.history_lock = threading.Lock()
+        self.history: deque[FactoryDataHistorySample] = deque(maxlen=self.HISTORY_MAX_SAMPLES)
+        self.history_instance_id = uuid.uuid4().hex
         self.last_update: Optional[float] = None
         self.interval_sec = float(config.INTERVAL_SEC)
         self.status_evaluator = StatusEvaluator()
@@ -131,15 +139,62 @@ class PLCService:
         computed = self.status_evaluator.evaluate(raw_data, thresholds_cfg, float(press_threshold))
         return raw_data.model_copy(update={"Computed": computed})
 
+    def _with_timestamp_ms(self, data: FactoryData, timestamp_ms: int) -> FactoryData:
+        return data.model_copy(update={"timestamp_ms": timestamp_ms})
+
+    def _prune_history_locked(self, now_ms: int) -> None:
+        cutoff_ms = now_ms - self.HISTORY_MAX_AGE_MS
+        while self.history and self.history[0].timestamp_ms < cutoff_ms:
+            self.history.popleft()
+
+    def _record_history_sample(self, data: FactoryData, captured_at_sec: float) -> None:
+        timestamp_ms = int(captured_at_sec * 1000)
+        data_with_timestamp = self._with_timestamp_ms(data, timestamp_ms)
+        sample = FactoryDataHistorySample(
+            timestamp_ms=timestamp_ms,
+            data=data_with_timestamp.model_copy(deep=True),
+        )
+        with self.history_lock:
+            self._prune_history_locked(timestamp_ms)
+            if self.history and self.history[-1].timestamp_ms == timestamp_ms:
+                self.history[-1] = sample
+                return
+            self.history.append(sample)
+
+    def get_data_history(self, since_ms: int, limit: int) -> FactoryDataHistoryResponse:
+        now_ms = int(time.time() * 1000)
+        cutoff_ms = max(since_ms, now_ms - self.HISTORY_MAX_AGE_MS)
+        with self.history_lock:
+            self._prune_history_locked(now_ms)
+            oldest_timestamp_ms = self.history[0].timestamp_ms if self.history else None
+            newest_timestamp_ms = self.history[-1].timestamp_ms if self.history else None
+            truncated = since_ms > 0 if oldest_timestamp_ms is None else since_ms < oldest_timestamp_ms
+            samples = [sample for sample in self.history if sample.timestamp_ms > cutoff_ms]
+            return FactoryDataHistoryResponse(
+                samples=samples[-limit:],
+                oldest_timestamp_ms=oldest_timestamp_ms,
+                newest_timestamp_ms=newest_timestamp_ms,
+                history_instance_id=self.history_instance_id,
+                truncated=truncated,
+            )
+
+    def clear_data_history(self) -> None:
+        with self.history_lock:
+            self.history.clear()
+            self.history_instance_id = uuid.uuid4().hex
+
     def _loop(self):
         while self.running:
             try:
                 raw_data, driver_data_at = self._get_driver_snapshot()
                 if raw_data is not None and driver_data_at is not None and driver_data_at != self.last_processed_driver_data_at:
                     next_data = self._compose_data(raw_data)
+                    timestamp_ms = int(driver_data_at * 1000)
+                    current_data = self._with_timestamp_ms(next_data, timestamp_ms)
                     with self.lock:
-                        self.current_data = next_data
+                        self.current_data = current_data
                         self.last_update = driver_data_at
+                    self._record_history_sample(current_data, driver_data_at)
                     logger_service.enqueue(next_data)
                     self.last_processed_driver_data_at = driver_data_at
                 time.sleep(self._current_interval())

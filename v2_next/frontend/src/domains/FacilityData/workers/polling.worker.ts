@@ -40,6 +40,9 @@ const scheduleNext = () => {
 const tick = async () => {
   try {
     const payload = await fetchLatestMetricWithLatency();
+    if (!isRunning) {
+      return;
+    }
     consecutiveFailures = 0;
     currentIntervalMs = baseIntervalMs;
     ctx.postMessage(
@@ -50,6 +53,9 @@ const tick = async () => {
       })
     );
   } catch (err: any) {
+    if (!isRunning) {
+      return;
+    }
     consecutiveFailures += 1;
     currentIntervalMs = resolveIntervalMs(baseIntervalMs, consecutiveFailures);
     ctx.postMessage(

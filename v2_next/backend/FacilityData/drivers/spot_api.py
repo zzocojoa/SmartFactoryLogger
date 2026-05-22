@@ -676,12 +676,11 @@ async def _refresh_spot_internal_temperature_safely(client: httpx.AsyncClient, l
 
 def get_image_proxy_diagnostics() -> Dict[str, Any]:
     now = time.time()
-    cache_age = _cache_age_sec(now) if _img_cache["data"] else None
+    cached_image = _cached_image_data()
+    cache_age = _cache_age_sec(now) if cached_image is not None else None
     cache_status = _cache_status(now)
     retry_after = _retry_after_sec(now)
-    internal_temperature = _cached_internal_temperature(now)
-    internal_temperature_at = float(_internal_temp_cache.get("temp_time") or 0.0)
-    return {
+    payload = {
         "cache_state": _cache_state_for_status(cache_status),
         "cache_status": cache_status,
         "image_status": _image_status_for_cache_status(cache_status),
@@ -692,8 +691,8 @@ def get_image_proxy_diagnostics() -> Dict[str, Any]:
         "last_error_code": _img_last_error_code,
         "last_error_message": _img_last_error_message,
         "image_url_configured": bool(str(config.SPOT_IMAGE_URL or "").strip()),
-        "has_cached_image": bool(_img_cache["data"]),
-        "cache_captured_at": float(_img_cache.get("time") or 0.0) if _img_cache["data"] else None,
+        "has_cached_image": cached_image is not None,
+        "cache_captured_at": float(_img_cache.get("time") or 0.0) if cached_image is not None else None,
         "cache_age_sec": cache_age,
         "max_stale_age_sec": _max_stale_age_sec(),
         "current_backoff_sec": _current_backoff_sec(),
@@ -708,39 +707,24 @@ def get_image_proxy_diagnostics() -> Dict[str, Any]:
         "temperature_last_error_message": _temp_last_error_message,
         "temperature_last_upstream_status": _temp_last_upstream_status,
         "temperature_last_url": _temp_last_url,
-        "internal_temperature_url_configured": bool(str(config.SPOT_INTERNAL_TEMPERATURE_URL or "").strip()),
-        "internal_temperature": internal_temperature,
-        "internal_temperature_at": internal_temperature_at if internal_temperature is not None else None,
-        "internal_temperature_cache_status": _internal_temperature_cache_status(now),
-        "internal_temperature_cache_age_sec": _internal_temperature_cache_age_sec(now),
-        "internal_temperature_last_success_at": (
-            float(_internal_temp_last_success_at) if _internal_temp_last_success_at else None
-        ),
-        "internal_temperature_last_error_at": (
-            float(_internal_temp_last_error) if _internal_temp_last_error else None
-        ),
-        "internal_temperature_last_error_code": _internal_temp_last_error_code,
-        "internal_temperature_last_error_message": _internal_temp_last_error_message,
-        "internal_temperature_last_upstream_status": _internal_temp_last_upstream_status,
-        "internal_temperature_last_url": _internal_temp_last_url,
     }
+    payload.update(_build_internal_temperature_diagnostics(now, include_cached_at=False))
+    return payload
 
 
 def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
-    now = time.time()
+    return _build_internal_temperature_diagnostics(time.time(), include_cached_at=True)
+
+
+def _build_internal_temperature_diagnostics(now: float, *, include_cached_at: bool) -> Dict[str, Any]:
     internal_temperature = _cached_internal_temperature(now)
     internal_temperature_at = float(_internal_temp_cache.get("temp_time") or 0.0)
-    return {
+    payload = {
         "internal_temperature_url_configured": bool(str(config.SPOT_INTERNAL_TEMPERATURE_URL or "").strip()),
         "internal_temperature": internal_temperature,
         "internal_temperature_at": internal_temperature_at if internal_temperature is not None else None,
         "internal_temperature_cache_status": _internal_temperature_cache_status(now),
         "internal_temperature_cache_age_sec": _internal_temperature_cache_age_sec(now),
-        "internal_temperature_cached_at": (
-            float(_internal_temp_cache.get("temp_time") or 0.0)
-            if _internal_temp_cache.get("temp_time")
-            else None
-        ),
         "internal_temperature_last_success_at": (
             float(_internal_temp_last_success_at) if _internal_temp_last_success_at else None
         ),
@@ -752,6 +736,13 @@ def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
         "internal_temperature_last_upstream_status": _internal_temp_last_upstream_status,
         "internal_temperature_last_url": _internal_temp_last_url,
     }
+    if include_cached_at:
+        payload["internal_temperature_cached_at"] = (
+            float(_internal_temp_cache.get("temp_time") or 0.0)
+            if _internal_temp_cache.get("temp_time")
+            else None
+        )
+    return payload
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -784,8 +775,15 @@ def _cache_age_sec(now: float) -> float:
     return max(0.0, now - float(_img_cache.get("time") or 0.0))
 
 
+def _cached_image_data() -> Optional[bytes]:
+    data = _img_cache.get("data")
+    if not isinstance(data, bytes) or not data:
+        return None
+    return data
+
+
 def _cache_status(now: float) -> str:
-    if not _img_cache["data"]:
+    if _cached_image_data() is None:
         return "empty"
     if _cache_age_sec(now) >= _max_stale_age_sec():
         return "stale"
@@ -819,9 +817,16 @@ def _image_proxy_state(now: float) -> str:
     return "ok"
 
 
-def _build_image_meta(now: float, status: str, source: str) -> Dict[str, Any]:
+def _build_image_meta(
+    now: float,
+    status: str,
+    source: str,
+    *,
+    cache_status: Optional[str] = None,
+) -> Dict[str, Any]:
     captured_at = float(_img_cache.get("time") or 0.0)
-    cache_status = _cache_status(now)
+    if cache_status is None:
+        cache_status = _cache_status(now)
     return {
         "status": status,
         "source": source,
@@ -845,6 +850,19 @@ def _should_log_cache_state(now: float) -> bool:
     return True
 
 
+def _build_cached_image_response(
+    now: float,
+    cached_image: bytes,
+    *,
+    cache_status: Optional[str] = None,
+) -> tuple[bytes, Dict[str, Any]]:
+    if cache_status is None:
+        cache_status = _cache_status(now)
+    status = _image_status_for_cache_status(cache_status)
+    cache_state = _cache_state_for_status(cache_status)
+    return cached_image, _build_image_meta(now, status, cache_state, cache_status=cache_status)
+
+
 async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     """캐시에서 즉시 반환 (백그라운드 프리페칭된 이미지)."""
     global _img_failure_count
@@ -855,10 +873,10 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     now = time.time()
     
     # 캐시에 이미지가 있으면 즉시 반환
-    if _img_cache["data"]:
+    cached_image = _cached_image_data()
+    if cached_image is not None:
         age = _cache_age_sec(now)
         cache_status = _cache_status(now)
-        status = _image_status_for_cache_status(cache_status)
         next_cache_state = _cache_state_for_status(cache_status)
         if _img_cache_state != next_cache_state and _should_log_cache_state(now):
             if next_cache_state == "cache":
@@ -866,7 +884,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             else:
                 logger.warning("Spot stale serve: age_sec=%.3f", age)
         _img_cache_state = next_cache_state
-        return _img_cache["data"], _build_image_meta(now, status, next_cache_state)
+        return _build_cached_image_response(now, cached_image, cache_status=cache_status)
     
     # 캐시가 비어있으면 초기 로드를 위해 한 번 직접 가져온다.
     try:
@@ -877,25 +895,24 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
 
     retry_after = _retry_after_sec(time.time())
     if retry_after is not None and retry_after > 0.0:
-        if _img_cache["data"]:
+        cached_image = _cached_image_data()
+        if cached_image is not None:
             backoff_cached_now = time.time()
-            backoff_cache_status = _cache_status(backoff_cached_now)
-            backoff_status = _image_status_for_cache_status(backoff_cache_status)
-            next_cache_state = _cache_state_for_status(backoff_cache_status)
+            cache_status = _cache_status(backoff_cached_now)
+            next_cache_state = _cache_state_for_status(cache_status)
             _img_cache_state = next_cache_state
-            return _img_cache["data"], _build_image_meta(backoff_cached_now, backoff_status, next_cache_state)
+            return _build_cached_image_response(backoff_cached_now, cached_image, cache_status=cache_status)
         raise SpotImageBackoffError(image_url, retry_after)
     
     async with _img_fetch_lock:
         # 잠금 획득 후 캐시를 다시 확인한다.
-        if _img_cache["data"]:
+        cached_image = _cached_image_data()
+        if cached_image is not None:
             cached_now = time.time()
-            cached_age = _cache_age_sec(cached_now)
-            cached_cache_status = _cache_status(cached_now)
-            cached_status = _image_status_for_cache_status(cached_cache_status)
-            next_cache_state = _cache_state_for_status(cached_cache_status)
+            cache_status = _cache_status(cached_now)
+            next_cache_state = _cache_state_for_status(cache_status)
             _img_cache_state = next_cache_state
-            return _img_cache["data"], _build_image_meta(cached_now, cached_status, next_cache_state)
+            return _build_cached_image_response(cached_now, cached_image, cache_status=cache_status)
 
         locked_retry_after = _retry_after_sec(time.time())
         if locked_retry_after is not None and locked_retry_after > 0.0:

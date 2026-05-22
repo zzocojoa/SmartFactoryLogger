@@ -5,9 +5,14 @@
 import type { ConnectionTestResult, PathHealthResult, CentralSyncResult } from '../../../../shared/types';
 import { formatTime } from '../../../../shared/utils/formatters';
 
+interface StatusBadge {
+  label: string;
+  className: 'idle' | 'ok' | 'warn' | 'error';
+}
+
 // ─── Connection Test Badges ───────────────────────────────────────
 
-export const getTestBadge = (result?: ConnectionTestResult) => {
+export const getTestBadge = (result?: ConnectionTestResult): StatusBadge => {
   if (!result) {
     return { label: '미실행', className: 'idle' };
   }
@@ -16,7 +21,7 @@ export const getTestBadge = (result?: ConnectionTestResult) => {
     : { label: '실패', className: 'error' };
 };
 
-export const formatTestTime = (result?: ConnectionTestResult) => {
+export const formatTestTime = (result?: ConnectionTestResult): string => {
   if (!result) {
     return '미실행';
   }
@@ -25,7 +30,7 @@ export const formatTestTime = (result?: ConnectionTestResult) => {
 
 // ─── Path Health Badges ───────────────────────────────────────────
 
-export const getPathBadge = (result?: PathHealthResult) => {
+export const getPathBadge = (result?: PathHealthResult): StatusBadge => {
   if (!result) {
     return { label: '미검사', className: 'idle' };
   }
@@ -41,14 +46,14 @@ export const getPathBadge = (result?: PathHealthResult) => {
   return { label: '미확인', className: 'idle' };
 };
 
-export const formatPathCheckTime = (result?: PathHealthResult) => {
+export const formatPathCheckTime = (result?: PathHealthResult): string => {
   if (!result?.checked_at) {
     return '미검사';
   }
   return new Date(result.checked_at).toLocaleTimeString();
 };
 
-export const formatPathMessage = (result?: PathHealthResult) => {
+export const formatPathMessage = (result?: PathHealthResult): string => {
   if (!result) {
     return '경로 상태를 확인하세요.';
   }
@@ -66,7 +71,7 @@ export const formatPathMessage = (result?: PathHealthResult) => {
 
 // ─── Central Sync Badges ──────────────────────────────────────────
 
-export const getCentralBadge = (status?: string, configured?: boolean) => {
+export const getCentralBadge = (status?: string, configured?: boolean): StatusBadge => {
   if (configured === false) {
     return { label: '미설정', className: 'idle' };
   }
@@ -94,7 +99,7 @@ export const getCentralBadge = (status?: string, configured?: boolean) => {
   return { label: status, className: 'idle' };
 };
 
-export const formatCentralTime = (result?: CentralSyncResult) => {
+export const formatCentralTime = (result?: CentralSyncResult): string => {
   if (!result?.at) {
     return '미실행';
   }

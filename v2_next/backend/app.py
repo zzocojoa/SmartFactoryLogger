@@ -2,7 +2,7 @@ import asyncio
 import sys
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 # Important: Add the directory containing the 'backend' folder to sys.path
 # This ensures that 'from backend.Observability...' works in all environments.
@@ -11,7 +11,7 @@ project_root = current_dir.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -75,7 +75,8 @@ from urllib.request import Request, urlopen
 from typing import Any, NamedTuple, TypedDict
 
 # Import Service Layer using absolute imports
-from backend.FacilityData.service import plc_service
+from backend.FacilityData.schemas import FactoryData, FactoryDataHistoryResponse
+from backend.FacilityData.service import PLCService, plc_service
 from backend.FacilityData.repository import logger_service
 from backend.Observability.metrics_logger import comm_metrics_logger_service
 from backend.Observability.memory_service import estimate_size_bytes, memory_service
@@ -103,7 +104,6 @@ from backend.Configuration.Configuration_Logic_Sync import config_sync_agent
 from backend.Configuration.Configuration_Logic_Watch import config_watch_service
 from backend.Configuration.Configuration_Structure import ConfigUpdate, OverrideToggle, SettingsConfig
 from backend.FacilityData.drivers import spot_api as spot_control
-from backend.FacilityData.schemas import FactoryData
 from backend.Observability.Observability_Logic_Verification import compare_with_reference
 from backend import config
 from backend.MESSync import MESSync_Logic_Scheduler as mes_scheduler
@@ -257,8 +257,6 @@ _SPOT_INTERNAL_TEMPERATURE_HEADER = "X-Spot-Internal-Temperature"
 _SPOT_INTERNAL_TEMPERATURE_AT_HEADER = "X-Spot-Internal-Temperature-At"
 _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER = "X-Spot-Internal-Temperature-Status"
 _SPOT_INTERNAL_TEMPERATURE_STALE_STATUSES = {"empty", "error", "missing", "stale", "unavailable"}
-
-
 def _url_host(url: str) -> str | None:
     try:
         host = urlsplit(url).hostname
@@ -1623,6 +1621,14 @@ def read_root():
 async def get_data():
     """Get latest snapshot from PLC Service (Memory)"""
     return plc_service.get_latest_data()
+
+
+@app.get("/api/data/history", response_model=FactoryDataHistoryResponse)
+async def get_data_history(
+    since_ms: Annotated[int, Query(ge=0)],
+    limit: Annotated[int, Query(ge=1, le=PLCService.HISTORY_MAX_SAMPLES)] = 36000,
+):
+    return plc_service.get_data_history(since_ms, limit)
 
 @app.get("/health")
 async def health():

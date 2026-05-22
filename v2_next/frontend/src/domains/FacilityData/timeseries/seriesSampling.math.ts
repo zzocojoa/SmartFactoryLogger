@@ -14,8 +14,7 @@ export const normalizeTimestamp = (value?: string | null, fallbackMs: number = D
   return parsed;
 };
 
-export const buildSeriesSample = (data: FactoryData, fallbackMs: number = Date.now()): SeriesSample => {
-  const timestampMs = normalizeTimestamp(data.Time, fallbackMs);
+const buildSeriesValues = (data: FactoryData): Record<TimeSeriesKey, number | null> => {
   const values = {} as Record<TimeSeriesKey, number | null>;
 
   for (const meta of TIME_SERIES_CATALOG) {
@@ -23,5 +22,15 @@ export const buildSeriesSample = (data: FactoryData, fallbackMs: number = Date.n
     values[meta.key] = typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
   }
 
+  return values;
+};
+
+export const buildSeriesSampleAt = (data: FactoryData, timestampMs: number): SeriesSample => {
+  const values = buildSeriesValues(data);
   return { timestampMs, values };
+};
+
+export const buildSeriesSample = (data: FactoryData, fallbackMs: number = Date.now()): SeriesSample => {
+  const timestampMs = normalizeTimestamp(data.Time, fallbackMs);
+  return buildSeriesSampleAt(data, timestampMs);
 };

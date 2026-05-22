@@ -658,18 +658,42 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
     return details;
   }, [commitDetails]);
 
+  const decorateFrontendSnapshot = useCallback((
+    snapshot: FrontendMemorySnapshot,
+    refreshError: string | null,
+    options: {
+      backendMemory?: MemoryStateResponse | null;
+      lastExportAt?: number | null;
+    } = {}
+  ): FrontendMemorySnapshot => {
+    const backendMemory = options.backendMemory ?? summaryRef.current;
+    const resolvedLastExportAt = options.lastExportAt ?? lastExportAtRef.current;
+    return cloneFrontendSnapshot(
+      snapshot,
+      buildFrontendAlerts(backendMemory, snapshot, refreshError),
+      refreshError,
+      readDiagnostics(),
+      resolvedLastExportAt
+    );
+  }, [readDiagnostics]);
+
+  const commitDecoratedFrontend = useCallback((
+    snapshot: FrontendMemorySnapshot,
+    refreshError: string | null,
+    options?: {
+      backendMemory?: MemoryStateResponse | null;
+      lastExportAt?: number | null;
+    }
+  ): FrontendMemorySnapshot => {
+    const decoratedSnapshot = decorateFrontendSnapshot(snapshot, refreshError, options);
+    commitFrontend(decoratedSnapshot);
+    return decoratedSnapshot;
+  }, [commitFrontend, decorateFrontendSnapshot]);
+
   const syncFrontend = useCallback(async (refreshError: string | null): Promise<void> => {
     const nextFrontend = await captureFrontendMemory();
-    commitFrontend(
-      cloneFrontendSnapshot(
-        nextFrontend,
-        buildFrontendAlerts(summaryRef.current, nextFrontend, refreshError),
-        refreshError,
-        readDiagnostics(),
-        lastExportAtRef.current
-      )
-    );
-  }, [captureFrontendMemory, commitFrontend, readDiagnostics]);
+    commitDecoratedFrontend(nextFrontend, refreshError);
+  }, [captureFrontendMemory, commitDecoratedFrontend]);
 
   const broadcastSummary = useCallback((summary: MemoryStateResponse): void => {
     if (typeof window === 'undefined') {
@@ -707,22 +731,14 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
       }
       exportMetaLoadedRef.current = true;
       if (frontendRef.current) {
-        commitFrontend(
-          cloneFrontendSnapshot(
-            frontendRef.current,
-            buildFrontendAlerts(summaryRef.current, frontendRef.current, frontendRef.current.refresh_error ?? null),
-            frontendRef.current.refresh_error ?? null,
-            readDiagnostics(),
-            lastExportAtRef.current
-          )
-        );
+        commitDecoratedFrontend(frontendRef.current, frontendRef.current.refresh_error ?? null);
       }
     } catch {
       exportMetaLoadedRef.current = true;
     } finally {
       exportMetaInFlightRef.current = false;
     }
-  }, [commitFrontend, readDiagnostics]);
+  }, [commitDecoratedFrontend]);
 
   const loadDetails = useCallback(async (): Promise<void> => {
     if (detailsInFlightRef.current) {
@@ -756,14 +772,10 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
         broadcastSummary(summary);
       }
       if (frontendRef.current) {
-        commitFrontend(
-          cloneFrontendSnapshot(
-            frontendRef.current,
-            buildFrontendAlerts(summary, frontendRef.current, frontendRef.current.refresh_error ?? null),
-            frontendRef.current.refresh_error ?? null,
-            readDiagnostics(),
-            lastExportAtRef.current
-          )
+        commitDecoratedFrontend(
+          frontendRef.current,
+          frontendRef.current.refresh_error ?? null,
+          { backendMemory: summary }
         );
       } else {
         await syncFrontend(null);
@@ -771,22 +783,14 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
     } catch (error) {
       const message = error instanceof Error ? error.message : 'backend memory refresh failed';
       if (frontendRef.current) {
-        commitFrontend(
-          cloneFrontendSnapshot(
-            frontendRef.current,
-            buildFrontendAlerts(summaryRef.current, frontendRef.current, message),
-            message,
-            readDiagnostics(),
-            lastExportAtRef.current
-          )
-        );
+        commitDecoratedFrontend(frontendRef.current, message);
       }
     } finally {
       refreshInFlightRef.current = false;
       setMemoryRefreshInFlight(false);
       setMemorySummaryBusy(false);
     }
-  }, [broadcastSummary, commitFrontend, readDiagnostics, syncFrontend, syncSummary]);
+  }, [broadcastSummary, commitDecoratedFrontend, syncFrontend, syncSummary]);
 
   useEffect(() => {
     executeSummarySyncRef.current = executeSummarySync;
@@ -915,15 +919,7 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
         await syncDetails();
         detailsLoadedRef.current = true;
         if (frontendRef.current) {
-          commitFrontend(
-            cloneFrontendSnapshot(
-              frontendRef.current,
-              buildFrontendAlerts(summaryRef.current, frontendRef.current, frontendRef.current.refresh_error ?? null),
-              frontendRef.current.refresh_error ?? null,
-              readDiagnostics(),
-              lastExportAtRef.current
-            )
-          );
+          commitDecoratedFrontend(frontendRef.current, frontendRef.current.refresh_error ?? null);
         }
       } finally {
         profilerActionRef.current = null;
@@ -933,7 +929,7 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
       }
       scheduleSummarySync(`profiler-${mode}`, true);
     },
-    [commitFrontend, commitSummary, readDiagnostics, scheduleSummarySync, syncDetails]
+    [commitDecoratedFrontend, commitSummary, scheduleSummarySync, syncDetails]
   );
 
   const startMemoryProfiler = useCallback(async (): Promise<void> => runProfilerAction('start'), [runProfilerAction]);
@@ -962,14 +958,10 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
         safeSetItem(MEMORY_EXPORT_PATH_KEY, path);
       }
       if (frontendRef.current) {
-        commitFrontend(
-          cloneFrontendSnapshot(
-            frontendRef.current,
-            buildFrontendAlerts(summaryRef.current, frontendRef.current, frontendRef.current.refresh_error ?? null),
-            frontendRef.current.refresh_error ?? null,
-            readDiagnostics(),
-            exportedAt
-          )
+        commitDecoratedFrontend(
+          frontendRef.current,
+          frontendRef.current.refresh_error ?? null,
+          { lastExportAt: exportedAt }
         );
       }
       return path;
@@ -978,7 +970,7 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
       setMemoryExportBusy(false);
       setMemoryActionState((current) => ({ ...current, export: false }));
     }
-  }, [commitFrontend, memoryExportPath, readDiagnostics, syncFrontend]);
+  }, [commitDecoratedFrontend, memoryExportPath, syncFrontend]);
 
   const reconcileLeadership = useCallback((): void => {
     if (typeof window === 'undefined') {

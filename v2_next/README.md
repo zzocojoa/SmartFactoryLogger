@@ -1,5 +1,7 @@
 ﻿# SmartFactoryLogger V2 (v2_next)
 
+릴리스 노트는 [CHANGELOG.md](CHANGELOG.md)를 확인하세요.
+
 cd frontend; npm start
 
 cd backend; python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload

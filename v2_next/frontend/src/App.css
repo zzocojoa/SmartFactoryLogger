@@ -1149,6 +1149,17 @@ body {
   pointer-events: auto;
 }
 
+@media (min-width: 769px) {
+  .notification-overlay {
+    z-index: 5300;
+  }
+
+  .notification-drawer {
+    top: 34px;
+    z-index: 5310;
+  }
+}
+
 .notification-header {
   display: flex;
   align-items: center;

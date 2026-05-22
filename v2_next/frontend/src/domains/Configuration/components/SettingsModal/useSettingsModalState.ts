@@ -6,7 +6,7 @@
  * removes ~200 lines from App.tsx without changing behaviour.
  */
 import { useMemo, useCallback } from 'react';
-import type { SettingsFormState } from '../../../../shared/types';
+import type { PathHealthState, SettingsFormState } from '../../../../shared/types';
 import { formatMetaTime } from '../../../../shared/utils/formatters';
 import { CONFIG_LABELS, LABELS } from '../../../../shared/constants/uiText';
 
@@ -17,7 +17,7 @@ export interface SettingsModalStateOptions {
   settingsBaseline: SettingsFormState | null;
   settingsApplyResult: { applied?: string[]; pending?: string[] } | null;
   overrideMeta: { last_sync?: string | null } | null | undefined;
-  pathHealth: any;
+  pathHealth: PathHealthState;
   hasSettingsChanges: boolean;
   isSettingsFieldDirty: (field: keyof SettingsFormState) => boolean;
 }
@@ -214,6 +214,8 @@ const CHANGE_SUMMARY_KEYS: Array<keyof SettingsFormState> = [
   'password',
 ];
 
+const PATH_HEALTH_KEYS = ['log', 'snapshot'] as const;
+
 const APPLY_KEY_LABELS: Record<string, string> = {
   'settings.logpath': CONFIG_LABELS.LOG_PATH,
   'settings.snapshotpath': CONFIG_LABELS.SNAPSHOT_PATH,
@@ -405,11 +407,11 @@ export function useSettingsModalState(opts: SettingsModalStateOptions) {
   /* ── path health ── */
   const { pathHealth } = opts;
   const hasPathError = useMemo(() => 
-    ['log', 'snapshot'].some(key => pathHealth[key]?.status === 'ERROR'),
+    PATH_HEALTH_KEYS.some(key => pathHealth[key]?.status === 'ERROR'),
     [pathHealth]
   );
   const hasPathWarn = useMemo(() => 
-    ['log', 'snapshot'].some(key => pathHealth[key]?.status === 'WARN'),
+    PATH_HEALTH_KEYS.some(key => pathHealth[key]?.status === 'WARN'),
     [pathHealth]
   );
   const logPathFieldState = useMemo(() => {

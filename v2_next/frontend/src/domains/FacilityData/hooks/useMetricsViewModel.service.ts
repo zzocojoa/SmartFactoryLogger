@@ -1,7 +1,20 @@
 import { metricService } from '../api/metricService';
+import type { LatestMetricResponse, MetricHistoryResponse } from '../api/metricService.types';
 
 let sharedPollingWorker: Worker | null = null;
 let sharedPollingWorkerRefCount = 0;
+
+export interface MetricFetchWithLatencyResult {
+  data: LatestMetricResponse;
+  latency: number;
+  timestamp: number;
+}
+
+export interface MetricHistoryFetchWithLatencyResult {
+  data: MetricHistoryResponse;
+  latency: number;
+  timestamp: number;
+}
 
 export const createPollingWorker = (): Worker => {
   if (sharedPollingWorker === null) {
@@ -36,9 +49,22 @@ export const stopPollingWorker = (worker: Worker): void => {
   worker.postMessage({ type: 'STOP' });
 };
 
-export const fetchLatestMetricOnMainThreadWithLatency = async () => {
+export const fetchLatestMetricOnMainThreadWithLatency = async (): Promise<MetricFetchWithLatencyResult> => {
   const startedAt = performance.now();
   const data = await metricService.getLatest();
+  const endedAt = performance.now();
+  return {
+    data,
+    latency: endedAt - startedAt,
+    timestamp: data.timestamp_ms ?? Date.now(),
+  };
+};
+
+export const fetchMetricHistorySinceOnMainThreadWithLatency = async (
+  sinceMs: number,
+): Promise<MetricHistoryFetchWithLatencyResult> => {
+  const startedAt = performance.now();
+  const data = await metricService.getHistorySince(sinceMs);
   const endedAt = performance.now();
   return {
     data,

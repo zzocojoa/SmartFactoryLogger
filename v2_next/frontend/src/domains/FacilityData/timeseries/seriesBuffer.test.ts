@@ -151,4 +151,91 @@ describe('SeriesBuffer', () => {
       chronological: false,
     });
   });
+
+  it('keeps overlapping visibility backfill samples idempotent by timestamp', () => {
+    const buffer = new SeriesBuffer(10_000, 10);
+
+    buffer.append(buildSample(1_000, 10));
+    buffer.append(buildSample(2_000, 20));
+    buffer.append(buildSample(2_000, 20));
+    buffer.append(buildSample(3_000, 30));
+
+    expect(getTimestamps(buffer.getSamples())).toEqual([1_000, 2_000, 3_000]);
+    expect(buffer.getSnapshot()).toMatchObject({
+      firstSequence: 0,
+      nextSequence: 3,
+      chronological: true,
+    });
+  });
+
+  it('appends history samples without duplicate timestamps', () => {
+    const buffer = new SeriesBuffer(10_000, 10);
+
+    buffer.append(buildSample(1_000, 10));
+    buffer.append(buildSample(2_000, 20));
+    const appendedCount = buffer.appendHistory([
+      buildSample(2_000, 200),
+      buildSample(3_000, 30),
+      buildSample(3_000, 300),
+      buildSample(4_000, 40),
+    ]);
+
+    expect(appendedCount).toBe(2);
+    expect(getTimestamps(buffer.getSamples())).toEqual([1_000, 2_000, 3_000, 4_000]);
+    expect(buffer.getSamples().map((sample) => sample.values.Spot)).toEqual([10, 20, 30, 40]);
+    expect(buffer.getLatestTimestampMs()).toBe(4_000);
+    expect(buffer.getSnapshot()).toMatchObject({
+      chronological: true,
+      firstSequence: 0,
+      nextSequence: 4,
+    });
+  });
+
+  it('bulk appends chronological history without routing through live append', () => {
+    const buffer = new SeriesBuffer(10_000, 10);
+    const originalAppend = buffer.append.bind(buffer);
+    let appendCallCount = 0;
+    buffer.append = ((sample: SeriesSample): void => {
+      appendCallCount += 1;
+      originalAppend(sample);
+    }) as SeriesBuffer['append'];
+
+    const appendedCount = buffer.appendHistory([
+      buildSample(1_000, 10),
+      buildSample(2_000, 20),
+      buildSample(3_000, 30),
+    ]);
+
+    expect(appendedCount).toBe(3);
+    expect(appendCallCount).toBe(0);
+    expect(getTimestamps(buffer.getSamples())).toEqual([1_000, 2_000, 3_000]);
+    expect(buffer.getSnapshot()).toMatchObject({
+      chronological: true,
+      firstSequence: 0,
+      nextSequence: 3,
+    });
+  });
+
+  it('merges delayed history samples before newer live samples', () => {
+    const buffer = new SeriesBuffer(10_000, 10);
+
+    buffer.append(buildSample(1_000, 10));
+    buffer.append(buildSample(5_000, 50));
+    const generationBeforeHistory = buffer.getSnapshot().generation;
+    const appendedCount = buffer.appendHistory([
+      buildSample(2_000, 20),
+      buildSample(3_000, 30),
+      buildSample(5_000, 500),
+    ]);
+
+    expect(appendedCount).toBe(2);
+    expect(getTimestamps(buffer.getSamples())).toEqual([1_000, 2_000, 3_000, 5_000]);
+    expect(buffer.getSamples().map((sample) => sample.values.Spot)).toEqual([10, 20, 30, 50]);
+    expect(buffer.getSnapshot()).toMatchObject({
+      generation: generationBeforeHistory + 1,
+      chronological: true,
+      firstSequence: 0,
+      nextSequence: 4,
+    });
+  });
 });

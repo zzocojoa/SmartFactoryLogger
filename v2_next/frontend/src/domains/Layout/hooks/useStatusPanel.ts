@@ -1,6 +1,12 @@
 import { useMemo } from 'react';
 import type { SpotImageResponseMetadata } from '../../FacilityData/api/spotService.types';
-import type { HealthSnapshot, StatsSnapshot, SpotConfig, CommChannelMetrics } from '../../../shared/types';
+import type {
+  HealthSnapshot,
+  StatsSnapshot,
+  SpotConfig,
+  CommChannelMetrics,
+  SettingsFormState,
+} from '../../../shared/types';
 import { CommBadge, buildCommBadge, buildSpotCommBadge, getCameraStatus } from '../../../shared/utils/commBadge';
 import {
   calcRecoverySec,
@@ -42,7 +48,7 @@ export interface StatusPanelInput {
   spotImageError: string | null;
   spotLastSuccessAt: number | null;
   spotImageMetadata: SpotImageResponseMetadata | null;
-  settingsBaseline: any;
+  settingsBaseline: SettingsFormState | null;
 }
 
 export type StatusPanelSource = Omit<
@@ -90,6 +96,81 @@ export interface StatusPanelOutput {
   cameraStatus: { type: string; title: string; detail?: string } | null;
 }
 
+type CommSeverity = 'idle' | 'ok' | 'warn' | 'error';
+
+const parseStatusThresholdMs = (
+  value: string | null | undefined,
+  fallbackMs: number
+): number => {
+  if (!value) {
+    return fallbackMs;
+  }
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallbackMs;
+};
+
+const resolveEffectiveAgeMs = (
+  ageMs: number | null,
+  healthAgeMs: number | null,
+  driverSnapshotAgeSec: number | null | undefined
+): number | null => {
+  if (driverSnapshotAgeSec !== null && driverSnapshotAgeSec !== undefined) {
+    return Math.max(0, driverSnapshotAgeSec * 1000);
+  }
+  if (healthAgeMs !== null && ageMs !== null) {
+    return Math.min(healthAgeMs, ageMs);
+  }
+  return healthAgeMs ?? ageMs;
+};
+
+const resolveCommSeverity = (
+  health: HealthSnapshot | null,
+  nowTick: number
+): CommSeverity => {
+  const comm = health?.comm;
+  if (!comm) {
+    return 'idle';
+  }
+
+  const states = [
+    buildCommBadge('EX', comm.extruder, nowTick).state,
+    buildCommBadge('LS', comm.ls_plc, nowTick).state,
+  ];
+  if (states.includes('error')) {
+    return 'error';
+  }
+  if (states.includes('warn')) {
+    return 'warn';
+  }
+  return 'ok';
+};
+
+const buildDegradedPollingText = (
+  dataPollingDegraded: boolean,
+  dataPollingIntervalMs: number,
+  dataPollingFailureCount: number,
+  healthPollingDegraded: boolean,
+  healthPollingIntervalMs: number,
+  healthPollingFailureCount: number,
+  statsPollingDegraded: boolean,
+  statsPollingIntervalMs: number,
+  statsPollingFailureCount: number
+): string => {
+  const degradedPollingParts: string[] = [];
+  if (dataPollingDegraded) {
+    degradedPollingParts.push(`data ${dataPollingIntervalMs}ms x${dataPollingFailureCount}`);
+  }
+  if (healthPollingDegraded) {
+    degradedPollingParts.push(`health ${healthPollingIntervalMs}ms x${healthPollingFailureCount}`);
+  }
+  if (statsPollingDegraded) {
+    degradedPollingParts.push(`stats ${statsPollingIntervalMs}ms x${statsPollingFailureCount}`);
+  }
+  return degradedPollingParts.length
+    ? `Polling ${degradedPollingParts.join(', ')}`
+    : 'Polling normal';
+};
+
 /* ─── Hook ─────────────────────────────────────────────────── */
 
 export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
@@ -121,17 +202,9 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
   const ageMs = lastDataAt ? Math.max(0, nowTick - lastDataAt) : null;
   const lastUpdateMs = health?.last_update ? health.last_update * 1000 : null;
   const healthAgeMs = lastUpdateMs ? Math.max(0, nowTick - lastUpdateMs) : null;
-  const driverSnapshotAgeMs =
-    health?.driver_snapshot_age_sec !== null && health?.driver_snapshot_age_sec !== undefined
-      ? Math.max(0, health.driver_snapshot_age_sec * 1000)
-      : null;
-  const effectiveAgeMs = driverSnapshotAgeMs ?? ((healthAgeMs !== null && ageMs !== null)
-    ? Math.min(healthAgeMs, ageMs)
-    : (healthAgeMs ?? ageMs));
-  const parsedWarnMs = settingsBaseline?.statusWarnMs ? parseInt(settingsBaseline.statusWarnMs, 10) : NaN;
-  const parsedOfflineMs = settingsBaseline?.statusOfflineMs ? parseInt(settingsBaseline.statusOfflineMs, 10) : NaN;
-  const dynWarnMs = Number.isFinite(parsedWarnMs) ? parsedWarnMs : STATUS_WARN_MS;
-  const dynOfflineMs = Number.isFinite(parsedOfflineMs) ? parsedOfflineMs : STATUS_OFFLINE_MS;
+  const effectiveAgeMs = resolveEffectiveAgeMs(ageMs, healthAgeMs, health?.driver_snapshot_age_sec);
+  const dynWarnMs = parseStatusThresholdMs(settingsBaseline?.statusWarnMs, STATUS_WARN_MS);
+  const dynOfflineMs = parseStatusThresholdMs(settingsBaseline?.statusOfflineMs, STATUS_OFFLINE_MS);
 
   // --- Window stats ---
   const statsWindow = stats?.window;
@@ -152,17 +225,7 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
       (windowErrorCount !== null && windowErrorCount >= 3));
 
   // --- Comm severity ---
-  const commSeverity = (() => {
-    const comm = health?.comm;
-    if (!comm) return 'idle';
-    const states = [
-      buildCommBadge('EX', comm.extruder, nowTick).state,
-      buildCommBadge('LS', comm.ls_plc, nowTick).state,
-    ];
-    if (states.includes('error')) return 'error';
-    if (states.includes('warn')) return 'warn';
-    return 'ok';
-  })();
+  const commSeverity = resolveCommSeverity(health, nowTick);
 
   // --- Status label & class ---
   let statusLabel = 'Offline';
@@ -212,19 +275,17 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
         .map(([source, count]) => `${source} ${count}`)
         .join(', ')
     : '--';
-  const degradedPollingParts: string[] = [];
-  if (dataPollingDegraded) {
-    degradedPollingParts.push(`data ${dataPollingIntervalMs}ms x${dataPollingFailureCount}`);
-  }
-  if (healthPollingDegraded) {
-    degradedPollingParts.push(`health ${healthPollingIntervalMs}ms x${healthPollingFailureCount}`);
-  }
-  if (statsPollingDegraded) {
-    degradedPollingParts.push(`stats ${statsPollingIntervalMs}ms x${statsPollingFailureCount}`);
-  }
-  const degradedPollingText = degradedPollingParts.length
-    ? `Polling ${degradedPollingParts.join(', ')}`
-    : 'Polling normal';
+  const degradedPollingText = buildDegradedPollingText(
+    dataPollingDegraded,
+    dataPollingIntervalMs,
+    dataPollingFailureCount,
+    healthPollingDegraded,
+    healthPollingIntervalMs,
+    healthPollingFailureCount,
+    statsPollingDegraded,
+    statsPollingIntervalMs,
+    statsPollingFailureCount
+  );
   const windowSummaryText = statsWindow
     ? `Win ${statsWindow.window_sec}s req ${statsWindow.request_count}, err ${windowHttpErrorCount ?? '--'}, 4xx ${statsWindow.http_4xx_count ?? '--'}, 5xx ${statsWindow.http_5xx_count ?? '--'}, p95 ${windowP95Text}`
     : 'Win --';

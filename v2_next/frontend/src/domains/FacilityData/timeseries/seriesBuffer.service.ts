@@ -1,5 +1,8 @@
 import type { SeriesSample } from './seriesSampling';
 
+const compareSeriesSampleTimestamp = (first: SeriesSample, second: SeriesSample): number =>
+  first.timestampMs - second.timestampMs;
+
 export const countPrunedSeriesSamples = (samples: readonly SeriesSample[], nowMs: number, windowMs: number): number => {
   const cutoff = nowMs - windowMs;
   let index = 0;
@@ -48,3 +51,40 @@ export const trimSeriesSamples = (
   const prunedSamples = pruneSeriesSamples(samples, nowMs, windowMs);
   return capSeriesSamples(prunedSamples, maxPoints);
 };
+
+export const getLatestSeriesSampleTimestampMs = (samples: readonly SeriesSample[]): number | null => {
+  if (!samples.length) {
+    return null;
+  }
+  return samples.reduce<number>((latestTimestampMs, sample) => Math.max(latestTimestampMs, sample.timestampMs), samples[0].timestampMs);
+};
+
+export const filterUniqueSeriesSamplesByTimestamp = (
+  currentSamples: readonly SeriesSample[],
+  incomingSamples: readonly SeriesSample[],
+): SeriesSample[] => {
+  const knownTimestamps = new Set<number>(currentSamples.map((sample) => sample.timestampMs));
+  const uniqueSamples: SeriesSample[] = [];
+
+  for (const sample of incomingSamples) {
+    if (knownTimestamps.has(sample.timestampMs)) {
+      continue;
+    }
+    knownTimestamps.add(sample.timestampMs);
+    uniqueSamples.push(sample);
+  }
+
+  return uniqueSamples;
+};
+
+export const areSeriesSamplesChronological = (samples: readonly SeriesSample[]): boolean => {
+  for (let index = 1; index < samples.length; index += 1) {
+    if (samples[index].timestampMs < samples[index - 1].timestampMs) {
+      return false;
+    }
+  }
+  return true;
+};
+
+export const sortSeriesSamplesByTimestamp = (samples: readonly SeriesSample[]): SeriesSample[] =>
+  [...samples].sort(compareSeriesSampleTimestamp);

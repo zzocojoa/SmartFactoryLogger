@@ -5,6 +5,7 @@ export interface FactoryData {
     // System
     Time: string;
     Status: string;
+    timestamp_ms?: number | null;
     
     // KPIs
     Speed: number | null;

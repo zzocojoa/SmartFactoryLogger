@@ -7,6 +7,6 @@ export const fetchLatestMetricWithLatency = async () => {
   return {
     data,
     latency: t1 - t0,
-    timestamp: Date.now(),
+    timestamp: data.timestamp_ms ?? Date.now(),
   };
 };
