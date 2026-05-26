@@ -25,8 +25,6 @@ import math
 import re
 from logging.handlers import RotatingFileHandler
 import time
-from backend.MESSync import sync_router as mes_sync
-
 import contextvars
 import queue
 from logging.handlers import QueueHandler, QueueListener
@@ -106,10 +104,6 @@ from backend.Configuration.Configuration_Structure import ConfigUpdate, Override
 from backend.FacilityData.drivers import spot_api as spot_control
 from backend.Observability.Observability_Logic_Verification import compare_with_reference
 from backend import config
-from backend.MESSync import MESSync_Logic_Scheduler as mes_scheduler
-from backend.MESSync import repository as mes_db
-from backend.MESSync.MESSync_Structure import MES_PAGES
-from backend.MESSync import router as mes_router
 from backend.core import ai_tools_dispatcher
 from backend.version import get_runtime_info
 
@@ -876,17 +870,6 @@ def _collect_spot_cache() -> dict[str, Any]:
     )
 
 
-def _collect_mes_sync_state() -> dict[str, Any]:
-    payload = dict(mes_sync.sync_state)
-    return _memory_result(
-        "mes.sync_state",
-        "state",
-        estimate_size_bytes(payload),
-        items=1,
-        note="manual sync state",
-    )
-
-
 def _register_memory_collectors() -> None:
     memory_service.register_collector("observability.requests", _collect_observability_requests)
     memory_service.register_collector("observability.errors", _collect_observability_errors)
@@ -894,7 +877,6 @@ def _register_memory_collectors() -> None:
     memory_service.register_collector("facility.csv_logger", _collect_csv_logger)
     memory_service.register_collector("configuration.snapshot", _collect_config_manager)
     memory_service.register_collector("spot.cache", _collect_spot_cache)
-    memory_service.register_collector("mes.sync_state", _collect_mes_sync_state)
 
 
 _log_queue_listeners = []
@@ -1434,8 +1416,6 @@ def acquire_single_instance_lock() -> bool:
         print(f"[Main] Failed to acquire single instance lock: {exc}")
         return True
 
-# MES Bridge 제어는 mes_scheduler.start() / stop()을 통해 수행됩니다.
-
 # Lifecycle Manager (Startup/Shutdown)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1456,10 +1436,6 @@ async def lifespan(app: FastAPI):
     print("[Main] Starting Memory Service...")
     memory_service.start()
 
-    # Start MES Bridge if enabled
-    if config.MES_ENABLED:
-        await mes_scheduler.start()
-    
     # Start SPOT image background prefetching
     print("[Main] Starting SPOT Image Prefetch...")
     await spot_control.start_prefetch_loop()
@@ -1506,8 +1482,6 @@ app = FastAPI(
 )
 
 # Register Routers
-app.include_router(mes_router.router, prefix="/api/mes", tags=["MES"])
-app.include_router(mes_sync.router, prefix="/api/mes/sync", tags=["MES Sync"])
 app.include_router(ai_tools_dispatcher.router, prefix="/api", tags=["AI Tool Calling"])
 
 # CORS (Allow Frontend Access)
@@ -2903,9 +2877,6 @@ def shutdown(payload: ShutdownRequest):
 
     threading.Thread(target=_shutdown, daemon=True).start()
     return {"ok": True}
-
-# --- MES Data APIs ---
-# (Moved to Api_MESSync.py)
 
 # --- Static File Serving (Frontend) ---
 @app.get("/assets/{asset_path:path}")

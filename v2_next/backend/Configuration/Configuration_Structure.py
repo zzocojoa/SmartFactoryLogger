@@ -72,14 +72,6 @@ class ThresholdsConfig(BaseModel):
     enable: Optional[ThresholdsEnable] = None
 
 
-class MESConfig(BaseModel):
-    enabled: Optional[bool] = None
-    userid: Optional[str] = None
-    password: Optional[str] = None
-    starthour: Optional[int] = None
-    endhour: Optional[int] = None
-
-
 class SystemConfig(BaseModel):
     interval_sec: Optional[float] = None
     status_warn_ms: Optional[int] = None
@@ -93,7 +85,6 @@ class ConfigUpdate(BaseModel):
     settings: Optional[SettingsConfig] = None
     thresholds: Optional[ThresholdsConfig] = None
     system: Optional[SystemConfig] = None
-    mes: Optional[MESConfig] = None
 
 
 class OverrideToggle(BaseModel):

@@ -57,11 +57,6 @@ DEFAULT_CSV_HEADER = (
     "Date,Time,Temperature,MainPress,BilletLength,Temp_F,Temp_B,Count,Speed,EndPos,"
     "Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp,DIE_ID,Billet_CycleID"
 )
-DEFAULT_MES_USER_ID = ""
-DEFAULT_MES_PASSWORD = ""
-DEFAULT_MES_ENABLED = False
-DEFAULT_MES_START_HOUR = 8   # 운영 시작 시간 (08:00)
-DEFAULT_MES_END_HOUR = 19    # 운영 종료 시간 (19:00)
 DEFAULT_LS_TARGETS: List[Tuple[str, str]] = [
     ("%DW250", "Mold1"),
     ("%DW256", "Mold2"),
@@ -309,23 +304,6 @@ CONFIG, CONFIG_ENCODING = _load_config(CONFIG_PATH)
 if _safe_is_file(CONFIG_PATH):
     _updated = False
     
-    # MES 섹션 및 개별 키 자동 추가 (기존 config.ini 호환)
-    if not CONFIG.has_section("MES"):
-        CONFIG.add_section("MES")
-        _updated = True
-    _mes_defaults = {
-        "enabled": str(DEFAULT_MES_ENABLED),
-        "userid": DEFAULT_MES_USER_ID,
-        "password": DEFAULT_MES_PASSWORD,
-        "starthour": str(DEFAULT_MES_START_HOUR),
-        "endhour": str(DEFAULT_MES_END_HOUR),
-    }
-    for _key, _default_val in _mes_defaults.items():
-        if not CONFIG.has_option("MES", _key):
-            CONFIG.set("MES", _key, _default_val)
-            _updated = True
-            _config_log("INFO", f"Auto-added missing MES.{_key} = {_default_val}")
-    
     # SYSTEM 섹션 및 개별 키 자동 추가
     if not CONFIG.has_section("SYSTEM"):
         CONFIG.add_section("SYSTEM")
@@ -489,14 +467,6 @@ JAM_PRESS_THRESHOLD = _env_float("JAM_PRESS_THRESHOLD", _jam_press_raw)
 
 # SETTINGS / Password
 SETTINGS_PASSWORD = os.getenv("SETTINGS_PASSWORD", _get(CONFIG, "SETTINGS", "password", "") or "")
-
-# MES
-MES_ENABLED = _get_bool(CONFIG, "MES", "enabled", DEFAULT_MES_ENABLED)
-MES_USER_ID = os.getenv("MES_USER_ID", _get(CONFIG, "MES", "userid", DEFAULT_MES_USER_ID) or DEFAULT_MES_USER_ID)
-MES_PASSWORD = os.getenv("MES_PASSWORD", _get(CONFIG, "MES", "password", DEFAULT_MES_PASSWORD) or DEFAULT_MES_PASSWORD)
-MES_START_HOUR = _get_int(CONFIG, "MES", "starthour", DEFAULT_MES_START_HOUR)
-MES_END_HOUR = _get_int(CONFIG, "MES", "endhour", DEFAULT_MES_END_HOUR)
-
 
 # Validation Logic
 def validate_config() -> List[str]:

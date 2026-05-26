@@ -39,13 +39,6 @@ const SECTION_FIELD_MAP: Record<string, Array<keyof SettingsFormState>> = {
     'statusWarnMs',
     'statusOfflineMs',
   ],
-  'settings-mes': [
-    'mesEnabled',
-    'mesUserId',
-    'mesPassword',
-    'mesStartHour',
-    'mesEndHour',
-  ],
   'settings-alerts': [
     'thresholdMasterOn',
     'thresholdSpeedEnabled',
@@ -113,12 +106,6 @@ const LABEL_MAP: Record<keyof SettingsFormState, string> = {
   intervalSec: '수집 간격 (초)',
   statusWarnMs: '경고 임계값 (ms)',
   statusOfflineMs: '오프라인 임계값 (ms)',
-  mesEnabled: 'MES 연동 사용',
-  mesUserId: 'MES 사용자 ID',
-  mesPassword: 'MES 비밀번호',
-  mesPasswordSet: 'MES 비밀번호 설정 상태',
-  mesStartHour: 'MES 운영 시작 시간',
-  mesEndHour: 'MES 운영 종료 시간',
   password: '설정 비밀번호',
   passwordSet: '비밀번호 설정 상태',
 };
@@ -160,9 +147,6 @@ const DIRTY_KEYS: Array<keyof SettingsFormState> = [
   'intervalSec',
   'statusWarnMs',
   'statusOfflineMs',
-  'mesEnabled',
-  'mesUserId',
-  'mesPassword',
   'password',
 ];
 
@@ -190,9 +174,6 @@ const CHANGE_SUMMARY_KEYS: Array<keyof SettingsFormState> = [
   'intervalSec',
   'statusWarnMs',
   'statusOfflineMs',
-  'mesEnabled',
-  'mesUserId',
-  'mesPassword',
   'password',
 ];
 
@@ -269,7 +250,7 @@ export function useSettingsModalState(opts: SettingsModalStateOptions) {
       return 0;
     }
     return DIRTY_KEYS.reduce((count, key) => {
-      if (key === 'password' || key === 'mesPassword') {
+      if (key === 'password') {
         return settingsForm[key].trim() ? count + 1 : count;
       }
       if (key === 'passwordSet') {
@@ -363,12 +344,6 @@ export function useSettingsModalState(opts: SettingsModalStateOptions) {
       if (key === 'password') {
         if (settingsForm.password.trim()) {
           summary.push(`${LABEL_MAP.password}: 변경됨`);
-        }
-        return;
-      }
-      if (key === 'mesPassword') {
-        if (settingsForm.mesPassword.trim()) {
-          summary.push(`${LABEL_MAP.mesPassword}: 변경됨`);
         }
         return;
       }

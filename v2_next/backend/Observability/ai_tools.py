@@ -24,7 +24,7 @@ TOOLS_SCHEMA = [
                 "properties": {
                     "log_type": {
                         "type": "string",
-                        "enum": ["app", "crash", "comm", "mes"],
+                        "enum": ["app", "crash", "comm"],
                         "description": "검색할 로그의 종류"
                     },
                     "level": {
@@ -78,8 +78,6 @@ def execute_tool(name: str, args: Dict[str, Any]) -> Any:
                 log_path = Path(config.APP_DATA_DIR) / "logs" / "system" / "crash.log"
             elif log_type == "comm":
                 log_path = Path(config.APP_DATA_DIR) / "logs" / "comm" / "comm_metrics.log"
-            elif log_type == "mes":
-                log_path = Path(config.APP_DATA_DIR) / "logs" / "system" / "mes_application.log"
             else:
                 return {"error": f"Unknown log type: {log_type}"}
                 

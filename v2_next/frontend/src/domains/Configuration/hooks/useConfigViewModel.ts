@@ -167,12 +167,6 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       statusOfflineMs: String(values.system?.status_offline_ms ?? 20000),
       password: '',
       passwordSet: values.settings.password_set ?? false,
-      mesEnabled: values.mes?.enabled ?? false,
-      mesUserId: values.mes?.userid ?? '',
-      mesPassword: '',
-      mesPasswordSet: values.mes?.password_set ?? false,
-      mesStartHour: String(values.mes?.starthour ?? 8),
-      mesEndHour: String(values.mes?.endhour ?? 19),
     };
     return { form: nextForm, thresholds: nextThresholdState };
   }, []);
@@ -187,15 +181,12 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         if (!prev) return form;
         
         // Check if user is editing the password field
-        // BUG FIX: Also preserve mesPassword
         const preservePassword = prev.password.length > 0;
-        const preserveMesPassword = prev.mesPassword.length > 0;
         
-        if (preservePassword || preserveMesPassword) {
+        if (preservePassword) {
             return { 
                 ...form, 
                 password: preservePassword ? prev.password : form.password,
-                mesPassword: preserveMesPassword ? prev.mesPassword : form.mesPassword
             };
         }
         
@@ -204,9 +195,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
           const key = k as keyof SettingsFormState;
           // Skip password since baseline always has empty password
           if (key === 'password') return prev.password.length > 0;
-          if (key === 'mesPassword') return prev.mesPassword.length > 0; // Fix: Treat mesPassword like password
           if (key === 'passwordSet') return false; // Read-only field
-          if (key === 'mesPasswordSet') return false; // Fix: Read-only field
           // Compare with what would be the new baseline
           return prev[key] !== form[key];
         });
@@ -486,13 +475,6 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         interval_sec: parseThresholdValue(settingsForm.intervalSec) ?? 0.2, // Use parseThresholdValue helper
         status_warn_ms: toInt(settingsForm.statusWarnMs),
         status_offline_ms: toInt(settingsForm.statusOfflineMs),
-      },
-      mes: {
-        enabled: settingsForm.mesEnabled,
-        userid: settingsForm.mesUserId.trim() || undefined,
-        password: settingsForm.mesPassword.trim() || undefined,
-        starthour: toInt(settingsForm.mesStartHour) ?? 8,
-        endhour: toInt(settingsForm.mesEndHour) ?? 19,
       }
     };
 
@@ -528,11 +510,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         ...settingsForm,
         password: '',
         passwordSet: settingsForm.passwordSet || settingsForm.password.trim().length > 0,
-        mesPassword: '',
       });
       setThresholdConfig(buildThresholdStateFromForm(settingsForm));
       updateSettingsField('password', '');
-      updateSettingsField('mesPassword', '');
       
       if (!isAuto) {
         showSettingsToast(saveMessage, pendingCount > 0 ? 'warn' : 'ok');

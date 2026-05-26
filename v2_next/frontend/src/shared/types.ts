@@ -507,13 +507,6 @@ export interface ConfigSnapshot {
       status_warn_ms?: number;
       status_offline_ms?: number;
     };
-    mes?: {
-      enabled: boolean;
-      userid: string;
-      password_set: boolean;
-      starthour: number;
-      endhour: number;
-    };
   };
 }
 
@@ -556,12 +549,6 @@ export interface SettingsFormState {
   statusOfflineMs: string;
   password: string;
   passwordSet: boolean;
-  mesEnabled: boolean;
-  mesUserId: string;
-  mesPassword: string;
-  mesPasswordSet: boolean;
-  mesStartHour: string;
-  mesEndHour: string;
 }
 
 export interface ConfigApplyResult {

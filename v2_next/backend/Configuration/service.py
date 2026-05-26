@@ -209,14 +209,6 @@ def get_config_snapshot() -> dict:
         except Exception:
             pending_info = {"path": str(pending_path)}
 
-    mes_cfg = {
-        "enabled": _get_bool(parser, "MES", "enabled", config.DEFAULT_MES_ENABLED),
-        "userid": _get(parser, "MES", "userid", config.DEFAULT_MES_USER_ID),
-        "password_set": bool(_get(parser, "MES", "password", "")),
-        "starthour": _get_int(parser, "MES", "starthour", config.DEFAULT_MES_START_HOUR),
-        "endhour": _get_int(parser, "MES", "endhour", config.DEFAULT_MES_END_HOUR),
-    }
-
     return {
         "config_path": str(path),
         "encoding": encoding,
@@ -235,7 +227,6 @@ def get_config_snapshot() -> dict:
             },
             "system": system_cfg,
             "status": status_cfg,
-            "mes": mes_cfg,
         },
         "restart_required": config_manager.get_restart_required(),
     }
@@ -592,19 +583,6 @@ def update_config(
             parser.set("SYSTEM", "statuswarnms", str(payload.system.status_warn_ms))
         if payload.system.status_offline_ms is not None:
             parser.set("SYSTEM", "statusofflinems", str(payload.system.status_offline_ms))
-
-    if payload.mes:
-        _ensure_section(parser, "MES")
-        if payload.mes.enabled is not None:
-            parser.set("MES", "enabled", str(payload.mes.enabled))
-        if payload.mes.userid:
-            parser.set("MES", "userid", payload.mes.userid)
-        if payload.mes.password:
-            parser.set("MES", "password", payload.mes.password)
-        if payload.mes.starthour is not None:
-            parser.set("MES", "starthour", str(payload.mes.starthour))
-        if payload.mes.endhour is not None:
-            parser.set("MES", "endhour", str(payload.mes.endhour))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     write_encoding = "utf-8-sig"

@@ -150,7 +150,6 @@ const settingsSections: Array<{ id: string; label: string }> = [
   { id: 'settings-memory', label: '메모리' },
   { id: 'settings-spot', label: LABELS.SPOT_CAMERA },
   { id: 'settings-storage', label: LABELS.STORAGE_CONFIG },
-  { id: 'settings-mes', label: 'MES 설정' },
   { id: 'settings-alerts', label: LABELS.ALERTS_THRESHOLDS },
   { id: 'settings-security', label: LABELS.SECURITY },
 ];

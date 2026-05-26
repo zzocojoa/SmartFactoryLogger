@@ -67,14 +67,6 @@ export interface ConfigSystemPayload {
   status_offline_ms?: number;
 }
 
-export interface ConfigMesPayload {
-  enabled: boolean;
-  userid?: string;
-  password?: string;
-  starthour: number;
-  endhour: number;
-}
-
 export interface ConfigPayload {
   extruder: ConfigConnectionPayload;
   ls_plc: ConfigConnectionPayload;
@@ -82,7 +74,6 @@ export interface ConfigPayload {
   thresholds: ConfigThresholdsPayload;
   settings: ConfigSettingsPayload;
   system: ConfigSystemPayload;
-  mes: ConfigMesPayload;
 }
 
 export type GenericApiResponse = Record<string, unknown>;

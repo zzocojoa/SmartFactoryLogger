@@ -5,7 +5,6 @@ from typing import Dict, Any, List
 
 # 도메인별 AITool 임포트
 from backend.FacilityData import ai_tools as FacilityData_AITool
-from backend.MESSync import ai_tools as MESSync_AITool
 from backend.Configuration import ai_tools as Configuration_AITool
 from backend.Observability import ai_tools as Observability_AITool
 
@@ -26,7 +25,6 @@ async def get_all_tools():
     """
     all_schemas = []
     all_schemas.extend(FacilityData_AITool.TOOLS_SCHEMA)
-    all_schemas.extend(MESSync_AITool.TOOLS_SCHEMA)
     all_schemas.extend(Configuration_AITool.TOOLS_SCHEMA)
     all_schemas.extend(Observability_AITool.TOOLS_SCHEMA)
     
@@ -35,7 +33,7 @@ async def get_all_tools():
 @router.post(
     "/invoke",
     summary="Invoke an AI Tool",
-    description="Executes a specific AI tool by name and arguments. Acts as a unified dispatcher across all backend domains (FacilityData, MESSync, Configuration, Observability) for Agentic workflows (Model Context Protocol)."
+    description="Executes a specific AI tool by name and arguments. Acts as a unified dispatcher across all backend domains (FacilityData, Configuration, Observability) for Agentic workflows (Model Context Protocol)."
 )
 async def invoke_tool(request: ToolInvokeRequest):
     """
@@ -52,17 +50,12 @@ async def invoke_tool(request: ToolInvokeRequest):
             from backend.app import plc_service
             return {"result": FacilityData_AITool.execute_tool(name, args, plc_service)}
             
-    # 2. MESSync
-    for schema in MESSync_AITool.TOOLS_SCHEMA:
-        if schema["function"]["name"] == name:
-            return {"result": MESSync_AITool.execute_tool(name, args)}
-            
-    # 3. Configuration
+    # 2. Configuration
     for schema in Configuration_AITool.TOOLS_SCHEMA:
         if schema["function"]["name"] == name:
             return {"result": Configuration_AITool.execute_tool(name, args)}
             
-    # 4. Observability
+    # 3. Observability
     for schema in Observability_AITool.TOOLS_SCHEMA:
         if schema["function"]["name"] == name:
             return {"result": Observability_AITool.execute_tool(name, args)}
