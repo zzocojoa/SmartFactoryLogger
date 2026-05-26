@@ -137,14 +137,6 @@ $DestExe = Join-Path $PortablePath $ExeName
 Copy-Item -Path $SourceExe -Destination $DestExe -Force
 Write-Host "    Copied EXE: $ExeName" -ForegroundColor Green
 
-# mes_data 폴더 복사
-$MesDataSource = "mes_data"
-$MesDataDest = Join-Path $PortablePath "mes_data"
-if (Test-Path $MesDataSource) {
-    Copy-Item -Path $MesDataSource -Destination $MesDataDest -Recurse -Force
-    Write-Host "    Copied mes_data folder" -ForegroundColor Green
-}
-
 # 브라우저 폴더 복사
 $BrowsersSource = Join-Path $ScriptDir "backend\browsers"
 $BrowsersDest = Join-Path $PortablePath "browsers"
@@ -327,7 +319,6 @@ If Grafana is not configured:
 - ``start.bat`` - Start all services
 - ``stop.bat`` - Stop SmartFactory
 - ``setup_grafana.bat`` - Configure Grafana (run once as Admin)
-- ``mes_data/`` - Database folder
 
 ## SPOT Actuator Config
 - Default ``[SPOT] actuatorstep`` is ``50`` for physical actuator movement.

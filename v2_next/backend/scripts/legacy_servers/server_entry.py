@@ -128,7 +128,6 @@ try:
     # Test absolute import
     from backend.app import app
     from backend import config
-    from backend.scripts.migrate_json_to_db import migrate_json_files, get_default_data_dir
     print("DEBUG: Imports successful!")
 except Exception as e:
     print(f"CRITICAL: Code Import Failed: {e}")
@@ -142,16 +141,7 @@ def parse_args():
     """Parse command line arguments."""
     import argparse
     parser = argparse.ArgumentParser(description="SmartFactory Logger Backend")
-    parser.add_argument(
-        "--migrate-json",
-        action="store_true",
-        help="Migrate legacy JSON files to SQLite database before starting"
-    )
-    parser.add_argument(
-        "--migrate-only",
-        action="store_true",
-        help="Run migration only without starting the server"
-    )
+
     return parser.parse_args()
 
 
@@ -271,19 +261,7 @@ def run_server():
 if __name__ == "__main__":
     try:
         # Parse CLI arguments
-        args = parse_args()
-        
-        # Run JSON migration if requested
-        if args.migrate_json or args.migrate_only:
-            print("[Migration] Starting JSON to SQLite migration...")
-            data_dir = get_default_data_dir()
-            db_path = data_dir / "mes_data.db"
-            migrate_json_files(data_dir, db_path, dry_run=False)
-            print("[Migration] Migration complete.")
-            
-            if args.migrate_only:
-                print("[Migration] --migrate-only flag set. Exiting without starting server.")
-                sys.exit(0)
+        parse_args()
         
         # Start Splash Screen in separate thread (GUI must run in main for some OSes, but we'll try)
         splash_thread = threading.Thread(target=show_splash, daemon=True)

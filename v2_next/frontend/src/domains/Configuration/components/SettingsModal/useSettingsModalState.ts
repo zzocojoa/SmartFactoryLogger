@@ -39,19 +39,6 @@ const SECTION_FIELD_MAP: Record<string, Array<keyof SettingsFormState>> = {
     'statusWarnMs',
     'statusOfflineMs',
   ],
-  'settings-logging': [
-    'rotationEnabled',
-    'rotationMode',
-    'cycleIdleTime',
-    'cycleThresholdPress',
-  ],
-  'settings-mes': [
-    'mesEnabled',
-    'mesUserId',
-    'mesPassword',
-    'mesStartHour',
-    'mesEndHour',
-  ],
   'settings-alerts': [
     'thresholdMasterOn',
     'thresholdSpeedEnabled',
@@ -116,19 +103,9 @@ const LABEL_MAP: Record<keyof SettingsFormState, string> = {
   logPath: 'Log Path',
   snapshotPath: 'Snapshot Path',
   autoSave: '자동 저장',
-  rotationEnabled: '로그 회전 사용',
-  rotationMode: 'Rotation Mode',
-  cycleIdleTime: 'Cycle Idle Time (sec)',
-  cycleThresholdPress: 'Cycle Threshold Press',
   intervalSec: '수집 간격 (초)',
   statusWarnMs: '경고 임계값 (ms)',
   statusOfflineMs: '오프라인 임계값 (ms)',
-  mesEnabled: 'MES 연동 사용',
-  mesUserId: 'MES 사용자 ID',
-  mesPassword: 'MES 비밀번호',
-  mesPasswordSet: 'MES 비밀번호 설정 상태',
-  mesStartHour: 'MES 운영 시작 시간',
-  mesEndHour: 'MES 운영 종료 시간',
   password: '설정 비밀번호',
   passwordSet: '비밀번호 설정 상태',
 };
@@ -167,16 +144,9 @@ const DIRTY_KEYS: Array<keyof SettingsFormState> = [
   'logPath',
   'snapshotPath',
   'autoSave',
-  'rotationEnabled',
-  'rotationMode',
-  'cycleIdleTime',
-  'cycleThresholdPress',
   'intervalSec',
   'statusWarnMs',
   'statusOfflineMs',
-  'mesEnabled',
-  'mesUserId',
-  'mesPassword',
   'password',
 ];
 
@@ -201,16 +171,9 @@ const CHANGE_SUMMARY_KEYS: Array<keyof SettingsFormState> = [
   'logPath',
   'snapshotPath',
   'autoSave',
-  'rotationEnabled',
-  'rotationMode',
-  'cycleIdleTime',
-  'cycleThresholdPress',
   'intervalSec',
   'statusWarnMs',
   'statusOfflineMs',
-  'mesEnabled',
-  'mesUserId',
-  'mesPassword',
   'password',
 ];
 
@@ -221,10 +184,6 @@ const APPLY_KEY_LABELS: Record<string, string> = {
   'settings.snapshotpath': CONFIG_LABELS.SNAPSHOT_PATH,
   'settings.autosave': CONFIG_LABELS.AUTO_SAVE,
   'settings.password_set': CONFIG_LABELS.PASSWORD_SET,
-  'logging.rotation_enabled': CONFIG_LABELS.ROTATION_ENABLED,
-  'logging.rotation_mode': CONFIG_LABELS.ROTATION_MODE,
-  'logging.cycle_idle_time': CONFIG_LABELS.CYCLE_IDLE,
-  'logging.cycle_threshold_press': CONFIG_LABELS.CYCLE_PRESS,
   'logging.csv_header': CONFIG_LABELS.CSV_HEADER,
   'system.intervalsec': CONFIG_LABELS.COLLECT_INTERVAL,
   'spot.ip': CONFIG_LABELS.SPOT_IP,
@@ -291,7 +250,7 @@ export function useSettingsModalState(opts: SettingsModalStateOptions) {
       return 0;
     }
     return DIRTY_KEYS.reduce((count, key) => {
-      if (key === 'password' || key === 'mesPassword') {
+      if (key === 'password') {
         return settingsForm[key].trim() ? count + 1 : count;
       }
       if (key === 'passwordSet') {
@@ -385,12 +344,6 @@ export function useSettingsModalState(opts: SettingsModalStateOptions) {
       if (key === 'password') {
         if (settingsForm.password.trim()) {
           summary.push(`${LABEL_MAP.password}: 변경됨`);
-        }
-        return;
-      }
-      if (key === 'mesPassword') {
-        if (settingsForm.mesPassword.trim()) {
-          summary.push(`${LABEL_MAP.mesPassword}: 변경됨`);
         }
         return;
       }

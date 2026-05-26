@@ -110,7 +110,6 @@ const registerChunkRecoveryHandlers = (): void => {
 // Lazy Components
 const App = lazy(() => import('./App'));
 const Home = lazy(() => import('./pages/Home'));
-const MesDashboard = lazy(() => import('./pages/MesDashboard').then(module => ({ default: module.MesDashboard })));
 const CustomDialog = lazy(() => import('./shared/components/CustomDialog').then(module => ({ default: module.CustomDialog })));
 
 // Loading Fallback
@@ -142,7 +141,6 @@ root.render(
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/dashboard" element={<App />} />
-              <Route path="/mes-dashboard" element={<MesDashboard />} />
             </Routes>
             <CustomDialog />
           </Suspense>

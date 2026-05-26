@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import threading
 import time
@@ -56,6 +57,7 @@ _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "i
 
 # 연결 풀 재사용을 위한 비동기 HTTP 클라이언트
 _http_client: Optional[httpx.AsyncClient] = None
+_logger = logging.getLogger("spot_control")
 
 
 class SpotImageConfigError(ValueError):
@@ -357,9 +359,6 @@ async def _request_spot_image_from_url(client: httpx.AsyncClient, image_url: str
 
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
-    from ...MESSync.logger import get_logger
-
-    logger = get_logger("spot_control")
     candidates = _resolve_spot_image_url_candidates(image_url)
     if len(candidates) == 1:
         return await _request_spot_image_from_url(client, candidates[0])
@@ -369,7 +368,7 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
         try:
             payload = await _request_spot_image_from_url(client, candidate)
             if index > 0:
-                logger.warning(
+                _logger.warning(
                     "SPOT image endpoint fallback succeeded",
                     extra={
                         "configured_image_url": image_url,
@@ -381,7 +380,7 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
         except SpotImageFetchError as exc:
             last_error = exc
             if _is_retryable_spot_image_error(exc, index < len(candidates) - 1):
-                logger.warning(
+                _logger.warning(
                     "SPOT image endpoint candidate failed",
                     extra={
                         "configured_image_url": image_url,
@@ -867,9 +866,6 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     """캐시에서 즉시 반환 (백그라운드 프리페칭된 이미지)."""
     global _img_failure_count
     global _img_cache_state
-    from ...MESSync.logger import get_logger
-
-    logger = get_logger("spot_control")
     now = time.time()
     
     # 캐시에 이미지가 있으면 즉시 반환
@@ -880,9 +876,9 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         next_cache_state = _cache_state_for_status(cache_status)
         if _img_cache_state != next_cache_state and _should_log_cache_state(now):
             if next_cache_state == "cache":
-                logger.info("Spot cache serve: age_sec=%.3f", age)
+                _logger.info("Spot cache serve: age_sec=%.3f", age)
             else:
-                logger.warning("Spot stale serve: age_sec=%.3f", age)
+                _logger.warning("Spot stale serve: age_sec=%.3f", age)
         _img_cache_state = next_cache_state
         return _build_cached_image_response(now, cached_image, cache_status=cache_status)
     
@@ -945,10 +941,7 @@ async def _prefetch_loop():
     """백그라운드에서 지속적으로 SPOT 이미지 프리페칭 (드리프트 방지 로직 적용)."""
     global _img_cache_state, _img_failure_count, _img_last_error, _internal_temp_prefetch_task, _prefetch_running
     _prefetch_running = True
-    
-    from ...MESSync.logger import get_logger
-    logger = get_logger("spot_control")
-    
+
     interval = max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
     next_tick = time.time()
     
@@ -964,7 +957,7 @@ async def _prefetch_loop():
                     _img_cache["time"] = time.time()
                     _img_cache_state = "upstream"
                     if _img_failure_count > 0:
-                        logger.info(
+                        _logger.info(
                             "Spot image fetch recovered",
                             extra={"failure_count": _img_failure_count},
                         )
@@ -976,7 +969,7 @@ async def _prefetch_loop():
                     await _refresh_spot_temperature(client)
                 except SpotTemperatureConfigError as exc:
                     _record_temperature_error("temperature-config-missing", str(exc), exc.temp_url, None)
-                    logger.warning(
+                    _logger.warning(
                         "Spot temperature fetch misconfigured",
                         extra={
                             "code": "temperature-config-missing",
@@ -986,7 +979,7 @@ async def _prefetch_loop():
                     )
                 except SpotTemperatureFetchError as exc:
                     _record_temperature_error(exc.code, str(exc), exc.temp_url, exc.upstream_status)
-                    logger.warning(
+                    _logger.warning(
                         "Spot temperature fetch failed",
                         extra={
                             "code": exc.code,
@@ -1000,7 +993,7 @@ async def _prefetch_loop():
                 _internal_temp_prefetch_task is None or _internal_temp_prefetch_task.done()
             ):
                 _internal_temp_prefetch_task = asyncio.create_task(
-                    _refresh_spot_internal_temperature_safely(client, logger)
+                    _refresh_spot_internal_temperature_safely(client, _logger)
                 )
                     
         except asyncio.CancelledError:
@@ -1010,7 +1003,7 @@ async def _prefetch_loop():
             _img_failure_count = min(_img_failure_count + 1, 10)
             config_backoff = max(interval, 1.0)
             _record_image_backoff(config_backoff)
-            logger.warning(
+            _logger.warning(
                 "Spot image fetch misconfigured",
                 extra={
                     "code": "config-missing",
@@ -1033,7 +1026,7 @@ async def _prefetch_loop():
                 backoff = _current_backoff_sec()
                 _record_image_backoff(backoff)
                 if _img_failure_count == 1 or _img_failure_count >= 6:
-                    logger.warning(
+                    _logger.warning(
                         "Spot image fetch failed",
                         extra={
                             "code": exc.code,

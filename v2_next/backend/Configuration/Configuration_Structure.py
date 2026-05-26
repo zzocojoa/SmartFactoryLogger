@@ -38,13 +38,6 @@ class SettingsConfig(BaseModel):
     custom_notice: Optional[str] = None
 
 
-class LoggingConfig(BaseModel):
-    rotation_enabled: Optional[bool] = None
-    rotation_mode: Optional[str] = None
-    cycle_idle_time: Optional[float] = None
-    cycle_threshold_press: Optional[float] = None
-
-
 class ThresholdsValue(BaseModel):
     speed: Optional[str] = None
     press: Optional[str] = None
@@ -79,18 +72,14 @@ class ThresholdsConfig(BaseModel):
     enable: Optional[ThresholdsEnable] = None
 
 
-class MESConfig(BaseModel):
-    enabled: Optional[bool] = None
-    userid: Optional[str] = None
-    password: Optional[str] = None
-    starthour: Optional[int] = None
-    endhour: Optional[int] = None
-
-
 class SystemConfig(BaseModel):
     interval_sec: Optional[float] = None
     status_warn_ms: Optional[int] = None
     status_offline_ms: Optional[int] = None
+
+
+class StatusConfig(BaseModel):
+    jam_press_threshold: Optional[float] = None
 
 
 class ConfigUpdate(BaseModel):
@@ -98,10 +87,9 @@ class ConfigUpdate(BaseModel):
     ls_plc: Optional[NetConfig] = None
     spot: Optional[SpotConfig] = None
     settings: Optional[SettingsConfig] = None
-    logging: Optional[LoggingConfig] = None
     thresholds: Optional[ThresholdsConfig] = None
     system: Optional[SystemConfig] = None
-    mes: Optional[MESConfig] = None
+    status: Optional[StatusConfig] = None
 
 
 class OverrideToggle(BaseModel):

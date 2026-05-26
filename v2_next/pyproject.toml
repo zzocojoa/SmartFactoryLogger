@@ -2,9 +2,7 @@
 target-version = "py312"
 line-length = 120
 include = [
-  "backend/FacilityData/drivers/spot_api.py",
-  "backend/app.py",
-  "backend/tests/test_spot_api.py",
+  "backend/**/*.py",
 ]
 extend-exclude = [
   ".tmp_*",

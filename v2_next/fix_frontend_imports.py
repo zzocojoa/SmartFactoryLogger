@@ -4,7 +4,6 @@ import re
 src_dir = r"C:\Users\user\Documents\GitHub\SmartFactoryLogger\v2_next\frontend\src"
 
 rules = [
-    ("domains/MESSync/components/mes", "components/mes"),
     ("domains/FacilityData/timeseries", "timeseries"),
     ("domains/FacilityData/components/widgets", "components/widgets"),
     ("domains/FacilityData/components/UPlotChart", "components/UPlotChart"),

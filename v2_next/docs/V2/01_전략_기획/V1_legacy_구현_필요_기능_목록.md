@@ -17,8 +17,8 @@ V1_legacy에 존재하는 핵심 기능을 기준으로 V2에 이관/구현해�
   - 근거: `v1_legacy/src/main.py` (app.lock 생성/검증/정리)
 - 전역 예외 처리 및 크래시 로그 기록  
   - 근거: `v1_legacy/src/main.py` (exception_hook, crash.log)
-- CSV 자동 저장 + 버퍼링 + 회전(DAILY/BILLET)  
-  - 근거: `v1_legacy/src/modules/logger.py` (buffer, rotation, cycle split)
+- CSV 자동 저장 + 버퍼링
+  - 근거: `v1_legacy/src/modules/logger.py` (buffer)
 - 로그 경로/스냅샷 경로 유효성 검사 및 AppData fallback  
   - 근거: `v1_legacy/src/modules/logger.py`, `v1_legacy/src/config.py`
 - 통신 재시도/백오프/스킵 로직  
@@ -60,7 +60,7 @@ V1_legacy에 존재하는 핵심 기능을 기준으로 V2에 이관/구현해�
 ### P0 (운영 안정성/데이터 보존)
 - [x] 단일 인스턴스 락 + 스테일 락 정리 + 종료 시 락 해제 (현황: 구현)
 - [x] 전역 예외 처리 + system.log/crash.log 회전 기록 (현황: 구현)
-- [x] CSV 자동 저장 서비스(버퍼/배치 플러시/DAILY·BILLET 회전/AutoSave) (현황: 구현)
+- [x] CSV 자동 저장 서비스(버퍼/배치 플러시/AutoSave) (현황: 구현)
 - [x] 로그/스냅샷 경로 유효성 검사 + AppData fallback + 권한 오류 안내 (현황: 구현)
 - [x] 통신 안정화 포팅(merge/split 읽기 전환, IO 오류 후 skip/backoff) (현황: 구현)
 - [x] 데이터 검증(범위/형식) Soft 처리 및 None 전파 (현황: 구현)
@@ -76,7 +76,7 @@ V1_legacy에 존재하는 핵심 기능을 기준으로 V2에 이관/구현해�
    - FastAPI/서비스 스레드 예외 캡처 및 crash.log 기록
 4) CSV 로깅 서비스 구축 (2.0일)
    - 버퍼링/배치 플러시/AutoSave
-   - DAILY/BILLET 회전 및 Cycle 조건 적용
+   - AutoSave 및 배치 플러시 조건 적용
 5) 로그/스냅샷 경로 유효성 + 권한 오류 안내 (0.5일)
    - AppData fallback 및 PermissionError 메시지 경로
 6) 통신 안정화 포팅 (1.5일)
@@ -91,7 +91,7 @@ V1_legacy에 존재하는 핵심 기능을 기준으로 V2에 이관/구현해�
 ### P0 산출물 및 검증 기준
 - 단일 인스턴스 락: app.lock 생성/삭제 확인, 중복 실행 차단, 스테일 락 자동 정리
 - 전역 예외 처리: 강제 예외 발생 시 crash.log 생성, system.log 기록, 종료 시 리소스 정리 확인
-- CSV 로깅: 헤더 포함 파일 생성, AutoSave on/off 반영, DAILY/BILLET 회전 조건 검증
+- CSV 로깅: 헤더 포함 파일 생성, AutoSave on/off 반영, 배치 플러시 검증
 - 경로 유효성: 비정상 경로 시 AppData fallback, 권한 오류 시 사용자 안내/로그 기록
 - 통신 안정화: IO Error 후 backoff·skip 동작, 재연결 성공 시 정상 수집 복귀
 - 데이터 검증: 범위 밖 값 None 처리, 정상 값 유지, 검증 실패 시 경고 로그

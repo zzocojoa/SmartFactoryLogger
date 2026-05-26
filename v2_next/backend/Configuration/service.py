@@ -178,14 +178,6 @@ def get_config_snapshot() -> dict:
         "password_set": bool(_get(parser, "SETTINGS", "password", "")),
         "custom_notice": _get(parser, "SETTINGS", "custom_notice", config.DEFAULT_CUSTOM_NOTICE).replace("\\n", "\n"),
     }
-    logging_cfg = {
-        "rotation_enabled": _get_bool(parser, "LOGGING", "rotationenabled", config.DEFAULT_ROTATION_ENABLED),
-        "rotation_mode": _get(parser, "LOGGING", "rotationmode", config.DEFAULT_ROTATION_MODE),
-        "cycle_idle_time": _get_int(parser, "LOGGING", "cycleidletime", config.DEFAULT_CYCLE_IDLE_TIME),
-        "cycle_threshold_press": _get_float(
-            parser, "LOGGING", "cyclethresholdpress", config.DEFAULT_CYCLE_THRESHOLD_PRESS
-        ),
-    }
     thresholds_value = {key: _get_text(parser, "THRESHOLDS_VALUE", key) for key in _THRESHOLD_KEYS}
     thresholds_enable = {key: _get_bool(parser, "THRESHOLDS_ENABLE", key, False) for key in _THRESHOLD_KEYS}
     thresholds_enable["master_on"] = _get_bool(parser, "THRESHOLDS_ENABLE", "master_on", False)
@@ -193,6 +185,14 @@ def get_config_snapshot() -> dict:
         "interval_sec": _get_float(parser, "SYSTEM", "intervalsec", config.DEFAULT_INTERVAL_SEC),
         "status_warn_ms": _get_int(parser, "SYSTEM", "statuswarnms", config.DEFAULT_STATUS_WARN_MS),
         "status_offline_ms": _get_int(parser, "SYSTEM", "statusofflinems", config.DEFAULT_STATUS_OFFLINE_MS),
+    }
+    status_cfg = {
+        "jam_press_threshold": _get_float(
+            parser,
+            "STATUS",
+            "jampressthreshold",
+            _get_float(parser, "LOGGING", "cyclethresholdpress", config.DEFAULT_JAM_PRESS_THRESHOLD),
+        ),
     }
 
     pending_info = None
@@ -209,14 +209,6 @@ def get_config_snapshot() -> dict:
         except Exception:
             pending_info = {"path": str(pending_path)}
 
-    mes_cfg = {
-        "enabled": _get_bool(parser, "MES", "enabled", config.DEFAULT_MES_ENABLED),
-        "userid": _get(parser, "MES", "userid", config.DEFAULT_MES_USER_ID),
-        "password_set": bool(_get(parser, "MES", "password", "")),
-        "starthour": _get_int(parser, "MES", "starthour", config.DEFAULT_MES_START_HOUR),
-        "endhour": _get_int(parser, "MES", "endhour", config.DEFAULT_MES_END_HOUR),
-    }
-
     return {
         "config_path": str(path),
         "encoding": encoding,
@@ -229,13 +221,12 @@ def get_config_snapshot() -> dict:
             "ls_plc": ls_plc,
             "spot": spot,
             "settings": settings,
-            "logging": logging_cfg,
             "thresholds": {
                 "values": thresholds_value,
                 "enable": thresholds_enable,
             },
             "system": system_cfg,
-            "mes": mes_cfg,
+            "status": status_cfg,
         },
         "restart_required": config_manager.get_restart_required(),
     }
@@ -267,6 +258,22 @@ def set_override_enabled(enabled: bool, password: Optional[str], actor: Optional
 def _ensure_section(parser: configparser.ConfigParser, section: str) -> None:
     if not parser.has_section(section):
         parser.add_section(section)
+
+
+def _cleanup_legacy_logging_options(parser: configparser.ConfigParser) -> None:
+    if not parser.has_section("LOGGING"):
+        return
+    legacy_jam_threshold = None
+    if parser.has_option("LOGGING", "cyclethresholdpress"):
+        legacy_jam_threshold = parser.get("LOGGING", "cyclethresholdpress")
+    for option in ("rotationenabled", "rotationmode", "cycleidletime", "cyclethresholdpress"):
+        parser.remove_option("LOGGING", option)
+    if not parser.options("LOGGING"):
+        parser.remove_section("LOGGING")
+    if legacy_jam_threshold is not None:
+        _ensure_section(parser, "STATUS")
+        if not parser.has_option("STATUS", "jampressthreshold"):
+            parser.set("STATUS", "jampressthreshold", legacy_jam_threshold)
 
 
 def _verify_settings_password_change(
@@ -398,16 +405,11 @@ def restore_defaults() -> dict:
             "snapshotpath": config.DEFAULT_SNAPSHOT_PATH,
             "autosave": config.DEFAULT_AUTO_SAVE,
         },
-        logging={
-            "rotation_enabled": config.DEFAULT_ROTATION_ENABLED,
-            "rotation_mode": config.DEFAULT_ROTATION_MODE,
-            "cycle_idle_time": config.DEFAULT_CYCLE_IDLE_TIME,
-            "cycle_threshold_press": config.DEFAULT_CYCLE_THRESHOLD_PRESS,
-        },
         thresholds={
             "values": threshold_values,
             "enable": threshold_enable,
         },
+        status={"jam_press_threshold": config.DEFAULT_JAM_PRESS_THRESHOLD},
     )
     res = update_config(payload, source="local")
     clear_snapshot_cache()
@@ -467,7 +469,6 @@ def update_config(
     _ensure_section(parser, "LS_PLC")
     _ensure_section(parser, "SPOT")
     _ensure_section(parser, "SETTINGS")
-    _ensure_section(parser, "LOGGING")
     _ensure_section(parser, "THRESHOLDS_VALUE")
     _ensure_section(parser, "THRESHOLDS_ENABLE")
 
@@ -556,15 +557,7 @@ def update_config(
         if payload.settings.custom_notice is not None:
             parser.set("SETTINGS", "custom_notice", payload.settings.custom_notice.replace("\n", "\\n"))
 
-    if payload.logging:
-        if payload.logging.rotation_enabled is not None:
-            parser.set("LOGGING", "rotationenabled", str(payload.logging.rotation_enabled))
-        if payload.logging.rotation_mode:
-            parser.set("LOGGING", "rotationmode", payload.logging.rotation_mode.upper())
-        if payload.logging.cycle_idle_time is not None:
-            parser.set("LOGGING", "cycleidletime", str(payload.logging.cycle_idle_time))
-        if payload.logging.cycle_threshold_press is not None:
-            parser.set("LOGGING", "cyclethresholdpress", str(payload.logging.cycle_threshold_press))
+    _cleanup_legacy_logging_options(parser)
 
     if payload.thresholds:
         if payload.thresholds.values:
@@ -592,18 +585,10 @@ def update_config(
         if payload.system.status_offline_ms is not None:
             parser.set("SYSTEM", "statusofflinems", str(payload.system.status_offline_ms))
 
-    if payload.mes:
-        _ensure_section(parser, "MES")
-        if payload.mes.enabled is not None:
-            parser.set("MES", "enabled", str(payload.mes.enabled))
-        if payload.mes.userid:
-            parser.set("MES", "userid", payload.mes.userid)
-        if payload.mes.password:
-            parser.set("MES", "password", payload.mes.password)
-        if payload.mes.starthour is not None:
-            parser.set("MES", "starthour", str(payload.mes.starthour))
-        if payload.mes.endhour is not None:
-            parser.set("MES", "endhour", str(payload.mes.endhour))
+    if payload.status:
+        _ensure_section(parser, "STATUS")
+        if payload.status.jam_press_threshold is not None:
+            parser.set("STATUS", "jampressthreshold", str(payload.status.jam_press_threshold))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     write_encoding = "utf-8-sig"

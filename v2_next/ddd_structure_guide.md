@@ -29,12 +29,6 @@ backend/
 │   ├── FacilityData_Models.py     # 설비 관련 Pydantic DTO 스키마
 │   └── FacilityData_AITool.py     # AI Agent가 실행할 설비 조회 Tool Call 래퍼
 │
-├── MESSync/                       # [도메인] MES 시스템 동기화 및 페이지 크롤링/브릿지 처리
-│   ├── MESSync_Logic_Scheduler.py # 백그라운드 MES 데이터 수집 스케줄러 (Playwright/Request)
-│   ├── MESSync_AITool.py          # AI Agent가 스케줄러 상태 확인 및 강제 트리거하는 Tool Call 래퍼
-│   ├── MESSync_Router.py          # MES 전용 별도 API 엔드포인트
-│   └── scripts/                   # MES 인증 처리, 캡챠 풀이 등 보조 스크립트 모음
-│
 ├── Configuration/                 # [도메인] 사용자 설정, 알람 임계치 설정 관리
 │   ├── Configuration_Logic_*.py   # 시스템/설비별 설정 로드 및 업데이트 코어 로직
 │   └── Configuration_AITool.py    # AI Agent용 시스템 환경설정 조회/수정 Tool Call 래퍼
@@ -65,28 +59,24 @@ backend/
 frontend/
 ├── index.html                 # React 애플리케이션 진입 HTML
 ├── src/
-│   ├── App.tsx                # 최상위 컴포넌트, 화면 레이아웃 스캐폴딩 
+│   ├── App.tsx                # 최상위 컴포넌트, 화면 레이아웃 스캐폴딩
 │   ├── index.css              # 글로벌 Tailwind 기반 및 CSS 변수 테마 설정
 │   │
 │   ├── domain/                # 🧩 도메인 단위로 분리된 주요 기능 디렉토리
 │   │   ├── Configuration/     # 시스템 / 타임시리즈 환경 설정 도메인
 │   │   │   ├── components/    # 설정 모달, 드롭다운 등 연관 컴포넌트
-│   │   │   └── context/       # 설정 전용 React Context 
+│   │   │   └── context/       # 설정 전용 React Context
 │   │   │
 │   │   ├── FacilityData/      # PLC 등 라이브 차트 및 데이터 시각화 도메인
 │   │   │   ├── components/    # TimeSeriesWidget, Gauge, Heatmap 등 시각화 패널
 │   │   │   └── hooks/         # 실시간 데이터 스트리밍(SSE/Short Polling) 처리 훅
-│   │   │
-│   │   ├── MESSync/           # 백그라운드 MES 스케줄링 현황 모니터링 도메인
-│   │   │   ├── components/    # 동기화 상태 배지, 마지막 수집 시간 패널
-│   │   │   └── api/           # MES 관련 데이터 Fetch 로직
 │   │   │
 │   │   └── Observability/     # 프론트엔드/백엔드 알람 및 알림 모니터링
 │   │       ├── components/    # Notification 리스트, 에러 스낵바
 │   │       └── context/       # 글로벌 에러 모니터링 메니저
 │   │
 │   ├── AI/                    # 🤖 AI 챗봇 시스템 (단독 도메인)
-│   │   ├── components/        
+│   │   ├── components/
 │   │   │   ├── AIChatbot.tsx  # 글래스모피즘(Glassmorphism) 기반 플로팅 챗봇 UI 메인
 │   │   │   └── ChatMessage.tsx# Markdown 기반 LLM 답변 / 로딩 상태 렌더러
 │   │   ├── hooks/

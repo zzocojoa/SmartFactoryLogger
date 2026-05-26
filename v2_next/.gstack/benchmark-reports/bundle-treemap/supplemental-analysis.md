@@ -73,7 +73,6 @@ frontend/src/App.tsx
 
 - `frontend/src` 직접 import: 위 vendor 대상에서는 발견하지 못했다.
 - Grafana package dependency: 위 항목 대부분은 `@grafana/ui`, `@grafana/data`, `@grafana/scenes` dependency로 확정된다.
-- `/mes-dashboard`: 이번 대상 vendor 직접 유입 근거는 없다. `/mes-dashboard` 쪽은 `recharts` 계열이며 `/dashboard` App chunk 원인과 별개다.
 
 추정:
 

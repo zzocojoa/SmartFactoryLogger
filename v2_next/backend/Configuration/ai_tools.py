@@ -7,7 +7,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "get_system_config",
-            "description": "서버의 현재 시스템 설정(수집 주기, 로그 회전 주기, 백오프 정책 등)을 조회합니다.",
+            "description": "서버의 현재 시스템 설정(수집 주기, 저장 경로, 통신 설정 등)을 조회합니다.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -43,7 +43,7 @@ def execute_tool(name: str, args: Dict[str, Any]) -> Any:
     Configuration 도메인의 도구를 실행합니다.
     """
     if name == "get_system_config":
-        return get_config_snapshot().model_dump()
+        return get_config_snapshot()
         
     elif name == "update_system_config":
         key = args.get("setting_key")

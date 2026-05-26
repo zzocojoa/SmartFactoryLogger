@@ -23,10 +23,6 @@ class CSVLoggerService:
         self.active_log_dir = Path(config.LOG_PATH)
         self.fallback_log_dir = config.APP_DATA_DIR / "logs" / "data"
         self.auto_save = bool(config.AUTO_SAVE)
-        self.rotation_enabled = bool(config.ROTATION_ENABLED)
-        self.rotation_mode = (config.ROTATION_MODE or "DAILY").upper()
-        self.cycle_idle_time = float(config.CYCLE_IDLE_TIME)
-        self.cycle_threshold_press = float(config.CYCLE_THRESHOLD_PRESS)
         self.csv_header = self._parse_header(config.CSV_HEADER)
         self._logpath_warned = False
         self._buffer_size = 0
@@ -63,10 +59,6 @@ class CSVLoggerService:
         *,
         log_path: Optional[Path] = None,
         auto_save: Optional[bool] = None,
-        rotation_enabled: Optional[bool] = None,
-        rotation_mode: Optional[str] = None,
-        cycle_idle_time: Optional[float] = None,
-        cycle_threshold_press: Optional[float] = None,
         csv_header: Optional[str] = None,
     ) -> bool:
         changed = False
@@ -77,24 +69,6 @@ class CSVLoggerService:
             if auto_save is not None:
                 self.auto_save = bool(auto_save)
                 changed = True
-            if rotation_enabled is not None:
-                self.rotation_enabled = bool(rotation_enabled)
-                changed = True
-            if rotation_mode is not None:
-                self.rotation_mode = (rotation_mode or "DAILY").upper()
-                changed = True
-            if cycle_idle_time is not None:
-                try:
-                    self.cycle_idle_time = float(cycle_idle_time)
-                    changed = True
-                except Exception:
-                    pass
-            if cycle_threshold_press is not None:
-                try:
-                    self.cycle_threshold_press = float(cycle_threshold_press)
-                    changed = True
-                except Exception:
-                    pass
             if csv_header is not None:
                 self.csv_header = self._parse_header(csv_header)
                 changed = True
@@ -168,7 +142,7 @@ class CSVLoggerService:
                     self.logger.error("Failed to open CSV log file (fallback): %s", exc2)
         return None, None
 
-    def _build_row(self, data: FactoryData, timestamp: datetime) -> Tuple[list, float]:
+    def _build_row(self, data: FactoryData, timestamp: datetime) -> list:
         date_s = timestamp.strftime("%Y-%m-%d")
         time_s = timestamp.strftime("%H:%M:%S.%f")[:-3]
         press_value = self._to_float(data.Press)
@@ -195,7 +169,7 @@ class CSVLoggerService:
             data.Die_ID or "",
             data.Billet_Cycle_ID or "",
         ]
-        return row, press_value
+        return row
 
     def _parse_timestamp(self, data: FactoryData) -> datetime:
         timestamp_text = data.Time or ""
@@ -235,15 +209,16 @@ class CSVLoggerService:
         writer: Optional[csv.writer],
         handle: Optional[object],
         buffer: Iterable[Tuple[list, datetime]],
-    ) -> None:
+    ) -> bool:
         rows = list(buffer)
         self._last_batch_size = len(rows)
         if not rows:
-            return
+            return True
         if writer is None or handle is None:
-            return
+            return False
         writer.writerows([row for row, _ in rows])
         handle.flush()
+        return True
 
     def _close_file(self, handle: Optional[object]) -> None:
         if handle is None:
@@ -253,31 +228,18 @@ class CSVLoggerService:
         except Exception:
             pass
 
-    def get_runtime_state(self) -> dict[str, int | bool]:
+    def get_runtime_state(self) -> dict[str, int | bool | str]:
+        with self._config_lock:
+            auto_save = self.auto_save
+            log_path = str(self.active_log_dir)
         return {
             "queue_size": self.queue.qsize(),
             "buffer_size": self._buffer_size,
             "last_batch_size": self._last_batch_size,
             "running": self.running,
+            "auto_save": auto_save,
+            "log_path": log_path,
         }
-
-    def _switch_file(
-        self,
-        timestamp: datetime,
-        prefix: str,
-        handle: Optional[object],
-        writer: Optional[csv.writer],
-        buffer: list[Tuple[list, datetime]],
-    ) -> Tuple[Optional[object], Optional[csv.writer], str]:
-        if buffer:
-            self._flush_buffer(writer, handle, buffer)
-            buffer.clear()
-
-        self._close_file(handle)
-
-        next_handle, next_writer = self._open_log_file(timestamp.strftime("%Y%m%d_%H%M%S"), prefix=prefix)
-        current_date_str = timestamp.strftime("%Y%m%d")
-        return next_handle, next_writer, current_date_str
 
     def _loop(self) -> None:
         buffer: list[Tuple[list, datetime]] = []
@@ -288,34 +250,31 @@ class CSVLoggerService:
 
         f_handle = None
         writer = None
-        current_date_str: Optional[str] = None
-
-        cycle_idle_start = 0.0
-        is_cycle_armed = False
-        idle_threshold = 10.0
         current_config_version = -1
 
         while True:
             try:
                 with self._config_lock:
                     auto_save = self.auto_save
-                    rotation_enabled = self.rotation_enabled
-                    rotation_mode = self.rotation_mode
-                    cycle_idle_time = self.cycle_idle_time
-                    cycle_threshold_press = self.cycle_threshold_press
                     config_version = self._config_version
 
                 if config_version != current_config_version:
                     current_config_version = config_version
                     if buffer:
-                        self._flush_buffer(writer, f_handle, buffer)
-                        buffer.clear()
+                        if auto_save and (f_handle is None or writer is None):
+                            f_handle, writer = self._open_log_file(
+                                buffer[0][1].strftime("%Y%m%d_%H%M%S"),
+                                prefix=file_prefix,
+                            )
+                        if self._flush_buffer(writer, f_handle, buffer):
+                            buffer.clear()
+                            self._buffer_size = 0
+                        elif not auto_save:
+                            buffer.clear()
+                            self._buffer_size = 0
                     self._close_file(f_handle)
                     f_handle = None
                     writer = None
-                    current_date_str = None
-                    cycle_idle_start = 0.0
-                    is_cycle_armed = False
 
                 item = None
                 try:
@@ -328,37 +287,12 @@ class CSVLoggerService:
                         break
                 else:
                     timestamp = self._parse_timestamp(item)
-                    row, press_value = self._build_row(item, timestamp)
-                    row_date_str = timestamp.strftime("%Y%m%d")
-                    should_rotate_billet = False
+                    row = self._build_row(item, timestamp)
 
-                    if rotation_enabled and rotation_mode == "BILLET":
-                        if press_value < idle_threshold:
-                            if cycle_idle_start == 0.0:
-                                cycle_idle_start = time.time()
-                            elif (time.time() - cycle_idle_start) > cycle_idle_time:
-                                is_cycle_armed = True
-                        else:
-                            cycle_idle_start = 0.0
-                            if is_cycle_armed and press_value >= cycle_threshold_press:
-                                is_cycle_armed = False
-                                should_rotate_billet = True
+                    if not auto_save:
+                        continue
 
-                    should_rotate_date = current_date_str is not None and row_date_str != current_date_str
-                    should_switch_file = should_rotate_date or should_rotate_billet
-
-                    if current_date_str is None:
-                        current_date_str = row_date_str
-                    elif should_switch_file:
-                        f_handle, writer, current_date_str = self._switch_file(
-                            timestamp,
-                            file_prefix,
-                            f_handle,
-                            writer,
-                            buffer,
-                        )
-
-                    if auto_save and (f_handle is None or writer is None):
+                    if f_handle is None or writer is None:
                         f_handle, writer = self._open_log_file(
                             timestamp.strftime("%Y%m%d_%H%M%S"),
                             prefix=file_prefix,
@@ -373,23 +307,29 @@ class CSVLoggerService:
                         ts = buffer[0][1].strftime("%Y%m%d_%H%M%S")
                         f_handle, writer = self._open_log_file(ts, prefix=file_prefix)
 
-                    if auto_save:
-                        self._flush_buffer(writer, f_handle, buffer)
-                    buffer.clear()
-                    self._buffer_size = 0
+                    if auto_save and self._flush_buffer(writer, f_handle, buffer):
+                        buffer.clear()
+                        self._buffer_size = 0
+                    elif not auto_save:
+                        buffer.clear()
+                        self._buffer_size = 0
                     last_flush_time = now
             except Exception as exc:
                 self.logger.error("Error in CSV logger loop: %s", exc)
                 self._close_file(f_handle)
                 f_handle, writer = None, None
-                current_date_str = None
-                buffer.clear()
-                self._buffer_size = 0
+                self._buffer_size = len(buffer)
                 time.sleep(0.5)
 
         if buffer:
             try:
-                self._flush_buffer(writer, f_handle, buffer)
+                if self.auto_save and (f_handle is None or writer is None):
+                    f_handle, writer = self._open_log_file(
+                        buffer[0][1].strftime("%Y%m%d_%H%M%S"),
+                        prefix=file_prefix,
+                    )
+                if self._flush_buffer(writer, f_handle, buffer):
+                    buffer.clear()
             except Exception:
                 pass
         self._buffer_size = 0

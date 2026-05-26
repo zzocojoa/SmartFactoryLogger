@@ -51,20 +51,12 @@ DEFAULT_SNAPSHOT_PATH = "snapshots"
 DEFAULT_AUTO_SAVE = True
 DEFAULT_STATUS_WARN_MS = 10000
 DEFAULT_STATUS_OFFLINE_MS = 20000
-DEFAULT_ROTATION_ENABLED = True
-DEFAULT_ROTATION_MODE = "BILLET"
-DEFAULT_CYCLE_IDLE_TIME = 30
-DEFAULT_CYCLE_THRESHOLD_PRESS = 20.0
+DEFAULT_JAM_PRESS_THRESHOLD = 20.0
 DEFAULT_CUSTOM_NOTICE = "작업 상황 및 주의사항을 여기에 입력하세요.\n(마크다운 형식을 지원합니다)"
 DEFAULT_CSV_HEADER = (
     "Date,Time,Temperature,MainPress,BilletLength,Temp_F,Temp_B,Count,Speed,EndPos,"
     "Mold1,Mold2,Mold3,Mold4,Mold5,Mold6,Billet_Temp,At_Pre,At_Temp,DIE_ID,Billet_CycleID"
 )
-DEFAULT_MES_USER_ID = ""
-DEFAULT_MES_PASSWORD = ""
-DEFAULT_MES_ENABLED = False
-DEFAULT_MES_START_HOUR = 8   # 운영 시작 시간 (08:00)
-DEFAULT_MES_END_HOUR = 19    # 운영 종료 시간 (19:00)
 DEFAULT_LS_TARGETS: List[Tuple[str, str]] = [
     ("%DW250", "Mold1"),
     ("%DW256", "Mold2"),
@@ -312,23 +304,6 @@ CONFIG, CONFIG_ENCODING = _load_config(CONFIG_PATH)
 if _safe_is_file(CONFIG_PATH):
     _updated = False
     
-    # MES 섹션 및 개별 키 자동 추가 (기존 config.ini 호환)
-    if not CONFIG.has_section("MES"):
-        CONFIG.add_section("MES")
-        _updated = True
-    _mes_defaults = {
-        "enabled": str(DEFAULT_MES_ENABLED),
-        "userid": DEFAULT_MES_USER_ID,
-        "password": DEFAULT_MES_PASSWORD,
-        "starthour": str(DEFAULT_MES_START_HOUR),
-        "endhour": str(DEFAULT_MES_END_HOUR),
-    }
-    for _key, _default_val in _mes_defaults.items():
-        if not CONFIG.has_option("MES", _key):
-            CONFIG.set("MES", _key, _default_val)
-            _updated = True
-            _config_log("INFO", f"Auto-added missing MES.{_key} = {_default_val}")
-    
     # SYSTEM 섹션 및 개별 키 자동 추가
     if not CONFIG.has_section("SYSTEM"):
         CONFIG.add_section("SYSTEM")
@@ -462,15 +437,11 @@ SPOT_WIDGET_HEIGHT = _env_int("SPOT_WIDGET_HEIGHT", SPOT_WIDGET_HEIGHT)
 LOG_PATH = resolve_storage_path(_get(CONFIG, "SETTINGS", "logpath", DEFAULT_LOG_PATH), "logs", "LogPath")
 AUTO_SAVE = _get_bool(CONFIG, "SETTINGS", "autosave", DEFAULT_AUTO_SAVE)
 CUSTOM_NOTICE = _get(CONFIG, "SETTINGS", "custom_notice", DEFAULT_CUSTOM_NOTICE) or DEFAULT_CUSTOM_NOTICE
-ROTATION_ENABLED = _get_bool(CONFIG, "LOGGING", "rotationenabled", DEFAULT_ROTATION_ENABLED)
-ROTATION_MODE = (_get(CONFIG, "LOGGING", "rotationmode", DEFAULT_ROTATION_MODE) or DEFAULT_ROTATION_MODE).upper()
 
 # APP MODE (REAL vs MOCK)
 # Priority: Env Var > Config.ini > Frozen State (Real) > Default (Mock)
 _DEFAULT_MODE = "REAL" if getattr(sys, "frozen", False) else "MOCK"
 MODE = os.getenv("V2_MODE", _get(CONFIG, "SETTINGS", "mode", _DEFAULT_MODE)).upper()
-CYCLE_IDLE_TIME = _get_int(CONFIG, "LOGGING", "cycleidletime", DEFAULT_CYCLE_IDLE_TIME)
-CYCLE_THRESHOLD_PRESS = _get_float(CONFIG, "LOGGING", "cyclethresholdpress", DEFAULT_CYCLE_THRESHOLD_PRESS)
 CSV_HEADER = _get(CONFIG, "HEADERS", "csv", DEFAULT_CSV_HEADER) or DEFAULT_CSV_HEADER
 SNAPSHOT_PATH = resolve_storage_path(
     _get(CONFIG, "SETTINGS", "snapshotpath", DEFAULT_SNAPSHOT_PATH),
@@ -486,17 +457,16 @@ INTERVAL_SEC = max(MIN_INTERVAL_SEC, min(MAX_INTERVAL_SEC, _interval_raw))
 # SYSTEM / Status Thresholds
 STATUS_WARN_MS = _get_int(CONFIG, "SYSTEM", "statuswarnms", DEFAULT_STATUS_WARN_MS)
 STATUS_OFFLINE_MS = _get_int(CONFIG, "SYSTEM", "statusofflinems", DEFAULT_STATUS_OFFLINE_MS)
+_jam_press_raw = _get_float(
+    CONFIG,
+    "STATUS",
+    "jampressthreshold",
+    _get_float(CONFIG, "LOGGING", "cyclethresholdpress", DEFAULT_JAM_PRESS_THRESHOLD),
+)
+JAM_PRESS_THRESHOLD = _env_float("JAM_PRESS_THRESHOLD", _jam_press_raw)
 
 # SETTINGS / Password
 SETTINGS_PASSWORD = os.getenv("SETTINGS_PASSWORD", _get(CONFIG, "SETTINGS", "password", "") or "")
-
-# MES
-MES_ENABLED = _get_bool(CONFIG, "MES", "enabled", DEFAULT_MES_ENABLED)
-MES_USER_ID = os.getenv("MES_USER_ID", _get(CONFIG, "MES", "userid", DEFAULT_MES_USER_ID) or DEFAULT_MES_USER_ID)
-MES_PASSWORD = os.getenv("MES_PASSWORD", _get(CONFIG, "MES", "password", DEFAULT_MES_PASSWORD) or DEFAULT_MES_PASSWORD)
-MES_START_HOUR = _get_int(CONFIG, "MES", "starthour", DEFAULT_MES_START_HOUR)
-MES_END_HOUR = _get_int(CONFIG, "MES", "endhour", DEFAULT_MES_END_HOUR)
-
 
 # Validation Logic
 def validate_config() -> List[str]:
