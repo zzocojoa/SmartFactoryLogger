@@ -45,7 +45,11 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "backend/assets/icon.ico"
+      "icon": "backend/assets/icon.ico",
+      "executableName": "smart-factory"
+    },
+    "nsis": {
+      "artifactName": "smart-factory-logger-v2 Setup ${version}.${ext}"
     },
     "asar": true,
     "extraResources": [
