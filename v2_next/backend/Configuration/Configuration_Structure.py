@@ -78,6 +78,10 @@ class SystemConfig(BaseModel):
     status_offline_ms: Optional[int] = None
 
 
+class StatusConfig(BaseModel):
+    jam_press_threshold: Optional[float] = None
+
+
 class ConfigUpdate(BaseModel):
     extruder: Optional[NetConfig] = None
     ls_plc: Optional[NetConfig] = None
@@ -85,6 +89,7 @@ class ConfigUpdate(BaseModel):
     settings: Optional[SettingsConfig] = None
     thresholds: Optional[ThresholdsConfig] = None
     system: Optional[SystemConfig] = None
+    status: Optional[StatusConfig] = None
 
 
 class OverrideToggle(BaseModel):

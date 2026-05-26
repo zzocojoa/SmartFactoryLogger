@@ -13,9 +13,9 @@
     "health:frontend:typecheck": "npm --prefix frontend run typecheck",
     "health:frontend:lint": "npm --prefix frontend run lint",
     "health:frontend:test": "npm --prefix frontend run test",
-    "health:backend:lint": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m ruff check",
+    "health:backend:lint": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m ruff check backend",
     "health:backend:typecheck": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m mypy",
-    "health:backend:test": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m unittest discover -s backend/tests"
+    "health:backend:test": "node scripts/run_backend_unittest.cjs"
   },
   "keywords": [],
   "author": "",

@@ -10,9 +10,6 @@ from backend.FacilityData.schemas import FactoryData
 from .. import constants
 from backend.FacilityData.service import plc_service
 
-
-
-
 def _parse_float(value: Any) -> Optional[float]:
     if value is None:
         return None
@@ -25,6 +22,11 @@ def _parse_float(value: Any) -> Optional[float]:
         return float(text)
     except Exception:
         return None
+
+
+def _normalize_header(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return "".join(ch for ch in text if not ch.isspace() and ch not in "_-()/[]{}.%")
 
 
 def _iter_csv_rows(path: Path) -> tuple[list[str], Iterable[list[str]]]:

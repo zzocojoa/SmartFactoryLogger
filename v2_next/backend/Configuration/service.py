@@ -409,6 +409,7 @@ def restore_defaults() -> dict:
             "values": threshold_values,
             "enable": threshold_enable,
         },
+        status={"jam_press_threshold": config.DEFAULT_JAM_PRESS_THRESHOLD},
     )
     res = update_config(payload, source="local")
     clear_snapshot_cache()
@@ -583,6 +584,11 @@ def update_config(
             parser.set("SYSTEM", "statuswarnms", str(payload.system.status_warn_ms))
         if payload.system.status_offline_ms is not None:
             parser.set("SYSTEM", "statusofflinems", str(payload.system.status_offline_ms))
+
+    if payload.status:
+        _ensure_section(parser, "STATUS")
+        if payload.status.jam_press_threshold is not None:
+            parser.set("STATUS", "jampressthreshold", str(payload.status.jam_press_threshold))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     write_encoding = "utf-8-sig"
