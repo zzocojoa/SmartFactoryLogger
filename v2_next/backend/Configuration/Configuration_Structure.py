@@ -38,13 +38,6 @@ class SettingsConfig(BaseModel):
     custom_notice: Optional[str] = None
 
 
-class LoggingConfig(BaseModel):
-    rotation_enabled: Optional[bool] = None
-    rotation_mode: Optional[str] = None
-    cycle_idle_time: Optional[float] = None
-    cycle_threshold_press: Optional[float] = None
-
-
 class ThresholdsValue(BaseModel):
     speed: Optional[str] = None
     press: Optional[str] = None
@@ -98,7 +91,6 @@ class ConfigUpdate(BaseModel):
     ls_plc: Optional[NetConfig] = None
     spot: Optional[SpotConfig] = None
     settings: Optional[SettingsConfig] = None
-    logging: Optional[LoggingConfig] = None
     thresholds: Optional[ThresholdsConfig] = None
     system: Optional[SystemConfig] = None
     mes: Optional[MESConfig] = None

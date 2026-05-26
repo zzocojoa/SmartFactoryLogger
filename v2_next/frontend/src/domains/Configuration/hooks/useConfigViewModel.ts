@@ -162,10 +162,6 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       logPath: values.settings.logpath ?? '',
       snapshotPath: values.settings.snapshotpath ?? '',
       autoSave: Boolean(values.settings.autosave),
-      rotationEnabled: values.logging.rotation_enabled ?? true,
-      rotationMode: values.logging.rotation_mode ?? 'BILLET',
-      cycleIdleTime: values.logging.cycle_idle_time?.toString() ?? '',
-      cycleThresholdPress: values.logging.cycle_threshold_press?.toString() ?? '',
       intervalSec: values.system?.interval_sec?.toString() ?? '0.2',
       statusWarnMs: String(values.system?.status_warn_ms ?? 10000),
       statusOfflineMs: String(values.system?.status_offline_ms ?? 20000),
@@ -485,12 +481,6 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         autosave: settingsForm.autoSave,
         password: settingsForm.password.trim() || undefined,
         current_password: requiresCurrentPassword ? trimmedCurrentPassword : undefined,
-      },
-      logging: {
-        rotation_enabled: settingsForm.rotationEnabled,
-        rotation_mode: settingsForm.rotationMode,
-        cycle_idle_time: toFloat(settingsForm.cycleIdleTime),
-        cycle_threshold_press: toFloat(settingsForm.cycleThresholdPress),
       },
       system: {
         interval_sec: parseThresholdValue(settingsForm.intervalSec) ?? 0.2, // Use parseThresholdValue helper

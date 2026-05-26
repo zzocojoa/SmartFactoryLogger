@@ -1741,67 +1741,6 @@ export function SettingsModal(props: SettingsModalProps) {
 
                     <div
                       className="settings-section"
-                      id="settings-logging"
-                      ref={registerSettingsSection('settings-logging')}
-                    >
-                      <div className="settings-section-title">로그 회전</div>
-                      <div className="settings-grid">
-                        <label
-                          className={`settings-field settings-toggle-field ${isSettingsFieldDirty('rotationEnabled') ? 'changed' : ''}`}
-                        >
-                          <span className="settings-toggle-label">로그 회전 사용</span>
-                          <button
-                            type="button"
-                            className="settings-toggle"
-                            aria-pressed={settingsForm.rotationEnabled}
-                            onClick={() => updateSettingsField('rotationEnabled', !settingsForm.rotationEnabled)}
-                          >
-                            <span className="settings-toggle-text">{settingsForm.rotationEnabled ? 'ON' : 'OFF'}</span>
-                          </button>
-                        </label>
-                        <label className={`settings-field ${isSettingsFieldDirty('rotationMode') ? 'changed' : ''}`}>
-                          Rotation Mode
-                          <select
-                            value={settingsForm.rotationMode}
-                            onChange={(e) => updateSettingsField('rotationMode', e.target.value)}
-                          >
-                            <option value="BILLET">BILLET</option>
-                            <option value="DAILY">DAILY</option>
-                          </select>
-                          <span className="settings-field-help">
-                            BILLET: 빌렛 기준 회전, DAILY: 날짜 기준 분리 저장
-                          </span>
-                        </label>
-                        <label className={`settings-field ${isSettingsFieldDirty('cycleIdleTime') ? 'changed' : ''}`}>
-                          Cycle Idle Time (sec)
-                          <input
-                            value={settingsForm.cycleIdleTime}
-                            onChange={(e) => updateSettingsField('cycleIdleTime', e.target.value)}
-                          />
-                          <span className="settings-field-help">
-                            사이클 종료 후 대기 시간(초)
-                          </span>
-                        </label>
-                        <label
-                          className={`settings-field ${isSettingsFieldDirty('cycleThresholdPress') ? 'changed' : ''}`}
-                        >
-                          Cycle Threshold Press
-                          <input
-                            value={settingsForm.cycleThresholdPress}
-                            onChange={(e) => updateSettingsField('cycleThresholdPress', e.target.value)}
-                          />
-                          <span className="settings-field-help">
-                            기준 압력 이상에서 사이클로 판단
-                          </span>
-                        </label>
-                      </div>
-                      <div className="settings-hint">
-                        로그 회전 기준과 사이클 조건은 CSV 분리 및 저장 주기에 직접 영향을 줍니다.
-                      </div>
-                    </div>
-
-                    <div
-                      className="settings-section"
                       id="settings-mes"
                       ref={registerSettingsSection('settings-mes')}
                     >

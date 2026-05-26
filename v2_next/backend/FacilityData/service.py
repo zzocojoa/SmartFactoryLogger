@@ -132,11 +132,13 @@ class PLCService:
         snapshot = config_manager.get_snapshot()
         values = snapshot.get("values", {})
         thresholds_cfg = values.get("thresholds", {})
-        logging_cfg = values.get("logging", {})
-        press_threshold = logging_cfg.get(
-            "cycle_threshold_press", config.DEFAULT_CYCLE_THRESHOLD_PRESS
+        status_cfg = values.get("status", {})
+        jam_press_threshold = status_cfg.get("jam_press_threshold", config.JAM_PRESS_THRESHOLD)
+        computed = self.status_evaluator.evaluate(
+            raw_data,
+            thresholds_cfg,
+            float(jam_press_threshold),
         )
-        computed = self.status_evaluator.evaluate(raw_data, thresholds_cfg, float(press_threshold))
         return raw_data.model_copy(update={"Computed": computed})
 
     def _with_timestamp_ms(self, data: FactoryData, timestamp_ms: int) -> FactoryData:

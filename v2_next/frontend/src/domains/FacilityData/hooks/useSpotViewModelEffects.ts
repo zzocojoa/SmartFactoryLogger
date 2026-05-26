@@ -165,7 +165,11 @@ export const useSpotViewModelEffects = ({
         config: nextConfig,
         sent_at: Date.now(),
       };
-      channel?.postMessage(payload);
+      try {
+        channel?.postMessage(payload);
+      } catch {
+        // Config sync can race with effect cleanup in React StrictMode.
+      }
       window.localStorage.setItem(SPOT_CONFIG_BROADCAST_KEY, JSON.stringify(payload));
       leaderMode = leaderMode === 'standalone' ? 'standalone' : 'leader';
     };

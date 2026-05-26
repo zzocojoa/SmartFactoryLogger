@@ -820,8 +820,6 @@ def _collect_csv_logger() -> dict[str, Any]:
     payload = {
         "queue_size": int(runtime_state.get("queue_size") or 0),
         "buffer_size": int(runtime_state.get("buffer_size") or 0),
-        "rotation_mode": runtime_state.get("rotation_mode"),
-        "rotation_enabled": runtime_state.get("rotation_enabled"),
         "auto_save": runtime_state.get("auto_save"),
         "log_path": runtime_state.get("log_path"),
     }

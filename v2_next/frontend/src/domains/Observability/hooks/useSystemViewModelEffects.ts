@@ -142,7 +142,11 @@ export const useSystemViewModelEffects = ({
         data,
         sent_at: Date.now(),
       };
-      channel?.postMessage(payload);
+      try {
+        channel?.postMessage(payload);
+      } catch {
+        // Async poll results can arrive after StrictMode cleanup closes the channel.
+      }
       window.localStorage.setItem(DASHBOARD_SYSTEM_BROADCAST_KEY, JSON.stringify(payload));
       updateLeaderState({
         tab_id: tabId,
@@ -424,7 +428,11 @@ export const useCommLogInfoEffects = ({
         data,
         sent_at: Date.now(),
       };
-      channel?.postMessage(payload);
+      try {
+        channel?.postMessage(payload);
+      } catch {
+        // Async loads can resolve after StrictMode cleanup closes the channel.
+      }
       window.localStorage.setItem(COMM_LOG_BROADCAST_KEY, JSON.stringify(payload));
     };
 

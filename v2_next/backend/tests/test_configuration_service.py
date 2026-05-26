@@ -1,7 +1,15 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+_TEST_ROOT = Path(__file__).resolve().parents[2]
+_TEST_APPDATA_ROOT = _TEST_ROOT / ".tmp_test_appdata"
+_TEST_CONFIG_PATH = _TEST_APPDATA_ROOT / "config.ini"
+
+os.environ.setdefault("APPDATA", str(_TEST_APPDATA_ROOT))
+os.environ.setdefault("SFL_CONFIG_PATH", str(_TEST_CONFIG_PATH))
 
 
 class ConfigurationServiceTests(unittest.TestCase):
@@ -103,6 +111,52 @@ class ConfigurationServiceTests(unittest.TestCase):
             self.assertEqual(spot["actuator_step"], 5)
             self.assertEqual(spot["actuator_ip"], "10.1.10.60")
             self.assertEqual(spot["focus_step"], 200)
+
+    def test_legacy_cycle_threshold_migrates_to_status_jam_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[LOGGING]",
+                        "rotationmode = BILLET",
+                        "cycleidletime = 30",
+                        "cyclethresholdpress = 55.5",
+                        "",
+                    ]
+                ),
+                encoding="utf-8-sig",
+            )
+
+            from backend.Configuration import service
+            from backend.Configuration.Configuration_Structure import ConfigUpdate
+
+            original_config_path = service.config.CONFIG_PATH
+            original_allow_local_config = service.os.environ.get("SFL_ALLOW_LOCAL_CONFIG")
+            service.config.CONFIG_PATH = config_path
+            service.os.environ["SFL_ALLOW_LOCAL_CONFIG"] = "1"
+            try:
+                service.clear_snapshot_cache()
+                snapshot = service.get_config_snapshot()
+                self.assertEqual(snapshot["values"]["status"]["jam_press_threshold"], 55.5)
+
+                with mock.patch.object(service.config_meta, "record_local_update", return_value={}):
+                    with mock.patch.object(service.config_manager, "reload", return_value={}):
+                        with mock.patch.object(service.config_manager, "apply_changes", return_value={}):
+                            service.update_config(ConfigUpdate(settings={"autosave": True}), source="local")
+            finally:
+                service.clear_snapshot_cache()
+                service.config.CONFIG_PATH = original_config_path
+                if original_allow_local_config is None:
+                    service.os.environ.pop("SFL_ALLOW_LOCAL_CONFIG", None)
+                else:
+                    service.os.environ["SFL_ALLOW_LOCAL_CONFIG"] = original_allow_local_config
+
+            migrated_text = config_path.read_text(encoding="utf-8-sig")
+            self.assertIn("[STATUS]", migrated_text)
+            self.assertIn("jampressthreshold = 55.5", migrated_text)
+            self.assertNotIn("cyclethresholdpress", migrated_text)
+            self.assertNotIn("rotationmode", migrated_text)
 
 
 if __name__ == "__main__":

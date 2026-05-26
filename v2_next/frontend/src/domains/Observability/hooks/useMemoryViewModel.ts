@@ -704,7 +704,11 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
       summary,
       sent_at: Date.now(),
     };
-    channelRef.current?.postMessage(payload);
+    try {
+      channelRef.current?.postMessage(payload);
+    } catch {
+      // Async summaries can resolve after cleanup closes the broadcast channel.
+    }
     window.localStorage.setItem(MEMORY_SUMMARY_BROADCAST_KEY, JSON.stringify(payload));
     setLeaderState({
       tab_id: tabIdRef.current,

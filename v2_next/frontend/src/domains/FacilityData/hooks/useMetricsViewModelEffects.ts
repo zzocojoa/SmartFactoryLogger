@@ -148,7 +148,11 @@ export const useMetricsPollingEffects = ({
         payload,
         sent_at: Date.now(),
       };
-      channel?.postMessage(message);
+      try {
+        channel?.postMessage(message);
+      } catch {
+        // Polling messages can race with effect cleanup in React StrictMode.
+      }
       updateLeaderState({
         tab_id: tabId,
         mode: leaderState.mode === 'standalone' ? 'standalone' : 'leader',

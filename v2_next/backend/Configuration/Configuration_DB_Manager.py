@@ -260,22 +260,25 @@ class ConfigManager:
             "password_set": bool(_get(parser, "SETTINGS", "password", "")),
         }
         logging_cfg = {
-            "rotation_enabled": _get_bool(parser, "LOGGING", "rotationenabled", config.DEFAULT_ROTATION_ENABLED),
-            "rotation_mode": _get(parser, "LOGGING", "rotationmode", config.DEFAULT_ROTATION_MODE),
-            "cycle_idle_time": _get_int(parser, "LOGGING", "cycleidletime", config.DEFAULT_CYCLE_IDLE_TIME),
-            "cycle_threshold_press": _get_float(
-                parser, "LOGGING", "cyclethresholdpress", config.DEFAULT_CYCLE_THRESHOLD_PRESS
-            ),
             "csv_header": _get(parser, "HEADERS", "csv", config.DEFAULT_CSV_HEADER) or config.DEFAULT_CSV_HEADER,
         }
         thresholds_value = {key: _get_text(parser, "THRESHOLDS_VALUE", key) for key in _THRESHOLD_KEYS}
         thresholds_enable = {key: _get_bool(parser, "THRESHOLDS_ENABLE", key, False) for key in _THRESHOLD_KEYS}
         thresholds_enable["master_on"] = _get_bool(parser, "THRESHOLDS_ENABLE", "master_on", False)
+        status_cfg = {
+            "jam_press_threshold": _get_float(
+                parser,
+                "STATUS",
+                "jampressthreshold",
+                _get_float(parser, "LOGGING", "cyclethresholdpress", config.DEFAULT_JAM_PRESS_THRESHOLD),
+            ),
+        }
 
         return {
             "system": {
                 "interval_sec": float(config.INTERVAL_SEC),
             },
+            "status": status_cfg,
             "extruder": {"ip": extruder_ip, "port": extruder_port},
             "ls_plc": {"ip": ls_ip, "port": ls_port, "targets": _load_ls_targets(parser)},
             "spot": {
@@ -342,21 +345,18 @@ class ConfigManager:
         pending: list[str] = []
         values = self._snapshot.get("values", {})
         settings = values.get("settings", {})
-        logging_cfg = values.get("logging", {})
         system_cfg = values.get("system", {})
+        status_cfg = values.get("status", {})
 
         log_keys = {
             "settings.logpath",
             "settings.autosave",
-            "logging.rotation_enabled",
-            "logging.rotation_mode",
-            "logging.cycle_idle_time",
-            "logging.cycle_threshold_press",
             "logging.csv_header",
         }
         security_keys = {"settings.password_set"}
         snapshot_keys = {"settings.snapshotpath"}
         system_keys = {"system.intervalsec"}
+        status_keys = {"status.jam_press_threshold"}
         spot_keys = {
             "spot.ip",
             "spot.url",
@@ -400,6 +400,7 @@ class ConfigManager:
         security_changed = [key for key in changes if key in security_keys]
         snapshot_changed = [key for key in changes if key in snapshot_keys]
         system_changed = [key for key in changes if key in system_keys]
+        status_changed = [key for key in changes if key in status_keys]
         spot_changed = [key for key in changes if key in spot_keys]
         plc_changed = [key for key in changes if key in plc_keys]
         threshold_changed = [key for key in changes if key in threshold_keys]
@@ -410,30 +411,12 @@ class ConfigManager:
             resolved_log_path = config.resolve_storage_path(log_path_value, "logs", "LogPath")
             config.LOG_PATH = resolved_log_path
             config.AUTO_SAVE = bool(settings.get("autosave", config.DEFAULT_AUTO_SAVE))
-            config.ROTATION_ENABLED = bool(
-                logging_cfg.get("rotation_enabled", config.DEFAULT_ROTATION_ENABLED)
-            )
-            rotation_mode = logging_cfg.get("rotation_mode") or config.DEFAULT_ROTATION_MODE
-            config.ROTATION_MODE = str(rotation_mode).upper()
-            try:
-                config.CYCLE_IDLE_TIME = float(logging_cfg.get("cycle_idle_time", config.DEFAULT_CYCLE_IDLE_TIME))
-            except Exception:
-                config.CYCLE_IDLE_TIME = float(config.DEFAULT_CYCLE_IDLE_TIME)
-            try:
-                config.CYCLE_THRESHOLD_PRESS = float(
-                    logging_cfg.get("cycle_threshold_press", config.DEFAULT_CYCLE_THRESHOLD_PRESS)
-                )
-            except Exception:
-                config.CYCLE_THRESHOLD_PRESS = float(config.DEFAULT_CYCLE_THRESHOLD_PRESS)
+            logging_cfg = values.get("logging", {})
             config.CSV_HEADER = logging_cfg.get("csv_header") or config.DEFAULT_CSV_HEADER
             try:
                 logger_service.apply_config(
                     log_path=resolved_log_path,
                     auto_save=config.AUTO_SAVE,
-                    rotation_enabled=config.ROTATION_ENABLED,
-                    rotation_mode=config.ROTATION_MODE,
-                    cycle_idle_time=config.CYCLE_IDLE_TIME,
-                    cycle_threshold_press=config.CYCLE_THRESHOLD_PRESS,
                     csv_header=config.CSV_HEADER,
                 )
                 applied.extend(sorted(log_changed))
@@ -456,6 +439,15 @@ class ConfigManager:
                 applied.extend(sorted(system_changed))
             except Exception:
                 pending.extend(sorted(system_changed))
+
+        if status_changed:
+            try:
+                config.JAM_PRESS_THRESHOLD = float(
+                    status_cfg.get("jam_press_threshold", config.DEFAULT_JAM_PRESS_THRESHOLD)
+                )
+                applied.extend(sorted(status_changed))
+            except Exception:
+                pending.extend(sorted(status_changed))
 
         if spot_changed:
             spot_cfg = values.get("spot", {})

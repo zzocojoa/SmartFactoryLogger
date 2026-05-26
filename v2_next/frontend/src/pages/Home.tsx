@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import packageJson from '../../package.json';
 import './Home.css';
 
 const Home: React.FC = () => {
@@ -11,11 +12,9 @@ const Home: React.FC = () => {
 
   return (
     <div className="home-container">
-      {/* Background Decor */}
       <div className="home-bg-glow" />
       <div className="home-bg-glow-2" />
 
-      {/* Main Content */}
       <div className="home-content">
         <div>
           <h1 className="home-title">Smart Factory Logger</h1>
@@ -45,7 +44,7 @@ const Home: React.FC = () => {
       </div>
 
       <footer className="home-footer">
-        Copyright © HOIHOU. All Rights Reserved. v1.0.1
+        Copyright (c) HOIHOU. All Rights Reserved. v{packageJson.version}
       </footer>
     </div>
   );

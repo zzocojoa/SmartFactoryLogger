@@ -502,12 +502,6 @@ export interface ConfigSnapshot {
       autosave: boolean;
       password_set: boolean;
     };
-    logging: {
-      rotation_enabled?: boolean;
-      rotation_mode: string;
-      cycle_idle_time: number;
-      cycle_threshold_press: number;
-    };
     system?: {
       interval_sec?: number;
       status_warn_ms?: number;
@@ -557,10 +551,6 @@ export interface SettingsFormState {
   logPath: string;
   snapshotPath: string;
   autoSave: boolean;
-  rotationEnabled: boolean;
-  rotationMode: string;
-  cycleIdleTime: string;
-  cycleThresholdPress: string;
   intervalSec: string;
   statusWarnMs: string;
   statusOfflineMs: string;

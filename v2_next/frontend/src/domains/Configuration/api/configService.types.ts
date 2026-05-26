@@ -61,13 +61,6 @@ export interface ConfigSettingsPayload {
   current_password?: string;
 }
 
-export interface ConfigLoggingPayload {
-  rotation_enabled: boolean;
-  rotation_mode: string;
-  cycle_idle_time?: number;
-  cycle_threshold_press?: number;
-}
-
 export interface ConfigSystemPayload {
   interval_sec: number;
   status_warn_ms?: number;
@@ -88,7 +81,6 @@ export interface ConfigPayload {
   spot: ConfigSpotPayload;
   thresholds: ConfigThresholdsPayload;
   settings: ConfigSettingsPayload;
-  logging: ConfigLoggingPayload;
   system: ConfigSystemPayload;
   mes: ConfigMesPayload;
 }
