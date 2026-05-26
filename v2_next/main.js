@@ -108,7 +108,11 @@ function startBackend() {
   const spawnOptions = {
     cwd: isPackaged ? path.join(process.resourcesPath, 'backend') : __dirname,
     shell: true,
-    windowsVerbatimArguments: true
+    windowsVerbatimArguments: true,
+    env: {
+      ...process.env,
+      SFL_EMBEDDED_ELECTRON: '1'
+    }
   };
 
   try {

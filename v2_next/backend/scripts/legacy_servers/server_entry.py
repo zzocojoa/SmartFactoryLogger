@@ -225,6 +225,10 @@ def close_splash():
         print(f"[Splash] Failed to close splash: {e}")
 
 def open_browser(icon=None, item=None):
+    if os.getenv("SFL_EMBEDDED_ELECTRON") == "1":
+        print("[Launcher] Embedded Electron mode detected; skipping browser auto-open.")
+        return
+
     try:
         target_url = f"http://127.0.0.1:{config.BACKEND_PORT}"
         print(f"[Launcher] Opening browser at {target_url}")
