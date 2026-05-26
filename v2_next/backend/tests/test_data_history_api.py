@@ -77,6 +77,19 @@ class DataHistoryApiTests(unittest.TestCase):
         self.assertEqual(response_payload["newest_timestamp_ms"], timestamp_ms[2])
         self.assertFalse(response_payload["truncated"])
 
+    def test_unknown_api_route_returns_json_404_not_spa_html(self) -> None:
+        # Regression: QA found removed MES API paths falling through to the SPA shell.
+        # Found by /qa on 2026-05-26.
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.get("/api/mes/status")
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["content-type"].split(";", 1)[0], "application/json")
+        self.assertEqual(response.json(), {"detail": "API route not found"})
+
     def test_history_read_is_idempotent_and_respects_limit(self) -> None:
         base_sec = time.time() - 10.0
         timestamp_ms = [int((base_sec + offset_sec) * 1000) for offset_sec in [1.0, 2.0, 3.0]]

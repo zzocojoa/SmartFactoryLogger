@@ -1229,6 +1229,11 @@ def is_frontend_file_request(full_path: str) -> bool:
     return "." in last_segment
 
 
+def is_api_route_request(full_path: str) -> bool:
+    normalized_path = full_path.strip("/")
+    return normalized_path == "api" or normalized_path.startswith("api/")
+
+
 def get_frontend_file_request_status(frontend_status: dict[str, Any], full_path: str) -> int:
     normalized_path = full_path.lstrip("/")
     if "/assets/" in normalized_path and not frontend_status["frontend_assets_exists"]:
@@ -2931,6 +2936,9 @@ async def serve_spa(full_path: str):
     nested_file = resolve_nested_frontend_file(frontend_dist, full_path)
     if nested_file is not None and nested_file.exists() and nested_file.is_file():
         return FileResponse(nested_file)
+
+    if is_api_route_request(full_path):
+        return JSONResponse(status_code=404, content={"detail": "API route not found"})
 
     if is_frontend_file_request(full_path):
         error_status = get_frontend_file_request_status(frontend_status, full_path)
