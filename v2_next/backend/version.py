@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
-__version__ = "1.0.10"
+__version__ = "1.0.11"
 
 
 def _resolve_executable_path() -> Path:
