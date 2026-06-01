@@ -4,7 +4,7 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [1.0.11] - 2026-06-01
 
-### Changed
+### For contributors
 
 - Updated backend development and packaging tooling pins so linting, type checking, and Windows backend builds use current verified patch-level tools.
 
