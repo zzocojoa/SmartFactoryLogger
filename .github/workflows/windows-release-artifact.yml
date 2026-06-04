@@ -1,0 +1,111 @@
+name: Windows Release Artifact
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-release-artifact.yml"
+      - "v2_next/package.json"
+      - "v2_next/package-lock.json"
+      - "v2_next/main.js"
+      - "v2_next/scripts/deploy.ps1"
+      - "v2_next/backend/**"
+      - "v2_next/frontend/**"
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-artifacts:
+    name: Build Windows artifacts
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: v2_next
+
+    env:
+      PYTHONNOUSERSITE: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            v2_next/package-lock.json
+            v2_next/frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Electron dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: v2_next/frontend
+        run: npm ci
+
+      - name: Build portable package
+        run: powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
+
+      - name: Preserve portable artifact
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "smartfactorylogger-windows"
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+
+          $portableZip = Get-ChildItem -Path "dist" -Filter "SmartFactory_v*_Portable.zip" | Select-Object -First 1
+          if (-not $portableZip) {
+            throw "Portable ZIP was not generated."
+          }
+
+          Copy-Item -Path $portableZip.FullName -Destination $artifactDir -Force
+
+      - name: Build NSIS installer
+        run: npm run dist
+
+      - name: Preserve installer artifact
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "smartfactorylogger-windows"
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+
+          $installer = Get-ChildItem -Path "dist" -Filter "smart-factory-logger-v2 Setup *.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer was not generated."
+          }
+
+          Copy-Item -Path $installer.FullName -Destination $artifactDir -Force
+
+      - name: Record checksums
+        run: |
+          $artifactDir = Join-Path $env:RUNNER_TEMP "smartfactorylogger-windows"
+          $checksumPath = Join-Path $artifactDir "SHA256SUMS.txt"
+
+          Get-ChildItem -Path $artifactDir -File |
+            Where-Object { $_.Name -ne "SHA256SUMS.txt" } |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = Get-FileHash -Algorithm SHA256 -Path $_.FullName
+              "$($hash.Hash.ToLowerInvariant())  $($_.Name)"
+            } |
+            Set-Content -Path $checksumPath -Encoding ASCII
+
+          Get-Content -Path $checksumPath
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartfactorylogger-windows-${{ github.run_number }}
+          path: ${{ runner.temp }}/smartfactorylogger-windows/*
+          if-no-files-found: error
+          retention-days: 14
