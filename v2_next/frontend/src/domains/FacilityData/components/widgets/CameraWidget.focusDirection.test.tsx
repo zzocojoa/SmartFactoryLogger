@@ -1,10 +1,10 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import type { SpotConfig } from '../../../../shared/types';
 import type { SpotImageResponseMetadata } from '../../api/spotService.types';
-import { CameraComponent } from './CameraWidget';
+import { CameraComponent, resolveSpotLiveImageUrl } from './CameraWidget';
 
 const buildSpotConfig = (): SpotConfig => ({
   image_url: '/api/spot/proxy_image',
@@ -46,6 +46,7 @@ const buildSpotImageMetadata = (): SpotImageResponseMetadata => {
 
 describe('CameraComponent focus direction controls', () => {
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
     useDashboardStore.setState({
       spotConfig: null,
@@ -95,5 +96,54 @@ describe('CameraComponent focus direction controls', () => {
 
     const badge = screen.getByText(/41\.3°C/);
     expect(badge).toHaveClass('camera-internal-temperature-badge');
+  });
+
+  it('renders live image endpoint and reloads it after onLoad without replacing proxy lifecycle image', () => {
+    vi.useFakeTimers();
+    useDashboardStore.setState({
+      spotConfig: {
+        ...buildSpotConfig(),
+        live_image_url: '/api/spot/live_image',
+      },
+      spotImageUrl: 'blob:spot-proxy-snapshot',
+      spotImageLoading: false,
+      spotImageError: null,
+      spotLastSuccessAt: Date.now(),
+      spotImageMetadata: buildSpotImageMetadata(),
+    });
+
+    const { container } = render(<CameraComponent focusBusy={false} />);
+    const liveImage = container.querySelector('img.camera-image');
+    const lifecycleImage = container.querySelector('img[aria-hidden="true"]');
+
+    expect(liveImage).toBeInstanceOf(HTMLImageElement);
+    expect(liveImage?.getAttribute('src')).toMatch(/^\/api\/spot\/live_image\?t=/);
+    expect(lifecycleImage?.getAttribute('src')).toBe('blob:spot-proxy-snapshot');
+
+    const firstSrc = liveImage?.getAttribute('src');
+    fireEvent.load(liveImage as HTMLImageElement);
+
+    act(() => {
+      vi.advanceTimersByTime(34);
+    });
+    expect(liveImage?.getAttribute('src')).toBe(firstSrc);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(liveImage?.getAttribute('src')).toMatch(/^\/api\/spot\/live_image\?t=/);
+    expect(liveImage?.getAttribute('src')).not.toBe(firstSrc);
+  });
+
+  it('resolves relative live image URLs against the API base for Electron file views', () => {
+    expect(resolveSpotLiveImageUrl('/api/spot/live_image', 'http://localhost:8000')).toBe(
+      'http://localhost:8000/api/spot/live_image'
+    );
+    expect(resolveSpotLiveImageUrl('api/spot/live_image', 'http://localhost:8000/')).toBe(
+      'http://localhost:8000/api/spot/live_image'
+    );
+    expect(resolveSpotLiveImageUrl('http://127.0.0.1:8000/api/spot/live_image', 'http://localhost:8000')).toBe(
+      'http://127.0.0.1:8000/api/spot/live_image'
+    );
   });
 });

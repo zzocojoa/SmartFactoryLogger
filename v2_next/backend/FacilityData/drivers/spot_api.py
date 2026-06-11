@@ -25,6 +25,9 @@ _internal_temp_cache: _TemperatureCache = {"temp": 0.0, "temp_time": 0.0}
 _IMG_CACHE_TTL_SEC = 2.0
 _IMG_BACKOFF_BASE_SEC = 0.5
 _IMG_BACKOFF_MAX_SEC = 5.0
+_LIVE_IMG_SHARED_FRAME_TTL_SEC = 0.05
+_LIVE_IMG_BACKOFF_BASE_SEC = 0.25
+_LIVE_IMG_BACKOFF_MAX_SEC = 2.0
 _TEMP_CACHE_TTL_SEC = 15.0
 _SPOT_FOCUS_MIN_MM = 300
 _SPOT_FOCUS_MAX_MM = 10000
@@ -34,6 +37,7 @@ _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 _img_fetch_lock = asyncio.Lock()
+_live_img_fetch_lock = asyncio.Lock()
 _img_last_error = 0.0
 _img_failure_count = 0
 _img_cache_state = "empty"
@@ -41,6 +45,13 @@ _img_last_cache_log_at = 0.0
 _img_last_error_code: Optional[str] = None
 _img_last_error_message: Optional[str] = None
 _img_next_retry_at: Optional[float] = None
+_live_img_cache: Dict[str, Any] = {"data": None, "time": 0.0, "url": None}
+_live_img_last_error = 0.0
+_live_img_failure_count = 0
+_live_img_last_error_code: Optional[str] = None
+_live_img_last_error_message: Optional[str] = None
+_live_img_last_url: Optional[str] = None
+_live_img_next_retry_at: Optional[float] = None
 _temp_last_error = 0.0
 _temp_last_error_code: Optional[str] = None
 _temp_last_error_message: Optional[str] = None
@@ -85,6 +96,21 @@ class SpotImageBackoffError(RuntimeError):
     def __init__(self, image_url: str, retry_after_sec: float) -> None:
         super().__init__(f"SPOT image retry backoff is active; retry_after_sec={retry_after_sec:.3f}")
         self.code = "retry-backoff-active"
+        self.image_url = image_url
+        self.upstream_status: Optional[int] = None
+        self.retry_after_sec = retry_after_sec
+
+
+class SpotLiveImageConfigError(ValueError):
+    def __init__(self, image_url: str) -> None:
+        super().__init__("SPOT_LIVE_IMAGE_URL is not configured")
+        self.image_url = image_url
+
+
+class SpotLiveImageBackoffError(RuntimeError):
+    def __init__(self, image_url: str, retry_after_sec: float) -> None:
+        super().__init__(f"SPOT live image retry backoff is active; retry_after_sec={retry_after_sec:.3f}")
+        self.code = "live-backoff-active"
         self.image_url = image_url
         self.upstream_status: Optional[int] = None
         self.retry_after_sec = retry_after_sec
@@ -237,6 +263,14 @@ def _resolve_spot_image_url() -> str:
     image_url = str(config.SPOT_IMAGE_URL or "").strip()
     if not image_url:
         raise SpotImageConfigError(image_url)
+    return image_url
+
+
+def _resolve_spot_live_image_url() -> str:
+    fallback_url = str(config.SPOT_IMAGE_URL or "").strip() or f"http://{config.SPOT_IP}/image.jpg"
+    image_url = str(getattr(config, "SPOT_LIVE_IMAGE_URL", "") or "").strip() or fallback_url
+    if not image_url:
+        raise SpotLiveImageConfigError(image_url)
     return image_url
 
 
@@ -514,6 +548,41 @@ def _record_image_backoff(backoff_sec: float) -> None:
     _img_next_retry_at = time.time() + backoff_sec
 
 
+def _record_live_image_error(code: str, message: str, image_url: str) -> None:
+    global _live_img_last_error
+    global _live_img_last_error_code
+    global _live_img_last_error_message
+    global _live_img_last_url
+
+    _live_img_last_error = time.time()
+    _live_img_last_error_code = code
+    _live_img_last_error_message = message
+    _live_img_last_url = image_url
+
+
+def _record_live_image_success(image_url: str) -> None:
+    global _live_img_failure_count
+    global _live_img_last_error_code
+    global _live_img_last_error_message
+    global _live_img_last_url
+    global _live_img_next_retry_at
+
+    _live_img_failure_count = 0
+    _live_img_last_error_code = None
+    _live_img_last_error_message = None
+    _live_img_last_url = image_url
+    _live_img_next_retry_at = None
+
+
+def _record_live_image_backoff(backoff_sec: float) -> None:
+    global _live_img_next_retry_at
+
+    if backoff_sec <= 0.0:
+        _live_img_next_retry_at = None
+        return
+    _live_img_next_retry_at = time.time() + backoff_sec
+
+
 def _record_temperature_error(
     code: str,
     message: str,
@@ -715,6 +784,22 @@ def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
     return _build_internal_temperature_diagnostics(time.time(), include_cached_at=True)
 
 
+def get_live_image_diagnostics() -> Dict[str, Any]:
+    now = time.time()
+    cached_at = float(_live_img_cache.get("time") or 0.0)
+    return {
+        "live_image_url": _live_img_last_url or str(getattr(config, "SPOT_LIVE_IMAGE_URL", "") or ""),
+        "live_cache_age_sec": max(0.0, now - cached_at) if cached_at else None,
+        "live_failure_count": int(_live_img_failure_count),
+        "live_last_error": float(_live_img_last_error) if _live_img_last_error else None,
+        "live_last_error_code": _live_img_last_error_code,
+        "live_last_error_message": _live_img_last_error_message,
+        "live_next_retry_at": _live_img_next_retry_at,
+        "live_retry_after_sec": _live_retry_after_sec(now),
+        "live_current_backoff_sec": _current_live_backoff_sec(),
+    }
+
+
 def _build_internal_temperature_diagnostics(now: float, *, include_cached_at: bool) -> Dict[str, Any]:
     internal_temperature = _cached_internal_temperature(now)
     internal_temperature_at = float(_internal_temp_cache.get("temp_time") or 0.0)
@@ -765,6 +850,21 @@ def _current_backoff_sec() -> float:
     return min(_IMG_BACKOFF_MAX_SEC, _IMG_BACKOFF_BASE_SEC * (2 ** (_img_failure_count - 1)))
 
 
+def _current_live_backoff_sec() -> float:
+    if _live_img_failure_count <= 0:
+        return 0.0
+    return min(_LIVE_IMG_BACKOFF_MAX_SEC, _LIVE_IMG_BACKOFF_BASE_SEC * (2 ** (_live_img_failure_count - 1)))
+
+
+def _live_retry_after_sec(now: float) -> Optional[float]:
+    if _live_img_next_retry_at is None:
+        return None
+    retry_after = float(_live_img_next_retry_at) - now
+    if retry_after <= 0.0:
+        return None
+    return retry_after
+
+
 def _max_stale_age_sec() -> float:
     refresh = float(config.SPOT_REFRESH_INTERVAL or 0)
     return max(5.0, refresh * 5.0)
@@ -776,6 +876,19 @@ def _cache_age_sec(now: float) -> float:
 
 def _cached_image_data() -> Optional[bytes]:
     data = _img_cache.get("data")
+    if not isinstance(data, bytes) or not data:
+        return None
+    return data
+
+
+def _cached_live_image_data(now: float, image_url: str) -> Optional[bytes]:
+    data = _live_img_cache.get("data")
+    cached_url = str(_live_img_cache.get("url") or "")
+    cached_at = float(_live_img_cache.get("time") or 0.0)
+    if cached_url != image_url:
+        return None
+    if now - cached_at > _LIVE_IMG_SHARED_FRAME_TTL_SEC:
+        return None
     if not isinstance(data, bytes) or not data:
         return None
     return data
@@ -929,6 +1042,74 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         _img_cache_state = "upstream"
         _record_image_success()
         return data, _build_image_meta(time.time(), "ok", "upstream")
+
+
+async def fetch_live_image_async() -> tuple[bytes, Dict[str, Any]]:
+    global _live_img_failure_count
+
+    try:
+        image_url = _resolve_spot_live_image_url()
+    except SpotLiveImageConfigError as exc:
+        _record_live_image_error("live-config-missing", str(exc), exc.image_url)
+        raise
+
+    now = time.time()
+    cached_image = _cached_live_image_data(now, image_url)
+    if cached_image is not None:
+        captured_at = float(_live_img_cache.get("time") or now)
+        return cached_image, {
+            "status": "ok",
+            "source": "shared-frame",
+            "captured_at": captured_at,
+            "age_sec": max(0.0, now - captured_at),
+            "image_url": image_url,
+            "retry_after_sec": _live_retry_after_sec(now),
+        }
+
+    retry_after = _live_retry_after_sec(now)
+    if retry_after is not None and retry_after > 0.0:
+        raise SpotLiveImageBackoffError(image_url, retry_after)
+
+    async with _live_img_fetch_lock:
+        locked_now = time.time()
+        cached_image = _cached_live_image_data(locked_now, image_url)
+        if cached_image is not None:
+            captured_at = float(_live_img_cache.get("time") or locked_now)
+            return cached_image, {
+                "status": "ok",
+                "source": "shared-frame",
+                "captured_at": captured_at,
+                "age_sec": max(0.0, locked_now - captured_at),
+                "image_url": image_url,
+                "retry_after_sec": _live_retry_after_sec(locked_now),
+            }
+
+        locked_retry_after = _live_retry_after_sec(locked_now)
+        if locked_retry_after is not None and locked_retry_after > 0.0:
+            raise SpotLiveImageBackoffError(image_url, locked_retry_after)
+
+        client = _get_http_client()
+        try:
+            data = await _request_spot_image(client, image_url)
+        except SpotImageFetchError as exc:
+            _record_live_image_error(exc.code, str(exc), exc.image_url)
+            _live_img_failure_count = min(_live_img_failure_count + 1, 10)
+            _record_live_image_backoff(_current_live_backoff_sec())
+            raise
+
+        captured_at = time.time()
+        _live_img_cache["data"] = data
+        _live_img_cache["time"] = captured_at
+        _live_img_cache["url"] = image_url
+        _record_live_image_success(image_url)
+        return data, {
+            "status": "ok",
+            "source": "upstream",
+            "captured_at": captured_at,
+            "age_sec": 0.0,
+            "image_url": image_url,
+            "retry_after_sec": None,
+        }
 
 
 # --- 백그라운드 프리페칭 ---

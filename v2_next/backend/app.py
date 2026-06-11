@@ -220,6 +220,7 @@ _access_log_lock = threading.Lock()
 _quiet_access_state: dict[tuple[str, str, int], dict[str, float | int]] = {}
 _QUIET_ACCESS_PATHS = {
     "/api/spot/proxy_image",
+    "/api/spot/live_image",
     "/api/data",
     "/health",
     "/stats",
@@ -245,6 +246,7 @@ _ACCESS_LOG_SAMPLE_SEC = 5.0
 _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
 _SPOT_PROXY_IMAGE_PATH = "/api/spot/proxy_image"
+_SPOT_LIVE_IMAGE_PATH = "/api/spot/live_image"
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 _SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
 _SPOT_INTERNAL_TEMPERATURE_HEADER = "X-Spot-Internal-Temperature"
@@ -2496,6 +2498,8 @@ def spot_config():
         "actuator_url": config.SPOT_ACTUATOR_URL,
         "focus_diagnostics": _spot_focus_diagnostics(),
         "proxy": spot_control.get_image_proxy_diagnostics(),
+        "live_image_url": _SPOT_LIVE_IMAGE_PATH,
+        "live": spot_control.get_live_image_diagnostics(),
     }
 
 @app.post("/api/spot/focus")
@@ -2682,6 +2686,78 @@ def _is_spot_proxy_payload_rejection_response(
     if status_code != 502:
         return False
     return _is_spot_payload_rejection_headers(headers)
+
+
+@app.get(_SPOT_LIVE_IMAGE_PATH)
+async def live_spot_image():
+    """Return a live SPOT camera image for direct browser <img> rendering."""
+    headers: dict[str, str] = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+    try:
+        data, meta = await spot_control.fetch_live_image_async()
+        captured_at = meta.get("captured_at") or 0.0
+        age_sec = meta.get("age_sec")
+        if captured_at:
+            headers["X-Spot-Live-Image-At"] = str(int(float(captured_at) * 1000))
+        if age_sec is not None:
+            headers["X-Spot-Live-Image-Age"] = f"{float(age_sec):.3f}"
+        if meta.get("source"):
+            headers["X-Spot-Live-Image-Source"] = str(meta["source"])
+        return Response(content=data, media_type="image/jpeg", headers=headers)
+    except spot_control.SpotLiveImageConfigError as exc:
+        diagnostics = spot_control.get_live_image_diagnostics()
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "live-config-missing",
+                "message": "SPOT live image URL is not configured.",
+                "diagnostics": diagnostics,
+            },
+            headers=headers,
+        ) from exc
+    except spot_control.SpotLiveImageBackoffError as exc:
+        diagnostics = spot_control.get_live_image_diagnostics()
+        diagnostics["live_retry_after_sec"] = exc.retry_after_sec
+        headers.update(_spot_retry_headers_from_value(exc.retry_after_sec))
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": exc.code,
+                "message": "SPOT live image retry backoff is active.",
+                "upstream_status": exc.upstream_status,
+                "diagnostics": diagnostics,
+            },
+            headers=headers,
+        ) from exc
+    except spot_control.SpotImageFetchError as exc:
+        diagnostics = spot_control.get_live_image_diagnostics()
+        headers.update(_spot_retry_headers_from_diagnostics(diagnostics))
+        if exc.code in _SPOT_PAYLOAD_REJECTION_CODES:
+            headers["X-Spot-Payload-Rejection"] = "1"
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": exc.code,
+                "message": "SPOT live image upstream request failed.",
+                "upstream_status": exc.upstream_status,
+                "diagnostics": diagnostics,
+            },
+            headers=headers,
+        ) from exc
+    except Exception as exc:
+        diagnostics = spot_control.get_live_image_diagnostics()
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "unknown",
+                "message": "Unexpected SPOT live image proxy error.",
+                "diagnostics": diagnostics,
+            },
+            headers=headers,
+        ) from exc
 
 
 @app.get("/api/spot/proxy_image")

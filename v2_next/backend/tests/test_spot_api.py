@@ -38,6 +38,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.original_spot_url: str = str(spot_api.config.SPOT_URL)
         self.original_spot_image_url: str = str(spot_api.config.SPOT_IMAGE_URL)
+        self.original_spot_live_image_url: str = str(spot_api.config.SPOT_LIVE_IMAGE_URL)
         self.original_spot_refresh_interval: float = float(spot_api.config.SPOT_REFRESH_INTERVAL)
         self.original_spot_internal_temperature_url: str = str(spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL)
         self.original_spot_focus_url: str = str(spot_api.config.SPOT_FOCUS_URL)
@@ -49,6 +50,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         spot_api.config.SPOT_URL = self.original_spot_url
         spot_api.config.SPOT_IMAGE_URL = self.original_spot_image_url
+        spot_api.config.SPOT_LIVE_IMAGE_URL = self.original_spot_live_image_url
         spot_api.config.SPOT_REFRESH_INTERVAL = self.original_spot_refresh_interval
         spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = self.original_spot_internal_temperature_url
         spot_api.config.SPOT_FOCUS_URL = self.original_spot_focus_url
@@ -67,6 +69,13 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api._img_last_error_code = None
         spot_api._img_last_error_message = None
         spot_api._img_next_retry_at = None
+        spot_api._live_img_cache = {"data": None, "time": 0.0, "url": None}
+        spot_api._live_img_last_error = 0.0
+        spot_api._live_img_failure_count = 0
+        spot_api._live_img_last_error_code = None
+        spot_api._live_img_last_error_message = None
+        spot_api._live_img_last_url = None
+        spot_api._live_img_next_retry_at = None
         spot_api._temp_last_error = 0.0
         spot_api._temp_last_error_code = None
         spot_api._temp_last_error_message = None
@@ -207,6 +216,55 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.upstream_status, 200)
         self.assertIn("content_type=text/html", str(error))
         self.assertIn("not an image", str(error))
+
+    def test_live_image_url_falls_back_to_spot_image_url(self) -> None:
+        spot_api.config.SPOT_LIVE_IMAGE_URL = ""
+        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+
+        self.assertEqual(spot_api._resolve_spot_live_image_url(), "http://spot.local/image.jpg")
+
+    async def test_live_image_fetch_does_not_update_snapshot_cache(self) -> None:
+        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/newjpeg.jpg"
+        image_bytes = b"\xff\xd8live-image\xff\xd9"
+        request_mock: AsyncMock = AsyncMock(return_value=image_bytes)
+
+        with patch.object(spot_api, "_request_spot_image", request_mock):
+            data, meta = await spot_api.fetch_live_image_async()
+
+        self.assertEqual(data, image_bytes)
+        self.assertEqual(meta["source"], "upstream")
+        self.assertEqual(meta["image_url"], "http://spot.local/newjpeg.jpg")
+        self.assertIsNone(spot_api._img_cache["data"])
+        self.assertEqual(spot_api._live_img_cache["data"], image_bytes)
+        request_mock.assert_awaited_once()
+
+    async def test_live_image_html_payload_is_rejected_and_backed_off(self) -> None:
+        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/image.ssi"
+        html_body = b"<!doctype html><html><body><img src='/newjpeg.jpg'></body></html>"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                content=html_body,
+                headers={"Content-Type": "text/html"},
+                request=request,
+            )
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with patch.object(spot_api, "_get_http_client", Mock(return_value=client)):
+                with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+                    await spot_api.fetch_live_image_async()
+
+        error = raised.exception
+        diagnostics = spot_api.get_live_image_diagnostics()
+
+        self.assertEqual(error.code, "invalid-image-html")
+        self.assertEqual(error.upstream_status, 200)
+        self.assertIsNone(spot_api._img_cache["data"])
+        self.assertEqual(diagnostics["live_failure_count"], 1)
+        self.assertEqual(diagnostics["live_last_error_code"], "invalid-image-html")
+        self.assertGreater(float(diagnostics["live_retry_after_sec"]), 0.0)
 
     async def test_image_missing_extension_fallbacks_to_jpg(self) -> None:
         image_bytes = b"\xff\xd8image-data\xff\xd9"
@@ -925,6 +983,37 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(backend_app._stats_total_requests, original_total_requests + 1)
                 self.assertEqual(backend_app._stats_error_count, original_error_count + 1)
                 self.assertEqual(backend_app._stats_last_status, 502)
+
+    async def test_live_image_endpoint_returns_jpeg_with_no_store_headers(self) -> None:
+        from backend import app as backend_app
+
+        image_bytes = b"\xff\xd8live-endpoint\xff\xd9"
+        meta: dict[str, Any] = {
+            "status": "ok",
+            "source": "upstream",
+            "captured_at": 1_777_660_800.123,
+            "age_sec": 0.0,
+            "image_url": "http://spot.local/image.jpg",
+            "retry_after_sec": None,
+        }
+
+        with patch.object(
+            backend_app.spot_control,
+            "fetch_live_image_async",
+            AsyncMock(return_value=(image_bytes, meta)),
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/live_image?t=123")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, image_bytes)
+        self.assertIn("image/jpeg", response.headers.get("content-type", ""))
+        self.assertIn("no-store", response.headers.get("cache-control", ""))
+        self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "upstream")
+        self.assertEqual(response.headers.get("X-Spot-Live-Image-Age"), "0.000")
 
     def test_move_focus_uses_ametek_focus_control_endpoint(self) -> None:
         spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
