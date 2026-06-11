@@ -389,7 +389,7 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
     setLayoutSaveMessage(`프리셋 '${preset.name}' 적용`);
   }, []);
 
-  useLayoutViewModelEffects({ loadLayoutSnapshot });
+  useLayoutViewModelEffects({ loadLayoutSnapshot, layoutSnapshot });
 
   return {
     layoutSnapshot,
