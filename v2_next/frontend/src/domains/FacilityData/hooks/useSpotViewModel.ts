@@ -39,6 +39,7 @@ interface SpotImageState {
 const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => {
   return (
     first.image_url === second.image_url &&
+    first.live_image_url === second.live_image_url &&
     first.refresh_interval === second.refresh_interval &&
     first.crosshair_x === second.crosshair_x &&
     first.crosshair_y === second.crosshair_y &&

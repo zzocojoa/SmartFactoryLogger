@@ -66,3 +66,7 @@ config.ini
 config.ini.bak
 config.ini.tmp
 config.pending.json
+
+# bkit-codex local install
+.bkit-codex/
+.agents/skills/

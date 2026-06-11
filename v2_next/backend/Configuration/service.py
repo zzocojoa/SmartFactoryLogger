@@ -139,10 +139,12 @@ def get_config_snapshot() -> dict:
         spot_actuator_ip = legacy_actuator_ip
     else:
         spot_actuator_ip = spot_ip
+    spot_image_url = _get(parser, "SPOT", "imageurl", f"http://{spot_ip}/image.jpg")
     spot = {
         "ip": spot_ip,
         "url": _get(parser, "SPOT", "url", f"http://{spot_ip}/output?p=temperature"),
-        "image_url": _get(parser, "SPOT", "imageurl", f"http://{spot_ip}/image.jpg"),
+        "image_url": spot_image_url,
+        "live_image_url": _get(parser, "SPOT", "liveimageurl", spot_image_url),
         "internal_temperature_url": _get(
             parser,
             "SPOT",
@@ -474,6 +476,7 @@ def update_config(
 
     old_spot_ip = _get(parser, "SPOT", "ip", config.DEFAULT_SPOT_IP)
     old_image_url = _get(parser, "SPOT", "imageurl", "")
+    old_live_image_url = _get(parser, "SPOT", "liveimageurl", "")
     old_internal_temperature_url = _get(parser, "SPOT", "internaltemperatureurl", "")
     old_focus_url = _get(parser, "SPOT", "focusurl", "")
     old_legacy_actuator_ip = _get_text(parser, "ACTUATOR", "actuatorip")
@@ -497,6 +500,8 @@ def update_config(
             parser.set("SPOT", "ip", payload.spot.ip)
             if not old_image_url or old_spot_ip in old_image_url:
                 parser.set("SPOT", "imageurl", f"http://{payload.spot.ip}/image.jpg")
+            if not old_live_image_url or old_spot_ip in old_live_image_url:
+                parser.set("SPOT", "liveimageurl", f"http://{payload.spot.ip}/image.jpg")
             if not old_internal_temperature_url or old_spot_ip in old_internal_temperature_url:
                 parser.set("SPOT", "internaltemperatureurl", f"http://{payload.spot.ip}/output?p=itemperature")
             if not old_focus_url or old_spot_ip in old_focus_url:
@@ -505,6 +510,8 @@ def update_config(
             parser.set("SPOT", "url", payload.spot.url)
         if payload.spot.image_url is not None:
             parser.set("SPOT", "imageurl", payload.spot.image_url)
+        if payload.spot.live_image_url is not None:
+            parser.set("SPOT", "liveimageurl", payload.spot.live_image_url)
         if payload.spot.internal_temperature_url is not None:
             parser.set("SPOT", "internaltemperatureurl", payload.spot.internal_temperature_url)
         if payload.spot.refresh_interval is not None:

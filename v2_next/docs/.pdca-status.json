@@ -1,0 +1,124 @@
+{
+  "version": "2.0",
+  "lastUpdated": "2026-06-11T03:24:19.928Z",
+  "activeFeatures": [
+    "spot-live-image"
+  ],
+  "primaryFeature": "spot-live-image",
+  "features": {
+    "spot-live-image": {
+      "phase": "check",
+      "matchRate": null,
+      "iterationCount": 3,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T01:57:33.963Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T01:57:45.327Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T02:25:11.322Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T02:26:13.444Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T02:26:53.888Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-11T01:56:04.884Z",
+        "lastUpdated": "2026-06-11T02:26:53.888Z"
+      },
+      "completedAt": "2026-06-11T02:26:53.885Z"
+    }
+  },
+  "pipeline": {
+    "currentPhase": 1,
+    "level": "Starter",
+    "phaseHistory": []
+  },
+  "session": {
+    "startedAt": "2026-06-11T01:56:04.880Z",
+    "onboardingCompleted": false,
+    "lastActivity": "2026-06-11T03:24:19.928Z"
+  },
+  "history": [
+    {
+      "feature": "spot-live-image",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-06-11T01:57:33.958Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-06-11T01:57:33.960Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-06-11T01:57:45.323Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-06-11T01:57:45.325Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-06-11T02:25:11.317Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-06-11T02:25:11.320Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-11T02:26:13.442Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-11T02:26:13.443Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-11T02:26:53.886Z"
+    }
+  ]
+}

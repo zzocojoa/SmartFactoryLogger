@@ -14,8 +14,10 @@ PollingClientCounts = Dict[str, int]
 PollingPathSummary = Dict[str, Any]
 PollingBucket = Tuple[float, Dict[str, PollingPathSummary]]
 _SPOT_PROXY_PATH = "/api/spot/proxy_image"
+_SPOT_LIVE_PATH = "/api/spot/live_image"
 _POLLING_PATHS = {
     _SPOT_PROXY_PATH,
+    _SPOT_LIVE_PATH,
     "/api/data",
     "/health",
     "/stats",

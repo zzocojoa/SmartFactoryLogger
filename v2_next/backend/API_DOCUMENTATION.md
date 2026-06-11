@@ -887,6 +887,31 @@ POST /api/spot/focus?steps=10
 }
 ```
 
+### GET `/api/spot/live_image`
+
+SPOT live view image endpoint for direct browser `<img>` rendering. This path is separate from `/api/spot/proxy_image` and does not update snapshot cache or delayed alert metadata.
+
+**Configuration priority:**
+
+1. `SPOT_LIVE_IMAGE_URL`
+2. `[SPOT] liveimageurl`
+3. `SPOT_IMAGE_URL`
+4. `http://{SPOT_IP}/image.jpg`
+
+Use `/image.jpg` by default. Operators may configure `/newjpeg.jpg` for smoother live display. Do not configure `/image.ssi`; it is an HTML page and will be rejected as `invalid-image-html`.
+
+**Response:**
+
+- **Content-Type:** `image/jpeg`
+- **Cache-Control:** `no-store, no-cache, must-revalidate, max-age=0`
+- **Body:** image bytes
+
+**Error responses:**
+
+- `404 live-config-missing`
+- `503 live-backoff-active`
+- `502 invalid-image-html`, `invalid-image-payload`, `empty-body`, or upstream request failures
+
 ---
 
 ## System

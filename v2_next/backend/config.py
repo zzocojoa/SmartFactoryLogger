@@ -34,6 +34,7 @@ DEFAULT_LS_PORT = 2004
 DEFAULT_SPOT_IP = "10.1.10.50"
 DEFAULT_SPOT_REFRESH_INTERVAL = 3.0
 DEFAULT_SPOT_IMAGE_URL = f"http://{DEFAULT_SPOT_IP}/image.jpg"
+DEFAULT_SPOT_LIVE_IMAGE_URL = f"http://{DEFAULT_SPOT_IP}/image.jpg"
 DEFAULT_SPOT_INTERNAL_TEMPERATURE_URL = f"http://{DEFAULT_SPOT_IP}/output?p=itemperature"
 DEFAULT_SPOT_CROSSHAIR_X = 0.5
 DEFAULT_SPOT_CROSSHAIR_Y = 0.5
@@ -326,6 +327,7 @@ if _safe_is_file(CONFIG_PATH):
     _spot_defaults = {
         "actuatorstep": str(DEFAULT_SPOT_ACTUATOR_STEP),
         "internaltemperatureurl": f"http://{_spot_ip_default}/output?p=itemperature",
+        "liveimageurl": f"http://{_spot_ip_default}/image.jpg",
     }
     for _key, _default_val in _spot_defaults.items():
         if not CONFIG.has_option("SPOT", _key):
@@ -375,6 +377,10 @@ SPOT_URL = os.getenv("SPOT_URL", f"http://{SPOT_IP}/output?p=temperature")
 SPOT_IMAGE_URL = os.getenv(
     "SPOT_IMAGE_URL",
     _get(CONFIG, "SPOT", "imageurl", f"http://{SPOT_IP}/image.jpg") or f"http://{SPOT_IP}/image.jpg",
+)
+SPOT_LIVE_IMAGE_URL = os.getenv(
+    "SPOT_LIVE_IMAGE_URL",
+    _get(CONFIG, "SPOT", "liveimageurl", SPOT_IMAGE_URL) or SPOT_IMAGE_URL or f"http://{SPOT_IP}/image.jpg",
 )
 SPOT_INTERNAL_TEMPERATURE_URL = os.getenv(
     "SPOT_INTERNAL_TEMPERATURE_URL",

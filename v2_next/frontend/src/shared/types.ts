@@ -66,6 +66,7 @@ export interface ComputedStatus {
 
 export interface SpotConfig {
     image_url: string;
+    live_image_url?: string;
     refresh_interval: number;
     crosshair_x: number;
     crosshair_y: number;
@@ -451,6 +452,7 @@ export interface ConfigSnapshot {
       ip: string;
       url?: string | null;
       image_url?: string | null;
+      live_image_url?: string | null;
       refresh_interval: number;
       crosshair_x?: number | null;
       crosshair_y?: number | null;
