@@ -1,4 +1,5 @@
 import type { TimeSeriesMeta } from './seriesCatalog.types';
+import { LABELS } from '../../../shared/constants/uiText';
 
 export type {
   SeriesAxisGroup,
@@ -74,6 +75,26 @@ export const TIME_SERIES_CATALOG: TimeSeriesMeta[] = [
     visibleByDefault: false,
     decimals: 1,
     legacyKey: 'EndPos',
+  },
+  {
+    key: 'MainRamPosition_D0010',
+    label: LABELS.MAIN_RAM_POSITION,
+    source: 'Extruder',
+    axis: 'process',
+    group: 'process',
+    unit: 'mm',
+    visibleByDefault: false,
+    decimals: 1,
+  },
+  {
+    key: 'ContainerPosition_D0012',
+    label: LABELS.CONTAINER_POSITION,
+    source: 'Extruder',
+    axis: 'process',
+    group: 'process',
+    unit: 'mm',
+    visibleByDefault: false,
+    decimals: 1,
   },
   {
     key: 'Count',
@@ -206,6 +227,8 @@ export const SERIES_COLORS: Record<string, string> = {
   Temp_B: '#8b5cf6',
   Speed: '#10b981',
   EndPos: '#f97316',
+  MainRamPosition_D0010: '#0ea5e9',
+  ContainerPosition_D0012: '#22c55e',
   Count: '#14b8a6',
   Billet_Length: '#ec4899',
   Billet_Temp: '#d946ef',

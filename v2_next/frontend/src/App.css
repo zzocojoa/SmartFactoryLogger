@@ -3818,7 +3818,7 @@ body {
 
 .kpi-mini-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-1);
 }
@@ -3831,8 +3831,8 @@ body {
 .kpi-mini-label {
   font-size: clamp(10px, calc(var(--cq) * 5), 24px);
   color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .kpi-mini-value-row {
@@ -4878,7 +4878,7 @@ body {
     grid-template-rows: auto auto auto;
     gap: 24px;
     height: auto;
-    min-height: 660px;
+    min-height: 760px;
     align-content: start;
     overflow: visible;
   }
@@ -4932,18 +4932,18 @@ body {
   }
 
   .kpi-mini {
-    min-height: 118px;
+    min-height: 96px;
     padding: 16px 12px;
   }
 
   .kpi-mini-label {
-    font-size: clamp(26px, 7vw, 34px);
+    font-size: clamp(18px, 6vw, 28px);
     line-height: 1.1;
   }
 
   .kpi-mini-value {
     min-width: 0;
-    font-size: clamp(34px, 9vw, 46px);
+    font-size: clamp(30px, 8vw, 42px);
     line-height: 1;
   }
 

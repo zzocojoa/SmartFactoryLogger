@@ -130,6 +130,8 @@ const buildFactoryData = (spotValue: number): FactoryData => ({
   Count: null,
   EndPos: null,
   Billet_Length: null,
+  MainRamPosition_D0010: null,
+  ContainerPosition_D0012: null,
   Spot: spotValue,
   Temp_F: null,
   Temp_B: null,
@@ -454,6 +456,35 @@ const buildDenseTooltipPlot = (cursorLeft: number, cursorTop: number): uPlot => 
   } as unknown as uPlot;
 };
 
+const buildPositionTooltipPlot = (cursorLeft: number, cursorTop: number): uPlot => {
+  const visibleMetas = TIME_SERIES_CATALOG.filter((meta) => !MOLD_SERIES_KEYS.includes(meta.key));
+  const values = visibleMetas.map((meta) => {
+    if (meta.key === 'Spot') {
+      return 11;
+    }
+    if (meta.key === 'MainRamPosition_D0010') {
+      return 602.2;
+    }
+    if (meta.key === 'ContainerPosition_D0012') {
+      return 8.8;
+    }
+    return null;
+  });
+
+  return {
+    bbox: { left: 80, top: 40, width: 420, height: 180 },
+    cursor: { left: cursorLeft, top: cursorTop, idx: 0 },
+    data: [[1_777_660_800], ...values.map((value) => [value])],
+    over: {
+      getBoundingClientRect: () => ({ left: 90, top: 60, width: 420, height: 180 }),
+    },
+    series: [
+      { show: true, stroke: '#aaa', label: 'Time' },
+      ...visibleMetas.map((meta) => ({ show: true, stroke: () => '#f00', label: meta.label })),
+    ],
+  } as unknown as uPlot;
+};
+
 const buildHiddenTooltipPlot = (cursorLeft: number, cursorTop: number): uPlot => {
   return {
     bbox: { left: 80, top: 40, width: 420, height: 180 },
@@ -605,6 +636,73 @@ describe('TimeSeriesWidget render', () => {
 
     expect(chartWrapper).toBeInTheDocument();
     expect(chartWrapper).toContainElement(chart);
+  });
+
+  it('renders actual position series labels in legend, uPlot options, and tooltip', async () => {
+    const timeSeriesAllFrame = buildSeriesFrameWithPointCount(1, (key) => {
+      if (key === 'Spot') {
+        return 11;
+      }
+      if (key === 'MainRamPosition_D0010') {
+        return 602.2;
+      }
+      if (key === 'ContainerPosition_D0012') {
+        return 8.8;
+      }
+      return null;
+    });
+
+    useDashboardStore.setState({
+      data: {
+        ...buildFactoryData(11),
+        MainRamPosition_D0010: 602.2,
+        ContainerPosition_D0012: 8.8,
+      },
+      timeSeriesAllFrame,
+      thresholds: buildThresholdStateFromConfig(),
+      lastDataAt: 1,
+      intervalSec: 0.2,
+    });
+
+    renderTimeSeriesWidget();
+
+    await screen.findByTestId('uplot-chart');
+    const mainRamButton = getButtonByText(getCatalogSeriesLabel('MainRamPosition_D0010'));
+    const containerButton = getButtonByText(getCatalogSeriesLabel('ContainerPosition_D0012'));
+    expect(mainRamButton).toHaveTextContent('602.2');
+    expect(containerButton).toHaveTextContent('8.8');
+
+    const latestUPlotProps = getLatestUPlotProps();
+    expect(getSeriesOptionByKey(latestUPlotProps, 'MainRamPosition_D0010').label).toBe('메인 램 현재 위치');
+    expect(getSeriesOptionByKey(latestUPlotProps, 'ContainerPosition_D0012').label).toBe('콘테이너 현재 위치');
+
+    const tooltip = document.querySelector<HTMLDivElement>('.uplot-tooltip');
+    const setCursorHook = getSetCursorHook(latestUPlotProps);
+
+    if (tooltip === null) {
+      throw new Error('Tooltip element was not found');
+    }
+
+    Object.defineProperty(tooltip, 'offsetWidth', { configurable: true, value: 360 });
+    Object.defineProperty(tooltip, 'offsetHeight', { configurable: true, value: 260 });
+    const chartWrapper = tooltip.parentElement;
+
+    if (chartWrapper === null) {
+      throw new Error('Chart wrapper was not found');
+    }
+
+    Object.defineProperty(chartWrapper, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ left: 10, top: 20, width: 500, height: 420 }),
+    });
+
+    setCursorHook(buildPositionTooltipPlot(100, 80));
+
+    expect(tooltip.style.display).toBe('block');
+    expect(tooltip).toHaveTextContent('메인 램 현재 위치');
+    expect(tooltip).toHaveTextContent('602.2');
+    expect(tooltip).toHaveTextContent('콘테이너 현재 위치');
+    expect(tooltip).toHaveTextContent('8.8');
   });
 
   it('passes only active series and downsampled render points to uPlot', async () => {

@@ -15,6 +15,8 @@ const buildValues = (
   Temp_B: null,
   Speed: null,
   EndPos: null,
+  MainRamPosition_D0010: null,
+  ContainerPosition_D0012: null,
   Count: null,
   Billet_Length: null,
   Mold1: null,

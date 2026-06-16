@@ -10,6 +10,8 @@ export interface DashboardKpiSlice {
   press: number | null | undefined;
   count: number | null | undefined;
   endPos: number | null | undefined;
+  mainRamPosition: number | null | undefined;
+  containerPosition: number | null | undefined;
   computedSpeedLevel: string | undefined;
   computedPressLevel: string | undefined;
   computedJamLevel: string | undefined;
@@ -242,6 +244,8 @@ export const selectDashboardKpiSlice = (state: DashboardState): DashboardKpiSlic
     press,
     count: state.data?.Count,
     endPos: state.data?.EndPos,
+    mainRamPosition: state.data?.MainRamPosition_D0010,
+    containerPosition: state.data?.ContainerPosition_D0012,
     computedSpeedLevel: state.data?.Computed?.speed_level,
     computedPressLevel: state.data?.Computed?.press_level,
     computedJamLevel: state.data?.Computed?.jam_level,

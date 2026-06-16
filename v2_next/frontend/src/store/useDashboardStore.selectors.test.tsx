@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FactoryData } from '../shared/types';
 import { buildThresholdStateFromConfig } from '../shared/utils/thresholds';
+import { LABELS } from '../shared/constants/uiText';
 import {
   selectDashboardEnvSlice,
   selectDashboardKpiSlice,
@@ -23,6 +24,8 @@ const buildFactoryData = (overrides: Partial<FactoryData>): FactoryData => ({
   Count: 10,
   EndPos: 1015,
   Billet_Length: 0,
+  MainRamPosition_D0010: 497,
+  ContainerPosition_D0012: 11.6,
   Spot: 520,
   Temp_F: 430,
   Temp_B: 431,
@@ -84,7 +87,12 @@ const resetDashboardStore = (): void => {
 const KpiSliceProbe = React.memo(function KpiSliceProbe() {
   const kpiSlice = useDashboardStore(useShallow(selectDashboardKpiSlice));
 
-  return <span data-testid="speed-value">{kpiSlice.speed}</span>;
+  return (
+    <>
+      <span data-testid="speed-value">{kpiSlice.speed}</span>
+      <span data-testid="main-ram-position-value">{kpiSlice.mainRamPosition}</span>
+    </>
+  );
 });
 
 const EnvSliceProbe = React.memo(function EnvSliceProbe() {
@@ -160,6 +168,27 @@ describe('useDashboardStore selectors', () => {
     expect(onRender.mock.calls.length).toBeGreaterThan(renderCount);
   });
 
+  it('rerenders the KPI slice subscriber when an actual position field changes', () => {
+    resetDashboardStore();
+    useDashboardStore.getState().setData(buildFactoryData({ MainRamPosition_D0010: 497 }), 1_000);
+    const onRender = vi.fn();
+
+    render(
+      <React.Profiler id="kpi-slice-probe" onRender={onRender}>
+        <KpiSliceProbe />
+      </React.Profiler>
+    );
+
+    const renderCount = onRender.mock.calls.length;
+
+    act(() => {
+      useDashboardStore.getState().setData(buildFactoryData({ MainRamPosition_D0010: 602.2 }), 1_500);
+    });
+
+    expect(screen.getByTestId('main-ram-position-value').textContent).toBe('602.2');
+    expect(onRender.mock.calls.length).toBeGreaterThan(renderCount);
+  });
+
   it('does not rerender the real KPI widget when only unrelated data fields change', () => {
     resetDashboardStore();
     useDashboardStore.getState().setData(buildFactoryData({ At_Temp: 32 }), 1_000);
@@ -198,6 +227,23 @@ describe('useDashboardStore selectors', () => {
     });
 
     expect(onRender.mock.calls.length).toBeGreaterThan(renderCount);
+  });
+
+  it('renders optional position fields as missing markers instead of zero when disabled', () => {
+    resetDashboardStore();
+    useDashboardStore.getState().setData(
+      buildFactoryData({
+        MainRamPosition_D0010: null,
+        ContainerPosition_D0012: null,
+      }),
+      1_000
+    );
+
+    render(<KpiComponent />);
+
+    expect(screen.getByText(LABELS.MAIN_RAM_POSITION)).toBeTruthy();
+    expect(screen.getByText(LABELS.CONTAINER_POSITION)).toBeTruthy();
+    expect(screen.getAllByText('-')).toHaveLength(2);
   });
 
   it('keeps non-KPI widget slices isolated from unrelated KPI data changes', () => {

@@ -10,6 +10,7 @@ import { useSustainedFlag } from '../../../../shared/hooks/useSustainedFlag';
 import { calcPercent } from '../../../../shared/utils/sparkline';
 import { formatNumber, formatInteger } from '../../../../shared/utils/formatters';
 import { mapSpeedLevel, mapPressLevel, getSpeedState, getPressState } from '../../../../shared/utils/stateMappers';
+import { LABELS } from '../../../../shared/constants/uiText';
 import {
   SPEED_MAX,
   PRESS_MAX,
@@ -19,6 +20,10 @@ import {
 } from '../../../../shared/constants/logic';
 import { MissingDataNote } from './MissingDataNote';
 
+const formatOptionalPosition = (value: number | null | undefined): string => (
+  typeof value === 'number' && Number.isFinite(value) ? formatNumber(value, 1) : '-'
+);
+
 export const KpiComponent = React.memo(function KpiComponent() {
   const {
     hasData,
@@ -26,6 +31,8 @@ export const KpiComponent = React.memo(function KpiComponent() {
     press,
     count,
     endPos,
+    mainRamPosition,
+    containerPosition,
     computedSpeedLevel,
     computedPressLevel,
     computedJamLevel,
@@ -134,6 +141,24 @@ export const KpiComponent = React.memo(function KpiComponent() {
           <div className="kpi-mini-value-row">
             <span className="kpi-mini-value">{formatNumber(endPos ?? NaN, 1)}</span>
             <span className="kpi-mini-unit">mm</span>
+          </div>
+        </div>
+        <div className="kpi-mini">
+          <div className="kpi-mini-header">
+            <span className="kpi-mini-label">{LABELS.MAIN_RAM_POSITION}</span>
+          </div>
+          <div className="kpi-mini-value-row">
+            <span className="kpi-mini-value">{formatOptionalPosition(mainRamPosition)}</span>
+            {typeof mainRamPosition === 'number' && Number.isFinite(mainRamPosition) && <span className="kpi-mini-unit">mm</span>}
+          </div>
+        </div>
+        <div className="kpi-mini">
+          <div className="kpi-mini-header">
+            <span className="kpi-mini-label">{LABELS.CONTAINER_POSITION}</span>
+          </div>
+          <div className="kpi-mini-value-row">
+            <span className="kpi-mini-value">{formatOptionalPosition(containerPosition)}</span>
+            {typeof containerPosition === 'number' && Number.isFinite(containerPosition) && <span className="kpi-mini-unit">mm</span>}
           </div>
         </div>
       </div>
