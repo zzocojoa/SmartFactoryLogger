@@ -258,6 +258,22 @@ class CSVLoggerService:
     def _open_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[object], Optional[csv.writer]]:
         if not self.auto_save or not self.csv_v1_enabled:
             return None, None
+        return self._open_v1_log_file_unchecked(timestamp_str, prefix)
+
+    def _open_v1_log_file_for_drain(
+        self,
+        timestamp_str: str,
+        prefix: str,
+    ) -> Tuple[Optional[object], Optional[csv.writer]]:
+        if not self.auto_save:
+            return None, None
+        return self._open_v1_log_file_unchecked(timestamp_str, prefix)
+
+    def _open_v1_log_file_unchecked(
+        self,
+        timestamp_str: str,
+        prefix: str,
+    ) -> Tuple[Optional[object], Optional[csv.writer]]:
         filename = f"{prefix}_{timestamp_str}.csv"
         log_dir = self._get_log_dir()
         full_path = log_dir / filename
@@ -766,20 +782,19 @@ class CSVLoggerService:
                 if config_version != current_config_version:
                     current_config_version = config_version
                     if buffer:
-                        if auto_save and csv_v1_enabled and (f_handle is None or writer is None):
-                            f_handle, writer = self._open_log_file(
+                        if auto_save and (f_handle is None or writer is None):
+                            f_handle, writer = self._open_v1_log_file_for_drain(
                                 buffer[0][1].strftime("%Y%m%d_%H%M%S"),
                                 prefix=file_prefix,
                             )
-                        if self._flush_buffer(writer, f_handle, buffer):
+                        if auto_save and self._flush_buffer(writer, f_handle, buffer):
                             buffer.clear()
                             self._buffer_size = 0
                         elif not auto_save:
                             buffer.clear()
                             self._buffer_size = 0
-                        elif not csv_v1_enabled:
-                            buffer.clear()
-                            self._buffer_size = 0
+                        else:
+                            self.logger.warning("CSV v1 buffer retained during config change.")
                     if v2_buffer:
                         if auto_save and csv_v2_enabled and (v2_handle is None or v2_writer is None):
                             v2_handle, v2_writer = self._open_v2_log_file(
@@ -845,19 +860,18 @@ class CSVLoggerService:
                 now = time.time()
                 pending_rows = len(buffer) + len(v2_buffer)
                 if pending_rows and (pending_rows >= batch_size or (now - last_flush_time) > flush_interval):
-                    if buffer and auto_save and csv_v1_enabled and (not f_handle or not writer):
+                    if buffer and auto_save and (not f_handle or not writer):
                         ts = buffer[0][1].strftime("%Y%m%d_%H%M%S")
-                        f_handle, writer = self._open_log_file(ts, prefix=file_prefix)
+                        f_handle, writer = self._open_v1_log_file_for_drain(ts, prefix=file_prefix)
 
-                    if buffer and auto_save and csv_v1_enabled and self._flush_buffer(writer, f_handle, buffer):
+                    if buffer and auto_save and self._flush_buffer(writer, f_handle, buffer):
                         buffer.clear()
                         self._buffer_size = 0
                     elif not auto_save:
                         buffer.clear()
                         self._buffer_size = 0
-                    elif buffer and not csv_v1_enabled:
-                        buffer.clear()
-                        self._buffer_size = 0
+                    elif buffer:
+                        self.logger.warning("CSV v1 buffer retained because v1 writer is unavailable.")
                     if v2_buffer:
                         if auto_save and csv_v2_enabled and (not v2_handle or not v2_writer):
                             ts = v2_buffer[0][1].strftime("%Y%m%d_%H%M%S")
@@ -879,12 +893,12 @@ class CSVLoggerService:
 
         if buffer:
             try:
-                if self.auto_save and self.csv_v1_enabled and (f_handle is None or writer is None):
-                    f_handle, writer = self._open_log_file(
+                if self.auto_save and (f_handle is None or writer is None):
+                    f_handle, writer = self._open_v1_log_file_for_drain(
                         buffer[0][1].strftime("%Y%m%d_%H%M%S"),
                         prefix=file_prefix,
                     )
-                if self.csv_v1_enabled and self._flush_buffer(writer, f_handle, buffer):
+                if self._flush_buffer(writer, f_handle, buffer):
                     buffer.clear()
             except Exception:
                 pass

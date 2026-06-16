@@ -2,6 +2,7 @@ import csv
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -399,6 +400,40 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertTrue(any("cannot disable both v1 and v2 writers" in message for message in logs.output))
             self.assertEqual(len(self._list_v1_files(log_dir)), 1)
             self.assertEqual(self._list_v2_files(log_dir), [])
+
+    def test_hot_reload_to_v2_only_flushes_pending_v1_buffer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v1_enabled=True,
+                csv_v2_enabled=False,
+            )
+            service.start()
+            try:
+                service.enqueue(self.create_data())
+                deadline = time.time() + 2.0
+                while service._buffer_size < 1 and time.time() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(service._buffer_size, 1)
+
+                service.apply_config(csv_v1_enabled=False, csv_v2_enabled=True)
+
+                deadline = time.time() + 2.0
+                while service._buffer_size != 0 and time.time() < deadline:
+                    time.sleep(0.01)
+            finally:
+                service.stop()
+
+            v1_files = self._list_v1_files(log_dir)
+            self.assertEqual(len(v1_files), 1)
+            rows = self._read_csv_rows(v1_files[0])
+            self.assertEqual(rows[0], V1_CSV_COLUMNS)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1][V1_CSV_COLUMNS.index("Time")], "07:20:25.123")
 
     def test_v2_writer_creates_separate_file_and_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
