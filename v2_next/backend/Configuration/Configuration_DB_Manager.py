@@ -116,6 +116,18 @@ def _env_float(name: str, fallback: float) -> float:
         return fallback
 
 
+def _env_bool(name: str, fallback: bool) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return fallback
+    lowered = val.strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    return fallback
+
+
 def _positive_int(value: int, fallback: int) -> int:
     if value > 0:
         return value
@@ -265,6 +277,18 @@ class ConfigManager:
         }
         logging_cfg = {
             "csv_header": _get(parser, "HEADERS", "csv", config.DEFAULT_CSV_HEADER) or config.DEFAULT_CSV_HEADER,
+            "csv_v1_enabled": _env_bool(
+                "CSV_V1_ENABLED",
+                _get_bool(parser, "LOGGING", "csv_v1_enabled", config.DEFAULT_CSV_V1_ENABLED),
+            ),
+            "csv_v2_enabled": _env_bool(
+                "CSV_V2_ENABLED",
+                _get_bool(parser, "LOGGING", "csv_v2_enabled", config.DEFAULT_CSV_V2_ENABLED),
+            ),
+            "csv_v2_sidecar_enabled": _env_bool(
+                "CSV_V2_SIDECAR_ENABLED",
+                _get_bool(parser, "LOGGING", "csv_v2_sidecar_enabled", config.DEFAULT_CSV_V2_SIDECAR_ENABLED),
+            ),
         }
         thresholds_value = {key: _get_text(parser, "THRESHOLDS_VALUE", key) for key in _THRESHOLD_KEYS}
         thresholds_enable = {key: _get_bool(parser, "THRESHOLDS_ENABLE", key, False) for key in _THRESHOLD_KEYS}
@@ -357,6 +381,9 @@ class ConfigManager:
             "settings.logpath",
             "settings.autosave",
             "logging.csv_header",
+            "logging.csv_v1_enabled",
+            "logging.csv_v2_enabled",
+            "logging.csv_v2_sidecar_enabled",
         }
         security_keys = {"settings.password_set"}
         snapshot_keys = {"settings.snapshotpath"}
@@ -411,11 +438,19 @@ class ConfigManager:
             config.AUTO_SAVE = bool(settings.get("autosave", config.DEFAULT_AUTO_SAVE))
             logging_cfg = values.get("logging", {})
             config.CSV_HEADER = logging_cfg.get("csv_header") or config.DEFAULT_CSV_HEADER
+            config.CSV_V1_ENABLED = bool(logging_cfg.get("csv_v1_enabled", config.DEFAULT_CSV_V1_ENABLED))
+            config.CSV_V2_ENABLED = bool(logging_cfg.get("csv_v2_enabled", config.DEFAULT_CSV_V2_ENABLED))
+            config.CSV_V2_SIDECAR_ENABLED = bool(
+                logging_cfg.get("csv_v2_sidecar_enabled", config.DEFAULT_CSV_V2_SIDECAR_ENABLED)
+            )
             try:
                 logger_service.apply_config(
                     log_path=resolved_log_path,
                     auto_save=config.AUTO_SAVE,
                     csv_header=config.CSV_HEADER,
+                    csv_v1_enabled=config.CSV_V1_ENABLED,
+                    csv_v2_enabled=config.CSV_V2_ENABLED,
+                    csv_v2_sidecar_enabled=config.CSV_V2_SIDECAR_ENABLED,
                 )
                 applied.extend(sorted(log_changed))
             except Exception:

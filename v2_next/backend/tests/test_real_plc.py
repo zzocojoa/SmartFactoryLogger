@@ -2,6 +2,7 @@ import csv
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -152,6 +153,42 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             captured_at_ls=1773040825.0,
             captured_at_spot=1773040825.0,
         )
+
+    def _read_csv_rows(self, path: Path) -> list[list[str]]:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            return list(csv.reader(handle))
+
+    def _list_v1_files(self, log_dir: Path) -> list[Path]:
+        return sorted(
+            path for path in log_dir.glob("Factory_Integrated_Log_*.csv") if "_v2_" not in path.name
+        )
+
+    def _list_v2_files(self, log_dir: Path) -> list[Path]:
+        return sorted(log_dir.glob("Factory_Integrated_Log_v2_*.csv"))
+
+    def _run_logger_once(
+        self,
+        log_dir: Path,
+        *,
+        csv_v1_enabled: bool,
+        csv_v2_enabled: bool,
+    ) -> CSVLoggerService:
+        service = CSVLoggerService()
+        service.fallback_log_dir = log_dir
+        service.apply_config(
+            log_path=log_dir,
+            auto_save=True,
+            csv_v1_enabled=csv_v1_enabled,
+            csv_v2_enabled=csv_v2_enabled,
+        )
+        service.start()
+        try:
+            service.enqueue(self.create_data())
+            service.stop()
+        finally:
+            if service.running:
+                service.stop()
+        return service
 
     def test_v1_golden_row_contract_is_stable(self) -> None:
         service = CSVLoggerService()
@@ -320,6 +357,84 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(row[19], "'=cmd")
         self.assertEqual(row[20], "'+cycle")
 
+    def test_csv_writer_mode_v1_enabled_v2_disabled_creates_v1_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            self._run_logger_once(log_dir, csv_v1_enabled=True, csv_v2_enabled=False)
+
+            self.assertEqual(len(self._list_v1_files(log_dir)), 1)
+            self.assertEqual(self._list_v2_files(log_dir), [])
+
+    def test_csv_writer_mode_v1_enabled_v2_enabled_creates_both_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            self._run_logger_once(log_dir, csv_v1_enabled=True, csv_v2_enabled=True)
+
+            self.assertEqual(len(self._list_v1_files(log_dir)), 1)
+            v2_files = self._list_v2_files(log_dir)
+            self.assertEqual(len(v2_files), 1)
+            metadata = json.loads(v2_files[0].with_suffix(".metadata.json").read_text(encoding="utf-8"))
+            self.assertTrue(metadata["schema_metadata"]["v1_csv_enabled"])
+
+    def test_csv_writer_mode_v1_disabled_v2_enabled_creates_v2_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            self._run_logger_once(log_dir, csv_v1_enabled=False, csv_v2_enabled=True)
+
+            self.assertEqual(self._list_v1_files(log_dir), [])
+            v2_files = self._list_v2_files(log_dir)
+            self.assertEqual(len(v2_files), 1)
+            rows = self._read_csv_rows(v2_files[0])
+            self.assertEqual(rows[0], V2_CSV_COLUMNS)
+            self.assertEqual(len(rows), 2)
+            metadata = json.loads(v2_files[0].with_suffix(".metadata.json").read_text(encoding="utf-8"))
+            self.assertFalse(metadata["schema_metadata"]["v1_csv_enabled"])
+
+    def test_csv_writer_mode_v1_disabled_v2_disabled_falls_back_to_v1(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            with self.assertLogs("SmartFactoryLoggerV2", level="WARNING") as logs:
+                service = self._run_logger_once(log_dir, csv_v1_enabled=False, csv_v2_enabled=False)
+
+            self.assertTrue(service.csv_v1_enabled)
+            self.assertTrue(any("cannot disable both v1 and v2 writers" in message for message in logs.output))
+            self.assertEqual(len(self._list_v1_files(log_dir)), 1)
+            self.assertEqual(self._list_v2_files(log_dir), [])
+
+    def test_hot_reload_to_v2_only_flushes_pending_v1_buffer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v1_enabled=True,
+                csv_v2_enabled=False,
+            )
+            service.start()
+            try:
+                service.enqueue(self.create_data())
+                deadline = time.time() + 2.0
+                while service._buffer_size < 1 and time.time() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(service._buffer_size, 1)
+
+                service.apply_config(csv_v1_enabled=False, csv_v2_enabled=True)
+
+                deadline = time.time() + 2.0
+                while service._buffer_size != 0 and time.time() < deadline:
+                    time.sleep(0.01)
+            finally:
+                service.stop()
+
+            v1_files = self._list_v1_files(log_dir)
+            self.assertEqual(len(v1_files), 1)
+            rows = self._read_csv_rows(v1_files[0])
+            self.assertEqual(rows[0], V1_CSV_COLUMNS)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1][V1_CSV_COLUMNS.index("Time")], "07:20:25.123")
+
     def test_v2_writer_creates_separate_file_and_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
@@ -435,6 +550,29 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             service._write_v2_sidecar(v2_path)
 
             result = validate_csv_v2_shadow(v1_path, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 0)
+
+    def test_shadow_validation_script_accepts_v2_only_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v1_enabled=False, csv_v2_enabled=True)
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path)
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
 
         self.assertEqual(result, 0)
 
