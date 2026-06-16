@@ -341,7 +341,17 @@ class RealPLCDriver(BasePLCDriver):
         print("[RealDriver] All Connections Closed.")
 
     def read_data(self) -> FactoryData:
-        ext_data, ls_data, spot_val = self._read_cached_snapshot()
+        (
+            ext_data,
+            ls_data,
+            spot_val,
+            ext_snapshot_at,
+            ls_snapshot_at,
+            spot_snapshot_at,
+            ext_snapshot_error,
+            ls_snapshot_error,
+            spot_snapshot_error,
+        ) = self._read_cached_snapshot_with_metadata()
 
         self.connected = self._update_connected_state(time.time())
 
@@ -363,9 +373,16 @@ class RealPLCDriver(BasePLCDriver):
             Press=ext_data.get("Press"),
             Count=ext_data.get("Count"),
             EndPos=ext_data.get("EndPos"),
+            MainRamPosition_D0010=ext_data.get("MainRamPosition_D0010"),
+            ContainerPosition_D0012=ext_data.get("ContainerPosition_D0012"),
             Billet_Length=ext_data.get("Billet"),
             Die_ID=die_id,
             Billet_Cycle_ID=billet_cycle_id,
+            Die_ID_derived=True,
+            Billet_Cycle_ID_derived=True,
+            derivation_version="cycle-heuristic-v1",
+            cycle_confidence=0.5 if billet_cycle_id else None,
+            cycle_state="active" if billet_cycle_id else "idle",
             Temp_F=ext_data.get("Temp_F"),
             Temp_B=ext_data.get("Temp_B"),
 
@@ -382,6 +399,14 @@ class RealPLCDriver(BasePLCDriver):
 
             # From SPOT
             Spot=spot_val,
+
+            # Source snapshot metadata
+            captured_at_extruder=ext_snapshot_at,
+            captured_at_ls=ls_snapshot_at,
+            captured_at_spot=spot_snapshot_at,
+            extruder_snapshot_error=ext_snapshot_error,
+            ls_snapshot_error=ls_snapshot_error,
+            spot_snapshot_error=spot_snapshot_error,
         )
 
     def _start_workers(self) -> None:
@@ -439,13 +464,45 @@ class RealPLCDriver(BasePLCDriver):
             self._spot_snapshot_error = message
 
     def _read_cached_snapshot(self) -> tuple[Dict[str, float], Dict[str, float], Optional[float]]:
+        ext_data, ls_data, spot_val, *_ = self._read_cached_snapshot_with_metadata()
+        return ext_data, ls_data, spot_val
+
+    def _read_cached_snapshot_with_metadata(
+        self,
+    ) -> tuple[
+        Dict[str, float],
+        Dict[str, float],
+        Optional[float],
+        Optional[float],
+        Optional[float],
+        Optional[float],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+    ]:
         with self._snapshot_lock:
             ext_data = dict(self._ext_snapshot)
             ls_data = dict(self._ls_snapshot)
             spot_val = self._spot_snapshot
+            ext_snapshot_at = self._ext_snapshot_at
+            ls_snapshot_at = self._ls_snapshot_at
+            spot_snapshot_at = self._spot_snapshot_at
+            ext_snapshot_error = self._ext_snapshot_error
+            ls_snapshot_error = self._ls_snapshot_error
+            spot_snapshot_error = self._spot_snapshot_error
         if spot_val is not None:
             self.last_spot = spot_val
-        return ext_data, ls_data, spot_val if spot_val is not None else self.last_spot
+        return (
+            ext_data,
+            ls_data,
+            spot_val if spot_val is not None else self.last_spot,
+            ext_snapshot_at,
+            ls_snapshot_at,
+            spot_snapshot_at,
+            ext_snapshot_error,
+            ls_snapshot_error,
+            spot_snapshot_error,
+        )
 
     def _connected_grace_sec(self) -> float:
         poll_interval_sec = self._connector_poll_interval_sec()
@@ -605,6 +662,8 @@ class RealPLCDriver(BasePLCDriver):
             if len(b4) > 11:
                 data["Billet"] = b4[11]
 
+            data.update(self._read_extruder_positions(deadline))
+
             if data:
                 self._mark_ext_success()
 
@@ -616,6 +675,8 @@ class RealPLCDriver(BasePLCDriver):
                         data.get("Temp_B"),
                         data.get("Speed"),
                         data.get("EndPos"),
+                        data.get("MainRamPosition_D0010"),
+                        data.get("ContainerPosition_D0012"),
                         data.get("Count"),
                         data.get("Billet"),
                     )
@@ -804,7 +865,7 @@ class RealPLCDriver(BasePLCDriver):
         b_spd = self._melsec_read("B1502", 1, deadline)
         if not b_spd:
             return None
-        return {
+        data = {
             "Press": b1[3] / 10.0,
             "Temp_F": b1[11],
             "Temp_B": b1[12],
@@ -813,6 +874,19 @@ class RealPLCDriver(BasePLCDriver):
             "Billet": b4[11],
             "Speed": b_spd[0] / 10.0,
         }
+        data.update(self._read_extruder_positions(deadline))
+        return data
+
+    def _read_extruder_positions(self, deadline: float) -> Dict[str, float]:
+        if not bool(getattr(config, "POSITION_READ_ENABLED", False)):
+            return {}
+        b_pos = self._melsec_read("D0010", 3, deadline)
+        if len(b_pos) > 2:
+            return {
+                "MainRamPosition_D0010": b_pos[0] / 10.0,
+                "ContainerPosition_D0012": b_pos[2] / 10.0,
+            }
+        return {}
 
     def _read_ls(self, deadline: float) -> Dict[str, float]:
         if time.time() >= deadline:
