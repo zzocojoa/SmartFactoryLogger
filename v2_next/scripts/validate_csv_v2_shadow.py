@@ -116,18 +116,22 @@ def position_summary(rows: list[list[str]], header: list[str], column: str) -> s
     )
 
 
-def validate(v1_path: Path, v2_path: Path, metadata_path: Path) -> int:
+def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
     failures: list[str] = []
     warnings: list[str] = []
 
-    v1_header, v1_rows = read_csv(v1_path)
+    v1_header: list[str] = []
+    v1_rows: list[list[str]] = []
+    if v1_path is not None:
+        v1_header, v1_rows = read_csv(v1_path)
     v2_header, v2_rows = read_csv(v2_path)
     metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
 
-    if v1_header != REQUIRED_V1_COLUMNS:
-        failures.append("v1 header does not match canonical 21-column contract")
-    if len(v1_header) != 21:
-        failures.append(f"v1 column count is {len(v1_header)}, expected 21")
+    if v1_path is not None:
+        if v1_header != REQUIRED_V1_COLUMNS:
+            failures.append("v1 header does not match canonical 21-column contract")
+        if len(v1_header) != 21:
+            failures.append(f"v1 column count is {len(v1_header)}, expected 21")
 
     missing_v2 = [column for column in REQUIRED_V2_COLUMNS if column not in v2_header]
     if missing_v2:
@@ -137,9 +141,11 @@ def validate(v1_path: Path, v2_path: Path, metadata_path: Path) -> int:
     if v2_schema != "2.1.0":
         failures.append(f"metadata schema_version is {v2_schema!r}, expected '2.1.0'")
 
-    row_delta = len(v2_rows) - len(v1_rows)
-    if row_delta != 0:
-        warnings.append(f"row count differs: v1={len(v1_rows)} v2={len(v2_rows)} delta={row_delta}")
+    row_delta: int | str = "v1_not_provided"
+    if v1_path is not None:
+        row_delta = len(v2_rows) - len(v1_rows)
+        if row_delta != 0:
+            warnings.append(f"row count differs: v1={len(v1_rows)} v2={len(v2_rows)} delta={row_delta}")
 
     seq_ok, seq_detail = validate_sample_seq(v2_rows, v2_header)
     if not seq_ok:
@@ -162,10 +168,10 @@ def validate(v1_path: Path, v2_path: Path, metadata_path: Path) -> int:
             warnings.append(f"{column} has no populated values. Check position_read_enabled.")
 
     print("CSV v2 shadow validation")
-    print(f"v1_file={v1_path}")
+    print(f"v1_file={v1_path if v1_path is not None else 'not provided'}")
     print(f"v2_file={v2_path}")
     print(f"metadata_file={metadata_path}")
-    print(f"v1_rows={len(v1_rows)}")
+    print(f"v1_rows={len(v1_rows) if v1_path is not None else 'not checked'}")
     print(f"v2_rows={len(v2_rows)}")
     print(f"row_delta={row_delta}")
     print(f"sample_seq={seq_detail}")
@@ -187,7 +193,7 @@ def validate(v1_path: Path, v2_path: Path, metadata_path: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate v1/v2 CSV shadow logging outputs.")
-    parser.add_argument("--v1", required=True, type=Path, help="Factory_Integrated_Log_*.csv")
+    parser.add_argument("--v1", type=Path, help="Factory_Integrated_Log_*.csv")
     parser.add_argument("--v2", required=True, type=Path, help="Factory_Integrated_Log_v2_*.csv")
     parser.add_argument(
         "--metadata",
