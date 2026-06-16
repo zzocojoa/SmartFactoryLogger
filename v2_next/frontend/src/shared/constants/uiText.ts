@@ -44,6 +44,8 @@ export const LABELS = {
   TEMP_B: '온도(B)',
   COUNT: '생산 수량',
   END_POS: '종료 위치',
+  MAIN_RAM_POSITION: '메인 램 현재 위치',
+  CONTAINER_POSITION: '콘테이너 현재 위치',
   SUMMARY: '요약',
   SUMMARY_INFO: '요약 정보',
   CENTRAL_CONFIG: '중앙 설정',

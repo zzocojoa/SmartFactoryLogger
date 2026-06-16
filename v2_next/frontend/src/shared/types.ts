@@ -13,6 +13,8 @@ export interface FactoryData {
     Count: number | null;
     EndPos: number | null;
     Billet_Length: number | null;
+    MainRamPosition_D0010?: number | null;
+    ContainerPosition_D0012?: number | null;
     Die_ID?: string | null;
     Billet_Cycle_ID?: string | null;
     
