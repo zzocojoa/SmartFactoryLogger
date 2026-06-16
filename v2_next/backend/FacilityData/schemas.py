@@ -6,15 +6,28 @@ class FactoryData(BaseModel):
     Time: str
     Status: str = "Running"
     timestamp_ms: Optional[int] = None
+    captured_at_extruder: Optional[float] = None
+    captured_at_ls: Optional[float] = None
+    captured_at_spot: Optional[float] = None
+    extruder_snapshot_error: Optional[str] = None
+    ls_snapshot_error: Optional[str] = None
+    spot_snapshot_error: Optional[str] = None
     
     # KPIs
     Speed: Optional[float] = None
     Press: Optional[float] = None
     Count: Optional[int] = None
     EndPos: Optional[float] = None
+    MainRamPosition_D0010: Optional[float] = None
+    ContainerPosition_D0012: Optional[float] = None
     Billet_Length: Optional[float] = None
     Die_ID: Optional[str] = None
     Billet_Cycle_ID: Optional[str] = None
+    Die_ID_derived: Optional[bool] = None
+    Billet_Cycle_ID_derived: Optional[bool] = None
+    derivation_version: Optional[str] = None
+    cycle_confidence: Optional[float] = None
+    cycle_state: Optional[str] = None
     
     # Temperatures
     Spot: Optional[float] = None
@@ -41,6 +54,8 @@ class FactoryData(BaseModel):
         "Speed",
         "Press",
         "EndPos",
+        "MainRamPosition_D0010",
+        "ContainerPosition_D0012",
         "Billet_Length",
         "Temp_F",
         "Temp_B",

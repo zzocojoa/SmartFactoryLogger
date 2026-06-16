@@ -50,6 +50,9 @@ DEFAULT_SPOT_WIDGET_HEIGHT = 288
 DEFAULT_LOG_PATH = "logs/data"
 DEFAULT_SNAPSHOT_PATH = "snapshots"
 DEFAULT_AUTO_SAVE = True
+DEFAULT_CSV_V2_ENABLED = False
+DEFAULT_CSV_V2_SIDECAR_ENABLED = True
+DEFAULT_POSITION_READ_ENABLED = False
 DEFAULT_STATUS_WARN_MS = 10000
 DEFAULT_STATUS_OFFLINE_MS = 20000
 DEFAULT_JAM_PRESS_THRESHOLD = 20.0
@@ -190,6 +193,18 @@ def _env_float(name: str, fallback: float) -> float:
         return float(val)
     except ValueError:
         return fallback
+
+
+def _env_bool(name: str, fallback: bool) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return fallback
+    lowered = val.strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    return fallback
 
 
 def _positive_int(value: int, fallback: int) -> int:
@@ -348,6 +363,10 @@ CENTRAL_PORT = _env_int("CENTRAL_PORT", 9000)
 EXTRUDER_IP = os.getenv("EXTRUDER_IP", _get(CONFIG, "EXTRUDER", "ip", DEFAULT_EXTRUDER_IP) or DEFAULT_EXTRUDER_IP)
 EXTRUDER_PORT = _get_int(CONFIG, "EXTRUDER", "port", DEFAULT_EXTRUDER_PORT)
 EXTRUDER_PORT = _env_int("EXTRUDER_PORT", EXTRUDER_PORT)
+POSITION_READ_ENABLED = _env_bool(
+    "POSITION_READ_ENABLED",
+    _get_bool(CONFIG, "EXTRUDER", "position_read_enabled", DEFAULT_POSITION_READ_ENABLED),
+)
 
 # LS PLC
 LS_IP = os.getenv("LS_IP", _get(CONFIG, "LS_PLC", "ip", DEFAULT_LS_IP) or DEFAULT_LS_IP)
@@ -449,6 +468,14 @@ CUSTOM_NOTICE = _get(CONFIG, "SETTINGS", "custom_notice", DEFAULT_CUSTOM_NOTICE)
 _DEFAULT_MODE = "REAL" if getattr(sys, "frozen", False) else "MOCK"
 MODE = os.getenv("V2_MODE", _get(CONFIG, "SETTINGS", "mode", _DEFAULT_MODE)).upper()
 CSV_HEADER = _get(CONFIG, "HEADERS", "csv", DEFAULT_CSV_HEADER) or DEFAULT_CSV_HEADER
+CSV_V2_ENABLED = _env_bool(
+    "CSV_V2_ENABLED",
+    _get_bool(CONFIG, "LOGGING", "csv_v2_enabled", DEFAULT_CSV_V2_ENABLED),
+)
+CSV_V2_SIDECAR_ENABLED = _env_bool(
+    "CSV_V2_SIDECAR_ENABLED",
+    _get_bool(CONFIG, "LOGGING", "csv_v2_sidecar_enabled", DEFAULT_CSV_V2_SIDECAR_ENABLED),
+)
 SNAPSHOT_PATH = resolve_storage_path(
     _get(CONFIG, "SETTINGS", "snapshotpath", DEFAULT_SNAPSHOT_PATH),
     "snapshots",
