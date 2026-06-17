@@ -4,7 +4,7 @@ import logging
 import queue
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional, Iterable, Tuple
 
@@ -513,8 +513,9 @@ class CSVLoggerService:
             self.logger.warning("Failed to write CSV v2 sidecar metadata: %s", exc)
 
     def _build_row(self, data: FactoryData, timestamp: datetime) -> list:
-        date_s = timestamp.strftime("%Y-%m-%d")
-        time_s = timestamp.strftime("%H:%M:%S.%f")[:-3]
+        local_timestamp = self._to_local_timestamp(timestamp)
+        date_s = local_timestamp.strftime("%Y-%m-%d")
+        time_s = local_timestamp.strftime("%H:%M:%S.%f")[:-3]
         press_value = self._to_float(data.Press)
         row = [
             date_s,
@@ -700,6 +701,12 @@ class CSVLoggerService:
         except Exception:
             return 0.0
 
+    def _log_file_date(self, timestamp: datetime) -> date:
+        return self._to_local_timestamp(timestamp).date()
+
+    def _filename_timestamp(self, timestamp: datetime) -> str:
+        return self._to_local_timestamp(timestamp).strftime("%Y%m%d_%H%M%S")
+
     def _flush_buffer(
         self,
         writer: Optional[csv.writer],
@@ -736,8 +743,8 @@ class CSVLoggerService:
             return
         try:
             handle.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            self.logger.warning("Failed to close CSV log file handle: %s", exc)
 
     def get_runtime_state(self) -> dict[str, int | bool | str]:
         with self._config_lock:
@@ -770,9 +777,12 @@ class CSVLoggerService:
         v2_handle = None
         v2_writer = None
         current_config_version = -1
+        current_file_date: Optional[date] = None
+        deferred_item: Optional[FactoryData] = None
 
         while True:
             try:
+                item: Optional[FactoryData] = None
                 with self._config_lock:
                     auto_save = self.auto_save
                     csv_v1_enabled = self.csv_v1_enabled
@@ -784,7 +794,7 @@ class CSVLoggerService:
                     if buffer:
                         if auto_save and (f_handle is None or writer is None):
                             f_handle, writer = self._open_v1_log_file_for_drain(
-                                buffer[0][1].strftime("%Y%m%d_%H%M%S"),
+                                self._filename_timestamp(buffer[0][1]),
                                 prefix=file_prefix,
                             )
                         if auto_save and self._flush_buffer(writer, f_handle, buffer):
@@ -798,7 +808,7 @@ class CSVLoggerService:
                     if v2_buffer:
                         if auto_save and csv_v2_enabled and (v2_handle is None or v2_writer is None):
                             v2_handle, v2_writer = self._open_v2_log_file(
-                                v2_buffer[0][1].strftime("%Y%m%d_%H%M%S"),
+                                self._filename_timestamp(v2_buffer[0][1]),
                                 prefix=v2_file_prefix,
                             )
                         if csv_v2_enabled and self._flush_v2_buffer(v2_writer, v2_handle, v2_buffer):
@@ -813,18 +823,78 @@ class CSVLoggerService:
                     writer = None
                     v2_handle = None
                     v2_writer = None
+                    current_file_date = None
 
-                item = None
-                try:
-                    item = self.queue.get(timeout=0.2)
-                except queue.Empty:
-                    item = None
+                if deferred_item is not None:
+                    item = deferred_item
+                    deferred_item = None
+                else:
+                    try:
+                        item = self.queue.get(timeout=0.2)
+                    except queue.Empty:
+                        item = None
 
                 if item is None:
                     if not self.running:
                         break
                 else:
                     timestamp = self._parse_timestamp(item)
+                    if not auto_save:
+                        continue
+
+                    item_file_date = self._log_file_date(timestamp)
+                    if current_file_date is not None and item_file_date != current_file_date:
+                        rollover_ready = True
+                        if buffer:
+                            if f_handle is None or writer is None:
+                                f_handle, writer = self._open_v1_log_file_for_drain(
+                                    self._filename_timestamp(buffer[0][1]),
+                                    prefix=file_prefix,
+                                )
+                            if self._flush_buffer(writer, f_handle, buffer):
+                                buffer.clear()
+                                self._buffer_size = 0
+                            else:
+                                rollover_ready = False
+                                self.logger.warning(
+                                    "CSV v1 daily rollover delayed because pending rows could not be flushed."
+                                )
+                        if v2_buffer:
+                            if csv_v2_enabled and (v2_handle is None or v2_writer is None):
+                                v2_handle, v2_writer = self._open_v2_log_file(
+                                    self._filename_timestamp(v2_buffer[0][1]),
+                                    prefix=v2_file_prefix,
+                                )
+                            if csv_v2_enabled and self._flush_v2_buffer(v2_writer, v2_handle, v2_buffer):
+                                v2_buffer.clear()
+                            else:
+                                rollover_ready = False
+                                self.logger.warning(
+                                    "CSV v2 daily rollover delayed because pending rows could not be flushed."
+                                )
+                        if rollover_ready:
+                            self._close_file(f_handle)
+                            self._close_file(v2_handle)
+                            f_handle = None
+                            writer = None
+                            v2_handle = None
+                            v2_writer = None
+                            self.logger.info(
+                                "CSV daily rollover completed: %s -> %s",
+                                current_file_date.isoformat(),
+                                item_file_date.isoformat(),
+                            )
+                            current_file_date = None
+                        else:
+                            if not self.running:
+                                deferred_item = item
+                                self._buffer_size = len(buffer)
+                                break
+                            deferred_item = item
+                            self._buffer_size = len(buffer)
+                            time.sleep(0.2)
+                            continue
+
                     row = self._build_row(item, timestamp)
                     v2_row = None
                     if csv_v2_enabled:
@@ -837,19 +907,18 @@ class CSVLoggerService:
                             row,
                         )
 
-                    if not auto_save:
-                        continue
-
                     if csv_v1_enabled and (f_handle is None or writer is None):
                         f_handle, writer = self._open_log_file(
-                            timestamp.strftime("%Y%m%d_%H%M%S"),
+                            self._filename_timestamp(timestamp),
                             prefix=file_prefix,
                         )
                     if csv_v2_enabled and (v2_handle is None or v2_writer is None):
                         v2_handle, v2_writer = self._open_v2_log_file(
-                            timestamp.strftime("%Y%m%d_%H%M%S"),
+                            self._filename_timestamp(timestamp),
                             prefix=v2_file_prefix,
                         )
+                    if current_file_date is None:
+                        current_file_date = item_file_date
 
                     if csv_v1_enabled:
                         buffer.append((row, timestamp))
@@ -861,7 +930,7 @@ class CSVLoggerService:
                 pending_rows = len(buffer) + len(v2_buffer)
                 if pending_rows and (pending_rows >= batch_size or (now - last_flush_time) > flush_interval):
                     if buffer and auto_save and (not f_handle or not writer):
-                        ts = buffer[0][1].strftime("%Y%m%d_%H%M%S")
+                        ts = self._filename_timestamp(buffer[0][1])
                         f_handle, writer = self._open_v1_log_file_for_drain(ts, prefix=file_prefix)
 
                     if buffer and auto_save and self._flush_buffer(writer, f_handle, buffer):
@@ -874,7 +943,7 @@ class CSVLoggerService:
                         self.logger.warning("CSV v1 buffer retained because v1 writer is unavailable.")
                     if v2_buffer:
                         if auto_save and csv_v2_enabled and (not v2_handle or not v2_writer):
-                            ts = v2_buffer[0][1].strftime("%Y%m%d_%H%M%S")
+                            ts = self._filename_timestamp(v2_buffer[0][1])
                             v2_handle, v2_writer = self._open_v2_log_file(ts, prefix=v2_file_prefix)
                         if auto_save and csv_v2_enabled and self._flush_v2_buffer(v2_writer, v2_handle, v2_buffer):
                             v2_buffer.clear()
@@ -884,35 +953,97 @@ class CSVLoggerService:
                     last_flush_time = now
             except Exception as exc:
                 self.logger.error("Error in CSV logger loop: %s", exc)
+                if item is not None and current_file_date is not None:
+                    try:
+                        item_file_date = self._log_file_date(self._parse_timestamp(item))
+                    except Exception:
+                        item_file_date = current_file_date
+                    if item_file_date != current_file_date and deferred_item is None:
+                        deferred_item = item
+                        self.logger.warning(
+                            "CSV daily rollover delayed because flush raised an exception. "
+                            "Current row deferred to preserve daily file boundary."
+                        )
                 self._close_file(f_handle)
                 self._close_file(v2_handle)
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
                 self._buffer_size = len(buffer)
+                if buffer:
+                    current_file_date = self._log_file_date(buffer[0][1])
+                elif v2_buffer:
+                    current_file_date = self._log_file_date(v2_buffer[0][1])
+                else:
+                    current_file_date = None
                 time.sleep(0.5)
 
         if buffer:
             try:
                 if self.auto_save and (f_handle is None or writer is None):
                     f_handle, writer = self._open_v1_log_file_for_drain(
-                        buffer[0][1].strftime("%Y%m%d_%H%M%S"),
+                        self._filename_timestamp(buffer[0][1]),
                         prefix=file_prefix,
                     )
                 if self._flush_buffer(writer, f_handle, buffer):
                     buffer.clear()
-            except Exception:
-                pass
+                else:
+                    self.logger.warning("CSV v1 final flush failed because writer is unavailable.")
+            except Exception as exc:
+                self.logger.warning("CSV v1 final flush failed: %s", exc)
         if v2_buffer:
             try:
                 if self.csv_v2_enabled and (v2_handle is None or v2_writer is None):
                     v2_handle, v2_writer = self._open_v2_log_file(
-                        v2_buffer[0][1].strftime("%Y%m%d_%H%M%S"),
+                        self._filename_timestamp(v2_buffer[0][1]),
                         prefix=v2_file_prefix,
                     )
                 if self._flush_v2_buffer(v2_writer, v2_handle, v2_buffer):
                     v2_buffer.clear()
+                else:
+                    self.logger.warning("CSV v2 final flush failed because writer is unavailable.")
             except Exception as exc:
                 self.logger.warning("CSV v2 final flush failed: %s", exc)
+        if deferred_item is not None:
+            if buffer or v2_buffer:
+                self.logger.warning(
+                    "CSV deferred shutdown row was not written because previous-day final flush failed."
+                )
+            elif self.auto_save:
+                self._close_file(f_handle)
+                self._close_file(v2_handle)
+                f_handle, writer = None, None
+                v2_handle, v2_writer = None, None
+                try:
+                    timestamp = self._parse_timestamp(deferred_item)
+                    row = self._build_row(deferred_item, timestamp)
+                    if self.csv_v1_enabled:
+                        f_handle, writer = self._open_log_file(
+                            self._filename_timestamp(timestamp),
+                            prefix=file_prefix,
+                        )
+                        if self._flush_buffer(writer, f_handle, [(row, timestamp)]):
+                            self.logger.info("CSV deferred shutdown v1 row written after final rollover flush.")
+                        else:
+                            self.logger.warning("CSV deferred shutdown v1 row was not written.")
+                    if self.csv_v2_enabled:
+                        self._sample_seq += 1
+                        v2_row = self._build_v2_row(
+                            deferred_item,
+                            timestamp,
+                            datetime.now().astimezone(),
+                            self._sample_seq,
+                            row,
+                        )
+                        v2_handle, v2_writer = self._open_v2_log_file(
+                            self._filename_timestamp(timestamp),
+                            prefix=v2_file_prefix,
+                        )
+                        if self._flush_v2_buffer(v2_writer, v2_handle, [(v2_row, timestamp)]):
+                            self.logger.info("CSV deferred shutdown v2 row written after final rollover flush.")
+                        else:
+                            self.logger.warning("CSV deferred shutdown v2 row was not written.")
+                except Exception as exc:
+                    self.logger.warning("CSV deferred shutdown row write failed: %s", exc)
         self._buffer_size = 0
         self._close_file(f_handle)
         self._close_file(v2_handle)

@@ -435,6 +435,236 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[1][V1_CSV_COLUMNS.index("Time")], "07:20:25.123")
 
+    def test_csv_writer_rolls_over_v1_v2_and_sidecar_at_midnight(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v1_enabled=True,
+                csv_v2_enabled=True,
+            )
+            service.start()
+            try:
+                service.enqueue(self.create_data().model_copy(update={"Time": "2026-03-09T23:59:59.900"}))
+                service.enqueue(self.create_data().model_copy(update={"Time": "2026-03-10T00:00:00.100"}))
+                time.sleep(1.2)
+            finally:
+                service.stop()
+
+            v1_files = self._list_v1_files(log_dir)
+            v2_files = self._list_v2_files(log_dir)
+            self.assertEqual(
+                [path.name for path in v1_files],
+                [
+                    "Factory_Integrated_Log_20260309_235959.csv",
+                    "Factory_Integrated_Log_20260310_000000.csv",
+                ],
+            )
+            self.assertEqual(
+                [path.name for path in v2_files],
+                [
+                    "Factory_Integrated_Log_v2_20260309_235959.csv",
+                    "Factory_Integrated_Log_v2_20260310_000000.csv",
+                ],
+            )
+            self.assertTrue(v2_files[0].with_suffix(".metadata.json").exists())
+            self.assertTrue(v2_files[1].with_suffix(".metadata.json").exists())
+
+            first_v2_rows = self._read_csv_rows(v2_files[0])
+            second_v2_rows = self._read_csv_rows(v2_files[1])
+            sample_seq_index = V2_CSV_COLUMNS.index("sample_seq")
+            date_index = V2_CSV_COLUMNS.index("Date")
+            self.assertEqual(first_v2_rows[1][sample_seq_index], "1")
+            self.assertEqual(second_v2_rows[1][sample_seq_index], "2")
+            self.assertEqual(first_v2_rows[1][date_index], "2026-03-09")
+            self.assertEqual(second_v2_rows[1][date_index], "2026-03-10")
+
+    def test_csv_rollover_defers_new_day_row_until_previous_day_flush_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v1_enabled=True,
+                csv_v2_enabled=True,
+            )
+            original_flush = service._flush_buffer
+            injected_failure = {"remaining": 1}
+
+            def fail_previous_day_flush_once(writer, handle, buffer):
+                rows = list(buffer)
+                if injected_failure["remaining"] and rows and rows[0][1].date().isoformat() == "2026-03-09":
+                    injected_failure["remaining"] = 0
+                    return False
+                return original_flush(writer, handle, rows)
+
+            with patch.object(service, "_flush_buffer", side_effect=fail_previous_day_flush_once):
+                service.start()
+                try:
+                    service.enqueue(self.create_data().model_copy(update={"Time": "2026-03-09T23:59:59.900"}))
+                    deadline = time.time() + 2.0
+                    while service._buffer_size < 1 and time.time() < deadline:
+                        time.sleep(0.01)
+
+                    service.enqueue(self.create_data().model_copy(update={"Time": "2026-03-10T00:00:00.100"}))
+                    deadline = time.time() + 3.0
+                    while len(self._list_v1_files(log_dir)) < 2 and time.time() < deadline:
+                        time.sleep(0.01)
+                finally:
+                    service.stop()
+
+            self.assertEqual(injected_failure["remaining"], 0)
+            v1_files = self._list_v1_files(log_dir)
+            v2_files = self._list_v2_files(log_dir)
+            self.assertEqual(
+                [path.name for path in v1_files],
+                [
+                    "Factory_Integrated_Log_20260309_235959.csv",
+                    "Factory_Integrated_Log_20260310_000000.csv",
+                ],
+            )
+            self.assertEqual(
+                [path.name for path in v2_files],
+                [
+                    "Factory_Integrated_Log_v2_20260309_235959.csv",
+                    "Factory_Integrated_Log_v2_20260310_000000.csv",
+                ],
+            )
+            self.assertEqual([self._read_csv_rows(path)[1][0] for path in v1_files], ["2026-03-09", "2026-03-10"])
+            self.assertEqual([self._read_csv_rows(path)[1][V1_CSV_COLUMNS.index("Time")] for path in v1_files], [
+                "23:59:59.900",
+                "00:00:00.100",
+            ])
+            self.assertTrue(v2_files[0].with_suffix(".metadata.json").exists())
+            self.assertTrue(v2_files[1].with_suffix(".metadata.json").exists())
+
+    def test_csv_rollover_defers_new_day_row_when_previous_day_flush_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v1_enabled=True,
+                csv_v2_enabled=True,
+            )
+            original_flush = service._flush_buffer
+            injected_failure = {"remaining": 1}
+
+            def raise_previous_day_flush_once(writer, handle, buffer):
+                rows = list(buffer)
+                if injected_failure["remaining"] and rows and rows[0][1].date().isoformat() == "2026-03-09":
+                    injected_failure["remaining"] = 0
+                    raise OSError("simulated flush failure")
+                return original_flush(writer, handle, rows)
+
+            with patch.object(service, "_flush_buffer", side_effect=raise_previous_day_flush_once):
+                service.start()
+                try:
+                    service.enqueue(self.create_data().model_copy(update={"Time": "2026-03-09T23:59:59.900"}))
+                    deadline = time.time() + 2.0
+                    while service._buffer_size < 1 and time.time() < deadline:
+                        time.sleep(0.01)
+
+                    service.enqueue(self.create_data().model_copy(update={"Time": "2026-03-10T00:00:00.100"}))
+                    deadline = time.time() + 4.0
+                    while len(self._list_v1_files(log_dir)) < 2 and time.time() < deadline:
+                        time.sleep(0.01)
+                finally:
+                    service.stop()
+
+            self.assertEqual(injected_failure["remaining"], 0)
+            v1_files = self._list_v1_files(log_dir)
+            v2_files = self._list_v2_files(log_dir)
+            self.assertEqual(
+                [path.name for path in v1_files],
+                [
+                    "Factory_Integrated_Log_20260309_235959.csv",
+                    "Factory_Integrated_Log_20260310_000000.csv",
+                ],
+            )
+            self.assertEqual(
+                [path.name for path in v2_files],
+                [
+                    "Factory_Integrated_Log_v2_20260309_235959.csv",
+                    "Factory_Integrated_Log_v2_20260310_000000.csv",
+                ],
+            )
+            self.assertEqual([self._read_csv_rows(path)[1][0] for path in v1_files], ["2026-03-09", "2026-03-10"])
+            self.assertEqual([self._read_csv_rows(path)[1][V1_CSV_COLUMNS.index("Time")] for path in v1_files], [
+                "23:59:59.900",
+                "00:00:00.100",
+            ])
+            self.assertTrue(v2_files[0].with_suffix(".metadata.json").exists())
+            self.assertTrue(v2_files[1].with_suffix(".metadata.json").exists())
+
+    def test_csv_shutdown_writes_deferred_new_day_row_after_final_flush_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v1_enabled=True,
+                csv_v2_enabled=True,
+            )
+            original_flush = service._flush_buffer
+            injected_failure = {"remaining": 1}
+
+            def fail_previous_day_flush_and_stop_once(writer, handle, buffer):
+                rows = list(buffer)
+                if injected_failure["remaining"] and rows and rows[0][1].date().isoformat() == "2026-03-09":
+                    injected_failure["remaining"] = 0
+                    service.running = False
+                    return False
+                return original_flush(writer, handle, rows)
+
+            with patch.object(service, "_flush_buffer", side_effect=fail_previous_day_flush_and_stop_once):
+                service.start()
+                service.enqueue(self.create_data().model_copy(update={"Time": "2026-03-09T23:59:59.900"}))
+                deadline = time.time() + 2.0
+                while service._buffer_size < 1 and time.time() < deadline:
+                    time.sleep(0.01)
+
+                service.enqueue(self.create_data().model_copy(update={"Time": "2026-03-10T00:00:00.100"}))
+                if service.thread:
+                    service.thread.join(timeout=3.0)
+                if service.running:
+                    service.stop()
+
+            self.assertEqual(injected_failure["remaining"], 0)
+            self.assertFalse(service.thread and service.thread.is_alive())
+            v1_files = self._list_v1_files(log_dir)
+            v2_files = self._list_v2_files(log_dir)
+            self.assertEqual(
+                [path.name for path in v1_files],
+                [
+                    "Factory_Integrated_Log_20260309_235959.csv",
+                    "Factory_Integrated_Log_20260310_000000.csv",
+                ],
+            )
+            self.assertEqual(
+                [path.name for path in v2_files],
+                [
+                    "Factory_Integrated_Log_v2_20260309_235959.csv",
+                    "Factory_Integrated_Log_v2_20260310_000000.csv",
+                ],
+            )
+            self.assertEqual([self._read_csv_rows(path)[1][0] for path in v1_files], ["2026-03-09", "2026-03-10"])
+            self.assertEqual([self._read_csv_rows(path)[1][V1_CSV_COLUMNS.index("Time")] for path in v1_files], [
+                "23:59:59.900",
+                "00:00:00.100",
+            ])
+            self.assertTrue(v2_files[0].with_suffix(".metadata.json").exists())
+            self.assertTrue(v2_files[1].with_suffix(".metadata.json").exists())
+
     def test_v2_writer_creates_separate_file_and_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)

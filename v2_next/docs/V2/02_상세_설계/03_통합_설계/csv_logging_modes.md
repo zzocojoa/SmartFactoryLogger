@@ -13,7 +13,7 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 | 설정 | 환경변수 | 기본값 | 의미 |
 | --- | --- | --- | --- |
 | `[SETTINGS] autosave` | 없음 | `true` | CSV 저장 전체 on/off |
-| `[LOGGING] csv_v1_enabled` | `CSV_V1_ENABLED` | `true` | `Factory_Integrated_Log_*.csv` 저장 |
+| `[LOGGING] csv_v1_enabled` | `CSV_V1_ENABLED` | `true` | `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv` 저장 |
 | `[LOGGING] csv_v2_enabled` | `CSV_V2_ENABLED` | `false` | `Factory_Integrated_Log_v2_*.csv` 저장 |
 | `[LOGGING] csv_v2_sidecar_enabled` | `CSV_V2_SIDECAR_ENABLED` | `true` | `Factory_Integrated_Log_v2_*.metadata.json` 저장 |
 
@@ -32,6 +32,21 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 - v1 CSV: `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv`
 - v2 CSV: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv`
 - v2 sidecar: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json`
+- glob 수집 시 v1과 v2를 같은 넓은 glob 패턴으로 섞지 말고,
+  v1 파일 목록과 v2 파일 목록을 별도로 모은 뒤 timestamp suffix 기준으로 정렬/매칭한다.
+
+## Daily rollover 정책
+
+- writer는 row timestamp를 서버 로컬 시간으로 해석한 calendar date를 파일 경계로 사용한다.
+- 로컬 날짜가 바뀌면 v1 CSV, v2 CSV, v2 sidecar가 같은 boundary에서 새 파일로 전환된다.
+- 새 파일명은 해당 daily 파일에 처음 쓰이는 row timestamp를 사용한다.
+- v2 `sample_seq`는 프로세스/세션 단위로 계속 증가한다. 따라서 각 파일 안에서는 단조 증가하지만 rollover 시 1로 reset하지 않는다.
+- rollover 직전 이전 날짜 buffer flush가 실패하면 새 날짜 row는 기존 날짜 파일에 쓰지 않고 보류한다.
+  이전 날짜 flush가 복구된 뒤 같은 row를 다시 처리해 날짜별 파일 계약을 유지한다.
+- shutdown 중 보류 row가 있으면 이전 날짜 final flush를 먼저 시도한다.
+  final flush가 성공하면 보류 row를 새 날짜 파일에 기록하고, 실패가 지속되면 warning을 남긴다.
+- 이 보류 중 queue 적체가 늘 수 있으므로 운영 로그에서 `CSV v1 daily rollover delayed`, `CSV v2 daily rollover delayed`,
+  `CSV daily rollover delayed because flush raised an exception`, `CSV log queue full` warning을 함께 확인한다.
 
 v2-only 모드에서는 v1 CSV 파일이 생성되지 않는다.
 기존 Excel 작업, replay runner, downstream parser가 v1 파일명을 기대한다면 v2-only를 켜면 안 된다.

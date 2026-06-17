@@ -193,8 +193,17 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate v1/v2 CSV shadow logging outputs.")
-    parser.add_argument("--v1", type=Path, help="Factory_Integrated_Log_*.csv")
-    parser.add_argument("--v2", required=True, type=Path, help="Factory_Integrated_Log_v2_*.csv")
+    parser.add_argument(
+        "--v1",
+        type=Path,
+        help="v1 Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv file",
+    )
+    parser.add_argument(
+        "--v2",
+        required=True,
+        type=Path,
+        help="v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv file",
+    )
     parser.add_argument(
         "--metadata",
         required=True,
