@@ -850,6 +850,33 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
 
+    def test_shadow_validation_script_fails_when_required_v1_glob_has_no_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path)
+
+            result = validate_csv_v2_shadow_many(
+                [],
+                [v2_path],
+                [v2_path.with_suffix(".metadata.json")],
+                require_v1=True,
+            )
+
+        self.assertEqual(result, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

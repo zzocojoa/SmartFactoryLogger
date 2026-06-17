@@ -228,6 +228,7 @@ def validate_many(
     v1_paths: list[Path],
     v2_paths: list[Path],
     metadata_paths: list[Path],
+    require_v1: bool = False,
 ) -> int:
     failures: list[str] = []
     try:
@@ -242,11 +243,13 @@ def validate_many(
         failures.append("no v2 CSV files matched")
     if not metadata_by_suffix:
         failures.append("no v2 metadata files matched")
+    if require_v1 and not v1_by_suffix:
+        failures.append("no v1 CSV files matched")
 
     for suffix in sorted(v2_by_suffix):
         if suffix not in metadata_by_suffix:
             failures.append(f"missing metadata for v2 suffix {suffix}")
-        if v1_paths and suffix not in v1_by_suffix:
+        if require_v1 and suffix not in v1_by_suffix:
             failures.append(f"missing v1 CSV for v2 suffix {suffix}")
 
     for suffix in sorted(metadata_by_suffix):
@@ -318,6 +321,7 @@ def main() -> int:
             _expand_glob(args.v1_glob, V1_NAME_RE) if args.v1_glob else [],
             _expand_glob(args.v2_glob, V2_NAME_RE),
             _expand_glob(args.metadata_glob, METADATA_NAME_RE),
+            require_v1=args.v1_glob is not None,
         )
 
     if args.v2 is None or args.metadata is None:
