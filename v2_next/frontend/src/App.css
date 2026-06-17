@@ -4349,8 +4349,9 @@ body {
 
 /* Operator metadata */
 .operator-card {
-  gap: var(--space-2);
-  justify-content: space-between;
+  gap: clamp(6px, calc(var(--cq) * 2), 10px);
+  justify-content: flex-start;
+  align-content: flex-start;
   overflow: hidden;
 }
 
