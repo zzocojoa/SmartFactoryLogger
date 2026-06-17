@@ -115,6 +115,21 @@ csv_v2_sidecar_enabled=true
 - v2 `sample_seq` 단조 증가
 - `MainRamPosition_D0010`, `ContainerPosition_D0012` populated value 요약
 
+### 4.5. 배포 전 Electron/downstream smoke
+
+- Electron GUI에서 `csv_v2_enabled=true`, `csv_v2_sidecar_enabled=true` 상태로 작업자 `product_no`,
+  `operator_mold_no`를 저장한다.
+- 앱 재시작 후 입력값이 다시 표시되고, 백엔드 `operator_metadata.json`에도 같은 값이 남아 있어야 한다.
+- GUI 런타임에서 생성된 v2 CSV는 header 53컬럼, row 53컬럼이어야 하며 `Product_No_operator`,
+  `Mold_No_operator`, `operator_metadata_valid=true`가 같은 row에 기록되어야 한다.
+- 생성된 v2 CSV와 같은 timestamp suffix의 `.metadata.json` sidecar가 있어야 하며
+  `schema_metadata.schema_version=2.2.0`, `operator_metadata_version=1.0.0`을 확인한다.
+- repo 내부 소비자는 `scripts/validate_csv_v2_shadow.py`와 `backend\FacilityData\drivers\csv_replay.py`
+  테스트로 확인한다.
+- repo 밖 consumer, ETL, Excel 매크로는 릴리스 게이트다. 실제 서버 샘플 또는 smoke 샘플을 넣어 53컬럼,
+  새 operator metadata 컬럼, sidecar `schema_version`을 처리하는지 dry-run해야 한다.
+- `Mold_No_operator`는 작업자 입력 필수값이다. 기존 `DIE_ID`와 같은 개념으로 자동 치환하거나 병합하면 안 된다.
+
 ### 5. 성공 기준
 
 - v1 CSV 21컬럼 호환성 유지.

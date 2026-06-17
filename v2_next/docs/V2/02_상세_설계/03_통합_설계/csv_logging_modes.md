@@ -35,6 +35,10 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 - v2 `schema_version=2.2.0`부터 작업자 입력 `Product_No_operator`, `Mold_No_operator`와
   `operator_metadata_valid`, `operator_metadata_missing_fields`, `operator_metadata_updated_at`가 기록된다.
   v1 CSV 21컬럼 contract는 변경하지 않는다.
+- v2 `schema_version=2.2.0` CSV는 53컬럼 contract다. index 기반으로 v2 CSV를 읽는 consumer는 header 기반
+  매핑으로 전환하거나 배포 전 dry-run에서 실패 여부를 확인해야 한다.
+- 운영 배포 전에는 실제 서버 샘플 1세트를 repo 내부 validator와 repo 밖 ETL/Excel 매크로에 각각 dry-run한다.
+  repo 밖 consumer가 53컬럼을 처리하지 못하면 `csv_v2_enabled=false`로 유지한다.
 - Validator compatibility: new writer output uses `schema_version=2.2.0`, but
   `scripts/validate_csv_v2_shadow.py` still accepts legacy `schema_version=2.1.0`
   v2 files without operator metadata columns so rollback and historical audits remain possible.
