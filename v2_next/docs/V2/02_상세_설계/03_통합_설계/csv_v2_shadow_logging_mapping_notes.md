@@ -128,6 +128,11 @@ csv_v2_sidecar_enabled=true
   `schema_metadata.schema_version=2.2.0`, `operator_metadata_version=1.0.0`을 확인한다.
 - repo 내부 소비자는 `scripts/validate_csv_v2_shadow.py`와 `backend\FacilityData\drivers\csv_replay.py`
   테스트로 확인한다.
+- 작업 정보 스냅카드(`operatorMetadata`)는 v2 operator metadata의 필수 UI 경로다. 기존 local/server 저장
+  레이아웃에 해당 key가 없더라도 화면 렌더링 시 1개가 자동 보강되어야 하며, persisted layout은 사용자가
+  레이아웃을 다시 저장할 때 반영한다.
+- Electron smoke는 기존 저장 레이아웃 로드, local/server 레이아웃 복구, preset 적용, 편집모드 위젯 추가
+  이후에도 `operatorMetadata` 카드가 정확히 1개 유지되는지 확인한다.
 - repo 밖 consumer, ETL, Excel 매크로는 릴리스 게이트다. 실제 서버 샘플 또는 smoke 샘플을 넣어 53컬럼,
   새 operator metadata 컬럼, sidecar `schema_version`을 처리하는지 dry-run해야 한다.
 - `Mold_No_operator`는 작업자 입력 필수값이다. 기존 `DIE_ID`와 같은 개념으로 자동 치환하거나 병합하면 안 된다.

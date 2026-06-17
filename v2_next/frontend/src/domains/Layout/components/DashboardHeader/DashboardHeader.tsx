@@ -712,7 +712,11 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                       <button className="menu-item" onClick={() => handleAddWidget('molds')}>
                         금형
                       </button>
-                      <button className="menu-item" onClick={() => handleAddWidget('operatorMetadata')}>
+                      <button
+                        className="menu-item"
+                        aria-label="Add operator metadata widget"
+                        onClick={() => handleAddWidget('operatorMetadata')}
+                      >
                         작업 정보
                       </button>
                       <button className="menu-item" onClick={() => handleAddWidget('env')}>

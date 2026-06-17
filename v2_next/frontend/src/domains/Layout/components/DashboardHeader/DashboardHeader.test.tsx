@@ -209,4 +209,18 @@ describe('DashboardHeader mobile header', () => {
     expect(setMenuOpen).toHaveBeenCalledWith(false);
     expect(menuButton).toHaveFocus();
   });
+
+  it('routes the operator metadata add action from the edit menu', () => {
+    const handleAddWidget = vi.fn();
+    render(<DashboardHeader {...buildProps({
+      menuOpen: true,
+      layoutEditing: true,
+      widgetAddOpen: true,
+      handleAddWidget,
+    })} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add operator metadata widget' }));
+
+    expect(handleAddWidget).toHaveBeenCalledWith('operatorMetadata');
+  });
 });
