@@ -10,8 +10,9 @@
 ## 운영자가 확인할 것
 
 - 하루를 넘긴 수집 폴더에는 날짜별 CSV 파일이 여러 개 생기는 것이 정상이다.
-- downstream 수집, Excel 작업, replay parser는 `Factory_Integrated_Log_*.csv` glob 결과를 모두 읽어야 한다.
-- v2를 사용하는 경우 `Factory_Integrated_Log_v2_*.csv`와 같은 timestamp suffix의 `.metadata.json` 파일이 같이 있어야 한다.
+- downstream 수집, Excel 작업, replay parser는 v1 daily CSV 전체와 v2 daily CSV 전체를 분리해서 모두 읽어야 한다.
+- v1 대상은 `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv` 형식이고, v2 대상은 `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv` 형식이다.
+- v2를 사용하는 경우 각 `Factory_Integrated_Log_v2_*.csv`와 같은 timestamp suffix의 `.metadata.json` 파일이 같이 있어야 한다.
 - 자정 직전 write/flush 실패가 있으면 새 날짜 row는 기존 날짜 파일에 섞이지 않고 보류된다.
   복구 후 새 날짜 파일에 기록되므로, warning 로그와 queue 적체 여부를 같이 확인한다.
 - 종료 중 보류 row가 있으면 앱은 이전 날짜 final flush를 먼저 시도한다.

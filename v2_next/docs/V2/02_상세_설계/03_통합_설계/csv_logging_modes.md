@@ -32,6 +32,8 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 - v1 CSV: `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv`
 - v2 CSV: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv`
 - v2 sidecar: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json`
+- glob 수집 시 v1과 v2를 같은 `Factory_Integrated_Log_*.csv` 패턴으로 섞지 말고,
+  v1 파일 목록과 v2 파일 목록을 별도로 모은 뒤 timestamp suffix 기준으로 정렬/매칭한다.
 
 ## Daily rollover 정책
 

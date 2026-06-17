@@ -5,8 +5,9 @@
 ## 목적
 
 이 문서는 v1 CSV 호환성을 유지하면서 v2 CSV와 sidecar metadata에 추가된 검증용 필드의 의미를 정리한다.
-운영 판단 기준은 서버 PC에서 수집한 `Factory_Integrated_Log_*.csv`,
-`Factory_Integrated_Log_v2_*.csv`, `Factory_Integrated_Log_v2_*.metadata.json` 기준이다.
+운영 판단 기준은 서버 PC에서 수집한 v1 `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv`,
+v2 `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv`, v2 sidecar
+`Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json` 기준이다.
 
 ## 필드 의미 contract
 
@@ -139,6 +140,7 @@ csv_v2_enabled=false
 
 - 자정이 포함된 24시간 수집에서는 날짜별로 v1/v2 CSV 파일 수가 증가한다.
   예: 자정 전후를 모두 포함하면 v1 2개, v2 2개, v2 sidecar 2개가 생성된다.
+- downstream 소비자는 v1 파일 목록과 v2 파일 목록을 별도 패턴으로 모은 뒤 timestamp suffix 기준으로 정렬/매칭해야 한다.
 - row count는 같은 날짜 boundary의 v1 파일과 v2 파일을 쌍으로 묶어 비교한다.
   전체 기간 합산 row count도 v1 합계와 v2 합계가 동일해야 한다.
 - 각 v2 CSV는 같은 timestamp suffix를 가진 `.metadata.json` sidecar가 있어야 한다.
