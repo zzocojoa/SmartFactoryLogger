@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import glob
 import json
+import re
 from pathlib import Path
 from statistics import mean
 
@@ -52,6 +54,10 @@ REQUIRED_METADATA_FIELDS = {
     "ButtLength_HMI_B1880": "hmi_confirmed_separate_field",
 }
 
+V1_NAME_RE = re.compile(r"^Factory_Integrated_Log_(\d{8}_\d{6})\.csv$")
+V2_NAME_RE = re.compile(r"^Factory_Integrated_Log_v2_(\d{8}_\d{6})\.csv$")
+METADATA_NAME_RE = re.compile(r"^Factory_Integrated_Log_v2_(\d{8}_\d{6})\.metadata\.json$")
+
 
 def read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
@@ -59,6 +65,33 @@ def read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
     if not rows:
         raise ValueError(f"CSV is empty: {path}")
     return rows[0], rows[1:]
+
+
+def _timestamp_suffix(path: Path, pattern: re.Pattern[str]) -> str | None:
+    match = pattern.match(path.name)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _expand_glob(pattern: str, name_pattern: re.Pattern[str]) -> list[Path]:
+    paths = [Path(path) for path in glob.glob(pattern)]
+    return sorted(
+        [path for path in paths if path.is_file() and _timestamp_suffix(path, name_pattern)],
+        key=lambda path: (_timestamp_suffix(path, name_pattern) or "", path.name),
+    )
+
+
+def _index_by_suffix(paths: list[Path], name_pattern: re.Pattern[str]) -> dict[str, Path]:
+    indexed: dict[str, Path] = {}
+    for path in paths:
+        suffix = _timestamp_suffix(path, name_pattern)
+        if suffix is None:
+            continue
+        if suffix in indexed:
+            raise ValueError(f"duplicate timestamp suffix {suffix}: {indexed[suffix]} and {path}")
+        indexed[suffix] = path
+    return indexed
 
 
 def find_metadata_item(metadata: dict, field_name: str) -> dict | None:
@@ -191,6 +224,63 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
     return 0
 
 
+def validate_many(
+    v1_paths: list[Path],
+    v2_paths: list[Path],
+    metadata_paths: list[Path],
+) -> int:
+    failures: list[str] = []
+    try:
+        v1_by_suffix = _index_by_suffix(v1_paths, V1_NAME_RE) if v1_paths else {}
+        v2_by_suffix = _index_by_suffix(v2_paths, V2_NAME_RE)
+        metadata_by_suffix = _index_by_suffix(metadata_paths, METADATA_NAME_RE)
+    except ValueError as exc:
+        print(f"FAIL: {exc}")
+        return 1
+
+    if not v2_by_suffix:
+        failures.append("no v2 CSV files matched")
+    if not metadata_by_suffix:
+        failures.append("no v2 metadata files matched")
+
+    for suffix in sorted(v2_by_suffix):
+        if suffix not in metadata_by_suffix:
+            failures.append(f"missing metadata for v2 suffix {suffix}")
+        if v1_paths and suffix not in v1_by_suffix:
+            failures.append(f"missing v1 CSV for v2 suffix {suffix}")
+
+    for suffix in sorted(metadata_by_suffix):
+        if suffix not in v2_by_suffix:
+            failures.append(f"metadata has no matching v2 CSV for suffix {suffix}")
+
+    if failures:
+        print("CSV v2 shadow multi-file validation")
+        print(f"v1_files={len(v1_paths)}")
+        print(f"v2_files={len(v2_paths)}")
+        print(f"metadata_files={len(metadata_paths)}")
+        print("\nFAILURES")
+        for failure in failures:
+            print(f"- {failure}")
+        return 1
+
+    print("CSV v2 shadow multi-file validation")
+    print(f"v1_files={len(v1_paths)}")
+    print(f"v2_files={len(v2_paths)}")
+    print(f"metadata_files={len(metadata_paths)}")
+
+    status = 0
+    for suffix in sorted(v2_by_suffix):
+        print(f"\nPAIR {suffix}")
+        pair_status = validate(
+            v1_by_suffix.get(suffix) if v1_paths else None,
+            v2_by_suffix[suffix],
+            metadata_by_suffix[suffix],
+        )
+        if pair_status != 0:
+            status = pair_status
+    return status
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate v1/v2 CSV shadow logging outputs.")
     parser.add_argument(
@@ -200,17 +290,38 @@ def main() -> int:
     )
     parser.add_argument(
         "--v2",
-        required=True,
         type=Path,
         help="v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv file",
     )
     parser.add_argument(
         "--metadata",
-        required=True,
         type=Path,
         help="Factory_Integrated_Log_v2_*.metadata.json",
     )
+    parser.add_argument(
+        "--v1-glob",
+        help="Glob for v1 Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv files",
+    )
+    parser.add_argument(
+        "--v2-glob",
+        help="Glob for v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv files",
+    )
+    parser.add_argument(
+        "--metadata-glob",
+        help="Glob for v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json files",
+    )
     args = parser.parse_args()
+    if args.v2_glob or args.metadata_glob or args.v1_glob:
+        if not args.v2_glob or not args.metadata_glob:
+            parser.error("--v2-glob and --metadata-glob are required for multi-file validation")
+        return validate_many(
+            _expand_glob(args.v1_glob, V1_NAME_RE) if args.v1_glob else [],
+            _expand_glob(args.v2_glob, V2_NAME_RE),
+            _expand_glob(args.metadata_glob, METADATA_NAME_RE),
+        )
+
+    if args.v2 is None or args.metadata is None:
+        parser.error("--v2 and --metadata are required for single-file validation")
     return validate(args.v1, args.v2, args.metadata)
 
 

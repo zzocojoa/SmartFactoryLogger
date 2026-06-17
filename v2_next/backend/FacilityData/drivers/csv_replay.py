@@ -1,20 +1,68 @@
 import csv
-import time
 import os
+import glob
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
 from backend.FacilityData.schemas import FactoryData
 from .base import BasePLCDriver
 
+
+CSV_TS_RE = re.compile(r"Factory_Integrated_Log(?:_v2)?_(\d{8}_\d{6})\.csv$")
+
+
+def _csv_sort_key(path: Path) -> tuple[str, str]:
+    match = CSV_TS_RE.search(path.name)
+    return (match.group(1) if match else path.stem, path.name)
+
+
+def _is_v2_csv(path: Path) -> bool:
+    return path.name.startswith("Factory_Integrated_Log_v2_")
+
+
 class CsvReplayDriver(BasePLCDriver):
     def __init__(self, csv_path: str):
         super().__init__()
         self.csv_path = Path(csv_path)
+        self.csv_paths = self._resolve_csv_paths(csv_path)
         self.rows: List[Dict[str, str]] = []
         self.current_index = 0
         self.last_step_time = 0.0
         self._load_csv()
+
+    def _resolve_csv_paths(self, csv_path: str) -> List[Path]:
+        tokens = [part.strip() for part in csv_path.split(os.pathsep) if part.strip()]
+        if not tokens:
+            tokens = [csv_path]
+
+        paths: List[Path] = []
+        for token in tokens:
+            if any(char in token for char in "*?[]"):
+                paths.extend(Path(match) for match in glob.glob(token))
+                continue
+
+            path = Path(token)
+            if path.is_dir():
+                paths.extend(
+                    child
+                    for child in path.glob("Factory_Integrated_Log_*.csv")
+                    if child.is_file() and not _is_v2_csv(child)
+                )
+            else:
+                paths.append(path)
+
+        unique_paths = sorted({path.resolve(): path for path in paths}.values(), key=_csv_sort_key)
+        if not unique_paths:
+            return []
+
+        has_v1 = any(not _is_v2_csv(path) for path in unique_paths)
+        has_v2 = any(_is_v2_csv(path) for path in unique_paths)
+        if has_v1 and has_v2:
+            print("[CsvDriver] Error: v1 and v2 CSV files must not be mixed in one replay input.")
+            return []
+
+        return unique_paths
 
     def _safe_float(self, value: Optional[str]) -> float:
         if not value:
@@ -25,15 +73,20 @@ class CsvReplayDriver(BasePLCDriver):
             return 0.0
         
     def _load_csv(self):
-        if not self.csv_path.exists():
-            print(f"[CsvDriver] Error: File not found {self.csv_path}")
+        if not self.csv_paths:
+            print(f"[CsvDriver] Error: No CSV files matched {self.csv_path}")
             return
-            
-        print(f"[CsvDriver] Loading {self.csv_path}...")
+
+        missing_paths = [path for path in self.csv_paths if not path.exists()]
+        if missing_paths:
+            print(f"[CsvDriver] Error: File not found {missing_paths[0]}")
+            return
+
+        print(f"[CsvDriver] Loading {len(self.csv_paths)} CSV file(s)...")
         
         # Helper to read with specific encoding
-        def read_with_encoding(enc, errors='strict'):
-            with self.csv_path.open("r", encoding=enc, errors=errors) as f:
+        def read_with_encoding(path: Path, enc, errors='strict'):
+            with path.open("r", encoding=enc, errors=errors) as f:
                 reader = csv.DictReader(f)
                 return [{k.strip(): v for k, v in row.items() if k} for row in reader]
 
@@ -41,11 +94,14 @@ class CsvReplayDriver(BasePLCDriver):
             # File has UTF-8 BOM, so we must use utf-8-sig. 
             # We use errors='replace' to avoid crashing on random bad bytes in data rows.
             print(f"[CsvDriver] Attempting UTF-8-SIG with replacement...")
-            self.rows = read_with_encoding("utf-8-sig", errors='replace')
+            self.rows = []
+            for path in self.csv_paths:
+                print(f"[CsvDriver] Loading {path}...")
+                self.rows.extend(read_with_encoding(path, "utf-8-sig", errors='replace'))
             
             # If that yielded no rows or keys look wrong (e.g. garbled), we could try CP949, 
             # but BOM confirms UTF-8.
-            print(f"[CsvDriver] Loaded {len(self.rows)} rows.")
+            print(f"[CsvDriver] Loaded {len(self.rows)} rows from {len(self.csv_paths)} file(s).")
             if self.rows:
                 keys = list(self.rows[0].keys())
                 print(f"[CsvDriver] Keys: {keys}")
@@ -74,9 +130,6 @@ class CsvReplayDriver(BasePLCDriver):
             
             self.current_index = start_index
             print(f"[CsvDriver] Ready to replay from index {self.current_index}.")
-        except Exception as e:
-            print(f"[CsvDriver] Failed to load CSV: {e}")
-            self.rows = []
         except Exception as e:
             print(f"[CsvDriver] Failed to load CSV: {e}")
             self.rows = []

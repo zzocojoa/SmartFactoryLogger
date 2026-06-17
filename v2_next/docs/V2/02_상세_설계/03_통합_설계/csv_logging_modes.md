@@ -34,6 +34,7 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 - v2 sidecar: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json`
 - glob 수집 시 v1과 v2를 같은 넓은 glob 패턴으로 섞지 말고,
   v1 파일 목록과 v2 파일 목록을 별도로 모은 뒤 timestamp suffix 기준으로 정렬/매칭한다.
+- replay/validator도 같은 원칙을 따른다. v1/v2를 한 입력 목록에 섞지 않고, 날짜별 파일 set은 timestamp suffix로 정렬/매칭한다.
 
 ## Daily rollover 정책
 
