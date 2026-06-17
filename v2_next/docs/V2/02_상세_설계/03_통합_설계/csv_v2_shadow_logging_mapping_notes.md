@@ -134,3 +134,16 @@ csv_v2_enabled=false
 ```
 
 이 설정으로 추가 위치 read와 v2 writer를 모두 중단한다. v1 CSV는 계속 유지한다.
+
+### 7. Daily rollover 운영 추가 기준
+
+- 자정이 포함된 24시간 수집에서는 날짜별로 v1/v2 CSV 파일 수가 증가한다.
+  예: 자정 전후를 모두 포함하면 v1 2개, v2 2개, v2 sidecar 2개가 생성된다.
+- row count는 같은 날짜 boundary의 v1 파일과 v2 파일을 쌍으로 묶어 비교한다.
+  전체 기간 합산 row count도 v1 합계와 v2 합계가 동일해야 한다.
+- 각 v2 CSV는 같은 timestamp suffix를 가진 `.metadata.json` sidecar가 있어야 한다.
+- rollover 직전 파일 write/flush 실패가 있으면 새 날짜 row가 기존 날짜 파일에 섞이면 안 된다.
+  이전 날짜 flush가 복구된 뒤 새 날짜 파일에 기록되어야 하며, 관련 warning 로그를 함께 보존한다.
+- shutdown 중 보류 row가 있으면 이전 날짜 final flush 성공 후 새 날짜 파일에 기록되어야 한다.
+  실패가 지속되어 기록하지 못한 경우 warning 로그를 보존하고 row count 불일치 원인으로 기록한다.
+- `sample_seq`는 프로세스/세션 단위 값이므로 rollover 시 1로 reset하지 않는다.
