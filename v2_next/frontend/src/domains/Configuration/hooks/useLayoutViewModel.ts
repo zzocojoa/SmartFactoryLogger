@@ -38,6 +38,7 @@ import { safeGetItem, safeRemoveItem } from '../../../shared/utils/safeStorage';
 
 const LAYOUT_COLS_KEY = 'grafana_scene_layout_cols';
 const CURRENT_LAYOUT_VERSION = 'v2';
+const SINGLE_INSTANCE_WIDGET_TYPES = new Set<string>(['operatorMetadata']);
 
 const buildDefaultLayoutMap = (): LayoutMap => {
   return DEFAULT_DASHBOARD_ITEMS.reduce<LayoutMap>((acc, item) => {
@@ -72,6 +73,10 @@ const resolveMutationLayout = (snapshot: LayoutSnapshot, baseLayout?: LayoutMap)
   }
 
   return snapshot.layout;
+};
+
+const hasWidgetInstance = (layout: LayoutMap, type: string): boolean => {
+  return Object.entries(layout).some(([key, entry]) => key === type || entry.type === type);
 };
 
 export const useLayoutViewModel = (): UseLayoutViewModel => {
@@ -355,6 +360,13 @@ export const useLayoutViewModel = (): UseLayoutViewModel => {
     setLayoutSnapshot((prev) => {
       const currentSnapshot = materializeLayoutSnapshot(prev);
       const currentLayout = resolveMutationLayout(currentSnapshot, baseLayout);
+
+      if (SINGLE_INSTANCE_WIDGET_TYPES.has(type) && hasWidgetInstance(currentLayout, type)) {
+        return {
+          ...currentSnapshot,
+          layout: { ...currentLayout },
+        };
+      }
 
       return {
         ...currentSnapshot,

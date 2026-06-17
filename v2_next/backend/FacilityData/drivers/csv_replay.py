@@ -166,6 +166,13 @@ class CsvReplayDriver(BasePLCDriver):
                 # IDs
                 Die_ID=row.get("DIE_ID", ""),
                 Billet_Cycle_ID=row.get("Billet_CycleID", ""),
+                Product_No_operator=row.get("Product_No_operator", ""),
+                Mold_No_operator=row.get("Mold_No_operator", ""),
+                operator_metadata_valid=(row.get("operator_metadata_valid", "").strip().lower() == "true"),
+                operator_metadata_missing_fields=[
+                    item for item in row.get("operator_metadata_missing_fields", "").split(",") if item
+                ],
+                operator_metadata_updated_at=row.get("operator_metadata_updated_at") or None,
                 
                 # Temperatures
                 Spot=self._safe_float(row.get("Temperature")), 

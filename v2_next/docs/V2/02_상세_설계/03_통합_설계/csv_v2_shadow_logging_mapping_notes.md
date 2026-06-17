@@ -75,8 +75,14 @@ csv_v2_sidecar_enabled=true
 
 - v1과 v2 파일이 동시에 생성된다.
 - v1 header는 21컬럼이고 기존 소비자 contract와 동일하다.
-- v2 header에는 `schema_version=2.1.0`, `MainRamPosition_D0010`, `ContainerPosition_D0012`가 있다.
+- v2 header에는 `schema_version=2.2.0`, `MainRamPosition_D0010`, `ContainerPosition_D0012`,
+  `Product_No_operator`, `Mold_No_operator`, `operator_metadata_valid`,
+  `operator_metadata_missing_fields`, `operator_metadata_updated_at`가 있다.
 - sidecar `sensor_metadata`에 `EndPos`, `MainRamPosition_D0010`, `ContainerPosition_D0012`, `ButtLength_HMI_B1880`의 `mapping_status`가 기록된다.
+- sidecar `operator_metadata`에 `product_no`, `operator_mold_no` 필수 필드와 `operator_metadata_version=1.0.0`이 기록된다.
+- Validator compatibility: `scripts/validate_csv_v2_shadow.py` accepts legacy
+  `schema_version=2.1.0` files without operator metadata, while enforcing
+  operator metadata columns and sidecar fields for `schema_version=2.2.0`.
 - sidecar `schema_metadata.position_read_feature_flag`는 `EXTRUDER.position_read_enabled or POSITION_READ_ENABLED`로 기록된다.
 - 앱 로그에 `CSV log queue full`, `CSV v2 buffer dropped`, PLC timeout 증가가 없는지 확인한다.
 
@@ -108,6 +114,37 @@ csv_v2_sidecar_enabled=true
 - v1/v2 row count parity
 - v2 `sample_seq` 단조 증가
 - `MainRamPosition_D0010`, `ContainerPosition_D0012` populated value 요약
+
+### 4.5. 배포 전 Electron/downstream smoke
+
+- Electron GUI에서 `csv_v2_enabled=true`, `csv_v2_sidecar_enabled=true` 상태로 작업자 `product_no`,
+  `operator_mold_no`를 저장한다.
+- `product_no`와 `operator_mold_no`는 숫자만 허용한다. smoke 입력 예시는 제품번호 `12345`, 금형 번호 `123`이다.
+  `DW-12345`, `ABC`, `123-1`, 공백, CR/LF 입력은 UI/API에서 거부되어야 한다.
+- 앱 재시작 후 입력값이 다시 표시되고, 백엔드 `operator_metadata.json`에도 같은 값이 남아 있어야 한다.
+- `서버 값 새로고침`은 저장된 서버 값을 다시 표시해야 하며, 저장값을 삭제하거나 변경하면 안 된다.
+- `서버 저장값 리셋`은 백엔드 `operator_metadata.json`을 빈 값으로 저장해야 한다. 리셋 직후
+  `GET /api/facility/operator-metadata`는 `valid=false`,
+  `missing_fields=["product_no","operator_mold_no"]`, 빈 `product_no`, 빈 `operator_mold_no`,
+  갱신된 `updated_at`을 반환해야 한다.
+- GUI 런타임에서 생성된 v2 CSV는 header 53컬럼, row 53컬럼이어야 하며 `Product_No_operator`,
+  `Mold_No_operator`, `operator_metadata_valid=true`가 같은 row에 기록되어야 한다.
+- 리셋 이후 생성된 새 v2 CSV row는 빈 `Product_No_operator`, 빈 `Mold_No_operator`,
+  `operator_metadata_valid=false`, `operator_metadata_missing_fields=product_no,operator_mold_no`,
+  리셋 시점의 `operator_metadata_updated_at`을 기록해야 한다. 리셋 전 이미 queue에 들어간 row는 소급
+  변경하지 않는다.
+- 생성된 v2 CSV와 같은 timestamp suffix의 `.metadata.json` sidecar가 있어야 하며
+  `schema_metadata.schema_version=2.2.0`, `operator_metadata_version=1.0.0`을 확인한다.
+- repo 내부 소비자는 `scripts/validate_csv_v2_shadow.py`와 `backend\FacilityData\drivers\csv_replay.py`
+  테스트로 확인한다.
+- 작업 정보 스냅카드(`operatorMetadata`)는 v2 operator metadata의 필수 UI 경로다. 기존 local/server 저장
+  레이아웃에 해당 key가 없더라도 화면 렌더링 시 1개가 자동 보강되어야 하며, persisted layout은 사용자가
+  레이아웃을 다시 저장할 때 반영한다.
+- Electron smoke는 기존 저장 레이아웃 로드, local/server 레이아웃 복구, preset 적용, 편집모드 위젯 추가
+  이후에도 `operatorMetadata` 카드가 정확히 1개 유지되는지 확인한다.
+- repo 밖 consumer, ETL, Excel 매크로는 릴리스 게이트다. 실제 서버 샘플 또는 smoke 샘플을 넣어 53컬럼,
+  새 operator metadata 컬럼, sidecar `schema_version`을 처리하는지 dry-run해야 한다.
+- `Mold_No_operator`는 작업자 입력 필수값이다. 기존 `DIE_ID`와 같은 개념으로 자동 치환하거나 병합하면 안 된다.
 
 ### 5. 성공 기준
 

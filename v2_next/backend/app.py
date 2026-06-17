@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 import base64
 import json
 import logging
+import ipaddress
 import math
 import re
 from logging.handlers import RotatingFileHandler
@@ -69,11 +70,17 @@ import threading
 import traceback
 import time
 import uvicorn
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 from typing import Any, NamedTuple, TypedDict
 
 # Import Service Layer using absolute imports
-from backend.FacilityData.schemas import FactoryData, FactoryDataHistoryResponse
+from backend.FacilityData.operator_metadata import operator_metadata_store
+from backend.FacilityData.schemas import (
+    FactoryData,
+    FactoryDataHistoryResponse,
+    OperatorMetadata,
+    OperatorMetadataUpdate,
+)
 from backend.FacilityData.service import PLCService, plc_service
 from backend.FacilityData.repository import logger_service
 from backend.Observability.metrics_logger import comm_metrics_logger_service
@@ -561,7 +568,7 @@ def _test_http(url: str | None, timeout: float = 1.5) -> dict:
         return {"ok": False, "latency_ms": None, "message": "URL missing"}
     start = time.perf_counter()
     try:
-        request = Request(url, method="HEAD")
+        request = UrlRequest(url, method="HEAD")
         with urlopen(request, timeout=timeout) as resp:
             status = getattr(resp, "status", 200)
         latency_ms = int((time.perf_counter() - start) * 1000)
@@ -1608,6 +1615,109 @@ async def get_data_history(
     limit: Annotated[int, Query(ge=1, le=PLCService.HISTORY_MAX_SAMPLES)] = 36000,
 ):
     return plc_service.get_data_history(since_ms, limit)
+
+
+def _netloc_from_header(value: str | None) -> str:
+    if not value:
+        return ""
+    return value.strip().lower()
+
+
+def _hostname_from_netloc(value: str | None) -> str:
+    if not value:
+        return ""
+    parsed = urlsplit(f"//{value.strip()}")
+    return (parsed.hostname or "").lower()
+
+
+def _is_loopback_hostname(hostname: str) -> bool:
+    if hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_trusted_request_source(source: str, host_header: str | None) -> bool:
+    parsed = urlsplit(source)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+
+    source_netloc = _netloc_from_header(parsed.netloc)
+    request_netloc = _netloc_from_header(host_header)
+    if source_netloc and source_netloc == request_netloc:
+        return True
+
+    source_host = (parsed.hostname or "").lower()
+    request_host = _hostname_from_netloc(host_header)
+    return _is_loopback_hostname(source_host) and _is_loopback_hostname(request_host)
+
+
+def _require_operator_metadata_write_access(request: Request) -> None:
+    origin = request.headers.get("origin")
+    host_header = request.headers.get("host")
+    if origin:
+        if origin.strip().lower() == "null":
+            client_host = request.client.host if request.client else ""
+            if _is_loopback_hostname(client_host):
+                return
+        elif _is_trusted_request_source(origin, host_header):
+            return
+        raise HTTPException(status_code=403, detail="Operator metadata updates require a trusted origin")
+
+    referer = request.headers.get("referer")
+    if referer:
+        if _is_trusted_request_source(referer, host_header):
+            return
+        raise HTTPException(status_code=403, detail="Operator metadata updates require a trusted origin")
+
+    client_host = request.client.host if request.client else ""
+    if _is_loopback_hostname(client_host):
+        return
+    raise HTTPException(status_code=403, detail="Operator metadata updates require a local request")
+
+
+@app.get("/api/facility/operator-metadata", response_model=OperatorMetadata)
+async def get_operator_metadata():
+    return operator_metadata_store.get()
+
+
+@app.put("/api/facility/operator-metadata", response_model=OperatorMetadata)
+def update_operator_metadata(payload: OperatorMetadataUpdate, request: Request):
+    _require_operator_metadata_write_access(request)
+    try:
+        metadata = operator_metadata_store.update(payload)
+        _logger.info(
+            "Operator metadata updated",
+            extra={
+                "operator_metadata_valid": metadata.valid,
+                "operator_metadata_missing_fields": ",".join(metadata.missing_fields),
+            },
+        )
+        return metadata
+    except Exception as exc:
+        _logger.error("Operator metadata save failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Operator metadata save failed") from exc
+
+
+@app.delete("/api/facility/operator-metadata", response_model=OperatorMetadata)
+def reset_operator_metadata(request: Request):
+    _require_operator_metadata_write_access(request)
+    try:
+        metadata = operator_metadata_store.reset()
+        _logger.info(
+            "Operator metadata reset",
+            extra={
+                "operator_metadata_valid": metadata.valid,
+                "operator_metadata_missing_fields": ",".join(metadata.missing_fields),
+            },
+        )
+        return metadata
+    except Exception as exc:
+        _logger.error("Operator metadata reset failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Operator metadata reset failed") from exc
+
 
 @app.get("/health")
 async def health():

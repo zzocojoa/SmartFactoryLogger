@@ -6,9 +6,12 @@ import time
 import unittest
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
+from backend import app as backend_app
 from backend.FacilityData.drivers.real_plc import MelsecResponseError, RealPLCDriver, _parse_melsec_values
 from backend.FacilityData.repository import CSVLoggerService, V1_CSV_COLUMNS, V2_CSV_COLUMNS
-from backend.FacilityData.schemas import FactoryData
+from backend.FacilityData.schemas import FactoryData, OperatorMetadata, OperatorMetadataUpdate
 from scripts.validate_csv_v2_shadow import validate as validate_csv_v2_shadow
 from scripts.validate_csv_v2_shadow import validate_many as validate_csv_v2_shadow_many
 
@@ -124,6 +127,246 @@ class RealPLCPositionReadFlagTests(unittest.TestCase):
         self.assertEqual(data["ContainerPosition_D0012"], 11.6)
 
 
+class OperatorMetadataApiTests(unittest.TestCase):
+    TRUSTED_WRITE_HEADERS = {"origin": "http://localhost:3000", "host": "localhost:8000"}
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_path = backend_app.operator_metadata_store._path
+        self.original_metadata = backend_app.operator_metadata_store.get()
+        with backend_app.operator_metadata_store._lock:
+            backend_app.operator_metadata_store._path = Path(self.temp_dir.name) / "operator_metadata.json"
+            backend_app.operator_metadata_store._metadata = OperatorMetadata()
+
+    def tearDown(self) -> None:
+        with backend_app.operator_metadata_store._lock:
+            backend_app.operator_metadata_store._path = self.original_path
+            backend_app.operator_metadata_store._metadata = self.original_metadata
+        self.temp_dir.cleanup()
+
+    def test_get_returns_default_invalid_state(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.get("/api/facility/operator-metadata")
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["valid"])
+        self.assertEqual(payload["missing_fields"], ["product_no", "operator_mold_no"])
+
+    def test_put_persists_valid_operator_metadata(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "12345", "operator_mold_no": "123"},
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["product_no"], "12345")
+        self.assertEqual(payload["operator_mold_no"], "123")
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["missing_fields"], [])
+        self.assertTrue(backend_app.operator_metadata_store._path.exists())
+
+    def test_put_rejects_untrusted_origin(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "12345", "operator_mold_no": "123"},
+                headers={"origin": "https://example.invalid", "host": "localhost:8000"},
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(backend_app.operator_metadata_store.get().product_no, "")
+
+    def test_put_rejects_csv_formula_prefix(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "12345", "operator_mold_no": "=cmd"},
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(backend_app.operator_metadata_store.get().operator_mold_no, "")
+
+    def test_put_rejects_non_numeric_operator_metadata(self) -> None:
+        invalid_payloads = [
+            {"product_no": "DW-12345", "operator_mold_no": "123"},
+            {"product_no": "ABC", "operator_mold_no": "123"},
+            {"product_no": "123-1", "operator_mold_no": "123"},
+            {"product_no": "123\n", "operator_mold_no": "123"},
+            {"product_no": "12345", "operator_mold_no": "ABC"},
+            {"product_no": "12345", "operator_mold_no": "123-1"},
+            {"product_no": "12345", "operator_mold_no": "123\r\n"},
+        ]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                client = TestClient(backend_app.app, raise_server_exceptions=False)
+                try:
+                    response = client.put("/api/facility/operator-metadata", json=payload)
+                finally:
+                    client.close()
+
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(backend_app.operator_metadata_store.get().product_no, "")
+                self.assertEqual(backend_app.operator_metadata_store.get().operator_mold_no, "")
+
+    def test_put_rejects_missing_required_fields(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "12345", "operator_mold_no": ""},
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(backend_app.operator_metadata_store.get().valid)
+
+    def test_delete_resets_operator_metadata_to_persisted_invalid_state(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.delete(
+                "/api/facility/operator-metadata",
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+            get_response = client.get("/api/facility/operator-metadata")
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["product_no"], "")
+        self.assertEqual(payload["operator_mold_no"], "")
+        self.assertFalse(payload["valid"])
+        self.assertEqual(payload["missing_fields"], ["product_no", "operator_mold_no"])
+        self.assertIsNotNone(payload["updated_at"])
+        self.assertEqual(get_response.json(), payload)
+
+        persisted = json.loads(backend_app.operator_metadata_store._path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["operator_metadata_version"], "1.0.0")
+        self.assertEqual(persisted["metadata"]["product_no"], "")
+        self.assertEqual(persisted["metadata"]["operator_mold_no"], "")
+        self.assertFalse(persisted["metadata"]["valid"])
+        self.assertEqual(persisted["metadata"]["missing_fields"], ["product_no", "operator_mold_no"])
+
+        composed = backend_app.plc_service._compose_data(
+            FactoryData(
+                Time="2026-03-09T07:20:25.123",
+                Status="Running",
+                Speed=1.0,
+                Press=2.0,
+                Count=3,
+                EndPos=4.0,
+                Billet_Length=5.0,
+                Spot=6.0,
+                Temp_F=7.0,
+                Temp_B=8.0,
+                Billet_Temp=9.0,
+                Mold1=10.0,
+                Mold2=11.0,
+                Mold3=12.0,
+                Mold4=13.0,
+                Mold5=14.0,
+                Mold6=15.0,
+                At_Temp=16.0,
+                At_Pre=17.0,
+            )
+        )
+        self.assertEqual(composed.Product_No_operator, "")
+        self.assertEqual(composed.Mold_No_operator, "")
+        self.assertFalse(composed.operator_metadata_valid)
+        self.assertEqual(composed.operator_metadata_missing_fields, ["product_no", "operator_mold_no"])
+        self.assertEqual(composed.operator_metadata_updated_at, payload["updated_at"])
+
+    def test_delete_rejects_untrusted_origin(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.delete(
+                "/api/facility/operator-metadata",
+                headers={"origin": "https://example.invalid", "host": "localhost:8000"},
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(backend_app.operator_metadata_store.get().product_no, "12345")
+        self.assertEqual(backend_app.operator_metadata_store.get().operator_mold_no, "123")
+
+    def test_store_keeps_existing_memory_state_when_persist_fails(self) -> None:
+        existing_metadata = OperatorMetadata(
+            product_no="11111",
+            operator_mold_no="111",
+            updated_at="2026-03-09T07:20:20Z",
+        )
+        with backend_app.operator_metadata_store._lock:
+            backend_app.operator_metadata_store._metadata = existing_metadata
+
+        with patch.object(Path, "write_text", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                backend_app.operator_metadata_store.update(
+                    OperatorMetadataUpdate(product_no="22222", operator_mold_no="222")
+                )
+
+        current_metadata = backend_app.operator_metadata_store.get()
+        self.assertEqual(current_metadata.product_no, "11111")
+        self.assertEqual(current_metadata.operator_mold_no, "111")
+
+    def test_compose_data_attaches_current_operator_metadata(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        raw_data = FactoryData(
+            Time="2026-03-09T07:20:25.123",
+            Status="Running",
+            Speed=1.0,
+            Press=2.0,
+            Count=3,
+            EndPos=4.0,
+            Billet_Length=5.0,
+            Spot=6.0,
+            Temp_F=7.0,
+            Temp_B=8.0,
+            Billet_Temp=9.0,
+            Mold1=10.0,
+            Mold2=11.0,
+            Mold3=12.0,
+            Mold4=13.0,
+            Mold5=14.0,
+            Mold6=15.0,
+            At_Temp=16.0,
+            At_Pre=17.0,
+        )
+
+        composed = backend_app.plc_service._compose_data(raw_data)
+
+        self.assertEqual(composed.Product_No_operator, "12345")
+        self.assertEqual(composed.Mold_No_operator, "123")
+        self.assertTrue(composed.operator_metadata_valid)
+        self.assertEqual(composed.operator_metadata_missing_fields, [])
+        self.assertIsNotNone(composed.operator_metadata_updated_at)
+
+
 class CSVLoggerV2ContractTests(unittest.TestCase):
     def create_data(self, press_value: float | None = 30.0) -> FactoryData:
         return FactoryData(
@@ -150,6 +393,11 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             At_Temp=14.0,
             Die_ID="D1",
             Billet_Cycle_ID="C1",
+            Product_No_operator="12345",
+            Mold_No_operator="123",
+            operator_metadata_valid=True,
+            operator_metadata_missing_fields=[],
+            operator_metadata_updated_at="2026-03-09T07:20:20Z",
             captured_at_extruder=1773040825.0,
             captured_at_ls=1773040825.0,
             captured_at_spot=1773040825.0,
@@ -311,6 +559,31 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("MainPress_quality")], "missing")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("MainPress_missing_reason")], "source_missing")
 
+    def test_v2_row_records_reset_operator_metadata_as_invalid(self) -> None:
+        service = CSVLoggerService()
+        data = self.create_data()
+        data.Product_No_operator = ""
+        data.Mold_No_operator = ""
+        data.operator_metadata_valid = False
+        data.operator_metadata_missing_fields = ["product_no", "operator_mold_no"]
+        data.operator_metadata_updated_at = "2026-03-09T07:21:00Z"
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Product_No_operator")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Mold_No_operator")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_valid")], "false")
+        self.assertEqual(
+            v2_row[V2_CSV_COLUMNS.index("operator_metadata_missing_fields")],
+            "product_no,operator_mold_no",
+        )
+        self.assertEqual(
+            v2_row[V2_CSV_COLUMNS.index("operator_metadata_updated_at")],
+            "2026-03-09T07:21:00Z",
+        )
+
     def test_v2_row_marks_billet_length_zero_as_idle_not_missing(self) -> None:
         service = CSVLoggerService()
         data = self.create_data().model_copy(update={"Billet_Length": 0.0})
@@ -349,14 +622,60 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("MainRamPosition_D0010")], "15.0")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("ContainerPosition_D0012")], "16.0")
 
+    def test_v2_row_includes_operator_metadata_without_changing_v1(self) -> None:
+        service = CSVLoggerService()
+        data = self.create_data()
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+        self.assertNotIn("Product_No_operator", V1_CSV_COLUMNS)
+        self.assertNotIn("Mold_No_operator", V1_CSV_COLUMNS)
+        self.assertEqual(len(v1_row), 21)
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Product_No_operator")], "12345")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Mold_No_operator")], "123")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_valid")], "true")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_missing_fields")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_updated_at")], "2026-03-09T07:20:20Z")
+
+    def test_v2_row_records_missing_operator_metadata_as_invalid(self) -> None:
+        service = CSVLoggerService()
+        data = self.create_data().model_copy(update={
+            "Product_No_operator": "",
+            "Mold_No_operator": "",
+            "operator_metadata_valid": False,
+            "operator_metadata_missing_fields": ["product_no", "operator_mold_no"],
+            "operator_metadata_updated_at": None,
+        })
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_valid")], "false")
+        self.assertEqual(
+            v2_row[V2_CSV_COLUMNS.index("operator_metadata_missing_fields")],
+            "product_no,operator_mold_no",
+        )
+
     def test_csv_injection_escapes_string_fields(self) -> None:
         service = CSVLoggerService()
-        data = self.create_data().model_copy(update={"Die_ID": "=cmd", "Billet_Cycle_ID": "+cycle"})
+        data = self.create_data().model_copy(update={
+            "Die_ID": "=cmd",
+            "Billet_Cycle_ID": "+cycle",
+            "Product_No_operator": "@product",
+            "Mold_No_operator": "-mold",
+        })
+        timestamp = service._parse_timestamp(data)
 
-        row = service._build_row(data, service._parse_timestamp(data))
+        row = service._build_row(data, timestamp)
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, row)
 
         self.assertEqual(row[19], "'=cmd")
         self.assertEqual(row[20], "'+cycle")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Product_No_operator")], "'@product")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Mold_No_operator")], "'-mold")
 
     def test_csv_writer_mode_v1_enabled_v2_disabled_creates_v1_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -690,6 +1009,8 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
 
             metadata = json.loads(v2_files[0].with_suffix(".metadata.json").read_text(encoding="utf-8"))
             self.assertIn("position-specific label", metadata["schema_metadata"]["header_policy"])
+            self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.2.0")
+            self.assertEqual(metadata["schema_metadata"]["operator_metadata_version"], "1.0.0")
             self.assertEqual(
                 metadata["schema_metadata"]["position_read_feature_flag"],
                 "EXTRUDER.position_read_enabled or POSITION_READ_ENABLED",
@@ -747,6 +1068,24 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertEqual(container_meta["semantic_group"], "position")
             self.assertEqual(container_meta["read_feature_flag"], "POSITION_READ_ENABLED")
 
+            product_meta = [
+                item for item in metadata["sensor_metadata"] if item.get("column_name") == "Product_No_operator"
+            ][0]
+            self.assertEqual(product_meta["field_name"], "product_no")
+            self.assertEqual(product_meta["physical_meaning"], "Operator-entered numeric product number")
+            self.assertEqual(product_meta["source_system"], "Operator input")
+            self.assertEqual(product_meta["mapping_status"], "operator_entered_required")
+            self.assertEqual(product_meta["validation_rule"], "1-40 digits only")
+            self.assertEqual(product_meta["not_replacement_for"], "%DW PLC address")
+
+            mold_no_meta = [
+                item for item in metadata["sensor_metadata"] if item.get("column_name") == "Mold_No_operator"
+            ][0]
+            self.assertEqual(mold_no_meta["field_name"], "operator_mold_no")
+            self.assertEqual(mold_no_meta["mapping_status"], "operator_entered_required")
+            self.assertEqual(mold_no_meta["validation_rule"], "1-32 digits only")
+            self.assertEqual(mold_no_meta["not_replacement_for"], "DIE_ID")
+
             self.assertIn(
                 "hmi_confirmed_actual_position",
                 metadata["quality_rule_metadata"]["mapping_status_values"],
@@ -754,6 +1093,14 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertIn(
                 "hmi_confirmed_separate_field",
                 metadata["quality_rule_metadata"]["mapping_status_values"],
+            )
+            self.assertIn(
+                "operator_entered_required",
+                metadata["quality_rule_metadata"]["mapping_status_values"],
+            )
+            self.assertEqual(
+                metadata["operator_metadata"]["required_fields"],
+                ["product_no", "operator_mold_no"],
             )
 
     def test_shadow_validation_script_accepts_v1_v2_sidecar_outputs(self) -> None:
@@ -781,6 +1128,67 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             service._write_v2_sidecar(v2_path)
 
             result = validate_csv_v2_shadow(v1_path, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 0)
+
+    def test_shadow_validation_script_accepts_legacy_2_1_v2_sidecar_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+            operator_columns = {
+                "Product_No_operator",
+                "Mold_No_operator",
+                "operator_metadata_valid",
+                "operator_metadata_missing_fields",
+                "operator_metadata_updated_at",
+            }
+            legacy_columns = [column for column in V2_CSV_COLUMNS if column not in operator_columns]
+            legacy_row = [
+                value for column, value in zip(V2_CSV_COLUMNS, v2_row) if column not in operator_columns
+            ]
+            legacy_row[legacy_columns.index("schema_version")] = "2.1.0"
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            metadata_path = v2_path.with_suffix(".metadata.json")
+
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(legacy_columns)
+                writer.writerow(legacy_row)
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "schema_metadata": {"schema_version": "2.1.0"},
+                        "sensor_metadata": [
+                            {
+                                "field_name": "EndPos",
+                                "mapping_status": "hmi_confirmed_setting_value",
+                            },
+                            {
+                                "field_name": "MainRamPosition_D0010",
+                                "mapping_status": "hmi_confirmed_actual_position",
+                            },
+                            {
+                                "field_name": "ContainerPosition_D0012",
+                                "mapping_status": "hmi_confirmed_actual_position",
+                            },
+                            {
+                                "field_name": "ButtLength_HMI_B1880",
+                                "mapping_status": "hmi_confirmed_separate_field",
+                            },
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = validate_csv_v2_shadow(None, v2_path, metadata_path)
 
         self.assertEqual(result, 0)
 

@@ -17,6 +17,11 @@ export interface FactoryData {
     ContainerPosition_D0012?: number | null;
     Die_ID?: string | null;
     Billet_Cycle_ID?: string | null;
+    Product_No_operator?: string | null;
+    Mold_No_operator?: string | null;
+    operator_metadata_valid?: boolean | null;
+    operator_metadata_missing_fields?: string[] | null;
+    operator_metadata_updated_at?: string | null;
     
     // Temperatures
     Spot: number | null;
@@ -64,6 +69,20 @@ export interface ComputedStatus {
     mold_levels?: Record<string, string>;
     jam_level?: string;
     thresholds?: ThresholdHits;
+}
+
+export interface OperatorMetadata {
+  product_no: string;
+  operator_mold_no: string;
+  valid: boolean;
+  missing_fields: string[];
+  updated_at?: string | null;
+  source: string;
+}
+
+export interface OperatorMetadataPayload {
+  product_no: string;
+  operator_mold_no: string;
 }
 
 export interface SpotConfig {

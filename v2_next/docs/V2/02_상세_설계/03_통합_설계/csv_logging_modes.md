@@ -32,6 +32,23 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 - v1 CSV: `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv`
 - v2 CSV: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv`
 - v2 sidecar: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json`
+- v2 `schema_version=2.2.0`부터 작업자 입력 `Product_No_operator`, `Mold_No_operator`와
+  `operator_metadata_valid`, `operator_metadata_missing_fields`, `operator_metadata_updated_at`가 기록된다.
+  v1 CSV 21컬럼 contract는 변경하지 않는다.
+- `Product_No_operator`와 `Mold_No_operator`는 작업자 입력 숫자 문자열이다. UI/API 모두 숫자만 허용하며,
+  예시는 제품번호 `12345`, 금형 번호 `123`이다. `DW-` prefix는 더 이상 입력하거나 저장하지 않는다.
+- 작업 정보 스냅카드의 `서버 값 새로고침`은 백엔드 저장값을 다시 불러오는 기능이다. `서버 저장값 리셋`은
+  백엔드 `operator_metadata.json`까지 빈 값으로 저장해 `operator_metadata_valid=false`와
+  `operator_metadata_missing_fields=product_no,operator_mold_no` 상태를 만든다. 리셋 이후 새 sample부터
+  v2 CSV에 빈 `Product_No_operator`, 빈 `Mold_No_operator`, invalid 상태가 기록되며, 이미 logger queue에
+  들어간 row는 소급 변경하지 않는다.
+- v2 `schema_version=2.2.0` CSV는 53컬럼 contract다. index 기반으로 v2 CSV를 읽는 consumer는 header 기반
+  매핑으로 전환하거나 배포 전 dry-run에서 실패 여부를 확인해야 한다.
+- 운영 배포 전에는 실제 서버 샘플 1세트를 repo 내부 validator와 repo 밖 ETL/Excel 매크로에 각각 dry-run한다.
+  repo 밖 consumer가 53컬럼을 처리하지 못하면 `csv_v2_enabled=false`로 유지한다.
+- Validator compatibility: new writer output uses `schema_version=2.2.0`, but
+  `scripts/validate_csv_v2_shadow.py` still accepts legacy `schema_version=2.1.0`
+  v2 files without operator metadata columns so rollback and historical audits remain possible.
 - glob 수집 시 v1과 v2를 같은 넓은 glob 패턴으로 섞지 말고,
   v1 파일 목록과 v2 파일 목록을 별도로 모은 뒤 timestamp suffix 기준으로 정렬/매칭한다.
 - replay/validator도 같은 원칙을 따른다. v1/v2를 한 입력 목록에 섞지 않고, 날짜별 파일 set은 timestamp suffix로 정렬/매칭한다.

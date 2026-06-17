@@ -14,6 +14,7 @@ import { ProfilerProbe } from '../shared/profiling/reactRenderProfiler';
 const TempsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/TempsWidget').then(m => ({ default: m.TempsComponent })));
 const MoldsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/MoldsWidget').then(m => ({ default: m.MoldsComponent })));
 const EnvComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/EnvWidget').then(m => ({ default: m.EnvComponent })));
+const OperatorMetadataComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/OperatorMetadataWidget').then(m => ({ default: m.OperatorMetadataComponent })));
 const TimeSeriesWidget = React.lazy(() => import('../domains/FacilityData/components/widgets/TimeSeriesWidget').then(m => ({ default: m.TimeSeriesWidget })));
 const ReactMarkdown = React.lazy(() => import('react-markdown').then(m => ({ default: m.default })));
 
@@ -208,6 +209,10 @@ const renderWidget = (
 
   if (item.type === 'env') {
     return <ProfilerProbe id="Widget:env"><EnvComponent /></ProfilerProbe>;
+  }
+
+  if (item.type === 'operatorMetadata') {
+    return <ProfilerProbe id="Widget:operatorMetadata"><OperatorMetadataComponent /></ProfilerProbe>;
   }
 
   if (item.type === 'timeseries') {

@@ -33,7 +33,11 @@ REQUIRED_V1_COLUMNS = [
     "Billet_CycleID",
 ]
 
-REQUIRED_V2_COLUMNS = [
+CSV_SCHEMA_VERSION_V2_1 = "2.1.0"
+CSV_SCHEMA_VERSION_V2_2 = "2.2.0"
+SUPPORTED_CSV_SCHEMA_VERSIONS = {CSV_SCHEMA_VERSION_V2_1, CSV_SCHEMA_VERSION_V2_2}
+
+REQUIRED_V2_BASE_COLUMNS = [
     "schema_version",
     "sample_seq",
     "timestamp_local",
@@ -47,11 +51,52 @@ REQUIRED_V2_COLUMNS = [
     "ContainerPosition_D0012",
 ]
 
-REQUIRED_METADATA_FIELDS = {
+OPERATOR_METADATA_V2_COLUMNS = [
+    "Product_No_operator",
+    "Mold_No_operator",
+    "operator_metadata_valid",
+    "operator_metadata_missing_fields",
+    "operator_metadata_updated_at",
+]
+
+REQUIRED_V2_COLUMNS = [
+    "schema_version",
+    "sample_seq",
+    "timestamp_local",
+    "timestamp_utc",
+    "ingest_timestamp",
+    "captured_at_extruder",
+    "captured_at_ls",
+    "captured_at_spot",
+    *OPERATOR_METADATA_V2_COLUMNS,
+    *REQUIRED_V1_COLUMNS,
+    "MainRamPosition_D0010",
+    "ContainerPosition_D0012",
+]
+
+REQUIRED_V2_COLUMNS_BY_SCHEMA = {
+    CSV_SCHEMA_VERSION_V2_1: REQUIRED_V2_BASE_COLUMNS,
+    CSV_SCHEMA_VERSION_V2_2: REQUIRED_V2_COLUMNS,
+}
+
+BASE_REQUIRED_METADATA_FIELDS = {
     "EndPos": "hmi_confirmed_setting_value",
     "MainRamPosition_D0010": "hmi_confirmed_actual_position",
     "ContainerPosition_D0012": "hmi_confirmed_actual_position",
     "ButtLength_HMI_B1880": "hmi_confirmed_separate_field",
+}
+
+OPERATOR_METADATA_FIELDS = {
+    "product_no": "operator_entered_required",
+    "operator_mold_no": "operator_entered_required",
+}
+
+REQUIRED_METADATA_FIELDS_BY_SCHEMA = {
+    CSV_SCHEMA_VERSION_V2_1: BASE_REQUIRED_METADATA_FIELDS,
+    CSV_SCHEMA_VERSION_V2_2: {
+        **BASE_REQUIRED_METADATA_FIELDS,
+        **OPERATOR_METADATA_FIELDS,
+    },
 }
 
 V1_NAME_RE = re.compile(r"^Factory_Integrated_Log_(\d{8}_\d{6})\.csv$")
@@ -166,13 +211,32 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
         if len(v1_header) != 21:
             failures.append(f"v1 column count is {len(v1_header)}, expected 21")
 
-    missing_v2 = [column for column in REQUIRED_V2_COLUMNS if column not in v2_header]
+    v2_schema = metadata.get("schema_metadata", {}).get("schema_version")
+    if v2_schema not in SUPPORTED_CSV_SCHEMA_VERSIONS:
+        failures.append(
+            f"metadata schema_version is {v2_schema!r}, expected one of "
+            f"{', '.join(sorted(SUPPORTED_CSV_SCHEMA_VERSIONS))}"
+        )
+
+    required_v2_columns = REQUIRED_V2_COLUMNS_BY_SCHEMA.get(v2_schema, REQUIRED_V2_COLUMNS)
+    missing_v2 = [column for column in required_v2_columns if column not in v2_header]
     if missing_v2:
         failures.append(f"v2 header missing columns: {', '.join(missing_v2)}")
 
-    v2_schema = metadata.get("schema_metadata", {}).get("schema_version")
-    if v2_schema != "2.1.0":
-        failures.append(f"metadata schema_version is {v2_schema!r}, expected '2.1.0'")
+    if v2_schema == CSV_SCHEMA_VERSION_V2_2:
+        operator_metadata_version = metadata.get("schema_metadata", {}).get("operator_metadata_version")
+        if operator_metadata_version != "1.0.0":
+            failures.append(
+                f"metadata operator_metadata_version is {operator_metadata_version!r}, expected '1.0.0'"
+            )
+
+        operator_metadata = metadata.get("operator_metadata")
+        if not isinstance(operator_metadata, dict):
+            failures.append("metadata missing operator_metadata block")
+        else:
+            required_fields = operator_metadata.get("required_fields")
+            if required_fields != ["product_no", "operator_mold_no"]:
+                failures.append(f"operator_metadata.required_fields={required_fields!r}")
 
     row_delta: int | str = "v1_not_provided"
     if v1_path is not None:
@@ -184,7 +248,8 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
     if not seq_ok:
         failures.append(seq_detail)
 
-    for field_name, expected_status in REQUIRED_METADATA_FIELDS.items():
+    required_metadata_fields = REQUIRED_METADATA_FIELDS_BY_SCHEMA.get(v2_schema, REQUIRED_METADATA_FIELDS_BY_SCHEMA[CSV_SCHEMA_VERSION_V2_2])
+    for field_name, expected_status in required_metadata_fields.items():
         item = find_metadata_item(metadata, field_name)
         if item is None:
             failures.append(f"metadata missing sensor field: {field_name}")

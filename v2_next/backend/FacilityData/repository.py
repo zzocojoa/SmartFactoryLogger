@@ -13,8 +13,9 @@ from .. import constants
 from backend.FacilityData.schemas import FactoryData
 
 
-CSV_SCHEMA_VERSION = "2.1.0"
+CSV_SCHEMA_VERSION = "2.2.0"
 DERIVATION_VERSION = "cycle-heuristic-v1"
+OPERATOR_METADATA_VERSION = "1.0.0"
 
 V1_CSV_COLUMNS = [
     "Date",
@@ -73,6 +74,11 @@ V2_CSV_COLUMNS = [
     "captured_at_extruder",
     "captured_at_ls",
     "captured_at_spot",
+    "Product_No_operator",
+    "Mold_No_operator",
+    "operator_metadata_valid",
+    "operator_metadata_missing_fields",
+    "operator_metadata_updated_at",
     *V1_CSV_COLUMNS,
     "MainRamPosition_D0010",
     "ContainerPosition_D0012",
@@ -333,6 +339,7 @@ class CSVLoggerService:
         payload = {
             "schema_metadata": {
                 "schema_version": CSV_SCHEMA_VERSION,
+                "operator_metadata_version": OPERATOR_METADATA_VERSION,
                 "v1_compatibility": True,
                 "v1_csv_enabled": self.csv_v1_enabled,
                 "v1_columns": V1_CSV_COLUMNS,
@@ -349,6 +356,35 @@ class CSVLoggerService:
                 "created_at": datetime.now().astimezone().isoformat(),
             },
             "sensor_metadata": [
+                {
+                    "column_name": "Product_No_operator",
+                    "field_name": "product_no",
+                    "physical_meaning": "Operator-entered numeric product number",
+                    "source_system": "Operator input",
+                    "device_id": "operator_console",
+                    "plc_address": "",
+                    "unit": "",
+                    "mapping_status": "operator_entered_required",
+                    "semantic_group": "operator_metadata",
+                    "required": True,
+                    "validation_rule": "1-40 digits only",
+                    "not_replacement_for": "%DW PLC address",
+                },
+                {
+                    "column_name": "Mold_No_operator",
+                    "field_name": "operator_mold_no",
+                    "physical_meaning": "Operator-entered mold number",
+                    "source_system": "Operator input",
+                    "device_id": "operator_console",
+                    "plc_address": "",
+                    "unit": "",
+                    "mapping_status": "operator_entered_required",
+                    "semantic_group": "operator_metadata",
+                    "required": True,
+                    "validation_rule": "1-32 digits only",
+                    "not_replacement_for": "DIE_ID",
+                    "note": "DIE_ID remains the derived cycle identifier from Count/Speed/state.",
+                },
                 {
                     "column_name": "MainPress",
                     "field_name": "Press",
@@ -494,6 +530,7 @@ class CSVLoggerService:
                     "hmi_confirmed_setting_value",
                     "hmi_confirmed_actual_position",
                     "hmi_confirmed_separate_field",
+                    "operator_entered_required",
                     "mapping_unverified",
                 ],
                 "missing_reason_values": [
@@ -504,6 +541,22 @@ class CSVLoggerService:
                     "mapping_unverified",
                     "invalid_value",
                 ],
+            },
+            "operator_metadata": {
+                "version": OPERATOR_METADATA_VERSION,
+                "source": "operator_input_api",
+                "required_fields": ["product_no", "operator_mold_no"],
+                "csv_columns": [
+                    "Product_No_operator",
+                    "Mold_No_operator",
+                    "operator_metadata_valid",
+                    "operator_metadata_missing_fields",
+                    "operator_metadata_updated_at",
+                ],
+                "missing_policy": (
+                    "The backend records invalid operator metadata state in v2 rows instead of "
+                    "dropping PLC telemetry. UI should gate work start until required fields are valid."
+                ),
             },
         }
         try:
@@ -567,6 +620,11 @@ class CSVLoggerService:
             self._epoch_to_iso(data.captured_at_extruder),
             self._epoch_to_iso(data.captured_at_ls),
             self._epoch_to_iso(data.captured_at_spot),
+            self._escape_csv_text(data.Product_No_operator or ""),
+            self._escape_csv_text(data.Mold_No_operator or ""),
+            self._fmt_bool(bool(data.operator_metadata_valid)),
+            self._escape_csv_text(",".join(data.operator_metadata_missing_fields or [])),
+            self._escape_csv_text(data.operator_metadata_updated_at or ""),
             *v1_row,
             self._fmt(data.MainRamPosition_D0010),
             self._fmt(data.ContainerPosition_D0012),

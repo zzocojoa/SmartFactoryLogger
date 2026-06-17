@@ -8,6 +8,7 @@ from .drivers.base import BasePLCDriver
 from .drivers.mock_plc import MockPLCDriver
 from .drivers.real_plc import RealPLCDriver
 from .. import config
+from backend.FacilityData.operator_metadata import operator_metadata_store
 from backend.FacilityData.repository import logger_service
 from backend.Configuration.Configuration_DB_Manager import config_manager
 from backend.Observability.Observability_Logic_Status import StatusEvaluator
@@ -129,6 +130,7 @@ class PLCService:
             return self.driver_last_data, self.driver_last_data_at
 
     def _compose_data(self, raw_data: FactoryData) -> FactoryData:
+        operator_metadata = operator_metadata_store.get()
         snapshot = config_manager.get_snapshot()
         values = snapshot.get("values", {})
         thresholds_cfg = values.get("thresholds", {})
@@ -139,7 +141,14 @@ class PLCService:
             thresholds_cfg,
             float(jam_press_threshold),
         )
-        return raw_data.model_copy(update={"Computed": computed})
+        return raw_data.model_copy(update={
+            "Computed": computed,
+            "Product_No_operator": operator_metadata.product_no,
+            "Mold_No_operator": operator_metadata.operator_mold_no,
+            "operator_metadata_valid": operator_metadata.valid,
+            "operator_metadata_missing_fields": operator_metadata.missing_fields,
+            "operator_metadata_updated_at": operator_metadata.updated_at,
+        })
 
     def _with_timestamp_ms(self, data: FactoryData, timestamp_ms: int) -> FactoryData:
         return data.model_copy(update={"timestamp_ms": timestamp_ms})
