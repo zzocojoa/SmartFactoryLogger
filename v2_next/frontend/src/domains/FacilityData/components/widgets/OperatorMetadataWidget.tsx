@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Save from 'lucide-react/dist/esm/icons/save';
 import { selectDashboardOperatorMetadataSlice, useDashboardStore } from '../../../../store/useDashboardStore';
 import type { OperatorMetadata } from '../../../../shared/types';
@@ -79,6 +80,7 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
   const [operatorMoldNo, setOperatorMoldNo] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
@@ -88,14 +90,23 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
   const dirty =
     normalize(productNo) !== serverMetadata.product_no ||
     normalize(operatorMoldNo) !== serverMetadata.operator_mold_no;
-  const appliedValid = applied.valid || serverMetadata.valid;
+  const busy = saving || resetting;
+  const hasAnyMetadataValue = Boolean(
+    normalize(productNo) ||
+    normalize(operatorMoldNo) ||
+    serverMetadata.product_no ||
+    serverMetadata.operator_mold_no
+  );
+  const appliedValid = serverMetadata.valid;
   const cardStateClass = loadError || saveError || !appliedValid ? 'card-danger' : dirty ? 'card-warning' : '';
   const statusText = loadError
     ? '불러오기 실패'
     : saveError
       ? '저장 실패'
-      : saving
-        ? '저장 중'
+      : resetting
+        ? '리셋 중'
+        : saving
+          ? '저장 중'
         : !appliedValid
           ? '필수값 미입력'
           : dirty
@@ -151,6 +162,23 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
     }
   }, [operatorMoldNo, productNo]);
 
+  const handleReset = useCallback(async () => {
+    setTouched(true);
+    setSaveError(null);
+    setResetting(true);
+    try {
+      const metadata = await operatorMetadataService.reset();
+      setServerMetadata(metadata);
+      setProductNo(metadata.product_no);
+      setOperatorMoldNo(metadata.operator_mold_no);
+      productInputRef.current?.focus();
+    } catch {
+      setSaveError('서버 저장값 리셋에 실패했습니다.');
+    } finally {
+      setResetting(false);
+    }
+  }, []);
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -175,7 +203,7 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
           )}
           <span>{statusText}</span>
         </div>
-        <span className="operator-card-updated">최근 적용 {formatAppliedAt(applied.updatedAt ?? serverMetadata.updated_at)}</span>
+        <span className="operator-card-updated">최근 적용 {formatAppliedAt(serverMetadata.updated_at ?? applied.updatedAt)}</span>
       </div>
 
       <div className="operator-form-grid">
@@ -230,7 +258,7 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
           type="button"
           className="operator-icon-button"
           onClick={() => void loadMetadata()}
-          disabled={saving}
+          disabled={busy}
           title="서버 값 새로고침"
           aria-label="서버 값 새로고침"
         >
@@ -238,9 +266,19 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
         </button>
         <button
           type="button"
+          className="operator-icon-button"
+          onClick={() => void handleReset()}
+          disabled={busy || !hasAnyMetadataValue}
+          title="서버 저장값 리셋"
+          aria-label="서버 저장값 리셋"
+        >
+          <RotateCcw aria-hidden="true" size={18} />
+        </button>
+        <button
+          type="button"
           className="operator-save-button"
           onClick={() => void handleSave()}
-          disabled={saving || hasFieldErrors || !dirty}
+          disabled={busy || hasFieldErrors || !dirty}
         >
           <Save aria-hidden="true" size={18} />
           <span>적용</span>

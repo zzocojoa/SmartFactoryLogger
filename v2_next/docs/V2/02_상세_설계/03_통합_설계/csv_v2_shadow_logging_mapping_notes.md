@@ -122,8 +122,17 @@ csv_v2_sidecar_enabled=true
 - `product_no`와 `operator_mold_no`는 숫자만 허용한다. smoke 입력 예시는 제품번호 `12345`, 금형 번호 `123`이다.
   `DW-12345`, `ABC`, `123-1`, 공백, CR/LF 입력은 UI/API에서 거부되어야 한다.
 - 앱 재시작 후 입력값이 다시 표시되고, 백엔드 `operator_metadata.json`에도 같은 값이 남아 있어야 한다.
+- `서버 값 새로고침`은 저장된 서버 값을 다시 표시해야 하며, 저장값을 삭제하거나 변경하면 안 된다.
+- `서버 저장값 리셋`은 백엔드 `operator_metadata.json`을 빈 값으로 저장해야 한다. 리셋 직후
+  `GET /api/facility/operator-metadata`는 `valid=false`,
+  `missing_fields=["product_no","operator_mold_no"]`, 빈 `product_no`, 빈 `operator_mold_no`,
+  갱신된 `updated_at`을 반환해야 한다.
 - GUI 런타임에서 생성된 v2 CSV는 header 53컬럼, row 53컬럼이어야 하며 `Product_No_operator`,
   `Mold_No_operator`, `operator_metadata_valid=true`가 같은 row에 기록되어야 한다.
+- 리셋 이후 생성된 새 v2 CSV row는 빈 `Product_No_operator`, 빈 `Mold_No_operator`,
+  `operator_metadata_valid=false`, `operator_metadata_missing_fields=product_no,operator_mold_no`,
+  리셋 시점의 `operator_metadata_updated_at`을 기록해야 한다. 리셋 전 이미 queue에 들어간 row는 소급
+  변경하지 않는다.
 - 생성된 v2 CSV와 같은 timestamp suffix의 `.metadata.json` sidecar가 있어야 하며
   `schema_metadata.schema_version=2.2.0`, `operator_metadata_version=1.0.0`을 확인한다.
 - repo 내부 소비자는 `scripts/validate_csv_v2_shadow.py`와 `backend\FacilityData\drivers\csv_replay.py`

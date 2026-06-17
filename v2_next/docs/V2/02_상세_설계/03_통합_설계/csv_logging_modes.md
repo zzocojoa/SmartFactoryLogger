@@ -37,6 +37,11 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
   v1 CSV 21컬럼 contract는 변경하지 않는다.
 - `Product_No_operator`와 `Mold_No_operator`는 작업자 입력 숫자 문자열이다. UI/API 모두 숫자만 허용하며,
   예시는 제품번호 `12345`, 금형 번호 `123`이다. `DW-` prefix는 더 이상 입력하거나 저장하지 않는다.
+- 작업 정보 스냅카드의 `서버 값 새로고침`은 백엔드 저장값을 다시 불러오는 기능이다. `서버 저장값 리셋`은
+  백엔드 `operator_metadata.json`까지 빈 값으로 저장해 `operator_metadata_valid=false`와
+  `operator_metadata_missing_fields=product_no,operator_mold_no` 상태를 만든다. 리셋 이후 새 sample부터
+  v2 CSV에 빈 `Product_No_operator`, 빈 `Mold_No_operator`, invalid 상태가 기록되며, 이미 logger queue에
+  들어간 row는 소급 변경하지 않는다.
 - v2 `schema_version=2.2.0` CSV는 53컬럼 contract다. index 기반으로 v2 CSV를 읽는 consumer는 header 기반
   매핑으로 전환하거나 배포 전 dry-run에서 실패 여부를 확인해야 한다.
 - 운영 배포 전에는 실제 서버 샘플 1세트를 repo 내부 validator와 repo 밖 ETL/Excel 매크로에 각각 dry-run한다.

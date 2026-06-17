@@ -1700,6 +1700,25 @@ def update_operator_metadata(payload: OperatorMetadataUpdate, request: Request):
         _logger.error("Operator metadata save failed: %s", exc)
         raise HTTPException(status_code=500, detail="Operator metadata save failed") from exc
 
+
+@app.delete("/api/facility/operator-metadata", response_model=OperatorMetadata)
+def reset_operator_metadata(request: Request):
+    _require_operator_metadata_write_access(request)
+    try:
+        metadata = operator_metadata_store.reset()
+        _logger.info(
+            "Operator metadata reset",
+            extra={
+                "operator_metadata_valid": metadata.valid,
+                "operator_metadata_missing_fields": ",".join(metadata.missing_fields),
+            },
+        )
+        return metadata
+    except Exception as exc:
+        _logger.error("Operator metadata reset failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Operator metadata reset failed") from exc
+
+
 @app.get("/health")
 async def health():
     return {

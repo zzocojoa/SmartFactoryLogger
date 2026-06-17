@@ -15,3 +15,8 @@ export const putOperatorMetadata = async (
   const response = await apiClient.put<OperatorMetadataResponse>('/api/facility/operator-metadata', payload);
   return response.data;
 };
+
+export const deleteOperatorMetadata = async (): Promise<OperatorMetadataResponse> => {
+  const response = await apiClient.delete<OperatorMetadataResponse>('/api/facility/operator-metadata');
+  return response.data;
+};

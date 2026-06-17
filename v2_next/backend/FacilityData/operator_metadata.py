@@ -41,6 +41,18 @@ class OperatorMetadataStore:
             self._metadata = next_metadata
             return self._metadata.model_copy(deep=True)
 
+    def reset(self) -> OperatorMetadata:
+        next_metadata = OperatorMetadata(
+            product_no="",
+            operator_mold_no="",
+            updated_at=_utc_now_iso(),
+            source="operator_input",
+        )
+        with self._lock:
+            self._persist_locked(next_metadata)
+            self._metadata = next_metadata
+            return self._metadata.model_copy(deep=True)
+
     def _load(self) -> None:
         try:
             if not self._path.exists():

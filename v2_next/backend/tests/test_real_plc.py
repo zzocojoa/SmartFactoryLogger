@@ -237,6 +237,82 @@ class OperatorMetadataApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertFalse(backend_app.operator_metadata_store.get().valid)
 
+    def test_delete_resets_operator_metadata_to_persisted_invalid_state(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.delete(
+                "/api/facility/operator-metadata",
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+            get_response = client.get("/api/facility/operator-metadata")
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["product_no"], "")
+        self.assertEqual(payload["operator_mold_no"], "")
+        self.assertFalse(payload["valid"])
+        self.assertEqual(payload["missing_fields"], ["product_no", "operator_mold_no"])
+        self.assertIsNotNone(payload["updated_at"])
+        self.assertEqual(get_response.json(), payload)
+
+        persisted = json.loads(backend_app.operator_metadata_store._path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["operator_metadata_version"], "1.0.0")
+        self.assertEqual(persisted["metadata"]["product_no"], "")
+        self.assertEqual(persisted["metadata"]["operator_mold_no"], "")
+        self.assertFalse(persisted["metadata"]["valid"])
+        self.assertEqual(persisted["metadata"]["missing_fields"], ["product_no", "operator_mold_no"])
+
+        composed = backend_app.plc_service._compose_data(
+            FactoryData(
+                Time="2026-03-09T07:20:25.123",
+                Status="Running",
+                Speed=1.0,
+                Press=2.0,
+                Count=3,
+                EndPos=4.0,
+                Billet_Length=5.0,
+                Spot=6.0,
+                Temp_F=7.0,
+                Temp_B=8.0,
+                Billet_Temp=9.0,
+                Mold1=10.0,
+                Mold2=11.0,
+                Mold3=12.0,
+                Mold4=13.0,
+                Mold5=14.0,
+                Mold6=15.0,
+                At_Temp=16.0,
+                At_Pre=17.0,
+            )
+        )
+        self.assertEqual(composed.Product_No_operator, "")
+        self.assertEqual(composed.Mold_No_operator, "")
+        self.assertFalse(composed.operator_metadata_valid)
+        self.assertEqual(composed.operator_metadata_missing_fields, ["product_no", "operator_mold_no"])
+        self.assertEqual(composed.operator_metadata_updated_at, payload["updated_at"])
+
+    def test_delete_rejects_untrusted_origin(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.delete(
+                "/api/facility/operator-metadata",
+                headers={"origin": "https://example.invalid", "host": "localhost:8000"},
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(backend_app.operator_metadata_store.get().product_no, "12345")
+        self.assertEqual(backend_app.operator_metadata_store.get().operator_mold_no, "123")
+
     def test_store_keeps_existing_memory_state_when_persist_fails(self) -> None:
         existing_metadata = OperatorMetadata(
             product_no="11111",
@@ -482,6 +558,31 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(v1_row[3], "0.0")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("MainPress_quality")], "missing")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("MainPress_missing_reason")], "source_missing")
+
+    def test_v2_row_records_reset_operator_metadata_as_invalid(self) -> None:
+        service = CSVLoggerService()
+        data = self.create_data()
+        data.Product_No_operator = ""
+        data.Mold_No_operator = ""
+        data.operator_metadata_valid = False
+        data.operator_metadata_missing_fields = ["product_no", "operator_mold_no"]
+        data.operator_metadata_updated_at = "2026-03-09T07:21:00Z"
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Product_No_operator")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Mold_No_operator")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_valid")], "false")
+        self.assertEqual(
+            v2_row[V2_CSV_COLUMNS.index("operator_metadata_missing_fields")],
+            "product_no,operator_mold_no",
+        )
+        self.assertEqual(
+            v2_row[V2_CSV_COLUMNS.index("operator_metadata_updated_at")],
+            "2026-03-09T07:21:00Z",
+        )
 
     def test_v2_row_marks_billet_length_zero_as_idle_not_missing(self) -> None:
         service = CSVLoggerService()
