@@ -4347,6 +4347,147 @@ body {
   border-color: var(--status-muted-border);
 }
 
+/* Operator metadata */
+.operator-card {
+  gap: var(--space-2);
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.operator-card-status {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.operator-card-status-main {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: clamp(13px, calc(var(--cq) * 5.4), 34px);
+  font-weight: 700;
+  min-width: 0;
+}
+
+.operator-card-updated {
+  color: var(--text-muted);
+  font-size: clamp(11px, calc(var(--cq) * 4), 22px);
+  white-space: normal;
+}
+
+.operator-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.operator-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.operator-field-label {
+  color: var(--dashboard-tile-label);
+  font-size: clamp(12px, calc(var(--cq) * 4.7), 28px);
+  font-weight: 600;
+}
+
+.operator-field input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  color: var(--text-primary);
+  border-radius: var(--radius-1);
+  padding: var(--space-2);
+  font-size: clamp(15px, calc(var(--cq) * 6.5), 40px);
+  font-weight: 700;
+  font-family: var(--font-number);
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.operator-field input:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 20%, transparent);
+}
+
+.operator-field input[aria-invalid='true'] {
+  border-color: var(--status-danger-border);
+  background: color-mix(in srgb, var(--bg-input) 88%, var(--status-danger-color));
+}
+
+.operator-field-error,
+.operator-card-message {
+  color: var(--status-danger-color);
+  font-size: clamp(11px, calc(var(--cq) * 4), 22px);
+  line-height: 1.3;
+}
+
+.operator-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+}
+
+.operator-icon-button,
+.operator-save-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: 36px;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--border-muted);
+  background: var(--bg-button);
+  color: var(--text-primary);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.operator-icon-button {
+  width: 40px;
+  padding: 0;
+}
+
+.operator-save-button {
+  padding: 0 var(--space-3);
+  min-width: 88px;
+}
+
+.operator-icon-button:hover:not(:disabled),
+.operator-save-button:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+}
+
+.operator-icon-button:disabled,
+.operator-save-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .operator-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .operator-card-actions {
+    justify-content: stretch;
+  }
+
+  .operator-save-button {
+    flex: 1;
+  }
+}
+
 /* Environment */
 .env-card {
   display: flex;

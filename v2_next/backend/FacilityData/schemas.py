@@ -1,5 +1,82 @@
-from pydantic import BaseModel, field_validator, ValidationInfo
+import re
+from pydantic import BaseModel, Field, field_validator, model_validator, ValidationInfo
 from typing import Optional, Dict, Any
+
+CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
+PRODUCT_NO_RE = re.compile(r"^DW-[A-Za-z0-9][A-Za-z0-9._-]{0,36}$")
+OPERATOR_MOLD_NO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
+
+
+def _normalize_operator_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _has_control_character(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+class OperatorMetadataBase(BaseModel):
+    product_no: str = ""
+    operator_mold_no: str = ""
+
+    @field_validator("product_no", "operator_mold_no", mode="before")
+    @classmethod
+    def normalize_text(cls, value):
+        return _normalize_operator_text(value)
+
+    @field_validator("product_no")
+    @classmethod
+    def validate_product_no(cls, value: str) -> str:
+        if not value:
+            return ""
+        if _has_control_character(value):
+            raise ValueError("product_no must not contain control characters")
+        if value[0] in CSV_INJECTION_PREFIXES:
+            raise ValueError("product_no must not start with a CSV formula character")
+        if not PRODUCT_NO_RE.match(value):
+            raise ValueError("product_no must match DW- followed by 1-37 letters, digits, dots, underscores, or hyphens")
+        return value
+
+    @field_validator("operator_mold_no")
+    @classmethod
+    def validate_operator_mold_no(cls, value: str) -> str:
+        if not value:
+            return ""
+        if _has_control_character(value):
+            raise ValueError("operator_mold_no must not contain control characters")
+        if value[0] in CSV_INJECTION_PREFIXES:
+            raise ValueError("operator_mold_no must not start with a CSV formula character")
+        if not OPERATOR_MOLD_NO_RE.match(value):
+            raise ValueError("operator_mold_no must be 1-32 characters and start with a letter or digit")
+        return value
+
+
+class OperatorMetadataUpdate(OperatorMetadataBase):
+    @model_validator(mode="after")
+    def require_required_fields(self):
+        if not self.product_no or not self.operator_mold_no:
+            raise ValueError("product_no and operator_mold_no are required")
+        return self
+
+
+class OperatorMetadata(OperatorMetadataBase):
+    valid: bool = False
+    missing_fields: list[str] = Field(default_factory=list)
+    updated_at: Optional[str] = None
+    source: str = "operator_input"
+
+    @model_validator(mode="after")
+    def derive_validity(self):
+        missing: list[str] = []
+        if not self.product_no:
+            missing.append("product_no")
+        if not self.operator_mold_no:
+            missing.append("operator_mold_no")
+        self.missing_fields = missing
+        self.valid = not missing
+        return self
 
 class FactoryData(BaseModel):
     # System
@@ -28,6 +105,11 @@ class FactoryData(BaseModel):
     derivation_version: Optional[str] = None
     cycle_confidence: Optional[float] = None
     cycle_state: Optional[str] = None
+    Product_No_operator: Optional[str] = None
+    Mold_No_operator: Optional[str] = None
+    operator_metadata_valid: Optional[bool] = None
+    operator_metadata_missing_fields: Optional[list[str]] = None
+    operator_metadata_updated_at: Optional[str] = None
     
     # Temperatures
     Spot: Optional[float] = None

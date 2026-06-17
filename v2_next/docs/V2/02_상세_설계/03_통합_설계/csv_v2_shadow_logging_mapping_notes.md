@@ -75,8 +75,14 @@ csv_v2_sidecar_enabled=true
 
 - v1과 v2 파일이 동시에 생성된다.
 - v1 header는 21컬럼이고 기존 소비자 contract와 동일하다.
-- v2 header에는 `schema_version=2.1.0`, `MainRamPosition_D0010`, `ContainerPosition_D0012`가 있다.
+- v2 header에는 `schema_version=2.2.0`, `MainRamPosition_D0010`, `ContainerPosition_D0012`,
+  `Product_No_operator`, `Mold_No_operator`, `operator_metadata_valid`,
+  `operator_metadata_missing_fields`, `operator_metadata_updated_at`가 있다.
 - sidecar `sensor_metadata`에 `EndPos`, `MainRamPosition_D0010`, `ContainerPosition_D0012`, `ButtLength_HMI_B1880`의 `mapping_status`가 기록된다.
+- sidecar `operator_metadata`에 `product_no`, `operator_mold_no` 필수 필드와 `operator_metadata_version=1.0.0`이 기록된다.
+- Validator compatibility: `scripts/validate_csv_v2_shadow.py` accepts legacy
+  `schema_version=2.1.0` files without operator metadata, while enforcing
+  operator metadata columns and sidecar fields for `schema_version=2.2.0`.
 - sidecar `schema_metadata.position_read_feature_flag`는 `EXTRUDER.position_read_enabled or POSITION_READ_ENABLED`로 기록된다.
 - 앱 로그에 `CSV log queue full`, `CSV v2 buffer dropped`, PLC timeout 증가가 없는지 확인한다.
 

@@ -32,6 +32,12 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 - v1 CSV: `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv`
 - v2 CSV: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv`
 - v2 sidecar: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json`
+- v2 `schema_version=2.2.0`부터 작업자 입력 `Product_No_operator`, `Mold_No_operator`와
+  `operator_metadata_valid`, `operator_metadata_missing_fields`, `operator_metadata_updated_at`가 기록된다.
+  v1 CSV 21컬럼 contract는 변경하지 않는다.
+- Validator compatibility: new writer output uses `schema_version=2.2.0`, but
+  `scripts/validate_csv_v2_shadow.py` still accepts legacy `schema_version=2.1.0`
+  v2 files without operator metadata columns so rollback and historical audits remain possible.
 - glob 수집 시 v1과 v2를 같은 넓은 glob 패턴으로 섞지 말고,
   v1 파일 목록과 v2 파일 목록을 별도로 모은 뒤 timestamp suffix 기준으로 정렬/매칭한다.
 - replay/validator도 같은 원칙을 따른다. v1/v2를 한 입력 목록에 섞지 않고, 날짜별 파일 set은 timestamp suffix로 정렬/매칭한다.

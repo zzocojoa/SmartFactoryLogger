@@ -1,4 +1,4 @@
-export type WidgetType = 'kpi' | 'spot' | 'temps' | 'camera' | 'molds' | 'env' | 'notice' | 'timeseries' | 'markdown';
+export type WidgetType = 'kpi' | 'spot' | 'temps' | 'camera' | 'molds' | 'env' | 'operatorMetadata' | 'notice' | 'timeseries' | 'markdown';
 
 export interface DashboardItem {
   key: string;
@@ -30,6 +30,7 @@ export const DEFAULT_DASHBOARD_ITEMS: DashboardItem[] = [
   { key: 'camera', type: 'camera', title: 'SPOT \uCE74\uBA54\uB77C', x: 15, y: 8, width: 25, height: 10 },
   { key: 'molds', type: 'molds', title: '\uBAB0\uB4DC \uC874', x: 40, y: 0, width: 20, height: 8 },
   { key: 'env', type: 'env', title: '\uD658\uACBD', x: 40, y: 8, width: 20, height: 4 },
+  { key: 'operatorMetadata', type: 'operatorMetadata', title: '\uC791\uC5C5 \uC815\uBCF4', x: 40, y: 12, width: 20, height: 6 },
   { key: 'timeseries', type: 'timeseries', title: '\uD0C0\uC784 \uC2DC\uB9AC\uC988', x: 0, y: 18, width: 60, height: 8 },
 ];
 
@@ -40,6 +41,7 @@ export const DASHBOARD_LAYOUT_KEYS = [
   'camera',
   'molds',
   'env',
+  'operatorMetadata',
   'timeseries',
 ] as const;
 

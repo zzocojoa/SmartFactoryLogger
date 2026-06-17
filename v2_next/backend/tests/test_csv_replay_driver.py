@@ -63,7 +63,7 @@ class CsvReplayDriverTests(unittest.TestCase):
             "CYCLE-1",
         ]
         v2_row = [
-            "2.1.0",
+            "2.2.0",
             str(count),
             "2026-03-09T07:20:25.123+09:00",
             "2026-03-08T22:20:25.123Z",
@@ -71,6 +71,11 @@ class CsvReplayDriverTests(unittest.TestCase):
             "",
             "",
             "",
+            "DW-50306",
+            "MOLD-01",
+            "true",
+            "",
+            "2026-03-09T07:20:20Z",
             *v1_row,
             "",
             "",
@@ -128,6 +133,27 @@ class CsvReplayDriverTests(unittest.TestCase):
 
             self.assertEqual(driver.rows, [])
             self.assertFalse(driver.connect())
+
+    def test_replay_maps_v2_operator_metadata_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_235959.csv"
+            self._write_v2_csv(v2_path, 1)
+
+            cwd = Path.cwd()
+            os.chdir(log_dir)
+            try:
+                driver = CsvReplayDriver(str(v2_path))
+            finally:
+                os.chdir(cwd)
+
+            self.assertTrue(driver.connect())
+            data = driver.read_data()
+            self.assertEqual(data.Product_No_operator, "DW-50306")
+            self.assertEqual(data.Mold_No_operator, "MOLD-01")
+            self.assertTrue(data.operator_metadata_valid)
+            self.assertEqual(data.operator_metadata_missing_fields, [])
+            self.assertEqual(data.operator_metadata_updated_at, "2026-03-09T07:20:20Z")
 
 
 if __name__ == "__main__":

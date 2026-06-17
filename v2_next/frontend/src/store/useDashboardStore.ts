@@ -97,6 +97,14 @@ export interface DashboardMoldsSlice {
   missing: boolean;
 }
 
+export interface DashboardOperatorMetadataSlice {
+  productNo: string;
+  operatorMoldNo: string;
+  valid: boolean;
+  missingFields: string[];
+  updatedAt: string | null;
+}
+
 interface DashboardTimeSeriesState {
   timeSeriesAllFrame: SeriesFrame | null;
   thresholds: ThresholdState;
@@ -119,6 +127,8 @@ interface DashboardMetricsStatus {
   pollingPausedByVisibility: boolean;
   seriesStats: DashboardSeriesStats;
 }
+
+const EMPTY_OPERATOR_METADATA_MISSING_FIELDS: string[] = [];
 
 const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => {
   return (
@@ -360,6 +370,17 @@ export const selectDashboardMoldsSlice = (state: DashboardState): DashboardMolds
       !Number.isFinite(moldValue4) ||
       !Number.isFinite(moldValue5) ||
       !Number.isFinite(moldValue6),
+  };
+};
+
+export const selectDashboardOperatorMetadataSlice = (state: DashboardState): DashboardOperatorMetadataSlice => {
+  const missingFields = state.data?.operator_metadata_missing_fields ?? EMPTY_OPERATOR_METADATA_MISSING_FIELDS;
+  return {
+    productNo: state.data?.Product_No_operator ?? '',
+    operatorMoldNo: state.data?.Mold_No_operator ?? '',
+    valid: Boolean(state.data?.operator_metadata_valid),
+    missingFields,
+    updatedAt: state.data?.operator_metadata_updated_at ?? null,
   };
 };
 
