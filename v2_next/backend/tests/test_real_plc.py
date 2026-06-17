@@ -161,7 +161,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         try:
             response = client.put(
                 "/api/facility/operator-metadata",
-                json={"product_no": "DW-50306", "operator_mold_no": "MOLD-01"},
+                json={"product_no": "12345", "operator_mold_no": "123"},
                 headers=self.TRUSTED_WRITE_HEADERS,
             )
         finally:
@@ -169,8 +169,8 @@ class OperatorMetadataApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["product_no"], "DW-50306")
-        self.assertEqual(payload["operator_mold_no"], "MOLD-01")
+        self.assertEqual(payload["product_no"], "12345")
+        self.assertEqual(payload["operator_mold_no"], "123")
         self.assertTrue(payload["valid"])
         self.assertEqual(payload["missing_fields"], [])
         self.assertTrue(backend_app.operator_metadata_store._path.exists())
@@ -180,7 +180,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         try:
             response = client.put(
                 "/api/facility/operator-metadata",
-                json={"product_no": "DW-50306", "operator_mold_no": "MOLD-01"},
+                json={"product_no": "12345", "operator_mold_no": "123"},
                 headers={"origin": "https://example.invalid", "host": "localhost:8000"},
             )
         finally:
@@ -194,7 +194,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         try:
             response = client.put(
                 "/api/facility/operator-metadata",
-                json={"product_no": "DW-50306", "operator_mold_no": "=cmd"},
+                json={"product_no": "12345", "operator_mold_no": "=cmd"},
             )
         finally:
             client.close()
@@ -202,12 +202,34 @@ class OperatorMetadataApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(backend_app.operator_metadata_store.get().operator_mold_no, "")
 
+    def test_put_rejects_non_numeric_operator_metadata(self) -> None:
+        invalid_payloads = [
+            {"product_no": "DW-12345", "operator_mold_no": "123"},
+            {"product_no": "ABC", "operator_mold_no": "123"},
+            {"product_no": "123-1", "operator_mold_no": "123"},
+            {"product_no": "123\n", "operator_mold_no": "123"},
+            {"product_no": "12345", "operator_mold_no": "ABC"},
+            {"product_no": "12345", "operator_mold_no": "123-1"},
+            {"product_no": "12345", "operator_mold_no": "123\r\n"},
+        ]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                client = TestClient(backend_app.app, raise_server_exceptions=False)
+                try:
+                    response = client.put("/api/facility/operator-metadata", json=payload)
+                finally:
+                    client.close()
+
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(backend_app.operator_metadata_store.get().product_no, "")
+                self.assertEqual(backend_app.operator_metadata_store.get().operator_mold_no, "")
+
     def test_put_rejects_missing_required_fields(self) -> None:
         client = TestClient(backend_app.app, raise_server_exceptions=False)
         try:
             response = client.put(
                 "/api/facility/operator-metadata",
-                json={"product_no": "DW-50306", "operator_mold_no": ""},
+                json={"product_no": "12345", "operator_mold_no": ""},
             )
         finally:
             client.close()
@@ -217,8 +239,8 @@ class OperatorMetadataApiTests(unittest.TestCase):
 
     def test_store_keeps_existing_memory_state_when_persist_fails(self) -> None:
         existing_metadata = OperatorMetadata(
-            product_no="DW-OLD",
-            operator_mold_no="MOLD-OLD",
+            product_no="11111",
+            operator_mold_no="111",
             updated_at="2026-03-09T07:20:20Z",
         )
         with backend_app.operator_metadata_store._lock:
@@ -227,16 +249,16 @@ class OperatorMetadataApiTests(unittest.TestCase):
         with patch.object(Path, "write_text", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 backend_app.operator_metadata_store.update(
-                    OperatorMetadataUpdate(product_no="DW-NEW", operator_mold_no="MOLD-NEW")
+                    OperatorMetadataUpdate(product_no="22222", operator_mold_no="222")
                 )
 
         current_metadata = backend_app.operator_metadata_store.get()
-        self.assertEqual(current_metadata.product_no, "DW-OLD")
-        self.assertEqual(current_metadata.operator_mold_no, "MOLD-OLD")
+        self.assertEqual(current_metadata.product_no, "11111")
+        self.assertEqual(current_metadata.operator_mold_no, "111")
 
     def test_compose_data_attaches_current_operator_metadata(self) -> None:
         backend_app.operator_metadata_store.update(
-            OperatorMetadataUpdate(product_no="DW-50306", operator_mold_no="MOLD-01")
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
         )
         raw_data = FactoryData(
             Time="2026-03-09T07:20:25.123",
@@ -262,8 +284,8 @@ class OperatorMetadataApiTests(unittest.TestCase):
 
         composed = backend_app.plc_service._compose_data(raw_data)
 
-        self.assertEqual(composed.Product_No_operator, "DW-50306")
-        self.assertEqual(composed.Mold_No_operator, "MOLD-01")
+        self.assertEqual(composed.Product_No_operator, "12345")
+        self.assertEqual(composed.Mold_No_operator, "123")
         self.assertTrue(composed.operator_metadata_valid)
         self.assertEqual(composed.operator_metadata_missing_fields, [])
         self.assertIsNotNone(composed.operator_metadata_updated_at)
@@ -295,8 +317,8 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             At_Temp=14.0,
             Die_ID="D1",
             Billet_Cycle_ID="C1",
-            Product_No_operator="DW-50306",
-            Mold_No_operator="MOLD-01",
+            Product_No_operator="12345",
+            Mold_No_operator="123",
             operator_metadata_valid=True,
             operator_metadata_missing_fields=[],
             operator_metadata_updated_at="2026-03-09T07:20:20Z",
@@ -510,8 +532,8 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertNotIn("Product_No_operator", V1_CSV_COLUMNS)
         self.assertNotIn("Mold_No_operator", V1_CSV_COLUMNS)
         self.assertEqual(len(v1_row), 21)
-        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Product_No_operator")], "DW-50306")
-        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Mold_No_operator")], "MOLD-01")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Product_No_operator")], "12345")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Mold_No_operator")], "123")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_valid")], "true")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_missing_fields")], "")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_updated_at")], "2026-03-09T07:20:20Z")
@@ -949,8 +971,10 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 item for item in metadata["sensor_metadata"] if item.get("column_name") == "Product_No_operator"
             ][0]
             self.assertEqual(product_meta["field_name"], "product_no")
+            self.assertEqual(product_meta["physical_meaning"], "Operator-entered numeric product number")
             self.assertEqual(product_meta["source_system"], "Operator input")
             self.assertEqual(product_meta["mapping_status"], "operator_entered_required")
+            self.assertEqual(product_meta["validation_rule"], "1-40 digits only")
             self.assertEqual(product_meta["not_replacement_for"], "%DW PLC address")
 
             mold_no_meta = [
@@ -958,6 +982,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             ][0]
             self.assertEqual(mold_no_meta["field_name"], "operator_mold_no")
             self.assertEqual(mold_no_meta["mapping_status"], "operator_entered_required")
+            self.assertEqual(mold_no_meta["validation_rule"], "1-32 digits only")
             self.assertEqual(mold_no_meta["not_replacement_for"], "DIE_ID")
 
             self.assertIn(

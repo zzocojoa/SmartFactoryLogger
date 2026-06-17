@@ -32,8 +32,8 @@ describe('OperatorMetadataComponent', () => {
   beforeEach(() => {
     mocks.get.mockResolvedValue(buildMetadata());
     mocks.update.mockResolvedValue(buildMetadata({
-      product_no: 'DW-50306',
-      operator_mold_no: 'MOLD-01',
+      product_no: '12345',
+      operator_mold_no: '123',
       valid: true,
       missing_fields: [],
       updated_at: '2026-03-09T07:20:20Z',
@@ -59,10 +59,10 @@ describe('OperatorMetadataComponent', () => {
   it('saves valid operator metadata through the backend API', async () => {
     render(<OperatorMetadataComponent />);
 
-    const productInput = await screen.findByLabelText('제품번호(DW-)');
+    const productInput = await screen.findByLabelText('제품번호');
     const moldInput = screen.getByLabelText('금형 번호');
-    fireEvent.change(productInput, { target: { value: 'DW-50306' } });
-    fireEvent.change(moldInput, { target: { value: 'MOLD-01' } });
+    fireEvent.change(productInput, { target: { value: '12345' } });
+    fireEvent.change(moldInput, { target: { value: '123' } });
 
     const saveButton = screen.getByRole('button', { name: /적용/i });
     expect(saveButton).toBeEnabled();
@@ -70,21 +70,34 @@ describe('OperatorMetadataComponent', () => {
 
     await waitFor(() => {
       expect(mocks.update).toHaveBeenCalledWith({
-        product_no: 'DW-50306',
-        operator_mold_no: 'MOLD-01',
+        product_no: '12345',
+        operator_mold_no: '123',
       });
     });
   });
 
-  it('keeps invalid DW product numbers client-side before save', async () => {
+  it('keeps non-numeric product numbers client-side before save', async () => {
     render(<OperatorMetadataComponent />);
 
-    const productInput = await screen.findByLabelText('제품번호(DW-)');
+    const productInput = await screen.findByLabelText('제품번호');
     const moldInput = screen.getByLabelText('금형 번호');
-    fireEvent.change(productInput, { target: { value: 'PX-50306' } });
-    fireEvent.change(moldInput, { target: { value: 'MOLD-01' } });
+    fireEvent.change(productInput, { target: { value: 'DW-12345' } });
+    fireEvent.change(moldInput, { target: { value: '123' } });
 
-    expect(screen.getByText('DW-로 시작하고 영문, 숫자, ., _, -만 사용할 수 있습니다.')).toBeInTheDocument();
+    expect(screen.getByText('숫자만 입력할 수 있습니다.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /적용/i })).toBeDisabled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps non-numeric mold numbers client-side before save', async () => {
+    render(<OperatorMetadataComponent />);
+
+    const productInput = await screen.findByLabelText('제품번호');
+    const moldInput = screen.getByLabelText('금형 번호');
+    fireEvent.change(productInput, { target: { value: '12345' } });
+    fireEvent.change(moldInput, { target: { value: '123-1' } });
+
+    expect(screen.getByText('숫자만 입력할 수 있습니다.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /적용/i })).toBeDisabled();
     expect(mocks.update).not.toHaveBeenCalled();
   });

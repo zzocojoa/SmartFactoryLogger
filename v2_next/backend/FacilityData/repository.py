@@ -359,7 +359,7 @@ class CSVLoggerService:
                 {
                     "column_name": "Product_No_operator",
                     "field_name": "product_no",
-                    "physical_meaning": "Operator-entered product number with DW- product-code prefix",
+                    "physical_meaning": "Operator-entered numeric product number",
                     "source_system": "Operator input",
                     "device_id": "operator_console",
                     "plc_address": "",
@@ -367,7 +367,7 @@ class CSVLoggerService:
                     "mapping_status": "operator_entered_required",
                     "semantic_group": "operator_metadata",
                     "required": True,
-                    "validation_rule": "DW- prefix, 4-40 chars, letters/digits/dot/underscore/hyphen, no CSV formula prefix",
+                    "validation_rule": "1-40 digits only",
                     "not_replacement_for": "%DW PLC address",
                 },
                 {
@@ -381,7 +381,7 @@ class CSVLoggerService:
                     "mapping_status": "operator_entered_required",
                     "semantic_group": "operator_metadata",
                     "required": True,
-                    "validation_rule": "1-32 chars, starts with letter/digit, letters/digits/dot/underscore/hyphen, no CSV formula prefix",
+                    "validation_rule": "1-32 digits only",
                     "not_replacement_for": "DIE_ID",
                     "note": "DIE_ID remains the derived cycle identifier from Count/Speed/state.",
                 },

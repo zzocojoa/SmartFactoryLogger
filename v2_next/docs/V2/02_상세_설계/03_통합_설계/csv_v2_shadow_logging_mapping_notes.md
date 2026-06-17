@@ -119,6 +119,8 @@ csv_v2_sidecar_enabled=true
 
 - Electron GUI에서 `csv_v2_enabled=true`, `csv_v2_sidecar_enabled=true` 상태로 작업자 `product_no`,
   `operator_mold_no`를 저장한다.
+- `product_no`와 `operator_mold_no`는 숫자만 허용한다. smoke 입력 예시는 제품번호 `12345`, 금형 번호 `123`이다.
+  `DW-12345`, `ABC`, `123-1`, 공백, CR/LF 입력은 UI/API에서 거부되어야 한다.
 - 앱 재시작 후 입력값이 다시 표시되고, 백엔드 `operator_metadata.json`에도 같은 값이 남아 있어야 한다.
 - GUI 런타임에서 생성된 v2 CSV는 header 53컬럼, row 53컬럼이어야 하며 `Product_No_operator`,
   `Mold_No_operator`, `operator_metadata_valid=true`가 같은 row에 기록되어야 한다.

@@ -8,8 +8,8 @@ import { selectDashboardOperatorMetadataSlice, useDashboardStore } from '../../.
 import type { OperatorMetadata } from '../../../../shared/types';
 import { operatorMetadataService } from '../../api/operatorMetadataService';
 
-const PRODUCT_NO_PATTERN = /^DW-[A-Za-z0-9][A-Za-z0-9._-]{0,36}$/;
-const OPERATOR_MOLD_NO_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const PRODUCT_NO_PATTERN = /^\d{1,40}$/;
+const OPERATOR_MOLD_NO_PATTERN = /^\d{1,32}$/;
 
 const EMPTY_METADATA: OperatorMetadata = {
   product_no: '',
@@ -28,23 +28,21 @@ type FieldErrors = {
 const normalize = (value: string): string => value.trim();
 
 const validateProductNo = (value: string): string | undefined => {
-  const normalized = normalize(value);
-  if (!normalized) {
+  if (!normalize(value)) {
     return '제품번호는 필수입니다.';
   }
-  if (!PRODUCT_NO_PATTERN.test(normalized)) {
-    return 'DW-로 시작하고 영문, 숫자, ., _, -만 사용할 수 있습니다.';
+  if (!PRODUCT_NO_PATTERN.test(value)) {
+    return '숫자만 입력할 수 있습니다.';
   }
   return undefined;
 };
 
 const validateOperatorMoldNo = (value: string): string | undefined => {
-  const normalized = normalize(value);
-  if (!normalized) {
+  if (!normalize(value)) {
     return '금형 번호는 필수입니다.';
   }
-  if (!OPERATOR_MOLD_NO_PATTERN.test(normalized)) {
-    return '영문 또는 숫자로 시작하고 32자 이하로 입력하세요.';
+  if (!OPERATOR_MOLD_NO_PATTERN.test(value)) {
+    return '숫자만 입력할 수 있습니다.';
   }
   return undefined;
 };
@@ -182,13 +180,15 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
 
       <div className="operator-form-grid">
         <label className="operator-field">
-          <span className="operator-field-label">제품번호(DW-)</span>
+          <span className="operator-field-label">제품번호</span>
           <input
             ref={productInputRef}
             value={productNo}
             maxLength={40}
-            placeholder="DW-50306"
-            aria-label="제품번호(DW-)"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="12345"
+            aria-label="제품번호"
             aria-invalid={Boolean(shouldShowErrors && fieldErrors.productNo)}
             onChange={(event) => setProductNo(event.target.value)}
             onBlur={() => setTouched(true)}
@@ -204,7 +204,9 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
           <input
             value={operatorMoldNo}
             maxLength={32}
-            placeholder="MOLD-01"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="123"
             aria-label="금형 번호"
             aria-invalid={Boolean(shouldShowErrors && fieldErrors.operatorMoldNo)}
             onChange={(event) => setOperatorMoldNo(event.target.value)}

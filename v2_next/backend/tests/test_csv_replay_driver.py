@@ -71,8 +71,8 @@ class CsvReplayDriverTests(unittest.TestCase):
             "",
             "",
             "",
-            "DW-50306",
-            "MOLD-01",
+            "12345",
+            "123",
             "true",
             "",
             "2026-03-09T07:20:20Z",
@@ -149,8 +149,8 @@ class CsvReplayDriverTests(unittest.TestCase):
 
             self.assertTrue(driver.connect())
             data = driver.read_data()
-            self.assertEqual(data.Product_No_operator, "DW-50306")
-            self.assertEqual(data.Mold_No_operator, "MOLD-01")
+            self.assertEqual(data.Product_No_operator, "12345")
+            self.assertEqual(data.Mold_No_operator, "123")
             self.assertTrue(data.operator_metadata_valid)
             self.assertEqual(data.operator_metadata_missing_fields, [])
             self.assertEqual(data.operator_metadata_updated_at, "2026-03-09T07:20:20Z")

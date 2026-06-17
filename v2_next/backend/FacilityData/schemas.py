@@ -3,14 +3,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator, Validat
 from typing import Optional, Dict, Any
 
 CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
-PRODUCT_NO_RE = re.compile(r"^DW-[A-Za-z0-9][A-Za-z0-9._-]{0,36}$")
-OPERATOR_MOLD_NO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
+PRODUCT_NO_RE = re.compile(r"^\d{1,40}$")
+OPERATOR_MOLD_NO_RE = re.compile(r"^\d{1,32}$")
 
 
 def _normalize_operator_text(value: str | None) -> str:
     if value is None:
         return ""
-    return str(value).strip()
+    return str(value)
 
 
 def _has_control_character(value: str) -> bool:
@@ -29,27 +29,27 @@ class OperatorMetadataBase(BaseModel):
     @field_validator("product_no")
     @classmethod
     def validate_product_no(cls, value: str) -> str:
-        if not value:
+        if not value.strip():
             return ""
         if _has_control_character(value):
             raise ValueError("product_no must not contain control characters")
         if value[0] in CSV_INJECTION_PREFIXES:
             raise ValueError("product_no must not start with a CSV formula character")
         if not PRODUCT_NO_RE.match(value):
-            raise ValueError("product_no must match DW- followed by 1-37 letters, digits, dots, underscores, or hyphens")
+            raise ValueError("product_no must contain digits only")
         return value
 
     @field_validator("operator_mold_no")
     @classmethod
     def validate_operator_mold_no(cls, value: str) -> str:
-        if not value:
+        if not value.strip():
             return ""
         if _has_control_character(value):
             raise ValueError("operator_mold_no must not contain control characters")
         if value[0] in CSV_INJECTION_PREFIXES:
             raise ValueError("operator_mold_no must not start with a CSV formula character")
         if not OPERATOR_MOLD_NO_RE.match(value):
-            raise ValueError("operator_mold_no must be 1-32 characters and start with a letter or digit")
+            raise ValueError("operator_mold_no must contain digits only")
         return value
 
 
