@@ -10,6 +10,7 @@ from backend.FacilityData.drivers.real_plc import MelsecResponseError, RealPLCDr
 from backend.FacilityData.repository import CSVLoggerService, V1_CSV_COLUMNS, V2_CSV_COLUMNS
 from backend.FacilityData.schemas import FactoryData
 from scripts.validate_csv_v2_shadow import validate as validate_csv_v2_shadow
+from scripts.validate_csv_v2_shadow import validate_many as validate_csv_v2_shadow_many
 
 
 class MelsecParseTests(unittest.TestCase):
@@ -805,6 +806,76 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
 
         self.assertEqual(result, 0)
+
+    def test_shadow_validation_script_accepts_daily_rollover_file_sets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+
+            file_specs = [
+                ("20260309_235959", "2026-03-09T23:59:59.900", 1),
+                ("20260310_000000", "2026-03-10T00:00:00.100", 2),
+            ]
+            v1_paths = []
+            v2_paths = []
+            metadata_paths = []
+            for suffix, timestamp_s, sample_seq in file_specs:
+                data = self.create_data().model_copy(update={"Time": timestamp_s})
+                timestamp = service._parse_timestamp(data)
+                v1_row = service._build_row(data, timestamp)
+                v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), sample_seq, v1_row)
+                v1_path = log_dir / f"Factory_Integrated_Log_{suffix}.csv"
+                v2_path = log_dir / f"Factory_Integrated_Log_v2_{suffix}.csv"
+
+                with v1_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(V1_CSV_COLUMNS)
+                    writer.writerow(v1_row)
+                with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(V2_CSV_COLUMNS)
+                    writer.writerow(v2_row)
+                service._write_v2_sidecar(v2_path)
+                v1_paths.append(v1_path)
+                v2_paths.append(v2_path)
+                metadata_paths.append(v2_path.with_suffix(".metadata.json"))
+
+            result = validate_csv_v2_shadow_many(
+                list(reversed(v1_paths)),
+                list(reversed(v2_paths)),
+                list(reversed(metadata_paths)),
+            )
+
+        self.assertEqual(result, 0)
+
+    def test_shadow_validation_script_fails_when_required_v1_glob_has_no_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path)
+
+            result = validate_csv_v2_shadow_many(
+                [],
+                [v2_path],
+                [v2_path.with_suffix(".metadata.json")],
+                require_v1=True,
+            )
+
+        self.assertEqual(result, 1)
 
 
 if __name__ == "__main__":
