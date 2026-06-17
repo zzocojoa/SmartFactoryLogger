@@ -13,7 +13,7 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 | 설정 | 환경변수 | 기본값 | 의미 |
 | --- | --- | --- | --- |
 | `[SETTINGS] autosave` | 없음 | `true` | CSV 저장 전체 on/off |
-| `[LOGGING] csv_v1_enabled` | `CSV_V1_ENABLED` | `true` | `Factory_Integrated_Log_*.csv` 저장 |
+| `[LOGGING] csv_v1_enabled` | `CSV_V1_ENABLED` | `true` | `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv` 저장 |
 | `[LOGGING] csv_v2_enabled` | `CSV_V2_ENABLED` | `false` | `Factory_Integrated_Log_v2_*.csv` 저장 |
 | `[LOGGING] csv_v2_sidecar_enabled` | `CSV_V2_SIDECAR_ENABLED` | `true` | `Factory_Integrated_Log_v2_*.metadata.json` 저장 |
 
@@ -32,7 +32,7 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 - v1 CSV: `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv`
 - v2 CSV: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv`
 - v2 sidecar: `Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json`
-- glob 수집 시 v1과 v2를 같은 `Factory_Integrated_Log_*.csv` 패턴으로 섞지 말고,
+- glob 수집 시 v1과 v2를 같은 넓은 glob 패턴으로 섞지 말고,
   v1 파일 목록과 v2 파일 목록을 별도로 모은 뒤 timestamp suffix 기준으로 정렬/매칭한다.
 
 ## Daily rollover 정책

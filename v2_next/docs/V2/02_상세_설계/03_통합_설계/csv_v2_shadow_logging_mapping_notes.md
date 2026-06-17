@@ -51,7 +51,7 @@ csv_v2_sidecar_enabled=true
 
 환경변수로 실행하는 경우 `POSITION_READ_ENABLED=true`가 `[EXTRUDER] position_read_enabled=true`보다 우선한다.
 
-- v1 CSV가 기존처럼 `Factory_Integrated_Log_*.csv`로 생성되는지 먼저 확인한다.
+- v1 CSV가 기존처럼 `Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv` 형식으로 생성되는지 먼저 확인한다.
 - v2 CSV가 `Factory_Integrated_Log_v2_*.csv`로 별도 생성되는지 확인한다.
 
 ### 2. 수집 산출물
