@@ -15,14 +15,14 @@ const OPERATOR_METADATA_TITLE = '작업 정보';
  * Balanced layout with all widgets visible
  */
 const PRESET_16_9: LayoutMap = {
-  kpi: { x: 0, y: 0, width: 15, height: 18, type: 'kpi', title: '공정 KPI' },
+  kpi: { x: 0, y: 0, width: 15, height: 28, type: 'kpi', title: '공정 KPI' },
   spot: { x: 15, y: 0, width: 25, height: 4, type: 'spot', title: 'SPOT 온도' },
   temps: { x: 15, y: 4, width: 25, height: 4, type: 'temps', title: '보조 온도' },
-  camera: { x: 15, y: 8, width: 25, height: 10, type: 'camera', title: 'SPOT 카메라' },
+  camera: { x: 15, y: 8, width: 25, height: 20, type: 'camera', title: 'SPOT 카메라' },
   molds: { x: 40, y: 0, width: 20, height: 8, type: 'molds', title: '몰드 존' },
   env: { x: 40, y: 8, width: 20, height: 4, type: 'env', title: '환경' },
-  operatorMetadata: { x: 40, y: 12, width: 20, height: 6, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
-  timeseries: { x: 0, y: 18, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
+  operatorMetadata: { x: 40, y: 12, width: 20, height: 16, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
+  timeseries: { x: 0, y: 28, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
 };
 
 /**
@@ -30,14 +30,14 @@ const PRESET_16_9: LayoutMap = {
  * Wider layout utilizing horizontal space
  */
 const PRESET_21_9: LayoutMap = {
-  kpi: { x: 0, y: 0, width: 12, height: 16, type: 'kpi', title: '공정 KPI' },
+  kpi: { x: 0, y: 0, width: 12, height: 20, type: 'kpi', title: '공정 KPI' },
   spot: { x: 12, y: 0, width: 16, height: 4, type: 'spot', title: 'SPOT 온도' },
   temps: { x: 12, y: 4, width: 16, height: 4, type: 'temps', title: '보조 온도' },
-  camera: { x: 12, y: 8, width: 16, height: 8, type: 'camera', title: 'SPOT 카메라' },
-  molds: { x: 28, y: 0, width: 20, height: 12, type: 'molds', title: '몰드 존' },
-  operatorMetadata: { x: 48, y: 0, width: 12, height: 12, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
-  env: { x: 28, y: 12, width: 32, height: 4, type: 'env', title: '환경' },
-  timeseries: { x: 0, y: 16, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
+  camera: { x: 12, y: 8, width: 16, height: 12, type: 'camera', title: 'SPOT 카메라' },
+  molds: { x: 28, y: 0, width: 20, height: 16, type: 'molds', title: '몰드 존' },
+  operatorMetadata: { x: 48, y: 0, width: 12, height: 20, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
+  env: { x: 28, y: 16, width: 20, height: 4, type: 'env', title: '환경' },
+  timeseries: { x: 0, y: 20, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
 };
 
 /**
@@ -50,9 +50,9 @@ const PRESET_4_3: LayoutMap = {
   temps: { x: 30, y: 4, width: 30, height: 4, type: 'temps', title: '보조 온도' },
   camera: { x: 30, y: 8, width: 30, height: 8, type: 'camera', title: 'SPOT 카메라' },
   molds: { x: 0, y: 12, width: 30, height: 6, type: 'molds', title: '몰드 존' },
-  operatorMetadata: { x: 30, y: 16, width: 30, height: 4, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
-  env: { x: 0, y: 18, width: 30, height: 4, type: 'env', title: '환경' },
-  timeseries: { x: 0, y: 22, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
+  operatorMetadata: { x: 30, y: 16, width: 30, height: 16, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
+  env: { x: 0, y: 18, width: 30, height: 14, type: 'env', title: '환경' },
+  timeseries: { x: 0, y: 32, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
 };
 
 /**
@@ -63,8 +63,8 @@ const PRESET_COMPACT: LayoutMap = {
   kpi: { x: 0, y: 0, width: 60, height: 8, type: 'kpi', title: '공정 KPI' },
   spot: { x: 0, y: 8, width: 30, height: 4, type: 'spot', title: 'SPOT 온도' },
   temps: { x: 30, y: 8, width: 30, height: 4, type: 'temps', title: '보조 온도' },
-  operatorMetadata: { x: 0, y: 12, width: 60, height: 4, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
-  timeseries: { x: 0, y: 16, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
+  operatorMetadata: { x: 0, y: 12, width: 60, height: 16, type: 'operatorMetadata', title: OPERATOR_METADATA_TITLE },
+  timeseries: { x: 0, y: 28, width: 60, height: 8, type: 'timeseries', title: '타임 시리즈' },
 };
 
 export const LAYOUT_PRESETS: LayoutPreset[] = [

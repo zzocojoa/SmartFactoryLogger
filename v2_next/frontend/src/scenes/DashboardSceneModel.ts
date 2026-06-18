@@ -23,15 +23,17 @@ export type SavedLayoutItem = {
 
 export type SavedLayoutMap = Record<string, SavedLayoutItem>;
 
+const OPERATOR_METADATA_MIN_HEIGHT = 16;
+
 export const DEFAULT_DASHBOARD_ITEMS: DashboardItem[] = [
-  { key: 'kpi', type: 'kpi', title: '\uACF5\uC815 KPI', x: 0, y: 0, width: 15, height: 18 },
+  { key: 'kpi', type: 'kpi', title: '\uACF5\uC815 KPI', x: 0, y: 0, width: 15, height: 28 },
   { key: 'spot', type: 'spot', title: 'SPOT \uC628\uB3C4', x: 15, y: 0, width: 25, height: 4 },
   { key: 'temps', type: 'temps', title: '\uBCF4\uC870 \uC628\uB3C4', x: 15, y: 4, width: 25, height: 4 },
-  { key: 'camera', type: 'camera', title: 'SPOT \uCE74\uBA54\uB77C', x: 15, y: 8, width: 25, height: 10 },
+  { key: 'camera', type: 'camera', title: 'SPOT \uCE74\uBA54\uB77C', x: 15, y: 8, width: 25, height: 20 },
   { key: 'molds', type: 'molds', title: '\uBAB0\uB4DC \uC874', x: 40, y: 0, width: 20, height: 8 },
   { key: 'env', type: 'env', title: '\uD658\uACBD', x: 40, y: 8, width: 20, height: 4 },
-  { key: 'operatorMetadata', type: 'operatorMetadata', title: '\uC791\uC5C5 \uC815\uBCF4', x: 40, y: 12, width: 20, height: 6 },
-  { key: 'timeseries', type: 'timeseries', title: '\uD0C0\uC784 \uC2DC\uB9AC\uC988', x: 0, y: 18, width: 60, height: 8 },
+  { key: 'operatorMetadata', type: 'operatorMetadata', title: '\uC791\uC5C5 \uC815\uBCF4', x: 40, y: 12, width: 20, height: OPERATOR_METADATA_MIN_HEIGHT },
+  { key: 'timeseries', type: 'timeseries', title: '\uD0C0\uC784 \uC2DC\uB9AC\uC988', x: 0, y: 28, width: 60, height: 8 },
 ];
 
 export const DASHBOARD_LAYOUT_KEYS = [
@@ -79,7 +81,10 @@ const resolveDashboardItemFromKey = (
   const x: number = saved?.x ?? defaultItem?.x ?? 0;
   const y: number = saved?.y ?? defaultItem?.y ?? 0;
   const width: number = saved?.width ?? defaultItem?.width ?? 10;
-  const height: number = saved?.height ?? defaultItem?.height ?? 4;
+  const rawHeight: number = saved?.height ?? defaultItem?.height ?? 4;
+  const height: number = type === 'operatorMetadata'
+    ? Math.max(rawHeight, OPERATOR_METADATA_MIN_HEIGHT)
+    : rawHeight;
 
   return {
     key,
@@ -101,8 +106,10 @@ const rectanglesOverlap = (a: DashboardItem, b: DashboardItem): boolean => {
   return a.x < bRight && aRight > b.x && a.y < bBottom && aBottom > b.y;
 };
 
+const getItemBottom = (item: DashboardItem): number => item.y + item.height;
+
 const getLayoutBottom = (items: DashboardItem[]): number => {
-  return items.reduce((bottom, item) => Math.max(bottom, item.y + item.height), 0);
+  return items.reduce((bottom, item) => Math.max(bottom, getItemBottom(item)), 0);
 };
 
 const uniquifyRequiredItemKey = (key: string, items: DashboardItem[]): string => {
@@ -159,6 +166,63 @@ export const ensureRequiredDashboardItems = (items: DashboardItem[]): DashboardI
   return nextItems;
 };
 
+const resolveOperatorMetadataLayoutConflicts = (items: DashboardItem[]): DashboardItem[] => {
+  const operatorItem = items.find(item => item.type === 'operatorMetadata');
+  if (!operatorItem) {
+    return items;
+  }
+
+  const originalIndex = new Map(items.map((item, index) => [item.key, index]));
+  const placedItems: DashboardItem[] = [];
+  const movedItems = new Map<string, DashboardItem>();
+  let changed = false;
+  let shouldResolveCollisions = false;
+
+  const orderedItems = [...items]
+    .sort((a, b) => (
+      a.y - b.y ||
+      a.x - b.x ||
+      (originalIndex.get(a.key) ?? 0) - (originalIndex.get(b.key) ?? 0)
+    ));
+
+  orderedItems.forEach((item) => {
+    let nextItem = item;
+
+    if (item.key === operatorItem.key) {
+      shouldResolveCollisions = true;
+    }
+
+    if (shouldResolveCollisions) {
+      while (true) {
+        const blockingBottom = placedItems.reduce((bottom, placedItem) => {
+          return rectanglesOverlap(placedItem, nextItem)
+            ? Math.max(bottom, getItemBottom(placedItem))
+            : bottom;
+        }, nextItem.y);
+
+        if (blockingBottom === nextItem.y) {
+          break;
+        }
+
+        nextItem = {
+          ...nextItem,
+          y: blockingBottom,
+        };
+      }
+    }
+
+    if (nextItem.y !== item.y) {
+      changed = true;
+      movedItems.set(item.key, nextItem);
+    }
+    placedItems.push(nextItem);
+  });
+
+  return changed
+    ? items.map(item => movedItems.get(item.key) ?? item)
+    : items;
+};
+
 export const resolveDashboardItems = (savedLayout: SavedLayoutMap | null): DashboardItem[] => {
   const savedMap: SavedLayoutMap = savedLayout ?? {};
   const defaultItemMap: Map<string, DashboardItem> = new Map(DEFAULT_DASHBOARD_ITEMS.map(item => [item.key, item]));
@@ -179,5 +243,5 @@ export const resolveDashboardItems = (savedLayout: SavedLayoutMap | null): Dashb
     return acc;
   }, []);
 
-  return ensureRequiredDashboardItems(items);
+  return resolveOperatorMetadataLayoutConflicts(ensureRequiredDashboardItems(items));
 };

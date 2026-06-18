@@ -135,6 +135,36 @@ describe('CameraComponent focus direction controls', () => {
     expect(liveImage?.getAttribute('src')).not.toBe(firstSrc);
   });
 
+  it('uses finite crosshair geometry when the SPOT config response is missing SVG fields', () => {
+    useDashboardStore.setState({
+      spotConfig: {
+        image_url: '',
+        refresh_interval: 3,
+      } as SpotConfig,
+    });
+
+    const { container } = render(<CameraComponent focusBusy={false} />);
+    const svg = container.querySelector('svg.camera-crosshair');
+    const lines = Array.from(container.querySelectorAll('svg.camera-crosshair line'));
+    const circles = Array.from(container.querySelectorAll('svg.camera-crosshair circle'));
+
+    expect(svg).toHaveAttribute('viewBox', '0 0 512 288');
+    expect(lines).toHaveLength(8);
+    expect(circles).toHaveLength(2);
+
+    const numericAttributes = [
+      ...lines.flatMap((line) => ['x1', 'y1', 'x2', 'y2'].map((attr) => line.getAttribute(attr))),
+      ...circles.flatMap((circle) => ['cx', 'cy'].map((attr) => circle.getAttribute(attr))),
+    ];
+
+    numericAttributes.forEach((value) => {
+      expect(value).not.toBeNull();
+      expect(value).not.toBe('NaN');
+      expect(value).not.toContain('undefined');
+      expect(Number.isFinite(Number(value))).toBe(true);
+    });
+  });
+
   it('resolves relative live image URLs against the API base for Electron file views', () => {
     expect(resolveSpotLiveImageUrl('/api/spot/live_image', 'http://localhost:8000')).toBe(
       'http://localhost:8000/api/spot/live_image'

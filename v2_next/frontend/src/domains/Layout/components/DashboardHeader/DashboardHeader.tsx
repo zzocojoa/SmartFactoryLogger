@@ -214,6 +214,14 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   const dataPollingDegraded = useDashboardStore((state) => state.pollingDegraded);
   const dataPollingIntervalMs = useDashboardStore((state) => state.pollingIntervalMs);
   const dataPollingFailureCount = useDashboardStore((state) => state.pollingFailureCount);
+  const operatorMetadataData = useDashboardStore((state) => state.data);
+  const hasOperatorMetadataSample = Boolean(operatorMetadataData);
+  const operatorMetadataNeedsAttention = Boolean(
+    operatorMetadataData &&
+    (operatorMetadataData.operator_metadata_valid !== true ||
+      (operatorMetadataData.operator_metadata_missing_fields?.length ?? 0) > 0)
+  );
+  const operatorMetadataIndicatorLabel = operatorMetadataNeedsAttention ? '작업 정보 필요' : '작업 정보 OK';
 
   const {
     statusLabel,
@@ -461,6 +469,17 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
             </div>
           )}
         </div>
+
+        {hasOperatorMetadataSample && (
+          <div
+            className={`operator-required-indicator ${operatorMetadataNeedsAttention ? 'attention' : 'ok'}`}
+            aria-label={operatorMetadataNeedsAttention ? 'Operator metadata required' : 'Operator metadata applied'}
+            title={operatorMetadataNeedsAttention ? '작업 정보 필수값을 확인하세요.' : '작업 정보 필수값이 적용되어 있습니다.'}
+          >
+            <span className="operator-required-dot" aria-hidden="true" />
+            <span className="operator-required-indicator-label">{operatorMetadataIndicatorLabel}</span>
+          </div>
+        )}
 
         <div className="snapshot-control">
           <button

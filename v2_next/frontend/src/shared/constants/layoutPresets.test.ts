@@ -81,6 +81,6 @@ describe('layoutPresets', () => {
     expect(getBottom(preset.layout.camera)).toBe(timeSeriesLayout.y);
     expect(getBottom(preset.layout.env)).toBe(timeSeriesLayout.y);
     expect(getRight(preset.layout.operatorMetadata)).toBe(CURRENT_LAYOUT_COLS);
-    expect(getBottom(preset.layout.operatorMetadata)).toBe(timeSeriesLayout.y - preset.layout.env.height);
+    expect(getBottom(preset.layout.operatorMetadata)).toBe(timeSeriesLayout.y);
   });
 });
