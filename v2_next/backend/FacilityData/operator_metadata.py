@@ -7,10 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backend import config
-from backend.FacilityData.schemas import OperatorMetadata, OperatorMetadataUpdate
+from backend.FacilityData.schemas import OperatorMetadata, OperatorMetadataHistoryEntry, OperatorMetadataUpdate
 
 
 OPERATOR_METADATA_VERSION = "1.0.0"
+OPERATOR_METADATA_HISTORY_LIMIT = 3
 
 
 def _utc_now_iso() -> str:
@@ -30,25 +31,36 @@ class OperatorMetadataStore:
             return self._metadata.model_copy(deep=True)
 
     def update(self, payload: OperatorMetadataUpdate) -> OperatorMetadata:
-        next_metadata = OperatorMetadata(
-            product_no=payload.product_no,
-            operator_mold_no=payload.operator_mold_no,
-            updated_at=_utc_now_iso(),
-            source="operator_input",
-        )
         with self._lock:
+            history = self._build_history_locked(
+                previous=self._metadata,
+                next_product_no=payload.product_no,
+                next_operator_mold_no=payload.operator_mold_no,
+            )
+            next_metadata = OperatorMetadata(
+                product_no=payload.product_no,
+                operator_mold_no=payload.operator_mold_no,
+                updated_at=_utc_now_iso(),
+                source="operator_input",
+                history=history,
+            )
             self._persist_locked(next_metadata)
             self._metadata = next_metadata
             return self._metadata.model_copy(deep=True)
 
     def reset(self) -> OperatorMetadata:
-        next_metadata = OperatorMetadata(
-            product_no="",
-            operator_mold_no="",
-            updated_at=_utc_now_iso(),
-            source="operator_input",
-        )
         with self._lock:
+            next_metadata = OperatorMetadata(
+                product_no="",
+                operator_mold_no="",
+                updated_at=_utc_now_iso(),
+                source="operator_input",
+                history=self._build_history_locked(
+                    previous=self._metadata,
+                    next_product_no="",
+                    next_operator_mold_no="",
+                ),
+            )
             self._persist_locked(next_metadata)
             self._metadata = next_metadata
             return self._metadata.model_copy(deep=True)
@@ -63,6 +75,41 @@ class OperatorMetadataStore:
         except Exception as exc:
             self._logger.warning("Operator metadata load failed: %s", exc)
             self._metadata = OperatorMetadata()
+
+    def _build_history_locked(
+        self,
+        previous: OperatorMetadata,
+        next_product_no: str,
+        next_operator_mold_no: str,
+    ) -> list[OperatorMetadataHistoryEntry]:
+        history = list(previous.history)
+        previous_is_valid = bool(previous.valid and previous.product_no and previous.operator_mold_no)
+        same_as_next = (
+            previous.product_no == next_product_no and
+            previous.operator_mold_no == next_operator_mold_no
+        )
+
+        if previous_is_valid and not same_as_next:
+            history.insert(
+                0,
+                OperatorMetadataHistoryEntry(
+                    product_no=previous.product_no,
+                    operator_mold_no=previous.operator_mold_no,
+                    updated_at=previous.updated_at,
+                ),
+            )
+
+        deduped: list[OperatorMetadataHistoryEntry] = []
+        seen: set[tuple[str, str]] = set()
+        for item in history:
+            key = (item.product_no, item.operator_mold_no)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+            if len(deduped) >= OPERATOR_METADATA_HISTORY_LIMIT:
+                break
+        return deduped
 
     def _persist_locked(self, metadata: OperatorMetadata) -> None:
         payload = {

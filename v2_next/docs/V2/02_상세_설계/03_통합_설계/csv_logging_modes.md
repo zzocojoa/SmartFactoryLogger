@@ -42,6 +42,11 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
   `operator_metadata_missing_fields=product_no,operator_mold_no` 상태를 만든다. 리셋 이후 새 sample부터
   v2 CSV에 빈 `Product_No_operator`, 빈 `Mold_No_operator`, invalid 상태가 기록되며, 이미 logger queue에
   들어간 row는 소급 변경하지 않는다.
+- 작업 정보 스냅카드의 RGB 외곽 펄스는 필수값 누락 상태에서 `적용`, `제품 변경`, Enter 저장을 시도하면
+  시작한다. 작업자가 제품번호와 금형 번호를 입력하더라도 `적용`으로 서버 저장이 성공해
+  `operator_metadata_valid=true`가 되기 전까지 펄스 경고는 유지한다.
+- 작업 정보 스냅카드는 안내 문구 대신 `이전 작업` 영역을 표시한다. 새 제품번호/금형 번호 적용 또는 리셋 직전의
+  유효한 작업 정보가 최근 순서로 최대 3개까지 `operator_metadata.json` history에 보존된다.
 - v2 `schema_version=2.2.0` CSV는 53컬럼 contract다. index 기반으로 v2 CSV를 읽는 consumer는 header 기반
   매핑으로 전환하거나 배포 전 dry-run에서 실패 여부를 확인해야 한다.
 - 운영 배포 전에는 실제 서버 샘플 1세트를 repo 내부 validator와 repo 밖 ETL/Excel 매크로에 각각 dry-run한다.

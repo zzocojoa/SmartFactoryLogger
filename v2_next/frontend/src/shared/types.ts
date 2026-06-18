@@ -78,6 +78,13 @@ export interface OperatorMetadata {
   missing_fields: string[];
   updated_at?: string | null;
   source: string;
+  history: OperatorMetadataHistoryEntry[];
+}
+
+export interface OperatorMetadataHistoryEntry {
+  product_no: string;
+  operator_mold_no: string;
+  updated_at?: string | null;
 }
 
 export interface OperatorMetadataPayload {

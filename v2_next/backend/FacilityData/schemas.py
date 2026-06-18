@@ -61,11 +61,22 @@ class OperatorMetadataUpdate(OperatorMetadataBase):
         return self
 
 
+class OperatorMetadataHistoryEntry(OperatorMetadataBase):
+    updated_at: Optional[str] = None
+
+    @model_validator(mode="after")
+    def require_required_fields(self):
+        if not self.product_no or not self.operator_mold_no:
+            raise ValueError("history product_no and operator_mold_no are required")
+        return self
+
+
 class OperatorMetadata(OperatorMetadataBase):
     valid: bool = False
     missing_fields: list[str] = Field(default_factory=list)
     updated_at: Optional[str] = None
     source: str = "operator_input"
+    history: list[OperatorMetadataHistoryEntry] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def derive_validity(self):
