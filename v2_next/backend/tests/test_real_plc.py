@@ -155,6 +155,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         payload = response.json()
         self.assertFalse(payload["valid"])
         self.assertEqual(payload["missing_fields"], ["product_no", "operator_mold_no"])
+        self.assertEqual(payload["history"], [])
 
     def test_put_persists_valid_operator_metadata(self) -> None:
         client = TestClient(backend_app.app, raise_server_exceptions=False)
@@ -173,7 +174,40 @@ class OperatorMetadataApiTests(unittest.TestCase):
         self.assertEqual(payload["operator_mold_no"], "123")
         self.assertTrue(payload["valid"])
         self.assertEqual(payload["missing_fields"], [])
+        self.assertEqual(payload["history"], [])
         self.assertTrue(backend_app.operator_metadata_store._path.exists())
+
+    def test_put_returns_previous_three_operator_metadata_entries(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            for product_no, mold_no in [
+                ("11111", "111"),
+                ("22222", "222"),
+                ("33333", "333"),
+                ("44444", "444"),
+            ]:
+                response = client.put(
+                    "/api/facility/operator-metadata",
+                    json={"product_no": product_no, "operator_mold_no": mold_no},
+                    headers=self.TRUSTED_WRITE_HEADERS,
+                )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["product_no"], "44444")
+        self.assertEqual(payload["operator_mold_no"], "444")
+        self.assertEqual(
+            [(item["product_no"], item["operator_mold_no"]) for item in payload["history"]],
+            [("33333", "333"), ("22222", "222"), ("11111", "111")],
+        )
+
+        persisted = json.loads(backend_app.operator_metadata_store._path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            [(item["product_no"], item["operator_mold_no"]) for item in persisted["metadata"]["history"]],
+            [("33333", "333"), ("22222", "222"), ("11111", "111")],
+        )
 
     def test_put_rejects_untrusted_origin(self) -> None:
         client = TestClient(backend_app.app, raise_server_exceptions=False)

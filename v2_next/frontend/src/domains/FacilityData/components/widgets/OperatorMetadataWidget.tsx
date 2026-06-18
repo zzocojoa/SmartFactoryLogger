@@ -12,6 +12,8 @@ import { operatorMetadataService } from '../../api/operatorMetadataService';
 
 const PRODUCT_NO_PATTERN = /^\d{1,40}$/;
 const OPERATOR_MOLD_NO_PATTERN = /^\d{1,32}$/;
+const REQUIRED_ALERT_RING_COUNT = 9;
+const REQUIRED_ALERT_RING_INDICES = Array.from({ length: REQUIRED_ALERT_RING_COUNT }, (_, index) => index);
 
 const EMPTY_METADATA: OperatorMetadata = {
   product_no: '',
@@ -20,6 +22,7 @@ const EMPTY_METADATA: OperatorMetadata = {
   missing_fields: ['product_no', 'operator_mold_no'],
   updated_at: null,
   source: 'operator_input',
+  history: [],
 };
 
 type FieldErrors = {
@@ -41,6 +44,20 @@ const normalizeOperatorMetadata = (metadata: Partial<OperatorMetadata> | null | 
         ...(!productNo ? ['product_no'] : []),
         ...(!operatorMoldNo ? ['operator_mold_no'] : []),
       ];
+  const rawHistory = metadata?.history;
+  const history = Array.isArray(rawHistory)
+    ? rawHistory
+        .filter((entry): entry is OperatorMetadata['history'][number] => (
+          typeof entry?.product_no === 'string' &&
+          typeof entry?.operator_mold_no === 'string'
+        ))
+        .map((entry) => ({
+          product_no: entry.product_no,
+          operator_mold_no: entry.operator_mold_no,
+          updated_at: typeof entry.updated_at === 'string' ? entry.updated_at : null,
+        }))
+        .slice(0, 3)
+    : [];
 
   return {
     product_no: productNo,
@@ -49,6 +66,7 @@ const normalizeOperatorMetadata = (metadata: Partial<OperatorMetadata> | null | 
     missing_fields: missingFields,
     updated_at: typeof metadata?.updated_at === 'string' ? metadata.updated_at : null,
     source: typeof metadata?.source === 'string' ? metadata.source : 'operator_input',
+    history,
   };
 };
 
@@ -109,6 +127,8 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
   const [saveError, setSaveError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
   const [changeNeeded, setChangeNeeded] = useState(false);
+  const [requiredAlertActive, setRequiredAlertActive] = useState(false);
+  const [requiredAlertNonce, setRequiredAlertNonce] = useState(0);
 
   const fieldErrors = useMemo(() => validateFields(productNo, operatorMoldNo), [operatorMoldNo, productNo]);
   const hasFieldErrors = Boolean(fieldErrors.productNo || fieldErrors.operatorMoldNo);
@@ -182,18 +202,23 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
           : viewState === 'stale'
             ? '제품 변경 확인 필요'
             : '적용됨';
-  const guidanceText = loadError || saveError
-    ? null
-    : viewState === 'missing'
-      ? '작업 시작 전 제품번호와 금형 번호를 입력하세요. 로깅은 계속되지만 CSV에는 invalid 상태가 기록됩니다.'
-      : viewState === 'invalid'
-        ? '제품번호와 금형 번호는 숫자만 입력할 수 있습니다.'
-        : viewState === 'dirty'
-          ? '입력값이 아직 서버에 적용되지 않았습니다. 적용 후 생성되는 새 v2 CSV row부터 반영됩니다.'
-          : viewState === 'stale'
-            ? '제품이 바뀌었으면 현재 값을 확인하거나 수정한 뒤 적용하세요. 자동 제품 변경 감지는 현재 지원되지 않습니다.'
-            : null;
   const canSave = !busy && !hasFieldErrors && (dirty || changeNeeded);
+  const saveBlocked = !canSave;
+  const changeBlocked = busy || !appliedValid;
+  const appliedMetadataMissing =
+    !serverMetadata.valid ||
+    serverMetadata.missing_fields.length > 0 ||
+    !serverMetadata.product_no ||
+    !serverMetadata.operator_mold_no;
+  const showRequiredAlert = !loading && requiredAlertActive && (inputMissing || appliedMetadataMissing);
+  const previousJobs = serverMetadata.history.slice(0, 3);
+
+  const triggerRequiredAlert = useCallback(() => {
+    setTouched(true);
+    setRequiredAlertActive(true);
+    setRequiredAlertNonce((current) => current + 1);
+    productInputRef.current?.focus();
+  }, []);
 
   const loadMetadata = useCallback(async () => {
     setLoading(true);
@@ -205,6 +230,7 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
       setOperatorMoldNo(metadata.operator_mold_no);
       setTouched(false);
       setChangeNeeded(false);
+      setRequiredAlertActive(false);
     } catch {
       setLoadError('작업자 입력값을 불러오지 못했습니다.');
     } finally {
@@ -226,8 +252,16 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
     setTouched(true);
     setSaveError(null);
     const errors = validateFields(productNo, operatorMoldNo);
+    const missingRequiredValue = !normalize(productNo) || !normalize(operatorMoldNo);
+    if (missingRequiredValue) {
+      triggerRequiredAlert();
+      return;
+    }
     if (errors.productNo || errors.operatorMoldNo) {
       productInputRef.current?.focus();
+      return;
+    }
+    if (!dirty && !changeNeeded) {
       return;
     }
     setSaving(true);
@@ -241,12 +275,13 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
       setOperatorMoldNo(metadata.operator_mold_no);
       setTouched(false);
       setChangeNeeded(false);
+      setRequiredAlertActive(false);
     } catch {
       setSaveError('서버 검증 또는 저장에 실패했습니다.');
     } finally {
       setSaving(false);
     }
-  }, [operatorMoldNo, productNo]);
+  }, [changeNeeded, dirty, operatorMoldNo, productNo, triggerRequiredAlert]);
 
   const handleReset = useCallback(async () => {
     setTouched(true);
@@ -258,6 +293,7 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
       setProductNo(metadata.product_no);
       setOperatorMoldNo(metadata.operator_mold_no);
       setChangeNeeded(false);
+      setRequiredAlertActive(false);
       productInputRef.current?.focus();
     } catch {
       setSaveError('서버 저장값 리셋에 실패했습니다.');
@@ -275,9 +311,21 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
 
   const handleMarkChangeNeeded = useCallback(() => {
     setTouched(true);
+    if (inputMissing) {
+      triggerRequiredAlert();
+      return;
+    }
+    if (hasFieldErrors) {
+      productInputRef.current?.focus();
+      return;
+    }
+    if (!appliedValid) {
+      productInputRef.current?.focus();
+      return;
+    }
     setChangeNeeded(true);
     productInputRef.current?.focus();
-  }, []);
+  }, [appliedValid, hasFieldErrors, inputMissing, triggerRequiredAlert]);
 
   const shouldShowErrors = touched || viewState === 'missing' || viewState === 'invalid';
 
@@ -287,10 +335,33 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
 
   return (
     <div
-      className={`card operator-card ${effectiveCardStateClass}`}
+      className={`card operator-card ${effectiveCardStateClass} ${showRequiredAlert ? 'operator-card-alert-active' : ''}`}
       data-testid="operator-metadata-card"
       data-state={loadError ? 'load-error' : saveError ? 'save-error' : viewState}
     >
+      {showRequiredAlert && (
+        <div
+          key={requiredAlertNonce}
+          className="operator-card-alert-glow"
+          data-testid="operator-metadata-required-alert"
+          data-alert-nonce={requiredAlertNonce}
+          aria-hidden="true"
+        >
+          <span className="operator-card-alert-base-glow" />
+          <span className="operator-card-alert-rays">
+            <span className="operator-card-alert-rays-line" />
+            <span className="operator-card-alert-rays-line operator-card-alert-rays-line-soft" />
+          </span>
+          <span className="operator-card-alert-rings">
+            {REQUIRED_ALERT_RING_INDICES.map((index) => (
+              <span key={index} className="operator-card-alert-ring" />
+            ))}
+          </span>
+          <span className="operator-card-alert-core operator-card-alert-core-blur" />
+          <span className="operator-card-alert-core" />
+        </div>
+      )}
+
       <div className="operator-card-status">
         <div className="operator-card-status-main">
           {viewState === 'applied' && !saveError && !loadError ? (
@@ -350,11 +421,24 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
         </div>
       )}
 
-      {guidanceText && (
-        <div className="operator-card-guidance" data-testid="operator-metadata-guidance">
-          {guidanceText}
-        </div>
-      )}
+      <div className="operator-history" data-testid="operator-metadata-history">
+        <div className="operator-history-title">이전 작업</div>
+        {previousJobs.length > 0 ? (
+          <div className="operator-history-list">
+            {previousJobs.map((entry, index) => (
+              <div
+                className="operator-history-row"
+                key={`${entry.updated_at ?? 'unknown'}:${entry.product_no}:${entry.operator_mold_no}:${index}`}
+              >
+                <span className="operator-history-time">{formatAppliedAt(entry.updated_at)}</span>
+                <span className="operator-history-values">{entry.product_no}, {entry.operator_mold_no}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="operator-history-empty">기록 없음</div>
+        )}
+      </div>
 
       <div className="operator-card-actions">
         <button
@@ -381,7 +465,8 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
           type="button"
           className={`operator-change-button ${changeNeeded ? 'active' : ''}`}
           onClick={handleMarkChangeNeeded}
-          disabled={busy || !appliedValid}
+          disabled={busy}
+          data-disabled={changeBlocked}
           title="제품 변경 표시"
           aria-label="Mark product change needed"
           data-testid="operator-metadata-change-needed"
@@ -393,7 +478,8 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
           type="button"
           className={`operator-save-button ${viewState === 'dirty' || viewState === 'stale' ? 'operator-save-emphasis' : ''}`}
           onClick={() => void handleSave()}
-          disabled={!canSave}
+          disabled={busy}
+          data-disabled={saveBlocked}
           data-testid="operator-metadata-apply"
         >
           <Save aria-hidden="true" size={18} />

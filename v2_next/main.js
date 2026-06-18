@@ -70,7 +70,7 @@ function createWindow() {
     dialog.showErrorBox('File Not Found', `index.html was not found at:\n${indexPath}`);
   }
 
-  mainWindow.loadFile(indexPath).catch(err => {
+  mainWindow.loadFile(indexPath, { hash: '/dashboard' }).catch(err => {
     log(`Failed to load index.html: ${err.message}`);
     mainWindow.webContents.openDevTools();
   });

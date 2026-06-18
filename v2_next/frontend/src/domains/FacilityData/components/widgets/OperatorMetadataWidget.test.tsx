@@ -27,6 +27,7 @@ const buildMetadata = (overrides: Partial<OperatorMetadata> = {}): OperatorMetad
   missing_fields: ['product_no', 'operator_mold_no'],
   updated_at: null,
   source: 'operator_input',
+  history: [],
   ...overrides,
 });
 
@@ -75,13 +76,105 @@ describe('OperatorMetadataComponent', () => {
     useDashboardStore.getState().setData(null, null);
   });
 
-  it('shows required missing state and disables apply until both fields are valid', async () => {
+  it('shows required missing state and triggers the RGB alert without saving', async () => {
     render(<OperatorMetadataComponent />);
 
     expect(await screen.findByText('필수값 미입력')).toBeInTheDocument();
     expect(screen.getByText('제품번호는 필수입니다.')).toBeInTheDocument();
     expect(screen.getByText('금형 번호는 필수입니다.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /적용/i })).toBeDisabled();
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    const applyButton = screen.getByTestId('operator-metadata-apply');
+    expect(applyButton).not.toBeDisabled();
+    expect(applyButton).toHaveAttribute('data-disabled', 'true');
+
+    fireEvent.click(applyButton);
+
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('starts the required RGB alert from an action when metadata load fails before Electron can apply server state', async () => {
+    mocks.get.mockRejectedValueOnce(new Error('metadata unavailable'));
+
+    render(<OperatorMetadataComponent />);
+
+    const card = await screen.findByTestId('operator-metadata-card');
+    expect(card).toHaveAttribute('data-state', 'load-error');
+    expect(card).not.toHaveClass('operator-card-alert-active');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('operator-metadata-apply'));
+
+    expect(card).toHaveClass('operator-card-alert-active');
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+  });
+
+  it('restarts the required RGB alert when missing apply is clicked repeatedly', async () => {
+    render(<OperatorMetadataComponent />);
+
+    const applyButton = await screen.findByTestId('operator-metadata-apply');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+
+    fireEvent.click(applyButton);
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+
+    fireEvent.click(applyButton);
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '2');
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('triggers the required RGB alert from Enter save when required values are missing', async () => {
+    render(<OperatorMetadataComponent />);
+
+    await screen.findByTestId('operator-metadata-apply');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    const [productInput] = screen.getAllByRole('textbox');
+
+    fireEvent.keyDown(productInput, { key: 'Enter' });
+
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('triggers the required RGB alert from product-change action when required values are missing', async () => {
+    render(<OperatorMetadataComponent />);
+
+    const changeButton = await screen.findByTestId('operator-metadata-change-needed');
+    expect(changeButton).not.toBeDisabled();
+    expect(changeButton).toHaveAttribute('data-disabled', 'true');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+
+    fireEvent.click(changeButton);
+
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps the required RGB alert until valid values are applied', async () => {
+    render(<OperatorMetadataComponent />);
+
+    const applyButton = await screen.findByTestId('operator-metadata-apply');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+
+    fireEvent.click(applyButton);
+    expect(screen.getByTestId('operator-metadata-required-alert')).toBeInTheDocument();
+
+    const [productInput, moldInput] = screen.getAllByRole('textbox');
+    fireEvent.change(productInput, { target: { value: '12345' } });
+    fireEvent.change(moldInput, { target: { value: '123' } });
+
+    expect(screen.getByTestId('operator-metadata-required-alert')).toBeInTheDocument();
+    fireEvent.click(applyButton);
+
+    await waitFor(() => {
+      expect(mocks.update).toHaveBeenCalledWith({
+        product_no: '12345',
+        operator_mold_no: '123',
+      });
+      expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    });
+    expect(productInput).not.toHaveAttribute('aria-invalid', 'true');
+    expect(moldInput).not.toHaveAttribute('aria-invalid', 'true');
   });
 
   it('keeps the card rendered when the server returns malformed metadata', async () => {
@@ -94,6 +187,32 @@ describe('OperatorMetadataComponent', () => {
     expect(screen.getByLabelText('금형 번호')).toHaveValue('');
     expect(screen.getByText('제품번호는 필수입니다.')).toBeInTheDocument();
     expect(screen.getByText('금형 번호는 필수입니다.')).toBeInTheDocument();
+  });
+
+  it('renders the previous three operator jobs in newest-first order', async () => {
+    mocks.get.mockResolvedValueOnce(buildMetadata({
+      product_no: '44444',
+      operator_mold_no: '444',
+      valid: true,
+      missing_fields: [],
+      updated_at: '2026-03-09T07:24:20Z',
+      history: [
+        { product_no: '33333', operator_mold_no: '333', updated_at: '2026-03-09T07:23:20Z' },
+        { product_no: '22222', operator_mold_no: '222', updated_at: '2026-03-09T07:22:20Z' },
+        { product_no: '11111', operator_mold_no: '111', updated_at: '2026-03-09T07:21:20Z' },
+        { product_no: '00000', operator_mold_no: '000', updated_at: '2026-03-09T07:20:20Z' },
+      ],
+    }));
+
+    render(<OperatorMetadataComponent />);
+
+    const history = await screen.findByTestId('operator-metadata-history');
+    expect(history).toHaveTextContent('이전 작업');
+    expect(history).toHaveTextContent('33333, 333');
+    expect(history).toHaveTextContent('22222, 222');
+    expect(history).toHaveTextContent('11111, 111');
+    expect(history).not.toHaveTextContent('00000, 000');
+    expect(screen.queryByTestId('operator-metadata-guidance')).not.toBeInTheDocument();
   });
 
   it('saves valid operator metadata through the backend API', async () => {
@@ -130,13 +249,15 @@ describe('OperatorMetadataComponent', () => {
     const applyButton = screen.getByTestId('operator-metadata-apply');
 
     expect(screen.getByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'applied');
-    expect(applyButton).toBeDisabled();
+    expect(applyButton).not.toBeDisabled();
+    expect(applyButton).toHaveAttribute('data-disabled', 'true');
 
     fireEvent.change(productInput, { target: { value: '67890' } });
 
     expect(screen.getByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'dirty');
-    expect(screen.getByTestId('operator-metadata-guidance')).toHaveTextContent('v2 CSV');
-    expect(applyButton).toBeEnabled();
+    expect(screen.queryByTestId('operator-metadata-guidance')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-history')).toBeInTheDocument();
+    expect(applyButton).not.toHaveAttribute('data-disabled', 'true');
   });
 
   it('lets the operator mark a product change and confirm the current values', async () => {
@@ -154,13 +275,15 @@ describe('OperatorMetadataComponent', () => {
     const applyButton = screen.getByTestId('operator-metadata-apply');
 
     expect(card).toHaveAttribute('data-state', 'applied');
-    expect(applyButton).toBeDisabled();
+    expect(applyButton).not.toBeDisabled();
+    expect(applyButton).toHaveAttribute('data-disabled', 'true');
 
     fireEvent.click(screen.getByTestId('operator-metadata-change-needed'));
 
     expect(card).toHaveAttribute('data-state', 'stale');
-    expect(screen.getByTestId('operator-metadata-guidance')).toBeInTheDocument();
-    expect(applyButton).toBeEnabled();
+    expect(screen.queryByTestId('operator-metadata-guidance')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-history')).toBeInTheDocument();
+    expect(applyButton).not.toHaveAttribute('data-disabled', 'true');
 
     fireEvent.click(applyButton);
 
@@ -184,7 +307,13 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.change(moldInput, { target: { value: '123' } });
 
     expect(screen.getByText('숫자만 입력할 수 있습니다.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /적용/i })).toBeDisabled();
+    const applyButton = screen.getByTestId('operator-metadata-apply');
+    expect(applyButton).not.toBeDisabled();
+    expect(applyButton).toHaveAttribute('data-disabled', 'true');
+
+    fireEvent.click(applyButton);
+
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -197,7 +326,13 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.change(moldInput, { target: { value: '123-1' } });
 
     expect(screen.getByText('숫자만 입력할 수 있습니다.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /적용/i })).toBeDisabled();
+    const applyButton = screen.getByTestId('operator-metadata-apply');
+    expect(applyButton).not.toBeDisabled();
+    expect(applyButton).toHaveAttribute('data-disabled', 'true');
+
+    fireEvent.click(applyButton);
+
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -263,6 +398,14 @@ describe('OperatorMetadataComponent', () => {
     expect(screen.getByText('필수값 미입력')).toBeInTheDocument();
     expect(screen.getByText('제품번호는 필수입니다.')).toBeInTheDocument();
     expect(screen.getByText('금형 번호는 필수입니다.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /적용/i })).toBeDisabled();
+    const applyButton = screen.getByTestId('operator-metadata-apply');
+    expect(applyButton).not.toBeDisabled();
+    expect(applyButton).toHaveAttribute('data-disabled', 'true');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+
+    fireEvent.click(applyButton);
+
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 });
