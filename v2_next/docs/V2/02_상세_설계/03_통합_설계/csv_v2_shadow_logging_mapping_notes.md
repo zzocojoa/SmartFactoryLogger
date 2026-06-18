@@ -160,7 +160,7 @@ csv_v2_sidecar_enabled=true
 - PR #56 `fix: strengthen operator metadata required ux`는 `master`에 merge되었다. `master` merge commit은
   `52a3932e1684ef2d21216e0469e588ac7abee573`이고, 변경 commit `c4a28c9`가 포함되어 있다.
 - NSIS 설치본은 `dist/smart-factory-logger-v2 Setup 1.0.11.exe`로 생성되었다. 로컬 확인 시 파일 크기는
-  `146973383` bytes였다.
+  `146973379` bytes였다.
 - 로컬 packaged Electron smoke 증적은 `C:\tmp\sfl-electron-packaged-ui-smoke-20260618-current-saved-layout`에 있다.
   `result.json` 기준 작업 정보 카드 상태는 `applied`, console/page error는 없고, `operatorMetadata`와 Time Series,
   Time Series와 Memo 위젯의 겹침은 모두 `false`였다.
