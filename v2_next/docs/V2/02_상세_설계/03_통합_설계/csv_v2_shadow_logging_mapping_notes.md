@@ -167,8 +167,10 @@ csv_v2_sidecar_enabled=true
 - 로컬 CSV smoke 증적은 `C:\tmp\sfl-csv-updated-at-smoke-20260618`에 있다. `result.json` 기준 v2 CSV는
   header 53컬럼, row 53컬럼이며 `Product_No_operator=12345`, `Mold_No_operator=123`,
   `operator_metadata_valid=true`, sidecar 존재를 확인했다.
-- 서버 PC 실제 설치본 smoke는 작업자 조작 기준 정상 동작으로 보고되었다. 다만 서버 PC 원본 CSV row, 설치 로그,
-  화면 캡처 파일은 이 문서 작성 시점에 직접 수집하지 못했으므로 운영 증적 첨부는 확인 필요로 둔다.
+- 서버 PC 실제 설치본 smoke는 작업자 조작 기준 정상 동작으로 사용자 직접 확인이 완료되었다.
+  확인 항목은 실제 CSV row의 operator metadata 반영, 설치 로그, 화면 캡처, `작업 정보` 카드,
+  `제품 변경` -> `적용` 흐름, 위젯 겹침 없음이다. 원본 증적 파일은 운영 PC에 보관하고,
+  이 저장소 문서에는 확인 결과만 기록한다.
 - 문제 발생 시 UI UX만 되돌릴 때는 `c4a28c9`를 revert한다. v2 CSV/backend 경로에서 운영 문제가 발생하면
   `[LOGGING] csv_v2_enabled=false`로 v2 writer를 비활성화하고 v1 CSV를 유지한다.
 
