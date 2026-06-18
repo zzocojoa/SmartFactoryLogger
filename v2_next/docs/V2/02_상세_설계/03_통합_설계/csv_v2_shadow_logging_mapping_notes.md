@@ -155,6 +155,23 @@ csv_v2_sidecar_enabled=true
 - 제품이 변경되면 작업자는 작업 정보 카드의 제품번호/금형 번호를 수정하거나 `제품 변경` 상태를 표시한 뒤 `적용`으로 확인한다.
   확인 시점 이후 새 sample compose부터 `operator_metadata_updated_at`과 v2 CSV row에 반영되며, 이미 queue에 들어간 row는 소급 변경하지 않는다.
 
+### 4.7. 2026-06-18 배포 증적 기록
+
+- PR #56 `fix: strengthen operator metadata required ux`는 `master`에 merge되었다. `master` merge commit은
+  `52a3932e1684ef2d21216e0469e588ac7abee573`이고, 변경 commit `c4a28c9`가 포함되어 있다.
+- NSIS 설치본은 `dist/smart-factory-logger-v2 Setup 1.0.11.exe`로 생성되었다. 로컬 확인 시 파일 크기는
+  `146973383` bytes였다.
+- 로컬 packaged Electron smoke 증적은 `C:\tmp\sfl-electron-packaged-ui-smoke-20260618-current-saved-layout`에 있다.
+  `result.json` 기준 작업 정보 카드 상태는 `applied`, console/page error는 없고, `operatorMetadata`와 Time Series,
+  Time Series와 Memo 위젯의 겹침은 모두 `false`였다.
+- 로컬 CSV smoke 증적은 `C:\tmp\sfl-csv-updated-at-smoke-20260618`에 있다. `result.json` 기준 v2 CSV는
+  header 53컬럼, row 53컬럼이며 `Product_No_operator=12345`, `Mold_No_operator=123`,
+  `operator_metadata_valid=true`, sidecar 존재를 확인했다.
+- 서버 PC 실제 설치본 smoke는 작업자 조작 기준 정상 동작으로 보고되었다. 다만 서버 PC 원본 CSV row, 설치 로그,
+  화면 캡처 파일은 이 문서 작성 시점에 직접 수집하지 못했으므로 운영 증적 첨부는 확인 필요로 둔다.
+- 문제 발생 시 UI UX만 되돌릴 때는 `c4a28c9`를 revert한다. v2 CSV/backend 경로에서 운영 문제가 발생하면
+  `[LOGGING] csv_v2_enabled=false`로 v2 writer를 비활성화하고 v1 CSV를 유지한다.
+
 ### 5. 성공 기준
 
 - v1 CSV 21컬럼 호환성 유지.
