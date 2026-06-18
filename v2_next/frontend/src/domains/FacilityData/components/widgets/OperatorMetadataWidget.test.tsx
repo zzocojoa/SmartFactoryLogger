@@ -84,6 +84,18 @@ describe('OperatorMetadataComponent', () => {
     expect(screen.getByRole('button', { name: /적용/i })).toBeDisabled();
   });
 
+  it('keeps the card rendered when the server returns malformed metadata', async () => {
+    mocks.get.mockResolvedValueOnce({});
+
+    render(<OperatorMetadataComponent />);
+
+    expect(await screen.findByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'missing');
+    expect(screen.getByLabelText('제품번호')).toHaveValue('');
+    expect(screen.getByLabelText('금형 번호')).toHaveValue('');
+    expect(screen.getByText('제품번호는 필수입니다.')).toBeInTheDocument();
+    expect(screen.getByText('금형 번호는 필수입니다.')).toBeInTheDocument();
+  });
+
   it('saves valid operator metadata through the backend API', async () => {
     render(<OperatorMetadataComponent />);
 
@@ -101,6 +113,65 @@ describe('OperatorMetadataComponent', () => {
         product_no: '12345',
         operator_mold_no: '123',
       });
+    });
+  });
+
+  it('marks edited applied metadata as dirty until the operator applies it', async () => {
+    mocks.get.mockResolvedValueOnce(buildMetadata({
+      product_no: '12345',
+      operator_mold_no: '123',
+      valid: true,
+      missing_fields: [],
+      updated_at: '2026-03-09T07:20:20Z',
+    }));
+    render(<OperatorMetadataComponent />);
+
+    const productInput = await screen.findByLabelText('제품번호');
+    const applyButton = screen.getByTestId('operator-metadata-apply');
+
+    expect(screen.getByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'applied');
+    expect(applyButton).toBeDisabled();
+
+    fireEvent.change(productInput, { target: { value: '67890' } });
+
+    expect(screen.getByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'dirty');
+    expect(screen.getByTestId('operator-metadata-guidance')).toHaveTextContent('v2 CSV');
+    expect(applyButton).toBeEnabled();
+  });
+
+  it('lets the operator mark a product change and confirm the current values', async () => {
+    mocks.get.mockResolvedValueOnce(buildMetadata({
+      product_no: '12345',
+      operator_mold_no: '123',
+      valid: true,
+      missing_fields: [],
+      updated_at: '2026-03-09T07:20:20Z',
+    }));
+    render(<OperatorMetadataComponent />);
+
+    await screen.findByLabelText('제품번호');
+    const card = screen.getByTestId('operator-metadata-card');
+    const applyButton = screen.getByTestId('operator-metadata-apply');
+
+    expect(card).toHaveAttribute('data-state', 'applied');
+    expect(applyButton).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('operator-metadata-change-needed'));
+
+    expect(card).toHaveAttribute('data-state', 'stale');
+    expect(screen.getByTestId('operator-metadata-guidance')).toBeInTheDocument();
+    expect(applyButton).toBeEnabled();
+
+    fireEvent.click(applyButton);
+
+    await waitFor(() => {
+      expect(mocks.update).toHaveBeenCalledWith({
+        product_no: '12345',
+        operator_mold_no: '123',
+      });
+    });
+    await waitFor(() => {
+      expect(card).toHaveAttribute('data-state', 'applied');
     });
   });
 

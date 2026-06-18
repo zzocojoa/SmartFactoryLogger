@@ -2,7 +2,8 @@ import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { HealthSnapshot, StatsSnapshot } from '../../../../shared/types';
+import type { FactoryData, HealthSnapshot, StatsSnapshot } from '../../../../shared/types';
+import { useDashboardStore } from '../../../../store/useDashboardStore';
 import type { StatusPanelSource } from '../../hooks/useStatusPanel';
 import type { DashboardHeaderProps } from './DashboardHeader';
 import { DashboardHeader } from './DashboardHeader';
@@ -67,6 +68,29 @@ const buildStatusPanelSource = (): StatusPanelSource => ({
   settingsBaseline: null,
 });
 
+const buildFactoryData = (overrides: Partial<FactoryData> = {}): FactoryData => ({
+  Time: '2026-03-09T07:20:20.000',
+  Status: 'Running',
+  Speed: 1,
+  Press: 2,
+  Count: 3,
+  EndPos: 4,
+  Billet_Length: 5,
+  Spot: 6,
+  Temp_F: 7,
+  Temp_B: 8,
+  Billet_Temp: 9,
+  Mold1: 10,
+  Mold2: 11,
+  Mold3: 12,
+  Mold4: 13,
+  Mold5: 14,
+  Mold6: 15,
+  At_Temp: 16,
+  At_Pre: 17,
+  ...overrides,
+});
+
 const buildProps = (overrides: Partial<DashboardHeaderProps> = {}): DashboardHeaderProps => ({
   activeCycle: 'day',
   appTitle: '창녕 2호기 Smart Factory',
@@ -114,6 +138,7 @@ const buildProps = (overrides: Partial<DashboardHeaderProps> = {}): DashboardHea
 
 afterEach(() => {
   cleanup();
+  useDashboardStore.getState().setData(null, null);
 });
 
 describe('DashboardHeader mobile header', () => {
@@ -167,6 +192,34 @@ describe('DashboardHeader mobile header', () => {
     expect(drawerScope.getByText('EX OK')).toBeInTheDocument();
     expect(drawerScope.getByText('LS OK')).toBeInTheDocument();
     expect(drawerScope.getByText('SPOT OK')).toBeInTheDocument();
+  });
+
+  it('shows a required operator metadata indicator when the latest sample is invalid', () => {
+    useDashboardStore.getState().setData(buildFactoryData({
+      Product_No_operator: '',
+      Mold_No_operator: '',
+      operator_metadata_valid: false,
+      operator_metadata_missing_fields: ['product_no', 'operator_mold_no'],
+      operator_metadata_updated_at: '2026-03-09T07:20:20Z',
+    }), Date.now());
+
+    render(<DashboardHeader {...buildProps()} />);
+
+    expect(screen.getByLabelText('Operator metadata required')).toHaveClass('attention');
+  });
+
+  it('shows an applied operator metadata indicator when the latest sample is valid', () => {
+    useDashboardStore.getState().setData(buildFactoryData({
+      Product_No_operator: '12345',
+      Mold_No_operator: '123',
+      operator_metadata_valid: true,
+      operator_metadata_missing_fields: [],
+      operator_metadata_updated_at: '2026-03-09T07:20:20Z',
+    }), Date.now());
+
+    render(<DashboardHeader {...buildProps()} />);
+
+    expect(screen.getByLabelText('Operator metadata applied')).toHaveClass('ok');
   });
 
   it('keeps hidden mobile header actions reachable from the drawer', () => {

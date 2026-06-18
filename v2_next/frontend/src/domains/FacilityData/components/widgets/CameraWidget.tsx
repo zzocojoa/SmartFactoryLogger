@@ -10,6 +10,13 @@ import { LABELS, SPOT_UNIT } from '../../../../shared/constants/uiText';
 
 const SPOT_LIVE_IMAGE_RELOAD_DELAY_MS = 35;
 const SPOT_LIVE_IMAGE_ERROR_RETRY_DELAY_MS = 500;
+const DEFAULT_CROSSHAIR_X = 0.5;
+const DEFAULT_CROSSHAIR_Y = 0.5;
+const DEFAULT_CROSSHAIR_WIDTH = 512;
+const DEFAULT_CROSSHAIR_HEIGHT = 288;
+const DEFAULT_CROSSHAIR_SIZE = 20;
+const DEFAULT_CROSSHAIR_GAP = 5;
+const DEFAULT_CROSSHAIR_THICKNESS = 2;
 
 interface CameraComponentProps {
   onSpotImageLoaded?: () => void;
@@ -32,6 +39,17 @@ const appendSpotLiveCacheBuster = (url: string, token: number): string => {
   const separator = url.includes('?') ? '&' : '?';
   return `${url}${separator}t=${encodeURIComponent(String(token))}`;
 };
+
+const finiteNumberOr = (value: unknown, fallback: number): number => {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+};
+
+const positiveNumberOr = (value: unknown, fallback: number): number => {
+  const finiteValue = finiteNumberOr(value, fallback);
+  return finiteValue > 0 ? finiteValue : fallback;
+};
+
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 export const resolveSpotLiveImageUrl = (url: string, apiBase: string): string => {
   const trimmedUrl = url.trim();
@@ -114,13 +132,18 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
   if (!spotConfig) return <div>Loading Config...</div>;
 
   // Crosshair logic
-  const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val));
-  const cx = clamp(spotConfig.crosshair_x, 0, 1) * spotConfig.widget_width;
-  const cy = clamp(spotConfig.crosshair_y, 0, 1) * spotConfig.widget_height;
-  const arm = Math.max(1, spotConfig.crosshair_size);
-  const gap = Math.max(0, spotConfig.crosshair_gap);
-  const thick = Math.max(1, spotConfig.crosshair_thickness);
-  const color = spotConfig.crosshair_color || 'lime';
+  const crosshairWidth = positiveNumberOr(spotConfig.widget_width, DEFAULT_CROSSHAIR_WIDTH);
+  const crosshairHeight = positiveNumberOr(spotConfig.widget_height, DEFAULT_CROSSHAIR_HEIGHT);
+  const crosshairX = clamp(finiteNumberOr(spotConfig.crosshair_x, DEFAULT_CROSSHAIR_X), 0, 1);
+  const crosshairY = clamp(finiteNumberOr(spotConfig.crosshair_y, DEFAULT_CROSSHAIR_Y), 0, 1);
+  const cx = crosshairX * crosshairWidth;
+  const cy = crosshairY * crosshairHeight;
+  const arm = positiveNumberOr(spotConfig.crosshair_size, DEFAULT_CROSSHAIR_SIZE);
+  const gap = Math.max(0, finiteNumberOr(spotConfig.crosshair_gap, DEFAULT_CROSSHAIR_GAP));
+  const thick = positiveNumberOr(spotConfig.crosshair_thickness, DEFAULT_CROSSHAIR_THICKNESS);
+  const color = typeof spotConfig.crosshair_color === 'string' && spotConfig.crosshair_color.trim()
+    ? spotConfig.crosshair_color
+    : 'lime';
 
   const lines = [
     { x1: cx - gap, y1: cy, x2: cx - arm, y2: cy },
@@ -143,15 +166,15 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
         spotImageMetadata?.internal_temperature ?? null,
         spotImageMetadata?.internal_temperature_status ?? null
       );
-  const actuatorStep = Math.abs(spotConfig.actuator_step);
-  const actuatorStepValid = Number.isFinite(actuatorStep) && actuatorStep > 0;
+  const actuatorStep = Math.abs(finiteNumberOr(spotConfig.actuator_step, 0));
+  const actuatorStepValid = actuatorStep > 0;
   const focusDisabled = !spotConfig.focus_enabled || !props.requestFocus || Boolean(props.focusBusy) || !actuatorStepValid;
   const focusDisabledReason = !spotConfig.focus_enabled
     ? 'Focus control is disabled'
     : !props.requestFocus
       ? 'Focus control handler is missing'
       : !actuatorStepValid
-        ? `Invalid actuator step: ${spotConfig.actuator_step}`
+        ? `Invalid actuator step: ${String(spotConfig.actuator_step)}`
         : undefined;
   const requestFocusChange = (stepUnits: number): void => {
     if (!props.requestFocus) {
@@ -196,7 +219,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
             onError={props.onSpotImageError}
           />
         )}
-        <svg className="camera-crosshair" viewBox={`0 0 ${spotConfig.widget_width} ${spotConfig.widget_height}`} preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+        <svg className="camera-crosshair" viewBox={`0 0 ${crosshairWidth} ${crosshairHeight}`} preserveAspectRatio="xMidYMid slice" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
           {lines.map((line, idx) => (
             <g key={idx}>
               <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="black" strokeWidth={thick + 2} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />

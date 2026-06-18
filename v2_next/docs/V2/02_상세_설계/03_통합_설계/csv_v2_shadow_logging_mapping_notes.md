@@ -146,6 +146,15 @@ csv_v2_sidecar_enabled=true
   새 operator metadata 컬럼, sidecar `schema_version`을 처리하는지 dry-run해야 한다.
 - `Mold_No_operator`는 작업자 입력 필수값이다. 기존 `DIE_ID`와 같은 개념으로 자동 치환하거나 병합하면 안 된다.
 
+### 4.6. 작업 정보 필수 입력 UX
+
+- 작업 정보 스냅카드는 로깅을 차단하지 않는 필수 입력 UX이다. 화면 상태는 `missing`, `invalid`, `dirty/unsaved`,
+  `applied`, `stale/change-needed`로 구분하고, 미입력 또는 invalid 상태의 row는 v2 CSV에 invalid metadata로 기록한다.
+- 현재 라이브 PLC/FactoryData 샘플에는 제품 변경을 안전하게 자동 감지할 제품번호/작업지시 필드가 없다. `DIE_ID`와
+  `Billet_CycleID`는 금형/빌렛 파생값이므로 `Product_No_operator` 변경 감지로 사용하지 않는다.
+- 제품이 변경되면 작업자는 작업 정보 카드의 제품번호/금형 번호를 수정하거나 `제품 변경` 상태를 표시한 뒤 `적용`으로 확인한다.
+  확인 시점 이후 새 sample compose부터 `operator_metadata_updated_at`과 v2 CSV row에 반영되며, 이미 queue에 들어간 row는 소급 변경하지 않는다.
+
 ### 5. 성공 기준
 
 - v1 CSV 21컬럼 호환성 유지.
