@@ -1106,6 +1106,15 @@ _FRONTEND_PUBLIC_FILENAMES: tuple[str, ...] = (
     "logo512.png",
 )
 _FRONTEND_ENTRY_ASSET_PATTERN = re.compile(r'(?:src|href)="\./(assets/[^"]+\.(?:js|css))"')
+_FRONTEND_NO_CACHE_HEADERS: dict[str, str] = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
+def frontend_file_response(path: Path) -> FileResponse:
+    return FileResponse(path, headers=_FRONTEND_NO_CACHE_HEADERS)
 
 
 def get_frontend_runtime_class(frontend_mode: str, frontend_source: str) -> str:
@@ -1592,7 +1601,7 @@ def read_root():
     if frontend_status["frontend_static_ready"]:
         index_path = frontend_dist / "index.html"
         if frontend_status["frontend_index_exists"]:
-            return FileResponse(index_path)
+            return frontend_file_response(index_path)
 
     _logger.error(
         "Frontend index unavailable for root request",
@@ -3102,7 +3111,7 @@ async def serve_frontend_asset(asset_path: str):
         )
         return build_frontend_error_response(404, "Frontend asset was not found.")
 
-    return FileResponse(asset_file)
+    return frontend_file_response(asset_file)
 
 
 @app.get("/{full_path:path}")
@@ -3117,11 +3126,11 @@ async def serve_spa(full_path: str):
     )
     requested_file = resolve_frontend_file(frontend_dist, full_path)
     if requested_file is not None and requested_file.exists() and requested_file.is_file():
-        return FileResponse(requested_file)
+        return frontend_file_response(requested_file)
 
     nested_file = resolve_nested_frontend_file(frontend_dist, full_path)
     if nested_file is not None and nested_file.exists() and nested_file.is_file():
-        return FileResponse(nested_file)
+        return frontend_file_response(nested_file)
 
     if is_api_route_request(full_path):
         return JSONResponse(status_code=404, content={"detail": "API route not found"})
@@ -3151,7 +3160,7 @@ async def serve_spa(full_path: str):
 
     index_path = frontend_dist / "index.html"
     if frontend_status["frontend_index_exists"]:
-        return FileResponse(index_path)
+        return frontend_file_response(index_path)
 
     _logger.error(
         "Frontend index unavailable for SPA request",

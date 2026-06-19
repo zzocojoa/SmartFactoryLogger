@@ -12,7 +12,8 @@ import { operatorMetadataService } from '../../api/operatorMetadataService';
 
 const PRODUCT_NO_PATTERN = /^\d{1,40}$/;
 const OPERATOR_MOLD_NO_PATTERN = /^\d{1,32}$/;
-const REQUIRED_ALERT_RING_COUNT = 9;
+const REQUIRED_ALERT_RING_COUNT = 14;
+const OPERATOR_METADATA_REFRESH_INTERVAL_MS = 10_000;
 const REQUIRED_ALERT_RING_INDICES = Array.from({ length: REQUIRED_ALERT_RING_COUNT }, (_, index) => index);
 
 const EMPTY_METADATA: OperatorMetadata = {
@@ -31,6 +32,12 @@ type FieldErrors = {
 };
 
 type OperatorMetadataViewState = 'missing' | 'invalid' | 'dirty' | 'applied' | 'stale';
+
+type MetadataLoadOptions = {
+  showLoading?: boolean;
+  silent?: boolean;
+  syncInputs?: boolean;
+};
 
 const normalize = (value: string | null | undefined): string => (value ?? '').trim();
 
@@ -127,7 +134,6 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
   const [saveError, setSaveError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
   const [changeNeeded, setChangeNeeded] = useState(false);
-  const [requiredAlertActive, setRequiredAlertActive] = useState(false);
   const [requiredAlertNonce, setRequiredAlertNonce] = useState(0);
 
   const fieldErrors = useMemo(() => validateFields(productNo, operatorMoldNo), [operatorMoldNo, productNo]);
@@ -210,37 +216,82 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
     serverMetadata.missing_fields.length > 0 ||
     !serverMetadata.product_no ||
     !serverMetadata.operator_mold_no;
-  const showRequiredAlert = !loading && requiredAlertActive && (inputMissing || appliedMetadataMissing);
+  const showRequiredAlert = !loading && (inputMissing || appliedMetadataMissing);
   const previousJobs = serverMetadata.history.slice(0, 3);
 
   const triggerRequiredAlert = useCallback(() => {
     setTouched(true);
-    setRequiredAlertActive(true);
     setRequiredAlertNonce((current) => current + 1);
     productInputRef.current?.focus();
   }, []);
 
-  const loadMetadata = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
+  const loadMetadata = useCallback(async (options: MetadataLoadOptions = {}) => {
+    const { showLoading = true, silent = false, syncInputs = true } = options;
+    if (showLoading) {
+      setLoading(true);
+    }
+    if (!silent) {
+      setLoadError(null);
+    }
     try {
       const metadata = normalizeOperatorMetadata(await operatorMetadataService.get());
       setServerMetadata(metadata);
-      setProductNo(metadata.product_no);
-      setOperatorMoldNo(metadata.operator_mold_no);
-      setTouched(false);
-      setChangeNeeded(false);
-      setRequiredAlertActive(false);
+      setLoadError(null);
+      if (syncInputs) {
+        setProductNo(metadata.product_no);
+        setOperatorMoldNo(metadata.operator_mold_no);
+        setTouched(false);
+        setChangeNeeded(false);
+      }
     } catch {
-      setLoadError('작업자 입력값을 불러오지 못했습니다.');
+      if (!silent) {
+        setLoadError('작업자 입력값을 불러오지 못했습니다.');
+      }
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, []);
-
   useEffect(() => {
     void loadMetadata();
   }, [loadMetadata]);
+
+  useEffect(() => {
+    if (loading) {
+      return undefined;
+    }
+
+    const refreshFromServer = (): void => {
+      if (busy) {
+        return;
+      }
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+      void loadMetadata({
+        showLoading: false,
+        silent: true,
+        syncInputs: !dirty && !changeNeeded,
+      });
+    };
+
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') {
+        refreshFromServer();
+      }
+    };
+
+    const intervalId = window.setInterval(refreshFromServer, OPERATOR_METADATA_REFRESH_INTERVAL_MS);
+    window.addEventListener('focus', refreshFromServer);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshFromServer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [busy, changeNeeded, dirty, loadMetadata, loading]);
 
   useEffect(() => {
     if (!loading && !serverMetadata.valid && productInputRef.current) {
@@ -275,7 +326,6 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
       setOperatorMoldNo(metadata.operator_mold_no);
       setTouched(false);
       setChangeNeeded(false);
-      setRequiredAlertActive(false);
     } catch {
       setSaveError('서버 검증 또는 저장에 실패했습니다.');
     } finally {
@@ -293,7 +343,6 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
       setProductNo(metadata.product_no);
       setOperatorMoldNo(metadata.operator_mold_no);
       setChangeNeeded(false);
-      setRequiredAlertActive(false);
       productInputRef.current?.focus();
     } catch {
       setSaveError('서버 저장값 리셋에 실패했습니다.');

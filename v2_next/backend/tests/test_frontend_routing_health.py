@@ -95,6 +95,16 @@ class FrontendRoutingHealthTests(unittest.TestCase):
         self.assertEqual(backend_app.get_frontend_runtime_class("frozen", "meipass"), "legacy-one-file")
         self.assertEqual(backend_app.get_frontend_runtime_warning("meipass", []), "legacy_meipass")
 
+    def test_frontend_file_response_disables_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            index_path = Path(temp_dir) / "index.html"
+            index_path.write_text("<div>ok</div>", encoding="utf-8")
+
+            response = backend_app.frontend_file_response(index_path)
+
+            self.assertEqual(response.headers["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
+            self.assertEqual(response.headers["Pragma"], "no-cache")
+            self.assertEqual(response.headers["Expires"], "0")
     def test_frontend_file_request_status_distinguishes_missing_assets_from_not_found(self) -> None:
         missing_assets_status = {
             "frontend_assets_exists": False,
