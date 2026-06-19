@@ -4557,6 +4557,9 @@ body {
 
 .operator-card.operator-card-alert-active {
   animation: operator-alert-card-breathe 1800ms ease-in-out infinite;
+  border-color: rgb(255 17 85 / 0.82);
+  outline: 2px solid rgb(255 17 85 / 0.78);
+  outline-offset: 4px;
 }
 
 .operator-card-alert-core {
@@ -4646,19 +4649,23 @@ body {
   100% {
     box-shadow:
       var(--dashboard-tile-shadow),
-      0 0 0 1px rgb(255 59 79 / 0.42),
-      0 0 14px rgb(255 59 79 / 0.28),
-      0 0 22px rgb(255 201 40 / 0.2),
-      0 0 30px rgb(22 140 255 / 0.18);
+      0 0 0 2px rgb(255 17 85 / 0.72),
+      0 0 0 5px rgb(255 221 0 / 0.42),
+      0 0 0 8px rgb(0 136 255 / 0.28),
+      0 0 18px rgb(255 17 85 / 0.34),
+      0 0 32px rgb(255 221 0 / 0.24),
+      0 0 46px rgb(0 136 255 / 0.2);
   }
 
   50% {
     box-shadow:
       var(--dashboard-tile-shadow),
-      0 0 0 2px rgb(255 59 79 / 0.72),
-      0 0 22px rgb(255 59 79 / 0.46),
-      0 0 36px rgb(255 201 40 / 0.34),
-      0 0 52px rgb(22 140 255 / 0.3);
+      0 0 0 3px rgb(255 17 85 / 0.92),
+      0 0 0 7px rgb(255 221 0 / 0.62),
+      0 0 0 11px rgb(0 136 255 / 0.46),
+      0 0 28px rgb(255 17 85 / 0.56),
+      0 0 48px rgb(255 221 0 / 0.42),
+      0 0 68px rgb(0 136 255 / 0.36);
   }
 }
 
