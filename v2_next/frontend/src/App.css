@@ -4578,6 +4578,33 @@ body {
   opacity: 0.75;
 }
 
+[data-theme="day"] .operator-card-alert-base-glow,
+[data-theme="sunset"] .operator-card-alert-base-glow,
+[data-theme="day"] .operator-card-alert-rays,
+[data-theme="sunset"] .operator-card-alert-rays,
+[data-theme="day"] .operator-card-alert-ring,
+[data-theme="sunset"] .operator-card-alert-ring,
+[data-theme="day"] .operator-card-alert-core,
+[data-theme="sunset"] .operator-card-alert-core {
+  mix-blend-mode: normal;
+}
+
+[data-theme="day"] .operator-card-alert-base-glow,
+[data-theme="sunset"] .operator-card-alert-base-glow {
+  filter: blur(18px) saturate(1.25);
+  opacity: 0.62;
+}
+
+[data-theme="day"] .operator-card-alert-rays,
+[data-theme="sunset"] .operator-card-alert-rays {
+  opacity: 0.72;
+}
+
+[data-theme="day"] .operator-card-alert-core,
+[data-theme="sunset"] .operator-card-alert-core {
+  opacity: 0.9;
+}
+
 @keyframes operator-alert-pulse-ring {
   0% {
     inset: 0;
