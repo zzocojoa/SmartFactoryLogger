@@ -1106,15 +1106,28 @@ _FRONTEND_PUBLIC_FILENAMES: tuple[str, ...] = (
     "logo512.png",
 )
 _FRONTEND_ENTRY_ASSET_PATTERN = re.compile(r'(?:src|href)="\./(assets/[^"]+\.(?:js|css))"')
+_FRONTEND_IMMUTABLE_ASSET_NAME_PATTERN = re.compile(r".+-[A-Za-z0-9_-]{6,}\.[A-Za-z0-9]+$")
 _FRONTEND_NO_CACHE_HEADERS: dict[str, str] = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     "Pragma": "no-cache",
     "Expires": "0",
 }
+_FRONTEND_IMMUTABLE_CACHE_HEADERS: dict[str, str] = {
+    "Cache-Control": "public, max-age=31536000, immutable",
+}
 
 
 def frontend_file_response(path: Path) -> FileResponse:
-    return FileResponse(path, headers=_FRONTEND_NO_CACHE_HEADERS)
+    headers = (
+        _FRONTEND_IMMUTABLE_CACHE_HEADERS
+        if is_frontend_immutable_asset(path)
+        else _FRONTEND_NO_CACHE_HEADERS
+    )
+    return FileResponse(path, headers=headers)
+
+
+def is_frontend_immutable_asset(path: Path) -> bool:
+    return "assets" in path.parts and bool(_FRONTEND_IMMUTABLE_ASSET_NAME_PATTERN.fullmatch(path.name))
 
 
 def get_frontend_runtime_class(frontend_mode: str, frontend_source: str) -> str:
