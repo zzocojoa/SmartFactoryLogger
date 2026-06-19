@@ -17,6 +17,9 @@ yarn-error.log
 # Electron / Build Output
 dist/
 build/
+!build/
+build/*
+!build/installer.nsh
 release/
 win-unpacked/
 
