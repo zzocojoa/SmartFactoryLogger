@@ -95,16 +95,40 @@ class FrontendRoutingHealthTests(unittest.TestCase):
         self.assertEqual(backend_app.get_frontend_runtime_class("frozen", "meipass"), "legacy-one-file")
         self.assertEqual(backend_app.get_frontend_runtime_warning("meipass", []), "legacy_meipass")
 
-    def test_frontend_file_response_disables_cache(self) -> None:
+    def test_frontend_file_response_keeps_entry_public_and_unversioned_files_uncached(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            index_path = Path(temp_dir) / "index.html"
-            index_path.write_text("<div>ok</div>", encoding="utf-8")
+            root = Path(temp_dir)
+            assets_path = root / "assets"
+            assets_path.mkdir()
+            paths = [
+                root / "index.html",
+                root / "manifest.json",
+                assets_path / "logo_white.png",
+            ]
+            for path in paths:
+                path.write_text("ok", encoding="utf-8")
 
-            response = backend_app.frontend_file_response(index_path)
+            for path in paths:
+                response = backend_app.frontend_file_response(path)
 
-            self.assertEqual(response.headers["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
-            self.assertEqual(response.headers["Pragma"], "no-cache")
-            self.assertEqual(response.headers["Expires"], "0")
+                self.assertEqual(response.headers["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
+                self.assertEqual(response.headers["Pragma"], "no-cache")
+                self.assertEqual(response.headers["Expires"], "0")
+                self.assertFalse(backend_app.is_frontend_immutable_asset(path))
+
+    def test_frontend_file_response_uses_immutable_cache_for_hashed_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            asset_path = Path(temp_dir) / "assets" / "OperatorMetadataWidget-DeoraY-r.js"
+            asset_path.parent.mkdir()
+            asset_path.write_text("console.log('ok');", encoding="utf-8")
+
+            response = backend_app.frontend_file_response(asset_path)
+
+            self.assertTrue(backend_app.is_frontend_immutable_asset(asset_path))
+            self.assertEqual(response.headers["Cache-Control"], "public, max-age=31536000, immutable")
+            self.assertNotIn("Pragma", response.headers)
+            self.assertNotIn("Expires", response.headers)
+
     def test_frontend_file_request_status_distinguishes_missing_assets_from_not_found(self) -> None:
         missing_assets_status = {
             "frontend_assets_exists": False,
