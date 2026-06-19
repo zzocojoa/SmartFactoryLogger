@@ -42,9 +42,15 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
   `operator_metadata_missing_fields=product_no,operator_mold_no` 상태를 만든다. 리셋 이후 새 sample부터
   v2 CSV에 빈 `Product_No_operator`, 빈 `Mold_No_operator`, invalid 상태가 기록되며, 이미 logger queue에
   들어간 row는 소급 변경하지 않는다.
-- 작업 정보 스냅카드의 RGB 외곽 펄스는 필수값 누락 상태에서 `적용`, `제품 변경`, Enter 저장을 시도하면
-  시작한다. 작업자가 제품번호와 금형 번호를 입력하더라도 `적용`으로 서버 저장이 성공해
+- 작업 정보 스냅카드의 RGB 외곽 펄스는 필수값이 누락되거나 서버 적용값이 invalid/missing이면 `적용` 클릭 전부터
+  표시한다. `적용`, `제품 변경`, Enter 저장 시도는 펄스 애니메이션을 처음부터 다시 시작시키지만, 필수값 누락 상태에서는
+  저장 API를 호출하지 않는다. 작업자가 제품번호와 금형 번호를 입력하더라도 `적용`으로 서버 저장이 성공해
   `operator_metadata_valid=true`가 되기 전까지 펄스 경고는 유지한다.
+- 펄스 회귀가 의심되면 최신 NSIS 설치 여부를 먼저 확인하고, `http://localhost:8000/dashboard` 또는
+  `http://192.168.0.7:8000/dashboard`에서 필수값 누락 상태의 `작업 정보` 카드가 클릭 전부터
+  `operator-card-alert-active`, `operator-metadata-required-alert`, 14개 `operator-card-alert-ring`,
+  `operator-alert-pulse-ring` 애니메이션을 갖는지 확인한다. DOM은 있는데 보이지 않으면 테마별 `mix-blend-mode`,
+  `z-index`, overflow clipping, `prefers-reduced-motion` 상태를 우선 확인한다.
 - 작업 정보 스냅카드는 안내 문구 대신 `이전 작업` 영역을 표시한다. 새 제품번호/금형 번호 적용 또는 리셋 직전의
   유효한 작업 정보가 최근 순서로 최대 3개까지 `operator_metadata.json` history에 보존된다.
 - History는 이전 유효 작업 정보의 제품번호 또는 금형 번호 중 하나만 달라져도 생성된다. 같은 제품번호/금형 번호 조합을 재적용하면
