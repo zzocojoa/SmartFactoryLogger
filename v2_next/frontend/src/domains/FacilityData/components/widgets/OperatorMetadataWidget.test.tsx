@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FactoryData, OperatorMetadata } from '../../../../shared/types';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
@@ -72,6 +72,7 @@ describe('OperatorMetadataComponent', () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.clearAllMocks();
     useDashboardStore.getState().setData(null, null);
   });
@@ -90,6 +91,7 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.click(applyButton);
 
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -133,6 +135,7 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.keyDown(productInput, { key: 'Enter' });
 
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -147,6 +150,7 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.click(changeButton);
 
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -177,6 +181,28 @@ describe('OperatorMetadataComponent', () => {
     expect(moldInput).not.toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('keeps the required RGB alert during silent refresh while server metadata is still invalid', async () => {
+    vi.useFakeTimers();
+    mocks.get.mockResolvedValue(buildMetadata());
+    render(<OperatorMetadataComponent />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    fireEvent.click(screen.getByTestId('operator-metadata-apply'));
+    expect(screen.getByTestId('operator-metadata-required-alert')).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('operator-metadata-required-alert')).toBeInTheDocument();
+  });
   it('keeps the card rendered when the server returns malformed metadata', async () => {
     mocks.get.mockResolvedValueOnce({});
 
@@ -336,6 +362,86 @@ describe('OperatorMetadataComponent', () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
+  it('automatically refreshes clean fields when another client updates server metadata', async () => {
+    vi.useFakeTimers();
+    mocks.get
+      .mockResolvedValueOnce(buildMetadata({
+        product_no: '11111',
+        operator_mold_no: '111',
+        valid: true,
+        missing_fields: [],
+        updated_at: '2026-03-09T07:20:20Z',
+      }))
+      .mockResolvedValueOnce(buildMetadata({
+        product_no: '22222',
+        operator_mold_no: '222',
+        valid: true,
+        missing_fields: [],
+        updated_at: '2026-03-09T07:21:20Z',
+        history: [
+          { product_no: '11111', operator_mold_no: '111', updated_at: '2026-03-09T07:20:20Z' },
+        ],
+      }));
+    render(<OperatorMetadataComponent />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const [productInput, moldInput] = screen.getAllByRole('textbox');
+    expect(productInput).toHaveValue('11111');
+    expect(moldInput).toHaveValue('111');
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(productInput).toHaveValue('22222');
+    expect(moldInput).toHaveValue('222');
+    expect(screen.getByTestId('operator-metadata-history')).toHaveTextContent('11111, 111');
+  });
+
+  it('does not overwrite dirty local input during automatic server metadata refresh', async () => {
+    vi.useFakeTimers();
+    mocks.get
+      .mockResolvedValueOnce(buildMetadata({
+        product_no: '11111',
+        operator_mold_no: '111',
+        valid: true,
+        missing_fields: [],
+        updated_at: '2026-03-09T07:20:20Z',
+      }))
+      .mockResolvedValueOnce(buildMetadata({
+        product_no: '22222',
+        operator_mold_no: '222',
+        valid: true,
+        missing_fields: [],
+        updated_at: '2026-03-09T07:21:20Z',
+      }));
+    render(<OperatorMetadataComponent />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const [productInput, moldInput] = screen.getAllByRole('textbox');
+    fireEvent.change(productInput, { target: { value: '99999' } });
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    expect(productInput).toHaveValue('99999');
+    expect(moldInput).toHaveValue('111');
+    expect(screen.getByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'dirty');
+  });
+
   it('reloads server values without resetting stored metadata', async () => {
     mocks.get
       .mockResolvedValueOnce(buildMetadata({
@@ -406,6 +512,7 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.click(applyButton);
 
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 });

@@ -209,6 +209,80 @@ class OperatorMetadataApiTests(unittest.TestCase):
             [("33333", "333"), ("22222", "222"), ("11111", "111")],
         )
 
+    def test_put_records_history_when_only_product_no_changes(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "11111", "operator_mold_no": "123"},
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+            response = client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "22222", "operator_mold_no": "123"},
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [(item["product_no"], item["operator_mold_no"]) for item in payload["history"]],
+            [("11111", "123")],
+        )
+
+    def test_put_records_history_when_only_operator_mold_no_changes(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "11111", "operator_mold_no": "123"},
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+            response = client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "11111", "operator_mold_no": "456"},
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [(item["product_no"], item["operator_mold_no"]) for item in payload["history"]],
+            [("11111", "123")],
+        )
+
+    def test_put_same_values_reapply_does_not_duplicate_history(self) -> None:
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "11111", "operator_mold_no": "111"},
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+            client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "22222", "operator_mold_no": "222"},
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+            response = client.put(
+                "/api/facility/operator-metadata",
+                json={"product_no": "22222", "operator_mold_no": "222"},
+                headers=self.TRUSTED_WRITE_HEADERS,
+            )
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [(item["product_no"], item["operator_mold_no"]) for item in payload["history"]],
+            [("11111", "111")],
+        )
+
     def test_put_rejects_untrusted_origin(self) -> None:
         client = TestClient(backend_app.app, raise_server_exceptions=False)
         try:

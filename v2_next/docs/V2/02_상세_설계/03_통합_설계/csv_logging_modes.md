@@ -47,6 +47,10 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
   `operator_metadata_valid=true`가 되기 전까지 펄스 경고는 유지한다.
 - 작업 정보 스냅카드는 안내 문구 대신 `이전 작업` 영역을 표시한다. 새 제품번호/금형 번호 적용 또는 리셋 직전의
   유효한 작업 정보가 최근 순서로 최대 3개까지 `operator_metadata.json` history에 보존된다.
+- History는 이전 유효 작업 정보의 제품번호 또는 금형 번호 중 하나만 달라져도 생성된다. 같은 제품번호/금형 번호 조합을 재적용하면
+  updated_at은 갱신되지만 history 중복 항목은 만들지 않는다.
+- UI는 다른 PC/클라이언트에서 저장한 작업 정보를 10초 주기 및 창 focus/visible 복귀 시 조용히 다시 조회한다. 입력 중인 dirty 상태나
+  제품 변경 상태에서는 로컬 입력값을 덮어쓰지 않으며, 수동 서버 값 새로고침은 기존처럼 서버값으로 폼을 다시 맞춘다.
 - v2 `schema_version=2.2.0` CSV는 53컬럼 contract다. index 기반으로 v2 CSV를 읽는 consumer는 header 기반
   매핑으로 전환하거나 배포 전 dry-run에서 실패 여부를 확인해야 한다.
 - 운영 배포 전에는 실제 서버 샘플 1세트를 repo 내부 validator와 repo 밖 ETL/Excel 매크로에 각각 dry-run한다.
