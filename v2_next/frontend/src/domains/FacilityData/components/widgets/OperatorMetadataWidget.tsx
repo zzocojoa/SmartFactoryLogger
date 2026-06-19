@@ -134,7 +134,6 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
   const [saveError, setSaveError] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
   const [changeNeeded, setChangeNeeded] = useState(false);
-  const [requiredAlertActive, setRequiredAlertActive] = useState(false);
   const [requiredAlertNonce, setRequiredAlertNonce] = useState(0);
 
   const fieldErrors = useMemo(() => validateFields(productNo, operatorMoldNo), [operatorMoldNo, productNo]);
@@ -217,12 +216,11 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
     serverMetadata.missing_fields.length > 0 ||
     !serverMetadata.product_no ||
     !serverMetadata.operator_mold_no;
-  const showRequiredAlert = !loading && requiredAlertActive && (inputMissing || appliedMetadataMissing);
+  const showRequiredAlert = !loading && (inputMissing || appliedMetadataMissing);
   const previousJobs = serverMetadata.history.slice(0, 3);
 
   const triggerRequiredAlert = useCallback(() => {
     setTouched(true);
-    setRequiredAlertActive(true);
     setRequiredAlertNonce((current) => current + 1);
     productInputRef.current?.focus();
   }, []);
@@ -244,9 +242,6 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
         setOperatorMoldNo(metadata.operator_mold_no);
         setTouched(false);
         setChangeNeeded(false);
-        if (!silent || metadata.valid) {
-          setRequiredAlertActive(false);
-        }
       }
     } catch {
       if (!silent) {
@@ -331,7 +326,6 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
       setOperatorMoldNo(metadata.operator_mold_no);
       setTouched(false);
       setChangeNeeded(false);
-      setRequiredAlertActive(false);
     } catch {
       setSaveError('서버 검증 또는 저장에 실패했습니다.');
     } finally {
@@ -349,7 +343,6 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
       setProductNo(metadata.product_no);
       setOperatorMoldNo(metadata.operator_mold_no);
       setChangeNeeded(false);
-      setRequiredAlertActive(false);
       productInputRef.current?.focus();
     } catch {
       setSaveError('서버 저장값 리셋에 실패했습니다.');

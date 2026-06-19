@@ -77,13 +77,14 @@ describe('OperatorMetadataComponent', () => {
     useDashboardStore.getState().setData(null, null);
   });
 
-  it('shows required missing state and triggers the RGB alert without saving', async () => {
+  it('shows the required RGB alert immediately when required values are missing', async () => {
     render(<OperatorMetadataComponent />);
 
     expect(await screen.findByText('필수값 미입력')).toBeInTheDocument();
     expect(screen.getByText('제품번호는 필수입니다.')).toBeInTheDocument();
     expect(screen.getByText('금형 번호는 필수입니다.')).toBeInTheDocument();
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
     const applyButton = screen.getByTestId('operator-metadata-apply');
     expect(applyButton).not.toBeDisabled();
     expect(applyButton).toHaveAttribute('data-disabled', 'true');
@@ -95,19 +96,18 @@ describe('OperatorMetadataComponent', () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
-  it('starts the required RGB alert from an action when metadata load fails before Electron can apply server state', async () => {
+  it('shows the required RGB alert when metadata load fails with empty values', async () => {
     mocks.get.mockRejectedValueOnce(new Error('metadata unavailable'));
 
     render(<OperatorMetadataComponent />);
 
     const card = await screen.findByTestId('operator-metadata-card');
     expect(card).toHaveAttribute('data-state', 'load-error');
-    expect(card).not.toHaveClass('operator-card-alert-active');
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(card).toHaveClass('operator-card-alert-active');
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
 
     fireEvent.click(screen.getByTestId('operator-metadata-apply'));
 
-    expect(card).toHaveClass('operator-card-alert-active');
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
   });
 
@@ -115,7 +115,7 @@ describe('OperatorMetadataComponent', () => {
     render(<OperatorMetadataComponent />);
 
     const applyButton = await screen.findByTestId('operator-metadata-apply');
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
 
     fireEvent.click(applyButton);
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
@@ -129,7 +129,7 @@ describe('OperatorMetadataComponent', () => {
     render(<OperatorMetadataComponent />);
 
     await screen.findByTestId('operator-metadata-apply');
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
     const [productInput] = screen.getAllByRole('textbox');
 
     fireEvent.keyDown(productInput, { key: 'Enter' });
@@ -145,7 +145,7 @@ describe('OperatorMetadataComponent', () => {
     const changeButton = await screen.findByTestId('operator-metadata-change-needed');
     expect(changeButton).not.toBeDisabled();
     expect(changeButton).toHaveAttribute('data-disabled', 'true');
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
 
     fireEvent.click(changeButton);
 
@@ -158,7 +158,7 @@ describe('OperatorMetadataComponent', () => {
     render(<OperatorMetadataComponent />);
 
     const applyButton = await screen.findByTestId('operator-metadata-apply');
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
 
     fireEvent.click(applyButton);
     expect(screen.getByTestId('operator-metadata-required-alert')).toBeInTheDocument();
@@ -339,7 +339,7 @@ describe('OperatorMetadataComponent', () => {
 
     fireEvent.click(applyButton);
 
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -358,7 +358,7 @@ describe('OperatorMetadataComponent', () => {
 
     fireEvent.click(applyButton);
 
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -507,7 +507,7 @@ describe('OperatorMetadataComponent', () => {
     const applyButton = screen.getByTestId('operator-metadata-apply');
     expect(applyButton).not.toBeDisabled();
     expect(applyButton).toHaveAttribute('data-disabled', 'true');
-    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
 
     fireEvent.click(applyButton);
 
