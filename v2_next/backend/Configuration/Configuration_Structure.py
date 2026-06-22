@@ -32,6 +32,7 @@ class SpotConfig(BaseModel):
 
 class SettingsConfig(BaseModel):
     logpath: Optional[str] = None
+    operator_metadata_downtime_reset_hours: Optional[int] = None
     snapshotpath: Optional[str] = None
     autosave: Optional[bool] = None
     password: Optional[str] = None

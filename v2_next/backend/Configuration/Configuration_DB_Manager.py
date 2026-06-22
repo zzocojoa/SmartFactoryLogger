@@ -268,12 +268,27 @@ class ConfigManager:
             "SPOT_WIDGET_HEIGHT",
             _get_int(parser, "SPOT", "widgetheight", config.DEFAULT_SPOT_WIDGET_HEIGHT),
         )
+        operator_metadata_downtime_reset_hours = _env_int(
+            "OPERATOR_METADATA_DOWNTIME_RESET_HOURS",
+            _get_int(
+                parser,
+                "SETTINGS",
+                "operator_metadata_downtime_reset_hours",
+                config.DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+            ),
+        )
+        operator_metadata_downtime_reset_hours = max(
+            config.MIN_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+            min(config.MAX_OPERATOR_METADATA_DOWNTIME_RESET_HOURS, operator_metadata_downtime_reset_hours),
+        )
+
 
         settings = {
             "logpath": _get(parser, "SETTINGS", "logpath", config.DEFAULT_LOG_PATH),
             "snapshotpath": _get(parser, "SETTINGS", "snapshotpath", config.DEFAULT_SNAPSHOT_PATH),
             "autosave": _get_bool(parser, "SETTINGS", "autosave", config.DEFAULT_AUTO_SAVE),
             "password_set": bool(_get(parser, "SETTINGS", "password", "")),
+            "operator_metadata_downtime_reset_hours": operator_metadata_downtime_reset_hours,
         }
         logging_cfg = {
             "csv_header": _get(parser, "HEADERS", "csv", config.DEFAULT_CSV_HEADER) or config.DEFAULT_CSV_HEADER,
@@ -388,6 +403,7 @@ class ConfigManager:
         security_keys = {"settings.password_set"}
         snapshot_keys = {"settings.snapshotpath"}
         system_keys = {"system.intervalsec"}
+        operator_metadata_keys = {"settings.operator_metadata_downtime_reset_hours"}
         status_keys = {"status.jam_press_threshold"}
         spot_keys = {
             "spot.ip",
@@ -426,6 +442,7 @@ class ConfigManager:
         security_changed = [key for key in changes if key in security_keys]
         snapshot_changed = [key for key in changes if key in snapshot_keys]
         system_changed = [key for key in changes if key in system_keys]
+        operator_metadata_changed = [key for key in changes if key in operator_metadata_keys]
         status_changed = [key for key in changes if key in status_keys]
         spot_changed = [key for key in changes if key in spot_keys]
         plc_changed = [key for key in changes if key in plc_keys]
@@ -460,6 +477,21 @@ class ConfigManager:
             snapshot_path_value = settings.get("snapshotpath")
             config.SNAPSHOT_PATH = config.resolve_storage_path(snapshot_path_value, "snapshots", "SnapshotPath")
             applied.extend(sorted(snapshot_changed))
+
+        if operator_metadata_changed:
+            reset_hours = settings.get(
+                "operator_metadata_downtime_reset_hours",
+                config.DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+            )
+            try:
+                reset_hours_int = int(reset_hours)
+            except Exception:
+                reset_hours_int = config.DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS
+            config.OPERATOR_METADATA_DOWNTIME_RESET_HOURS = max(
+                config.MIN_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+                min(config.MAX_OPERATOR_METADATA_DOWNTIME_RESET_HOURS, reset_hours_int),
+            )
+            applied.extend(sorted(operator_metadata_changed))
 
         if system_changed:
             interval_sec = system_cfg.get("interval_sec", config.DEFAULT_INTERVAL_SEC)

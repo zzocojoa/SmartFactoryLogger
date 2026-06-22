@@ -65,6 +65,26 @@ class OperatorMetadataStore:
             self._metadata = next_metadata
             return self._metadata.model_copy(deep=True)
 
+    def reset_if_valid(self, source: str = "system_auto_reset") -> tuple[OperatorMetadata, bool]:
+        with self._lock:
+            if not self._metadata.valid:
+                return self._metadata.model_copy(deep=True), False
+
+            next_metadata = OperatorMetadata(
+                product_no="",
+                operator_mold_no="",
+                updated_at=_utc_now_iso(),
+                source=source,
+                history=self._build_history_locked(
+                    previous=self._metadata,
+                    next_product_no="",
+                    next_operator_mold_no="",
+                ),
+            )
+            self._persist_locked(next_metadata)
+            self._metadata = next_metadata
+            return self._metadata.model_copy(deep=True), True
+
     def _load(self) -> None:
         try:
             if not self._path.exists():

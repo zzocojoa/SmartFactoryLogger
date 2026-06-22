@@ -173,11 +173,23 @@ def get_config_snapshot() -> dict:
         "widget_height": _get_int(parser, "SPOT", "widgetheight", config.DEFAULT_SPOT_WIDGET_HEIGHT),
     }
 
+    operator_metadata_downtime_reset_hours = _get_int(
+        parser,
+        "SETTINGS",
+        "operator_metadata_downtime_reset_hours",
+        config.DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+    )
+    operator_metadata_downtime_reset_hours = max(
+        config.MIN_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+        min(config.MAX_OPERATOR_METADATA_DOWNTIME_RESET_HOURS, operator_metadata_downtime_reset_hours),
+    )
+
     settings = {
         "logpath": _get(parser, "SETTINGS", "logpath", config.DEFAULT_LOG_PATH),
         "snapshotpath": _get(parser, "SETTINGS", "snapshotpath", config.DEFAULT_SNAPSHOT_PATH),
         "autosave": _get_bool(parser, "SETTINGS", "autosave", config.DEFAULT_AUTO_SAVE),
         "password_set": bool(_get(parser, "SETTINGS", "password", "")),
+        "operator_metadata_downtime_reset_hours": operator_metadata_downtime_reset_hours,
         "custom_notice": _get(parser, "SETTINGS", "custom_notice", config.DEFAULT_CUSTOM_NOTICE).replace("\\n", "\n"),
     }
     thresholds_value = {key: _get_text(parser, "THRESHOLDS_VALUE", key) for key in _THRESHOLD_KEYS}
@@ -406,6 +418,7 @@ def restore_defaults() -> dict:
             "logpath": config.DEFAULT_LOG_PATH,
             "snapshotpath": config.DEFAULT_SNAPSHOT_PATH,
             "autosave": config.DEFAULT_AUTO_SAVE,
+            "operator_metadata_downtime_reset_hours": config.DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
         },
         thresholds={
             "values": threshold_values,
@@ -559,6 +572,12 @@ def update_config(
             parser.set("SETTINGS", "snapshotpath", payload.settings.snapshotpath)
         if payload.settings.autosave is not None:
             parser.set("SETTINGS", "autosave", str(payload.settings.autosave))
+        if payload.settings.operator_metadata_downtime_reset_hours is not None:
+            reset_hours = max(
+                config.MIN_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+                min(config.MAX_OPERATOR_METADATA_DOWNTIME_RESET_HOURS, payload.settings.operator_metadata_downtime_reset_hours),
+            )
+            parser.set("SETTINGS", "operator_metadata_downtime_reset_hours", str(reset_hours))
         if payload.settings.password:
             parser.set("SETTINGS", "password", payload.settings.password)
         if payload.settings.custom_notice is not None:

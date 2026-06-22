@@ -101,6 +101,16 @@ v1과 v2 병행 저장 검증:
   --metadata "Z:\Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json"
 ```
 
+## Operator metadata downtime reset policy
+
+- `[SETTINGS] operator_metadata_downtime_reset_hours` controls the long-downtime reset threshold. Default is `8`; valid UI/API range is `1` to `72` hours.
+- During operation, a `Count` transition from a positive value to `0` is treated as a mold/product change boundary and resets the server-stored operator metadata.
+- After program restart, the first normal PLC sample resets operator metadata when the elapsed time since the last normal PLC sample is greater than or equal to the configured threshold, regardless of whether the current `Count` is `0` or positive.
+- Automatic reset is skipped when the stored operator metadata is already invalid, so repeated offline samples do not create duplicate reset history or overwrite `updated_at`.
+- Reset keeps the v1 CSV 21-column contract unchanged. v2 CSV rows after reset record blank `Product_No_operator`, blank `Mold_No_operator`, and `operator_metadata_valid=false` with `operator_metadata_missing_fields=product_no,operator_mold_no`.
+- `Mold_No_operator` remains an operator-entered mold number and must not be merged with `DIE_ID` or derived DIE fields.
+- Rollback before merge is branch discard or commit revert. Rollback after merge is merge-commit revert; after deployment, reinstall the previous NSIS build.
+
 v2-only 저장 검증:
 
 ```powershell

@@ -39,6 +39,14 @@ const isPositiveIntegerInput = (value: string): boolean => {
   const parsed = Number.parseInt(trimmed, 10);
   return Number.isFinite(parsed) && parsed > 0;
 };
+const isIntegerInRangeInput = (value: string, min: number, max: number): boolean => {
+  if (!isPositiveIntegerInput(value)) {
+    return false;
+  }
+  const parsed = Number.parseInt(value.trim(), 10);
+  return parsed >= min && parsed <= max;
+};
+
 
 const toOptionalNumberText = (value: number | null | undefined): string => {
   if (value === null || value === undefined) {
@@ -162,6 +170,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       logPath: values.settings.logpath ?? '',
       snapshotPath: values.settings.snapshotpath ?? '',
       autoSave: Boolean(values.settings.autosave),
+      operatorMetadataDowntimeResetHours: String(values.settings.operator_metadata_downtime_reset_hours ?? 8),
       intervalSec: values.system?.interval_sec?.toString() ?? '0.2',
       statusWarnMs: String(values.system?.status_warn_ms ?? 10000),
       statusOfflineMs: String(values.system?.status_offline_ms ?? 20000),
@@ -300,6 +309,9 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     if (!isPositiveIntegerInput(settingsForm.spotActuatorStep)) {
       errors.spotActuatorStep = '양의 정수를 입력하세요.';
     }
+    if (!isIntegerInRangeInput(settingsForm.operatorMetadataDowntimeResetHours, 1, 72)) {
+      errors.operatorMetadataDowntimeResetHours = '1-72시간 사이의 값을 입력하세요.';
+    }
     const thresholdValueFields: Array<keyof SettingsFormState> = [
       'thresholdSpeedValue',
       'thresholdPressValue',
@@ -414,6 +426,10 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       if (!isAuto) setSettingsError('?묒쓽 ?뺤닔瑜??낅젰?섏꽭??');
       return false;
     }
+    const operatorMetadataDowntimeResetHours = Math.max(
+      1,
+      Math.min(72, toPositiveInt(settingsForm.operatorMetadataDowntimeResetHours) ?? 8),
+    );
 
     setSettingsLoading(true);
     setSettingsError(null);
@@ -468,6 +484,7 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         logpath: settingsForm.logPath.trim() || undefined,
         snapshotpath: settingsForm.snapshotPath.trim() || undefined,
         autosave: settingsForm.autoSave,
+        operator_metadata_downtime_reset_hours: operatorMetadataDowntimeResetHours,
         password: settingsForm.password.trim() || undefined,
         current_password: requiresCurrentPassword ? trimmedCurrentPassword : undefined,
       },
