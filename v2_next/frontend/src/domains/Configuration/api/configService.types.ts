@@ -58,6 +58,7 @@ export interface ConfigSettingsPayload {
   snapshotpath?: string;
   autosave: boolean;
   password?: string;
+  operator_metadata_downtime_reset_hours: number;
   current_password?: string;
 }
 

@@ -531,6 +531,7 @@ export interface ConfigSnapshot {
       snapshotpath: string;
       autosave: boolean;
       password_set: boolean;
+      operator_metadata_downtime_reset_hours?: number;
     };
     system?: {
       interval_sec?: number;
@@ -575,6 +576,7 @@ export interface SettingsFormState {
   snapshotPath: string;
   autoSave: boolean;
   intervalSec: string;
+  operatorMetadataDowntimeResetHours: string;
   statusWarnMs: string;
   statusOfflineMs: string;
   password: string;

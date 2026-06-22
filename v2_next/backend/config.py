@@ -50,6 +50,9 @@ DEFAULT_SPOT_WIDGET_HEIGHT = 288
 DEFAULT_LOG_PATH = "logs/data"
 DEFAULT_SNAPSHOT_PATH = "snapshots"
 DEFAULT_AUTO_SAVE = True
+DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS = 8
+MIN_OPERATOR_METADATA_DOWNTIME_RESET_HOURS = 1
+MAX_OPERATOR_METADATA_DOWNTIME_RESET_HOURS = 72
 DEFAULT_CSV_V1_ENABLED = True
 DEFAULT_CSV_V2_ENABLED = False
 DEFAULT_CSV_V2_SIDECAR_ENABLED = True
@@ -320,6 +323,18 @@ CONFIG, CONFIG_ENCODING = _load_config(CONFIG_PATH)
 # --- Auto-Update config.ini if missing new sections ---
 if _safe_is_file(CONFIG_PATH):
     _updated = False
+    if not CONFIG.has_section("SETTINGS"):
+        CONFIG.add_section("SETTINGS")
+        _updated = True
+    _settings_defaults = {
+        "operator_metadata_downtime_reset_hours": str(DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS),
+    }
+    for _key, _default_val in _settings_defaults.items():
+        if not CONFIG.has_option("SETTINGS", _key):
+            CONFIG.set("SETTINGS", _key, _default_val)
+            _updated = True
+            _config_log("INFO", f"Auto-added missing SETTINGS.{_key} = {_default_val}")
+
     
     # SYSTEM 섹션 및 개별 키 자동 추가
     if not CONFIG.has_section("SYSTEM"):
@@ -462,6 +477,20 @@ SPOT_WIDGET_HEIGHT = _env_int("SPOT_WIDGET_HEIGHT", SPOT_WIDGET_HEIGHT)
 # SETTINGS / LOGGING
 LOG_PATH = resolve_storage_path(_get(CONFIG, "SETTINGS", "logpath", DEFAULT_LOG_PATH), "logs", "LogPath")
 AUTO_SAVE = _get_bool(CONFIG, "SETTINGS", "autosave", DEFAULT_AUTO_SAVE)
+_operator_metadata_downtime_reset_hours_raw = _get_int(
+    CONFIG,
+    "SETTINGS",
+    "operator_metadata_downtime_reset_hours",
+    DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+)
+_operator_metadata_downtime_reset_hours_raw = _env_int(
+    "OPERATOR_METADATA_DOWNTIME_RESET_HOURS",
+    _operator_metadata_downtime_reset_hours_raw,
+)
+OPERATOR_METADATA_DOWNTIME_RESET_HOURS = max(
+    MIN_OPERATOR_METADATA_DOWNTIME_RESET_HOURS,
+    min(MAX_OPERATOR_METADATA_DOWNTIME_RESET_HOURS, _operator_metadata_downtime_reset_hours_raw),
+)
 CUSTOM_NOTICE = _get(CONFIG, "SETTINGS", "custom_notice", DEFAULT_CUSTOM_NOTICE) or DEFAULT_CUSTOM_NOTICE
 
 # APP MODE (REAL vs MOCK)

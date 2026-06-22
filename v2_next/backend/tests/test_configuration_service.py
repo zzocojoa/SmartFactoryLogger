@@ -200,6 +200,48 @@ class ConfigurationServiceTests(unittest.TestCase):
             self.assertEqual(snapshot["values"]["status"]["jam_press_threshold"], 42.5)
             self.assertIn("jampressthreshold = 42.5", config_path.read_text(encoding="utf-8-sig"))
 
+    def test_update_config_writes_operator_metadata_downtime_reset_hours(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[SETTINGS]",
+                        "operator_metadata_downtime_reset_hours = 8",
+                        "",
+                    ]
+                ),
+                encoding="utf-8-sig",
+            )
+
+            from backend.Configuration import service
+            from backend.Configuration.Configuration_Structure import ConfigUpdate
+
+            original_config_path = service.config.CONFIG_PATH
+            original_allow_local_config = service.os.environ.get("SFL_ALLOW_LOCAL_CONFIG")
+            service.config.CONFIG_PATH = config_path
+            service.os.environ["SFL_ALLOW_LOCAL_CONFIG"] = "1"
+            try:
+                with mock.patch.object(service.config_meta, "record_local_update", return_value={}):
+                    with mock.patch.object(service.config_manager, "reload", return_value={}):
+                        with mock.patch.object(service.config_manager, "apply_changes", return_value={}):
+                            service.update_config(
+                                ConfigUpdate(settings={"operator_metadata_downtime_reset_hours": 200}),
+                                source="local",
+                            )
+                service.clear_snapshot_cache()
+                snapshot = service.get_config_snapshot()
+            finally:
+                service.clear_snapshot_cache()
+                service.config.CONFIG_PATH = original_config_path
+                if original_allow_local_config is None:
+                    service.os.environ.pop("SFL_ALLOW_LOCAL_CONFIG", None)
+                else:
+                    service.os.environ["SFL_ALLOW_LOCAL_CONFIG"] = original_allow_local_config
+
+            self.assertEqual(snapshot["values"]["settings"]["operator_metadata_downtime_reset_hours"], 72)
+            self.assertIn("operator_metadata_downtime_reset_hours = 72", config_path.read_text(encoding="utf-8-sig"))
+
 
 if __name__ == "__main__":
     unittest.main()

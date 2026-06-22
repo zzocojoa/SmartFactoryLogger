@@ -134,15 +134,69 @@ class OperatorMetadataApiTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_path = backend_app.operator_metadata_store._path
         self.original_metadata = backend_app.operator_metadata_store.get()
+        self.original_runtime_state_path = backend_app.plc_service.operator_metadata_runtime_state_path
+        self.original_previous_count = backend_app.plc_service.operator_metadata_previous_count
+        self.original_last_normal_sample_at = backend_app.plc_service.operator_metadata_last_normal_sample_at
+        self.original_last_state_write_at = backend_app.plc_service.operator_metadata_last_state_write_at
+        self.original_reset_hours = backend_app.config.OPERATOR_METADATA_DOWNTIME_RESET_HOURS
         with backend_app.operator_metadata_store._lock:
             backend_app.operator_metadata_store._path = Path(self.temp_dir.name) / "operator_metadata.json"
             backend_app.operator_metadata_store._metadata = OperatorMetadata()
+        backend_app.plc_service.operator_metadata_runtime_state_path = (
+            Path(self.temp_dir.name) / "operator_metadata_runtime_state.json"
+        )
+        backend_app.plc_service.operator_metadata_previous_count = None
+        backend_app.plc_service.operator_metadata_last_normal_sample_at = None
+        backend_app.plc_service.operator_metadata_last_state_write_at = None
+        backend_app.config.OPERATOR_METADATA_DOWNTIME_RESET_HOURS = 8
 
     def tearDown(self) -> None:
         with backend_app.operator_metadata_store._lock:
             backend_app.operator_metadata_store._path = self.original_path
             backend_app.operator_metadata_store._metadata = self.original_metadata
+        backend_app.plc_service.operator_metadata_runtime_state_path = self.original_runtime_state_path
+        backend_app.plc_service.operator_metadata_previous_count = self.original_previous_count
+        backend_app.plc_service.operator_metadata_last_normal_sample_at = self.original_last_normal_sample_at
+        backend_app.plc_service.operator_metadata_last_state_write_at = self.original_last_state_write_at
+        backend_app.config.OPERATOR_METADATA_DOWNTIME_RESET_HOURS = self.original_reset_hours
         self.temp_dir.cleanup()
+
+    def _factory_data(self, count: int | None = 3) -> FactoryData:
+        return FactoryData(
+            Time="2026-03-09T07:20:25.123",
+            Status="Running",
+            Speed=1.0,
+            Press=2.0,
+            Count=count,
+            EndPos=4.0,
+            Billet_Length=5.0,
+            Spot=6.0,
+            Temp_F=7.0,
+            Temp_B=8.0,
+            Billet_Temp=9.0,
+            Mold1=10.0,
+            Mold2=11.0,
+            Mold3=12.0,
+            Mold4=13.0,
+            Mold5=14.0,
+            Mold6=15.0,
+            At_Temp=16.0,
+            At_Pre=17.0,
+        )
+
+    def _set_operator_metadata_runtime_state(self, last_sample_at: float, count: int = 3) -> None:
+        payload = {
+            "operator_metadata_runtime_state_version": "1.0.0",
+            "last_normal_sample_at": last_sample_at,
+            "last_count": count,
+        }
+        backend_app.plc_service.operator_metadata_runtime_state_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        backend_app.plc_service.operator_metadata_previous_count = None
+        backend_app.plc_service.operator_metadata_last_normal_sample_at = last_sample_at
+        backend_app.plc_service.operator_metadata_last_state_write_at = last_sample_at
 
     def test_get_returns_default_invalid_state(self) -> None:
         client = TestClient(backend_app.app, raise_server_exceptions=False)
@@ -474,6 +528,96 @@ class OperatorMetadataApiTests(unittest.TestCase):
         self.assertEqual(composed.operator_metadata_missing_fields, [])
         self.assertIsNotNone(composed.operator_metadata_updated_at)
 
+
+    def test_downtime_reset_after_threshold_with_zero_count(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        now = 1_773_040_825.0
+        self._set_operator_metadata_runtime_state(now - (8 * 60 * 60) - 1, count=9)
+
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=0), captured_at_sec=now)
+
+        self.assertEqual(composed.Product_No_operator, "")
+        self.assertEqual(composed.Mold_No_operator, "")
+        self.assertFalse(composed.operator_metadata_valid)
+        current = backend_app.operator_metadata_store.get()
+        self.assertFalse(current.valid)
+        self.assertEqual(current.source, "auto_downtime_threshold")
+
+    def test_downtime_reset_after_threshold_with_positive_count(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        now = 1_773_040_825.0
+        self._set_operator_metadata_runtime_state(now - (8 * 60 * 60) - 1, count=9)
+
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=2), captured_at_sec=now)
+
+        self.assertEqual(composed.Product_No_operator, "")
+        self.assertEqual(composed.Mold_No_operator, "")
+        self.assertFalse(composed.operator_metadata_valid)
+        self.assertEqual(backend_app.operator_metadata_store.get().source, "auto_downtime_threshold")
+
+    def test_downtime_under_threshold_does_not_reset(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        now = 1_773_040_825.0
+        self._set_operator_metadata_runtime_state(now - (7 * 60 * 60), count=9)
+
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=2), captured_at_sec=now)
+
+        self.assertEqual(composed.Product_No_operator, "12345")
+        self.assertEqual(composed.Mold_No_operator, "123")
+        self.assertTrue(composed.operator_metadata_valid)
+        self.assertEqual(backend_app.operator_metadata_store.get().product_no, "12345")
+
+    def test_running_positive_count_to_zero_resets(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        now = 1_773_040_825.0
+
+        first = backend_app.plc_service._compose_data(self._factory_data(count=3), captured_at_sec=now)
+        second = backend_app.plc_service._compose_data(self._factory_data(count=0), captured_at_sec=now + 1)
+
+        self.assertTrue(first.operator_metadata_valid)
+        self.assertEqual(second.Product_No_operator, "")
+        self.assertEqual(second.Mold_No_operator, "")
+        self.assertFalse(second.operator_metadata_valid)
+        self.assertEqual(backend_app.operator_metadata_store.get().source, "auto_count_transition_to_zero")
+
+    def test_auto_reset_skips_duplicate_when_metadata_already_invalid(self) -> None:
+        now = 1_773_040_825.0
+        self._set_operator_metadata_runtime_state(now - (8 * 60 * 60) - 1, count=9)
+
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=0), captured_at_sec=now)
+
+        current = backend_app.operator_metadata_store.get()
+        self.assertFalse(composed.operator_metadata_valid)
+        self.assertIsNone(current.updated_at)
+        self.assertFalse(backend_app.operator_metadata_store._path.exists())
+        self.assertTrue(backend_app.plc_service.operator_metadata_runtime_state_path.exists())
+
+    def test_auto_reset_sample_records_blank_operator_metadata_in_v2_csv_without_changing_v1(self) -> None:
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
+        )
+        now = 1_773_040_825.0
+        self._set_operator_metadata_runtime_state(now - (8 * 60 * 60) - 1, count=9)
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=2), captured_at_sec=now)
+        service = CSVLoggerService()
+        timestamp = service._parse_timestamp(composed)
+        v1_row = service._build_row(composed, timestamp)
+
+        v2_row = service._build_v2_row(composed, timestamp, timestamp.astimezone(), 1, v1_row)
+
+        self.assertNotIn("Product_No_operator", V1_CSV_COLUMNS)
+        self.assertNotIn("Mold_No_operator", V1_CSV_COLUMNS)
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Product_No_operator")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Mold_No_operator")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("operator_metadata_valid")], "false")
 
 class CSVLoggerV2ContractTests(unittest.TestCase):
     def create_data(self, press_value: float | None = 30.0) -> FactoryData:

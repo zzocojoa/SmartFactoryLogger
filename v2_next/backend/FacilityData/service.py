@@ -1,4 +1,7 @@
 from collections import deque
+import json
+import logging
+from pathlib import Path
 from typing import Optional, Dict, Any
 import threading
 import time
@@ -14,11 +17,16 @@ from backend.Configuration.Configuration_DB_Manager import config_manager
 from backend.Observability.Observability_Logic_Status import StatusEvaluator
 from backend.Observability.service import observability_service
 
+OPERATOR_METADATA_RUNTIME_STATE_VERSION = "1.0.0"
+OPERATOR_METADATA_RUNTIME_STATE_WRITE_INTERVAL_SEC = 60.0
+
+
 class PLCService:
     HISTORY_MAX_AGE_MS = 60 * 60 * 1000
     HISTORY_MAX_SAMPLES = 36_000
 
-    def __init__(self, use_mock: bool = True):
+    def __init__(self, use_mock: bool = True, operator_metadata_runtime_state_path: Optional[Path] = None):
+        self._logger = logging.getLogger("SmartFactoryLoggerV2")
         if use_mock:
             import os
             mode_env = os.getenv("V2_MODE", "MOCK").upper()
@@ -54,6 +62,14 @@ class PLCService:
         self.driver_last_error: Optional[str] = None
         self.driver_last_error_at: Optional[float] = None
         self.last_processed_driver_data_at: Optional[float] = None
+        self.operator_metadata_runtime_state_path = (
+            operator_metadata_runtime_state_path
+            or (config.APP_DATA_DIR / "operator_metadata_runtime_state.json")
+        )
+        self.operator_metadata_state_lock = threading.Lock()
+        self.operator_metadata_previous_count: Optional[int] = None
+        self.operator_metadata_last_normal_sample_at = self._load_operator_metadata_last_sample_at()
+        self.operator_metadata_last_state_write_at = self.operator_metadata_last_normal_sample_at
 
         self.current_data: FactoryData = FactoryData(
             Time="", Speed=0, Press=0, Count=0, EndPos=0, Billet_Length=0,
@@ -129,7 +145,99 @@ class PLCService:
         with self.driver_state_lock:
             return self.driver_last_data, self.driver_last_data_at
 
-    def _compose_data(self, raw_data: FactoryData) -> FactoryData:
+    def _operator_metadata_downtime_reset_hours(self) -> int:
+        fallback = getattr(config, "DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS", 8)
+        minimum = getattr(config, "MIN_OPERATOR_METADATA_DOWNTIME_RESET_HOURS", 1)
+        maximum = getattr(config, "MAX_OPERATOR_METADATA_DOWNTIME_RESET_HOURS", 72)
+        try:
+            value = int(getattr(config, "OPERATOR_METADATA_DOWNTIME_RESET_HOURS", fallback))
+        except Exception:
+            value = fallback
+        return max(minimum, min(maximum, value))
+
+    def _load_operator_metadata_last_sample_at(self) -> Optional[float]:
+        try:
+            if not self.operator_metadata_runtime_state_path.exists():
+                return None
+            payload = json.loads(self.operator_metadata_runtime_state_path.read_text(encoding="utf-8"))
+            last_sample_at = payload.get("last_normal_sample_at")
+            if isinstance(last_sample_at, (int, float)) and last_sample_at >= 0:
+                return float(last_sample_at)
+        except Exception as exc:
+            self._logger.warning("Operator metadata runtime state load failed: %s", exc)
+        return None
+
+    def _persist_operator_metadata_runtime_state(
+        self,
+        *,
+        sample_at_sec: float,
+        count: int,
+        force: bool = False,
+    ) -> None:
+        with self.operator_metadata_state_lock:
+            previous_write_at = self.operator_metadata_last_state_write_at
+            if (
+                not force
+                and previous_write_at is not None
+                and sample_at_sec - previous_write_at < OPERATOR_METADATA_RUNTIME_STATE_WRITE_INTERVAL_SEC
+            ):
+                return
+
+            payload = {
+                "operator_metadata_runtime_state_version": OPERATOR_METADATA_RUNTIME_STATE_VERSION,
+                "last_normal_sample_at": sample_at_sec,
+                "last_count": count,
+            }
+            temp_path = self.operator_metadata_runtime_state_path.with_name(
+                f"{self.operator_metadata_runtime_state_path.name}.tmp"
+            )
+            try:
+                self.operator_metadata_runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                temp_path.replace(self.operator_metadata_runtime_state_path)
+                self.operator_metadata_last_state_write_at = sample_at_sec
+            except Exception as exc:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                self._logger.warning("Operator metadata runtime state persist failed: %s", exc)
+
+    def _apply_operator_metadata_auto_reset(self, raw_data: FactoryData, captured_at_sec: float) -> None:
+        count = raw_data.Count
+        if count is None:
+            return
+
+        reset_reason: Optional[str] = None
+        previous_count = self.operator_metadata_previous_count
+        if previous_count is not None and previous_count > 0 and count == 0:
+            reset_reason = "count_transition_to_zero"
+        else:
+            last_sample_at = self.operator_metadata_last_normal_sample_at
+            threshold_sec = self._operator_metadata_downtime_reset_hours() * 60 * 60
+            if last_sample_at is not None and captured_at_sec - last_sample_at >= threshold_sec:
+                reset_reason = "downtime_threshold"
+
+        if reset_reason:
+            _, did_reset = operator_metadata_store.reset_if_valid(source=f"auto_{reset_reason}")
+            if did_reset:
+                self._logger.info(
+                    "Operator metadata auto reset applied: reason=%s count=%s",
+                    reset_reason,
+                    count,
+                )
+
+        self.operator_metadata_previous_count = count
+        self.operator_metadata_last_normal_sample_at = captured_at_sec
+        self._persist_operator_metadata_runtime_state(
+            sample_at_sec=captured_at_sec,
+            count=count,
+            force=reset_reason is not None,
+        )
+
+    def _compose_data(self, raw_data: FactoryData, captured_at_sec: Optional[float] = None) -> FactoryData:
+        sample_at_sec = captured_at_sec if captured_at_sec is not None else time.time()
+        self._apply_operator_metadata_auto_reset(raw_data, sample_at_sec)
         operator_metadata = operator_metadata_store.get()
         snapshot = config_manager.get_snapshot()
         values = snapshot.get("values", {})
@@ -199,7 +307,7 @@ class PLCService:
             try:
                 raw_data, driver_data_at = self._get_driver_snapshot()
                 if raw_data is not None and driver_data_at is not None and driver_data_at != self.last_processed_driver_data_at:
-                    next_data = self._compose_data(raw_data)
+                    next_data = self._compose_data(raw_data, driver_data_at)
                     timestamp_ms = int(driver_data_at * 1000)
                     current_data = self._with_timestamp_ms(next_data, timestamp_ms)
                     with self.lock:

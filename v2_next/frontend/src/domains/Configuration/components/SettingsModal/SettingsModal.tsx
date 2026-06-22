@@ -1621,6 +1621,22 @@ export function SettingsModal(props: SettingsModalProps) {
                           </button>
                         </label>
                         
+                        <label
+                          className={`settings-field ${isSettingsFieldDirty('operatorMetadataDowntimeResetHours') ? 'changed' : ''} ${validationErrors.operatorMetadataDowntimeResetHours ? 'error' : ''}`}
+                        >
+                          <span>{'\uC7A5\uC2DC\uAC04 \uBBF8\uC6B4\uC601 \uC2DC \uC791\uC5C5 \uC815\uBCF4 \uB9AC\uC14B'}</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="72"
+                            step="1"
+                            aria-label={'\uBBF8\uC6B4\uC601 \uAE30\uC900 \uC2DC\uAC04'}
+                            value={settingsForm.operatorMetadataDowntimeResetHours}
+                            onChange={(e) => updateSettingsField('operatorMetadataDowntimeResetHours', e.target.value)}
+                          />
+                          <span className="settings-field-help">{'\uBBF8\uC6B4\uC601 \uAE30\uC900 \uC2DC\uAC04: 1-72\uC2DC\uAC04'}</span>
+                        </label>
+
                         {/* Interval Collection Settings */}
                         <div className={`settings-field settings-interval-field ${isSettingsFieldDirty('intervalSec') ? 'changed' : ''}`}>
                           <label>수집 간격 (초)</label>
