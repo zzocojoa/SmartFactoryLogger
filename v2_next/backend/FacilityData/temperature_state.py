@@ -105,6 +105,16 @@ def derive_temperature_state(input_state: TemperatureStateInput) -> TemperatureS
             temperature_value_origin=TemperatureValueOrigin.NONE,
         )
 
+    if _is_transport_failure(input_state):
+        return TemperatureStateDecision(
+            temperature_status_shadow=TemperatureStatusShadow.SOURCE_ERROR,
+            spot_cache_status=(
+                SpotCacheStatus.AVAILABLE_NOT_USED
+                if input_state.has_ttl_valid_cache
+                else SpotCacheStatus.EMPTY
+            ),
+            temperature_value_origin=TemperatureValueOrigin.NONE,
+        )
     if input_state.raw_validity in {
         SpotRawValidity.EMPTY_BODY,
         SpotRawValidity.PARSE_ERROR,
@@ -124,7 +134,11 @@ def derive_temperature_state(input_state: TemperatureStateInput) -> TemperatureS
 
     return TemperatureStateDecision(
         temperature_status_shadow=TemperatureStatusShadow.UNKNOWN_MISSING,
-        spot_cache_status=SpotCacheStatus.EMPTY,
+        spot_cache_status=(
+            SpotCacheStatus.AVAILABLE_NOT_USED
+            if input_state.has_ttl_valid_cache
+            else SpotCacheStatus.EMPTY
+        ),
         temperature_value_origin=TemperatureValueOrigin.NONE,
     )
 
@@ -149,6 +163,16 @@ def _derive_for_stale_source(input_state: TemperatureStateInput) -> TemperatureS
             temperature_value_origin=TemperatureValueOrigin.NONE,
         )
 
+    if _is_transport_failure(input_state):
+        return TemperatureStateDecision(
+            temperature_status_shadow=TemperatureStatusShadow.SOURCE_ERROR,
+            spot_cache_status=(
+                SpotCacheStatus.AVAILABLE_NOT_USED
+                if input_state.has_ttl_valid_cache
+                else SpotCacheStatus.EMPTY
+            ),
+            temperature_value_origin=TemperatureValueOrigin.NONE,
+        )
     if input_state.has_previous_valid_value and not input_state.has_ttl_valid_cache:
         return TemperatureStateDecision(
             temperature_status_shadow=TemperatureStatusShadow.STALE,
@@ -168,6 +192,8 @@ def _derive_for_stale_source(input_state: TemperatureStateInput) -> TemperatureS
 
 
 def _is_transport_failure_with_allowed_fallback(input_state: TemperatureStateInput) -> bool:
-    return input_state.cache_fallback_allowed and cache_fallback_allowed_for_poll_status(
-        input_state.poll_status
-    )
+    return input_state.cache_fallback_allowed and _is_transport_failure(input_state)
+
+
+def _is_transport_failure(input_state: TemperatureStateInput) -> bool:
+    return cache_fallback_allowed_for_poll_status(input_state.poll_status)

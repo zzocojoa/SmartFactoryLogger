@@ -157,3 +157,11 @@ Do not switch operational alerts, ML preprocessing, or legacy quality mapping to
 - Factory CSV evidence limitation: inspected `Factory_Integrated_Log_v2_20260623_000000.csv` has no literal `6553.4` or `6553.5` in `Temperature`, so v2.2 CSV output should not be treated as raw device truth for sentinel semantics.
 - Contract update: `6553.4` and `6553.5` are documented invalid temperature sentinels, not `verified_no_target`; `verified_no_target_values` remains empty until a no-target response is separately server-verified.
 - Additional recommended capture endpoints for promotion evidence: `/output`, `/output?p=alarmstatus`, and `/output?p=signalpc`.
+
+## 2026-06-24 Sentinel Contract Patch
+
+- Decimal equivalence update: `6553.40` and `6553.50` are classified as the documented `6553.4` under-range and `6553.5` over-range invalid sentinels, while nearby values such as `6553.39`, `6553.41`, `6553.49`, and `6553.51` remain `out_of_range`.
+- Row-level preservation: `spot_raw_validity=invalid_sentinel` remains generic, but CSV rows now preserve `spot_device_status_code=temperature_under_range` or `temperature_over_range` so downstream consumers do not need raw text or sidecar lookup to distinguish the two.
+- Cache suppression: after an invalid sentinel, the pre-sentinel temperature cache may remain physically present but is emitted as `available_not_used`; transport fallback is suppressed until the next `valid_temperature` replaces the cache, and suppressed transport failures emit `temperature_status_shadow=source_error` rather than `unknown_missing`.
+- Raw preservation and provenance: raw decoded text and payload hash are preserved separately from the stripped Decimal classification text. The sentinel sidecar records repo-relative PDF path, title, issue, page, SHA-256, verification date, and verification method.
+- Regression evidence: tests cover `6553.4`, `6553.40`, whitespace/CRLF, `6553.5`, `6553.50`, non-sentinel nearby values, NaN/Inf invalid numeric handling, row-level device status propagation, health API device-status exposure, and `valid -> sentinel -> timeout(source_error) -> valid -> timeout(reused)` cache behavior.

@@ -23,6 +23,7 @@ from backend.FacilityData.spot_observation import (
     derive_spot_target_observed_shadow,
 )
 from backend.FacilityData.temperature_state import (
+    TemperatureStateDecision,
     TemperatureStateInput,
     derive_temperature_state,
 )
@@ -88,6 +89,7 @@ _spot_poll_seq = 0
 _spot_observation_seq = 0
 _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
 _spot_last_valid_value_at: Optional[float] = None
+_spot_temperature_cache_suppressed_until_valid = False
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
 
 # Async HTTP client reused for connection pooling.
@@ -536,7 +538,17 @@ async def _request_spot_temperature_observation(
         invalid_sentinel_values=_SPOT_INVALID_SENTINEL_VALUES,
     )
     if classification.raw_validity == SpotRawValidity.VALID_TEMPERATURE:
-        return float(classification.parsed_temperature_c), classification
+        parsed_temperature_c = classification.parsed_temperature_c
+        if parsed_temperature_c is None:
+            raise SpotTemperatureFetchError(
+                "temperature-parse-error",
+                "SPOT temperature upstream produced a valid classification without a parsed temperature",
+                temp_url=temp_url,
+                upstream_status=response.status_code,
+                raw_body=response.content,
+                raw_classification=classification,
+            )
+        return float(parsed_temperature_c), classification
 
     raw_temp = classification.raw_value_text or ""
     if classification.raw_validity == SpotRawValidity.EMPTY_BODY:
@@ -864,6 +876,7 @@ def _publish_spot_temperature_snapshot(
     global _spot_observation_seq
     global _spot_temperature_snapshot
     global _spot_last_valid_value_at
+    global _spot_temperature_cache_suppressed_until_valid
 
     if classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
         _img_cache["temp"] = 0.0
@@ -878,8 +891,20 @@ def _publish_spot_temperature_snapshot(
         observation_seq = _spot_observation_seq
         if classification.raw_validity == SpotRawValidity.VALID_TEMPERATURE:
             _spot_last_valid_value_at = poll_completed_at
+            _spot_temperature_cache_suppressed_until_valid = False
+        elif classification.raw_validity == SpotRawValidity.INVALID_SENTINEL:
+            _spot_temperature_cache_suppressed_until_valid = True
         elif classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
             _spot_last_valid_value_at = None
+            _spot_temperature_cache_suppressed_until_valid = False
+
+        cache_fallback_allowed = classification.cache_fallback_allowed
+        if _spot_temperature_cache_suppressed_until_valid and classification.poll_status in {
+            SpotPollStatus.TIMEOUT,
+            SpotPollStatus.CONNECTION_ERROR,
+            SpotPollStatus.HTTP_ERROR,
+        }:
+            cache_fallback_allowed = False
 
         _spot_temperature_snapshot = {
             "spot_service_instance_id": _spot_service_instance_id,
@@ -897,8 +922,9 @@ def _publish_spot_temperature_snapshot(
             "spot_http_status_code": classification.http_status_code,
             "spot_response_content_length": classification.response_content_length,
             "spot_raw_payload_hash": classification.raw_payload_hash,
+            "spot_device_status_code": classification.device_status_code,
             "spot_error_code": classification.error_code,
-            "cache_fallback_allowed": classification.cache_fallback_allowed,
+            "cache_fallback_allowed": cache_fallback_allowed,
             "spot_temperature_url": temp_url,
         }
 
@@ -924,8 +950,8 @@ def _spot_source_freshness_for_snapshot(
     return SpotSourceFreshness.FRESH
 
 
-def _effective_spot_temperature_for_decision(decision: Any) -> Optional[float]:
-    if getattr(decision, "temperature_value_origin", None).value == "none":
+def _effective_spot_temperature_for_decision(decision: TemperatureStateDecision) -> Optional[float]:
+    if decision.temperature_value_origin.value == "none":
         return None
     temperature = _img_cache.get("temp")
     if isinstance(temperature, bool) or not isinstance(temperature, (float, int)):
@@ -981,6 +1007,7 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
             "spot_poll_duration_ms": None,
             "spot_response_content_length": None,
             "spot_raw_payload_hash": None,
+            "spot_device_status_code": None,
             "spot_error_code": None,
         }
 

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-06-23T13:35:30Z",
+  "lastUpdated": "2026-06-24T00:00:00Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling"
@@ -57,7 +57,7 @@
       "documents": {
         "plan": {
           "path": "docs/01-plan/features/spot-temperature-state-labeling.plan.md",
-          "document_version": "1.0.9",
+          "document_version": "1.0.10",
           "status": "completed",
           "approved_at": "2026-06-22",
           "approved_by": "user",
@@ -69,11 +69,11 @@
             "261EA580E55267A197E6ED8923E6467AED8DEAE4ABDD10C11F4645130F843B32",
             "8D69FD5165ACEB0BDCC184A60A4DB1DFAF0750698B060C79033A1AEE517DE71F"
           ],
-          "lastUpdated": "2026-06-23T13:35:30Z"
+          "lastUpdated": "2026-06-24T00:00:00Z"
         },
         "design": {
           "path": "docs/02-design/features/spot-temperature-state-labeling.design.md",
-          "document_version": "1.0.9",
+          "document_version": "1.0.10",
           "status": "conditionally_approved",
           "approved_at": "2026-06-22T15:12:39.880Z",
           "approved_by": "user",
@@ -145,14 +145,19 @@
             "online_process_state_priority_tests_added",
             "spot_invalid_sentinel_defaults_include_ametek_range_sentinels",
             "spot_api_rejects_6553_4_and_6553_5_as_invalid_sentinel",
-            "csv_v2_shadow_validator_checks_ametek_sentinel_map"
+            "csv_v2_shadow_validator_checks_ametek_sentinel_map",
+            "decimal_equivalent_ametek_sentinel_classification_added",
+            "spot_invalid_sentinel_device_status_preserved_to_csv",
+            "spot_invalid_sentinel_cache_suppression_latch_added",
+            "sentinel_sidecar_provenance_hardened",
+            "csv_v2_shadow_validator_checks_invalid_sentinel_row_contract"
           ],
           "remaining_do_items": [],
-          "lastUpdated": "2026-06-23T13:35:30Z"
+          "lastUpdated": "2026-06-24T00:00:00Z"
         },
         "analysis": {
           "path": "docs/03-analysis/spot-temperature-state-labeling.analysis.md",
-          "document_version": "1.0.1",
+          "document_version": "1.0.2",
           "status": "completed_local_instrumentation_check",
           "match_rate": 100,
           "scope": "local_instrumentation_only",
@@ -164,15 +169,15 @@
             "legacy_reason_policy_pending",
             "operational_schema_v2_4_plus_fields_required"
           ],
-          "lastUpdated": "2026-06-23T13:35:30Z"
+          "lastUpdated": "2026-06-24T00:00:00Z"
         },
         "report": {
           "path": "docs/04-report/spot-temperature-state-labeling.report.md",
-          "document_version": "1.0.1",
+          "document_version": "1.0.2",
           "status": "completed_local_instrumentation_report",
           "scope": "local_instrumentation_only",
           "operational_promotion_blocked": true,
-          "lastUpdated": "2026-06-23T13:35:30Z"
+          "lastUpdated": "2026-06-24T00:00:00Z"
         }
       },
       "taskChain": [
@@ -209,7 +214,7 @@
       ],
       "timestamps": {
         "started": "2026-06-22T12:48:48.707Z",
-        "lastUpdated": "2026-06-23T13:35:30Z"
+        "lastUpdated": "2026-06-24T00:00:00Z"
       },
       "reviewStatus": "local_instrumentation_completed_operational_promotion_blocked",
       "doScope": "instrumentation_only",
@@ -224,7 +229,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-06-23T13:35:30Z"
+    "lastActivity": "2026-06-24T00:00:00Z"
   },
   "history": [
     {
@@ -351,6 +356,13 @@
       "phase": "act",
       "timestamp": "2026-06-23T13:35:30Z",
       "evidence": "ametek_rest_pdf_and_raw_capture_20260623"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "sentinel_contract_patch",
+      "phase": "act",
+      "timestamp": "2026-06-24T00:00:00Z",
+      "evidence": "decimal_classification_device_status_cache_suppression_tests_20260624"
     }
   ]
 }

@@ -163,6 +163,45 @@ class SpotSnapshotTests(unittest.TestCase):
 
 
 
+    def test_read_data_preserves_invalid_sentinel_device_status_without_snapshot_error(self) -> None:
+        driver = RealPLCDriver()
+        now = time.time()
+        driver._update_ext_snapshot({"Speed": 1.0, "Press": 10.0}, now)
+        driver._process_high_speed_since = now - 1.0
+        driver._update_ls_snapshot({}, now)
+        driver._update_spot_snapshot(
+            None,
+            now,
+            {
+                "spot_target_state_observed_shadow": "unknown",
+                "spot_target_state_observed_source": "unknown",
+                "temperature_status_shadow": "invalid_value",
+                "spot_poll_status": "success",
+                "spot_raw_validity": "invalid_sentinel",
+                "spot_cache_status": "available_not_used",
+                "spot_source_freshness": "fresh",
+                "temperature_value_origin": "none",
+                "cache_fallback_allowed": False,
+                "spot_temperature_observed_c": None,
+                "spot_raw_value_text": "6553.4",
+                "spot_http_status_code": 200,
+                "spot_device_status_code": "temperature_under_range",
+                "spot_error_code": None,
+            },
+        )
+
+        data = driver.read_data()
+
+        self.assertIsNone(data.Spot)
+        self.assertIsNone(data.spot_snapshot_error)
+        self.assertEqual(data.spot_poll_status, "success")
+        self.assertEqual(data.spot_raw_validity, "invalid_sentinel")
+        self.assertEqual(data.spot_device_status_code, "temperature_under_range")
+        self.assertIsNone(data.spot_error_code)
+        self.assertEqual(data.temperature_status_shadow, "invalid_value")
+        self.assertEqual(data.temperature_value_origin, "none")
+        self.assertFalse(data.cache_fallback_allowed)
+
 class OnlineProcessStateTests(unittest.TestCase):
     def test_ext_snapshot_stale_missing_or_error_forces_unknown(self) -> None:
         driver = RealPLCDriver()
@@ -235,6 +274,7 @@ class PLCServiceHealthTests(unittest.TestCase):
             "spot_poll_status": "timeout",
             "spot_raw_validity": "not_received",
             "spot_source_freshness": "stale",
+            "spot_device_status_code": "temperature_under_range",
             "temperature_status_shadow": "ok",
             "spot_cache_status": "reused",
             "temperature_value_origin": "cached_observation",
@@ -262,6 +302,7 @@ class PLCServiceHealthTests(unittest.TestCase):
         self.assertEqual(spot_health["validation_state"], "shadow")
         self.assertEqual(spot_health["spot_poll_status"], "timeout")
         self.assertEqual(spot_health["spot_source_freshness"], "stale")
+        self.assertEqual(spot_health["spot_device_status_code"], "temperature_under_range")
         self.assertEqual(spot_health["temperature_status_shadow"], "ok")
         self.assertEqual(spot_health["temperature_value_origin"], "cached_observation")
         self.assertTrue(spot_health["cache_fallback_allowed"])
@@ -1151,6 +1192,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         data.spot_raw_payload_hash = "abc123"
         data.spot_raw_payload_encoding = "utf-8-replace"
         data.spot_http_status_code = 200
+        data.spot_device_status_code = "temperature_under_range"
         data.spot_poll_duration_ms = 12.5
         data.spot_response_content_length = 5
         data.spot_last_poll_started_at = "2026-03-09T07:20:24.000Z"
@@ -1178,6 +1220,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_temperature_observed_c")], "448.5")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_temperature_raw")], "'=448.5")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_temperature_raw_truncated")], "false")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_device_status_code")], "temperature_under_range")
 
     def test_v2_row_includes_operator_metadata_without_changing_v1(self) -> None:
         service = CSVLoggerService()

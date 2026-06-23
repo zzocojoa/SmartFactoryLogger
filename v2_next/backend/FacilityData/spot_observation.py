@@ -1,7 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
-import math
+from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable, Optional
@@ -18,6 +18,12 @@ SPOT_INVALID_SENTINEL_VALUES = (
 SPOT_INVALID_SENTINEL_MEANINGS = {
     SPOT_UNDER_RANGE_SENTINEL_VALUE: "under_range",
     SPOT_OVER_RANGE_SENTINEL_VALUE: "over_range",
+}
+SPOT_UNDER_RANGE_DEVICE_STATUS_CODE = "temperature_under_range"
+SPOT_OVER_RANGE_DEVICE_STATUS_CODE = "temperature_over_range"
+SPOT_INVALID_SENTINEL_DEVICE_STATUS_CODES = {
+    SPOT_UNDER_RANGE_SENTINEL_VALUE: SPOT_UNDER_RANGE_DEVICE_STATUS_CODE,
+    SPOT_OVER_RANGE_SENTINEL_VALUE: SPOT_OVER_RANGE_DEVICE_STATUS_CODE,
 }
 
 
@@ -69,6 +75,7 @@ class SpotRawClassification:
     raw_payload_hash: Optional[str]
     response_content_length: Optional[int]
     http_status_code: Optional[int] = None
+    device_status_code: Optional[str] = None
     error_code: Optional[str] = None
 
 
@@ -113,7 +120,7 @@ def classify_spot_raw_response(
     if status != SpotPollStatus.SUCCESS:
         if status == SpotPollStatus.HTTP_ERROR and body:
             raw_validity = SpotRawValidity.NOT_EVALUATED
-            raw_text = _decode_body(body, encoding).strip()
+            raw_text = _decode_body(body, encoding)
         else:
             raw_validity = SpotRawValidity.NOT_RECEIVED
             raw_text = None
@@ -129,8 +136,9 @@ def classify_spot_raw_response(
             error_code=error_code,
         )
 
-    raw_text = _decode_body(body or b"", encoding).strip()
-    if raw_text == "":
+    raw_text = _decode_body(body or b"", encoding)
+    classification_text = raw_text.strip()
+    if classification_text == "":
         return SpotRawClassification(
             poll_status=status,
             raw_validity=SpotRawValidity.EMPTY_BODY,
@@ -143,7 +151,8 @@ def classify_spot_raw_response(
             error_code=error_code,
         )
 
-    if raw_text in set(verified_no_target_values):
+    verified_no_target_set = {str(value).strip() for value in verified_no_target_values}
+    if classification_text in verified_no_target_set:
         return _successful_non_temperature_classification(
             raw_text,
             SpotRawValidity.VERIFIED_NO_TARGET,
@@ -153,7 +162,11 @@ def classify_spot_raw_response(
             error_code,
         )
 
-    if raw_text in set(invalid_sentinel_values):
+    sentinel_matched, device_status_code = _match_invalid_sentinel(
+        classification_text,
+        invalid_sentinel_values,
+    )
+    if sentinel_matched:
         return _successful_non_temperature_classification(
             raw_text,
             SpotRawValidity.INVALID_SENTINEL,
@@ -161,11 +174,11 @@ def classify_spot_raw_response(
             content_length,
             http_status_code,
             error_code,
+            device_status_code=device_status_code,
         )
 
-    try:
-        parsed = float(raw_text)
-    except ValueError:
+    parsed_decimal = _parse_decimal(classification_text)
+    if parsed_decimal is None or not parsed_decimal.is_finite():
         return _successful_non_temperature_classification(
             raw_text,
             SpotRawValidity.PARSE_ERROR,
@@ -175,17 +188,7 @@ def classify_spot_raw_response(
             error_code,
         )
 
-    if not math.isfinite(parsed):
-        return _successful_non_temperature_classification(
-            raw_text,
-            SpotRawValidity.PARSE_ERROR,
-            raw_hash,
-            content_length,
-            http_status_code,
-            error_code,
-        )
-
-    if parsed < min_c or parsed > max_c:
+    if parsed_decimal < Decimal(str(min_c)) or parsed_decimal > Decimal(str(max_c)):
         return _successful_non_temperature_classification(
             raw_text,
             SpotRawValidity.OUT_OF_RANGE,
@@ -199,7 +202,7 @@ def classify_spot_raw_response(
         poll_status=status,
         raw_validity=SpotRawValidity.VALID_TEMPERATURE,
         raw_value_text=raw_text,
-        parsed_temperature_c=parsed,
+        parsed_temperature_c=float(parsed_decimal),
         cache_fallback_allowed=False,
         raw_payload_hash=raw_hash,
         response_content_length=content_length,
@@ -243,6 +246,8 @@ def _successful_non_temperature_classification(
     content_length: Optional[int],
     http_status_code: Optional[int],
     error_code: Optional[str],
+    *,
+    device_status_code: Optional[str] = None,
 ) -> SpotRawClassification:
     return SpotRawClassification(
         poll_status=SpotPollStatus.SUCCESS,
@@ -253,8 +258,48 @@ def _successful_non_temperature_classification(
         raw_payload_hash=raw_hash,
         response_content_length=content_length,
         http_status_code=http_status_code,
+        device_status_code=device_status_code,
         error_code=error_code,
     )
+
+
+def _match_invalid_sentinel(
+    classification_text: str,
+    invalid_sentinel_values: Iterable[str],
+) -> tuple[bool, Optional[str]]:
+    sentinel_texts = {str(value).strip() for value in invalid_sentinel_values}
+    if classification_text in sentinel_texts:
+        parsed = _parse_decimal(classification_text)
+        return True, _device_status_code_for_invalid_sentinel_decimal(parsed)
+
+    parsed = _parse_decimal(classification_text)
+    if parsed is None or not parsed.is_finite():
+        return False, None
+
+    for sentinel_text in sentinel_texts:
+        sentinel_decimal = _parse_decimal(sentinel_text)
+        if sentinel_decimal is None or not sentinel_decimal.is_finite():
+            continue
+        if parsed == sentinel_decimal:
+            return True, _device_status_code_for_invalid_sentinel_decimal(sentinel_decimal)
+    return False, None
+
+
+def _device_status_code_for_invalid_sentinel_decimal(value: Optional[Decimal]) -> Optional[str]:
+    if value is None or not value.is_finite():
+        return None
+    if value == Decimal(SPOT_UNDER_RANGE_SENTINEL_VALUE):
+        return SPOT_UNDER_RANGE_DEVICE_STATUS_CODE
+    if value == Decimal(SPOT_OVER_RANGE_SENTINEL_VALUE):
+        return SPOT_OVER_RANGE_DEVICE_STATUS_CODE
+    return None
+
+
+def _parse_decimal(text: str) -> Optional[Decimal]:
+    try:
+        return Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _decode_body(body: bytes, encoding: str) -> str:

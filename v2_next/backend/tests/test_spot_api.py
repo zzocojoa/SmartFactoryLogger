@@ -95,6 +95,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_observation_seq = 0
             spot_api._spot_temperature_snapshot = None
             spot_api._spot_last_valid_value_at = None
+            spot_api._spot_temperature_cache_suppressed_until_valid = False
 
     def test_spot_temperature_diagnostics_before_first_poll_are_startup_pending(self) -> None:
         diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
@@ -187,7 +188,10 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.upstream_status, 200)
         self.assertEqual(diagnostics["spot_poll_status"], "success")
         self.assertEqual(diagnostics["spot_raw_validity"], "invalid_sentinel")
-        self.assertEqual(diagnostics["spot_raw_value_text"], "6553.4")
+        self.assertEqual(diagnostics["spot_raw_value_text"], "6553.4\r\n")
+        self.assertEqual(diagnostics["spot_device_status_code"], "temperature_under_range")
+        self.assertIsNone(diagnostics["spot_error_code"])
+        self.assertFalse(diagnostics["cache_fallback_allowed"])
         self.assertEqual(diagnostics["temperature_status_shadow"], "invalid_value")
         self.assertEqual(diagnostics["spot_cache_status"], "empty")
         self.assertEqual(diagnostics["temperature_value_origin"], "none")
@@ -198,7 +202,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ametek_over_range_sentinel_uses_invalid_sentinel_error(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, text="6553.5", request=request)
+            return httpx.Response(200, text="6553.50", request=request)
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with self.assertRaises(spot_api.SpotTemperatureFetchError) as raised:
@@ -209,6 +213,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(raised.exception.raw_classification)
         assert raised.exception.raw_classification is not None
         self.assertEqual(raised.exception.raw_classification.raw_validity.value, "invalid_sentinel")
+        self.assertEqual(raised.exception.raw_classification.device_status_code, "temperature_over_range")
 
     async def test_spot_temperature_http_error_with_body_publishes_not_evaluated_snapshot(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/temp"
@@ -297,6 +302,54 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["spot_cache_status"], "reused")
         self.assertEqual(diagnostics["spot_temperature_effective_c"], 450.0)
         self.assertEqual(diagnostics["spot_target_state_observed_shadow"], "unknown")
+
+    async def test_invalid_sentinel_suppresses_pre_sentinel_cache_until_next_valid_temperature(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+
+        async def valid_500_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="500.0", request=request)
+
+        async def sentinel_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="6553.4", request=request)
+
+        async def timeout_handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timeout", request=request)
+
+        async def valid_510_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="510.0", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(valid_500_handler)) as client:
+            await spot_api._refresh_spot_temperature(client)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(sentinel_handler)) as client:
+            with self.assertRaises(spot_api.SpotTemperatureFetchError):
+                await spot_api._refresh_spot_temperature(client)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(timeout_handler)) as client:
+            with self.assertRaises(spot_api.SpotTemperatureFetchError):
+                await spot_api._refresh_spot_temperature(client)
+
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+
+        self.assertEqual(diagnostics["spot_poll_status"], "timeout")
+        self.assertEqual(diagnostics["spot_raw_validity"], "not_received")
+        self.assertFalse(diagnostics["cache_fallback_allowed"])
+        self.assertEqual(diagnostics["temperature_status_shadow"], "source_error")
+        self.assertEqual(diagnostics["temperature_value_origin"], "none")
+        self.assertEqual(diagnostics["spot_cache_status"], "available_not_used")
+        self.assertIsNone(diagnostics["spot_temperature_effective_c"])
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(valid_510_handler)) as client:
+            await spot_api._refresh_spot_temperature(client)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(timeout_handler)) as client:
+            with self.assertRaises(spot_api.SpotTemperatureFetchError):
+                await spot_api._refresh_spot_temperature(client)
+
+        diagnostics = spot_api.get_image_proxy_diagnostics()
+
+        self.assertEqual(diagnostics["spot_poll_status"], "timeout")
+        self.assertTrue(diagnostics["cache_fallback_allowed"])
+        self.assertEqual(diagnostics["temperature_value_origin"], "cached_observation")
+        self.assertEqual(diagnostics["spot_cache_status"], "reused")
+        self.assertEqual(diagnostics["spot_temperature_effective_c"], 510.0)
 
     async def test_temperature_timeout_diagnostics_have_non_empty_message_and_status(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

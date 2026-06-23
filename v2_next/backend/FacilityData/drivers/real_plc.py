@@ -452,6 +452,7 @@ class RealPLCDriver(BasePLCDriver):
             "spot_temperature_observed_c",
             "spot_raw_payload_hash",
             "spot_http_status_code",
+            "spot_device_status_code",
             "spot_error_code",
             "spot_poll_duration_ms",
             "spot_response_content_length",
@@ -471,7 +472,6 @@ class RealPLCDriver(BasePLCDriver):
             fields["spot_raw_payload_encoding"] = "raw-bytes"
         else:
             fields["spot_raw_payload_encoding"] = None
-        fields["spot_device_status_code"] = None
         poll_status = fields.get("spot_poll_status")
         if poll_status not in {"timeout", "connection_error", "config_missing", "not_attempted"}:
             fields["spot_last_response_at"] = metadata.get("spot_last_poll_completed_at")

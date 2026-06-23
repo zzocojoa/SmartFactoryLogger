@@ -6,6 +6,7 @@ import glob
 import json
 import math
 import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from statistics import mean
 
@@ -42,6 +43,18 @@ EXPECTED_SPOT_INVALID_SENTINEL_VALUES = {"6553.4", "6553.5"}
 EXPECTED_SPOT_INVALID_SENTINEL_MEANINGS = {
     "6553.4": "under_range",
     "6553.5": "over_range",
+}
+EXPECTED_SPOT_INVALID_SENTINEL_DEVICE_STATUS_CODES = {
+    "6553.4": "temperature_under_range",
+    "6553.5": "temperature_over_range",
+}
+EXPECTED_SPOT_SENTINEL_PROVENANCE = {
+    "document_title": "SPOT+ Family REST API User Guide",
+    "document_issue": "2",
+    "repository_relative_path": "docs/reference/ametek_land_spot.pdf",
+    "document_sha256": "c8d315fafd796075545558afcca894e0f1855fc3ba6ebc2f875e95ca1d39bf22",
+    "page_numbers": [7],
+    "verification_method": "local_pdf_text_extraction_pypdf",
 }
 REQUIRED_V2_BASE_COLUMNS = [
     "schema_version",
@@ -378,6 +391,73 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
     return failures
 
 
+def _parse_decimal_value(value: str) -> Decimal | None:
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _expected_device_status_for_sentinel_raw(raw_value: str) -> str | None:
+    parsed = _parse_decimal_value(raw_value.strip())
+    if parsed is None or not parsed.is_finite():
+        return None
+    for sentinel_value, device_status in EXPECTED_SPOT_INVALID_SENTINEL_DEVICE_STATUS_CODES.items():
+        if parsed == Decimal(sentinel_value):
+            return device_status
+    return None
+
+
+def validate_spot_invalid_sentinel_invariants(rows: list[list[str]], header: list[str]) -> list[str]:
+    required_columns = [
+        "Temperature",
+        "spot_poll_status",
+        "spot_raw_validity",
+        "spot_temperature_raw",
+        "spot_device_status_code",
+        "spot_error_code",
+        "cache_fallback_allowed",
+        "temperature_status_shadow",
+        "spot_target_state_observed_shadow",
+        "temperature_value_origin",
+    ]
+    missing_columns = [column for column in required_columns if column not in header]
+    if missing_columns:
+        return ["v2 header missing invalid sentinel invariant columns: " + ", ".join(missing_columns)]
+
+    indices = {column: header.index(column) for column in required_columns}
+    failures: list[str] = []
+    for row_number, row in enumerate(rows, start=2):
+        if max(indices.values()) >= len(row):
+            failures.append(f"row {row_number} shorter than invalid sentinel invariant columns")
+            continue
+        if row[indices["spot_raw_validity"]].strip() != "invalid_sentinel":
+            continue
+
+        raw_value = row[indices["spot_temperature_raw"]]
+        expected_device_status = _expected_device_status_for_sentinel_raw(raw_value)
+        if expected_device_status is None:
+            failures.append(f"row {row_number} invalid_sentinel raw value is not documented 6553.4/6553.5 sentinel")
+            continue
+
+        expected_values = {
+            "spot_poll_status": "success",
+            "spot_device_status_code": expected_device_status,
+            "spot_error_code": "",
+            "cache_fallback_allowed": "false",
+            "temperature_status_shadow": "invalid_value",
+            "spot_target_state_observed_shadow": "unknown",
+            "temperature_value_origin": "none",
+            "Temperature": "",
+        }
+        for column, expected in expected_values.items():
+            actual = row[indices[column]].strip()
+            comparable_actual = actual.lower() if column == "cache_fallback_allowed" else actual
+            if comparable_actual != expected:
+                failures.append(f"row {row_number} {column}={actual!r}, expected {expected!r}")
+    return failures
+
+
 def validate_sample_seq(rows: list[list[str]], header: list[str]) -> tuple[bool, str]:
     if "sample_seq" not in header:
         return False, "missing sample_seq"
@@ -463,6 +543,7 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
         failures.extend(validate_shadow_enum_values(v2_rows, v2_header))
         failures.extend(validate_spot_sequence_values(v2_rows, v2_header))
         failures.extend(validate_temperature_value_origin_invariants(v2_rows, v2_header))
+        failures.extend(validate_spot_invalid_sentinel_invariants(v2_rows, v2_header))
 
         shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
         if not isinstance(shadow_metadata, dict):
@@ -501,6 +582,11 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
                 documented_sentinels = sentinel_map.get("documented_temperature_sentinels")
                 if documented_sentinels != {"under_range": "6553.4", "over_range": "6553.5"}:
                     failures.append("sentinel_map.documented_temperature_sentinels must match AMETEK REST API values")
+                for key, expected_value in EXPECTED_SPOT_SENTINEL_PROVENANCE.items():
+                    if sentinel_map.get(key) != expected_value:
+                        failures.append(f"sentinel_map.{key} must be {expected_value!r}")
+                if not str(sentinel_map.get("verified_at") or "").strip():
+                    failures.append("sentinel_map.verified_at must record the verification date")
                 if sentinel_map.get("pdf_verified") is not True:
                     failures.append("sentinel_map.pdf_verified must be true for documented AMETEK sentinel values")
                 if sentinel_map.get("verified_no_target_values") not in ([], ()):

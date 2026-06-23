@@ -372,6 +372,7 @@ class PLCService:
             "spot_poll_status",
             "spot_raw_validity",
             "spot_source_freshness",
+            "spot_device_status_code",
             "temperature_status_shadow",
             "spot_cache_status",
             "temperature_value_origin",

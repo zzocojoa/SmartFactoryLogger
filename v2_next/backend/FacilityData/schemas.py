@@ -56,6 +56,7 @@ FACTORY_DATA_ENUM_VALUES = {
     },
     "spot_source_freshness": {"fresh", "stale", "unknown"},
     "temperature_value_origin": {"current_observation", "cached_observation", "none"},
+    "spot_device_status_code": {"temperature_under_range", "temperature_over_range"},
 }
 
 
@@ -241,6 +242,7 @@ class FactoryData(BaseModel):
         "spot_cache_status",
         "spot_source_freshness",
         "temperature_value_origin",
+        "spot_device_status_code",
         mode="before",
     )
     @classmethod

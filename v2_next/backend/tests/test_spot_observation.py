@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 
 from backend.FacilityData.spot_observation import (
     SpotPollStatus,
@@ -29,6 +29,7 @@ class SpotObservationTests(unittest.TestCase):
         self.assertEqual(classification.raw_validity, SpotRawValidity.VALID_TEMPERATURE)
         self.assertEqual(classification.parsed_temperature_c, 448.5)
         self.assertFalse(classification.cache_fallback_allowed)
+        self.assertIsNone(classification.device_status_code)
         self.assertEqual(classification.response_content_length, 5)
 
         decision = derive_temperature_state(
@@ -76,6 +77,7 @@ class SpotObservationTests(unittest.TestCase):
 
         self.assertEqual(classification.raw_validity, SpotRawValidity.EMPTY_BODY)
         self.assertFalse(classification.cache_fallback_allowed)
+        self.assertIsNone(classification.device_status_code)
 
         target = derive_spot_target_observed_shadow(
             classification.raw_validity,
@@ -144,6 +146,57 @@ class SpotObservationTests(unittest.TestCase):
         self.assertEqual(decision.spot_cache_status, SpotCacheStatus.AVAILABLE_NOT_USED)
         self.assertEqual(decision.temperature_value_origin, TemperatureValueOrigin.NONE)
 
+    def test_ametek_range_sentinels_use_decimal_equivalence_and_device_status(self) -> None:
+        cases = [
+            (b"6553.4", "6553.4", "temperature_under_range"),
+            (b"6553.40", "6553.40", "temperature_under_range"),
+            (b" 6553.4\r\n", " 6553.4\r\n", "temperature_under_range"),
+            (b"6553.5", "6553.5", "temperature_over_range"),
+            (b"6553.50", "6553.50", "temperature_over_range"),
+        ]
+
+        for body, expected_raw_text, expected_device_status in cases:
+            with self.subTest(body=body):
+                classification = classify_spot_raw_response(
+                    poll_status=SpotPollStatus.SUCCESS,
+                    body=body,
+                    http_status_code=200,
+                )
+
+                self.assertEqual(classification.raw_validity, SpotRawValidity.INVALID_SENTINEL)
+                self.assertEqual(classification.raw_value_text, expected_raw_text)
+                self.assertIsNone(classification.parsed_temperature_c)
+                self.assertFalse(classification.cache_fallback_allowed)
+                self.assertEqual(
+                    getattr(classification, "device_status_code", None),
+                    expected_device_status,
+                )
+
+    def test_nearby_out_of_range_values_are_not_ametek_sentinels(self) -> None:
+        for body in (b"3000", b"6553.39", b"6553.41", b"6553.49", b"6553.51"):
+            with self.subTest(body=body):
+                classification = classify_spot_raw_response(
+                    poll_status=SpotPollStatus.SUCCESS,
+                    body=body,
+                    http_status_code=200,
+                )
+
+                self.assertEqual(classification.raw_validity, SpotRawValidity.OUT_OF_RANGE)
+                self.assertIsNone(getattr(classification, "device_status_code", None))
+
+    def test_nan_and_infinity_are_invalid_numeric_not_sentinels(self) -> None:
+        for body in (b"NaN", b"Inf", b"-Infinity"):
+            with self.subTest(body=body):
+                classification = classify_spot_raw_response(
+                    poll_status=SpotPollStatus.SUCCESS,
+                    body=body,
+                    http_status_code=200,
+                )
+
+                self.assertEqual(classification.raw_validity, SpotRawValidity.PARSE_ERROR)
+                self.assertIsNone(classification.parsed_temperature_c)
+                self.assertIsNone(getattr(classification, "device_status_code", None))
+
     def test_stale_success_snapshot_suppresses_ttl_cache(self) -> None:
         decision = derive_temperature_state(
             TemperatureStateInput(
@@ -176,6 +229,37 @@ class SpotObservationTests(unittest.TestCase):
         self.assertEqual(decision.spot_cache_status, SpotCacheStatus.REUSED)
         self.assertEqual(decision.temperature_value_origin, TemperatureValueOrigin.CACHED_OBSERVATION)
 
+    def test_transport_failure_with_suppressed_ttl_cache_is_source_error(self) -> None:
+        decision = derive_temperature_state(
+            TemperatureStateInput(
+                poll_status=SpotPollStatus.TIMEOUT,
+                raw_validity=SpotRawValidity.NOT_RECEIVED,
+                source_freshness=SpotSourceFreshness.FRESH,
+                cache_fallback_allowed=False,
+                has_ttl_valid_cache=True,
+                has_previous_valid_value=True,
+            )
+        )
+
+        self.assertEqual(decision.temperature_status_shadow, TemperatureStatusShadow.SOURCE_ERROR)
+        self.assertEqual(decision.spot_cache_status, SpotCacheStatus.AVAILABLE_NOT_USED)
+        self.assertEqual(decision.temperature_value_origin, TemperatureValueOrigin.NONE)
+
+    def test_stale_transport_failure_with_suppressed_ttl_cache_is_source_error(self) -> None:
+        decision = derive_temperature_state(
+            TemperatureStateInput(
+                poll_status=SpotPollStatus.TIMEOUT,
+                raw_validity=SpotRawValidity.NOT_RECEIVED,
+                source_freshness=SpotSourceFreshness.STALE,
+                cache_fallback_allowed=False,
+                has_ttl_valid_cache=True,
+                has_previous_valid_value=True,
+            )
+        )
+
+        self.assertEqual(decision.temperature_status_shadow, TemperatureStatusShadow.SOURCE_ERROR)
+        self.assertEqual(decision.spot_cache_status, SpotCacheStatus.AVAILABLE_NOT_USED)
+        self.assertEqual(decision.temperature_value_origin, TemperatureValueOrigin.NONE)
     def test_stale_transport_failure_without_previous_value_is_source_error(self) -> None:
         decision = derive_temperature_state(
             TemperatureStateInput(
@@ -268,9 +352,10 @@ class SpotObservationTests(unittest.TestCase):
         )
 
         self.assertEqual(classification.raw_validity, SpotRawValidity.INVALID_SENTINEL)
-        self.assertEqual(classification.raw_value_text, "6553.4")
+        self.assertEqual(classification.raw_value_text, "6553.4\r\n")
         self.assertIsNone(classification.parsed_temperature_c)
         self.assertFalse(classification.cache_fallback_allowed)
+        self.assertEqual(classification.device_status_code, "temperature_under_range")
 
         target = derive_spot_target_observed_shadow(
             classification.raw_validity,
@@ -303,6 +388,7 @@ class SpotObservationTests(unittest.TestCase):
         self.assertEqual(classification.raw_value_text, "6553.5")
         self.assertIsNone(classification.parsed_temperature_c)
         self.assertFalse(classification.cache_fallback_allowed)
+        self.assertEqual(classification.device_status_code, "temperature_over_range")
 
 if __name__ == "__main__":
     unittest.main()
