@@ -1,13 +1,14 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-06-11T03:24:19.928Z",
+  "lastUpdated": "2026-06-23T13:35:30Z",
   "activeFeatures": [
-    "spot-live-image"
+    "spot-live-image",
+    "spot-temperature-state-labeling"
   ],
-  "primaryFeature": "spot-live-image",
+  "primaryFeature": "spot-temperature-state-labeling",
   "features": {
     "spot-live-image": {
-      "phase": "check",
+      "phase": "completed",
       "matchRate": null,
       "iterationCount": 3,
       "documents": {},
@@ -48,17 +49,182 @@
         "lastUpdated": "2026-06-11T02:26:53.888Z"
       },
       "completedAt": "2026-06-11T02:26:53.885Z"
+    },
+    "spot-temperature-state-labeling": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 15,
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/spot-temperature-state-labeling.plan.md",
+          "document_version": "1.0.9",
+          "status": "completed",
+          "approved_at": "2026-06-22",
+          "approved_by": "user",
+          "git_commit": null,
+          "dataset_id": "spot-temperature-gap-20260619-20260620",
+          "dataset_sha256": [
+            "AA708210E2D60D7E68895BAB13F3CD6C731F835E0E5D04543C12E697493C83A0",
+            "DFD988624D11A0CDF585D45B8A337D1DBC4A057507006FDD0567CF856913E634",
+            "261EA580E55267A197E6ED8923E6467AED8DEAE4ABDD10C11F4645130F843B32",
+            "8D69FD5165ACEB0BDCC184A60A4DB1DFAF0750698B060C79033A1AEE517DE71F"
+          ],
+          "lastUpdated": "2026-06-23T13:35:30Z"
+        },
+        "design": {
+          "path": "docs/02-design/features/spot-temperature-state-labeling.design.md",
+          "document_version": "1.0.9",
+          "status": "conditionally_approved",
+          "approved_at": "2026-06-22T15:12:39.880Z",
+          "approved_by": "user",
+          "git_commit": null,
+          "do_scope": "instrumentation_only",
+          "instrumentation_do_requirements": [
+            "schema_rollover_guard_required",
+            "immutable_poll_snapshot_required",
+            "logger_service_instance_id_required",
+            "spot_source_freshness_fields_required",
+            "cache_fallback_allowed_required",
+            "sidecar_rule_version_metadata_required"
+          ],
+          "operational_promotion_blockers": [
+            "server_pc_spot_no_target_response_unverified",
+            "server_pc_poll_freshness_threshold_unverified",
+            "downstream_v2_3_consumer_compatibility_unverified",
+            "legacy_reason_policy_pending",
+            "operational_schema_v2_4_plus_fields_required"
+          ],
+          "resolved_documentation_items": [
+            "online_process_state_priority_defined",
+            "billet_change_pause_run_boundary_policy_defined",
+            "realtime_confidence_policy_defined",
+            "poller_stale_duration_metric_defined",
+            "cache_fallback_allowed_policy_defined",
+            "spot_raw_validity_not_evaluated_defined",
+            "v2_3_shadow_only_promotion_boundary_defined",
+            "sidecar_git_commit_null_policy_defined",
+            "stale_snapshot_transport_cache_fallback_policy_aligned",
+            "v2_3_permanent_shadow_boundary_aligned",
+            "temperature_effective_value_invariant_rechecked",
+            "development_replay_consumer_v2_3_contract_checked",
+            "enum_mismatch_validation_implemented",
+            "spot_sequence_invariant_validation_implemented",
+            "ametek_rest_under_over_range_sentinel_contract_documented",
+            "raw_capture_6553_4_under_range_evidence_recorded",
+            "verified_no_target_kept_separate_from_range_sentinels"
+          ],
+          "implemented_do_items": [
+            "spot_raw_validity_classifier_added",
+            "spot_target_observed_freshness_gate_added",
+            "temperature_status_shadow_decision_table_added",
+            "spot_numeric_validation_hardened",
+            "v2_header_append_guard_added",
+            "sidecar_logger_identity_and_shadow_metadata_added",
+            "spot_api_immutable_poll_snapshot_added",
+            "spot_api_shadow_diagnostics_added",
+            "stale_snapshot_transport_cache_fallback_policy_implemented",
+            "real_plc_spot_snapshot_metadata_join_added",
+            "v2_3_shadow_csv_fields_emitted",
+            "csv_v2_shadow_validator_supports_2_3",
+            "v2_3_shadow_csv_contract_tests_added",
+            "temperature_origin_none_clears_legacy_temperature_value",
+            "compose_layer_changeover_candidate_from_valid_metadata_change_added",
+            "source_freshness_unknown_after_first_poll_maps_unknown_missing",
+            "real_plc_spot_diagnostics_read_after_cache_probe",
+            "csv_replay_driver_preserves_v2_3_shadow_fields",
+            "csv_replay_driver_preserves_temperature_null_for_origin_none",
+            "factory_data_shadow_enum_validation_added",
+            "factory_data_spot_sequence_invariant_validation_added",
+            "csv_v2_shadow_validator_checks_shadow_enum_values",
+            "csv_v2_shadow_validator_checks_row_unique_key_scope",
+            "csv_v2_shadow_validator_checks_temperature_origin_invariants",
+            "health_exposes_shadow_spot_temperature_source_health",
+            "posthoc_process_segment_fact_pipeline_added",
+            "posthoc_billet_change_pause_requires_same_inferred_run_context",
+            "spot_observation_decision_table_tests_tracked",
+            "online_process_state_priority_tests_added",
+            "spot_invalid_sentinel_defaults_include_ametek_range_sentinels",
+            "spot_api_rejects_6553_4_and_6553_5_as_invalid_sentinel",
+            "csv_v2_shadow_validator_checks_ametek_sentinel_map"
+          ],
+          "remaining_do_items": [],
+          "lastUpdated": "2026-06-23T13:35:30Z"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/spot-temperature-state-labeling.analysis.md",
+          "document_version": "1.0.1",
+          "status": "completed_local_instrumentation_check",
+          "match_rate": 100,
+          "scope": "local_instrumentation_only",
+          "operational_promotion_blocked": true,
+          "blockers": [
+            "server_pc_spot_no_target_response_unverified",
+            "server_pc_poll_freshness_threshold_unverified",
+            "downstream_v2_3_consumer_compatibility_unverified",
+            "legacy_reason_policy_pending",
+            "operational_schema_v2_4_plus_fields_required"
+          ],
+          "lastUpdated": "2026-06-23T13:35:30Z"
+        },
+        "report": {
+          "path": "docs/04-report/spot-temperature-state-labeling.report.md",
+          "document_version": "1.0.1",
+          "status": "completed_local_instrumentation_report",
+          "scope": "local_instrumentation_only",
+          "operational_promotion_blocked": true,
+          "lastUpdated": "2026-06-23T13:35:30Z"
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T12:49:32.662Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T12:51:20.174Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T17:24:19.410Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T17:29:57.518Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T17:34:54.296Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-22T12:48:48.707Z",
+        "lastUpdated": "2026-06-23T13:35:30Z"
+      },
+      "reviewStatus": "local_instrumentation_completed_operational_promotion_blocked",
+      "doScope": "instrumentation_only",
+      "completedAt": "2026-06-22T17:34:54.290Z"
     }
   },
   "pipeline": {
-    "currentPhase": 1,
-    "level": "Starter",
-    "phaseHistory": []
+    "currentFeature": "spot-temperature-state-labeling",
+    "currentPhase": "completed",
+    "level": "Dynamic"
   },
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-06-11T03:24:19.928Z"
+    "lastActivity": "2026-06-23T13:35:30Z"
   },
   "history": [
     {
@@ -119,6 +285,72 @@
       "phase": "report",
       "nextPhase": "completed",
       "timestamp": "2026-06-11T02:26:53.886Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-06-22T12:49:32.658Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-06-22T12:49:32.659Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-06-22T12:51:20.171Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-06-22T12:51:20.172Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-06-22T17:24:19.406Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-06-22T17:24:19.407Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-22T17:29:57.514Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-22T17:29:57.515Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-22T17:34:54.292Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "sentinel_contract_update",
+      "phase": "act",
+      "timestamp": "2026-06-23T13:35:30Z",
+      "evidence": "ametek_rest_pdf_and_raw_capture_20260623"
     }
   ]
 }

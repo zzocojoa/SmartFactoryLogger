@@ -11,12 +11,20 @@ print(">>> REAL DRIVER V5 (NON-BLOCKING/SELECT) LOADED <<<") # VERSION CHECK
 import httpx
 
 from .base import BasePLCDriver
-from .spot_api import get_cached_spot_temp
+from .spot_api import get_cached_spot_temp, get_image_proxy_diagnostics
 from backend.FacilityData.schemas import FactoryData
 from backend import config
 from ..processor import LogicProcessor
 from backend.Observability.service import observability_service
 from backend import constants
+
+PROCESS_STATE_ONLINE_RULE_VERSION = "process-state-online-v1"
+TEMPERATURE_STATUS_RULE_VERSION = "temperature-status-shadow-v1"
+LABEL_VALIDATION_STATE_SHADOW = "shadow"
+PROCESS_STATE_ENTER_DWELL_SEC = 0.4
+PROCESS_STATE_EXIT_DWELL_SEC = 0.4
+RECENT_EXTRUSION_WINDOW_SEC = 300.0
+IDLE_CANDIDATE_MIN_SEC = 600.0
 
 
 class MelsecResponseError(ValueError):
@@ -126,6 +134,11 @@ class RealPLCDriver(BasePLCDriver):
         self._spot_snapshot: Optional[float] = None
         self._spot_snapshot_at: Optional[float] = None
         self._spot_snapshot_error: Optional[str] = None
+        self._spot_snapshot_metadata: Dict[str, Any] = {}
+        self._process_state_online = "unknown"
+        self._process_last_extruding_at: Optional[float] = None
+        self._process_low_speed_since: Optional[float] = None
+        self._process_high_speed_since: Optional[float] = None
         self._connected_state = False
         self._connected_failure_count = 0
         self._connected_recovery_count = 0
@@ -340,6 +353,134 @@ class RealPLCDriver(BasePLCDriver):
         self._connected_recovery_count = 0
         print("[RealDriver] All Connections Closed.")
 
+    def _safe_float(self, value: Any) -> Optional[float]:
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        return None
+
+    def _ext_snapshot_grace_sec(self) -> float:
+        return max(self._connector_poll_interval_sec() * 3.0, self.ext_timeout * 2.0, 1.0)
+
+    def _is_ext_snapshot_usable(
+        self,
+        ext_snapshot_at: Optional[float],
+        ext_snapshot_error: Optional[str],
+        now_epoch: float,
+    ) -> bool:
+        if ext_snapshot_error:
+            return False
+        if ext_snapshot_at is None:
+            return False
+        return now_epoch - ext_snapshot_at <= self._ext_snapshot_grace_sec()
+
+    def _derive_extruder_process_state_online(
+        self,
+        ext_data: Dict[str, float],
+        ext_snapshot_at: Optional[float],
+        ext_snapshot_error: Optional[str],
+        now_epoch: float,
+    ) -> str:
+        if not self._is_ext_snapshot_usable(ext_snapshot_at, ext_snapshot_error, now_epoch):
+            self._process_state_online = "unknown"
+            return self._process_state_online
+
+        speed = self._safe_float(ext_data.get("Speed"))
+        if speed is None:
+            self._process_state_online = "unknown"
+            return self._process_state_online
+
+        if speed > constants.CYCLE_SPEED_THRESHOLD:
+            if self._process_high_speed_since is None:
+                self._process_high_speed_since = now_epoch
+            self._process_low_speed_since = None
+            if (
+                self._process_state_online == "extruding"
+                or now_epoch - self._process_high_speed_since >= PROCESS_STATE_ENTER_DWELL_SEC
+            ):
+                self._process_last_extruding_at = now_epoch
+                self._process_state_online = "extruding"
+            else:
+                self._process_state_online = "unknown"
+            return self._process_state_online
+
+        self._process_high_speed_since = None
+        if self._process_low_speed_since is None:
+            self._process_low_speed_since = now_epoch
+
+        low_speed_duration = now_epoch - self._process_low_speed_since
+        recent_extrusion = (
+            self._process_last_extruding_at is not None
+            and now_epoch - self._process_last_extruding_at <= RECENT_EXTRUSION_WINDOW_SEC
+        )
+        if recent_extrusion:
+            if self._process_state_online == "extruding" and low_speed_duration < PROCESS_STATE_EXIT_DWELL_SEC:
+                return "extruding"
+            if low_speed_duration >= PROCESS_STATE_EXIT_DWELL_SEC:
+                self._process_state_online = "stopped"
+            else:
+                self._process_state_online = "unknown"
+            return self._process_state_online
+
+        press = self._safe_float(ext_data.get("Press"))
+        if (
+            press is not None
+            and press <= constants.PRESS_IDLE_MAX
+            and low_speed_duration >= IDLE_CANDIDATE_MIN_SEC
+        ):
+            self._process_state_online = "idle_candidate"
+        else:
+            self._process_state_online = "unknown"
+        return self._process_state_online
+
+    def _spot_metadata_to_factory_fields(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        passthrough_keys = (
+            "spot_target_state_observed_shadow",
+            "spot_target_state_observed_source",
+            "temperature_status_shadow",
+            "spot_poll_status",
+            "spot_raw_validity",
+            "spot_cache_status",
+            "spot_source_freshness",
+            "temperature_value_origin",
+            "cache_fallback_allowed",
+            "spot_service_instance_id",
+            "spot_service_started_at",
+            "spot_poll_seq",
+            "spot_observation_seq",
+            "spot_temperature_observed_c",
+            "spot_raw_payload_hash",
+            "spot_http_status_code",
+            "spot_error_code",
+            "spot_poll_duration_ms",
+            "spot_response_content_length",
+            "spot_last_poll_started_at",
+            "spot_last_poll_completed_at",
+            "spot_last_valid_value_at",
+            "spot_snapshot_age_ms",
+            "spot_value_age_ms",
+        )
+        fields = {key: metadata.get(key) for key in passthrough_keys}
+        raw_value_text = metadata.get("spot_raw_value_text")
+        fields["spot_temperature_raw"] = raw_value_text if raw_value_text is not None else None
+        fields["spot_temperature_raw_truncated"] = False
+        if raw_value_text is not None:
+            fields["spot_raw_payload_encoding"] = "utf-8-replace"
+        elif metadata.get("spot_raw_payload_hash"):
+            fields["spot_raw_payload_encoding"] = "raw-bytes"
+        else:
+            fields["spot_raw_payload_encoding"] = None
+        fields["spot_device_status_code"] = None
+        poll_status = fields.get("spot_poll_status")
+        if poll_status not in {"timeout", "connection_error", "config_missing", "not_attempted"}:
+            fields["spot_last_response_at"] = metadata.get("spot_last_poll_completed_at")
+        else:
+            fields["spot_last_response_at"] = None
+        fields["label_validation_state"] = LABEL_VALIDATION_STATE_SHADOW
+        fields["temperature_status_rule_version"] = TEMPERATURE_STATUS_RULE_VERSION
+        return fields
+
     def read_data(self) -> FactoryData:
         (
             ext_data,
@@ -351,9 +492,18 @@ class RealPLCDriver(BasePLCDriver):
             ext_snapshot_error,
             ls_snapshot_error,
             spot_snapshot_error,
+            spot_snapshot_metadata,
         ) = self._read_cached_snapshot_with_metadata()
 
-        self.connected = self._update_connected_state(time.time())
+        now_epoch = time.time()
+        self.connected = self._update_connected_state(now_epoch)
+        extruder_process_state_online = self._derive_extruder_process_state_online(
+            ext_data,
+            ext_snapshot_at,
+            ext_snapshot_error,
+            now_epoch,
+        )
+        spot_factory_fields = self._spot_metadata_to_factory_fields(spot_snapshot_metadata)
 
         now = datetime.now()
 
@@ -399,6 +549,9 @@ class RealPLCDriver(BasePLCDriver):
 
             # From SPOT
             Spot=spot_val,
+            extruder_process_state_online=extruder_process_state_online,
+            process_state_online_rule_version=PROCESS_STATE_ONLINE_RULE_VERSION,
+            **spot_factory_fields,
 
             # Source snapshot metadata
             captured_at_extruder=ext_snapshot_at,
@@ -445,11 +598,17 @@ class RealPLCDriver(BasePLCDriver):
             self._ls_snapshot_at = captured_at
             self._ls_snapshot_error = None
 
-    def _update_spot_snapshot(self, value: float, captured_at: float) -> None:
+    def _update_spot_snapshot(
+        self,
+        value: Optional[float],
+        captured_at: float,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         with self._snapshot_lock:
             self._spot_snapshot = value
             self._spot_snapshot_at = captured_at
             self._spot_snapshot_error = None
+            self._spot_snapshot_metadata = dict(metadata or {})
 
     def _record_ext_snapshot_error(self, message: str) -> None:
         with self._snapshot_lock:
@@ -479,6 +638,7 @@ class RealPLCDriver(BasePLCDriver):
         Optional[str],
         Optional[str],
         Optional[str],
+        Dict[str, Any],
     ]:
         with self._snapshot_lock:
             ext_data = dict(self._ext_snapshot)
@@ -490,18 +650,20 @@ class RealPLCDriver(BasePLCDriver):
             ext_snapshot_error = self._ext_snapshot_error
             ls_snapshot_error = self._ls_snapshot_error
             spot_snapshot_error = self._spot_snapshot_error
+            spot_snapshot_metadata = dict(self._spot_snapshot_metadata)
         if spot_val is not None:
             self.last_spot = spot_val
         return (
             ext_data,
             ls_data,
-            spot_val if spot_val is not None else self.last_spot,
+            spot_val,
             ext_snapshot_at,
             ls_snapshot_at,
             spot_snapshot_at,
             ext_snapshot_error,
             ls_snapshot_error,
             spot_snapshot_error,
+            spot_snapshot_metadata,
         )
 
     def _connected_grace_sec(self) -> float:
@@ -584,14 +746,23 @@ class RealPLCDriver(BasePLCDriver):
             self._sleep_until_next_cycle(started_at, self._spot_poll_interval_sec())
 
     def _read_spot(self) -> float:
-        val = get_cached_spot_temp()
-        if val > 0:
-            self.last_spot = val
-            self._mark_spot_success()
-            self._update_spot_snapshot(val, time.time())
-            return val
-        self.last_spot = 0.0
-        self._update_spot_snapshot(0.0, time.time())
+        get_cached_spot_temp()
+        try:
+            metadata = get_image_proxy_diagnostics()
+        except Exception as exc:
+            metadata = {"spot_error_code": f"spot-diagnostics-error:{exc}"}
+        captured_at = time.time()
+        effective_value = self._safe_float(metadata.get("spot_temperature_effective_c"))
+        if effective_value is not None:
+            self.last_spot = effective_value
+            if (
+                metadata.get("spot_poll_status") == "success"
+                and metadata.get("temperature_value_origin") == "current_observation"
+            ):
+                self._mark_spot_success()
+            self._update_spot_snapshot(effective_value, captured_at, metadata)
+            return effective_value
+        self._update_spot_snapshot(None, captured_at, metadata)
         return 0.0
 
     def _remaining_timeout(self, deadline: float, base_timeout: float, context: str) -> float:

@@ -4,6 +4,7 @@ import argparse
 import csv
 import glob
 import json
+import math
 import re
 from pathlib import Path
 from statistics import mean
@@ -35,8 +36,13 @@ REQUIRED_V1_COLUMNS = [
 
 CSV_SCHEMA_VERSION_V2_1 = "2.1.0"
 CSV_SCHEMA_VERSION_V2_2 = "2.2.0"
-SUPPORTED_CSV_SCHEMA_VERSIONS = {CSV_SCHEMA_VERSION_V2_1, CSV_SCHEMA_VERSION_V2_2}
-
+CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
+SUPPORTED_CSV_SCHEMA_VERSIONS = {CSV_SCHEMA_VERSION_V2_1, CSV_SCHEMA_VERSION_V2_2, CSV_SCHEMA_VERSION_V2_3}
+EXPECTED_SPOT_INVALID_SENTINEL_VALUES = {"6553.4", "6553.5"}
+EXPECTED_SPOT_INVALID_SENTINEL_MEANINGS = {
+    "6553.4": "under_range",
+    "6553.5": "over_range",
+}
 REQUIRED_V2_BASE_COLUMNS = [
     "schema_version",
     "sample_seq",
@@ -59,6 +65,94 @@ OPERATOR_METADATA_V2_COLUMNS = [
     "operator_metadata_updated_at",
 ]
 
+SPOT_SHADOW_ENUM_VALUES = {
+    "extruder_process_state_online": {
+        "extruding",
+        "stopped",
+        "idle_candidate",
+        "changeover_candidate",
+        "unknown",
+    },
+    "spot_target_state_observed_shadow": {"present", "absent", "unknown"},
+    "spot_target_state_observed_source": {"verified_device_code", "valid_temperature", "unknown"},
+    "label_validation_state": {"shadow", "validated", "deprecated"},
+    "temperature_status_shadow": {
+        "ok",
+        "no_target",
+        "startup_pending",
+        "source_error",
+        "invalid_value",
+        "stale",
+        "unknown_missing",
+    },
+    "spot_poll_status": {
+        "success",
+        "timeout",
+        "connection_error",
+        "http_error",
+        "config_missing",
+        "not_attempted",
+    },
+    "spot_raw_validity": {
+        "valid_temperature",
+        "verified_no_target",
+        "empty_body",
+        "parse_error",
+        "invalid_sentinel",
+        "out_of_range",
+        "not_received",
+        "not_evaluated",
+    },
+    "spot_cache_status": {
+        "fresh",
+        "reused",
+        "expired",
+        "empty",
+        "invalidated",
+        "available_not_used",
+    },
+    "spot_source_freshness": {"fresh", "stale", "unknown"},
+    "temperature_value_origin": {"current_observation", "cached_observation", "none"},
+}
+
+SPOT_TEMPERATURE_SHADOW_COLUMNS = [
+    "logger_service_instance_id",
+    "logger_service_started_at",
+    "extruder_process_state_online",
+    "process_state_online_rule_version",
+    "spot_target_state_observed_shadow",
+    "spot_target_state_observed_source",
+    "label_validation_state",
+    "temperature_status_shadow",
+    "temperature_status_rule_version",
+    "spot_poll_status",
+    "spot_raw_validity",
+    "spot_cache_status",
+    "spot_source_freshness",
+    "temperature_value_origin",
+    "cache_fallback_allowed",
+    "spot_service_instance_id",
+    "spot_service_started_at",
+    "spot_poll_seq",
+    "spot_observation_seq",
+    "spot_temperature_observed_c",
+    "spot_temperature_raw",
+    "spot_temperature_raw_truncated",
+    "spot_raw_payload_hash",
+    "spot_raw_payload_encoding",
+    "spot_http_status_code",
+    "spot_device_status_code",
+    "spot_error_code",
+    "spot_poll_duration_ms",
+    "spot_response_content_length",
+    "spot_last_poll_started_at",
+    "spot_last_poll_completed_at",
+    "spot_last_response_at",
+    "spot_last_valid_value_at",
+    "spot_snapshot_age_ms",
+    "spot_value_age_ms",
+]
+
 REQUIRED_V2_COLUMNS = [
     "schema_version",
     "sample_seq",
@@ -77,6 +171,7 @@ REQUIRED_V2_COLUMNS = [
 REQUIRED_V2_COLUMNS_BY_SCHEMA = {
     CSV_SCHEMA_VERSION_V2_1: REQUIRED_V2_BASE_COLUMNS,
     CSV_SCHEMA_VERSION_V2_2: REQUIRED_V2_COLUMNS,
+    CSV_SCHEMA_VERSION_V2_3: [*REQUIRED_V2_COLUMNS, *SPOT_TEMPERATURE_SHADOW_COLUMNS],
 }
 
 BASE_REQUIRED_METADATA_FIELDS = {
@@ -94,6 +189,10 @@ OPERATOR_METADATA_FIELDS = {
 REQUIRED_METADATA_FIELDS_BY_SCHEMA = {
     CSV_SCHEMA_VERSION_V2_1: BASE_REQUIRED_METADATA_FIELDS,
     CSV_SCHEMA_VERSION_V2_2: {
+        **BASE_REQUIRED_METADATA_FIELDS,
+        **OPERATOR_METADATA_FIELDS,
+    },
+    CSV_SCHEMA_VERSION_V2_3: {
         **BASE_REQUIRED_METADATA_FIELDS,
         **OPERATOR_METADATA_FIELDS,
     },
@@ -164,6 +263,121 @@ def parse_float_values(rows: list[list[str]], header: list[str], column: str) ->
     return values
 
 
+def validate_shadow_enum_values(rows: list[list[str]], header: list[str]) -> list[str]:
+    failures: list[str] = []
+    for column, allowed in SPOT_SHADOW_ENUM_VALUES.items():
+        if column not in header:
+            continue
+        index = header.index(column)
+        for row_number, row in enumerate(rows, start=2):
+            if index >= len(row):
+                failures.append(f"row {row_number} shorter than {column} column")
+                continue
+            value = row[index].strip()
+            if not value:
+                continue
+            if value not in allowed:
+                failures.append(f"row {row_number} {column}={value!r} not in {sorted(allowed)!r}")
+    return failures
+
+
+def validate_spot_sequence_values(rows: list[list[str]], header: list[str]) -> list[str]:
+    failures: list[str] = []
+    if "spot_poll_seq" not in header or "spot_observation_seq" not in header:
+        return failures
+    poll_index = header.index("spot_poll_seq")
+    observation_index = header.index("spot_observation_seq")
+    for row_number, row in enumerate(rows, start=2):
+        if poll_index >= len(row) or observation_index >= len(row):
+            failures.append(f"row {row_number} shorter than spot sequence columns")
+            continue
+        raw_poll = row[poll_index].strip()
+        raw_observation = row[observation_index].strip()
+        if not raw_poll and not raw_observation:
+            continue
+        try:
+            poll_seq = int(raw_poll)
+            observation_seq = int(raw_observation)
+        except ValueError:
+            failures.append(f"row {row_number} has non-integer spot sequence values")
+            continue
+        if poll_seq < 0 or observation_seq < 0:
+            failures.append(f"row {row_number} has negative spot sequence values")
+        if observation_seq > poll_seq:
+            failures.append(f"row {row_number} spot_observation_seq exceeds spot_poll_seq")
+    return failures
+
+
+def _parse_finite_float(value: str) -> float | None:
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def validate_temperature_value_origin_invariants(rows: list[list[str]], header: list[str]) -> list[str]:
+    required_columns = [
+        "Temperature",
+        "temperature_value_origin",
+        "spot_temperature_observed_c",
+        "spot_last_valid_value_at",
+    ]
+    missing_columns = [column for column in required_columns if column not in header]
+    if missing_columns:
+        return ["v2 header missing temperature origin invariant columns: " + ", ".join(missing_columns)]
+
+    failures: list[str] = []
+    temperature_index = header.index("Temperature")
+    origin_index = header.index("temperature_value_origin")
+    observed_index = header.index("spot_temperature_observed_c")
+    last_valid_index = header.index("spot_last_valid_value_at")
+
+    for row_number, row in enumerate(rows, start=2):
+        if max(temperature_index, origin_index, observed_index, last_valid_index) >= len(row):
+            failures.append(f"row {row_number} shorter than temperature origin invariant columns")
+            continue
+
+        temperature = row[temperature_index].strip()
+        origin = row[origin_index].strip()
+        observed = row[observed_index].strip()
+        last_valid_at = row[last_valid_index].strip()
+
+        if not origin:
+            continue
+
+        if origin == "current_observation":
+            temperature_value = _parse_finite_float(temperature)
+            observed_value = _parse_finite_float(observed)
+            if temperature_value is None:
+                failures.append(f"row {row_number} current_observation requires finite Temperature")
+            if observed_value is None:
+                failures.append(f"row {row_number} current_observation requires finite spot_temperature_observed_c")
+            if temperature_value is not None and observed_value is not None:
+                if abs(temperature_value - observed_value) > 1e-6:
+                    failures.append(
+                        f"row {row_number} current_observation Temperature must equal spot_temperature_observed_c"
+                    )
+            if not last_valid_at:
+                failures.append(f"row {row_number} current_observation requires spot_last_valid_value_at")
+        elif origin == "cached_observation":
+            if _parse_finite_float(temperature) is None:
+                failures.append(f"row {row_number} cached_observation requires finite Temperature")
+            if observed and _parse_finite_float(observed) is None:
+                failures.append(f"row {row_number} populated spot_temperature_observed_c must be finite")
+            if not last_valid_at:
+                failures.append(f"row {row_number} cached_observation requires spot_last_valid_value_at")
+        elif origin == "none":
+            if temperature:
+                failures.append(f"row {row_number} origin none requires blank Temperature")
+            if observed:
+                failures.append(f"row {row_number} origin none requires blank spot_temperature_observed_c")
+
+    return failures
+
+
 def validate_sample_seq(rows: list[list[str]], header: list[str]) -> tuple[bool, str]:
     if "sample_seq" not in header:
         return False, "missing sample_seq"
@@ -223,7 +437,7 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
     if missing_v2:
         failures.append(f"v2 header missing columns: {', '.join(missing_v2)}")
 
-    if v2_schema == CSV_SCHEMA_VERSION_V2_2:
+    if v2_schema in {CSV_SCHEMA_VERSION_V2_2, CSV_SCHEMA_VERSION_V2_3}:
         operator_metadata_version = metadata.get("schema_metadata", {}).get("operator_metadata_version")
         if operator_metadata_version != "1.0.0":
             failures.append(
@@ -237,6 +451,63 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
             required_fields = operator_metadata.get("required_fields")
             if required_fields != ["product_no", "operator_mold_no"]:
                 failures.append(f"operator_metadata.required_fields={required_fields!r}")
+
+    if v2_schema == CSV_SCHEMA_VERSION_V2_3:
+        schema_metadata = metadata.get("schema_metadata", {})
+        if schema_metadata.get("row_unique_key") != ["logger_service_instance_id", "sample_seq"]:
+            failures.append("schema_metadata.row_unique_key must be ['logger_service_instance_id', 'sample_seq']")
+        spot_key_scope = str(schema_metadata.get("spot_observation_key_scope") or "")
+        if "not realtime CSV rows" not in spot_key_scope:
+            failures.append("schema_metadata.spot_observation_key_scope must limit SPOT sequence uniqueness to spot_observation_fact")
+
+        failures.extend(validate_shadow_enum_values(v2_rows, v2_header))
+        failures.extend(validate_spot_sequence_values(v2_rows, v2_header))
+        failures.extend(validate_temperature_value_origin_invariants(v2_rows, v2_header))
+
+        shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
+        if not isinstance(shadow_metadata, dict):
+            failures.append("metadata missing spot_temperature_shadow_metadata block")
+        else:
+            shadow_columns = shadow_metadata.get("shadow_columns")
+            if not isinstance(shadow_columns, list):
+                failures.append("spot_temperature_shadow_metadata.shadow_columns is missing or not a list")
+            else:
+                missing_shadow_columns = [
+                    column for column in SPOT_TEMPERATURE_SHADOW_COLUMNS if column not in shadow_columns
+                ]
+                if missing_shadow_columns:
+                    failures.append(
+                        "spot_temperature_shadow_metadata.shadow_columns missing: "
+                        + ", ".join(missing_shadow_columns)
+                    )
+            sentinel_map = shadow_metadata.get("sentinel_map")
+            if not isinstance(sentinel_map, dict):
+                failures.append("spot_temperature_shadow_metadata.sentinel_map is missing or not a dict")
+            else:
+                if sentinel_map.get("server_pc_verified") is not False:
+                    failures.append("sentinel_map.server_pc_verified must be false during shadow validation")
+                invalid_sentinel_values = set(sentinel_map.get("invalid_sentinel_values") or [])
+                missing_invalid_sentinels = EXPECTED_SPOT_INVALID_SENTINEL_VALUES - invalid_sentinel_values
+                if missing_invalid_sentinels:
+                    failures.append(
+                        "sentinel_map.invalid_sentinel_values missing documented values: "
+                        + ", ".join(sorted(missing_invalid_sentinels))
+                    )
+                invalid_sentinel_meanings = sentinel_map.get("invalid_sentinel_meanings")
+                if invalid_sentinel_meanings != EXPECTED_SPOT_INVALID_SENTINEL_MEANINGS:
+                    failures.append(
+                        "sentinel_map.invalid_sentinel_meanings must map 6553.4=under_range and 6553.5=over_range"
+                    )
+                documented_sentinels = sentinel_map.get("documented_temperature_sentinels")
+                if documented_sentinels != {"under_range": "6553.4", "over_range": "6553.5"}:
+                    failures.append("sentinel_map.documented_temperature_sentinels must match AMETEK REST API values")
+                if sentinel_map.get("pdf_verified") is not True:
+                    failures.append("sentinel_map.pdf_verified must be true for documented AMETEK sentinel values")
+                if sentinel_map.get("verified_no_target_values") not in ([], ()):
+                    failures.append("sentinel_map.verified_no_target_values must remain empty until no-target is server-verified")
+            policy = str(shadow_metadata.get("v2_3_policy") or "")
+            if "v2.4.0" not in policy:
+                failures.append("spot_temperature_shadow_metadata.v2_3_policy must mention v2.4.0+ operational fields")
 
     row_delta: int | str = "v1_not_provided"
     if v1_path is not None:

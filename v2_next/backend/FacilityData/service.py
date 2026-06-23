@@ -70,6 +70,7 @@ class PLCService:
         self.operator_metadata_previous_count: Optional[int] = None
         self.operator_metadata_last_normal_sample_at = self._load_operator_metadata_last_sample_at()
         self.operator_metadata_last_state_write_at = self.operator_metadata_last_normal_sample_at
+        self._process_operator_context: Optional[tuple[str, str]] = None
 
         self.current_data: FactoryData = FactoryData(
             Time="", Speed=0, Press=0, Count=0, EndPos=0, Billet_Length=0,
@@ -235,10 +236,31 @@ class PLCService:
             force=reset_reason is not None,
         )
 
+    def _derive_metadata_process_state_candidate(
+        self,
+        current_state: Optional[str],
+        operator_metadata: Any,
+    ) -> str:
+        state = current_state or "unknown"
+        context = (operator_metadata.product_no or "", operator_metadata.operator_mold_no or "")
+        previous_context = self._process_operator_context
+        self._process_operator_context = context
+        if previous_context is None or previous_context == context:
+            return state
+        if state not in {"stopped", "idle_candidate"}:
+            return state
+        if not operator_metadata.valid or not context[0] or not context[1]:
+            return state
+        return "changeover_candidate"
+
     def _compose_data(self, raw_data: FactoryData, captured_at_sec: Optional[float] = None) -> FactoryData:
         sample_at_sec = captured_at_sec if captured_at_sec is not None else time.time()
         self._apply_operator_metadata_auto_reset(raw_data, sample_at_sec)
         operator_metadata = operator_metadata_store.get()
+        extruder_process_state_online = self._derive_metadata_process_state_candidate(
+            raw_data.extruder_process_state_online,
+            operator_metadata,
+        )
         snapshot = config_manager.get_snapshot()
         values = snapshot.get("values", {})
         thresholds_cfg = values.get("thresholds", {})
@@ -256,6 +278,7 @@ class PLCService:
             "operator_metadata_valid": operator_metadata.valid,
             "operator_metadata_missing_fields": operator_metadata.missing_fields,
             "operator_metadata_updated_at": operator_metadata.updated_at,
+            "extruder_process_state_online": extruder_process_state_online,
         })
 
     def _with_timestamp_ms(self, data: FactoryData, timestamp_ms: int) -> FactoryData:
@@ -328,6 +351,50 @@ class PLCService:
         with self.lock:
             return self.current_data
 
+
+    def _spot_temperature_health(self) -> Dict[str, Any]:
+        try:
+            from backend.FacilityData.drivers import spot_api as spot_control
+
+            diagnostics = spot_control.get_image_proxy_diagnostics()
+        except Exception as exc:
+            return {
+                "diagnostics_available": False,
+                "diagnostics_error": exc.__class__.__name__,
+                "validation_state": "shadow",
+                "operational_truth": False,
+            }
+
+        exposed_fields = (
+            "spot_service_instance_id",
+            "spot_poll_seq",
+            "spot_observation_seq",
+            "spot_poll_status",
+            "spot_raw_validity",
+            "spot_source_freshness",
+            "temperature_status_shadow",
+            "spot_cache_status",
+            "temperature_value_origin",
+            "cache_fallback_allowed",
+            "spot_snapshot_age_ms",
+            "spot_value_age_ms",
+            "spot_poll_freshness_threshold_sec",
+            "spot_cache_expiry_threshold_sec",
+            "temperature_cache_status",
+            "temperature_last_success_at",
+            "temperature_last_error_at",
+            "temperature_last_error_code",
+        )
+        payload = {field: diagnostics.get(field) for field in exposed_fields}
+        payload.update(
+            {
+                "diagnostics_available": True,
+                "validation_state": "shadow",
+                "operational_truth": False,
+            }
+        )
+        return payload
+
     def get_health(self) -> Dict[str, Any]:
         with self.lock:
             last_update = self.last_update
@@ -342,6 +409,7 @@ class PLCService:
         driver_snapshot_age_sec: Optional[float] = None
         if driver_last_data_at is not None:
             driver_snapshot_age_sec = max(0.0, time.time() - driver_last_data_at)
+        spot_temperature = self._spot_temperature_health()
         return {
             "running": self.running,
             "thread_alive": self.thread.is_alive() if self.thread else False,
@@ -353,6 +421,7 @@ class PLCService:
             "driver_snapshot_age_sec": driver_snapshot_age_sec,
             "driver_last_error": driver_last_error,
             "comm": comm_metrics,
+            "spot_temperature": spot_temperature,
         }
 
 # Singleton Instance (Initialized by main.py)

@@ -88,6 +88,215 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api._internal_temp_last_upstream_status = None
         spot_api._internal_temp_last_url = None
         spot_api._internal_temp_last_success_at = 0.0
+        with spot_api._spot_temperature_snapshot_lock:
+            spot_api._spot_service_instance_id = "test-spot-service-instance"
+            spot_api._spot_service_started_at = "2026-06-22T00:00:00Z"
+            spot_api._spot_poll_seq = 0
+            spot_api._spot_observation_seq = 0
+            spot_api._spot_temperature_snapshot = None
+            spot_api._spot_last_valid_value_at = None
+
+    def test_spot_temperature_diagnostics_before_first_poll_are_startup_pending(self) -> None:
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+
+        self.assertEqual(diagnostics["spot_service_instance_id"], "test-spot-service-instance")
+        self.assertEqual(diagnostics["spot_poll_seq"], 0)
+        self.assertEqual(diagnostics["spot_observation_seq"], 0)
+        self.assertEqual(diagnostics["spot_poll_status"], "not_attempted")
+        self.assertEqual(diagnostics["spot_raw_validity"], "not_received")
+        self.assertEqual(diagnostics["spot_source_freshness"], "unknown")
+        self.assertEqual(diagnostics["temperature_status_shadow"], "startup_pending")
+        self.assertEqual(diagnostics["temperature_value_origin"], "none")
+        self.assertIsNone(diagnostics["spot_snapshot_age_ms"])
+
+    async def test_spot_temperature_refresh_success_publishes_shadow_snapshot(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="448.5", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            await spot_api._refresh_spot_temperature(client)
+
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        snapshot = spot_api.get_spot_temperature_poll_snapshot()
+
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(diagnostics["spot_poll_seq"], 1)
+        self.assertEqual(diagnostics["spot_observation_seq"], 1)
+        self.assertEqual(diagnostics["spot_poll_status"], "success")
+        self.assertEqual(diagnostics["spot_raw_validity"], "valid_temperature")
+        self.assertEqual(diagnostics["spot_source_freshness"], "fresh")
+        self.assertEqual(diagnostics["temperature_status_shadow"], "ok")
+        self.assertEqual(diagnostics["temperature_value_origin"], "current_observation")
+        self.assertEqual(diagnostics["spot_cache_status"], "fresh")
+        self.assertEqual(diagnostics["spot_target_state_observed_shadow"], "present")
+        self.assertEqual(diagnostics["spot_target_state_observed_source"], "valid_temperature")
+        self.assertEqual(diagnostics["spot_temperature_observed_c"], 448.5)
+        self.assertEqual(diagnostics["spot_temperature_effective_c"], 448.5)
+        self.assertIsNotNone(diagnostics["spot_last_valid_value_at"])
+        self.assertIsNotNone(diagnostics["spot_raw_payload_hash"])
+
+    async def test_verified_no_target_invalidates_previous_temperature_cache(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+
+        async def success_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="448.5", request=request)
+
+        async def no_target_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="NO_TARGET", request=request)
+
+        with patch.object(spot_api, "_SPOT_VERIFIED_NO_TARGET_VALUES", ("NO_TARGET",)):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(success_handler)) as client:
+                await spot_api._refresh_spot_temperature(client)
+            async with httpx.AsyncClient(transport=httpx.MockTransport(no_target_handler)) as client:
+                with self.assertRaises(spot_api.SpotTemperatureFetchError):
+                    await spot_api._refresh_spot_temperature(client)
+
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+
+        self.assertEqual(diagnostics["spot_poll_seq"], 2)
+        self.assertEqual(diagnostics["spot_observation_seq"], 2)
+        self.assertEqual(diagnostics["spot_poll_status"], "success")
+        self.assertEqual(diagnostics["spot_raw_validity"], "verified_no_target")
+        self.assertEqual(diagnostics["temperature_status_shadow"], "no_target")
+        self.assertEqual(diagnostics["spot_cache_status"], "invalidated")
+        self.assertEqual(diagnostics["temperature_value_origin"], "none")
+        self.assertEqual(diagnostics["spot_target_state_observed_shadow"], "absent")
+        self.assertEqual(diagnostics["spot_target_state_observed_source"], "verified_device_code")
+        self.assertIsNone(diagnostics["spot_temperature_effective_c"])
+        self.assertIsNone(diagnostics["spot_last_valid_value_at"])
+        self.assertEqual(spot_api._img_cache["temp_time"], 0.0)
+
+
+    async def test_ametek_under_range_sentinel_publishes_invalid_value_snapshot(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="6553.4\r\n", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with self.assertRaises(spot_api.SpotTemperatureFetchError) as raised:
+                await spot_api._refresh_spot_temperature(client)
+
+        error = raised.exception
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+
+        self.assertEqual(error.code, "temperature-invalid-sentinel")
+        self.assertEqual(error.upstream_status, 200)
+        self.assertEqual(diagnostics["spot_poll_status"], "success")
+        self.assertEqual(diagnostics["spot_raw_validity"], "invalid_sentinel")
+        self.assertEqual(diagnostics["spot_raw_value_text"], "6553.4")
+        self.assertEqual(diagnostics["temperature_status_shadow"], "invalid_value")
+        self.assertEqual(diagnostics["spot_cache_status"], "empty")
+        self.assertEqual(diagnostics["temperature_value_origin"], "none")
+        self.assertEqual(diagnostics["spot_target_state_observed_shadow"], "unknown")
+        self.assertEqual(diagnostics["spot_target_state_observed_source"], "unknown")
+        self.assertIsNone(diagnostics["spot_temperature_observed_c"])
+        self.assertIsNone(diagnostics["spot_temperature_effective_c"])
+
+    async def test_ametek_over_range_sentinel_uses_invalid_sentinel_error(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="6553.5", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with self.assertRaises(spot_api.SpotTemperatureFetchError) as raised:
+                await spot_api._request_spot_temperature(client, "http://spot.local/temp")
+
+        self.assertEqual(raised.exception.code, "temperature-invalid-sentinel")
+        self.assertEqual(raised.exception.upstream_status, 200)
+        self.assertIsNotNone(raised.exception.raw_classification)
+        assert raised.exception.raw_classification is not None
+        self.assertEqual(raised.exception.raw_classification.raw_validity.value, "invalid_sentinel")
+
+    async def test_spot_temperature_http_error_with_body_publishes_not_evaluated_snapshot(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503, text="busy", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            with self.assertRaises(spot_api.SpotTemperatureFetchError):
+                await spot_api._refresh_spot_temperature(client)
+
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+
+        self.assertEqual(diagnostics["spot_poll_seq"], 1)
+        self.assertEqual(diagnostics["spot_observation_seq"], 1)
+        self.assertEqual(diagnostics["spot_poll_status"], "http_error")
+        self.assertEqual(diagnostics["spot_raw_validity"], "not_evaluated")
+        self.assertTrue(diagnostics["cache_fallback_allowed"])
+        self.assertEqual(diagnostics["spot_http_status_code"], 503)
+        self.assertEqual(diagnostics["spot_response_content_length"], 4)
+        self.assertIsNotNone(diagnostics["spot_raw_payload_hash"])
+        self.assertEqual(diagnostics["temperature_status_shadow"], "source_error")
+        self.assertEqual(diagnostics["spot_cache_status"], "empty")
+        self.assertEqual(diagnostics["temperature_value_origin"], "none")
+        self.assertIsNone(diagnostics["spot_temperature_observed_c"])
+        self.assertIsNone(diagnostics["spot_temperature_effective_c"])
+
+    async def test_stale_success_snapshot_suppresses_ttl_cache(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 0.5
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="450.0", request=request)
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            await spot_api._refresh_spot_temperature(client)
+
+        stale_epoch = time.time() - 2.0
+        spot_api._img_cache["temp_time"] = stale_epoch
+        with spot_api._spot_temperature_snapshot_lock:
+            assert spot_api._spot_temperature_snapshot is not None
+            spot_api._spot_temperature_snapshot["_spot_last_poll_completed_at_epoch"] = stale_epoch
+            spot_api._spot_last_valid_value_at = stale_epoch
+
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+
+        self.assertEqual(diagnostics["spot_source_freshness"], "stale")
+        self.assertEqual(diagnostics["temperature_status_shadow"], "unknown_missing")
+        self.assertEqual(diagnostics["temperature_value_origin"], "none")
+        self.assertEqual(diagnostics["spot_cache_status"], "available_not_used")
+        self.assertIsNone(diagnostics["spot_temperature_effective_c"])
+        self.assertEqual(diagnostics["spot_target_state_observed_shadow"], "unknown")
+        self.assertGreater(float(diagnostics["spot_snapshot_age_ms"]), 1500.0)
+
+    async def test_stale_transport_failure_snapshot_reuses_ttl_cache(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 0.5
+
+        async def success_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="450.0", request=request)
+
+        async def timeout_handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timeout", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(success_handler)) as client:
+            await spot_api._refresh_spot_temperature(client)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(timeout_handler)) as client:
+            with self.assertRaises(spot_api.SpotTemperatureFetchError):
+                await spot_api._refresh_spot_temperature(client)
+
+        stale_epoch = time.time() - 2.0
+        spot_api._img_cache["temp_time"] = stale_epoch
+        with spot_api._spot_temperature_snapshot_lock:
+            assert spot_api._spot_temperature_snapshot is not None
+            spot_api._spot_temperature_snapshot["_spot_last_poll_completed_at_epoch"] = stale_epoch
+
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+
+        self.assertEqual(diagnostics["spot_source_freshness"], "stale")
+        self.assertEqual(diagnostics["spot_poll_status"], "timeout")
+        self.assertTrue(diagnostics["cache_fallback_allowed"])
+        self.assertEqual(diagnostics["temperature_status_shadow"], "ok")
+        self.assertEqual(diagnostics["temperature_value_origin"], "cached_observation")
+        self.assertEqual(diagnostics["spot_cache_status"], "reused")
+        self.assertEqual(diagnostics["spot_temperature_effective_c"], 450.0)
+        self.assertEqual(diagnostics["spot_target_state_observed_shadow"], "unknown")
 
     async def test_temperature_timeout_diagnostics_have_non_empty_message_and_status(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

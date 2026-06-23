@@ -3,14 +3,29 @@ import logging
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 import httpx
 
 from backend import config
+from backend.FacilityData.spot_observation import (
+    SPOT_INVALID_SENTINEL_VALUES,
+    SpotPollStatus,
+    SpotRawClassification,
+    SpotRawValidity,
+    SpotSourceFreshness,
+    classify_spot_raw_response,
+    derive_spot_target_observed_shadow,
+)
+from backend.FacilityData.temperature_state import (
+    TemperatureStateInput,
+    derive_temperature_state,
+)
 
 _ACTUATOR_LOCK = threading.Lock()
 
@@ -19,7 +34,7 @@ class _TemperatureCache(TypedDict):
     temp: float
     temp_time: float
 
-# 이미지 프록시 단기 캐시
+# Short-lived image proxy cache
 _img_cache: Dict[str, Any] = {"data": None, "time": 0.0, "temp": 0.0, "temp_time": 0.0}
 _internal_temp_cache: _TemperatureCache = {"temp": 0.0, "temp_time": 0.0}
 _IMG_CACHE_TTL_SEC = 2.0
@@ -29,6 +44,8 @@ _LIVE_IMG_SHARED_FRAME_TTL_SEC = 0.05
 _LIVE_IMG_BACKOFF_BASE_SEC = 0.25
 _LIVE_IMG_BACKOFF_MAX_SEC = 2.0
 _TEMP_CACHE_TTL_SEC = 15.0
+_SPOT_VERIFIED_NO_TARGET_VALUES: tuple[str, ...] = ()
+_SPOT_INVALID_SENTINEL_VALUES: tuple[str, ...] = SPOT_INVALID_SENTINEL_VALUES
 _SPOT_FOCUS_MIN_MM = 300
 _SPOT_FOCUS_MAX_MM = 10000
 _SPOT_FOCUS_VERIFY_TIMEOUT_SEC = 4.0
@@ -64,9 +81,16 @@ _internal_temp_last_error_message: Optional[str] = None
 _internal_temp_last_upstream_status: Optional[int] = None
 _internal_temp_last_url: Optional[str] = None
 _internal_temp_last_success_at = 0.0
+_spot_temperature_snapshot_lock = threading.Lock()
+_spot_service_instance_id = str(uuid4())
+_spot_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+_spot_poll_seq = 0
+_spot_observation_seq = 0
+_spot_temperature_snapshot: Optional[Dict[str, Any]] = None
+_spot_last_valid_value_at: Optional[float] = None
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
 
-# 연결 풀 재사용을 위한 비동기 HTTP 클라이언트
+# Async HTTP client reused for connection pooling.
 _http_client: Optional[httpx.AsyncClient] = None
 _logger = logging.getLogger("spot_control")
 
@@ -130,11 +154,15 @@ class SpotTemperatureFetchError(RuntimeError):
         *,
         temp_url: str,
         upstream_status: Optional[int],
+        raw_body: Optional[bytes] = None,
+        raw_classification: Optional[SpotRawClassification] = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.temp_url = temp_url
         self.upstream_status = upstream_status
+        self.raw_body = raw_body
+        self.raw_classification = raw_classification
 
 
 class SpotInternalTemperatureConfigError(ValueError):
@@ -439,11 +467,19 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     raise last_error
 
 
-async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) -> float:
+async def _request_spot_temperature_observation(
+    client: httpx.AsyncClient,
+    temp_url: str,
+) -> tuple[float, SpotRawClassification]:
     try:
         response = await client.get(temp_url)
         response.raise_for_status()
     except httpx.TimeoutException as exc:
+        classification = classify_spot_raw_response(
+            poll_status=SpotPollStatus.TIMEOUT,
+            body=None,
+            error_code="temperature-upstream-timeout",
+        )
         raise SpotTemperatureFetchError(
             "temperature-upstream-timeout",
             (
@@ -453,8 +489,16 @@ async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) ->
             ),
             temp_url=temp_url,
             upstream_status=None,
+            raw_classification=classification,
         ) from exc
     except httpx.HTTPStatusError as exc:
+        raw_body = exc.response.content
+        classification = classify_spot_raw_response(
+            poll_status=SpotPollStatus.HTTP_ERROR,
+            body=raw_body,
+            http_status_code=exc.response.status_code,
+            error_code="temperature-upstream-http-error",
+        )
         raise SpotTemperatureFetchError(
             "temperature-upstream-http-error",
             (
@@ -463,8 +507,15 @@ async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) ->
             ),
             temp_url=temp_url,
             upstream_status=exc.response.status_code,
+            raw_body=raw_body,
+            raw_classification=classification,
         ) from exc
     except httpx.RequestError as exc:
+        classification = classify_spot_raw_response(
+            poll_status=SpotPollStatus.CONNECTION_ERROR,
+            body=None,
+            error_code="temperature-upstream-request-error",
+        )
         raise SpotTemperatureFetchError(
             "temperature-upstream-request-error",
             (
@@ -474,20 +525,30 @@ async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) ->
             ),
             temp_url=temp_url,
             upstream_status=None,
+            raw_classification=classification,
         ) from exc
 
-    raw_temp = response.text.strip()
-    if not raw_temp:
+    classification = classify_spot_raw_response(
+        poll_status=SpotPollStatus.SUCCESS,
+        body=response.content,
+        http_status_code=response.status_code,
+        verified_no_target_values=_SPOT_VERIFIED_NO_TARGET_VALUES,
+        invalid_sentinel_values=_SPOT_INVALID_SENTINEL_VALUES,
+    )
+    if classification.raw_validity == SpotRawValidity.VALID_TEMPERATURE:
+        return float(classification.parsed_temperature_c), classification
+
+    raw_temp = classification.raw_value_text or ""
+    if classification.raw_validity == SpotRawValidity.EMPTY_BODY:
         raise SpotTemperatureFetchError(
             "temperature-empty-body",
             f"SPOT temperature upstream returned an empty body; url={temp_url}",
             temp_url=temp_url,
             upstream_status=response.status_code,
+            raw_body=response.content,
+            raw_classification=classification,
         )
-
-    try:
-        return float(raw_temp)
-    except ValueError as exc:
+    if classification.raw_validity == SpotRawValidity.PARSE_ERROR:
         raise SpotTemperatureFetchError(
             "temperature-parse-error",
             (
@@ -496,7 +557,59 @@ async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) ->
             ),
             temp_url=temp_url,
             upstream_status=response.status_code,
-        ) from exc
+            raw_body=response.content,
+            raw_classification=classification,
+        )
+    if classification.raw_validity == SpotRawValidity.OUT_OF_RANGE:
+        raise SpotTemperatureFetchError(
+            "temperature-out-of-range",
+            (
+                "SPOT temperature upstream returned an out-of-range value; "
+                f"url={temp_url}; body={raw_temp[:200]}"
+            ),
+            temp_url=temp_url,
+            upstream_status=response.status_code,
+            raw_body=response.content,
+            raw_classification=classification,
+        )
+    if classification.raw_validity == SpotRawValidity.INVALID_SENTINEL:
+        raise SpotTemperatureFetchError(
+            "temperature-invalid-sentinel",
+            (
+                "SPOT temperature upstream returned an invalid sentinel; "
+                f"url={temp_url}; body={raw_temp[:200]}"
+            ),
+            temp_url=temp_url,
+            upstream_status=response.status_code,
+            raw_body=response.content,
+            raw_classification=classification,
+        )
+    if classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
+        raise SpotTemperatureFetchError(
+            "temperature-verified-no-target",
+            (
+                "SPOT temperature upstream returned a verified no-target value; "
+                f"url={temp_url}; body={raw_temp[:200]}"
+            ),
+            temp_url=temp_url,
+            upstream_status=response.status_code,
+            raw_body=response.content,
+            raw_classification=classification,
+        )
+
+    raise SpotTemperatureFetchError(
+        "temperature-unknown-invalid-response",
+        f"SPOT temperature upstream returned an unsupported response; url={temp_url}",
+        temp_url=temp_url,
+        upstream_status=response.status_code,
+        raw_body=response.content,
+        raw_classification=classification,
+    )
+
+
+async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) -> float:
+    temperature, _classification = await _request_spot_temperature_observation(client, temp_url)
+    return temperature
 
 
 async def _request_spot_internal_temperature(client: httpx.AsyncClient, temp_url: str) -> float:
@@ -695,12 +808,271 @@ def _cached_internal_temperature(now: float) -> Optional[float]:
     return float(temperature)
 
 
+def _epoch_to_utc_iso(value: Optional[float]) -> Optional[str]:
+    if not value:
+        return None
+    return datetime.fromtimestamp(float(value), timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _spot_poll_freshness_threshold_sec() -> float:
+    try:
+        refresh_interval = float(config.SPOT_REFRESH_INTERVAL or 1.0)
+    except (TypeError, ValueError):
+        refresh_interval = 1.0
+    return max(1.0, refresh_interval * 3.0)
+
+
+def _begin_spot_temperature_poll() -> tuple[int, float]:
+    global _spot_poll_seq
+
+    started_at = time.time()
+    with _spot_temperature_snapshot_lock:
+        _spot_poll_seq += 1
+        poll_seq = _spot_poll_seq
+    return poll_seq, started_at
+
+
+def _poll_status_for_temperature_error_code(code: str) -> SpotPollStatus:
+    if "config-missing" in code:
+        return SpotPollStatus.CONFIG_MISSING
+    if "timeout" in code:
+        return SpotPollStatus.TIMEOUT
+    if "http-error" in code:
+        return SpotPollStatus.HTTP_ERROR
+    return SpotPollStatus.CONNECTION_ERROR
+
+
+def _classification_for_temperature_error(exc: SpotTemperatureFetchError) -> SpotRawClassification:
+    if exc.raw_classification is not None:
+        return exc.raw_classification
+    return classify_spot_raw_response(
+        poll_status=_poll_status_for_temperature_error_code(exc.code),
+        body=exc.raw_body,
+        http_status_code=exc.upstream_status,
+        error_code=exc.code,
+    )
+
+
+def _publish_spot_temperature_snapshot(
+    *,
+    poll_seq: int,
+    poll_started_at: float,
+    poll_completed_at: float,
+    temp_url: str,
+    classification: SpotRawClassification,
+) -> None:
+    global _spot_observation_seq
+    global _spot_temperature_snapshot
+    global _spot_last_valid_value_at
+
+    if classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
+        _img_cache["temp"] = 0.0
+        _img_cache["temp_time"] = 0.0
+
+    raw_value_text = classification.raw_value_text
+    if classification.raw_validity == SpotRawValidity.NOT_EVALUATED:
+        raw_value_text = None
+
+    with _spot_temperature_snapshot_lock:
+        _spot_observation_seq += 1
+        observation_seq = _spot_observation_seq
+        if classification.raw_validity == SpotRawValidity.VALID_TEMPERATURE:
+            _spot_last_valid_value_at = poll_completed_at
+        elif classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
+            _spot_last_valid_value_at = None
+
+        _spot_temperature_snapshot = {
+            "spot_service_instance_id": _spot_service_instance_id,
+            "spot_service_started_at": _spot_service_started_at,
+            "spot_poll_seq": poll_seq,
+            "spot_observation_seq": observation_seq,
+            "spot_poll_status": classification.poll_status.value,
+            "spot_raw_validity": classification.raw_validity.value,
+            "spot_raw_value_text": raw_value_text,
+            "spot_temperature_observed_c": classification.parsed_temperature_c,
+            "spot_last_poll_started_at": _epoch_to_utc_iso(poll_started_at),
+            "spot_last_poll_completed_at": _epoch_to_utc_iso(poll_completed_at),
+            "_spot_last_poll_completed_at_epoch": poll_completed_at,
+            "spot_poll_duration_ms": max(0.0, (poll_completed_at - poll_started_at) * 1000.0),
+            "spot_http_status_code": classification.http_status_code,
+            "spot_response_content_length": classification.response_content_length,
+            "spot_raw_payload_hash": classification.raw_payload_hash,
+            "spot_error_code": classification.error_code,
+            "cache_fallback_allowed": classification.cache_fallback_allowed,
+            "spot_temperature_url": temp_url,
+        }
+
+
+def get_spot_temperature_poll_snapshot() -> Optional[Dict[str, Any]]:
+    with _spot_temperature_snapshot_lock:
+        if _spot_temperature_snapshot is None:
+            return None
+        return dict(_spot_temperature_snapshot)
+
+
+def _spot_source_freshness_for_snapshot(
+    snapshot: Optional[Dict[str, Any]],
+    now: float,
+) -> SpotSourceFreshness:
+    if snapshot is None:
+        return SpotSourceFreshness.UNKNOWN
+    completed_at = snapshot.get("_spot_last_poll_completed_at_epoch")
+    if not isinstance(completed_at, (float, int)) or completed_at <= 0:
+        return SpotSourceFreshness.UNKNOWN
+    if now - float(completed_at) > _spot_poll_freshness_threshold_sec():
+        return SpotSourceFreshness.STALE
+    return SpotSourceFreshness.FRESH
+
+
+def _effective_spot_temperature_for_decision(decision: Any) -> Optional[float]:
+    if getattr(decision, "temperature_value_origin", None).value == "none":
+        return None
+    temperature = _img_cache.get("temp")
+    if isinstance(temperature, bool) or not isinstance(temperature, (float, int)):
+        return None
+    return float(temperature)
+
+
+def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
+    with _spot_temperature_snapshot_lock:
+        snapshot = dict(_spot_temperature_snapshot) if _spot_temperature_snapshot is not None else None
+        poll_seq = _spot_poll_seq
+        observation_seq = _spot_observation_seq
+        last_valid_value_at = _spot_last_valid_value_at
+
+    if snapshot is None:
+        decision = derive_temperature_state(
+            TemperatureStateInput(
+                poll_status=SpotPollStatus.NOT_ATTEMPTED,
+                raw_validity=SpotRawValidity.NOT_RECEIVED,
+                source_freshness=SpotSourceFreshness.UNKNOWN,
+                cache_fallback_allowed=False,
+                first_poll_completed=False,
+            )
+        )
+        target = derive_spot_target_observed_shadow(
+            SpotRawValidity.NOT_RECEIVED,
+            SpotSourceFreshness.UNKNOWN,
+        )
+        return {
+            "spot_service_instance_id": _spot_service_instance_id,
+            "spot_service_started_at": _spot_service_started_at,
+            "spot_poll_seq": poll_seq,
+            "spot_observation_seq": observation_seq,
+            "spot_poll_status": SpotPollStatus.NOT_ATTEMPTED.value,
+            "spot_raw_validity": SpotRawValidity.NOT_RECEIVED.value,
+            "spot_source_freshness": SpotSourceFreshness.UNKNOWN.value,
+            "spot_target_state_observed_shadow": target.state.value,
+            "spot_target_state_observed_source": target.source.value,
+            "temperature_status_shadow": decision.temperature_status_shadow.value,
+            "spot_cache_status": decision.spot_cache_status.value,
+            "temperature_value_origin": decision.temperature_value_origin.value,
+            "spot_temperature_effective_c": None,
+            "spot_temperature_observed_c": None,
+            "spot_last_valid_value_at": None,
+            "spot_value_age_ms": None,
+            "spot_snapshot_age_ms": None,
+            "spot_last_poll_started_at": None,
+            "spot_last_poll_completed_at": None,
+            "spot_poll_freshness_threshold_sec": _spot_poll_freshness_threshold_sec(),
+            "spot_cache_expiry_threshold_sec": _TEMP_CACHE_TTL_SEC,
+            "cache_fallback_allowed": False,
+            "spot_http_status_code": None,
+            "spot_poll_duration_ms": None,
+            "spot_response_content_length": None,
+            "spot_raw_payload_hash": None,
+            "spot_error_code": None,
+        }
+
+    source_freshness = _spot_source_freshness_for_snapshot(snapshot, now)
+    poll_status = SpotPollStatus(str(snapshot["spot_poll_status"]))
+    raw_validity = SpotRawValidity(str(snapshot["spot_raw_validity"]))
+    cache_age = _temperature_cache_age_sec(now)
+    has_ttl_valid_cache = cache_age is not None and cache_age <= _TEMP_CACHE_TTL_SEC
+    has_previous_valid_value = last_valid_value_at is not None
+    decision = derive_temperature_state(
+        TemperatureStateInput(
+            poll_status=poll_status,
+            raw_validity=raw_validity,
+            source_freshness=source_freshness,
+            cache_fallback_allowed=bool(snapshot.get("cache_fallback_allowed")),
+            has_ttl_valid_cache=has_ttl_valid_cache,
+            has_previous_valid_value=has_previous_valid_value,
+            first_poll_completed=True,
+        )
+    )
+    target = derive_spot_target_observed_shadow(raw_validity, source_freshness)
+    completed_at = snapshot.get("_spot_last_poll_completed_at_epoch")
+    snapshot_age_ms = None
+    if isinstance(completed_at, (float, int)) and completed_at > 0:
+        snapshot_age_ms = max(0.0, (now - float(completed_at)) * 1000.0)
+    value_age_ms = None
+    if last_valid_value_at is not None:
+        value_age_ms = max(0.0, (now - float(last_valid_value_at)) * 1000.0)
+
+    payload = {k: v for k, v in snapshot.items() if not k.startswith("_")}
+    payload.update(
+        {
+            "spot_source_freshness": source_freshness.value,
+            "spot_target_state_observed_shadow": target.state.value,
+            "spot_target_state_observed_source": target.source.value,
+            "temperature_status_shadow": decision.temperature_status_shadow.value,
+            "spot_cache_status": decision.spot_cache_status.value,
+            "temperature_value_origin": decision.temperature_value_origin.value,
+            "spot_temperature_effective_c": _effective_spot_temperature_for_decision(decision),
+            "spot_last_valid_value_at": _epoch_to_utc_iso(last_valid_value_at),
+            "spot_value_age_ms": value_age_ms,
+            "spot_snapshot_age_ms": snapshot_age_ms,
+            "spot_poll_freshness_threshold_sec": _spot_poll_freshness_threshold_sec(),
+            "spot_cache_expiry_threshold_sec": _TEMP_CACHE_TTL_SEC,
+        }
+    )
+    return payload
+
 async def _refresh_spot_temperature(client: httpx.AsyncClient) -> None:
-    temp_url = _resolve_spot_temperature_url()
-    temperature = await _request_spot_temperature(client, temp_url)
+    poll_seq, poll_started_at = _begin_spot_temperature_poll()
+    try:
+        temp_url = _resolve_spot_temperature_url()
+    except SpotTemperatureConfigError as exc:
+        poll_completed_at = time.time()
+        classification = classify_spot_raw_response(
+            poll_status=SpotPollStatus.CONFIG_MISSING,
+            body=None,
+            error_code="temperature-config-missing",
+        )
+        _publish_spot_temperature_snapshot(
+            poll_seq=poll_seq,
+            poll_started_at=poll_started_at,
+            poll_completed_at=poll_completed_at,
+            temp_url=exc.temp_url,
+            classification=classification,
+        )
+        raise
+
+    try:
+        temperature, classification = await _request_spot_temperature_observation(client, temp_url)
+    except SpotTemperatureFetchError as exc:
+        poll_completed_at = time.time()
+        _publish_spot_temperature_snapshot(
+            poll_seq=poll_seq,
+            poll_started_at=poll_started_at,
+            poll_completed_at=poll_completed_at,
+            temp_url=exc.temp_url,
+            classification=_classification_for_temperature_error(exc),
+        )
+        raise
+
+    poll_completed_at = time.time()
     _img_cache["temp"] = temperature
-    _img_cache["temp_time"] = time.time()
+    _img_cache["temp_time"] = poll_completed_at
     _record_temperature_success(temp_url)
+    _publish_spot_temperature_snapshot(
+        poll_seq=poll_seq,
+        poll_started_at=poll_started_at,
+        poll_completed_at=poll_completed_at,
+        temp_url=temp_url,
+        classification=classification,
+    )
 
 
 async def _refresh_spot_internal_temperature(client: httpx.AsyncClient) -> None:
@@ -776,6 +1148,7 @@ def get_image_proxy_diagnostics() -> Dict[str, Any]:
         "temperature_last_upstream_status": _temp_last_upstream_status,
         "temperature_last_url": _temp_last_url,
     }
+    payload.update(_build_spot_temperature_snapshot_diagnostics(now))
     payload.update(_build_internal_temperature_diagnostics(now, include_cached_at=False))
     return payload
 
@@ -830,12 +1203,12 @@ def _build_internal_temperature_diagnostics(now: float, *, include_cached_at: bo
 
 
 def _get_http_client() -> httpx.AsyncClient:
-    """공유 비동기 HTTP 클라이언트를 지연 초기화해 반환한다."""
+    """?⑤벊? ??쑬猷욄묾?HTTP ?????곷섧?紐? 筌왖???λ뜃由?酉鍮?獄쏆꼹???뺣뼄."""
     global _http_client
     if _http_client is None:
         timeout = httpx.Timeout(
             connect=1.0,
-            # 응답 대기 제한을 5초로 둔다.
+            # ?臾먮뼗 ??疫???쀫립??5?λ뜄以??遺얜뼄.
             read=5.0, 
             write=1.0,
             pool=5.0,
@@ -976,12 +1349,12 @@ def _build_cached_image_response(
 
 
 async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
-    """캐시에서 즉시 반환 (백그라운드 프리페칭된 이미지)."""
+    """筌?Ŋ??癒?퐣 筌앸맩??獄쏆꼹??(獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф?????筌왖)."""
     global _img_failure_count
     global _img_cache_state
     now = time.time()
     
-    # 캐시에 이미지가 있으면 즉시 반환
+    # 筌?Ŋ??????筌왖揶쎛 ??됱몵筌?筌앸맩??獄쏆꼹??
     cached_image = _cached_image_data()
     if cached_image is not None:
         age = _cache_age_sec(now)
@@ -995,7 +1368,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         _img_cache_state = next_cache_state
         return _build_cached_image_response(now, cached_image, cache_status=cache_status)
     
-    # 캐시가 비어있으면 초기 로드를 위해 한 번 직접 가져온다.
+    # 筌?Ŋ?녶첎? ??쑴堉??됱몵筌??λ뜃由?嚥≪뮆諭띄몴??袁る퉸 ??甕?筌욊낯??揶쎛?紐꾩궔??
     try:
         image_url = _resolve_spot_image_url()
     except SpotImageConfigError as exc:
@@ -1014,7 +1387,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         raise SpotImageBackoffError(image_url, retry_after)
     
     async with _img_fetch_lock:
-        # 잠금 획득 후 캐시를 다시 확인한다.
+        # ?醫됲닊 ??얜굣 ??筌?Ŋ?녺몴???쇰뻻 ?類ㅼ뵥??뺣뼄.
         cached_image = _cached_image_data()
         if cached_image is not None:
             cached_now = time.time()
@@ -1112,14 +1485,14 @@ async def fetch_live_image_async() -> tuple[bytes, Dict[str, Any]]:
         }
 
 
-# --- 백그라운드 프리페칭 ---
+# --- 獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ---
 _prefetch_task: Optional[asyncio.Task] = None
 _internal_temp_prefetch_task: Optional[asyncio.Task] = None
 _prefetch_running = False
 
 
 async def _prefetch_loop():
-    """백그라운드에서 지속적으로 SPOT 이미지 프리페칭 (드리프트 방지 로직 적용)."""
+    """獄쏄퉫???깆뒲??뽯퓠??筌왖??우읅??곗쨮 SPOT ???筌왖 ?袁ⓥ봺??뤿Ф (??뺚봺?袁る뱜 獄쎻뫗? 嚥≪뮇彛??怨몄뒠)."""
     global _img_cache_state, _img_failure_count, _img_last_error, _internal_temp_prefetch_task, _prefetch_running
     _prefetch_running = True
 
@@ -1225,7 +1598,7 @@ async def _prefetch_loop():
                     next_tick = time.time()
                     continue
         
-        # 드리프트 방지: 다음 실행 시간 계산
+        # ??뺚봺?袁る뱜 獄쎻뫗?: ??쇱벉 ??쎈뻬 ??볦퍢 ?④쑴沅?
         next_tick += interval
         now = time.time()
         sleep_time = next_tick - now
@@ -1233,23 +1606,23 @@ async def _prefetch_loop():
         if sleep_time > 0:
             await asyncio.sleep(sleep_time)
         else:
-            # 작업이 너무 오래 걸려 다음 실행 시점을 이미 지난 경우 보정한다.
+            # ?臾믩씜????댭???살삋 椰꾨챶????쇱벉 ??쎈뻬 ??뽰젎????? 筌왖??野껋럩??癰귣똻???뺣뼄.
             next_tick = now
-            await asyncio.sleep(0.1) # 최소 0.1초 휴식으로 프로세서 점유 방지
+            await asyncio.sleep(0.1) # 筌ㅼ뮇??0.1????곷뻼??곗쨮 ?袁⑥쨮?紐꾧퐣 ?癒?? 獄쎻뫗?
 
 
 async def start_prefetch_loop():
-    """백그라운드 프리페칭 시작."""
+    """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ??뽰삂."""
     global _prefetch_task, _prefetch_running
     if _prefetch_task and not _prefetch_task.done():
-        return  # 이미 실행 중
+        return  # ??? ??쎈뻬 餓?
     
     _prefetch_running = True
     _prefetch_task = asyncio.create_task(_prefetch_loop())
 
 
 async def stop_prefetch_loop():
-    """백그라운드 프리페칭 중지."""
+    """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф 餓λ쵐?."""
     global _internal_temp_prefetch_task, _prefetch_task, _prefetch_running
     _prefetch_running = False
     
@@ -1270,9 +1643,9 @@ async def stop_prefetch_loop():
 
 
 def get_cached_spot_temp() -> float:
-    """캐시된 SPOT 온도를 반환 (PLC 드라이버 등에서 사용)."""
+    """筌?Ŋ???SPOT ??ㅻ즲??獄쏆꼹??(PLC ??뺤뵬??苡??源녿퓠??????."""
     now = time.time()
-    # 이미지가 너무 오래되었거나(15초), 온도가 없으면 0.0 반환
+    # ???筌왖揶쎛 ??댭???살삋??뤿?椰꾧퀡援?15??, ??ㅻ즲揶쎛 ??곸몵筌?0.0 獄쏆꼹??
     if not _img_cache["temp_time"] or (now - _img_cache["temp_time"] > _TEMP_CACHE_TTL_SEC):
         return 0.0
     return _img_cache["temp"]
@@ -1434,7 +1807,7 @@ def move_focus(steps: int) -> Dict[str, Any]:
         delta = steps * max(1, config.SPOT_FOCUS_STEP)
         new_val = current + delta
 
-        # v1 동작에 맞춰 범위를 제한한다.
+        # v1 ??덉삂??筌띿쉸??甕곕뗄?욅몴???쀫립??뺣뼄.
         new_val = max(_SPOT_FOCUS_MIN_MM, min(_SPOT_FOCUS_MAX_MM, new_val))
         if new_val == current:
             return {

@@ -1,21 +1,76 @@
 import csv
+import hashlib
 import json
 import logging
 import queue
+import subprocess
 import threading
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional, Iterable, Tuple
+from uuid import uuid4
 
 from .. import config
 from .. import constants
 from backend.FacilityData.schemas import FactoryData
+from backend.FacilityData.spot_observation import (
+    SPOT_INVALID_SENTINEL_MEANINGS,
+    SPOT_INVALID_SENTINEL_VALUES,
+    SPOT_TEMPERATURE_MAX_C,
+    SPOT_TEMPERATURE_MIN_C,
+)
+from backend.version import get_runtime_info
 
 
-CSV_SCHEMA_VERSION = "2.2.0"
+CSV_SCHEMA_VERSION = "2.3.0"
 DERIVATION_VERSION = "cycle-heuristic-v1"
+PROCESS_STATE_ONLINE_RULE_VERSION = "process-state-online-v1"
 OPERATOR_METADATA_VERSION = "1.0.0"
+TEMPERATURE_STATUS_RULE_VERSION = "temperature-status-shadow-v1"
+SPOT_FRESHNESS_RULE_VERSION = "spot-freshness-shadow-v1"
+SPOT_SENTINEL_MAP_VERSION = "spot-sentinel-ametek-rest-v1"
+SPOT_VERIFIED_NO_TARGET_VALUES: tuple[str, ...] = ()
+SPOT_CACHE_EXPIRY_THRESHOLD_SEC = 15.0
+SPOT_TEMPERATURE_RAW_MAX_LENGTH = 256
+
+SPOT_TEMPERATURE_SHADOW_COLUMNS = [
+    "logger_service_instance_id",
+    "logger_service_started_at",
+    "extruder_process_state_online",
+    "process_state_online_rule_version",
+    "spot_target_state_observed_shadow",
+    "spot_target_state_observed_source",
+    "label_validation_state",
+    "temperature_status_shadow",
+    "temperature_status_rule_version",
+    "spot_poll_status",
+    "spot_raw_validity",
+    "spot_cache_status",
+    "spot_source_freshness",
+    "temperature_value_origin",
+    "cache_fallback_allowed",
+    "spot_service_instance_id",
+    "spot_service_started_at",
+    "spot_poll_seq",
+    "spot_observation_seq",
+    "spot_temperature_observed_c",
+    "spot_temperature_raw",
+    "spot_temperature_raw_truncated",
+    "spot_raw_payload_hash",
+    "spot_raw_payload_encoding",
+    "spot_http_status_code",
+    "spot_device_status_code",
+    "spot_error_code",
+    "spot_poll_duration_ms",
+    "spot_response_content_length",
+    "spot_last_poll_started_at",
+    "spot_last_poll_completed_at",
+    "spot_last_response_at",
+    "spot_last_valid_value_at",
+    "spot_snapshot_age_ms",
+    "spot_value_age_ms",
+]
 
 V1_CSV_COLUMNS = [
     "Date",
@@ -99,6 +154,7 @@ V2_CSV_COLUMNS = [
     "derivation_version",
     "cycle_confidence",
     "cycle_state",
+    *SPOT_TEMPERATURE_SHADOW_COLUMNS,
 ]
 
 CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
@@ -125,6 +181,8 @@ class CSVLoggerService:
         self._buffer_size = 0
         self._last_batch_size = 0
         self._sample_seq = 0
+        self.logger_service_instance_id = str(uuid4())
+        self.logger_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         self._sidecar_paths_written: set[str] = set()
 
     def start(self) -> None:
@@ -316,18 +374,109 @@ class CSVLoggerService:
         log_dir = self._get_log_dir()
         full_path = log_dir / filename
         try:
+            if full_path.exists() and full_path.stat().st_size > 0:
+                if not self._v2_header_matches_current_schema(full_path):
+                    self.logger.error(
+                        "CSV v2 schema mismatch. Refusing append to existing file: %s",
+                        full_path,
+                    )
+                    return None, None
+
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
             writer = csv.writer(handle)
             if handle.tell() == 0:
                 writer.writerow(V2_CSV_COLUMNS)
                 handle.flush()
-                self._write_v2_sidecar(full_path)
+            self._write_v2_sidecar(full_path)
             self.logger.info("CSV v2 log file opened: %s", full_path)
             return handle, writer
         except Exception as exc:
             self.logger.warning("Failed to open CSV v2 log file: %s", exc)
             return None, None
 
+    def _v2_header_matches_current_schema(self, csv_path: Path) -> bool:
+        try:
+            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                reader = csv.reader(handle)
+                header = next(reader, None)
+        except Exception as exc:
+            self.logger.warning("Failed to read CSV v2 header for compatibility check: %s", exc)
+            return False
+        if header != V2_CSV_COLUMNS:
+            expected_count = len(V2_CSV_COLUMNS)
+            actual_count = len(header or [])
+            self.logger.error(
+                "CSV v2 header mismatch: expected_columns=%s actual_columns=%s path=%s",
+                expected_count,
+                actual_count,
+                csv_path,
+            )
+            return False
+        return True
+
+    def _spot_temperature_shadow_metadata(self) -> dict:
+        sentinel_payload = {
+            "version": SPOT_SENTINEL_MAP_VERSION,
+            "verified_no_target_values": list(SPOT_VERIFIED_NO_TARGET_VALUES),
+            "invalid_sentinel_values": list(SPOT_INVALID_SENTINEL_VALUES),
+            "invalid_sentinel_meanings": dict(SPOT_INVALID_SENTINEL_MEANINGS),
+            "documented_temperature_sentinels": {
+                "under_range": "6553.4",
+                "over_range": "6553.5",
+            },
+            "documentation_reference": "docs/reference/ametek_land_spot.pdf",
+            "pdf_verified": True,
+            "verified_no_target_server_pc_verified": False,
+            "server_pc_verified": False,
+        }
+        sentinel_hash = hashlib.sha256(
+            json.dumps(sentinel_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return {
+            "schema_version": CSV_SCHEMA_VERSION,
+            "shadow_columns": SPOT_TEMPERATURE_SHADOW_COLUMNS,
+            "temperature_status_rule_version": TEMPERATURE_STATUS_RULE_VERSION,
+            "process_state_online_rule_version": PROCESS_STATE_ONLINE_RULE_VERSION,
+            "spot_freshness_rule_version": SPOT_FRESHNESS_RULE_VERSION,
+            "spot_temperature_min_c": SPOT_TEMPERATURE_MIN_C,
+            "spot_temperature_max_c": SPOT_TEMPERATURE_MAX_C,
+            "cache_expiry_threshold_sec": SPOT_CACHE_EXPIRY_THRESHOLD_SEC,
+            "poll_freshness_threshold_sec": float(getattr(config, "SPOT_REFRESH_INTERVAL", 3.0)) * 3.0,
+            "poll_freshness_threshold_status": "candidate_unverified_server_pc",
+            "raw_payload_realtime_csv_policy": "temporary validation-period repetition; long-term storage belongs in spot_observation_fact",
+            "spot_temperature_raw_max_length": SPOT_TEMPERATURE_RAW_MAX_LENGTH,
+            "sentinel_map": sentinel_payload,
+            "sentinel_map_sha256": sentinel_hash,
+            "v2_3_policy": "instrumentation_shadow_only; operational truth requires v2.4.0+ operational fields",
+        }
+
+    def _resolve_clean_git_commit(self) -> Optional[str]:
+        repo_root = Path(__file__).resolve().parents[2]
+        try:
+            status = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+            if status.returncode != 0 or status.stdout.strip():
+                return None
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+        except Exception:
+            return None
+        if head.returncode != 0:
+            return None
+        commit = head.stdout.strip()
+        return commit or None
     def _write_v2_sidecar(self, csv_path: Path) -> None:
         if not self.csv_v2_sidecar_enabled:
             return
@@ -340,6 +489,10 @@ class CSVLoggerService:
             "schema_metadata": {
                 "schema_version": CSV_SCHEMA_VERSION,
                 "operator_metadata_version": OPERATOR_METADATA_VERSION,
+                "logger_service_instance_id": self.logger_service_instance_id,
+                "logger_service_started_at": self.logger_service_started_at,
+                "git_commit": self._resolve_clean_git_commit(),
+                "runtime_info": get_runtime_info(),
                 "v1_compatibility": True,
                 "v1_csv_enabled": self.csv_v1_enabled,
                 "v1_columns": V1_CSV_COLUMNS,
@@ -354,7 +507,17 @@ class CSVLoggerService:
                 },
                 "writer": "CSVLoggerService",
                 "created_at": datetime.now().astimezone().isoformat(),
+                "row_unique_key": ["logger_service_instance_id", "sample_seq"],
+                "spot_observation_key_scope": (
+                    "spot_service_instance_id and spot_poll_seq/spot_observation_seq are unique "
+                    "only in spot_observation_fact, not realtime CSV rows."
+                ),
+                "compatibility_statement": (
+                    "Append-compatible for tolerant column-name consumers; strict backward "
+                    "compatibility is not guaranteed for exact-column-count consumers."
+                ),
             },
+            "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(),
             "sensor_metadata": [
                 {
                     "column_name": "Product_No_operator",
@@ -611,6 +774,10 @@ class CSVLoggerService:
         billet_quality, billet_reason = self._quality_for_billet_length(data)
         cycle_state = self._cycle_state(data)
         cycle_confidence = self._cycle_confidence(data, cycle_state)
+        spot_temperature_raw, spot_temperature_raw_truncated = self._bounded_csv_text(
+            data.spot_temperature_raw,
+            SPOT_TEMPERATURE_RAW_MAX_LENGTH,
+        )
         return [
             CSV_SCHEMA_VERSION,
             sample_seq,
@@ -649,6 +816,41 @@ class CSVLoggerService:
             self._escape_csv_text(data.derivation_version or DERIVATION_VERSION),
             self._fmt(cycle_confidence),
             cycle_state,
+            self._escape_csv_text(self.logger_service_instance_id),
+            self._escape_csv_text(self.logger_service_started_at),
+            self._escape_csv_text(data.extruder_process_state_online or "unknown"),
+            self._escape_csv_text(data.process_state_online_rule_version or PROCESS_STATE_ONLINE_RULE_VERSION),
+            self._escape_csv_text(data.spot_target_state_observed_shadow or ""),
+            self._escape_csv_text(data.spot_target_state_observed_source or ""),
+            self._escape_csv_text(data.label_validation_state or "shadow"),
+            self._escape_csv_text(data.temperature_status_shadow or ""),
+            self._escape_csv_text(data.temperature_status_rule_version or TEMPERATURE_STATUS_RULE_VERSION),
+            self._escape_csv_text(data.spot_poll_status or ""),
+            self._escape_csv_text(data.spot_raw_validity or ""),
+            self._escape_csv_text(data.spot_cache_status or ""),
+            self._escape_csv_text(data.spot_source_freshness or ""),
+            self._escape_csv_text(data.temperature_value_origin or ""),
+            self._fmt_optional_bool(data.cache_fallback_allowed, default=False),
+            self._escape_csv_text(data.spot_service_instance_id or ""),
+            self._escape_csv_text(data.spot_service_started_at or ""),
+            self._fmt_int(data.spot_poll_seq),
+            self._fmt_int(data.spot_observation_seq),
+            self._fmt(data.spot_temperature_observed_c),
+            spot_temperature_raw,
+            self._fmt_bool(bool(data.spot_temperature_raw_truncated or spot_temperature_raw_truncated)),
+            self._escape_csv_text(data.spot_raw_payload_hash or ""),
+            self._escape_csv_text(data.spot_raw_payload_encoding or ""),
+            self._fmt_int(data.spot_http_status_code),
+            self._escape_csv_text(data.spot_device_status_code or ""),
+            self._escape_csv_text(data.spot_error_code or ""),
+            self._fmt(data.spot_poll_duration_ms),
+            self._fmt_int(data.spot_response_content_length),
+            self._escape_csv_text(data.spot_last_poll_started_at or ""),
+            self._escape_csv_text(data.spot_last_poll_completed_at or ""),
+            self._escape_csv_text(data.spot_last_response_at or ""),
+            self._escape_csv_text(data.spot_last_valid_value_at or ""),
+            self._fmt(data.spot_snapshot_age_ms),
+            self._fmt(data.spot_value_age_ms),
         ]
 
     def _parse_timestamp(self, data: FactoryData) -> datetime:
@@ -680,6 +882,30 @@ class CSVLoggerService:
 
     def _fmt_bool(self, value: bool) -> str:
         return "true" if value else "false"
+
+    def _fmt_optional_bool(self, value: Optional[bool], *, default: Optional[bool] = None) -> str:
+        if value is None:
+            if default is None:
+                return ""
+            return self._fmt_bool(default)
+        return self._fmt_bool(bool(value))
+
+    def _fmt_int(self, value: Optional[int]) -> str:
+        if value is None or isinstance(value, bool):
+            return ""
+        try:
+            return str(int(value))
+        except Exception:
+            return ""
+
+    def _bounded_csv_text(self, value: Optional[str], max_length: int) -> tuple[str, bool]:
+        if value is None:
+            return "", False
+        text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+        truncated = len(text) > max_length
+        if truncated:
+            text = text[:max_length]
+        return self._escape_csv_text(text), truncated
 
     def _escape_csv_text(self, value: str) -> str:
         if value and value[0] in CSV_INJECTION_PREFIXES:
