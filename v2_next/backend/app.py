@@ -2838,6 +2838,12 @@ async def live_spot_image():
             headers["X-Spot-Live-Image-Age"] = f"{float(age_sec):.3f}"
         if meta.get("source"):
             headers["X-Spot-Live-Image-Source"] = str(meta["source"])
+        is_stale = str(meta.get("status") or "") == "stale"
+        observability_service.record_spot_live_image_result(
+            200,
+            float(age_sec) if age_sec is not None else None,
+            is_stale,
+        )
         return Response(content=data, media_type="image/jpeg", headers=headers)
     except spot_control.SpotLiveImageConfigError as exc:
         diagnostics = spot_control.get_live_image_diagnostics()
