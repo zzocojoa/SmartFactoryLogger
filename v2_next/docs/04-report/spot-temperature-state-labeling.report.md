@@ -121,6 +121,19 @@ Until these are resolved, the following remain prohibited:
 - Using new labels in ML training pipelines.
 - Writing post-hoc segment labels into realtime CSV rows.
 
+These are operational promotion blockers, not PR #65 code blockers. PR #65 may ship
+shadow instrumentation, but any later change that turns `temperature_status_shadow`,
+SPOT target shadow fields, or process segment facts into operational truth, alert
+suppression, legacy reason remapping, or ML input requires server-PC evidence and a
+separate promotion PR.
+
+The local harness/reference assets that were kept out of PR #65 are protected by the
+local ref `refs/local/pr65-harness-reference-assets`. Because that ref is local to
+this clone, an export was also written to
+`C:\tmp\pr65-harness-reference-assets.patch`. Restore with
+`git apply --binary C:\tmp\pr65-harness-reference-assets.patch` in a clean worktree,
+or use `git stash apply refs/local/pr65-harness-reference-assets` on this machine.
+
 ## 8. Metrics
 
 | Metric | Value |

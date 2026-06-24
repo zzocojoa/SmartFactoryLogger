@@ -94,6 +94,15 @@
             "legacy_reason_policy_pending",
             "operational_schema_v2_4_plus_fields_required"
           ],
+          "operational_promotion_blocker_scope": "future_promotion_gate_not_pr65_code_blocker",
+          "promotion_requires_separate_pr": true,
+          "prohibited_until_promotion": [
+            "temperature_status_shadow_as_operational_truth",
+            "spot_target_shadow_fields_as_operational_truth",
+            "alert_suppression_from_shadow_labels",
+            "legacy_reason_remapping_from_shadow_labels",
+            "ml_training_or_inference_input_from_shadow_labels"
+          ],
           "resolved_documentation_items": [
             "online_process_state_priority_defined",
             "billet_change_pause_run_boundary_policy_defined",
@@ -169,6 +178,14 @@
             "legacy_reason_policy_pending",
             "operational_schema_v2_4_plus_fields_required"
           ],
+          "blocker_scope": "future_operational_promotion_only",
+          "shadow_fields_operational_truth_allowed": false,
+          "shadow_fields_ml_input_allowed": false,
+          "local_asset_recovery": {
+            "stable_ref": "refs/local/pr65-harness-reference-assets",
+            "portable_patch": "C:\\tmp\\pr65-harness-reference-assets.patch",
+            "restore_command": "git apply --binary C:\\tmp\\pr65-harness-reference-assets.patch"
+          },
           "lastUpdated": "2026-06-24T00:00:00Z"
         },
         "report": {
@@ -177,6 +194,15 @@
           "status": "completed_local_instrumentation_report",
           "scope": "local_instrumentation_only",
           "operational_promotion_blocked": true,
+          "blocker_scope": "future_operational_promotion_only_not_pr65_merge_blocker",
+          "promotion_requires_server_pc_evidence": true,
+          "promotion_requires_separate_pr": true,
+          "shadow_fields_operational_truth_allowed": false,
+          "shadow_fields_ml_input_allowed": false,
+          "local_asset_recovery": {
+            "stable_ref": "refs/local/pr65-harness-reference-assets",
+            "portable_patch": "C:\\tmp\\pr65-harness-reference-assets.patch"
+          },
           "lastUpdated": "2026-06-24T00:00:00Z"
         }
       },

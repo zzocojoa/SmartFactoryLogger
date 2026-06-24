@@ -132,6 +132,9 @@ PASS, with existing LF/CRLF warnings only for spot_api.py and test_spot_api.py
 2. Run server-PC validation before any alert suppression, ML ingestion, or legacy reason remapping.
 3. Use the new `process_segment_fact` output only as post-hoc analysis data. Do not join it into realtime training labels unless future-context features are explicitly allowed.
 4. Run downstream consumer compatibility checks before enabling v2.3.0 in production logging.
+5. Treat operational promotion blockers as release gates for future promotion only, not as blockers for PR #65 shadow instrumentation.
+6. Keep `temperature_status_shadow`, SPOT target shadow fields, and post-hoc segment facts out of operational truth, alert suppression, legacy reason remapping, and ML input until server-PC evidence and a separate promotion PR approve the change.
+7. The local stash ref `refs/local/pr65-harness-reference-assets` is clone-local; use `C:\tmp\pr65-harness-reference-assets.patch` as the portable export for the harness/reference assets kept out of PR #65.
 
 ## Next Steps
 
@@ -139,6 +142,8 @@ PASS, with existing LF/CRLF warnings only for spot_api.py and test_spot_api.py
 - [ ] Run downstream consumer compatibility smoke tests against generated v2.3.0 CSV and metadata sidecars.
 - [ ] Re-run Check after server evidence is attached.
 - [ ] Proceed to Report only for instrumentation completion, not for operational promotion, unless blockers are explicitly accepted as external gates.
+- [ ] Open a separate promotion PR before any shadow field becomes operational truth or ML input.
+- [ ] Restore local harness/reference assets only from `refs/local/pr65-harness-reference-assets` or `C:\tmp\pr65-harness-reference-assets.patch`; do not mix them into PR #65.
 
 ## 2026-06-23 SPOT REST Sentinel Evidence Update
 
