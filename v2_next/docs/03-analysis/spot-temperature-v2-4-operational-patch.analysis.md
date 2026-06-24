@@ -1,0 +1,126 @@
+# Gap Analysis: spot-temperature-v2-4-operational-patch
+
+> Date: 2026-06-25 KST | Re-run after implementation
+> Design: docs/02-design/features/spot-temperature-v2-4-operational-patch.design.md v1.1.1
+> Scope: post-implementation gap analysis against the current branch
+> bkit Analyze Iteration: 8
+> Analyzed Branch/Ref: codex/spot-temperature-v2-4-operational-implementation
+> Worktree Dirty During Analysis: true
+> Analysis Command: $pdca analyze spot-temperature-v2-4-operational-patch
+
+---
+
+## Verdict
+
+Implementation is ready for pre-landing review and PR creation. The branch now implements the v2.4 operational CSV contract while preserving the PR #65 v2.3 sentinel and cache-suppression invariants.
+
+Blocking gaps were not found in the implemented P0/P1 contract:
+
+- v2.3/v2.4 schema constants are split.
+- `CSV_V2_OPERATIONAL_FIELDS_ENABLED` selects the active v2 file contract at file-open time.
+- known v2.3/v2.4 header transitions roll over instead of mixing schemas in one CSV.
+- `temperature_operational.py` reuses `temperature_state.py` for transport/freshness/cache decisions.
+- stale row precedence overrides old raw sentinel status while preserving raw SPOT metadata.
+- realtime `process_phase_candidate` does not use SPOT status or future context.
+- candidate resolution and confirmed process phase event facts are separate from realtime rows.
+- `spot_observation_fact.py` emits idempotent per-poll facts and isolates writer failure with failure count plus local JSONL retry spool.
+- `scripts/infer_process_phase_events_for_csv.py` emits fact outputs without mutating source CSV.
+- `scripts/validate_csv_v2_shadow.py` validates v2.4 operational fields while preserving v2.3 checks.
+
+## Match Rate: 90%
+
+Calculation: 18 implemented items / 20 canonical design items.
+
+```text
+v2.3 baseline preservation: 7/7
+v2.4 operational deliverables: 11/13
+overall design match: 18/20 = 90%
+```
+
+This is a post-implementation score, not the previous pre-implementation 35% analysis. The remaining 10% is non-blocking for the current PR because it is operational promotion hardening, not correctness of the emitted v2.4 contract.
+
+## Re-Run Evidence
+
+Implemented files and behavior now present:
+
+- `backend/FacilityData/temperature_operational.py`
+- `backend/FacilityData/process_phase.py`
+- `backend/FacilityData/changeover_candidate_resolution_fact.py`
+- `backend/FacilityData/spot_observation_fact.py`
+- `scripts/infer_process_phase_events_for_csv.py`
+- v2.4 unit and contract tests under `backend/tests/test_*v2_4*`, `test_temperature_operational.py`, `test_process_phase.py`, `test_changeover_candidate_resolution_fact.py`, and `test_spot_observation_fact.py`
+- `backend/FacilityData/repository.py` exposes `CSV_SCHEMA_VERSION_V2_3`, `CSV_SCHEMA_VERSION_V2_4`, `V2_3_CSV_COLUMNS`, `V2_4_OPERATIONAL_COLUMNS`, and `V2_4_CSV_COLUMNS`
+- `scripts/validate_csv_v2_shadow.py` supports `2.1.0`, `2.2.0`, `2.3.0`, and `2.4.0`
+- config flags exist for `CSV_V2_OPERATIONAL_FIELDS_ENABLED`, `SPOT_OBSERVATION_FACT_ENABLED`, and `PROCESS_PHASE_EVENT_FACT_ENABLED`
+
+## Verification Summary
+
+Commands run after implementation:
+
+```text
+npm --prefix frontend run lint: PASS
+npm --prefix frontend run typecheck: PASS
+npm --prefix frontend run build: PASS, with existing Vite chunk-size/module-type warnings
+.\backend\.venv\Scripts\python.exe -m ruff check backend scripts: PASS
+.\backend\.venv\Scripts\python.exe -m mypy: PASS
+C:\Python312\python.exe -m pytest backend\tests\test_spot_observation.py backend\tests\test_spot_api.py backend\tests\test_real_plc.py backend\tests\test_temperature_operational.py backend\tests\test_process_phase.py backend\tests\test_changeover_candidate_resolution_fact.py backend\tests\test_spot_observation_fact.py backend\tests\test_csv_v2_4_operational_contract.py -q: 175 passed, 1 warning, 24 subtests passed
+node scripts\run_backend_unittest.cjs: 239 tests OK
+C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_105757.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_105757.metadata.json: PASS, 6,577 rows
+C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_112050.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_112050.metadata.json: PASS, 7,153 rows
+C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_114532.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_114532.metadata.json: PASS, 95,280 rows
+C:\Python312\python.exe scripts\infer_process_phase_events_for_csv.py --input docs\data\Factory_Integrated_Log_v2_20260624_105757.csv --resolution-output C:\tmp\sfl-v2-4-resolution-facts-smoke.csv --event-output C:\tmp\sfl-v2-4-process-events-smoke.csv: PASS
+```
+
+The three local v2.3 source CSV files total 109,010 rows and remain local evidence only. They are intentionally ignored rather than committed because they are large operational data artifacts.
+
+## Canonical Item Mapping
+
+| # | Canonical item | Current status |
+|---:|---|---|
+| 1 | PR #65 sentinel classification baseline | implemented |
+| 2 | invalid sentinel cache suppression baseline | implemented |
+| 3 | immutable SPOT snapshot metadata baseline | implemented |
+| 4 | v2.3 SPOT shadow CSV columns | implemented |
+| 5 | v2.3 validator sentinel checks | implemented |
+| 6 | post-hoc process segment fact separation | implemented |
+| 7 | CSV formula escaping for existing text fields | implemented |
+| 8 | operational adapter reusing `temperature_state.py` | implemented |
+| 9 | v2.4 output status and unavailable reason fields | implemented |
+| 10 | realtime expectedness candidate and post-hoc confirmed expectedness | implemented |
+| 11 | under-range cause candidate, confidence, and evidence fields | implemented |
+| 12 | row-time freshness and stale precedence | implemented |
+| 13 | realtime process phase candidate without future context | implemented |
+| 14 | candidate resolution fact and process phase event fact split | implemented |
+| 15 | explicit `spot_observation_key` | implemented |
+| 16 | idempotent `spot_observation_fact` with diagnostics and writer failure isolation | implemented |
+| 17 | v2.3/v2.4 schema constants and feature-flag rollover | implemented |
+| 18 | v2.4 metadata contract and promotion bundle metadata | implemented |
+| 19 | v2.3/v2.4 validator support | implemented |
+| 20 | synthetic, source replay, schema rollover, lifecycle, and recovery tests | implemented |
+
+## Remaining Gaps
+
+1. Aggregate operational counters are not yet exposed through `/health` or `/stats` as first-class v2.4 counters. Current evidence exists in CSV/fact outputs and validator checks, not a live aggregate API.
+2. Promotion bundle is represented by config flags and sidecar metadata, but runtime deployment does not yet reject partial promotion combinations. Operational rollout should set all three flags together:
+
+```text
+CSV_V2_OPERATIONAL_FIELDS_ENABLED=true
+SPOT_OBSERVATION_FACT_ENABLED=true
+PROCESS_PHASE_EVENT_FACT_ENABLED=true
+```
+
+## Non-Blocking Risks
+
+- Frontend build still reports existing Vite chunk-size warnings. This branch does not change frontend bundles, so it is not a blocker.
+- v2.4 operational fields are behind feature flags and default off. This protects existing v2.3 consumers but means production evidence requires an explicit promotion bundle deployment.
+- `/health` aggregate counters should be added before declaring long-running operational observability complete.
+
+## Merge Readiness
+
+The branch is ready for PR creation if the final code review gates remain clean:
+
+- no new sentinel regression;
+- no mixed v2.3/v2.4 CSV header append;
+- no source CSV mutation by post-hoc scripts;
+- working tree clean after staging/commit;
+- CI passes on the PR branch.

@@ -49,6 +49,8 @@ backend/scripts/utils/refactor_ddd.py
 scripts/test_spot_drift.py
 scripts/test_spot_unified.py
 docs/optimization/
+docs/data/Factory_Integrated_Log_v2_*.csv
+docs/data/Factory_Integrated_Log_v2_*.metadata.json
 
 # Local QA / Codex artifacts
 .tmp_*

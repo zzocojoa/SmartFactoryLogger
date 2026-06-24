@@ -1,4 +1,5 @@
 import csv
+from dataclasses import dataclass
 import hashlib
 import json
 import logging
@@ -21,9 +22,24 @@ from backend.FacilityData.spot_observation import (
     SPOT_TEMPERATURE_MIN_C,
 )
 from backend.version import get_runtime_info
+from backend.FacilityData.process_phase import (
+    PROCESS_PHASE_RULE_VERSION,
+    ProcessPhaseDecision,
+    ProcessPhaseInput,
+    derive_process_phase_candidate,
+)
+from backend.FacilityData.spot_observation_fact import build_spot_observation_key
+from backend.FacilityData.temperature_operational import (
+    SPOT_ROW_FRESHNESS_RULE_VERSION,
+    TEMPERATURE_OPERATIONAL_RULE_VERSION,
+    TemperatureOperationalInput,
+    derive_temperature_operational_fields,
+)
 
 
-CSV_SCHEMA_VERSION = "2.3.0"
+CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
+CSV_SCHEMA_VERSION_V2_4 = "2.4.0"
+CSV_SCHEMA_VERSION = CSV_SCHEMA_VERSION_V2_3
 DERIVATION_VERSION = "cycle-heuristic-v1"
 PROCESS_STATE_ONLINE_RULE_VERSION = "process-state-online-v1"
 OPERATOR_METADATA_VERSION = "1.0.0"
@@ -120,7 +136,7 @@ V1_CSV_HEADER_ALIASES = {
     "Billet_CycleID": frozenset({"Billet_CycleID"}),
 }
 
-V2_CSV_COLUMNS = [
+V2_3_CSV_COLUMNS = [
     "schema_version",
     "sample_seq",
     "timestamp_local",
@@ -157,7 +173,45 @@ V2_CSV_COLUMNS = [
     *SPOT_TEMPERATURE_SHADOW_COLUMNS,
 ]
 
+V2_4_OPERATIONAL_COLUMNS = [
+    "temperature_output_status",
+    "temperature_unavailable_reason",
+    "temperature_expectedness_candidate",
+    "temperature_under_range_cause_candidate",
+    "temperature_cause_confidence",
+    "temperature_cause_evidence_codes",
+    "spot_effective_age_ms_at_row",
+    "spot_effective_freshness_at_row",
+    "spot_effective_value_age_ms_at_row",
+    "spot_row_age_clock_status",
+    "process_phase_candidate",
+    "process_phase_rule_version",
+    "phase_confirmation_state",
+    "changeover_candidate_id",
+    "spot_observation_key",
+]
+
+V2_4_CSV_COLUMNS = [
+    *V2_3_CSV_COLUMNS,
+    *V2_4_OPERATIONAL_COLUMNS,
+]
+
+V2_CSV_COLUMNS = V2_3_CSV_COLUMNS
+
 CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
+
+@dataclass(frozen=True)
+class V2CsvContract:
+    schema_version: str
+    columns: tuple[str, ...]
+    operational_fields_enabled: bool
+    column_hash: str
+
+
+def _v2_column_hash(columns: Iterable[str]) -> str:
+    return hashlib.sha256(
+        json.dumps(list(columns), separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 class CSVLoggerService:
@@ -175,6 +229,10 @@ class CSVLoggerService:
         self.csv_v1_enabled = bool(getattr(config, "CSV_V1_ENABLED", True))
         self.csv_v2_enabled = bool(getattr(config, "CSV_V2_ENABLED", False))
         self.csv_v2_sidecar_enabled = bool(getattr(config, "CSV_V2_SIDECAR_ENABLED", True))
+        self.csv_v2_operational_fields_enabled = bool(
+            getattr(config, "CSV_V2_OPERATIONAL_FIELDS_ENABLED", False)
+        )
+        self._active_v2_contract: Optional[V2CsvContract] = None
         self._ensure_csv_writer_enabled()
         self.csv_header = self._parse_header(config.CSV_HEADER)
         self._logpath_warned = False
@@ -220,6 +278,7 @@ class CSVLoggerService:
         csv_v1_enabled: Optional[bool] = None,
         csv_v2_enabled: Optional[bool] = None,
         csv_v2_sidecar_enabled: Optional[bool] = None,
+        csv_v2_operational_fields_enabled: Optional[bool] = None,
     ) -> bool:
         changed = False
         with self._config_lock:
@@ -238,6 +297,12 @@ class CSVLoggerService:
             if csv_v2_enabled is not None:
                 self.csv_v2_enabled = bool(csv_v2_enabled)
                 changed = True
+            if csv_v2_operational_fields_enabled is not None:
+                next_enabled = bool(csv_v2_operational_fields_enabled)
+                if next_enabled != self.csv_v2_operational_fields_enabled:
+                    self.csv_v2_operational_fields_enabled = next_enabled
+                    self._active_v2_contract = None
+                    changed = True
             if csv_v2_sidecar_enabled is not None:
                 self.csv_v2_sidecar_enabled = bool(csv_v2_sidecar_enabled)
                 changed = True
@@ -341,6 +406,7 @@ class CSVLoggerService:
         filename = f"{prefix}_{timestamp_str}.csv"
         log_dir = self._get_log_dir()
         full_path = log_dir / filename
+        handle = None
         try:
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
             writer = csv.writer(handle)
@@ -350,6 +416,7 @@ class CSVLoggerService:
             self.logger.info("CSV log file opened: %s", full_path)
             return handle, writer
         except Exception as exc:
+            self._close_file(handle)
             self.logger.error("Failed to open CSV log file: %s", exc)
             if log_dir != self.fallback_log_dir:
                 fallback_path = self.fallback_log_dir / filename
@@ -367,34 +434,92 @@ class CSVLoggerService:
                     self.logger.error("Failed to open CSV log file (fallback): %s", exc2)
         return None, None
 
+    def _resolve_v2_contract(self) -> V2CsvContract:
+        enabled = bool(self.csv_v2_operational_fields_enabled)
+        columns = tuple(V2_4_CSV_COLUMNS if enabled else V2_3_CSV_COLUMNS)
+        schema_version = CSV_SCHEMA_VERSION_V2_4 if enabled else CSV_SCHEMA_VERSION_V2_3
+        return V2CsvContract(
+            schema_version=schema_version,
+            columns=columns,
+            operational_fields_enabled=enabled,
+            column_hash=_v2_column_hash(columns),
+        )
+
+    def _get_active_v2_contract(self) -> V2CsvContract:
+        if self._active_v2_contract is None:
+            self._active_v2_contract = self._resolve_v2_contract()
+        return self._active_v2_contract
+
+    def _v2_rollover_path_for_contract(self, csv_path: Path, contract: V2CsvContract) -> Path:
+        schema_suffix = contract.schema_version.replace(".", "_")
+        candidate = csv_path.with_name(f"{csv_path.stem}_{schema_suffix}{csv_path.suffix}")
+        if candidate == csv_path:
+            return csv_path
+        return candidate
+
     def _open_v2_log_file(self, timestamp_str: str, prefix: str) -> Tuple[Optional[object], Optional[csv.writer]]:
         if not self.auto_save or not self.csv_v2_enabled:
             return None, None
+        contract = self._get_active_v2_contract()
         filename = f"{prefix}_{timestamp_str}.csv"
         log_dir = self._get_log_dir()
         full_path = log_dir / filename
+        handle = None
         try:
             if full_path.exists() and full_path.stat().st_size > 0:
-                if not self._v2_header_matches_current_schema(full_path):
-                    self.logger.error(
-                        "CSV v2 schema mismatch. Refusing append to existing file: %s",
+                if not self._v2_header_matches_current_schema(full_path, contract):
+                    if not self._v2_header_matches_known_schema(full_path):
+                        self.logger.error(
+                            "CSV v2 schema mismatch. Refusing append to existing file: %s",
+                            full_path,
+                        )
+                        return None, None
+                    rollover_path = self._v2_rollover_path_for_contract(full_path, contract)
+                    self.logger.info(
+                        "CSV v2 schema rollover selected: previous=%s next=%s schema=%s",
                         full_path,
+                        rollover_path,
+                        contract.schema_version,
                     )
-                    return None, None
+                    full_path = rollover_path
+                    if full_path.exists() and full_path.stat().st_size > 0:
+                        if not self._v2_header_matches_current_schema(full_path, contract):
+                            self.logger.error(
+                                "CSV v2 rollover target schema mismatch. Refusing append: %s",
+                                full_path,
+                            )
+                            return None, None
 
             handle = full_path.open("a", newline="", encoding="utf-8-sig")
             writer = csv.writer(handle)
             if handle.tell() == 0:
-                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(list(contract.columns))
                 handle.flush()
-            self._write_v2_sidecar(full_path)
+            self._write_v2_sidecar(full_path, contract)
             self.logger.info("CSV v2 log file opened: %s", full_path)
             return handle, writer
         except Exception as exc:
+            self._close_file(handle)
             self.logger.warning("Failed to open CSV v2 log file: %s", exc)
             return None, None
 
-    def _v2_header_matches_current_schema(self, csv_path: Path) -> bool:
+    def _v2_header_matches_known_schema(self, csv_path: Path) -> bool:
+        try:
+            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                reader = csv.reader(handle)
+                header = next(reader, None)
+        except Exception as exc:
+            self.logger.warning("Failed to read CSV v2 header for schema rollover check: %s", exc)
+            return False
+        return header in (V2_3_CSV_COLUMNS, V2_4_CSV_COLUMNS)
+
+
+    def _v2_header_matches_current_schema(
+        self,
+        csv_path: Path,
+        contract: Optional[V2CsvContract] = None,
+    ) -> bool:
+        active_contract = contract or self._get_active_v2_contract()
         try:
             with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
                 reader = csv.reader(handle)
@@ -402,8 +527,9 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to read CSV v2 header for compatibility check: %s", exc)
             return False
-        if header != V2_CSV_COLUMNS:
-            expected_count = len(V2_CSV_COLUMNS)
+        expected_columns = list(active_contract.columns)
+        if header != expected_columns:
+            expected_count = len(expected_columns)
             actual_count = len(header or [])
             self.logger.error(
                 "CSV v2 header mismatch: expected_columns=%s actual_columns=%s path=%s",
@@ -414,7 +540,7 @@ class CSVLoggerService:
             return False
         return True
 
-    def _spot_temperature_shadow_metadata(self) -> dict:
+    def _spot_temperature_shadow_metadata(self, contract: Optional[V2CsvContract] = None) -> dict:
         sentinel_payload = {
             "version": SPOT_SENTINEL_MAP_VERSION,
             "verified_no_target_values": list(SPOT_VERIFIED_NO_TARGET_VALUES),
@@ -439,8 +565,9 @@ class CSVLoggerService:
         sentinel_hash = hashlib.sha256(
             json.dumps(sentinel_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
+        active_contract = contract or self._get_active_v2_contract()
         return {
-            "schema_version": CSV_SCHEMA_VERSION,
+            "schema_version": active_contract.schema_version,
             "shadow_columns": SPOT_TEMPERATURE_SHADOW_COLUMNS,
             "temperature_status_rule_version": TEMPERATURE_STATUS_RULE_VERSION,
             "process_state_online_rule_version": PROCESS_STATE_ONLINE_RULE_VERSION,
@@ -484,9 +611,10 @@ class CSVLoggerService:
             return None
         commit = head.stdout.strip()
         return commit or None
-    def _write_v2_sidecar(self, csv_path: Path) -> None:
+    def _write_v2_sidecar(self, csv_path: Path, contract: Optional[V2CsvContract] = None) -> None:
         if not self.csv_v2_sidecar_enabled:
             return
+        active_contract = contract or self._get_active_v2_contract()
         sidecar_path = csv_path.with_suffix(".metadata.json")
         sidecar_key = str(sidecar_path)
         if sidecar_key in self._sidecar_paths_written or sidecar_path.exists():
@@ -494,7 +622,18 @@ class CSVLoggerService:
             return
         payload = {
             "schema_metadata": {
-                "schema_version": CSV_SCHEMA_VERSION,
+                "schema_version": active_contract.schema_version,
+                "active_schema_version": active_contract.schema_version,
+                "active_column_hash": active_contract.column_hash,
+                "csv_v2_operational_fields_enabled": active_contract.operational_fields_enabled,
+                "temperature_operational_rule_version": TEMPERATURE_OPERATIONAL_RULE_VERSION,
+                "spot_row_freshness_rule_version": SPOT_ROW_FRESHNESS_RULE_VERSION,
+                "process_phase_rule_version": PROCESS_PHASE_RULE_VERSION,
+                "promotion_bundle_required_flags": {
+                    "CSV_V2_OPERATIONAL_FIELDS_ENABLED": True,
+                    "SPOT_OBSERVATION_FACT_ENABLED": True,
+                    "PROCESS_PHASE_EVENT_FACT_ENABLED": True,
+                },
                 "operator_metadata_version": OPERATOR_METADATA_VERSION,
                 "logger_service_instance_id": self.logger_service_instance_id,
                 "logger_service_started_at": self.logger_service_started_at,
@@ -503,7 +642,7 @@ class CSVLoggerService:
                 "v1_compatibility": True,
                 "v1_csv_enabled": self.csv_v1_enabled,
                 "v1_columns": V1_CSV_COLUMNS,
-                "v2_columns": V2_CSV_COLUMNS,
+                "v2_columns": list(active_contract.columns),
                 "header_policy": (
                     "HEADERS.csv may rename v1 columns only when the column count and each "
                     "position-specific label match the v1 contract aliases."
@@ -524,7 +663,7 @@ class CSVLoggerService:
                     "compatibility is not guaranteed for exact-column-count consumers."
                 ),
             },
-            "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(),
+            "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(active_contract),
             "sensor_metadata": [
                 {
                     "column_name": "Product_No_operator",
@@ -765,6 +904,59 @@ class CSVLoggerService:
         ]
         return row
 
+    def _derive_process_phase_decision(self, data: FactoryData):
+        if data.process_phase_candidate:
+            return ProcessPhaseDecision(
+                process_phase_candidate=data.process_phase_candidate,
+                process_phase_rule_version=data.process_phase_rule_version or PROCESS_PHASE_RULE_VERSION,
+                phase_confirmation_state=data.phase_confirmation_state or "realtime_candidate",
+                changeover_candidate_id=data.changeover_candidate_id or "",
+            )
+        return derive_process_phase_candidate(
+            ProcessPhaseInput(
+                speed=data.Speed,
+                press=data.Press,
+                count=data.Count,
+                extruder_process_state_online=data.extruder_process_state_online,
+                product_no=data.Product_No_operator,
+                mold_no=data.Mold_No_operator,
+            )
+        )
+
+    def _derive_temperature_operational_decision(self, data: FactoryData, process_phase_candidate: str):
+        return derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status=data.spot_poll_status or "not_attempted",
+                raw_validity=data.spot_raw_validity or "not_received",
+                source_freshness=data.spot_source_freshness or "unknown",
+                cache_fallback_allowed=bool(data.cache_fallback_allowed),
+                has_ttl_valid_cache=data.spot_cache_status in {"fresh", "reused"},
+                has_previous_valid_value=bool(data.spot_last_valid_value_at),
+                first_poll_completed=bool(data.spot_poll_status and data.spot_poll_status != "not_attempted"),
+                temperature_value_origin=data.temperature_value_origin or "none",
+                spot_device_status_code=data.spot_device_status_code,
+                spot_error_code=data.spot_error_code,
+                spot_effective_age_ms_at_row=data.spot_effective_age_ms_at_row
+                if data.spot_effective_age_ms_at_row is not None
+                else data.spot_snapshot_age_ms,
+                spot_effective_value_age_ms_at_row=data.spot_effective_value_age_ms_at_row
+                if data.spot_effective_value_age_ms_at_row is not None
+                else data.spot_value_age_ms,
+                process_phase_candidate=process_phase_candidate,
+            )
+        )
+
+    def _spot_observation_key_for_data(self, data: FactoryData) -> str:
+        if data.spot_observation_key:
+            return data.spot_observation_key
+        return build_spot_observation_key(
+            {
+                "spot_service_instance_id": data.spot_service_instance_id,
+                "spot_poll_seq": data.spot_poll_seq,
+            }
+        )
+
+
     def _build_v2_row(
         self,
         data: FactoryData,
@@ -785,8 +977,20 @@ class CSVLoggerService:
             data.spot_temperature_raw,
             SPOT_TEMPERATURE_RAW_MAX_LENGTH,
         )
-        return [
-            CSV_SCHEMA_VERSION,
+        contract = self._get_active_v2_contract()
+        process_phase_decision = self._derive_process_phase_decision(data)
+        operational_decision = self._derive_temperature_operational_decision(
+            data,
+            process_phase_decision.process_phase_candidate,
+        )
+        v1_values = list(v1_row)
+        if (
+            contract.operational_fields_enabled
+            and operational_decision.temperature_output_status != "valid"
+        ):
+            v1_values[V1_CSV_COLUMNS.index("Temperature")] = ""
+        base_row = [
+            contract.schema_version,
             sample_seq,
             local_timestamp.isoformat(),
             utc_timestamp.isoformat().replace("+00:00", "Z"),
@@ -799,7 +1003,7 @@ class CSVLoggerService:
             self._fmt_bool(bool(data.operator_metadata_valid)),
             self._escape_csv_text(",".join(data.operator_metadata_missing_fields or [])),
             self._escape_csv_text(data.operator_metadata_updated_at or ""),
-            *v1_row,
+            *v1_values,
             self._fmt(data.MainRamPosition_D0010),
             self._fmt(data.ContainerPosition_D0012),
             mainpress_quality,
@@ -858,6 +1062,26 @@ class CSVLoggerService:
             self._escape_csv_text(data.spot_last_valid_value_at or ""),
             self._fmt(data.spot_snapshot_age_ms),
             self._fmt(data.spot_value_age_ms),
+        ]
+        if not contract.operational_fields_enabled:
+            return base_row
+        return [
+            *base_row,
+            self._escape_csv_text(operational_decision.temperature_output_status),
+            self._escape_csv_text(operational_decision.temperature_unavailable_reason),
+            self._escape_csv_text(operational_decision.temperature_expectedness_candidate),
+            self._escape_csv_text(operational_decision.temperature_under_range_cause_candidate),
+            self._fmt(operational_decision.temperature_cause_confidence),
+            self._escape_csv_text(operational_decision.temperature_cause_evidence_codes),
+            self._fmt(operational_decision.spot_effective_age_ms_at_row),
+            self._escape_csv_text(operational_decision.spot_effective_freshness_at_row),
+            self._fmt(operational_decision.spot_effective_value_age_ms_at_row),
+            self._escape_csv_text(operational_decision.spot_row_age_clock_status),
+            self._escape_csv_text(process_phase_decision.process_phase_candidate),
+            self._escape_csv_text(process_phase_decision.process_phase_rule_version),
+            self._escape_csv_text(process_phase_decision.phase_confirmation_state),
+            self._escape_csv_text(process_phase_decision.changeover_candidate_id),
+            self._escape_csv_text(self._spot_observation_key_for_data(data)),
         ]
 
     def _parse_timestamp(self, data: FactoryData) -> datetime:
