@@ -52,5 +52,52 @@ class ChangeoverCandidateResolutionFactTests(unittest.TestCase):
         self.assertEqual(facts[0]["temperature_expectedness_confirmed"], "expected")
 
 
+    def test_repeated_candidate_id_is_split_by_contiguous_occurrence(self) -> None:
+        rows = [
+            {
+                "changeover_candidate_id": "chg_repeat",
+                "process_phase_candidate": "setup_candidate",
+                "logger_service_instance_id": "logger-1",
+                "sample_seq": "1",
+                "timestamp_utc": "2026-06-25T00:00:00Z",
+            },
+            {
+                "changeover_candidate_id": "chg_repeat",
+                "process_phase_candidate": "setup_candidate",
+                "logger_service_instance_id": "logger-1",
+                "sample_seq": "2",
+                "timestamp_utc": "2026-06-25T00:00:01Z",
+            },
+            {
+                "changeover_candidate_id": "",
+                "process_phase_candidate": "production_stable",
+                "logger_service_instance_id": "logger-1",
+                "sample_seq": "3",
+                "timestamp_utc": "2026-06-25T00:00:02Z",
+            },
+            {
+                "changeover_candidate_id": "chg_repeat",
+                "process_phase_candidate": "setup_candidate",
+                "logger_service_instance_id": "logger-1",
+                "sample_seq": "4",
+                "timestamp_utc": "2026-06-25T00:00:03Z",
+            },
+        ]
+
+        resolution_facts = infer_changeover_candidate_resolution_facts(rows, source_file_id="sha256:abc")
+        event_facts = infer_process_phase_event_facts(rows, source_file_id="sha256:abc")
+
+        self.assertEqual([fact["changeover_candidate_id"] for fact in resolution_facts], [
+            "chg_repeat__seq_1",
+            "chg_repeat__seq_4",
+        ])
+        self.assertEqual([fact["sample_seq_start"] for fact in resolution_facts], ["1", "4"])
+        self.assertEqual([fact["sample_seq_end"] for fact in resolution_facts], ["2", "4"])
+        self.assertEqual([fact["source_changeover_candidate_id"] for fact in event_facts], [
+            "chg_repeat__seq_1",
+            "chg_repeat__seq_4",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()
