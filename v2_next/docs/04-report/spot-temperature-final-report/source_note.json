@@ -1,0 +1,147 @@
+{
+  "report": "/mnt/data/spot_temperature_final_report_20260624/SPOT_Temperature_최종_수정_방향_보고서.html",
+  "generated_at": "2026-06-24 22:37 KST",
+  "analysis_scope": {
+    "rows": 109010,
+    "columns": 88,
+    "sample_seq_min": 11236,
+    "sample_seq_max": 120245,
+    "duration_hours": 6.3465421125,
+    "normal_rows": 92582,
+    "under_range_rows": 16428,
+    "over_range_rows": 0,
+    "unique_polls": 22275,
+    "unique_valid_polls": 18702,
+    "unique_under_range_polls": 3573,
+    "repeat_poll_rows": 86735,
+    "repeat_poll_pct": 79.56609485368314,
+    "poll_coverage_pct": 97.4921218487395,
+    "poll_missing_numbers": 573,
+    "capture_stale_rows": 0,
+    "max_snapshot_age_ms": 2305.2077293396,
+    "row_effective_age_over_3s_rows": 3,
+    "cache_available_not_used_rows": 530,
+    "cache_used_rows": 0,
+    "setup_rows": 14429,
+    "pre_changeover_rows": 1999
+  },
+  "under_range_by_count": {
+    "0": 14429,
+    "12": 957,
+    "15": 252,
+    "16": 206,
+    "35": 269,
+    "49": 315
+  },
+  "changeover_events": [
+    {
+      "reset_time_kst": "12:29:36",
+      "prev_product": 60533,
+      "prev_mold": 1,
+      "next_product": 60535,
+      "next_mold": 1,
+      "prev_count": 49,
+      "pre_under_rows": 315,
+      "pre_to_reset_s": 66.14089,
+      "setup_under_rows": 1535
+    },
+    {
+      "reset_time_kst": "13:24:45",
+      "prev_product": 60535,
+      "prev_mold": 1,
+      "next_product": 1555,
+      "next_mold": 1,
+      "prev_count": 16,
+      "pre_under_rows": 206,
+      "pre_to_reset_s": 46.360638,
+      "setup_under_rows": 2177
+    },
+    {
+      "reset_time_kst": "14:12:56",
+      "prev_product": 1555,
+      "prev_mold": 1,
+      "next_product": 6162,
+      "next_mold": 1,
+      "prev_count": 15,
+      "pre_under_rows": 252,
+      "pre_to_reset_s": 51.989369,
+      "setup_under_rows": 2113
+    },
+    {
+      "reset_time_kst": "14:31:21",
+      "prev_product": 6162,
+      "prev_mold": 1,
+      "next_product": 6163,
+      "next_mold": 1,
+      "prev_count": 4,
+      "pre_under_rows": 0,
+      "pre_to_reset_s": null,
+      "setup_under_rows": 3274
+    },
+    {
+      "reset_time_kst": "15:15:40",
+      "prev_product": 6163,
+      "prev_mold": 1,
+      "next_product": 6165,
+      "next_mold": 1,
+      "prev_count": 12,
+      "pre_under_rows": 957,
+      "pre_to_reset_s": 197.492616,
+      "setup_under_rows": 1803
+    },
+    {
+      "reset_time_kst": "16:47:47",
+      "prev_product": 6165,
+      "prev_mold": 1,
+      "next_product": 60313,
+      "next_mold": 2,
+      "prev_count": 35,
+      "pre_under_rows": 269,
+      "pre_to_reset_s": 57.329082,
+      "setup_under_rows": 3527
+    }
+  ],
+  "chart_map": [
+    {
+      "section": "Key findings",
+      "question": "6553.4가 어떤 Count에 집중되는가",
+      "family": "Comparison & Ranking",
+      "type": "categorical bar",
+      "fields": [
+        "Count",
+        "6553.4 rows"
+      ],
+      "claim": "Count 0에 87.83% 집중, 나머지는 final Count 12/15/16/35/49",
+      "artifact": "/mnt/data/spot_temperature_final_report_20260624/charts/under_range_by_count.png"
+    },
+    {
+      "section": "Key findings",
+      "question": "금형 교체 이벤트별로 교체 전 대기와 셋팅 구간이 어떻게 나뉘는가",
+      "family": "Comparison",
+      "type": "grouped bar",
+      "fields": [
+        "changeover event",
+        "pre_changeover rows",
+        "setup rows"
+      ],
+      "claim": "전체 6553.4가 두 공정 phase로 완전히 분해됨",
+      "artifact": "/mnt/data/spot_temperature_final_report_20260624/charts/under_range_by_changeover_event.png"
+    }
+  ],
+  "source_sha256": {
+    "Factory_Integrated_Log_v2_20260624_105757.csv": "eea5a5b80ea82fff341e028be4856d9a0fb6ca30ae19ea23dd8772fa98c37d66",
+    "Factory_Integrated_Log_v2_20260624_112050.csv": "b80a0d4a2081e292b999811b3a7007ef1d4b785c2263d0438b99e6e93e965d74",
+    "Factory_Integrated_Log_v2_20260624_114532.csv": "bee25e44ac254922596cdb8d0c983d47661dc7c70844c5c9038ef22fe92f1e2d",
+    "Factory_Integrated_Log_v2_20260624_105757.metadata.json": "588ee87b55a1b3c85c7465306d903b53842f7f4bd4b0de2268cf48c8d9e7ec10",
+    "Factory_Integrated_Log_v2_20260624_112050.metadata.json": "508ba616824e29f074df99a8b9b0ccbd3c6d2f5c00efb07e3ca7810cb675b6a6",
+    "Factory_Integrated_Log_v2_20260624_114532.metadata.json": "947338b88a64e09aae9fd640a7258302c45763173903496f13a2b51f18f8144a",
+    "ametek_land_spot.pdf": "c8d315fafd796075545558afcca894e0f1855fc3ba6ebc2f875e95ca1d39bf22",
+    "ametek_land_spot_al_lt_thermometer_user_guide_811299_issue_7_en.pdf": "5cad8a25a6e4d7fe17f24275f0feb3653f4056782d564c6531aba6aa5d33811b",
+    "ametek_land_spot_actuator_brochure_rev2_en.pdf": "34025d8c799dde826e8e9f74f68d69f2a4f77f97146bf27e0de39368987052be"
+  },
+  "assumptions": [
+    "Count 0~2는 사용자가 정의한 초기 셋팅 범위로 적용",
+    "pre_changeover_hold는 이후 Count 0 또는 operator context 변경으로 사후 확정",
+    "6553.4의 물리 원인은 현재 데이터만으로 확정하지 않음"
+  ]
+}
