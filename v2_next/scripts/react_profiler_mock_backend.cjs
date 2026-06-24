@@ -126,6 +126,16 @@ const buildSpotConfig = () => ({
   focus_enabled: true,
 });
 
+const buildOperatorMetadata = () => ({
+  product_no: '',
+  operator_mold_no: '',
+  valid: false,
+  missing_fields: ['product_no', 'operator_mold_no'],
+  updated_at: null,
+  source: 'profiler_mock',
+  history: [],
+});
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
 
@@ -192,6 +202,11 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/api/log/status') {
     writeJson(res, { ok: true, path: null, size: 0 });
+    return;
+  }
+
+  if (url.pathname === '/api/facility/operator-metadata' && req.method === 'GET') {
+    writeJson(res, buildOperatorMetadata());
     return;
   }
 

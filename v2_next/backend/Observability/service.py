@@ -45,6 +45,38 @@ _SUMMARY_ONLY_PATH_PREFIXES = (
 )
 
 
+_PERFORMANCE_CONTRACT_VERSION = "1.0"
+
+
+def _performance_thresholds() -> Dict[str, Any]:
+    return {
+        "operational": {
+            "health_latency_ms": {"target": 50, "warning": 50, "failure": 200},
+            "data_latency_ms": {"target": 100, "warning": 100, "failure": 500},
+            "spot_live_image_latency_ms": {"target": 500, "warning": 500, "failure": None},
+            "spot_proxy_image_latency_ms": {"target": 500, "warning": 500, "failure": None},
+            "lcp_ms": {"target": 2500, "warning": 2500, "failure": 4000},
+            "cls": {"target": 0.1, "warning": 0.1, "failure": 0.25},
+        },
+        "regression_budget": {
+            "timing_warning_ratio": 1.2,
+            "timing_regression_ratio": 1.5,
+            "timing_regression_absolute_ms": 500,
+            "bundle_warning_ratio": 1.1,
+            "bundle_regression_ratio": 1.25,
+            "request_count_warning_ratio": 1.3,
+        },
+        "resource_growth": {
+            "warmup_sec": 120,
+            "observation_window_sec": 300,
+            "sampling_cadence_sec": 5,
+            "preferred_sample_count": 60,
+            "minimum_sample_count": 48,
+            "minimum_window_sec": 240,
+        },
+    }
+
+
 def _is_quiet_path(path: str) -> bool:
     if path in _POLLING_PATHS:
         return True
@@ -146,6 +178,21 @@ class ObservabilityService:
                 entry["age_total_sec"] += float(age_sec)
                 entry["age_count"] += 1
 
+    def record_spot_live_image_result(self, status_code: int, age_sec: Optional[float], is_stale: bool) -> None:
+        now = time.time()
+        with self._lock:
+            self._trim_polling_buckets(now)
+            bucket = self._get_or_create_polling_bucket(now)
+            entry = self._get_or_create_polling_entry(bucket, _SPOT_LIVE_PATH)
+            if status_code >= 400:
+                return
+            entry["success_count"] += 1
+            if is_stale:
+                entry["stale_count"] += 1
+            if age_sec is not None:
+                entry["age_total_sec"] += float(age_sec)
+                entry["age_count"] += 1
+
     def record_request(self, path: str, status_code: int, latency_ms: float, client_host: str) -> None:
         now = time.time()
         sample: RequestSample = (now, float(latency_ms), int(status_code), str(path), str(client_host))
@@ -176,7 +223,7 @@ class ObservabilityService:
                     entry["http_5xx_count"] += 1
                 clients: PollingClientCounts = entry["clients"]
                 clients[client_host] = clients.get(client_host, 0) + 1
-                if path == _SPOT_PROXY_PATH and status_code >= 400:
+                if path in (_SPOT_PROXY_PATH, _SPOT_LIVE_PATH) and status_code >= 400:
                     entry["failure_count"] += 1
             else:
                 self._requests.append(sample)
@@ -438,7 +485,7 @@ class ObservabilityService:
                     for client_host, client_count in top_clients
                 ],
             }
-            if path == _SPOT_PROXY_PATH:
+            if path in (_SPOT_PROXY_PATH, _SPOT_LIVE_PATH):
                 age_count = int(entry["age_count"])
                 path_payload["success_count"] = int(entry["success_count"])
                 path_payload["failure_count"] = int(entry["failure_count"])
@@ -484,6 +531,8 @@ class ObservabilityService:
         avg_latency = (total_latency / total_requests) if total_requests else None
         total_http_error_count = total_http_4xx_count + total_http_5xx_count
         return {
+            "performance_contract_version": _PERFORMANCE_CONTRACT_VERSION,
+            "thresholds": _performance_thresholds(),
             "total_requests": total_requests,
             "avg_latency_ms": round(avg_latency, 2) if avg_latency is not None else None,
             "error_count": total_http_error_count,

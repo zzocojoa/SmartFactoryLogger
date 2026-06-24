@@ -75,13 +75,33 @@ const data = await response.json();
 
 ```json
 {
+  "performance_contract_version": "1.0",
+  "thresholds": {
+    "operational": {...},
+    "regression_budget": {...},
+    "resource_growth": {...}
+  },
   "uptime_sec": 3600,
   "total_requests": 1234,
-  "total_errors": 5,
+  "error_count": 5,
+  "total_http_error_count": 5,
   "avg_latency_ms": 12.5,
+  "polling": {
+    "paths": {
+      "/api/spot/live_image": {
+        "count": 30,
+        "success_count": 29,
+        "failure_count": 1,
+        "stale_count": 0,
+        "avg_age_sec": 0.25
+      }
+    }
+  },
   ...
 }
 ```
+
+Performance resource-growth thresholds define memory/thread/handle sampling windows only. CPU percent is not exposed by `/stats` or `/api/memory/state`; use the resource-monitor artifact unless a future API field is explicitly added and tested.
 
 ---
 

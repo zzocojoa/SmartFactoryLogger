@@ -28,6 +28,15 @@ const appendProfilerParams = (value) => {
   return parsed.toString();
 };
 
+const maskUrlForArtifact = (value) => {
+  try {
+    const parsed = new URL(value);
+    return `masked-origin${parsed.pathname}${parsed.search}`;
+  } catch {
+    return 'masked-url';
+  }
+};
+
 const main = async () => {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -61,7 +70,7 @@ const main = async () => {
     if (!result.collectorFound || result.sampleCount === 0) {
       throw new Error(JSON.stringify({
         message: 'React profiler collector did not capture samples.',
-        targetUrl,
+        targetUrl: maskUrlForArtifact(targetUrl),
         durationMs,
         collectorFound: result.collectorFound,
         sampleCount: result.sampleCount,
@@ -72,7 +81,7 @@ const main = async () => {
 
     const payload = {
       label,
-      url: targetUrl,
+      url: maskUrlForArtifact(targetUrl),
       durationMs,
       capturedAt: new Date().toISOString(),
       sampleCount: result.sampleCount,

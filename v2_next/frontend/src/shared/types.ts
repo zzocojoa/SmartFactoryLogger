@@ -184,7 +184,21 @@ export interface CommLogInfo {
   path: string | null;
 }
 
+export interface PerformanceThresholdValue {
+  target?: number | null;
+  warning?: number | null;
+  failure?: number | null;
+}
+
+export interface PerformanceThresholds {
+  operational: Record<string, PerformanceThresholdValue>;
+  regression_budget: Record<string, number>;
+  resource_growth: Record<string, number>;
+}
+
 export interface StatsSnapshot {
+  performance_contract_version?: string;
+  thresholds?: PerformanceThresholds;
   uptime_sec: number;
   total_requests: number;
   avg_latency_ms: number | null;

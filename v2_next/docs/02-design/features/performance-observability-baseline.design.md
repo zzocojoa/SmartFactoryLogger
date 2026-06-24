@@ -128,6 +128,14 @@ Add these fields to `/stats`:
       "bundle_warning_ratio": 1.1,
       "bundle_regression_ratio": 1.25,
       "request_count_warning_ratio": 1.3
+    },
+    "resource_growth": {
+      "warmup_sec": 120,
+      "observation_window_sec": 300,
+      "sampling_cadence_sec": 5,
+      "preferred_sample_count": 60,
+      "minimum_sample_count": 48,
+      "minimum_window_sec": 240
     }
   }
 }
@@ -136,6 +144,7 @@ Add these fields to `/stats`:
 Rules:
 
 - The exact numeric values may be adjusted in implementation, but the shape must separate operational thresholds from regression budgets.
+- Resource-growth thresholds define the memory/thread/handle sampling window and minimum sample requirements. CPU percent remains external resource monitor artifact evidence unless a future implementation adds a tested API field.
 - Existing `/stats` fields remain unchanged.
 - Threshold values are read-only diagnostics, not configuration writes.
 

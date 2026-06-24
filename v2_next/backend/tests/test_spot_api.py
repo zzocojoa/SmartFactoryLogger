@@ -1246,6 +1246,45 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(backend_app._stats_error_count, original_error_count + 1)
                 self.assertEqual(backend_app._stats_last_status, 502)
 
+    def test_stats_response_includes_performance_contract_version_and_thresholds(self) -> None:
+        from backend import app as backend_app
+
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
+        try:
+            response = client.get("/stats")
+        finally:
+            client.close()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["performance_contract_version"], "1.0")
+        self.assertEqual(payload["thresholds"]["operational"]["health_latency_ms"]["target"], 50)
+        self.assertEqual(payload["thresholds"]["regression_budget"]["timing_warning_ratio"], 1.2)
+        self.assertEqual(payload["thresholds"]["resource_growth"]["minimum_sample_count"], 48)
+        self.assertIn("total_requests", payload)
+        self.assertIn("avg_latency_ms", payload)
+        self.assertIn("error_count", payload)
+        self.assertIn("polling", payload)
+
+    def test_spot_live_image_stats_include_success_failure_stale_and_age(self) -> None:
+        from backend.Observability.service import ObservabilityService
+
+        service = ObservabilityService(window_sec=60.0, max_requests=100, max_errors=20)
+
+        service.record_request("/api/spot/live_image", 200, 5.0, "client-a")
+        service.record_spot_live_image_result(200, 0.25, False)
+        service.record_request("/api/spot/live_image", 200, 7.0, "client-b")
+        service.record_spot_live_image_result(200, 0.75, True)
+        service.record_request("/api/spot/live_image", 503, 9.0, "client-b")
+
+        live_stats = service.get_stats()["polling"]["paths"]["/api/spot/live_image"]
+
+        self.assertEqual(live_stats["count"], 3)
+        self.assertEqual(live_stats["success_count"], 2)
+        self.assertEqual(live_stats["failure_count"], 1)
+        self.assertEqual(live_stats["stale_count"], 1)
+        self.assertEqual(live_stats["avg_age_sec"], 0.5)
+
     async def test_live_image_endpoint_returns_jpeg_with_no_store_headers(self) -> None:
         from backend import app as backend_app
 
@@ -1259,10 +1298,15 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             "retry_after_sec": None,
         }
 
-        with patch.object(
-            backend_app.spot_control,
-            "fetch_live_image_async",
-            AsyncMock(return_value=(image_bytes, meta)),
+        record_mock: Mock = Mock()
+
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "fetch_live_image_async",
+                AsyncMock(return_value=(image_bytes, meta)),
+            ),
+            patch.object(backend_app.observability_service, "record_spot_live_image_result", record_mock),
         ):
             client = TestClient(backend_app.app, raise_server_exceptions=False)
             try:
@@ -1276,6 +1320,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("no-store", response.headers.get("cache-control", ""))
         self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "upstream")
         self.assertEqual(response.headers.get("X-Spot-Live-Image-Age"), "0.000")
+        record_mock.assert_called_once_with(200, 0.0, False)
 
     def test_move_focus_uses_ametek_focus_control_endpoint(self) -> None:
         spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
