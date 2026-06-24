@@ -1,3 +1,4 @@
+import math
 import re
 from pydantic import BaseModel, Field, field_validator, model_validator, ValidationInfo
 from typing import Optional, Dict, Any
@@ -5,6 +6,58 @@ from typing import Optional, Dict, Any
 CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
 PRODUCT_NO_RE = re.compile(r"^\d{1,40}$")
 OPERATOR_MOLD_NO_RE = re.compile(r"^\d{1,32}$")
+
+
+FACTORY_DATA_ENUM_VALUES = {
+    "extruder_process_state_online": {
+        "extruding",
+        "stopped",
+        "idle_candidate",
+        "changeover_candidate",
+        "unknown",
+    },
+    "spot_target_state_observed_shadow": {"present", "absent", "unknown"},
+    "spot_target_state_observed_source": {"verified_device_code", "valid_temperature", "unknown"},
+    "label_validation_state": {"shadow", "validated", "deprecated"},
+    "temperature_status_shadow": {
+        "ok",
+        "no_target",
+        "startup_pending",
+        "source_error",
+        "invalid_value",
+        "stale",
+        "unknown_missing",
+    },
+    "spot_poll_status": {
+        "success",
+        "timeout",
+        "connection_error",
+        "http_error",
+        "config_missing",
+        "not_attempted",
+    },
+    "spot_raw_validity": {
+        "valid_temperature",
+        "verified_no_target",
+        "empty_body",
+        "parse_error",
+        "invalid_sentinel",
+        "out_of_range",
+        "not_received",
+        "not_evaluated",
+    },
+    "spot_cache_status": {
+        "fresh",
+        "reused",
+        "expired",
+        "empty",
+        "invalidated",
+        "available_not_used",
+    },
+    "spot_source_freshness": {"fresh", "stale", "unknown"},
+    "temperature_value_origin": {"current_observation", "cached_observation", "none"},
+    "spot_device_status_code": {"temperature_under_range", "temperature_over_range"},
+}
 
 
 def _normalize_operator_text(value: str | None) -> str:
@@ -127,7 +180,42 @@ class FactoryData(BaseModel):
     Temp_F: Optional[float] = None
     Temp_B: Optional[float] = None
     Billet_Temp: Optional[float] = None
-    
+
+    # SPOT temperature shadow diagnostics (v2.3 instrumentation)
+    extruder_process_state_online: Optional[str] = None
+    process_state_online_rule_version: Optional[str] = None
+    spot_target_state_observed_shadow: Optional[str] = None
+    spot_target_state_observed_source: Optional[str] = None
+    label_validation_state: Optional[str] = None
+    temperature_status_shadow: Optional[str] = None
+    temperature_status_rule_version: Optional[str] = None
+    spot_poll_status: Optional[str] = None
+    spot_raw_validity: Optional[str] = None
+    spot_cache_status: Optional[str] = None
+    spot_source_freshness: Optional[str] = None
+    temperature_value_origin: Optional[str] = None
+    cache_fallback_allowed: Optional[bool] = None
+    spot_service_instance_id: Optional[str] = None
+    spot_service_started_at: Optional[str] = None
+    spot_poll_seq: Optional[int] = None
+    spot_observation_seq: Optional[int] = None
+    spot_temperature_observed_c: Optional[float] = None
+    spot_temperature_raw: Optional[str] = None
+    spot_temperature_raw_truncated: Optional[bool] = None
+    spot_raw_payload_hash: Optional[str] = None
+    spot_raw_payload_encoding: Optional[str] = None
+    spot_http_status_code: Optional[int] = None
+    spot_device_status_code: Optional[str] = None
+    spot_error_code: Optional[str] = None
+    spot_poll_duration_ms: Optional[float] = None
+    spot_response_content_length: Optional[int] = None
+    spot_last_poll_started_at: Optional[str] = None
+    spot_last_poll_completed_at: Optional[str] = None
+    spot_last_response_at: Optional[str] = None
+    spot_last_valid_value_at: Optional[str] = None
+    spot_snapshot_age_ms: Optional[float] = None
+    spot_value_age_ms: Optional[float] = None
+
     # Molds
     Mold1: Optional[float] = None
     Mold2: Optional[float] = None
@@ -142,6 +230,63 @@ class FactoryData(BaseModel):
 
     # Computed status (backend-derived)
     Computed: Optional[Dict[str, Any]] = None
+
+    @field_validator(
+        "extruder_process_state_online",
+        "spot_target_state_observed_shadow",
+        "spot_target_state_observed_source",
+        "label_validation_state",
+        "temperature_status_shadow",
+        "spot_poll_status",
+        "spot_raw_validity",
+        "spot_cache_status",
+        "spot_source_freshness",
+        "temperature_value_origin",
+        "spot_device_status_code",
+        mode="before",
+    )
+    @classmethod
+    def validate_shadow_enum(cls, value, info: ValidationInfo):
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError(f"{info.field_name} must be one of configured enum values")
+        text_value = str(value)
+        allowed = FACTORY_DATA_ENUM_VALUES[info.field_name]
+        if text_value not in allowed:
+            raise ValueError(f"{info.field_name}={text_value!r} is not in {sorted(allowed)!r}")
+        return text_value
+
+    @field_validator(
+        "spot_poll_seq",
+        "spot_observation_seq",
+        "spot_http_status_code",
+        "spot_response_content_length",
+        mode="before",
+    )
+    @classmethod
+    def coerce_non_negative_int(cls, value, info: ValidationInfo):
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            return None
+        try:
+            val = int(value)
+        except Exception:
+            return None
+        if val < 0:
+            return None
+        return val
+
+    @model_validator(mode="after")
+    def validate_spot_sequence_order(self):
+        if (
+            self.spot_poll_seq is not None
+            and self.spot_observation_seq is not None
+            and self.spot_observation_seq > self.spot_poll_seq
+        ):
+            raise ValueError("spot_observation_seq must be less than or equal to spot_poll_seq")
+        return self
 
     @field_validator(
         "Speed",
@@ -169,9 +314,13 @@ class FactoryData(BaseModel):
     def coerce_float(cls, value, info: ValidationInfo):
         if value is None or value == "":
             return None
+        if isinstance(value, bool):
+            return None
         try:
             val = float(value)
         except Exception:
+            return None
+        if not math.isfinite(val):
             return None
         name = info.field_name
 
@@ -184,7 +333,7 @@ class FactoryData(BaseModel):
                 return None
             return val
         if name in {"Spot"}:
-            if val > 2000:
+            if val < 0 or val > 2000:
                 return None
             return val
         if name in {"Temp_F", "Temp_B"}:
@@ -203,6 +352,8 @@ class FactoryData(BaseModel):
     @classmethod
     def coerce_int(cls, value):
         if value is None or value == "":
+            return None
+        if isinstance(value, bool):
             return None
         try:
             val = int(value)

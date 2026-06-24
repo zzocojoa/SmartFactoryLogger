@@ -4,7 +4,7 @@ import glob
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from backend.FacilityData.schemas import FactoryData
 from .base import BasePLCDriver
 
@@ -65,12 +65,77 @@ class CsvReplayDriver(BasePLCDriver):
         return unique_paths
 
     def _safe_float(self, value: Optional[str]) -> float:
-        if not value:
-            return 0.0
+        parsed = self._optional_float(value)
+        return parsed if parsed is not None else 0.0
+
+    def _optional_float(self, value: Optional[str]) -> Optional[float]:
+        if value is None or value == "":
+            return None
         try:
             return float(value)
-        except ValueError:
-            return 0.0
+        except (TypeError, ValueError):
+            return None
+
+    def _optional_int(self, value: Optional[str]) -> Optional[int]:
+        parsed = self._optional_float(value)
+        if parsed is None:
+            return None
+        try:
+            return int(parsed)
+        except (TypeError, ValueError):
+            return None
+
+    def _optional_bool(self, value: Optional[str]) -> Optional[bool]:
+        if value is None or value == "":
+            return None
+        lowered = str(value).strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        return None
+
+    def _optional_text(self, value: Optional[str]) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        return value
+
+    def _spot_shadow_fields(self, row: Dict[str, str]) -> Dict[str, Any]:
+        return {
+            "extruder_process_state_online": self._optional_text(row.get("extruder_process_state_online")),
+            "process_state_online_rule_version": self._optional_text(row.get("process_state_online_rule_version")),
+            "spot_target_state_observed_shadow": self._optional_text(row.get("spot_target_state_observed_shadow")),
+            "spot_target_state_observed_source": self._optional_text(row.get("spot_target_state_observed_source")),
+            "label_validation_state": self._optional_text(row.get("label_validation_state")),
+            "temperature_status_shadow": self._optional_text(row.get("temperature_status_shadow")),
+            "temperature_status_rule_version": self._optional_text(row.get("temperature_status_rule_version")),
+            "spot_poll_status": self._optional_text(row.get("spot_poll_status")),
+            "spot_raw_validity": self._optional_text(row.get("spot_raw_validity")),
+            "spot_cache_status": self._optional_text(row.get("spot_cache_status")),
+            "spot_source_freshness": self._optional_text(row.get("spot_source_freshness")),
+            "temperature_value_origin": self._optional_text(row.get("temperature_value_origin")),
+            "cache_fallback_allowed": self._optional_bool(row.get("cache_fallback_allowed")),
+            "spot_service_instance_id": self._optional_text(row.get("spot_service_instance_id")),
+            "spot_service_started_at": self._optional_text(row.get("spot_service_started_at")),
+            "spot_poll_seq": self._optional_int(row.get("spot_poll_seq")),
+            "spot_observation_seq": self._optional_int(row.get("spot_observation_seq")),
+            "spot_temperature_observed_c": self._optional_float(row.get("spot_temperature_observed_c")),
+            "spot_temperature_raw": self._optional_text(row.get("spot_temperature_raw")),
+            "spot_temperature_raw_truncated": self._optional_bool(row.get("spot_temperature_raw_truncated")),
+            "spot_raw_payload_hash": self._optional_text(row.get("spot_raw_payload_hash")),
+            "spot_raw_payload_encoding": self._optional_text(row.get("spot_raw_payload_encoding")),
+            "spot_http_status_code": self._optional_int(row.get("spot_http_status_code")),
+            "spot_device_status_code": self._optional_text(row.get("spot_device_status_code")),
+            "spot_error_code": self._optional_text(row.get("spot_error_code")),
+            "spot_poll_duration_ms": self._optional_float(row.get("spot_poll_duration_ms")),
+            "spot_response_content_length": self._optional_int(row.get("spot_response_content_length")),
+            "spot_last_poll_started_at": self._optional_text(row.get("spot_last_poll_started_at")),
+            "spot_last_poll_completed_at": self._optional_text(row.get("spot_last_poll_completed_at")),
+            "spot_last_response_at": self._optional_text(row.get("spot_last_response_at")),
+            "spot_last_valid_value_at": self._optional_text(row.get("spot_last_valid_value_at")),
+            "spot_snapshot_age_ms": self._optional_float(row.get("spot_snapshot_age_ms")),
+            "spot_value_age_ms": self._optional_float(row.get("spot_value_age_ms")),
+        }
         
     def _load_csv(self):
         if not self.csv_paths:
@@ -175,7 +240,7 @@ class CsvReplayDriver(BasePLCDriver):
                 operator_metadata_updated_at=row.get("operator_metadata_updated_at") or None,
                 
                 # Temperatures
-                Spot=self._safe_float(row.get("Temperature")), 
+                Spot=self._optional_float(row.get("Temperature")),
                 Temp_F=self._safe_float(row.get("콘테이너온도 앞쪽") or row.get("Temp_F")),
                 # Note: CSV header has a typo '콘테이 너온도 뒷쪽'
                 Temp_B=self._safe_float(row.get("콘테이 너온도 뒷쪽") or row.get("콘테이너온도 뒷쪽") or row.get("Temp_B")),
@@ -192,7 +257,8 @@ class CsvReplayDriver(BasePLCDriver):
                 
                 # Environment
                 At_Temp=self._safe_float(row.get("At_Temp")),
-                At_Pre=self._safe_float(row.get("At_Pre"))
+                At_Pre=self._safe_float(row.get("At_Pre")),
+                **self._spot_shadow_fields(row),
             )
             return data
         except Exception as e:

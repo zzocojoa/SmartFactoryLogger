@@ -9,11 +9,14 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from backend import app as backend_app
+from backend.FacilityData.drivers import real_plc
 from backend.FacilityData.drivers.real_plc import MelsecResponseError, RealPLCDriver, _parse_melsec_values
-from backend.FacilityData.repository import CSVLoggerService, V1_CSV_COLUMNS, V2_CSV_COLUMNS
+from backend.FacilityData.process_state import PROCESS_SEGMENT_FACT_COLUMNS, infer_process_segment_facts
+from backend.FacilityData.repository import CSVLoggerService, CSV_SCHEMA_VERSION, SPOT_TEMPERATURE_SHADOW_COLUMNS, V1_CSV_COLUMNS, V2_CSV_COLUMNS
 from backend.FacilityData.schemas import FactoryData, OperatorMetadata, OperatorMetadataUpdate
 from scripts.validate_csv_v2_shadow import validate as validate_csv_v2_shadow
 from scripts.validate_csv_v2_shadow import validate_many as validate_csv_v2_shadow_many
+from scripts.infer_process_segments_for_csv import infer_process_segments_from_csv
 
 
 class MelsecParseTests(unittest.TestCase):
@@ -58,14 +61,252 @@ class SpotSnapshotTests(unittest.TestCase):
         _, _, previous_spot = driver._read_cached_snapshot()
         self.assertEqual(previous_spot, 45.5)
 
-        with patch("backend.FacilityData.drivers.real_plc.get_cached_spot_temp", return_value=0.0):
-            spot_value = driver._read_spot()
+        diagnostics = {
+            "temperature_status_shadow": "no_target",
+            "temperature_value_origin": "none",
+            "spot_temperature_effective_c": None,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "verified_no_target",
+            "spot_cache_status": "invalidated",
+            "spot_source_freshness": "fresh",
+        }
+        with patch("backend.FacilityData.drivers.real_plc.get_image_proxy_diagnostics", return_value=diagnostics):
+            with patch("backend.FacilityData.drivers.real_plc.get_cached_spot_temp", return_value=0.0):
+                spot_value = driver._read_spot()
 
         _, _, cached_spot = driver._read_cached_snapshot()
 
         self.assertEqual(spot_value, 0.0)
-        self.assertEqual(driver.last_spot, 0.0)
-        self.assertEqual(cached_spot, 0.0)
+        self.assertEqual(driver.last_spot, 45.5)
+        self.assertIsNone(cached_spot)
+
+    def test_cached_observation_uses_effective_temperature_value(self) -> None:
+        driver = RealPLCDriver()
+        diagnostics = {
+            "temperature_status_shadow": "ok",
+            "temperature_value_origin": "cached_observation",
+            "spot_temperature_effective_c": 450.0,
+            "spot_poll_status": "timeout",
+            "spot_raw_validity": "not_received",
+            "spot_cache_status": "reused",
+            "spot_source_freshness": "stale",
+        }
+
+        with patch("backend.FacilityData.drivers.real_plc.get_image_proxy_diagnostics", return_value=diagnostics):
+            with patch("backend.FacilityData.drivers.real_plc.get_cached_spot_temp", return_value=999.0):
+                spot_value = driver._read_spot()
+
+        _, _, cached_spot = driver._read_cached_snapshot()
+        self.assertEqual(spot_value, 450.0)
+        self.assertEqual(cached_spot, 450.0)
+        self.assertEqual(driver.last_spot, 450.0)
+        self.assertIsNone(driver.spot_last_success_time)
+
+    def test_read_data_includes_spot_shadow_metadata(self) -> None:
+        driver = RealPLCDriver()
+        now = time.time()
+        driver._update_ext_snapshot({"Speed": 1.0, "Press": 10.0}, now)
+        driver._process_high_speed_since = now - 1.0
+        driver._update_ls_snapshot({}, now)
+        driver._update_spot_snapshot(
+            448.5,
+            now,
+            {
+                "spot_target_state_observed_shadow": "present",
+                "spot_target_state_observed_source": "valid_temperature",
+                "temperature_status_shadow": "ok",
+                "spot_poll_status": "success",
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "spot_source_freshness": "fresh",
+                "temperature_value_origin": "current_observation",
+                "cache_fallback_allowed": False,
+                "spot_service_instance_id": "spot-service-1",
+                "spot_service_started_at": "2026-03-09T07:20:00Z",
+                "spot_poll_seq": 3,
+                "spot_observation_seq": 3,
+                "spot_temperature_observed_c": 448.5,
+                "spot_raw_value_text": "448.5",
+                "spot_raw_payload_hash": "hash-1",
+                "spot_http_status_code": 200,
+                "spot_poll_duration_ms": 12.5,
+                "spot_response_content_length": 5,
+                "spot_last_poll_started_at": "2026-03-09T07:20:24.000Z",
+                "spot_last_poll_completed_at": "2026-03-09T07:20:24.012Z",
+                "spot_last_valid_value_at": "2026-03-09T07:20:24.012Z",
+                "spot_snapshot_age_ms": 188.0,
+                "spot_value_age_ms": 188.0,
+            },
+        )
+
+        data = driver.read_data()
+
+        self.assertEqual(data.Spot, 448.5)
+        self.assertEqual(data.extruder_process_state_online, "extruding")
+        self.assertEqual(data.process_state_online_rule_version, "process-state-online-v1")
+        self.assertEqual(data.label_validation_state, "shadow")
+        self.assertEqual(data.temperature_status_shadow, "ok")
+        self.assertEqual(data.temperature_status_rule_version, "temperature-status-shadow-v1")
+        self.assertEqual(data.spot_poll_status, "success")
+        self.assertEqual(data.spot_raw_validity, "valid_temperature")
+        self.assertEqual(data.spot_source_freshness, "fresh")
+        self.assertEqual(data.temperature_value_origin, "current_observation")
+        self.assertEqual(data.spot_service_instance_id, "spot-service-1")
+        self.assertEqual(data.spot_poll_seq, 3)
+        self.assertEqual(data.spot_observation_seq, 3)
+        self.assertEqual(data.spot_temperature_observed_c, 448.5)
+        self.assertEqual(data.spot_temperature_raw, "448.5")
+        self.assertFalse(data.spot_temperature_raw_truncated)
+        self.assertEqual(data.spot_raw_payload_encoding, "utf-8-replace")
+        self.assertEqual(data.spot_last_response_at, "2026-03-09T07:20:24.012Z")
+
+
+
+
+    def test_read_data_preserves_invalid_sentinel_device_status_without_snapshot_error(self) -> None:
+        driver = RealPLCDriver()
+        now = time.time()
+        driver._update_ext_snapshot({"Speed": 1.0, "Press": 10.0}, now)
+        driver._process_high_speed_since = now - 1.0
+        driver._update_ls_snapshot({}, now)
+        driver._update_spot_snapshot(
+            None,
+            now,
+            {
+                "spot_target_state_observed_shadow": "unknown",
+                "spot_target_state_observed_source": "unknown",
+                "temperature_status_shadow": "invalid_value",
+                "spot_poll_status": "success",
+                "spot_raw_validity": "invalid_sentinel",
+                "spot_cache_status": "available_not_used",
+                "spot_source_freshness": "fresh",
+                "temperature_value_origin": "none",
+                "cache_fallback_allowed": False,
+                "spot_temperature_observed_c": None,
+                "spot_raw_value_text": "6553.4",
+                "spot_http_status_code": 200,
+                "spot_device_status_code": "temperature_under_range",
+                "spot_error_code": None,
+            },
+        )
+
+        data = driver.read_data()
+
+        self.assertIsNone(data.Spot)
+        self.assertIsNone(data.spot_snapshot_error)
+        self.assertEqual(data.spot_poll_status, "success")
+        self.assertEqual(data.spot_raw_validity, "invalid_sentinel")
+        self.assertEqual(data.spot_device_status_code, "temperature_under_range")
+        self.assertIsNone(data.spot_error_code)
+        self.assertEqual(data.temperature_status_shadow, "invalid_value")
+        self.assertEqual(data.temperature_value_origin, "none")
+        self.assertFalse(data.cache_fallback_allowed)
+
+class OnlineProcessStateTests(unittest.TestCase):
+    def test_ext_snapshot_stale_missing_or_error_forces_unknown(self) -> None:
+        driver = RealPLCDriver()
+        now = 1_773_040_825.0
+
+        self.assertEqual(
+            driver._derive_extruder_process_state_online({"Speed": 1.0, "Press": 10.0}, None, None, now),
+            "unknown",
+        )
+        self.assertEqual(
+            driver._derive_extruder_process_state_online(
+                {"Speed": 1.0, "Press": 10.0}, now, "plc-timeout", now
+            ),
+            "unknown",
+        )
+        self.assertEqual(
+            driver._derive_extruder_process_state_online(
+                {"Speed": 1.0, "Press": 10.0}, now - driver._ext_snapshot_grace_sec() - 0.1, None, now
+            ),
+            "unknown",
+        )
+
+    def test_high_speed_requires_enter_dwell_before_extruding(self) -> None:
+        driver = RealPLCDriver()
+        now = 1_773_040_825.0
+
+        first = driver._derive_extruder_process_state_online({"Speed": 1.0, "Press": 10.0}, now, None, now)
+        second = driver._derive_extruder_process_state_online(
+            {"Speed": 1.0, "Press": 10.0},
+            now + real_plc.PROCESS_STATE_ENTER_DWELL_SEC + 0.1,
+            None,
+            now + real_plc.PROCESS_STATE_ENTER_DWELL_SEC + 0.1,
+        )
+
+        self.assertEqual(first, "unknown")
+        self.assertEqual(second, "extruding")
+
+    def test_restart_low_speed_without_recent_context_stays_unknown_until_idle_dwell(self) -> None:
+        driver = RealPLCDriver()
+        now = 1_773_040_825.0
+
+        first = driver._derive_extruder_process_state_online({"Speed": 0.0, "Press": 0.0}, now, None, now)
+        idle = driver._derive_extruder_process_state_online(
+            {"Speed": 0.0, "Press": 0.0},
+            now + real_plc.IDLE_CANDIDATE_MIN_SEC + 0.1,
+            None,
+            now + real_plc.IDLE_CANDIDATE_MIN_SEC + 0.1,
+        )
+
+        self.assertEqual(first, "unknown")
+        self.assertEqual(idle, "idle_candidate")
+
+    def test_recent_extrusion_low_speed_becomes_stopped_after_exit_dwell(self) -> None:
+        driver = RealPLCDriver()
+        now = 1_773_040_825.0
+        driver._process_state_online = "extruding"
+        driver._process_last_extruding_at = now - 1.0
+        driver._process_low_speed_since = now - real_plc.PROCESS_STATE_EXIT_DWELL_SEC - 0.1
+
+        state = driver._derive_extruder_process_state_online({"Speed": 0.0, "Press": 10.0}, now, None, now)
+
+        self.assertEqual(state, "stopped")
+class PLCServiceHealthTests(unittest.TestCase):
+    def test_get_health_exposes_shadow_spot_temperature_source_health_without_urls(self) -> None:
+        service = backend_app.PLCService(use_mock=True)
+        diagnostics = {
+            "spot_service_instance_id": "spot-service-1",
+            "spot_poll_seq": 7,
+            "spot_observation_seq": 7,
+            "spot_poll_status": "timeout",
+            "spot_raw_validity": "not_received",
+            "spot_source_freshness": "stale",
+            "spot_device_status_code": "temperature_under_range",
+            "temperature_status_shadow": "ok",
+            "spot_cache_status": "reused",
+            "temperature_value_origin": "cached_observation",
+            "cache_fallback_allowed": True,
+            "spot_snapshot_age_ms": 2400.0,
+            "spot_value_age_ms": 1400.0,
+            "spot_poll_freshness_threshold_sec": 1.5,
+            "spot_cache_expiry_threshold_sec": 15.0,
+            "temperature_cache_status": "ok",
+            "temperature_last_success_at": 1770000000.0,
+            "temperature_last_error_at": 1770000001.0,
+            "temperature_last_error_code": "temperature-upstream-timeout",
+            "temperature_last_url": "http://spot.local/temp",
+        }
+
+        with patch(
+            "backend.FacilityData.drivers.spot_api.get_image_proxy_diagnostics",
+            return_value=diagnostics,
+        ):
+            health = service.get_health()
+
+        spot_health = health["spot_temperature"]
+        self.assertTrue(spot_health["diagnostics_available"])
+        self.assertFalse(spot_health["operational_truth"])
+        self.assertEqual(spot_health["validation_state"], "shadow")
+        self.assertEqual(spot_health["spot_poll_status"], "timeout")
+        self.assertEqual(spot_health["spot_source_freshness"], "stale")
+        self.assertEqual(spot_health["spot_device_status_code"], "temperature_under_range")
+        self.assertEqual(spot_health["temperature_status_shadow"], "ok")
+        self.assertEqual(spot_health["temperature_value_origin"], "cached_observation")
+        self.assertTrue(spot_health["cache_fallback_allowed"])
+        self.assertNotIn("temperature_last_url", spot_health)
 
 
 class RealPLCPositionReadFlagTests(unittest.TestCase):
@@ -138,6 +379,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         self.original_previous_count = backend_app.plc_service.operator_metadata_previous_count
         self.original_last_normal_sample_at = backend_app.plc_service.operator_metadata_last_normal_sample_at
         self.original_last_state_write_at = backend_app.plc_service.operator_metadata_last_state_write_at
+        self.original_process_operator_context = backend_app.plc_service._process_operator_context
         self.original_reset_hours = backend_app.config.OPERATOR_METADATA_DOWNTIME_RESET_HOURS
         with backend_app.operator_metadata_store._lock:
             backend_app.operator_metadata_store._path = Path(self.temp_dir.name) / "operator_metadata.json"
@@ -148,6 +390,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         backend_app.plc_service.operator_metadata_previous_count = None
         backend_app.plc_service.operator_metadata_last_normal_sample_at = None
         backend_app.plc_service.operator_metadata_last_state_write_at = None
+        backend_app.plc_service._process_operator_context = None
         backend_app.config.OPERATOR_METADATA_DOWNTIME_RESET_HOURS = 8
 
     def tearDown(self) -> None:
@@ -158,6 +401,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         backend_app.plc_service.operator_metadata_previous_count = self.original_previous_count
         backend_app.plc_service.operator_metadata_last_normal_sample_at = self.original_last_normal_sample_at
         backend_app.plc_service.operator_metadata_last_state_write_at = self.original_last_state_write_at
+        backend_app.plc_service._process_operator_context = self.original_process_operator_context
         backend_app.config.OPERATOR_METADATA_DOWNTIME_RESET_HOURS = self.original_reset_hours
         self.temp_dir.cleanup()
 
@@ -529,6 +773,32 @@ class OperatorMetadataApiTests(unittest.TestCase):
         self.assertIsNotNone(composed.operator_metadata_updated_at)
 
 
+    def test_compose_data_marks_changeover_candidate_only_for_valid_metadata_change_while_stopped(self) -> None:
+        backend_app.plc_service._process_operator_context = ("11111", "111")
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="22222", operator_mold_no="222")
+        )
+        raw_data = self._factory_data(count=0).model_copy(
+            update={"Speed": 0.0, "Press": 0.0, "extruder_process_state_online": "stopped"}
+        )
+
+        composed = backend_app.plc_service._compose_data(raw_data)
+
+        self.assertEqual(composed.extruder_process_state_online, "changeover_candidate")
+
+    def test_compose_data_does_not_mark_changeover_candidate_while_extruding(self) -> None:
+        backend_app.plc_service._process_operator_context = ("11111", "111")
+        backend_app.operator_metadata_store.update(
+            OperatorMetadataUpdate(product_no="22222", operator_mold_no="222")
+        )
+        raw_data = self._factory_data(count=3).model_copy(
+            update={"Speed": 1.0, "Press": 2.0, "extruder_process_state_online": "extruding"}
+        )
+
+        composed = backend_app.plc_service._compose_data(raw_data)
+
+        self.assertEqual(composed.extruder_process_state_online, "extruding")
+
     def test_downtime_reset_after_threshold_with_zero_count(self) -> None:
         backend_app.operator_metadata_store.update(
             OperatorMetadataUpdate(product_no="12345", operator_mold_no="123")
@@ -811,6 +1081,29 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("MainPress_quality")], "missing")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("MainPress_missing_reason")], "source_missing")
 
+    def test_v2_row_keeps_temperature_empty_when_value_origin_none(self) -> None:
+        service = CSVLoggerService()
+        data = self.create_data().model_copy(
+            update={
+                "Spot": None,
+                "temperature_status_shadow": "no_target",
+                "temperature_value_origin": "none",
+                "spot_cache_status": "invalidated",
+                "spot_source_freshness": "fresh",
+                "spot_raw_validity": "verified_no_target",
+            }
+        )
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+        self.assertEqual(v1_row[V1_CSV_COLUMNS.index("Temperature")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Temperature")], "")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Temperature_quality")], "missing")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Temperature_missing_reason")], "source_missing")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("temperature_value_origin")], "none")
+
     def test_v2_row_records_reset_operator_metadata_as_invalid(self) -> None:
         service = CSVLoggerService()
         data = self.create_data()
@@ -873,6 +1166,61 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(len(v1_row), 21)
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("MainRamPosition_D0010")], "15.0")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("ContainerPosition_D0012")], "16.0")
+
+    def test_v2_row_includes_v2_3_shadow_fields_without_duplicate_sample_seq(self) -> None:
+        service = CSVLoggerService()
+        data = self.create_data()
+        data.extruder_process_state_online = "extruding"
+        data.process_state_online_rule_version = "process-state-online-v1"
+        data.spot_target_state_observed_shadow = "present"
+        data.spot_target_state_observed_source = "valid_temperature"
+        data.label_validation_state = "shadow"
+        data.temperature_status_shadow = "ok"
+        data.temperature_status_rule_version = "temperature-status-shadow-v1"
+        data.spot_poll_status = "success"
+        data.spot_raw_validity = "valid_temperature"
+        data.spot_cache_status = "fresh"
+        data.spot_source_freshness = "fresh"
+        data.temperature_value_origin = "current_observation"
+        data.cache_fallback_allowed = False
+        data.spot_service_instance_id = "spot-service-1"
+        data.spot_service_started_at = "2026-03-09T07:20:00Z"
+        data.spot_poll_seq = 10
+        data.spot_observation_seq = 10
+        data.spot_temperature_observed_c = 448.5
+        data.spot_temperature_raw = "=448.5"
+        data.spot_raw_payload_hash = "abc123"
+        data.spot_raw_payload_encoding = "utf-8-replace"
+        data.spot_http_status_code = 200
+        data.spot_device_status_code = "temperature_under_range"
+        data.spot_poll_duration_ms = 12.5
+        data.spot_response_content_length = 5
+        data.spot_last_poll_started_at = "2026-03-09T07:20:24.000Z"
+        data.spot_last_poll_completed_at = "2026-03-09T07:20:24.012Z"
+        data.spot_last_response_at = "2026-03-09T07:20:24.012Z"
+        data.spot_last_valid_value_at = "2026-03-09T07:20:24.012Z"
+        data.spot_snapshot_age_ms = 188.0
+        data.spot_value_age_ms = 188.0
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+        self.assertEqual(CSV_SCHEMA_VERSION, "2.3.0")
+        self.assertEqual(V2_CSV_COLUMNS.count("sample_seq"), 1)
+        for column in SPOT_TEMPERATURE_SHADOW_COLUMNS:
+            self.assertIn(column, V2_CSV_COLUMNS)
+        self.assertEqual(len(v2_row), len(V2_CSV_COLUMNS))
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("schema_version")], "2.3.0")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("logger_service_instance_id")], service.logger_service_instance_id)
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("logger_service_started_at")], service.logger_service_started_at)
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("extruder_process_state_online")], "extruding")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("temperature_status_shadow")], "ok")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_poll_status")], "success")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_temperature_observed_c")], "448.5")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_temperature_raw")], "'=448.5")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_temperature_raw_truncated")], "false")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("spot_device_status_code")], "temperature_under_range")
 
     def test_v2_row_includes_operator_metadata_without_changing_v1(self) -> None:
         service = CSVLoggerService()
@@ -1261,7 +1609,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
 
             metadata = json.loads(v2_files[0].with_suffix(".metadata.json").read_text(encoding="utf-8"))
             self.assertIn("position-specific label", metadata["schema_metadata"]["header_policy"])
-            self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.2.0")
+            self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.3.0")
             self.assertEqual(metadata["schema_metadata"]["operator_metadata_version"], "1.0.0")
             self.assertEqual(
                 metadata["schema_metadata"]["position_read_feature_flag"],
@@ -1444,6 +1792,146 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
 
+    def test_shadow_validation_script_rejects_invalid_v2_3_shadow_enum_and_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+            v2_row[V2_CSV_COLUMNS.index("spot_poll_status")] = "parse_error"
+            v2_row[V2_CSV_COLUMNS.index("spot_poll_seq")] = "1"
+            v2_row[V2_CSV_COLUMNS.index("spot_observation_seq")] = "2"
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path)
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 1)
+
+    def test_shadow_validation_script_accepts_temperature_origin_current_invariant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            data = self.create_data()
+            data.Spot = 448.5
+            data.temperature_value_origin = "current_observation"
+            data.temperature_status_shadow = "ok"
+            data.spot_poll_status = "success"
+            data.spot_raw_validity = "valid_temperature"
+            data.spot_cache_status = "fresh"
+            data.spot_source_freshness = "fresh"
+            data.spot_temperature_observed_c = 448.5
+            data.spot_last_valid_value_at = "2026-03-09T07:20:24.012Z"
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path)
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 0)
+
+    def test_shadow_validation_script_rejects_origin_none_with_legacy_temperature(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            data = self.create_data()
+            data.temperature_value_origin = "none"
+            data.temperature_status_shadow = "no_target"
+            data.spot_poll_status = "success"
+            data.spot_raw_validity = "verified_no_target"
+            data.spot_cache_status = "invalidated"
+            data.spot_source_freshness = "fresh"
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path)
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 1)
+
+    def test_shadow_validation_script_rejects_current_origin_temperature_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            data = self.create_data()
+            data.temperature_value_origin = "current_observation"
+            data.temperature_status_shadow = "ok"
+            data.spot_poll_status = "success"
+            data.spot_raw_validity = "valid_temperature"
+            data.spot_cache_status = "fresh"
+            data.spot_source_freshness = "fresh"
+            data.spot_temperature_observed_c = 448.5
+            data.spot_last_valid_value_at = "2026-03-09T07:20:24.012Z"
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path)
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 1)
+
+    def test_shadow_validation_script_rejects_wrong_v2_3_row_unique_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_CSV_COLUMNS)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path)
+            metadata_path = v2_path.with_suffix(".metadata.json")
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["schema_metadata"]["row_unique_key"] = ["spot_service_instance_id", "spot_poll_seq"]
+            metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+
+            result = validate_csv_v2_shadow(None, v2_path, metadata_path)
+
+        self.assertEqual(result, 1)
+
     def test_shadow_validation_script_accepts_v2_only_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
@@ -1536,6 +2024,118 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             )
 
         self.assertEqual(result, 1)
+
+
+
+class ProcessSegmentFactInferenceTests(unittest.TestCase):
+    def _process_row(
+        self,
+        sample_seq: int,
+        online_state: str,
+        *,
+        product_no: str = "12345",
+        mold_no: str = "123",
+        logger_id: str = "logger-1",
+        valid_metadata: bool = True,
+    ) -> dict[str, str]:
+        return {
+            "schema_version": "2.3.0",
+            "sample_seq": str(sample_seq),
+            "timestamp_utc": f"2026-03-09T07:20:{sample_seq:02d}.000Z",
+            "logger_service_instance_id": logger_id,
+            "Product_No_operator": product_no,
+            "Mold_No_operator": mold_no,
+            "operator_metadata_valid": "true" if valid_metadata else "false",
+            "extruder_process_state_online": online_state,
+        }
+
+    def test_infers_billet_change_pause_only_as_separate_posthoc_fact(self) -> None:
+        rows = [
+            self._process_row(1, "extruding"),
+            self._process_row(2, "stopped"),
+            self._process_row(3, "extruding"),
+        ]
+
+        facts = infer_process_segment_facts(rows, source_file_id="sha256:test")
+
+        self.assertEqual(
+            [fact["extruder_process_state_inferred"] for fact in facts],
+            ["extruding", "billet_change_pause", "extruding"],
+        )
+        stopped = facts[1]
+        self.assertEqual(stopped["sample_seq_start"], "2")
+        self.assertEqual(stopped["sample_seq_end"], "2")
+        self.assertEqual(stopped["logger_service_instance_id"], "logger-1")
+        self.assertEqual(stopped["inference_rule_version"], "process-segment-inference-v1")
+        self.assertEqual(stopped["run_segmentation_rule_version"], "run-segmentation-inferred-v1")
+        self.assertTrue(stopped["process_segment_id"].startswith("ps_"))
+        self.assertTrue(stopped["run_segment_id_inferred"].startswith("run_"))
+
+    def test_does_not_label_stopped_between_different_contexts_as_billet_change_pause(self) -> None:
+        rows = [
+            self._process_row(1, "extruding", product_no="11111", mold_no="111"),
+            self._process_row(2, "stopped", product_no="11111", mold_no="111"),
+            self._process_row(3, "extruding", product_no="22222", mold_no="111"),
+        ]
+
+        facts = infer_process_segment_facts(rows, source_file_id="sha256:test")
+
+        self.assertEqual(facts[1]["extruder_process_state_inferred"], "unknown")
+        self.assertEqual(facts[1]["inference_reason"], "stopped_without_same_run_future_context")
+
+    def test_promotes_only_candidate_states_in_posthoc_output(self) -> None:
+        rows = [
+            self._process_row(1, "idle_candidate"),
+            self._process_row(2, "changeover_candidate", product_no="54321", mold_no="321"),
+        ]
+
+        facts = infer_process_segment_facts(rows, source_file_id="sha256:test")
+
+        self.assertEqual(facts[0]["extruder_process_state_inferred"], "idle")
+        self.assertEqual(facts[1]["extruder_process_state_inferred"], "changeover")
+        self.assertEqual(facts[0]["inference_confidence"], "0.650")
+        self.assertEqual(facts[1]["inference_confidence"], "0.650")
+
+    def test_realtime_v2_columns_do_not_contain_posthoc_segment_fields(self) -> None:
+        excluded = {
+            "process_segment_id",
+            "extruder_process_state_inferred",
+            "extruder_process_state_inferred_confidence",
+            "process_state_inference_rule_version",
+            "run_segment_id_inferred",
+            "run_segmentation_confidence",
+            "run_segmentation_rule_version",
+        }
+
+        for column in excluded:
+            self.assertNotIn(column, V2_CSV_COLUMNS)
+
+    def test_script_writes_process_segment_fact_csv_without_mutating_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp)
+            input_path = temp_dir / "Factory_Integrated_Log_v2_20260309_072000.csv"
+            output_path = temp_dir / "Factory_Integrated_Log_v2_20260309_072000.process_segment_fact.csv"
+            rows = [
+                self._process_row(1, "extruding"),
+                self._process_row(2, "stopped"),
+                self._process_row(3, "extruding"),
+            ]
+            with input_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+            original_text = input_path.read_text(encoding="utf-8-sig")
+
+            facts = infer_process_segments_from_csv(input_path, output_path)
+
+            self.assertEqual(input_path.read_text(encoding="utf-8-sig"), original_text)
+            self.assertTrue(output_path.exists())
+            with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                output_rows = list(csv.DictReader(handle))
+            self.assertEqual(output_rows, facts)
+            self.assertEqual(list(output_rows[0]), PROCESS_SEGMENT_FACT_COLUMNS)
+            self.assertEqual(output_rows[1]["extruder_process_state_inferred"], "billet_change_pause")
+            self.assertTrue(output_rows[1]["source_file_id"].startswith("sha256:"))
 
 
 if __name__ == "__main__":
