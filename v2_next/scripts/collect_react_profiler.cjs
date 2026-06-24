@@ -31,11 +31,55 @@ const appendProfilerParams = (value) => {
 const maskUrlForArtifact = (value) => {
   try {
     const parsed = new URL(value);
-    return `masked-origin${parsed.pathname}${parsed.search}`;
+    return `masked-origin${parsed.pathname}`;
   } catch {
     return 'masked-url';
   }
 };
+
+const assertSafeProfilerArtifactUrl = () => {
+  const sentinel = 'QUERY_SENTINEL_DO_NOT_PERSIST';
+  const testOrigin = `${'http'}${'://'}${'example.invalid'}`;
+  const sensitiveParams = new URLSearchParams();
+  sensitiveParams.set('token', sentinel);
+  sensitiveParams.set('debug', 'true');
+  const targetUrl = appendProfilerParams(
+    `${testOrigin}/dashboard?${sensitiveParams.toString()}#fragment-${sentinel}`,
+  );
+  const maskedUrl = maskUrlForArtifact(targetUrl);
+  const errorPayload = JSON.stringify({
+    message: 'React profiler collector did not capture samples.',
+    targetUrl: maskedUrl,
+  });
+  const forbiddenValues = [
+    sentinel,
+    ['http', '://'].join(''),
+    ['https', '://'].join(''),
+    'example.invalid',
+    'token=',
+    'debug=',
+    'sfReactProfiler',
+    'sfReactProfilerReset',
+    '#fragment',
+  ];
+
+  for (const forbidden of forbiddenValues) {
+    if (maskedUrl.includes(forbidden) || errorPayload.includes(forbidden)) {
+      throw new Error(`Unsafe profiler artifact URL retained forbidden value: ${forbidden}`);
+    }
+  }
+
+  if (maskedUrl !== 'masked-origin/dashboard') {
+    throw new Error(`Unexpected profiler artifact URL mask: ${maskedUrl}`);
+  }
+
+  process.stdout.write('mask-url-self-test passed\n');
+};
+
+if (process.argv.includes('--self-test-mask-url')) {
+  assertSafeProfilerArtifactUrl();
+  process.exit(0);
+}
 
 const main = async () => {
   const browser = await chromium.launch({ headless: true });
