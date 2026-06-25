@@ -56,6 +56,9 @@ MAX_OPERATOR_METADATA_DOWNTIME_RESET_HOURS = 72
 DEFAULT_CSV_V1_ENABLED = True
 DEFAULT_CSV_V2_ENABLED = False
 DEFAULT_CSV_V2_SIDECAR_ENABLED = True
+DEFAULT_CSV_V2_OPERATIONAL_FIELDS_ENABLED = False
+DEFAULT_SPOT_OBSERVATION_FACT_ENABLED = False
+DEFAULT_PROCESS_PHASE_EVENT_FACT_ENABLED = False
 DEFAULT_POSITION_READ_ENABLED = False
 DEFAULT_STATUS_WARN_MS = 10000
 DEFAULT_STATUS_OFFLINE_MS = 20000
@@ -510,6 +513,52 @@ CSV_V2_SIDECAR_ENABLED = _env_bool(
     "CSV_V2_SIDECAR_ENABLED",
     _get_bool(CONFIG, "LOGGING", "csv_v2_sidecar_enabled", DEFAULT_CSV_V2_SIDECAR_ENABLED),
 )
+CSV_V2_OPERATIONAL_FIELDS_ENABLED = _env_bool(
+    "CSV_V2_OPERATIONAL_FIELDS_ENABLED",
+    _get_bool(
+        CONFIG,
+        "LOGGING",
+        "csv_v2_operational_fields_enabled",
+        DEFAULT_CSV_V2_OPERATIONAL_FIELDS_ENABLED,
+    ),
+)
+SPOT_OBSERVATION_FACT_ENABLED = _env_bool(
+    "SPOT_OBSERVATION_FACT_ENABLED",
+    _get_bool(CONFIG, "LOGGING", "spot_observation_fact_enabled", DEFAULT_SPOT_OBSERVATION_FACT_ENABLED),
+)
+PROCESS_PHASE_EVENT_FACT_ENABLED = _env_bool(
+    "PROCESS_PHASE_EVENT_FACT_ENABLED",
+    _get_bool(CONFIG, "LOGGING", "process_phase_event_fact_enabled", DEFAULT_PROCESS_PHASE_EVENT_FACT_ENABLED),
+)
+
+V2_4_PROMOTION_BUNDLE_FLAGS = (
+    "CSV_V2_OPERATIONAL_FIELDS_ENABLED",
+    "SPOT_OBSERVATION_FACT_ENABLED",
+    "PROCESS_PHASE_EVENT_FACT_ENABLED",
+)
+
+
+def _validate_v2_4_promotion_bundle_flags() -> None:
+    flag_values = {
+        "CSV_V2_OPERATIONAL_FIELDS_ENABLED": CSV_V2_OPERATIONAL_FIELDS_ENABLED,
+        "SPOT_OBSERVATION_FACT_ENABLED": SPOT_OBSERVATION_FACT_ENABLED,
+        "PROCESS_PHASE_EVENT_FACT_ENABLED": PROCESS_PHASE_EVENT_FACT_ENABLED,
+    }
+    if not any(flag_values.values()) or all(flag_values.values()):
+        return
+    enabled = ", ".join(name for name, value in flag_values.items() if value) or "none"
+    disabled = ", ".join(name for name, value in flag_values.items() if not value) or "none"
+    message = (
+        "Partial v2.4 promotion flag configuration is not allowed. "
+        "Enable all promotion bundle flags together or disable all of them. "
+        f"enabled={enabled}; disabled={disabled}"
+    )
+    _config_log("ERROR", message)
+    raise RuntimeError(message)
+
+
+_validate_v2_4_promotion_bundle_flags()
+
 SNAPSHOT_PATH = resolve_storage_path(
     _get(CONFIG, "SETTINGS", "snapshotpath", DEFAULT_SNAPSHOT_PATH),
     "snapshots",

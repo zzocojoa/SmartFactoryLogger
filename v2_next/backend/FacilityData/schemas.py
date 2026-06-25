@@ -57,6 +57,53 @@ FACTORY_DATA_ENUM_VALUES = {
     "spot_source_freshness": {"fresh", "stale", "unknown"},
     "temperature_value_origin": {"current_observation", "cached_observation", "none"},
     "spot_device_status_code": {"temperature_under_range", "temperature_over_range"},
+    "temperature_output_status": {
+        "valid",
+        "under_range",
+        "over_range",
+        "stale",
+        "source_error",
+        "startup_pending",
+        "unknown",
+    },
+    "temperature_unavailable_reason": {
+        "under_range",
+        "over_range",
+        "stale_observation",
+        "timeout",
+        "connection_error",
+        "http_error",
+        "parse_error",
+        "empty_body",
+        "config_missing",
+        "numeric_out_of_range",
+        "not_attempted",
+        "startup_pending",
+        "unknown_freshness",
+        "unknown",
+    },
+    "temperature_expectedness_candidate": {"expected_candidate", "unexpected_candidate", "unknown"},
+    "temperature_under_range_cause_candidate": {
+        "peak_picker_reset_candidate",
+        "target_out_of_fov_candidate",
+        "alignment_change_candidate",
+        "low_signal_candidate",
+        "below_measurement_range_candidate",
+        "unknown",
+    },
+    "spot_effective_freshness_at_row": {"fresh", "stale", "unknown"},
+    "spot_row_age_clock_status": {"ok", "clock_anomaly", "unknown"},
+    "process_phase_candidate": {
+        "production_stable",
+        "setup_candidate",
+        "pre_changeover_hold_candidate",
+        "die_change_candidate",
+        "setup_alignment_candidate",
+        "changeover_candidate",
+        "idle_candidate",
+        "unknown",
+    },
+    "phase_confirmation_state": {"realtime_candidate", "unknown"},
 }
 
 
@@ -216,6 +263,23 @@ class FactoryData(BaseModel):
     spot_snapshot_age_ms: Optional[float] = None
     spot_value_age_ms: Optional[float] = None
 
+    # SPOT temperature operational diagnostics (v2.4 candidate contract)
+    temperature_output_status: Optional[str] = None
+    temperature_unavailable_reason: Optional[str] = None
+    temperature_expectedness_candidate: Optional[str] = None
+    temperature_under_range_cause_candidate: Optional[str] = None
+    temperature_cause_confidence: Optional[float] = None
+    temperature_cause_evidence_codes: Optional[str] = None
+    spot_effective_age_ms_at_row: Optional[float] = None
+    spot_effective_freshness_at_row: Optional[str] = None
+    spot_effective_value_age_ms_at_row: Optional[float] = None
+    spot_row_age_clock_status: Optional[str] = None
+    process_phase_candidate: Optional[str] = None
+    process_phase_rule_version: Optional[str] = None
+    phase_confirmation_state: Optional[str] = None
+    changeover_candidate_id: Optional[str] = None
+    spot_observation_key: Optional[str] = None
+
     # Molds
     Mold1: Optional[float] = None
     Mold2: Optional[float] = None
@@ -243,6 +307,14 @@ class FactoryData(BaseModel):
         "spot_source_freshness",
         "temperature_value_origin",
         "spot_device_status_code",
+        "temperature_output_status",
+        "temperature_unavailable_reason",
+        "temperature_expectedness_candidate",
+        "temperature_under_range_cause_candidate",
+        "spot_effective_freshness_at_row",
+        "spot_row_age_clock_status",
+        "process_phase_candidate",
+        "phase_confirmation_state",
         mode="before",
     )
     @classmethod

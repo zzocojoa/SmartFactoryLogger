@@ -20,6 +20,10 @@ select = ["E9", "F821"]
 [tool.mypy]
 python_version = "3.12"
 files = [
+  "backend/FacilityData/changeover_candidate_resolution_fact.py",
+  "backend/FacilityData/process_phase.py",
+  "backend/FacilityData/spot_observation_fact.py",
+  "backend/FacilityData/temperature_operational.py",
   "backend/FacilityData/drivers/spot_api.py",
 ]
 ignore_missing_imports = true

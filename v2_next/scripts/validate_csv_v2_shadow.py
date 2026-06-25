@@ -38,7 +38,13 @@ REQUIRED_V1_COLUMNS = [
 CSV_SCHEMA_VERSION_V2_1 = "2.1.0"
 CSV_SCHEMA_VERSION_V2_2 = "2.2.0"
 CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
-SUPPORTED_CSV_SCHEMA_VERSIONS = {CSV_SCHEMA_VERSION_V2_1, CSV_SCHEMA_VERSION_V2_2, CSV_SCHEMA_VERSION_V2_3}
+CSV_SCHEMA_VERSION_V2_4 = "2.4.0"
+SUPPORTED_CSV_SCHEMA_VERSIONS = {
+    CSV_SCHEMA_VERSION_V2_1,
+    CSV_SCHEMA_VERSION_V2_2,
+    CSV_SCHEMA_VERSION_V2_3,
+    CSV_SCHEMA_VERSION_V2_4,
+}
 EXPECTED_SPOT_INVALID_SENTINEL_VALUES = {"6553.4", "6553.5"}
 EXPECTED_SPOT_INVALID_SENTINEL_MEANINGS = {
     "6553.4": "under_range",
@@ -166,6 +172,24 @@ SPOT_TEMPERATURE_SHADOW_COLUMNS = [
     "spot_value_age_ms",
 ]
 
+V2_4_OPERATIONAL_COLUMNS = [
+    "temperature_output_status",
+    "temperature_unavailable_reason",
+    "temperature_expectedness_candidate",
+    "temperature_under_range_cause_candidate",
+    "temperature_cause_confidence",
+    "temperature_cause_evidence_codes",
+    "spot_effective_age_ms_at_row",
+    "spot_effective_freshness_at_row",
+    "spot_effective_value_age_ms_at_row",
+    "spot_row_age_clock_status",
+    "process_phase_candidate",
+    "process_phase_rule_version",
+    "phase_confirmation_state",
+    "changeover_candidate_id",
+    "spot_observation_key",
+]
+
 REQUIRED_V2_COLUMNS = [
     "schema_version",
     "sample_seq",
@@ -185,6 +209,7 @@ REQUIRED_V2_COLUMNS_BY_SCHEMA = {
     CSV_SCHEMA_VERSION_V2_1: REQUIRED_V2_BASE_COLUMNS,
     CSV_SCHEMA_VERSION_V2_2: REQUIRED_V2_COLUMNS,
     CSV_SCHEMA_VERSION_V2_3: [*REQUIRED_V2_COLUMNS, *SPOT_TEMPERATURE_SHADOW_COLUMNS],
+    CSV_SCHEMA_VERSION_V2_4: [*REQUIRED_V2_COLUMNS, *SPOT_TEMPERATURE_SHADOW_COLUMNS, *V2_4_OPERATIONAL_COLUMNS],
 }
 
 BASE_REQUIRED_METADATA_FIELDS = {
@@ -206,6 +231,10 @@ REQUIRED_METADATA_FIELDS_BY_SCHEMA = {
         **OPERATOR_METADATA_FIELDS,
     },
     CSV_SCHEMA_VERSION_V2_3: {
+        **BASE_REQUIRED_METADATA_FIELDS,
+        **OPERATOR_METADATA_FIELDS,
+    },
+    CSV_SCHEMA_VERSION_V2_4: {
         **BASE_REQUIRED_METADATA_FIELDS,
         **OPERATOR_METADATA_FIELDS,
     },
@@ -458,6 +487,123 @@ def validate_spot_invalid_sentinel_invariants(rows: list[list[str]], header: lis
     return failures
 
 
+V2_4_OPERATIONAL_ENUM_VALUES = {
+    "temperature_output_status": {
+        "valid",
+        "under_range",
+        "over_range",
+        "stale",
+        "source_error",
+        "startup_pending",
+        "unknown",
+    },
+    "temperature_unavailable_reason": {
+        "under_range",
+        "over_range",
+        "stale_observation",
+        "timeout",
+        "connection_error",
+        "http_error",
+        "parse_error",
+        "empty_body",
+        "config_missing",
+        "numeric_out_of_range",
+        "not_attempted",
+        "startup_pending",
+        "unknown_freshness",
+        "unknown",
+    },
+    "temperature_expectedness_candidate": {"expected_candidate", "unexpected_candidate", "unknown"},
+    "temperature_under_range_cause_candidate": {
+        "peak_picker_reset_candidate",
+        "target_out_of_fov_candidate",
+        "alignment_change_candidate",
+        "low_signal_candidate",
+        "below_measurement_range_candidate",
+        "unknown",
+    },
+    "spot_effective_freshness_at_row": {"fresh", "stale", "unknown"},
+    "spot_row_age_clock_status": {"ok", "clock_anomaly", "unknown"},
+    "process_phase_candidate": {
+        "production_stable",
+        "setup_candidate",
+        "pre_changeover_hold_candidate",
+        "die_change_candidate",
+        "setup_alignment_candidate",
+        "changeover_candidate",
+        "idle_candidate",
+        "unknown",
+    },
+    "phase_confirmation_state": {"realtime_candidate", "unknown"},
+}
+
+
+def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str]) -> list[str]:
+    required_columns = [
+        "Temperature",
+        "spot_raw_validity",
+        "spot_device_status_code",
+        "spot_effective_freshness_at_row",
+        "temperature_output_status",
+        "temperature_unavailable_reason",
+        "temperature_cause_confidence",
+        "temperature_cause_evidence_codes",
+        "spot_observation_key",
+    ]
+    missing_columns = [column for column in required_columns if column not in header]
+    if missing_columns:
+        return ["v2.4 header missing operational invariant columns: " + ", ".join(missing_columns)]
+
+    failures: list[str] = []
+    indices = {column: header.index(column) for column in required_columns}
+    for column, allowed in V2_4_OPERATIONAL_ENUM_VALUES.items():
+        if column not in header:
+            failures.append(f"v2.4 header missing enum column: {column}")
+            continue
+        index = header.index(column)
+        for row_number, row in enumerate(rows, start=2):
+            if index >= len(row):
+                failures.append(f"row {row_number} shorter than {column} column")
+                continue
+            value = row[index].strip()
+            if value and value not in allowed:
+                failures.append(f"row {row_number} {column}={value!r} not in {sorted(allowed)!r}")
+
+    for row_number, row in enumerate(rows, start=2):
+        if max(indices.values()) >= len(row):
+            failures.append(f"row {row_number} shorter than v2.4 operational columns")
+            continue
+        temperature = row[indices["Temperature"]].strip()
+        raw_validity = row[indices["spot_raw_validity"]].strip()
+        device_status = row[indices["spot_device_status_code"]].strip()
+        row_freshness = row[indices["spot_effective_freshness_at_row"]].strip()
+        output_status = row[indices["temperature_output_status"]].strip()
+        unavailable_reason = row[indices["temperature_unavailable_reason"]].strip()
+        confidence = row[indices["temperature_cause_confidence"]].strip()
+
+        if output_status and output_status != "valid" and temperature:
+            failures.append(f"row {row_number} non-valid temperature_output_status requires blank Temperature")
+        if row_freshness == "stale":
+            if output_status != "stale":
+                failures.append(f"row {row_number} stale freshness requires temperature_output_status=stale")
+            if unavailable_reason != "stale_observation":
+                failures.append(f"row {row_number} stale freshness requires temperature_unavailable_reason=stale_observation")
+        if raw_validity == "invalid_sentinel" and row_freshness != "stale":
+            expected_status = {
+                "temperature_under_range": "under_range",
+                "temperature_over_range": "over_range",
+            }.get(device_status)
+            if expected_status is None:
+                failures.append(f"row {row_number} invalid_sentinel has unsupported spot_device_status_code={device_status!r}")
+            elif output_status != expected_status:
+                failures.append(f"row {row_number} invalid_sentinel output status {output_status!r}, expected {expected_status!r}")
+        if confidence:
+            parsed_confidence = _parse_finite_float(confidence)
+            if parsed_confidence is None or not 0.0 <= parsed_confidence <= 1.0:
+                failures.append(f"row {row_number} temperature_cause_confidence must be 0.0..1.0")
+    return failures
+
+
 def validate_sample_seq(rows: list[list[str]], header: list[str]) -> tuple[bool, str]:
     if "sample_seq" not in header:
         return False, "missing sample_seq"
@@ -517,7 +663,7 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
     if missing_v2:
         failures.append(f"v2 header missing columns: {', '.join(missing_v2)}")
 
-    if v2_schema in {CSV_SCHEMA_VERSION_V2_2, CSV_SCHEMA_VERSION_V2_3}:
+    if v2_schema in {CSV_SCHEMA_VERSION_V2_2, CSV_SCHEMA_VERSION_V2_3, CSV_SCHEMA_VERSION_V2_4}:
         operator_metadata_version = metadata.get("schema_metadata", {}).get("operator_metadata_version")
         if operator_metadata_version != "1.0.0":
             failures.append(
@@ -532,7 +678,7 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
             if required_fields != ["product_no", "operator_mold_no"]:
                 failures.append(f"operator_metadata.required_fields={required_fields!r}")
 
-    if v2_schema == CSV_SCHEMA_VERSION_V2_3:
+    if v2_schema in {CSV_SCHEMA_VERSION_V2_3, CSV_SCHEMA_VERSION_V2_4}:
         schema_metadata = metadata.get("schema_metadata", {})
         if schema_metadata.get("row_unique_key") != ["logger_service_instance_id", "sample_seq"]:
             failures.append("schema_metadata.row_unique_key must be ['logger_service_instance_id', 'sample_seq']")
@@ -544,6 +690,8 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
         failures.extend(validate_spot_sequence_values(v2_rows, v2_header))
         failures.extend(validate_temperature_value_origin_invariants(v2_rows, v2_header))
         failures.extend(validate_spot_invalid_sentinel_invariants(v2_rows, v2_header))
+        if v2_schema == CSV_SCHEMA_VERSION_V2_4:
+            failures.extend(validate_v2_4_operational_invariants(v2_rows, v2_header))
 
         shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
         if not isinstance(shadow_metadata, dict):

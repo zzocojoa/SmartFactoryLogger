@@ -357,12 +357,21 @@ class PLCService:
             from backend.FacilityData.drivers import spot_api as spot_control
 
             diagnostics = spot_control.get_image_proxy_diagnostics()
+            fact_health = spot_control.get_spot_observation_fact_health()
         except Exception as exc:
+            v2_4_operational = logger_service.get_v2_4_operational_summary()
+            v2_4_operational.update(
+                {
+                    "observation_fact_enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
+                    "observation_fact_write_failure_count": None,
+                }
+            )
             return {
                 "diagnostics_available": False,
                 "diagnostics_error": exc.__class__.__name__,
                 "validation_state": "shadow",
                 "operational_truth": False,
+                "v2_4_operational": v2_4_operational,
             }
 
         exposed_fields = (
@@ -387,11 +396,19 @@ class PLCService:
             "temperature_last_error_code",
         )
         payload = {field: diagnostics.get(field) for field in exposed_fields}
+        v2_4_operational = logger_service.get_v2_4_operational_summary()
+        v2_4_operational.update(
+            {
+                "observation_fact_enabled": bool(fact_health.get("enabled")),
+                "observation_fact_write_failure_count": fact_health.get("write_failure_count"),
+            }
+        )
         payload.update(
             {
                 "diagnostics_available": True,
                 "validation_state": "shadow",
                 "operational_truth": False,
+                "v2_4_operational": v2_4_operational,
             }
         )
         return payload

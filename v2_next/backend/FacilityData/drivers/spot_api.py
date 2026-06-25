@@ -4,6 +4,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -22,6 +23,7 @@ from backend.FacilityData.spot_observation import (
     classify_spot_raw_response,
     derive_spot_target_observed_shadow,
 )
+from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -88,6 +90,7 @@ _spot_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:0
 _spot_poll_seq = 0
 _spot_observation_seq = 0
 _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
+_spot_observation_fact_writer: Optional[SpotObservationFactWriter] = None
 _spot_last_valid_value_at: Optional[float] = None
 _spot_temperature_cache_suppressed_until_valid = False
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
@@ -865,6 +868,37 @@ def _classification_for_temperature_error(exc: SpotTemperatureFetchError) -> Spo
     )
 
 
+
+def _spot_observation_fact_path() -> Path:
+    return Path(config.LOG_PATH) / "spot_observation_fact.csv"
+
+
+def _get_spot_observation_fact_writer() -> SpotObservationFactWriter:
+    global _spot_observation_fact_writer
+
+    if _spot_observation_fact_writer is None:
+        _spot_observation_fact_writer = SpotObservationFactWriter(_spot_observation_fact_path())
+    return _spot_observation_fact_writer
+
+
+def _write_spot_observation_fact_safely(snapshot: Dict[str, Any]) -> None:
+    if not bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)):
+        return
+    try:
+        _get_spot_observation_fact_writer().write_fact(snapshot)
+    except Exception:
+        writer = _get_spot_observation_fact_writer()
+        writer.failure_count += 1
+
+
+def get_spot_observation_fact_health() -> Dict[str, Any]:
+    writer = _spot_observation_fact_writer
+    return {
+        "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
+        "write_failure_count": int(writer.failure_count) if writer is not None else 0,
+    }
+
+
 def _publish_spot_temperature_snapshot(
     *,
     poll_seq: int,
@@ -927,6 +961,8 @@ def _publish_spot_temperature_snapshot(
             "cache_fallback_allowed": cache_fallback_allowed,
             "spot_temperature_url": temp_url,
         }
+        snapshot_for_fact = dict(_spot_temperature_snapshot)
+    _write_spot_observation_fact_safely(snapshot_for_fact)
 
 
 def get_spot_temperature_poll_snapshot() -> Optional[Dict[str, Any]]:
