@@ -22,16 +22,17 @@ Main outcomes:
 - realtime CSV rows, per-poll `spot_observation_fact`, and post-hoc process phase event facts are separated.
 - post-hoc fact generation never mutates source CSV input and only emits outputs when `PROCESS_PHASE_EVENT_FACT_ENABLED=true`.
 
-### 1.2 Final Match Rate
+### 1.2 Match Rate Evidence
 
-90% (Target: 90%)
+- Latest `bkit_pdca_analyze` result: 90% / iteration 9.
+- Manual follow-up audit: 100% / iteration 10.
 
-Evidence: `docs/03-analysis/spot-temperature-v2-4-operational-patch.analysis.md` iteration 9.
+The 100% figure is a manual post-tool audit after closing NONBLOCK-1 and NONBLOCK-2, not a new `bkit_pdca_analyze` return value.
 
 ```text
 v2.3 baseline preservation: 7/7
-v2.4 operational deliverables: 11/13
-overall design match: 18/20 = 90%
+v2.4 operational deliverables: 13/13
+overall design match: 20/20 = 100%
 ```
 
 ### 1.3 Merge Readiness
@@ -85,13 +86,11 @@ PR #68 is merge-ready for the default-off v2.4 implementation scope at report ti
 
 ## 3. Deviations from Design
 
-### 3.1 Aggregate Counters Deferred
+### 3.1 Aggregate Counters Implemented
 
-The design allows read-only operational aggregate counters. Current PR validates v2.4 state through CSV/fact outputs and validators, but does not expose first-class aggregate v2.4 counters through `/health` or `/stats`.
+Read-only v2.4 operational aggregate counters are exposed through `/health` under `spot_temperature.v2_4_operational`. The runtime summary records rows by `temperature_output_status`, rows by `temperature_unavailable_reason`, sentinel counts by `spot_device_status_code`, stale threshold breach count, observation fact link failure count, observation fact write failure count, and process phase candidate counts.
 
-Justification: this is operational observability hardening, not correctness of the emitted v2.4 CSV/fact contract. It remains a follow-up before long-running operational promotion.
-
-### 3.2 Promotion Bundle Guard Deferred
+### 3.2 Promotion Bundle Guard Implemented
 
 The three promotion flags have concrete runtime or CLI effects:
 
@@ -101,9 +100,7 @@ SPOT_OBSERVATION_FACT_ENABLED=true
 PROCESS_PHASE_EVENT_FACT_ENABLED=true
 ```
 
-Current PR documents the required bundle and makes each flag testable, but deployment does not yet hard-reject partial promotion combinations.
-
-Justification: default-off flags protect existing v2.3 consumers. Hard deployment rejection should be added with deployment/operator workflow context so it does not block development or local replay use cases.
+Runtime config loading now rejects partial combinations. Operators must enable all three flags together for v2.4 promotion or disable all three to stay on the default-off path.
 
 ### 3.3 Operational Promotion Not Claimed
 
@@ -115,10 +112,12 @@ This report closes implementation evidence for PR #68. It does not claim product
 
 | Metric | Value |
 |--------|-------|
-| Final match rate | 90% |
-| PDCA iteration count | 9 |
-| Canonical design items implemented | 18 / 20 |
-| PR diff before this report | 22 files, +3814 / -415 |
+| Latest bkit analyze match rate | 90% |
+| Latest bkit analyze iteration | 9 |
+| Manual follow-up coverage | 100% |
+| Manual follow-up iteration | 10 |
+| Canonical design items implemented after follow-up | 20 / 20 |
+| Follow-up implementation diff | 7 tracked files updated |
 | Pre-report implementation HEAD | `35122cbb0f69bfa6adeb952a2fef7d0728723cb6` |
 | PDCA report commit | `1973bc54008ad7878e71a339b34b0c11f7ace4c0` |
 | CI at report time | `Build Windows artifacts` PASS |
@@ -139,8 +138,8 @@ npm --prefix frontend run typecheck: PASS
 npm --prefix frontend run build: PASS, existing Vite warnings only
 .\backend\.venv\Scripts\python.exe -m ruff check backend scripts: PASS
 .\backend\.venv\Scripts\python.exe -m mypy: PASS, 5 source files after NONBLOCK-3
-C:\Python312\python.exe -m pytest backend\tests\test_temperature_operational.py backend\tests\test_process_phase.py backend\tests\test_changeover_candidate_resolution_fact.py backend\tests\test_spot_observation_fact.py backend\tests\test_csv_v2_4_operational_contract.py backend\tests\test_infer_process_phase_events_for_csv.py -q: PASS, 23 passed
-node scripts\run_backend_unittest.cjs: PASS, 245 tests
+C:\Python312\python.exe -m pytest backend\tests\test_temperature_operational.py backend\tests\test_process_phase.py backend\tests\test_changeover_candidate_resolution_fact.py backend\tests\test_spot_observation_fact.py backend\tests\test_csv_v2_4_operational_contract.py backend\tests\test_infer_process_phase_events_for_csv.py -q: PASS, 28 passed
+node scripts\run_backend_unittest.cjs: PASS, 250 tests
 ```
 
 ### 5.2 Source Replay Evidence
@@ -166,15 +165,15 @@ The CSV files remain local evidence only and are intentionally ignored because t
 1. v2.3 shadow instrumentation should remain evidence, not operational truth. The v2.4 fields make this boundary explicit without breaking existing consumers.
 2. Sentinel raw status and row-time operational status must stay separate. Stale precedence prevents old `under_range` or `over_range` observations from being treated as current state.
 3. Fact tables are safer than widening realtime rows indefinitely. Per-poll SPOT facts and post-hoc process phase facts preserve lineage without mutating source CSV.
-4. Feature flags need both runtime behavior and rollout policy. This PR adds the runtime behavior; deployment-level partial-bundle rejection remains follow-up work.
+4. Feature flags need both runtime behavior and rollout policy. This PR now rejects partial v2.4 promotion flag combinations during runtime config loading.
 5. Type-check coverage should follow new operational modules as they are added. The mypy scope now includes the v2.4 operational/fact modules.
 
 ---
 
 ## 7. Follow-up Items
 
-- [ ] Add first-class v2.4 aggregate counters to `/health` or `/stats` before declaring long-running operational observability complete.
-- [ ] Add deployment/operator guardrails so partial promotion flag combinations cannot be accidentally used in production rollout.
+- [x] Add first-class v2.4 aggregate counters to `/health` before declaring long-running operational observability complete.
+- [x] Add runtime config guardrails so partial promotion flag combinations cannot be accidentally used in production rollout.
 - [ ] Run controlled server-PC promotion smoke with all three promotion flags enabled together.
 - [ ] Verify downstream v2.4 consumer compatibility before any legacy `Temperature_quality` semantic promotion.
 - [ ] Keep rollback drill documented: disable `CSV_V2_OPERATIONAL_FIELDS_ENABLED` and roll over to v2.3-compatible output if v2.4 consumers fail.
@@ -196,4 +195,4 @@ The CSV files remain local evidence only and are intentionally ignored because t
 
 PDCA report phase is complete for the PR #68 implementation scope.
 
-This report closes the implementation evidence and records the remaining operational follow-up. The remaining items are not merge blockers for the current default-off v2.4 contract, but they are required before production operational promotion.
+This report closes the implementation evidence and records the remaining operational follow-up. The remaining items are not merge blockers for the current default-off v2.4 contract, but controlled server-PC promotion smoke and downstream compatibility checks are still required before production operational promotion.

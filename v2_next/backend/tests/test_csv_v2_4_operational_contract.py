@@ -1,7 +1,11 @@
 import csv
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.FacilityData.repository import (
     CSVLoggerService,
@@ -210,6 +214,48 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
         self.assertEqual(validate_v2_4_operational_invariants([row], header), [])
 
+    def test_v2_4_runtime_summary_counts_operational_rows(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_enabled=True, csv_v2_operational_fields_enabled=True)
+        under_range = self.create_data()
+        stale = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:05",
+                "spot_source_freshness": "stale",
+                "spot_snapshot_age_ms": 10_000.0,
+            }
+        )
+
+        self.build_v2_row(service, under_range, 1)
+        self.build_v2_row(service, stale, 2)
+
+        summary = service.get_v2_4_operational_summary()
+        self.assertTrue(summary["enabled"])
+        self.assertEqual(summary["rows_total"], 2)
+        self.assertEqual(summary["rows_by_temperature_output_status"]["under_range"], 1)
+        self.assertEqual(summary["rows_by_temperature_output_status"]["stale"], 1)
+        self.assertEqual(summary["rows_by_temperature_unavailable_reason"]["under_range"], 1)
+        self.assertEqual(summary["rows_by_temperature_unavailable_reason"]["stale_observation"], 1)
+        self.assertEqual(
+            summary["sentinel_counts_by_spot_device_status_code"]["temperature_under_range"],
+            2,
+        )
+        self.assertEqual(summary["stale_threshold_breach_count"], 1)
+        self.assertEqual(summary["process_phase_candidate_counts"]["setup_candidate"], 2)
+        self.assertEqual(summary["observation_fact_link_failure_count"], 0)
+        self.assertEqual(service.get_runtime_state()["v2_4_operational"]["rows_total"], 2)
+
+    def test_v2_4_runtime_summary_counts_missing_fact_link_when_fact_enabled(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_enabled=True, csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(update={"spot_service_instance_id": ""})
+
+        with patch("backend.FacilityData.repository.config.SPOT_OBSERVATION_FACT_ENABLED", True):
+            self.build_v2_row(service, data, 1)
+
+        summary = service.get_v2_4_operational_summary()
+        self.assertEqual(summary["observation_fact_link_failure_count"], 1)
+
     def test_schema_rollover_uses_separate_file_when_contract_changes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
@@ -233,6 +279,84 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
     def test_v1_temperature_index_remains_stable(self) -> None:
         self.assertEqual(V1_CSV_COLUMNS.index("Temperature"), 2)
+
+
+PROMOTION_FLAGS = (
+    "CSV_V2_OPERATIONAL_FIELDS_ENABLED",
+    "SPOT_OBSERVATION_FACT_ENABLED",
+    "PROCESS_PHASE_EVENT_FACT_ENABLED",
+)
+
+
+class ConfigPromotionBundleTests(unittest.TestCase):
+    def import_config(self, **overrides: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        for flag in PROMOTION_FLAGS:
+            env[flag] = "false"
+        env.update(overrides)
+        env["V2_MODE"] = "MOCK"
+        repo_root = Path(__file__).resolve().parents[2]
+        env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
+        return subprocess.run(
+            [sys.executable, "-c", "import backend.config; print('config-import-ok')"],
+            cwd=repo_root,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+
+    def test_partial_v2_4_promotion_bundle_is_rejected_on_import(self) -> None:
+        result = self.import_config(CSV_V2_OPERATIONAL_FIELDS_ENABLED="true")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Partial v2.4 promotion flag configuration is not allowed", result.stderr + result.stdout)
+
+    def test_full_v2_4_promotion_bundle_is_allowed_on_import(self) -> None:
+        result = self.import_config(
+            CSV_V2_OPERATIONAL_FIELDS_ENABLED="true",
+            SPOT_OBSERVATION_FACT_ENABLED="true",
+            PROCESS_PHASE_EVENT_FACT_ENABLED="true",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("config-import-ok", result.stdout)
+
+
+class V24HealthCounterTests(unittest.TestCase):
+    def test_spot_temperature_health_exposes_v2_4_operational_counters(self) -> None:
+        from backend.FacilityData import service as facility_service
+
+        summary = {
+            "enabled": True,
+            "schema_version": "2.4.0",
+            "rows_total": 3,
+            "rows_by_temperature_output_status": {"under_range": 2, "stale": 1},
+            "rows_by_temperature_unavailable_reason": {"under_range": 2, "stale_observation": 1},
+            "sentinel_counts_by_spot_device_status_code": {"temperature_under_range": 3},
+            "stale_threshold_breach_count": 1,
+            "observation_fact_link_failure_count": 0,
+            "process_phase_candidate_counts": {"setup_candidate": 3},
+            "last_sample_seq": 3,
+            "last_updated_at": "2026-06-25T00:00:00Z",
+        }
+        with (
+            patch.object(facility_service.logger_service, "get_v2_4_operational_summary", return_value=dict(summary)),
+            patch(
+                "backend.FacilityData.drivers.spot_api.get_image_proxy_diagnostics",
+                return_value={"spot_poll_status": "success"},
+            ),
+            patch(
+                "backend.FacilityData.drivers.spot_api.get_spot_observation_fact_health",
+                return_value={"enabled": True, "write_failure_count": 2},
+            ),
+        ):
+            payload = facility_service.plc_service._spot_temperature_health()
+
+        self.assertTrue(payload["diagnostics_available"])
+        self.assertEqual(payload["v2_4_operational"]["rows_total"], 3)
+        self.assertEqual(payload["v2_4_operational"]["observation_fact_write_failure_count"], 2)
+        self.assertTrue(payload["v2_4_operational"]["observation_fact_enabled"])
 
 
 if __name__ == "__main__":

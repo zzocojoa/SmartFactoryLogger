@@ -530,6 +530,35 @@ PROCESS_PHASE_EVENT_FACT_ENABLED = _env_bool(
     "PROCESS_PHASE_EVENT_FACT_ENABLED",
     _get_bool(CONFIG, "LOGGING", "process_phase_event_fact_enabled", DEFAULT_PROCESS_PHASE_EVENT_FACT_ENABLED),
 )
+
+V2_4_PROMOTION_BUNDLE_FLAGS = (
+    "CSV_V2_OPERATIONAL_FIELDS_ENABLED",
+    "SPOT_OBSERVATION_FACT_ENABLED",
+    "PROCESS_PHASE_EVENT_FACT_ENABLED",
+)
+
+
+def _validate_v2_4_promotion_bundle_flags() -> None:
+    flag_values = {
+        "CSV_V2_OPERATIONAL_FIELDS_ENABLED": CSV_V2_OPERATIONAL_FIELDS_ENABLED,
+        "SPOT_OBSERVATION_FACT_ENABLED": SPOT_OBSERVATION_FACT_ENABLED,
+        "PROCESS_PHASE_EVENT_FACT_ENABLED": PROCESS_PHASE_EVENT_FACT_ENABLED,
+    }
+    if not any(flag_values.values()) or all(flag_values.values()):
+        return
+    enabled = ", ".join(name for name, value in flag_values.items() if value) or "none"
+    disabled = ", ".join(name for name, value in flag_values.items() if not value) or "none"
+    message = (
+        "Partial v2.4 promotion flag configuration is not allowed. "
+        "Enable all promotion bundle flags together or disable all of them. "
+        f"enabled={enabled}; disabled={disabled}"
+    )
+    _config_log("ERROR", message)
+    raise RuntimeError(message)
+
+
+_validate_v2_4_promotion_bundle_flags()
+
 SNAPSHOT_PATH = resolve_storage_path(
     _get(CONFIG, "SETTINGS", "snapshotpath", DEFAULT_SNAPSHOT_PATH),
     "snapshots",

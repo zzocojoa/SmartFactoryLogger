@@ -1,4 +1,5 @@
 import csv
+from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import json
@@ -9,7 +10,7 @@ import threading
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Optional, Iterable, Tuple
+from typing import Any, Optional, Iterable, Tuple
 from uuid import uuid4
 
 from .. import config
@@ -32,6 +33,7 @@ from backend.FacilityData.spot_observation_fact import build_spot_observation_ke
 from backend.FacilityData.temperature_operational import (
     SPOT_ROW_FRESHNESS_RULE_VERSION,
     TEMPERATURE_OPERATIONAL_RULE_VERSION,
+    TemperatureOperationalDecision,
     TemperatureOperationalInput,
     derive_temperature_operational_fields,
 )
@@ -253,6 +255,16 @@ class CSVLoggerService:
         self.logger_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         self._sidecar_paths_written: set[str] = set()
         self._process_phase_runtime_state = _ProcessPhaseRuntimeState()
+        self._v2_4_operational_lock = threading.Lock()
+        self._v2_4_operational_rows_total = 0
+        self._v2_4_temperature_output_status_counts: Counter[str] = Counter()
+        self._v2_4_temperature_unavailable_reason_counts: Counter[str] = Counter()
+        self._v2_4_sentinel_device_status_counts: Counter[str] = Counter()
+        self._v2_4_process_phase_candidate_counts: Counter[str] = Counter()
+        self._v2_4_stale_threshold_breach_count = 0
+        self._v2_4_observation_fact_link_failure_count = 0
+        self._v2_4_last_sample_seq: Optional[int] = None
+        self._v2_4_last_updated_at: Optional[str] = None
 
     def start(self) -> None:
         if self.running:
@@ -1069,6 +1081,64 @@ class CSVLoggerService:
             }
         )
 
+    def _record_v2_4_operational_counters(
+        self,
+        *,
+        operational_decision: TemperatureOperationalDecision,
+        process_phase_decision: ProcessPhaseDecision,
+        data: FactoryData,
+        sample_seq: int,
+        spot_observation_key: str,
+    ) -> None:
+        output_status = str(operational_decision.temperature_output_status or "unknown")
+        unavailable_reason = str(operational_decision.temperature_unavailable_reason or "").strip()
+        device_status = str(data.spot_device_status_code or "").strip()
+        process_phase = str(process_phase_decision.process_phase_candidate or "unknown")
+        row_freshness = str(operational_decision.spot_effective_freshness_at_row or "unknown")
+        fact_link_expected = bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)) and (
+            data.spot_poll_seq is not None
+            or data.spot_observation_seq is not None
+            or bool(data.spot_service_instance_id)
+        )
+        updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        with self._v2_4_operational_lock:
+            self._v2_4_operational_rows_total += 1
+            self._v2_4_temperature_output_status_counts[output_status] += 1
+            if unavailable_reason:
+                self._v2_4_temperature_unavailable_reason_counts[unavailable_reason] += 1
+            if device_status:
+                self._v2_4_sentinel_device_status_counts[device_status] += 1
+            self._v2_4_process_phase_candidate_counts[process_phase] += 1
+            if output_status == "stale" or row_freshness == "stale":
+                self._v2_4_stale_threshold_breach_count += 1
+            if fact_link_expected and not spot_observation_key:
+                self._v2_4_observation_fact_link_failure_count += 1
+            self._v2_4_last_sample_seq = sample_seq
+            self._v2_4_last_updated_at = updated_at
+
+    def get_v2_4_operational_summary(self) -> dict[str, Any]:
+        with self._config_lock:
+            operational_fields_enabled = self.csv_v2_operational_fields_enabled
+            csv_v2_enabled = self.csv_v2_enabled
+        with self._v2_4_operational_lock:
+            return {
+                "enabled": bool(csv_v2_enabled and operational_fields_enabled),
+                "schema_version": CSV_SCHEMA_VERSION_V2_4,
+                "rows_total": self._v2_4_operational_rows_total,
+                "rows_by_temperature_output_status": dict(self._v2_4_temperature_output_status_counts),
+                "rows_by_temperature_unavailable_reason": dict(
+                    self._v2_4_temperature_unavailable_reason_counts
+                ),
+                "sentinel_counts_by_spot_device_status_code": dict(
+                    self._v2_4_sentinel_device_status_counts
+                ),
+                "stale_threshold_breach_count": self._v2_4_stale_threshold_breach_count,
+                "observation_fact_link_failure_count": self._v2_4_observation_fact_link_failure_count,
+                "process_phase_candidate_counts": dict(self._v2_4_process_phase_candidate_counts),
+                "last_sample_seq": self._v2_4_last_sample_seq,
+                "last_updated_at": self._v2_4_last_updated_at,
+            }
 
     def _build_v2_row(
         self,
@@ -1178,6 +1248,14 @@ class CSVLoggerService:
         ]
         if not contract.operational_fields_enabled:
             return base_row
+        spot_observation_key = self._spot_observation_key_for_data(data)
+        self._record_v2_4_operational_counters(
+            operational_decision=operational_decision,
+            process_phase_decision=process_phase_decision,
+            data=data,
+            sample_seq=sample_seq,
+            spot_observation_key=spot_observation_key,
+        )
         return [
             *base_row,
             self._escape_csv_text(operational_decision.temperature_output_status),
@@ -1194,7 +1272,7 @@ class CSVLoggerService:
             self._escape_csv_text(process_phase_decision.process_phase_rule_version),
             self._escape_csv_text(process_phase_decision.phase_confirmation_state),
             self._escape_csv_text(process_phase_decision.changeover_candidate_id),
-            self._escape_csv_text(self._spot_observation_key_for_data(data)),
+            self._escape_csv_text(spot_observation_key),
         ]
 
     def _parse_timestamp(self, data: FactoryData) -> datetime:
@@ -1374,12 +1452,13 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to close CSV log file handle: %s", exc)
 
-    def get_runtime_state(self) -> dict[str, int | bool | str]:
+    def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
             auto_save = self.auto_save
             csv_v1_enabled = self.csv_v1_enabled
             log_path = str(self.active_log_dir)
             csv_v2_enabled = self.csv_v2_enabled
+            csv_v2_operational_fields_enabled = self.csv_v2_operational_fields_enabled
         return {
             "queue_size": self.queue.qsize(),
             "buffer_size": self._buffer_size,
@@ -1388,7 +1467,9 @@ class CSVLoggerService:
             "auto_save": auto_save,
             "csv_v1_enabled": csv_v1_enabled,
             "csv_v2_enabled": csv_v2_enabled,
+            "csv_v2_operational_fields_enabled": csv_v2_operational_fields_enabled,
             "log_path": log_path,
+            "v2_4_operational": self.get_v2_4_operational_summary(),
         }
 
     def _loop(self) -> None:

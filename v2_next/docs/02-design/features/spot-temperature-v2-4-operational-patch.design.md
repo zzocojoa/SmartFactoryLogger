@@ -553,18 +553,18 @@ Replay checks should reproduce the existing dataset observations and add v2.4 as
 
 | Flag | Default | Purpose |
 |---|---:|---|
-| `CSV_V2_OPERATIONAL_FIELDS_ENABLED` | false during initial rollout | emit v2.4 operational fields with file rollover |
+| `CSV_V2_OPERATIONAL_FIELDS_ENABLED` | false during initial rollout | emit v2.4 operational fields with file rollover as part of the full promotion bundle |
 | `CSV_V2_LEGACY_TEMPERATURE_QUALITY_PROMOTION_ENABLED` | false | allow legacy `Temperature_quality` semantic switch after P3 |
-| `SPOT_OBSERVATION_FACT_ENABLED` | false | emit per-poll fact table |
-| `PROCESS_PHASE_EVENT_FACT_ENABLED` | false | gate `scripts/infer_process_phase_events_for_csv.py`; when true, emit candidate resolution and post-hoc phase event facts |
+| `SPOT_OBSERVATION_FACT_ENABLED` | false | emit per-poll fact table only as part of the full promotion bundle |
+| `PROCESS_PHASE_EVENT_FACT_ENABLED` | false | gate `scripts/infer_process_phase_events_for_csv.py`; enabled only as part of the full promotion bundle |
 
 Rollout stages:
 
 | Stage | Allowed state | Promotion criteria |
 |---|---|---|
-| P0 | collect v2.3 plus optional isolated fact outputs | #65 regression, writer failure isolation, no CSV schema change by default |
-| P1 | enable v2.4 CSV in controlled environment | schema atomicity, v2.3/v2.4 validators, synthetic decision coverage |
-| P2 | enable observation and process facts with v2.4 CSV | link coverage, observation uniqueness, lifecycle resolution integrity |
+| P0 | default-off only; collect v2.3 evidence with all v2.4 promotion flags false | #65 regression, no CSV schema change by default, partial promotion flag combinations rejected at runtime |
+| P1 | enable the full v2.4 promotion bundle in controlled environment | schema atomicity, v2.3/v2.4 validators, synthetic decision coverage, health aggregate counters |
+| P2 | validate observation and process facts with v2.4 CSV under the full bundle | link coverage, observation uniqueness, lifecycle resolution integrity |
 | P3 | optional legacy `Temperature_quality` semantic promotion | downstream compatibility and rollback drill complete |
 
 Operational promotion bundle:
@@ -575,7 +575,7 @@ SPOT_OBSERVATION_FACT_ENABLED=true
 PROCESS_PHASE_EVENT_FACT_ENABLED=true
 ```
 
-The three flags may be tested independently during P0/P1, but report readiness and operational promotion require the bundle above. Otherwise link coverage or candidate lifecycle gates cannot pass.
+The only allowed runtime states are all three promotion flags disabled or all three enabled together. Partial promotion flag combinations are rejected during backend config import, including fact-only experiments such as `SPOT_OBSERVATION_FACT_ENABLED=true` without the other two flags. CLI/fact smoke tests that exercise v2.4 facts must set the full bundle in a controlled environment.
 
 Rollback:
 

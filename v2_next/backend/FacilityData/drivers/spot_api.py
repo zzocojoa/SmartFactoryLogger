@@ -890,6 +890,15 @@ def _write_spot_observation_fact_safely(snapshot: Dict[str, Any]) -> None:
         writer = _get_spot_observation_fact_writer()
         writer.failure_count += 1
 
+
+def get_spot_observation_fact_health() -> Dict[str, Any]:
+    writer = _spot_observation_fact_writer
+    return {
+        "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
+        "write_failure_count": int(writer.failure_count) if writer is not None else 0,
+    }
+
+
 def _publish_spot_temperature_snapshot(
     *,
     poll_seq: int,

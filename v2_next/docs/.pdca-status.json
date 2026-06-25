@@ -1,6 +1,6 @@
 {
     "version":  "2.0",
-    "lastUpdated":  "2026-06-25T02:25:25.726Z",
+    "lastUpdated":  "2026-06-25T04:00:00.000Z",
     "activeFeatures":  [
                            "spot-live-image",
                            "spot-temperature-state-labeling",
@@ -289,7 +289,7 @@
                                                                                    ],
                                                                      "timestamps":  {
                                                                                         "started":  "2026-06-24T14:16:07.077Z",
-                                                                                        "lastUpdated":  "2026-06-25T02:25:25.726Z"
+                                                                                        "lastUpdated":  "2026-06-25T04:00:00.000Z"
                                                                                     },
                                                                      "documents":  {
                                                                                        "plan":  {
@@ -315,9 +315,20 @@
                                                                                                       "operational_promotion_blocked":  true,
                                                                                                       "blocker_scope":  "future_operational_promotion_only_not_pr68_merge_blocker",
                                                                                                       "promotion_requires_bundle_flags":  true,
-                                                                                                      "lastUpdated":  "2026-06-25T02:25:25.726Z"
+                                                                                                      "lastUpdated":  "2026-06-25T04:00:00.000Z"
                                                                                                   }
                                                                                    },
+                                                                     "manualFollowUp":  {
+                                                                                            "status":  "completed_nonblocking_followup",
+                                                                                            "matchRate":  100,
+                                                                                            "iteration":  10,
+                                                                                            "source":  "manual audit after NONBLOCK-1 and NONBLOCK-2 implementation; bkit_pdca_analyze was not rerun",
+                                                                                            "closedItems":  [
+                                                                                                                "v2_4_health_aggregate_counters",
+                                                                                                                "v2_4_promotion_bundle_guard"
+                                                                                                            ],
+                                                                                            "lastUpdated":  "2026-06-25T04:00:00.000Z"
+                                                                                        },
                                                                      "reviewStatus":  "completed_report_ready_for_merge",
                                                                      "completedAt":  "2026-06-25T02:25:25.721Z"
                                                                  }
@@ -330,7 +341,7 @@
     "session":  {
                     "startedAt":  "2026-06-11T01:56:04.880Z",
                     "onboardingCompleted":  false,
-                    "lastActivity":  "2026-06-25T02:25:25.726Z"
+                    "lastActivity":  "2026-06-25T04:00:00.000Z"
                 },
     "history":  [
                     {

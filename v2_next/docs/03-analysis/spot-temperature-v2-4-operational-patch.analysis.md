@@ -27,17 +27,20 @@ Blocking gaps were not found in the implemented P0/P1 contract:
 - `scripts/infer_process_phase_events_for_csv.py` emits fact outputs without mutating source CSV only when `PROCESS_PHASE_EVENT_FACT_ENABLED=true`.
 - `scripts/validate_csv_v2_shadow.py` validates v2.4 operational fields while preserving v2.3 checks.
 
-## Match Rate: 90%
+## Match Rate
 
-Calculation: 18 implemented items / 20 canonical design items.
+Tool execution result: 90%.
+Manual follow-up audit: 100%.
+
+The latest actual `bkit_pdca_analyze` result recorded by the tool remains 90% / iteration 9. The two remaining non-blocking gaps were then closed manually and verified with targeted tests, so the manual follow-up audit is 20 implemented items / 20 canonical design items. This manual score is not presented as a new `bkit_pdca_analyze` return value.
 
 ```text
 v2.3 baseline preservation: 7/7
-v2.4 operational deliverables: 11/13
-overall design match: 18/20 = 90%
+v2.4 operational deliverables: 13/13
+overall design match: 20/20 = 100%
 ```
 
-This is a post-implementation score, not the previous pre-implementation 35% analysis. The remaining 10% is non-blocking for the current PR because it is operational promotion hardening, not correctness of the emitted v2.4 contract.
+This is a post-follow-up implementation score. The previous remaining 10% is now closed by `/health` aggregate counters and runtime promotion bundle guardrails.
 
 ## PDCA Tool Execution Evidence
 
@@ -52,6 +55,8 @@ returned_analysisPath=docs/03-analysis/spot-temperature-v2-4-operational-patch.a
 analyzed_head=c7f7bc35a9c1ccd66880651b3277d8ee422861a9
 status_side_effect=docs/.pdca-status.json updated to phase=check, matchRate=90, iterationCount=9, lastUpdated=2026-06-25T01:14:34.070Z
 ```
+
+Follow-up note: the two remaining non-blocking implementation gaps were closed after this tool run. `docs/.pdca-status.json` keeps the actual tool result as `matchRate=90`, `iterationCount=9`, and records the 100% / iteration 10 result under `manualFollowUp`.
 
 ## Re-Run Evidence
 
@@ -79,11 +84,11 @@ npm --prefix frontend run build: PASS, with existing Vite chunk-size/module-type
 .\backend\.venv\Scripts\python.exe -m mypy: PASS
 C:\Python312\python.exe -m pytest backend\tests\test_process_phase.py backend\tests\test_csv_v2_4_operational_contract.py backend\tests\test_temperature_operational.py backend\tests\test_changeover_candidate_resolution_fact.py backend\tests\test_spot_observation_fact.py -q: 21 passed
 C:\Python312\python.exe -m pytest backend\tests\test_infer_process_phase_events_for_csv.py backend\tests\test_changeover_candidate_resolution_fact.py -q: 5 passed
-node scripts\run_backend_unittest.cjs: 245 tests OK
+node scripts\run_backend_unittest.cjs: 250 tests OK
 C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_105757.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_105757.metadata.json: PASS, 6,577 rows
 C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_112050.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_112050.metadata.json: PASS, 7,153 rows
 C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_114532.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_114532.metadata.json: PASS, 95,280 rows
-$env:PROCESS_PHASE_EVENT_FACT_ENABLED="true"; C:\Python312\python.exe scripts\infer_process_phase_events_for_csv.py --input docs\data\Factory_Integrated_Log_v2_20260624_105757.csv --resolution-output C:\tmp\sfl-v2-4-resolution-facts-smoke.csv --event-output C:\tmp\sfl-v2-4-process-events-smoke.csv: PASS
+$env:CSV_V2_OPERATIONAL_FIELDS_ENABLED="true"; $env:SPOT_OBSERVATION_FACT_ENABLED="true"; $env:PROCESS_PHASE_EVENT_FACT_ENABLED="true"; C:\Python312\python.exe scripts\infer_process_phase_events_for_csv.py --input docs\data\Factory_Integrated_Log_v2_20260624_105757.csv --resolution-output C:\tmp\sfl-v2-4-resolution-facts-smoke.csv --event-output C:\tmp\sfl-v2-4-process-events-smoke.csv: PASS
 ```
 
 The three local v2.3 source CSV files total 109,010 rows and remain local evidence only. They are intentionally ignored rather than committed because they are large operational data artifacts.
@@ -115,8 +120,7 @@ The three local v2.3 source CSV files total 109,010 rows and remain local eviden
 
 ## Remaining Gaps
 
-1. Aggregate operational counters are not yet exposed through `/health` or `/stats` as first-class v2.4 counters. Current evidence exists in CSV/fact outputs and validator checks, not a live aggregate API.
-2. Promotion bundle flags now have concrete runtime/CLI effects, but deployment still does not reject partial promotion combinations. Operational rollout should set all three flags together:
+The previous aggregate counter and partial promotion guard gaps are now closed in code. `/health` exposes first-class `spot_temperature.v2_4_operational` counters, and runtime config loading rejects partial promotion flag combinations. Operational rollout should still set all three flags together:
 
 ```text
 CSV_V2_OPERATIONAL_FIELDS_ENABLED=true
@@ -128,7 +132,7 @@ PROCESS_PHASE_EVENT_FACT_ENABLED=true
 
 - Frontend build still reports existing Vite chunk-size warnings. This branch does not change frontend bundles, so it is not a blocker.
 - v2.4 operational fields are behind feature flags and default off. This protects existing v2.3 consumers but means production evidence requires an explicit promotion bundle deployment.
-- `/health` aggregate counters should be added before declaring long-running operational observability complete.
+- `/health` aggregate counters now exist, but production promotion still needs controlled server-PC smoke with the full flag bundle enabled.
 
 ## Merge Readiness
 
