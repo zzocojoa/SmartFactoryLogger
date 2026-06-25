@@ -1,12 +1,12 @@
 # Gap Analysis: spot-temperature-v2-4-operational-patch
 
-> Date: 2026-06-25 KST | Re-run after implementation
+> Date: 2026-06-25 KST | Re-run after BLOCK-1/BLOCK-2 follow-ups
 > Design: docs/02-design/features/spot-temperature-v2-4-operational-patch.design.md v1.1.1
 > Scope: post-implementation gap analysis against the current branch
-> bkit Analyze Iteration: 8
-> Analyzed Branch/Ref: codex/spot-temperature-v2-4-operational-implementation
-> Worktree Dirty During Analysis: true
-> Analysis Command: $pdca analyze spot-temperature-v2-4-operational-patch
+> bkit Analyze Iteration: 9
+> Analyzed Branch/Ref: codex/spot-temperature-v2-4-operational-implementation @ c7f7bc35a9c1ccd66880651b3277d8ee422861a9
+> Worktree Dirty During Analysis: true (pre-existing local `.gitignore`/`.agents/skills/harness` changes were present and excluded from PR commits)
+> Analysis Command: $pdca analyze spot-temperature-v2-4-operational-patch via `bkit_init` + `bkit_pdca_analyze`
 
 ---
 
@@ -39,6 +39,20 @@ overall design match: 18/20 = 90%
 
 This is a post-implementation score, not the previous pre-implementation 35% analysis. The remaining 10% is non-blocking for the current PR because it is operational promotion hardening, not correctness of the emitted v2.4 contract.
 
+## PDCA Tool Execution Evidence
+
+Latest analyze execution was run after BLOCK-1 and BLOCK-2 follow-up commits were pushed to PR #68.
+
+```text
+bkit_init(projectDir="C:\Users\user\Documents\GitHub\SmartFactoryLogger\v2_next"): PASS
+bkit_pdca_analyze(feature="spot-temperature-v2-4-operational-patch"): PASS
+returned_matchRate=90
+returned_iterationCount=9
+returned_analysisPath=docs/03-analysis/spot-temperature-v2-4-operational-patch.analysis.md
+analyzed_head=c7f7bc35a9c1ccd66880651b3277d8ee422861a9
+status_side_effect=docs/.pdca-status.json updated to phase=check, matchRate=90, iterationCount=9, lastUpdated=2026-06-25T01:14:34.070Z
+```
+
 ## Re-Run Evidence
 
 Implemented files and behavior now present:
@@ -63,8 +77,9 @@ npm --prefix frontend run typecheck: PASS
 npm --prefix frontend run build: PASS, with existing Vite chunk-size/module-type warnings
 .\backend\.venv\Scripts\python.exe -m ruff check backend scripts: PASS
 .\backend\.venv\Scripts\python.exe -m mypy: PASS
-C:\Python312\python.exe -m pytest backend\tests\test_spot_observation.py backend\tests\test_spot_api.py backend\tests\test_real_plc.py backend\tests\test_temperature_operational.py backend\tests\test_process_phase.py backend\tests\test_changeover_candidate_resolution_fact.py backend\tests\test_spot_observation_fact.py backend\tests\test_csv_v2_4_operational_contract.py -q: 175 passed, 1 warning, 24 subtests passed
-node scripts\run_backend_unittest.cjs: 239 tests OK
+C:\Python312\python.exe -m pytest backend\tests\test_process_phase.py backend\tests\test_csv_v2_4_operational_contract.py backend\tests\test_temperature_operational.py backend\tests\test_changeover_candidate_resolution_fact.py backend\tests\test_spot_observation_fact.py -q: 21 passed
+C:\Python312\python.exe -m pytest backend\tests\test_infer_process_phase_events_for_csv.py backend\tests\test_changeover_candidate_resolution_fact.py -q: 5 passed
+node scripts\run_backend_unittest.cjs: 245 tests OK
 C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_105757.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_105757.metadata.json: PASS, 6,577 rows
 C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_112050.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_112050.metadata.json: PASS, 7,153 rows
 C:\Python312\python.exe scripts\validate_csv_v2_shadow.py --v2 docs\data\Factory_Integrated_Log_v2_20260624_114532.csv --metadata docs\data\Factory_Integrated_Log_v2_20260624_114532.metadata.json: PASS, 95,280 rows
@@ -101,7 +116,7 @@ The three local v2.3 source CSV files total 109,010 rows and remain local eviden
 ## Remaining Gaps
 
 1. Aggregate operational counters are not yet exposed through `/health` or `/stats` as first-class v2.4 counters. Current evidence exists in CSV/fact outputs and validator checks, not a live aggregate API.
-2. Promotion bundle is represented by config flags and sidecar metadata, but runtime deployment does not yet reject partial promotion combinations. Operational rollout should set all three flags together:
+2. Promotion bundle flags now have concrete runtime/CLI effects, but deployment still does not reject partial promotion combinations. Operational rollout should set all three flags together:
 
 ```text
 CSV_V2_OPERATIONAL_FIELDS_ENABLED=true
