@@ -20,6 +20,26 @@ class ProcessPhaseCandidateTests(unittest.TestCase):
         self.assertEqual(decision.process_phase_candidate, "setup_candidate")
         self.assertTrue(decision.changeover_candidate_id.startswith("chg_"))
 
+    def test_low_count_high_motion_maps_to_setup_alignment_candidate(self) -> None:
+        cases = (
+            ProcessPhaseInput(speed=1.0, press=35.0, count=0, extruder_process_state_online="unknown"),
+            ProcessPhaseInput(speed=0.0, press=35.0, count=2, extruder_process_state_online="extruding"),
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                decision = derive_process_phase_candidate(case)
+
+                self.assertEqual(decision.process_phase_candidate, "setup_alignment_candidate")
+                self.assertTrue(decision.changeover_candidate_id.startswith("chg_"))
+
+    def test_count_three_high_motion_can_promote_to_production_stable(self) -> None:
+        decision = derive_process_phase_candidate(
+            ProcessPhaseInput(speed=1.0, press=35.0, count=3, extruder_process_state_online="extruding")
+        )
+
+        self.assertEqual(decision.process_phase_candidate, "production_stable")
+        self.assertEqual(decision.changeover_candidate_id, "")
+
     def test_changeover_candidate_does_not_require_spot_status(self) -> None:
         decision = derive_process_phase_candidate(
             ProcessPhaseInput(

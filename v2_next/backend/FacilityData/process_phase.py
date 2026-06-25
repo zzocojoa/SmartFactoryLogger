@@ -57,9 +57,17 @@ def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPha
     online_state = (input_state.extruder_process_state_online or "unknown").strip() or "unknown"
     low_speed = speed is not None and speed <= constants.SPEED_IDLE_MAX
     low_press = press is not None and press <= constants.PRESS_IDLE_MAX
+    low_count_startup = count is not None and 0 <= count <= _LOW_COUNT_MAX
+    production_motion = online_state == "extruding" or (
+        speed is not None and speed > constants.CYCLE_SPEED_THRESHOLD
+    )
 
     phase = "unknown"
-    if online_state == "extruding" or (speed is not None and speed > constants.CYCLE_SPEED_THRESHOLD):
+    if low_count_startup and low_speed and low_press:
+        phase = "setup_candidate"
+    elif low_count_startup and production_motion:
+        phase = "setup_alignment_candidate"
+    elif production_motion:
         phase = "production_stable"
     elif input_state.actuator_scanning and low_speed:
         phase = "setup_alignment_candidate"
@@ -77,8 +85,6 @@ def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPha
         and (input_state.count_held_sec or 0.0) >= _COUNT_HELD_FOR_CHANGEOVER_SEC
     ):
         phase = "pre_changeover_hold_candidate"
-    elif count is not None and 0 <= count <= _LOW_COUNT_MAX and low_speed and low_press:
-        phase = "setup_candidate"
     elif online_state == "idle_candidate" or (low_speed and low_press):
         phase = "idle_candidate"
 

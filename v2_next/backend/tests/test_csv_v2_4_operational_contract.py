@@ -71,6 +71,26 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], "setup_candidate")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_observation_key")], "spot-service-1:14")
 
+    def test_low_count_high_motion_under_range_does_not_promote_to_production_stable(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "Count": 0,
+                "Speed": 1.0,
+                "Press": 35.0,
+                "extruder_process_state_online": "extruding",
+            }
+        )
+
+        row = self.build_v2_row(service, data)
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("Temperature")], "")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], "setup_alignment_candidate")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "expected_candidate")
+        self.assertNotEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
+
     def test_build_v2_row_uses_runtime_state_for_pre_changeover_under_range_sequence(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)

@@ -22,6 +22,7 @@ Blocking gaps were not found in the implemented P0/P1 contract:
 - `temperature_operational.py` reuses `temperature_state.py` for transport/freshness/cache decisions.
 - stale row precedence overrides old raw sentinel status while preserving raw SPOT metadata.
 - realtime `process_phase_candidate` does not use SPOT status or future context.
+- Count 0..2 production motion is gated as `setup_alignment_candidate`; `production_stable` promotion starts at Count 3 or unknown Count, without adding a new `production_stabilizing` enum in this PR.
 - candidate resolution and confirmed process phase event facts are separate from realtime rows.
 - `spot_observation_fact.py` emits idempotent per-poll facts and isolates writer failure with failure count plus local JSONL retry spool.
 - `scripts/infer_process_phase_events_for_csv.py` emits fact outputs without mutating source CSV only when `PROCESS_PHASE_EVENT_FACT_ENABLED=true`.

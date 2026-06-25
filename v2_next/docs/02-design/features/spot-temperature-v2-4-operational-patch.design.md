@@ -174,6 +174,8 @@ Metadata must record `active_schema_version`, active column hash, operational fl
 | `changeover_candidate_id` | text/blank | deterministic candidate id | process candidate classifier |
 | `spot_observation_key` | text/blank | `{spot_service_instance_id}:{spot_poll_seq}` | SPOT snapshot |
 
+Deferred enum note: the user-domain term `production_stabilizing` is not part of the current `process_phase_candidate` enum. Count 3 and later production motion remains eligible for `production_stable` in this PR. Adding `production_stabilizing` would change CSV schema validation and downstream compatibility, so it requires a separate design and migration review.
+
 Realtime CSV는 confirmed `changeover_event_id`를 소유하지 않는다.
 
 ### 3.3 Changeover Candidate Resolution Fact
@@ -410,15 +412,18 @@ Realtime phase is candidate-only and cannot use SPOT status as an input. Rules m
 | Condition | `process_phase_candidate` |
 |---|---|
 | Count in 0..2 and low speed/press | `setup_candidate` |
+| Count in 0..2 and production motion or online extruding before Count 3 is observed | `setup_alignment_candidate` |
 | Count > 2, recent production motion exists, currently stopped, Speed/MainPress/BilletLength are stopped, and Count is held for the configured duration | `pre_changeover_hold_candidate` |
 | current row has operator-entered die/mold change marker or mold id differs from the last committed operator context while stopped | `die_change_candidate` |
 | product or mold context transition is already observed at or before the current row while stopped | `changeover_candidate` |
 | actuator scan/alignment evidence while stopped | `setup_alignment_candidate` |
-| sustained extruding | `production_stable` |
+| sustained extruding outside the Count 0..2 startup gate, including Count >= 3 or unknown Count | `production_stable` |
 | idle low speed/press without setup evidence | `idle_candidate` |
 | insufficient context | `unknown` |
 
 `pre_changeover_hold_candidate` must not look ahead to a later Count reset or future 품번/금형 변경. Later Count reset or product/mold change may only be used by post-hoc facts to confirm `pre_changeover_hold`.
+
+The Count 0..2 stable promotion gate is intentionally process-only. It does not use SPOT status, and Count 3 is the first low-count boundary that may promote to `production_stable` when production motion is present.
 
 Candidate-to-confirmed mapping is fixed in Section 3.4 and must be covered by tests.
 
