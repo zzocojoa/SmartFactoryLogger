@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Mapping, Sequence
 
@@ -11,7 +12,7 @@ CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION = "1.0.0"
 CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION = "changeover-candidate-resolution-v1"
 PROCESS_PHASE_EVENT_SCHEMA_VERSION = "1.0.0"
 PROCESS_PHASE_EVENT_RULE_VERSION = "process-phase-event-v1"
-
+_PRE_CHANGEOVER_EVIDENCE_WINDOW = timedelta(seconds=300)
 CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS = [
     "candidate_resolution_schema_version",
     "changeover_candidate_id",
@@ -71,6 +72,12 @@ class _CandidateSegment:
     rows: tuple[Mapping[str, object], ...]
 
 
+@dataclass(frozen=True)
+class _PhaseConfirmation:
+    confirmed_phase: str
+    reason: str
+
+
 def infer_changeover_candidate_resolution_facts(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -81,7 +88,8 @@ def infer_changeover_candidate_resolution_facts(
         start = candidate.rows[0]
         end = candidate.rows[-1]
         phase = _text(start, "process_phase_candidate") or "unknown"
-        outcome = "confirmed" if phase != "unknown" else "rejected"
+        confirmation = _confirm_candidate_phase(phase, candidate.rows, rows)
+        outcome = "confirmed" if confirmation.confirmed_phase != "unknown" else "rejected"
         confidence = "0.650" if outcome == "confirmed" else "0.350"
         facts.append(
             {
@@ -97,7 +105,7 @@ def infer_changeover_candidate_resolution_facts(
                 "merged_into_changeover_event_id": "",
                 "split_event_count": "0",
                 "split_changeover_event_ids": "[]",
-                "resolution_reason": f"realtime_{phase}_terminal",
+                "resolution_reason": confirmation.reason,
                 "resolution_confidence": confidence,
             }
         )
@@ -114,9 +122,10 @@ def infer_process_phase_event_facts(
         start = candidate.rows[0]
         end = candidate.rows[-1]
         phase_candidate = _text(start, "process_phase_candidate") or "unknown"
-        confirmed_phase = _CANDIDATE_TO_CONFIRMED.get(phase_candidate, "unknown")
+        confirmation = _confirm_candidate_phase(phase_candidate, candidate.rows, rows)
+        confirmed_phase = confirmation.confirmed_phase
         event_id = _event_id(source_file_id, candidate.candidate_id, confirmed_phase)
-        expectedness = _confirmed_expectedness(candidate.rows)
+        expectedness = _confirmed_expectedness(candidate.rows) if confirmed_phase != "unknown" else "indeterminate"
         facts.append(
             {
                 "process_phase_event_schema_version": PROCESS_PHASE_EVENT_SCHEMA_VERSION,
@@ -132,7 +141,7 @@ def infer_process_phase_event_facts(
                 "temperature_expectedness_confirmed": expectedness,
                 "phase_confirmation_state": "posthoc_confirmed" if confirmed_phase != "unknown" else "posthoc_rejected",
                 "confirmation_rule_version": PROCESS_PHASE_EVENT_RULE_VERSION,
-                "confirmation_reason": f"{phase_candidate}_mapped_posthoc",
+                "confirmation_reason": confirmation.reason,
                 "confirmation_confidence": "0.650" if confirmed_phase != "unknown" else "0.350",
             }
         )
@@ -203,6 +212,83 @@ def _sample_seq_is_contiguous(previous: Mapping[str, object], current: Mapping[s
         return True
     return current_seq == previous_seq + 1
 
+
+def _confirm_candidate_phase(
+    phase_candidate: str,
+    candidate_rows: Sequence[Mapping[str, object]],
+    all_rows: Sequence[Mapping[str, object]],
+) -> _PhaseConfirmation:
+    confirmed_phase = _CANDIDATE_TO_CONFIRMED.get(phase_candidate, "unknown")
+    if phase_candidate != "pre_changeover_hold_candidate":
+        return _PhaseConfirmation(
+            confirmed_phase=confirmed_phase,
+            reason=f"{phase_candidate}_mapped_posthoc",
+        )
+    evidence = _pre_changeover_future_evidence(candidate_rows, all_rows)
+    if evidence:
+        return _PhaseConfirmation(
+            confirmed_phase=confirmed_phase,
+            reason=f"pre_changeover_hold_candidate_confirmed_by_{evidence}",
+        )
+    return _PhaseConfirmation(
+        confirmed_phase="unknown",
+        reason="pre_changeover_hold_candidate_without_future_evidence",
+    )
+
+
+def _pre_changeover_future_evidence(
+    candidate_rows: Sequence[Mapping[str, object]],
+    all_rows: Sequence[Mapping[str, object]],
+) -> str:
+    if not candidate_rows:
+        return ""
+    start = candidate_rows[0]
+    end = candidate_rows[-1]
+    end_seq = _to_int(_text(end, "sample_seq"))
+    end_time = _parse_timestamp(end)
+    if end_seq is None or end_time is None:
+        return ""
+    start_count = _to_int(_text(start, "Count"))
+    start_product = _text(start, "Product_No_operator")
+    start_mold = _text(start, "Mold_No_operator")
+    for row in all_rows:
+        row_seq = _to_int(_text(row, "sample_seq"))
+        if row_seq is None or row_seq <= end_seq:
+            continue
+        row_time = _parse_timestamp(row)
+        if row_time is None:
+            continue
+        if row_time - end_time > _PRE_CHANGEOVER_EVIDENCE_WINDOW:
+            break
+        count = _to_int(_text(row, "Count"))
+        if start_count is not None and start_count > 2 and count == 0:
+            return "future_count_reset_to_0"
+        product = _text(row, "Product_No_operator")
+        mold = _text(row, "Mold_No_operator")
+        if (
+            start_product
+            and start_mold
+            and product
+            and mold
+            and (product, mold) != (start_product, start_mold)
+        ):
+            return "future_operator_context_changed"
+        phase = _text(row, "process_phase_candidate")
+        if phase in {"die_change_candidate", "changeover_candidate"}:
+            return "future_die_change_marker"
+    return ""
+
+
+def _parse_timestamp(row: Mapping[str, object]) -> datetime | None:
+    raw = _text(row, "timestamp_utc") or _text(row, "timestamp_local")
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
 
 def _confirmed_expectedness(rows: Sequence[Mapping[str, object]]) -> str:
     values = {_text(row, "temperature_expectedness_candidate") for row in rows}

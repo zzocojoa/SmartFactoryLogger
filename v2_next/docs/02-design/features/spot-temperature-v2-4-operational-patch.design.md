@@ -232,7 +232,7 @@ Candidate-to-confirmed mapping:
 ```text
 setup_candidate               -> setup
 setup_alignment_candidate     -> setup_alignment
-pre_changeover_hold_candidate -> pre_changeover_hold
+pre_changeover_hold_candidate -> pre_changeover_hold only with future evidence; otherwise unknown/posthoc_rejected
 die_change_candidate          -> die_change
 changeover_candidate          -> changeover
 production_stable             -> production_stable
@@ -421,7 +421,7 @@ Realtime phase is candidate-only and cannot use SPOT status as an input. Rules m
 | idle low speed/press without setup evidence | `idle_candidate` |
 | insufficient context | `unknown` |
 
-`pre_changeover_hold_candidate` must not look ahead to a later Count reset or future 품번/금형 변경. Later Count reset or product/mold change may only be used by post-hoc facts to confirm `pre_changeover_hold`.
+`pre_changeover_hold_candidate` must not look ahead to a later Count reset or future product/mold change. Later Count reset, product/mold change, or die-change marker may only be used by post-hoc facts to confirm `pre_changeover_hold` within the evidence window. Without that future evidence, the fact row must stay `unknown` with `phase_confirmation_state=posthoc_rejected`.
 
 The Count 0..2 stable promotion gate is intentionally process-only. It does not use SPOT status, and Count 3 is the first low-count boundary that may promote to `production_stable` when production motion is present.
 

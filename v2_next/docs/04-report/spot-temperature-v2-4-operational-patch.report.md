@@ -71,6 +71,7 @@ PR #68 is merge-ready for the default-off v2.4 implementation scope at report ti
 - [x] v2.4 metadata records active schema, rule versions, feature flag state, and promotion bundle metadata.
 - [x] `spot_observation_fact.py` emits idempotent per-poll facts and isolates writer failure through failure count plus JSONL retry spool.
 - [x] `changeover_candidate_resolution_fact.py` emits candidate resolution and process phase event facts.
+- [x] `pre_changeover_hold_candidate` only confirms post-hoc when later Count reset, operator context change, or die-change marker evidence exists; otherwise it is `posthoc_rejected`.
 - [x] repeated candidate ids are split by contiguous occurrence and sample sequence to avoid merging unrelated candidate windows.
 - [x] `scripts/infer_process_phase_events_for_csv.py` is gated by `PROCESS_PHASE_EVENT_FACT_ENABLED` and never mutates the source CSV.
 - [x] `scripts/validate_csv_v2_shadow.py` supports `2.4.0` while preserving `2.1.0` through `2.3.0` checks.
