@@ -158,6 +158,36 @@ The CSV files remain local evidence only and are intentionally ignored because t
 - Check: `Build Windows artifacts` PASS
 - Merge state: `CLEAN`
 
+### 5.4 Post-merge Full-bundle Server Smoke
+
+Evidence level: `[operator-provided evidence]`. The following server-PC smoke results were provided by the operator after PR #68 was merged to `master` as `b5a0a82ba943caca7c513c412a4cdbce53397c03`. Raw operational artifacts were not committed to this repository, so this section records the provided PowerShell output and does not re-label it as direct local verification.
+
+Server runtime and promotion bundle:
+
+- `[operator-provided evidence]` NSIS-built `smart-factory-logger-v2 Setup 1.0.11.exe` was installed and executed on the server PC.
+- `[operator-provided evidence]` `/health` reported `runtime_kind=frozen`, packaged frontend resources ready, REAL mode PLC/SPOT connectivity healthy, and `spot_temperature.v2_4_operational.enabled=true`.
+- `[operator-provided evidence]` server `config.ini` had all three promotion flags enabled together:
+  - `csv_v2_operational_fields_enabled = true`
+  - `spot_observation_fact_enabled = true`
+  - `process_phase_event_fact_enabled = true`
+- `[operator-provided evidence]` `/health` v2.4 counters reported `schema_version=2.4.0`, increasing rows, `observation_fact_enabled=true`, `observation_fact_write_failure_count=0`, `observation_fact_link_failure_count=0`, and `stale_threshold_breach_count=0`.
+
+CSV and fact outputs:
+
+- `[operator-provided evidence]` `spot_observation_fact.csv` existed, was growing, had no failed spool file, and its latest sampled rows had `spot_poll_status=success` plus `spot_raw_validity=valid_temperature`.
+- `[operator-provided evidence]` realtime CSV `Factory_Integrated_Log_v2_20260625_154904.csv` contained all required v2.4 headers checked during smoke:
+  - `schema_version`
+  - `temperature_output_status`
+  - `temperature_unavailable_reason`
+  - `process_phase_candidate`
+  - `spot_observation_key`
+- `[operator-provided evidence]` latest sampled realtime CSV rows `6140` through `6144` reported `schema_version=2.4.0`, `temperature_output_status=valid`, non-empty `process_phase_candidate=idle_candidate`, and non-empty `spot_observation_key`.
+- `[operator-provided evidence]` sidecar metadata parsed as JSON with `schema_metadata.schema_version=2.4.0`, `spot_temperature_shadow_metadata.schema_version=2.4.0`, and promotion bundle flags all `true`.
+
+Verdict: PASS for the controlled three-flag full-bundle server smoke. This validates server installation, frozen runtime startup, v2.4 operational health counters, realtime v2.4 CSV field emission, SPOT observation fact emission, and sidecar metadata readability under the enabled promotion bundle.
+
+Scope note: This smoke does not claim downstream consumer compatibility, legacy `Temperature_quality` semantic promotion, alerting policy changes, or ML input readiness.
+
 ---
 
 ## 6. Learnings
@@ -174,7 +204,7 @@ The CSV files remain local evidence only and are intentionally ignored because t
 
 - [x] Add first-class v2.4 aggregate counters to `/health` before declaring long-running operational observability complete.
 - [x] Add runtime config guardrails so partial promotion flag combinations cannot be accidentally used in production rollout.
-- [ ] Run controlled server-PC promotion smoke with all three promotion flags enabled together.
+- [x] Run controlled server-PC promotion smoke with all three promotion flags enabled together. Evidence level: [operator-provided evidence].
 - [ ] Verify downstream v2.4 consumer compatibility before any legacy `Temperature_quality` semantic promotion.
 - [ ] Keep rollback drill documented: disable `CSV_V2_OPERATIONAL_FIELDS_ENABLED` and roll over to v2.3-compatible output if v2.4 consumers fail.
 
@@ -195,4 +225,4 @@ The CSV files remain local evidence only and are intentionally ignored because t
 
 PDCA report phase is complete for the PR #68 implementation scope.
 
-This report closes the implementation evidence and records the remaining operational follow-up. The remaining items are not merge blockers for the current default-off v2.4 contract, but controlled server-PC promotion smoke and downstream compatibility checks are still required before production operational promotion.
+This report closes the implementation evidence and records the post-merge controlled server-PC smoke PASS from operator-provided evidence. The remaining item before broader operational promotion is downstream v2.4 consumer compatibility, plus the existing rollback path if v2.4 consumers fail.
