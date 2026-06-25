@@ -3,7 +3,8 @@
 > Date: 2026-06-25 KST | Level: Dynamic
 > PR: #68 `Implement SPOT temperature v2.4 operational contract`
 > Branch: `codex/spot-temperature-v2-4-operational-implementation`
-> HEAD: `35122cbb0f69bfa6adeb952a2fef7d0728723cb6`
+> Pre-report implementation HEAD: `35122cbb0f69bfa6adeb952a2fef7d0728723cb6`
+> PDCA report commit: `1973bc54008ad7878e71a339b34b0c11f7ace4c0`
 
 ---
 
@@ -118,7 +119,8 @@ This report closes implementation evidence for PR #68. It does not claim product
 | PDCA iteration count | 9 |
 | Canonical design items implemented | 18 / 20 |
 | PR diff before this report | 22 files, +3814 / -415 |
-| PR HEAD at report time | `35122cbb0f69bfa6adeb952a2fef7d0728723cb6` |
+| Pre-report implementation HEAD | `35122cbb0f69bfa6adeb952a2fef7d0728723cb6` |
+| PDCA report commit | `1973bc54008ad7878e71a339b34b0c11f7ace4c0` |
 | CI at report time | `Build Windows artifacts` PASS |
 | Merge state at report time | `CLEAN` |
 | Local working tree before report | clean |
