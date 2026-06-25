@@ -556,7 +556,7 @@ Replay checks should reproduce the existing dataset observations and add v2.4 as
 | `CSV_V2_OPERATIONAL_FIELDS_ENABLED` | false during initial rollout | emit v2.4 operational fields with file rollover |
 | `CSV_V2_LEGACY_TEMPERATURE_QUALITY_PROMOTION_ENABLED` | false | allow legacy `Temperature_quality` semantic switch after P3 |
 | `SPOT_OBSERVATION_FACT_ENABLED` | false | emit per-poll fact table |
-| `PROCESS_PHASE_EVENT_FACT_ENABLED` | false | emit candidate resolution and post-hoc phase event facts |
+| `PROCESS_PHASE_EVENT_FACT_ENABLED` | false | gate `scripts/infer_process_phase_events_for_csv.py`; when true, emit candidate resolution and post-hoc phase event facts |
 
 Rollout stages:
 

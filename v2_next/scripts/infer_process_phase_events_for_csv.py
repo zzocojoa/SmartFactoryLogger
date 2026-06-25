@@ -5,11 +5,13 @@ import csv
 import sys
 from hashlib import sha256
 from pathlib import Path
+from typing import Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from backend import config
 from backend.FacilityData.changeover_candidate_resolution_fact import (
     CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
     PROCESS_PHASE_EVENT_FACT_COLUMNS,
@@ -18,15 +20,34 @@ from backend.FacilityData.changeover_candidate_resolution_fact import (
 )
 
 
+PROCESS_PHASE_EVENT_FACT_FLAG = "PROCESS_PHASE_EVENT_FACT_ENABLED"
+
+
+class ProcessPhaseEventFactDisabledError(RuntimeError):
+    pass
+
+
 def source_file_id_for_path(path: Path) -> str:
     return f"sha256:{sha256(path.read_bytes()).hexdigest()}"
+
+
+def process_phase_event_fact_enabled() -> bool:
+    return bool(getattr(config, PROCESS_PHASE_EVENT_FACT_FLAG, False))
 
 
 def infer_process_phase_events_from_csv(
     input_path: Path,
     resolution_output_path: Path,
     event_output_path: Path,
+    *,
+    enabled: Optional[bool] = None,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    effective_enabled = process_phase_event_fact_enabled() if enabled is None else enabled
+    if not effective_enabled:
+        raise ProcessPhaseEventFactDisabledError(
+            f"{PROCESS_PHASE_EVENT_FACT_FLAG}=false; process phase event fact generation is disabled."
+        )
+
     with input_path.open("r", encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
     source_file_id = source_file_id_for_path(input_path)
@@ -58,11 +79,15 @@ def main() -> int:
     )
     parser.add_argument("--event-output", type=Path, required=True, help="process_phase_event_fact CSV output")
     args = parser.parse_args()
-    resolution_facts, event_facts = infer_process_phase_events_from_csv(
-        args.input,
-        args.resolution_output,
-        args.event_output,
-    )
+    try:
+        resolution_facts, event_facts = infer_process_phase_events_from_csv(
+            args.input,
+            args.resolution_output,
+            args.event_output,
+        )
+    except ProcessPhaseEventFactDisabledError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     print(f"changeover_candidate_resolution_fact_rows={len(resolution_facts)}")
     print(f"process_phase_event_fact_rows={len(event_facts)}")
     print(f"resolution_output={args.resolution_output}")
