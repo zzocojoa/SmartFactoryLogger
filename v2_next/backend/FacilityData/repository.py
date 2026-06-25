@@ -200,12 +200,22 @@ V2_CSV_COLUMNS = V2_3_CSV_COLUMNS
 
 CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
 
+
 @dataclass(frozen=True)
 class V2CsvContract:
     schema_version: str
     columns: tuple[str, ...]
     operational_fields_enabled: bool
     column_hash: str
+
+
+@dataclass
+class _ProcessPhaseRuntimeState:
+    committed_product_no: Optional[str] = None
+    committed_mold_no: Optional[str] = None
+    count_value: Optional[int] = None
+    count_first_observed_at: Optional[datetime] = None
+    count_recent_production_motion: bool = False
 
 
 def _v2_column_hash(columns: Iterable[str]) -> str:
@@ -242,6 +252,7 @@ class CSVLoggerService:
         self.logger_service_instance_id = str(uuid4())
         self.logger_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         self._sidecar_paths_written: set[str] = set()
+        self._process_phase_runtime_state = _ProcessPhaseRuntimeState()
 
     def start(self) -> None:
         if self.running:
@@ -904,24 +915,126 @@ class CSVLoggerService:
         ]
         return row
 
-    def _derive_process_phase_decision(self, data: FactoryData):
+    def _derive_process_phase_decision(self, data: FactoryData, timestamp: datetime) -> ProcessPhaseDecision:
+        phase_input = self._process_phase_input_for_row(data, timestamp)
         if data.process_phase_candidate:
-            return ProcessPhaseDecision(
+            decision = ProcessPhaseDecision(
                 process_phase_candidate=data.process_phase_candidate,
                 process_phase_rule_version=data.process_phase_rule_version or PROCESS_PHASE_RULE_VERSION,
                 phase_confirmation_state=data.phase_confirmation_state or "realtime_candidate",
                 changeover_candidate_id=data.changeover_candidate_id or "",
             )
-        return derive_process_phase_candidate(
-            ProcessPhaseInput(
-                speed=data.Speed,
-                press=data.Press,
-                count=data.Count,
-                extruder_process_state_online=data.extruder_process_state_online,
-                product_no=data.Product_No_operator,
-                mold_no=data.Mold_No_operator,
-            )
+        else:
+            decision = derive_process_phase_candidate(phase_input)
+        self._commit_process_phase_operator_context(data, decision)
+        return decision
+
+    def _process_phase_input_for_row(self, data: FactoryData, timestamp: datetime) -> ProcessPhaseInput:
+        state = self._process_phase_runtime_state
+        previous_product_no = state.committed_product_no
+        previous_mold_no = state.committed_mold_no
+        production_motion = self._has_process_phase_production_motion(data)
+        count_held_sec, recent_production_motion = self._observe_process_phase_count(
+            data,
+            timestamp,
+            production_motion,
         )
+        return ProcessPhaseInput(
+            speed=data.Speed,
+            press=data.Press,
+            count=data.Count,
+            extruder_process_state_online=data.extruder_process_state_online,
+            product_no=data.Product_No_operator,
+            mold_no=data.Mold_No_operator,
+            previous_product_no=previous_product_no,
+            previous_mold_no=previous_mold_no,
+            count_held_sec=count_held_sec,
+            recent_production_motion=recent_production_motion,
+        )
+
+    def _observe_process_phase_count(
+        self,
+        data: FactoryData,
+        timestamp: datetime,
+        production_motion: bool,
+    ) -> tuple[Optional[float], bool]:
+        state = self._process_phase_runtime_state
+        count = self._optional_int(data.Count)
+        if count is None:
+            state.count_value = None
+            state.count_first_observed_at = None
+            state.count_recent_production_motion = False
+            return None, production_motion
+
+        if state.count_value != count:
+            state.count_value = count
+            state.count_first_observed_at = timestamp
+            state.count_recent_production_motion = production_motion
+        else:
+            if state.count_first_observed_at is None:
+                state.count_first_observed_at = timestamp
+            if production_motion:
+                state.count_recent_production_motion = True
+
+        return (
+            self._elapsed_seconds(state.count_first_observed_at, timestamp),
+            state.count_recent_production_motion,
+        )
+
+    def _commit_process_phase_operator_context(
+        self,
+        data: FactoryData,
+        decision: ProcessPhaseDecision,
+    ) -> None:
+        if (
+            decision.process_phase_candidate != "production_stable"
+            and not self._has_process_phase_production_motion(data)
+        ):
+            return
+        if data.operator_metadata_valid is False:
+            return
+        product_no = self._normalized_operator_text(data.Product_No_operator)
+        mold_no = self._normalized_operator_text(data.Mold_No_operator)
+        if not product_no or not mold_no:
+            return
+        self._process_phase_runtime_state.committed_product_no = product_no
+        self._process_phase_runtime_state.committed_mold_no = mold_no
+
+    def _has_process_phase_production_motion(self, data: FactoryData) -> bool:
+        online_state = (data.extruder_process_state_online or "").strip()
+        speed = self._optional_float(data.Speed)
+        return online_state == "extruding" or (
+            speed is not None and speed > constants.CYCLE_SPEED_THRESHOLD
+        )
+
+    def _elapsed_seconds(self, start: Optional[datetime], end: datetime) -> Optional[float]:
+        if start is None:
+            return None
+        try:
+            return max(0.0, (end - start).total_seconds())
+        except TypeError:
+            start_naive = start.replace(tzinfo=None)
+            end_naive = end.replace(tzinfo=None)
+            return max(0.0, (end_naive - start_naive).total_seconds())
+
+    def _normalized_operator_text(self, value: Optional[str]) -> str:
+        return str(value or "").strip()
+
+    def _optional_float(self, value: Optional[float]) -> Optional[float]:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _optional_int(self, value: Optional[int]) -> Optional[int]:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _derive_temperature_operational_decision(self, data: FactoryData, process_phase_candidate: str):
         return derive_temperature_operational_fields(
@@ -978,7 +1091,7 @@ class CSVLoggerService:
             SPOT_TEMPERATURE_RAW_MAX_LENGTH,
         )
         contract = self._get_active_v2_contract()
-        process_phase_decision = self._derive_process_phase_decision(data)
+        process_phase_decision = self._derive_process_phase_decision(data, timestamp)
         operational_decision = self._derive_temperature_operational_decision(
             data,
             process_phase_decision.process_phase_candidate,

@@ -42,14 +42,22 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             spot_temperature_raw="6553.4",
         )
 
+    def build_v2_row(
+        self,
+        service: CSVLoggerService,
+        data: FactoryData,
+        sample_seq: int = 1,
+    ) -> list[object]:
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+        return service._build_v2_row(data, timestamp, timestamp.astimezone(), sample_seq, v1_row)
+
     def test_v2_4_row_appends_operational_fields_and_blanks_legacy_temperature(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
         data = self.create_data()
-        timestamp = service._parse_timestamp(data)
-        v1_row = service._build_row(data, timestamp)
 
-        row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+        row = self.build_v2_row(service, data)
 
         self.assertEqual(len(row), len(V2_4_CSV_COLUMNS))
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("schema_version")], "2.4.0")
@@ -58,6 +66,123 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "under_range")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], "setup_candidate")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_observation_key")], "spot-service-1:14")
+
+    def test_build_v2_row_uses_runtime_state_for_pre_changeover_under_range_sequence(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        production_row = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:00",
+                "Speed": 1.0,
+                "Press": 35.0,
+                "Count": 12,
+                "Spot": 500.0,
+                "extruder_process_state_online": "extruding",
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "temperature_value_origin": "current_observation",
+                "cache_fallback_allowed": True,
+                "spot_device_status_code": None,
+                "spot_temperature_observed_c": 500.0,
+                "spot_temperature_raw": "500.0",
+            }
+        )
+        under_range_row = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:31",
+                "Speed": 0.0,
+                "Press": 0.0,
+                "Count": 12,
+                "extruder_process_state_online": "stopped",
+            }
+        )
+        timeout_row = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:36",
+                "Speed": 0.0,
+                "Press": 0.0,
+                "Count": 12,
+                "extruder_process_state_online": "stopped",
+                "spot_poll_status": "timeout",
+                "spot_raw_validity": "not_received",
+                "spot_cache_status": "available_not_used",
+                "temperature_value_origin": "none",
+                "spot_device_status_code": None,
+                "spot_temperature_raw": "",
+            }
+        )
+        timeout_row_2 = timeout_row.model_copy(update={"Time": "2026-06-25T08:00:41"})
+        valid_again_row = production_row.model_copy(
+            update={
+                "Time": "2026-06-25T08:00:46",
+                "Count": 13,
+                "spot_poll_seq": 15,
+                "spot_observation_seq": 15,
+                "spot_temperature_observed_c": 510.0,
+                "spot_temperature_raw": "510.0",
+                "Spot": 510.0,
+            }
+        )
+
+        rows = [
+            self.build_v2_row(service, production_row, 1),
+            self.build_v2_row(service, under_range_row, 2),
+            self.build_v2_row(service, timeout_row, 3),
+            self.build_v2_row(service, timeout_row_2, 4),
+            self.build_v2_row(service, valid_again_row, 5),
+        ]
+
+        self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "expected_candidate")
+        self.assertEqual(
+            rows[1][V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
+            "below_measurement_range_candidate",
+        )
+        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
+        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("temperature_output_status")], "source_error")
+        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
+        self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
+
+    def test_build_v2_row_passes_previous_operator_context_for_stopped_change(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        production_row = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:00",
+                "Speed": 1.0,
+                "Press": 35.0,
+                "Count": 20,
+                "Spot": 500.0,
+                "extruder_process_state_online": "extruding",
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "temperature_value_origin": "current_observation",
+                "cache_fallback_allowed": True,
+                "spot_device_status_code": None,
+                "spot_temperature_observed_c": 500.0,
+                "spot_temperature_raw": "500.0",
+            }
+        )
+        changed_context_row = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:10",
+                "Speed": 0.0,
+                "Press": 0.0,
+                "Count": 20,
+                "Product_No_operator": "200",
+                "Mold_No_operator": "8",
+                "extruder_process_state_online": "stopped",
+            }
+        )
+
+        self.build_v2_row(service, production_row, 1)
+        row = self.build_v2_row(service, changed_context_row, 2)
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], "die_change_candidate")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "expected_candidate")
+        self.assertTrue(row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")].startswith("chg_"))
 
     def test_stale_row_preserves_raw_device_status_but_outputs_stale(self) -> None:
         service = CSVLoggerService()
