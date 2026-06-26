@@ -318,4 +318,4 @@ Post-merge local evidence update, 2026-06-26:
 
 PDCA report phase is complete for the PR #68 implementation scope.
 
-This report closes the implementation evidence and records the post-merge controlled server-PC smoke PASS from operator-provided evidence. The remaining item before broader operational promotion is downstream v2.4 consumer compatibility, plus the existing rollback path if v2.4 consumers fail.
+This report closes the implementation evidence and records the post-merge controlled server-PC smoke PASS plus downstream v2.4 consumer gate closure for the current operation scope. The rollback path remains documented for any future repo-out CSV consumer introduction or v2.4 consumer failure.
