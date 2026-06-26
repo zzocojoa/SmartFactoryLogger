@@ -267,6 +267,21 @@ Replay PASS criteria:
 
 Current PR local evidence: generated v2.4 consumer replay with `process_segment_id`, `changeover_candidate_id`, `process_phase_candidate`, and `production_stabilizing` passed `scripts.validate_csv_v2_shadow.validate`. This local validator replay is not a substitute for server-PC downstream consumer replay.
 
+Post-merge local evidence update, 2026-06-26:
+
+- PR #70 merged to `master` at `bd2a64dd3a054eff490b8beffba1d593ac008886`.
+- The merged commit produced `dist/smart-factory-logger-v2 Setup 1.0.11.exe` with SHA-256 `57CA33C6E12EAF9CBF4BB8A8A7ED05AE341901F4EE08116FD74872F65F257329`.
+- Operator-provided server-PC install smoke for the new build reported `/health` with `app_version=1.0.11`, `runtime_kind=frozen`, and `/dashboard` HTTP 200.
+- Local checked-in CSV replay passed `scripts/validate_csv_v2_shadow.py --v2-glob docs/data/Factory_Integrated_Log_v2_*.csv --metadata-glob docs/data/Factory_Integrated_Log_v2_*.metadata.json` across three fixture pairs.
+- Local internal consumer replay passed `scripts/infer_process_segments_for_csv.py` on `docs/data/Factory_Integrated_Log_v2_20260624_105757.csv` with `process_segment_fact_rows=25`.
+- Local full-bundle internal consumer replay passed `scripts/infer_process_phase_events_for_csv.py` on the same fixture with zero generated event rows, which is expected because that fixture predates v2.4 realtime process-phase columns.
+- A synthetic v2.4 CSV fixture containing `process_phase_candidate=production_stabilizing`, `process_segment_id`, and `changeover_candidate_id` passed `validate_v2_4_operational_invariants` with zero failures.
+- The same synthetic fixture passed `scripts/infer_process_phase_events_for_csv.py`; output confirmed `process_phase_confirmed=production_stabilizing` and `resolution_reason=production_stabilizing_mapped_posthoc`.
+- The same synthetic fixture passed `scripts/infer_process_segments_for_csv.py` with `process_segment_fact_rows=3`.
+- Operator-provided server-PC full-bundle evidence after installing the PR #70 build reported `schema_version=2.4.0`, promotion flags enabled, metadata and fact file present, and healthy `/stats`. However, the selected latest server CSV `Factory_Integrated_Log_v2_20260626_000000.csv` did not contain `process_segment_id` in the header, so the downstream replay gate remained FAIL.
+- Local follow-up fixed the schema rollover recognition path so prior v2 prefix-compatible headers can roll over to the current `2.4.0` header instead of blocking same-day migration to `process_segment_id`.
+- Remaining gap: rebuild and reinstall the rollover fix, confirm the server creates/selects a current-header v2.4 CSV with `process_segment_id`, then run every real downstream CSV consumer replay and record the result before broader operational promotion.
+
 ---
 
 ## 8. Related Documents

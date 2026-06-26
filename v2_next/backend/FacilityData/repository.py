@@ -555,7 +555,11 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to read CSV v2 header for schema rollover check: %s", exc)
             return False
-        return header in (V2_3_CSV_COLUMNS, V2_4_CSV_COLUMNS)
+        if header in (V2_3_CSV_COLUMNS, V2_4_CSV_COLUMNS):
+            return True
+        if not header:
+            return False
+        return header[: len(V2_3_CSV_COLUMNS)] == V2_3_CSV_COLUMNS
 
 
     def _v2_header_matches_current_schema(
