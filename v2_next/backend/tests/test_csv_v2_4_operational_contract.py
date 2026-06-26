@@ -316,6 +316,34 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "stale")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "stale_observation")
 
+    def test_v2_4_validator_accepts_stale_observation_value_not_used(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "Spot": None,
+                "spot_poll_status": "success",
+                "spot_raw_validity": "valid_temperature",
+                "spot_source_freshness": "stale",
+                "spot_cache_status": "available_not_used",
+                "temperature_value_origin": "none",
+                "spot_device_status_code": None,
+                "spot_temperature_observed_c": 560.7,
+                "spot_temperature_raw": "560.7",
+                "spot_snapshot_age_ms": 10_000.0,
+                "spot_value_age_ms": 10_000.0,
+            }
+        )
+        timestamp = service._parse_timestamp(data)
+        row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("Temperature")], "")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_value_origin")], "none")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_temperature_observed_c")], "560.7")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "stale")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "stale_observation")
+        self.assertEqual(validate_v2_4_operational_invariants([row], V2_4_CSV_COLUMNS), [])
+
     def test_v2_4_validator_accepts_operational_row(self) -> None:
         header = V2_4_CSV_COLUMNS
         service = CSVLoggerService()

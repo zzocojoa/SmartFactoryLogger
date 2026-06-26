@@ -377,6 +377,9 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
     origin_index = header.index("temperature_value_origin")
     observed_index = header.index("spot_temperature_observed_c")
     last_valid_index = header.index("spot_last_valid_value_at")
+    cache_index = header.index("spot_cache_status") if "spot_cache_status" in header else None
+    freshness_index = header.index("spot_source_freshness") if "spot_source_freshness" in header else None
+    output_status_index = header.index("temperature_output_status") if "temperature_output_status" in header else None
 
     for row_number, row in enumerate(rows, start=2):
         if max(temperature_index, origin_index, observed_index, last_valid_index) >= len(row):
@@ -387,6 +390,13 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
         origin = row[origin_index].strip()
         observed = row[observed_index].strip()
         last_valid_at = row[last_valid_index].strip()
+        cache_status = row[cache_index].strip() if cache_index is not None and cache_index < len(row) else ""
+        freshness = row[freshness_index].strip() if freshness_index is not None and freshness_index < len(row) else ""
+        output_status = (
+            row[output_status_index].strip()
+            if output_status_index is not None and output_status_index < len(row)
+            else ""
+        )
 
         if not origin:
             continue
@@ -416,7 +426,18 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
             if temperature:
                 failures.append(f"row {row_number} origin none requires blank Temperature")
             if observed:
-                failures.append(f"row {row_number} origin none requires blank spot_temperature_observed_c")
+                observed_value = _parse_finite_float(observed)
+                if observed_value is None:
+                    failures.append(f"row {row_number} populated spot_temperature_observed_c must be finite")
+                elif not (
+                    cache_status == "available_not_used"
+                    and freshness == "stale"
+                    and (not output_status or output_status == "stale")
+                ):
+                    failures.append(
+                        f"row {row_number} origin none permits populated spot_temperature_observed_c "
+                        "only for stale available_not_used rows"
+                    )
 
     return failures
 
