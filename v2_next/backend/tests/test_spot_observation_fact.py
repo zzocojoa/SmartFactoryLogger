@@ -128,6 +128,82 @@ class SpotObservationFactTests(unittest.TestCase):
             '["actuator_scanning","alarm_low_signal","peak_picker_off_mode_reset_configured","target_absent_verified"]',
         )
 
+    def test_numeric_alarmstatus_bit_four_derives_alarm_low_signal(self) -> None:
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes({"alarmstatus": "16"}),
+            ("alarm_low_signal",),
+        )
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes({"alarmstatus": "0x10"}),
+            ("alarm_low_signal",),
+        )
+        self.assertEqual(derive_spot_diagnostic_evidence_codes({"alarmstatus": "0"}), ())
+
+    def test_signalpc_with_configured_lte_threshold_derives_signal_below_threshold(self) -> None:
+        snapshot = {
+            "signalpc": "3.2",
+            "low_signal_threshold_pc": "5.0",
+            "low_signal_comparator": "lte",
+        }
+
+        self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ("signal_below_threshold",))
+        self.assertEqual(encode_spot_diagnostic_evidence_codes(snapshot), '["signal_below_threshold"]')
+
+    def test_signalpc_threshold_edge_respects_lt_and_lte_comparators(self) -> None:
+        lte_snapshot = {
+            "signalpc": "5.0",
+            "low_signal_threshold_pc": "5.0",
+            "low_signal_comparator": "lte",
+        }
+        lt_snapshot = {
+            "signalpc": "5.0",
+            "low_signal_threshold_pc": "5.0",
+            "low_signal_comparator": "lt",
+        }
+
+        self.assertEqual(derive_spot_diagnostic_evidence_codes(lte_snapshot), ("signal_below_threshold",))
+        self.assertEqual(derive_spot_diagnostic_evidence_codes(lt_snapshot), ())
+
+    def test_signalpc_without_valid_threshold_or_invalid_value_does_not_set_low(self) -> None:
+        cases = [
+            {"signalpc": "3.2"},
+            {"signalpc": "3.2", "low_signal_threshold_pc": "5.0"},
+            {
+                "signalpc": "3.2",
+                "low_signal_threshold_pc": "5.0",
+                "low_signal_comparator": "unknown",
+            },
+            {
+                "signalpc": "5.1",
+                "low_signal_threshold_pc": "5.0",
+                "low_signal_comparator": "lte",
+            },
+            {
+                "signalpc": "not-a-number",
+                "low_signal_threshold_pc": "5.0",
+                "low_signal_comparator": "lte",
+            },
+            {
+                "signalpc": "nan",
+                "low_signal_threshold_pc": "5.0",
+                "low_signal_comparator": "lte",
+            },
+            {
+                "signalpc": "101",
+                "low_signal_threshold_pc": "5.0",
+                "low_signal_comparator": "lte",
+            },
+            {
+                "signalpc": "3.2",
+                "low_signal_threshold_pc": "nan",
+                "low_signal_comparator": "lte",
+            },
+        ]
+
+        for snapshot in cases:
+            with self.subTest(snapshot=snapshot):
+                self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ())
+
 
 if __name__ == "__main__":
     unittest.main()

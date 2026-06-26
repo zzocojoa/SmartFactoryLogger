@@ -359,7 +359,7 @@ Final expected/unexpected/indeterminate is written only to post-hoc fact as `tem
 - `peak_picker_reset_candidate` only when `peak_picker_off_mode_reset_configured` evidence is present.
 - `target_out_of_fov_candidate` only when actuator/camera evidence supports it.
 - `alignment_change_candidate` only when actuator scan/change evidence supports it.
-- `low_signal_candidate` only when signal diagnostic evidence supports it.
+- `low_signal_candidate` only when signal diagnostic evidence supports it. `alarm_low_signal` is derived from `alarmstatus` bit 4 or a textual low-signal alarm. `signal_below_threshold` is derived from `signalpc` only when a finite `low_signal_threshold_pc` in `0..100` and `low_signal_comparator` of `lt` or `lte` are explicitly supplied; `signalpc` alone is captured diagnostics, not a low-signal claim.
 - `below_measurement_range_candidate` only when configured measurement range and detector evidence both support it; setup/process phase evidence alone is never sufficient.
 - No final non-candidate physical cause is allowed in this patch.
 

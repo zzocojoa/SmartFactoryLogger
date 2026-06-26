@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -10,6 +11,8 @@ from typing import Any, Optional
 
 
 SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.0.0"
+LOW_SIGNAL_ALARM_BIT_MASK = 1 << 4
+LOW_SIGNAL_COMPARATORS = frozenset({"lt", "lte"})
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
         "actuator_position_changed",
@@ -229,9 +232,10 @@ def derive_spot_diagnostic_evidence_codes(snapshot: Mapping[str, Any]) -> tuple[
         evidence.add("detector_below_measurement_range")
     if _truthy(snapshot.get("signal_below_threshold")):
         evidence.add("signal_below_threshold")
+    if _signalpc_below_configured_threshold(snapshot) is True:
+        evidence.add("signal_below_threshold")
 
-    alarmstatus = _normalize_token(snapshot.get("alarmstatus"))
-    if "low_signal" in alarmstatus or "lowsignal" in alarmstatus:
+    if _alarmstatus_low_signal_active(snapshot.get("alarmstatus")):
         evidence.add("alarm_low_signal")
 
     actuator_scan_state = _normalize_token(snapshot.get("actuator_scan_state"))
@@ -278,6 +282,74 @@ def _truthy(value: Any) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "enabled"}
+
+
+def _signalpc_below_configured_threshold(snapshot: Mapping[str, Any]) -> Optional[bool]:
+    signalpc = _signal_percent_or_none(snapshot.get("signalpc"))
+    threshold = _signal_percent_or_none(snapshot.get("low_signal_threshold_pc"))
+    comparator = _low_signal_comparator_or_none(snapshot.get("low_signal_comparator"))
+    if signalpc is None or threshold is None or comparator is None:
+        return None
+    if comparator == "lt":
+        return signalpc < threshold
+    return signalpc <= threshold
+
+
+def _signal_percent_or_none(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (float, int)):
+        parsed = float(value)
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("%"):
+            text = text[:-1].strip()
+        try:
+            parsed = float(text)
+        except ValueError:
+            return None
+    if not math.isfinite(parsed) or parsed < 0.0 or parsed > 100.0:
+        return None
+    return parsed
+
+
+def _low_signal_comparator_or_none(value: Any) -> Optional[str]:
+    raw = _text(value).strip().lower()
+    if raw in LOW_SIGNAL_COMPARATORS:
+        return raw
+    if raw == "<":
+        return "lt"
+    if raw in {"<=", "le"}:
+        return "lte"
+    return None
+
+
+def _alarmstatus_low_signal_active(value: Any) -> bool:
+    alarmstatus = _alarmstatus_byte_or_none(value)
+    if alarmstatus is not None:
+        return bool(alarmstatus & LOW_SIGNAL_ALARM_BIT_MASK)
+    normalized = _normalize_token(value)
+    return "low_signal" in normalized or "lowsignal" in normalized
+
+
+def _alarmstatus_byte_or_none(value: Any) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = int(text, 0)
+        except ValueError:
+            return None
+    if parsed < 0 or parsed > 255:
+        return None
+    return parsed
 
 
 def _normalize_token(value: Any) -> str:

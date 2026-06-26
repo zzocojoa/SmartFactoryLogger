@@ -63,7 +63,7 @@ PR #68 is merge-ready for the default-off v2.4 implementation scope at report ti
 - [x] `temperature_operational.py` added as a pure adapter over `temperature_state.py`.
 - [x] `temperature_output_status`, `temperature_unavailable_reason`, expectedness, cause, confidence, and row freshness fields added.
 - [x] Under-range physical cause candidates now require direct diagnostics; setup phase evidence alone stays `unknown` with confidence `0.0`.
-- [x] `alarmstatus` and `signalpc` are collected through non-blocking SPOT diagnostics enrichment, preserved in `spot_observation_fact`, normalized into `spot_diagnostic_evidence_codes`, and passed through RealPLC into `temperature_cause_evidence_codes` for v2.4 rows.
+- [x] `alarmstatus` and `signalpc` are collected through non-blocking SPOT diagnostics enrichment, preserved in `spot_observation_fact`, normalized into `spot_diagnostic_evidence_codes`, and passed through RealPLC into `temperature_cause_evidence_codes` for v2.4 rows. `alarmstatus` bit 4 is authoritative low-signal evidence; `signalpc` numeric evidence is emitted only when `low_signal_threshold_pc` and `low_signal_comparator` are explicitly supplied, so threshold-unknown `signalpc` remains captured-only.
 - [x] stale row precedence prevents old sentinel values from being interpreted as current operational state.
 - [x] realtime `process_phase_candidate` implemented without SPOT status or future context.
 - [x] Count 0..2 production motion is kept out of `production_stable`; general rows use `process_segment_id`, and eligible changeover lifecycles carry one `changeover_candidate_id` through `production_stabilizing`.
