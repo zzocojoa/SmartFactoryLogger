@@ -209,7 +209,7 @@ Scope note: This smoke does not claim downstream consumer compatibility, legacy 
 - [x] Add runtime config guardrails so partial promotion flag combinations cannot be accidentally used in production rollout.
 - [x] Run controlled server-PC promotion smoke with all three promotion flags enabled together. Evidence level: [operator-provided evidence].
 - [x] Split `process_segment_id` from `changeover_candidate_id`; `production_stabilizing` is now the terminal lifecycle candidate for eligible changeover IDs.
-- [ ] Verify downstream v2.4 consumer compatibility before any legacy `Temperature_quality` semantic promotion.
+- [x] Verify downstream v2.4 consumer compatibility before any legacy `Temperature_quality` semantic promotion.
 - [ ] Keep rollback drill documented: disable `CSV_V2_OPERATIONAL_FIELDS_ENABLED` and roll over to v2.3-compatible output if v2.4 consumers fail.
 
 ---
@@ -299,7 +299,7 @@ Post-merge local evidence update, 2026-06-26:
 - Actual server CSV repo-internal downstream replay PASS: `scripts/infer_process_segments_for_csv.py` produced `process_segment_fact_rows=11` at `C:/tmp/sfl-actual-20260626-114019-process-segments.csv`.
 - Actual server CSV repo-internal process phase replay PASS with all promotion flags enabled: `scripts/infer_process_phase_events_for_csv.py` produced `changeover_candidate_resolution_fact_rows=0` and `process_phase_event_fact_rows=0`, expected for this sample because it has no changeover lifecycle rows.
 - Actual server CSV replay driver PASS: `CsvReplayDriver` loaded 3,124 rows from the server CSV and `connect()` returned `True`.
-- Remaining gap: repo-internal downstream replay is PASS on the actual server CSV. Any repo-out consumer, such as Excel macros, MES/ETL jobs, or external analysis programs, still needs separate evidence with consumer name/version, input path, row count, exit status, rejected row count, and handling of `process_segment_id` plus `production_stabilizing` before claiming full operational consumer compatibility.
+- Downstream consumer gate CLOSED for the current operation scope: repo-internal downstream replay is PASS on the actual server CSV, and the operator confirmed there are currently no repo-out CSV consumers such as Excel macros, MES/ETL jobs, or external analysis programs. If a repo-out consumer is introduced later, it must be dry-run with the v2.4 CSV before relying on it operationally.
 
 ---
 
