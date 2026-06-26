@@ -62,6 +62,22 @@ EXPECTED_SPOT_SENTINEL_PROVENANCE = {
     "page_numbers": [7],
     "verification_method": "local_pdf_text_extraction_pypdf",
 }
+CURRENT_SERVER_PROMOTION_SPOT_CONFIGURATION_PROFILE = {
+    "spot_model_info": "SPOT+ AL",
+    "spot_app_mode": "App1: AL E",
+    "spot_range_min_c": 200.0,
+    "spot_range_max_c": 900.0,
+    "spot_analog_4ma_c": 200.0,
+    "spot_analog_20ma_c": 800.0,
+    "low_signal_alarm_enabled": False,
+    "low_signal_threshold_pc": 2.0,
+    "low_signal_comparator": "lt",
+    "low_signal_comparator_verified": False,
+    "peak_picker_enabled": False,
+    "window_obscuration_pc": 12.0,
+    "focus_mm": 6071,
+    "config_operator_verified": True,
+}
 REQUIRED_V2_BASE_COLUMNS = [
     "schema_version",
     "sample_seq",
@@ -351,14 +367,26 @@ def validate_spot_sequence_values(rows: list[list[str]], header: list[str]) -> l
     return failures
 
 
-def _parse_finite_float(value: str) -> float | None:
+def _parse_finite_float(value: object) -> float | None:
     try:
         parsed = float(value)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     if not math.isfinite(parsed):
         return None
     return parsed
+
+
+def _parse_json_string_list(value: str) -> list[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item)]
 
 
 def validate_temperature_value_origin_invariants(rows: list[list[str]], header: list[str]) -> list[str]:
@@ -569,8 +597,10 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
         "spot_effective_freshness_at_row",
         "temperature_output_status",
         "temperature_unavailable_reason",
+        "temperature_under_range_cause_candidate",
         "temperature_cause_confidence",
         "temperature_cause_evidence_codes",
+        "process_phase_candidate",
         "spot_observation_key",
     ]
     missing_columns = [column for column in required_columns if column not in header]
@@ -602,7 +632,9 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
         row_freshness = row[indices["spot_effective_freshness_at_row"]].strip()
         output_status = row[indices["temperature_output_status"]].strip()
         unavailable_reason = row[indices["temperature_unavailable_reason"]].strip()
+        cause = row[indices["temperature_under_range_cause_candidate"]].strip()
         confidence = row[indices["temperature_cause_confidence"]].strip()
+        evidence_codes = _parse_json_string_list(row[indices["temperature_cause_evidence_codes"]].strip())
 
         if output_status and output_status != "valid" and temperature:
             failures.append(f"row {row_number} non-valid temperature_output_status requires blank Temperature")
@@ -620,10 +652,172 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
                 failures.append(f"row {row_number} invalid_sentinel has unsupported spot_device_status_code={device_status!r}")
             elif output_status != expected_status:
                 failures.append(f"row {row_number} invalid_sentinel output status {output_status!r}, expected {expected_status!r}")
+        if cause == "low_signal_candidate" and not ({"alarm_low_signal", "signal_below_threshold"} & set(evidence_codes)):
+            failures.append(f"row {row_number} low_signal_candidate requires alarm_low_signal or signal_below_threshold evidence")
+        if cause == "peak_picker_reset_candidate" and "peak_picker_off_mode_reset_configured" not in evidence_codes:
+            failures.append(f"row {row_number} peak_picker_reset_candidate requires peak_picker_off_mode_reset_configured evidence")
+        if cause == "below_measurement_range_candidate" and not {
+            "measurement_range_configured",
+            "detector_below_measurement_range",
+        }.issubset(set(evidence_codes)):
+            failures.append(f"row {row_number} below_measurement_range_candidate requires measurement range and detector evidence")
         if confidence:
             parsed_confidence = _parse_finite_float(confidence)
             if parsed_confidence is None or not 0.0 <= parsed_confidence <= 1.0:
                 failures.append(f"row {row_number} temperature_cause_confidence must be 0.0..1.0")
+    return failures
+
+
+def validate_current_server_promotion_profile(snapshot: dict) -> list[str]:
+    failures: list[str] = []
+    for key, expected in CURRENT_SERVER_PROMOTION_SPOT_CONFIGURATION_PROFILE.items():
+        actual = snapshot.get(key)
+        if isinstance(expected, float):
+            parsed = _parse_finite_float(actual)
+            if parsed is None or abs(parsed - expected) > 1e-9:
+                failures.append(f"current server promotion profile spot_configuration_snapshot.{key} must be {expected!r}")
+        elif actual != expected:
+            failures.append(f"current server promotion profile spot_configuration_snapshot.{key} must be {expected!r}")
+    return failures
+
+
+def validate_spot_configuration_snapshot(
+    metadata: dict,
+    rows: list[list[str]],
+    header: list[str],
+    *,
+    require_current_server_promotion_profile: bool = False,
+) -> list[str]:
+    failures: list[str] = []
+    snapshot = metadata.get("spot_configuration_snapshot")
+    if not isinstance(snapshot, dict):
+        return ["metadata missing spot_configuration_snapshot block"]
+
+    threshold = _parse_finite_float(snapshot.get("low_signal_threshold_pc"))
+    if threshold is None or not 0.0 <= threshold <= 100.0:
+        failures.append("spot_configuration_snapshot.low_signal_threshold_pc must be 0.0..100.0")
+    comparator = str(snapshot.get("low_signal_comparator") or "").strip().lower()
+    if comparator not in {"lt", "lte", "unknown"}:
+        failures.append("spot_configuration_snapshot.low_signal_comparator must be lt/lte/unknown")
+    if not isinstance(snapshot.get("low_signal_alarm_enabled"), bool):
+        failures.append("spot_configuration_snapshot.low_signal_alarm_enabled must be boolean")
+    if not isinstance(snapshot.get("low_signal_comparator_verified"), bool):
+        failures.append("spot_configuration_snapshot.low_signal_comparator_verified must be boolean")
+    for key in (
+        "peak_picker_enabled",
+        "limiter_enabled",
+        "averager_enabled",
+        "modemaster_enabled",
+        "spot_ratio_raw_enabled",
+        "config_operator_verified",
+    ):
+        if key in snapshot and not isinstance(snapshot.get(key), bool):
+            failures.append(f"spot_configuration_snapshot.{key} must be boolean")
+    for key in (
+        "spot_range_min_c",
+        "spot_range_max_c",
+        "spot_analog_4ma_c",
+        "spot_analog_20ma_c",
+        "window_obscuration_pc",
+        "focus_mm",
+    ):
+        if key in snapshot and _parse_finite_float(snapshot.get(key)) is None:
+            failures.append(f"spot_configuration_snapshot.{key} must be finite")
+    range_min = _parse_finite_float(snapshot.get("spot_range_min_c"))
+    range_max = _parse_finite_float(snapshot.get("spot_range_max_c"))
+    if range_min is not None and range_max is not None and range_min > range_max:
+        failures.append("spot_configuration_snapshot.spot_range_min_c must be <= spot_range_max_c")
+    obscuration = _parse_finite_float(snapshot.get("window_obscuration_pc"))
+    if obscuration is not None and not 0.0 <= obscuration <= 100.0:
+        failures.append("spot_configuration_snapshot.window_obscuration_pc must be 0.0..100.0")
+
+    if snapshot.get("low_signal_alarm_enabled") is False and "temperature_cause_evidence_codes" in header:
+        evidence_index = header.index("temperature_cause_evidence_codes")
+        for row_number, row in enumerate(rows, start=2):
+            if evidence_index >= len(row):
+                continue
+            evidence_codes = _parse_json_string_list(row[evidence_index].strip())
+            if "signal_below_threshold" in evidence_codes:
+                failures.append(f"row {row_number} signal_below_threshold evidence is forbidden when low signal alarm is disabled")
+    if snapshot.get("peak_picker_enabled") is False and "temperature_under_range_cause_candidate" in header:
+        cause_index = header.index("temperature_under_range_cause_candidate")
+        for row_number, row in enumerate(rows, start=2):
+            if cause_index < len(row) and row[cause_index].strip() == "peak_picker_reset_candidate":
+                failures.append(f"row {row_number} peak_picker_reset_candidate is forbidden when Peak Picker is disabled")
+    if require_current_server_promotion_profile:
+        failures.extend(validate_current_server_promotion_profile(snapshot))
+    return failures
+
+def _parse_bool_text(value: str) -> bool | None:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off", "disabled"}:
+        return False
+    return None
+
+
+def _parse_alarmstatus_byte(value: str) -> int | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = int(text, 0)
+    except ValueError:
+        return None
+    if parsed < 0 or parsed > 255:
+        return None
+    return parsed
+
+
+def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
+    header, rows = read_csv(fact_path)
+    required_columns = [
+        "alarmstatus",
+        "spot_diagnostic_evidence_codes",
+        "low_signal_alarm_enabled",
+        "low_signal_threshold_pc",
+        "low_signal_comparator",
+        "peak_picker_enabled",
+    ]
+    missing_columns = [column for column in required_columns if column not in header]
+    if missing_columns:
+        return ["spot_observation_fact header missing columns: " + ", ".join(missing_columns)]
+
+    failures: list[str] = []
+    indices = {column: header.index(column) for column in required_columns}
+    for row_number, row in enumerate(rows, start=2):
+        if len(row) != len(header):
+            failures.append(
+                f"spot_observation_fact row {row_number} has {len(row)} columns, expected {len(header)}"
+            )
+            continue
+        evidence_codes = _parse_json_string_list(row[indices["spot_diagnostic_evidence_codes"]].strip())
+        alarmstatus = _parse_alarmstatus_byte(row[indices["alarmstatus"]])
+        if alarmstatus is not None and (alarmstatus & 0x10) and "alarm_low_signal" not in evidence_codes:
+            failures.append(
+                f"spot_observation_fact row {row_number} alarmstatus bit4 requires alarm_low_signal evidence"
+            )
+        threshold = row[indices["low_signal_threshold_pc"]].strip()
+        if threshold:
+            parsed_threshold = _parse_finite_float(threshold)
+            if parsed_threshold is None or not 0.0 <= parsed_threshold <= 100.0:
+                failures.append(f"spot_observation_fact row {row_number} low_signal_threshold_pc must be 0.0..100.0")
+        comparator = row[indices["low_signal_comparator"]].strip().lower()
+        if comparator and comparator not in {"lt", "lte", "unknown"}:
+            failures.append(f"spot_observation_fact row {row_number} low_signal_comparator must be lt/lte/unknown")
+        low_signal_alarm_enabled = _parse_bool_text(row[indices["low_signal_alarm_enabled"]])
+        if row[indices["low_signal_alarm_enabled"]].strip() and low_signal_alarm_enabled is None:
+            failures.append(f"spot_observation_fact row {row_number} low_signal_alarm_enabled must be true/false")
+        if low_signal_alarm_enabled is False and "signal_below_threshold" in evidence_codes:
+            failures.append(
+                f"spot_observation_fact row {row_number} signal_below_threshold is forbidden when low signal alarm is disabled"
+            )
+        peak_picker_enabled = _parse_bool_text(row[indices["peak_picker_enabled"]])
+        if peak_picker_enabled is False and "peak_picker_off_mode_reset_configured" in evidence_codes:
+            failures.append(
+                f"spot_observation_fact row {row_number} peak_picker evidence is forbidden when Peak Picker is disabled"
+            )
     return failures
 
 
@@ -657,7 +851,13 @@ def position_summary(rows: list[list[str]], header: list[str], column: str) -> s
     )
 
 
-def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
+def validate(
+    v1_path: Path | None,
+    v2_path: Path,
+    metadata_path: Path,
+    spot_observation_fact_path: Path | None = None,
+    require_current_server_promotion_profile: bool = False,
+) -> int:
     failures: list[str] = []
     warnings: list[str] = []
 
@@ -715,6 +915,14 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
         failures.extend(validate_spot_invalid_sentinel_invariants(v2_rows, v2_header))
         if v2_schema == CSV_SCHEMA_VERSION_V2_4:
             failures.extend(validate_v2_4_operational_invariants(v2_rows, v2_header))
+            failures.extend(
+                validate_spot_configuration_snapshot(
+                    metadata,
+                    v2_rows,
+                    v2_header,
+                    require_current_server_promotion_profile=require_current_server_promotion_profile,
+                )
+            )
 
         shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
         if not isinstance(shadow_metadata, dict):
@@ -788,6 +996,9 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
                 f"metadata {field_name}.mapping_status={actual_status!r}, expected {expected_status!r}"
             )
 
+    if spot_observation_fact_path is not None:
+        failures.extend(validate_spot_observation_fact_invariants(spot_observation_fact_path))
+
     for column in ("MainRamPosition_D0010", "ContainerPosition_D0012"):
         values = parse_float_values(v2_rows, v2_header, column)
         if not values:
@@ -797,6 +1008,8 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
     print(f"v1_file={v1_path if v1_path is not None else 'not provided'}")
     print(f"v2_file={v2_path}")
     print(f"metadata_file={metadata_path}")
+    print(f"spot_observation_fact_file={spot_observation_fact_path if spot_observation_fact_path is not None else 'not provided'}")
+    print(f"current_server_promotion_profile_required={require_current_server_promotion_profile}")
     print(f"v1_rows={len(v1_rows) if v1_path is not None else 'not checked'}")
     print(f"v2_rows={len(v2_rows)}")
     print(f"row_delta={row_delta}")
@@ -822,6 +1035,7 @@ def validate_many(
     v2_paths: list[Path],
     metadata_paths: list[Path],
     require_v1: bool = False,
+    require_current_server_promotion_profile: bool = False,
 ) -> int:
     failures: list[str] = []
     try:
@@ -871,6 +1085,7 @@ def validate_many(
             v1_by_suffix.get(suffix) if v1_paths else None,
             v2_by_suffix[suffix],
             metadata_by_suffix[suffix],
+            require_current_server_promotion_profile=require_current_server_promotion_profile,
         )
         if pair_status != 0:
             status = pair_status
@@ -895,6 +1110,16 @@ def main() -> int:
         help="Factory_Integrated_Log_v2_*.metadata.json",
     )
     parser.add_argument(
+        "--spot-observation-fact",
+        type=Path,
+        help="Optional spot_observation_fact.csv for SPOT diagnostic invariant validation",
+    )
+    parser.add_argument(
+        "--require-current-server-promotion-profile",
+        action="store_true",
+        help="Also require the known current server SPOT promotion profile values, not only generic schema/range invariants",
+    )
+    parser.add_argument(
         "--v1-glob",
         help="Glob for v1 Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv files",
     )
@@ -915,11 +1140,18 @@ def main() -> int:
             _expand_glob(args.v2_glob, V2_NAME_RE),
             _expand_glob(args.metadata_glob, METADATA_NAME_RE),
             require_v1=args.v1_glob is not None,
+            require_current_server_promotion_profile=args.require_current_server_promotion_profile,
         )
 
     if args.v2 is None or args.metadata is None:
         parser.error("--v2 and --metadata are required for single-file validation")
-    return validate(args.v1, args.v2, args.metadata)
+    return validate(
+        args.v1,
+        args.v2,
+        args.metadata,
+        args.spot_observation_fact,
+        args.require_current_server_promotion_profile,
+    )
 
 
 if __name__ == "__main__":

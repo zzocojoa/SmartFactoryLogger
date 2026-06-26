@@ -47,6 +47,25 @@ DEFAULT_SPOT_FOCUS_STEP = 50
 DEFAULT_SPOT_ACTUATOR_STEP = 50
 DEFAULT_SPOT_WIDGET_WIDTH = 512
 DEFAULT_SPOT_WIDGET_HEIGHT = 288
+DEFAULT_SPOT_LOW_SIGNAL_ALARM_ENABLED = False
+DEFAULT_SPOT_LOW_SIGNAL_THRESHOLD_PC = 2.0
+DEFAULT_SPOT_LOW_SIGNAL_COMPARATOR = "lt"
+DEFAULT_SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED = False
+DEFAULT_SPOT_LOW_SIGNAL_CONFIG_SOURCE = "spot_web_server_alarms_screen"
+DEFAULT_SPOT_CONFIG_OPERATOR_VERIFIED = True
+DEFAULT_SPOT_MODEL_INFO = "SPOT+ AL"
+DEFAULT_SPOT_APP_MODE = "App1: AL E"
+DEFAULT_SPOT_RANGE_MIN_C = 200.0
+DEFAULT_SPOT_RANGE_MAX_C = 900.0
+DEFAULT_SPOT_ANALOG_4MA_C = 200.0
+DEFAULT_SPOT_ANALOG_20MA_C = 800.0
+DEFAULT_SPOT_PEAK_PICKER_ENABLED = False
+DEFAULT_SPOT_LIMITER_ENABLED = False
+DEFAULT_SPOT_AVERAGER_ENABLED = False
+DEFAULT_SPOT_MODEMASTER_ENABLED = False
+DEFAULT_SPOT_RATIO_RAW_ENABLED = False
+DEFAULT_SPOT_WINDOW_OBSCURATION_PC = 12.0
+DEFAULT_SPOT_FOCUS_MM = 6071
 DEFAULT_LOG_PATH = "logs/data"
 DEFAULT_SNAPSHOT_PATH = "snapshots"
 DEFAULT_AUTO_SAVE = True
@@ -211,6 +230,19 @@ def _env_bool(name: str, fallback: bool) -> bool:
         return True
     if lowered in {"0", "false", "no", "n", "off"}:
         return False
+    return fallback
+
+
+def _bounded_float(value: float, fallback: float, minimum: float, maximum: float) -> float:
+    if minimum <= value <= maximum:
+        return value
+    return fallback
+
+
+def _normalized_choice(value: Optional[str], allowed: set[str], fallback: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in allowed:
+        return normalized
     return fallback
 
 
@@ -476,6 +508,101 @@ SPOT_WIDGET_WIDTH = _get_int(CONFIG, "SPOT", "widgetwidth", DEFAULT_SPOT_WIDGET_
 SPOT_WIDGET_WIDTH = _env_int("SPOT_WIDGET_WIDTH", SPOT_WIDGET_WIDTH)
 SPOT_WIDGET_HEIGHT = _get_int(CONFIG, "SPOT", "widgetheight", DEFAULT_SPOT_WIDGET_HEIGHT)
 SPOT_WIDGET_HEIGHT = _env_int("SPOT_WIDGET_HEIGHT", SPOT_WIDGET_HEIGHT)
+
+SPOT_LOW_SIGNAL_ALARM_ENABLED = _env_bool(
+    "SPOT_LOW_SIGNAL_ALARM_ENABLED",
+    _get_bool(CONFIG, "SPOT", "low_signal_alarm_enabled", DEFAULT_SPOT_LOW_SIGNAL_ALARM_ENABLED),
+)
+SPOT_LOW_SIGNAL_THRESHOLD_PC = _get_float(
+    CONFIG,
+    "SPOT",
+    "low_signal_threshold_pc",
+    DEFAULT_SPOT_LOW_SIGNAL_THRESHOLD_PC,
+)
+SPOT_LOW_SIGNAL_THRESHOLD_PC = _env_float("SPOT_LOW_SIGNAL_THRESHOLD_PC", SPOT_LOW_SIGNAL_THRESHOLD_PC)
+SPOT_LOW_SIGNAL_THRESHOLD_PC = _bounded_float(
+    SPOT_LOW_SIGNAL_THRESHOLD_PC,
+    DEFAULT_SPOT_LOW_SIGNAL_THRESHOLD_PC,
+    0.0,
+    100.0,
+)
+SPOT_LOW_SIGNAL_COMPARATOR = _normalized_choice(
+    os.getenv(
+        "SPOT_LOW_SIGNAL_COMPARATOR",
+        _get(CONFIG, "SPOT", "low_signal_comparator", DEFAULT_SPOT_LOW_SIGNAL_COMPARATOR),
+    ),
+    {"lt", "lte"},
+    DEFAULT_SPOT_LOW_SIGNAL_COMPARATOR,
+)
+SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED = _env_bool(
+    "SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED",
+    _get_bool(CONFIG, "SPOT", "low_signal_comparator_verified", DEFAULT_SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED),
+)
+SPOT_LOW_SIGNAL_CONFIG_SOURCE = os.getenv(
+    "SPOT_LOW_SIGNAL_CONFIG_SOURCE",
+    _get(CONFIG, "SPOT", "low_signal_config_source", DEFAULT_SPOT_LOW_SIGNAL_CONFIG_SOURCE)
+    or DEFAULT_SPOT_LOW_SIGNAL_CONFIG_SOURCE,
+)
+SPOT_CONFIG_OPERATOR_VERIFIED = _env_bool(
+    "SPOT_CONFIG_OPERATOR_VERIFIED",
+    _get_bool(CONFIG, "SPOT", "config_operator_verified", DEFAULT_SPOT_CONFIG_OPERATOR_VERIFIED),
+)
+SPOT_MODEL_INFO = os.getenv(
+    "SPOT_MODEL_INFO",
+    _get(CONFIG, "SPOT", "modelinfo", DEFAULT_SPOT_MODEL_INFO) or DEFAULT_SPOT_MODEL_INFO,
+)
+SPOT_APP_MODE = os.getenv(
+    "SPOT_APP_MODE",
+    _get(CONFIG, "SPOT", "appmode", DEFAULT_SPOT_APP_MODE) or DEFAULT_SPOT_APP_MODE,
+)
+SPOT_RANGE_MIN_C = _env_float(
+    "SPOT_RANGE_MIN_C",
+    _get_float(CONFIG, "SPOT", "rangeminc", DEFAULT_SPOT_RANGE_MIN_C),
+)
+SPOT_RANGE_MAX_C = _env_float(
+    "SPOT_RANGE_MAX_C",
+    _get_float(CONFIG, "SPOT", "rangemaxc", DEFAULT_SPOT_RANGE_MAX_C),
+)
+SPOT_ANALOG_4MA_C = _env_float(
+    "SPOT_ANALOG_4MA_C",
+    _get_float(CONFIG, "SPOT", "analog4mac", DEFAULT_SPOT_ANALOG_4MA_C),
+)
+SPOT_ANALOG_20MA_C = _env_float(
+    "SPOT_ANALOG_20MA_C",
+    _get_float(CONFIG, "SPOT", "analog20mac", DEFAULT_SPOT_ANALOG_20MA_C),
+)
+SPOT_PEAK_PICKER_ENABLED = _env_bool(
+    "SPOT_PEAK_PICKER_ENABLED",
+    _get_bool(CONFIG, "SPOT", "peak_picker_enabled", DEFAULT_SPOT_PEAK_PICKER_ENABLED),
+)
+SPOT_LIMITER_ENABLED = _env_bool(
+    "SPOT_LIMITER_ENABLED",
+    _get_bool(CONFIG, "SPOT", "limiter_enabled", DEFAULT_SPOT_LIMITER_ENABLED),
+)
+SPOT_AVERAGER_ENABLED = _env_bool(
+    "SPOT_AVERAGER_ENABLED",
+    _get_bool(CONFIG, "SPOT", "averager_enabled", DEFAULT_SPOT_AVERAGER_ENABLED),
+)
+SPOT_MODEMASTER_ENABLED = _env_bool(
+    "SPOT_MODEMASTER_ENABLED",
+    _get_bool(CONFIG, "SPOT", "modemaster_enabled", DEFAULT_SPOT_MODEMASTER_ENABLED),
+)
+SPOT_RATIO_RAW_ENABLED = _env_bool(
+    "SPOT_RATIO_RAW_ENABLED",
+    _get_bool(CONFIG, "SPOT", "ratio_raw_enabled", DEFAULT_SPOT_RATIO_RAW_ENABLED),
+)
+SPOT_WINDOW_OBSCURATION_PC = _env_float(
+    "SPOT_WINDOW_OBSCURATION_PC",
+    _get_float(CONFIG, "SPOT", "window_obscuration_pc", DEFAULT_SPOT_WINDOW_OBSCURATION_PC),
+)
+SPOT_WINDOW_OBSCURATION_PC = _bounded_float(
+    SPOT_WINDOW_OBSCURATION_PC,
+    DEFAULT_SPOT_WINDOW_OBSCURATION_PC,
+    0.0,
+    100.0,
+)
+SPOT_FOCUS_MM = _env_int("SPOT_FOCUS_MM", _get_int(CONFIG, "SPOT", "focus_mm", DEFAULT_SPOT_FOCUS_MM))
+SPOT_FOCUS_MM = _positive_int(SPOT_FOCUS_MM, DEFAULT_SPOT_FOCUS_MM)
 
 # SETTINGS / LOGGING
 LOG_PATH = resolve_storage_path(_get(CONFIG, "SETTINGS", "logpath", DEFAULT_LOG_PATH), "logs", "LogPath")

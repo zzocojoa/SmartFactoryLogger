@@ -282,7 +282,13 @@ class FactoryData(BaseModel):
     changeover_candidate_id: Optional[str] = None
     spot_observation_key: Optional[str] = None
     spot_diagnostic_evidence_codes: Optional[str] = None
-
+    alarmstatus: Optional[str] = None
+    signalpc: Optional[float] = None
+    low_signal_alarm_enabled: Optional[bool] = None
+    low_signal_threshold_pc: Optional[float] = None
+    low_signal_comparator: Optional[str] = None
+    peak_picker_enabled: Optional[bool] = None
+    peak_picker_off_mode: Optional[str] = None
     # Molds
     Mold1: Optional[float] = None
     Mold2: Optional[float] = None

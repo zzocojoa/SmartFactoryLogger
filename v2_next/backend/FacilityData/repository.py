@@ -635,6 +635,34 @@ class CSVLoggerService:
             "v2_3_policy": "instrumentation_shadow_only; operational truth requires v2.4.0+ operational fields",
         }
 
+    def _spot_configuration_snapshot(self) -> dict[str, Any]:
+        return {
+            "spot_ip": str(getattr(config, "SPOT_IP", "") or ""),
+            "spot_model_info": str(getattr(config, "SPOT_MODEL_INFO", "") or ""),
+            "spot_app_mode": str(getattr(config, "SPOT_APP_MODE", "") or ""),
+            "spot_range_min_c": float(getattr(config, "SPOT_RANGE_MIN_C", 0.0)),
+            "spot_range_max_c": float(getattr(config, "SPOT_RANGE_MAX_C", 0.0)),
+            "spot_analog_4ma_c": float(getattr(config, "SPOT_ANALOG_4MA_C", 0.0)),
+            "spot_analog_20ma_c": float(getattr(config, "SPOT_ANALOG_20MA_C", 0.0)),
+            "low_signal_alarm_enabled": bool(getattr(config, "SPOT_LOW_SIGNAL_ALARM_ENABLED", False)),
+            "low_signal_threshold_pc": float(getattr(config, "SPOT_LOW_SIGNAL_THRESHOLD_PC", 0.0)),
+            "low_signal_comparator": str(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR", "") or ""),
+            "low_signal_comparator_verified": bool(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED", False)),
+            "low_signal_config_source": str(getattr(config, "SPOT_LOW_SIGNAL_CONFIG_SOURCE", "") or ""),
+            "peak_picker_enabled": bool(getattr(config, "SPOT_PEAK_PICKER_ENABLED", False)),
+            "limiter_enabled": bool(getattr(config, "SPOT_LIMITER_ENABLED", False)),
+            "averager_enabled": bool(getattr(config, "SPOT_AVERAGER_ENABLED", False)),
+            "modemaster_enabled": bool(getattr(config, "SPOT_MODEMASTER_ENABLED", False)),
+            "ratio_raw_enabled": bool(getattr(config, "SPOT_RATIO_RAW_ENABLED", False)),
+            "spot_ratio_raw_enabled": bool(getattr(config, "SPOT_RATIO_RAW_ENABLED", False)),
+            "window_obscuration_pc": float(getattr(config, "SPOT_WINDOW_OBSCURATION_PC", 0.0)),
+            "focus_mm": int(getattr(config, "SPOT_FOCUS_MM", 0)),
+            "config_source": "spot_web_server_screenshot",
+            "config_captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "config_operator_verified": bool(getattr(config, "SPOT_CONFIG_OPERATOR_VERIFIED", False)),
+        }
+
+
     def _resolve_clean_git_commit(self) -> Optional[str]:
         repo_root = Path(__file__).resolve().parents[2]
         try:
@@ -715,6 +743,7 @@ class CSVLoggerService:
                 ),
             },
             "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(active_contract),
+            "spot_configuration_snapshot": self._spot_configuration_snapshot(),
             "sensor_metadata": [
                 {
                     "column_name": "Product_No_operator",
@@ -1162,6 +1191,21 @@ class CSVLoggerService:
         except (TypeError, ValueError):
             return None
 
+    def _optional_alarmstatus(self, value: Optional[str]) -> Optional[int]:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            return int(str(value).strip(), 0)
+        except (TypeError, ValueError):
+            return None
+
+    def _optional_bool(self, value: Optional[bool], default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "enabled"}
+
     def _derive_temperature_operational_decision(self, data: FactoryData, process_phase_candidate: str):
         return derive_temperature_operational_fields(
             TemperatureOperationalInput(
@@ -1183,6 +1227,25 @@ class CSVLoggerService:
                 else data.spot_value_age_ms,
                 process_phase_candidate=process_phase_candidate,
                 evidence_codes=parse_spot_diagnostic_evidence_codes(data.spot_diagnostic_evidence_codes),
+                alarmstatus=self._optional_alarmstatus(data.alarmstatus),
+                signalpc=self._optional_float(data.signalpc),
+                low_signal_alarm_enabled=self._optional_bool(
+                    data.low_signal_alarm_enabled,
+                    bool(getattr(config, "SPOT_LOW_SIGNAL_ALARM_ENABLED", False)),
+                ),
+                low_signal_threshold_pc=self._optional_float(data.low_signal_threshold_pc)
+                if data.low_signal_threshold_pc is not None
+                else self._optional_float(getattr(config, "SPOT_LOW_SIGNAL_THRESHOLD_PC", None)),
+                low_signal_comparator=str(
+                    data.low_signal_comparator
+                    if data.low_signal_comparator is not None
+                    else getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR", "")
+                ),
+                peak_picker_enabled=self._optional_bool(
+                    data.peak_picker_enabled,
+                    bool(getattr(config, "SPOT_PEAK_PICKER_ENABLED", False)),
+                ),
+                peak_picker_off_mode=data.peak_picker_off_mode,
             )
         )
 

@@ -1587,6 +1587,24 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertTrue(v2_files[0].with_suffix(".metadata.json").exists())
             self.assertTrue(v2_files[1].with_suffix(".metadata.json").exists())
 
+    def test_v2_sidecar_records_config_operator_verified_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            timestamp = service._parse_timestamp(self.create_data())
+
+            handle, _ = service._open_v2_log_file(
+                timestamp.strftime("%Y%m%d_%H%M%S"),
+                "Factory_Integrated_Log_v2",
+            )
+            service._close_file(handle)
+            v2_file = next(log_dir.glob("Factory_Integrated_Log_v2_*.csv"))
+            metadata = json.loads(v2_file.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(metadata["spot_configuration_snapshot"]["config_operator_verified"])
+
     def test_v2_writer_creates_separate_file_and_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
@@ -1613,6 +1631,20 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertIn("position-specific label", metadata["schema_metadata"]["header_policy"])
             self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.3.0")
             self.assertEqual(metadata["schema_metadata"]["operator_metadata_version"], "1.0.0")
+            spot_config = metadata["spot_configuration_snapshot"]
+            self.assertEqual(spot_config["spot_ip"], "10.1.10.50")
+            self.assertEqual(spot_config["spot_model_info"], "SPOT+ AL")
+            self.assertEqual(spot_config["spot_app_mode"], "App1: AL E")
+            self.assertEqual(spot_config["low_signal_threshold_pc"], 2.0)
+            self.assertEqual(spot_config["low_signal_comparator"], "lt")
+            self.assertFalse(spot_config["low_signal_alarm_enabled"])
+            self.assertFalse(spot_config["low_signal_comparator_verified"])
+            self.assertFalse(spot_config["peak_picker_enabled"])
+            self.assertEqual(spot_config["window_obscuration_pc"], 12.0)
+            self.assertEqual(spot_config["focus_mm"], 6071)
+            self.assertEqual(spot_config["config_source"], "spot_web_server_screenshot")
+            self.assertTrue(spot_config["config_operator_verified"])
+            self.assertTrue(spot_config["config_captured_at"].endswith("Z"))
             self.assertEqual(
                 metadata["schema_metadata"]["position_read_feature_flag"],
                 "EXTRUDER.position_read_enabled or POSITION_READ_ENABLED",

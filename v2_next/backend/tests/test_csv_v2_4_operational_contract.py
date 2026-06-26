@@ -14,7 +14,10 @@ from backend.FacilityData.repository import (
     V2_4_CSV_COLUMNS,
 )
 from backend.FacilityData.schemas import FactoryData
-from scripts.validate_csv_v2_shadow import validate_v2_4_operational_invariants
+from scripts.validate_csv_v2_shadow import (
+    validate_spot_configuration_snapshot,
+    validate_v2_4_operational_invariants,
+)
 
 
 class CsvV24OperationalContractTests(unittest.TestCase):
@@ -73,10 +76,18 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertTrue(row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")].startswith("chg_"))
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_observation_key")], "spot-service-1:14")
 
-    def test_v2_4_row_uses_spot_diagnostic_evidence_codes_for_under_range_cause(self) -> None:
+    def test_v2_4_row_uses_signalpc_config_for_under_range_low_signal_cause(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
-        data = self.create_data().model_copy(update={"spot_diagnostic_evidence_codes": '["signal_below_threshold"]'})
+        data = self.create_data().model_copy(
+            update={
+                "spot_diagnostic_evidence_codes": '["signal_below_threshold"]',
+                "signalpc": 3.2,
+                "low_signal_alarm_enabled": True,
+                "low_signal_threshold_pc": 5.0,
+                "low_signal_comparator": "lte",
+            }
+        )
 
         row = self.build_v2_row(service, data)
 
@@ -84,10 +95,38 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
             "low_signal_candidate",
         )
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.6")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.65")
         self.assertEqual(
             row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
             '["phase_setup_candidate","signal_below_threshold"]',
+        )
+
+    def test_v2_4_row_ignores_stale_low_signal_evidence_without_config_inputs(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(update={"spot_diagnostic_evidence_codes": '["signal_below_threshold"]'})
+
+        row = self.build_v2_row(service, data)
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")], "unknown")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.0")
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
+            '["phase_setup_candidate","signal_below_threshold"]',
+        )
+
+    def test_v2_4_row_uses_alarmstatus_bit4_for_under_range_low_signal_cause(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(update={"alarmstatus": "0x10"})
+
+        row = self.build_v2_row(service, data)
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")], "low_signal_candidate")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.85")
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
+            '["alarm_low_signal","phase_setup_candidate"]',
         )
 
     def test_low_count_high_motion_under_range_does_not_promote_to_production_stable(self) -> None:
@@ -373,6 +412,91 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
         self.assertEqual(validate_v2_4_operational_invariants([row], header), [])
 
+    def test_spot_configuration_validator_accepts_non_current_valid_profile_by_default(self) -> None:
+        metadata = {
+            "spot_configuration_snapshot": {
+                "spot_model_info": "SPOT+ AL",
+                "spot_app_mode": "App2: AL E",
+                "spot_range_min_c": 100.0,
+                "spot_range_max_c": 1200.0,
+                "spot_analog_4ma_c": 100.0,
+                "spot_analog_20ma_c": 1000.0,
+                "low_signal_alarm_enabled": True,
+                "low_signal_threshold_pc": 10.0,
+                "low_signal_comparator": "lte",
+                "low_signal_comparator_verified": True,
+                "peak_picker_enabled": True,
+                "limiter_enabled": True,
+                "averager_enabled": False,
+                "modemaster_enabled": False,
+                "spot_ratio_raw_enabled": False,
+                "window_obscuration_pc": 25.0,
+                "focus_mm": 5000,
+                "config_operator_verified": True,
+            }
+        }
+
+        self.assertEqual(validate_spot_configuration_snapshot(metadata, [], []), [])
+
+    def test_spot_configuration_validator_requires_current_server_profile_only_when_requested(self) -> None:
+        metadata = {
+            "spot_configuration_snapshot": {
+                "spot_model_info": "SPOT+ AL",
+                "spot_app_mode": "App2: AL E",
+                "spot_range_min_c": 100.0,
+                "spot_range_max_c": 1200.0,
+                "spot_analog_4ma_c": 100.0,
+                "spot_analog_20ma_c": 1000.0,
+                "low_signal_alarm_enabled": True,
+                "low_signal_threshold_pc": 10.0,
+                "low_signal_comparator": "lte",
+                "low_signal_comparator_verified": True,
+                "peak_picker_enabled": True,
+                "limiter_enabled": True,
+                "averager_enabled": False,
+                "modemaster_enabled": False,
+                "spot_ratio_raw_enabled": False,
+                "window_obscuration_pc": 25.0,
+                "focus_mm": 5000,
+                "config_operator_verified": True,
+            }
+        }
+
+        failures = validate_spot_configuration_snapshot(
+            metadata,
+            [],
+            [],
+            require_current_server_promotion_profile=True,
+        )
+
+        self.assertTrue(
+            any("current server promotion profile spot_configuration_snapshot.low_signal_threshold_pc" in failure
+                for failure in failures)
+        )
+        self.assertTrue(
+            any("current server promotion profile spot_configuration_snapshot.focus_mm" in failure for failure in failures)
+        )
+
+    def test_spot_configuration_validator_still_rejects_invalid_generic_ranges(self) -> None:
+        metadata = {
+            "spot_configuration_snapshot": {
+                "low_signal_alarm_enabled": False,
+                "low_signal_threshold_pc": 101.0,
+                "low_signal_comparator": "bad",
+                "low_signal_comparator_verified": False,
+                "spot_range_min_c": 900.0,
+                "spot_range_max_c": 200.0,
+                "window_obscuration_pc": -1.0,
+            }
+        }
+
+        failures = validate_spot_configuration_snapshot(metadata, [], [])
+
+        self.assertIn("spot_configuration_snapshot.low_signal_threshold_pc must be 0.0..100.0", failures)
+        self.assertIn("spot_configuration_snapshot.low_signal_comparator must be lt/lte/unknown", failures)
+        self.assertIn("spot_configuration_snapshot.spot_range_min_c must be <= spot_range_max_c", failures)
+        self.assertIn("spot_configuration_snapshot.window_obscuration_pc must be 0.0..100.0", failures)
+
     def test_v2_4_runtime_summary_counts_operational_rows(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_enabled=True, csv_v2_operational_fields_enabled=True)
@@ -507,6 +631,28 @@ class ConfigPromotionBundleTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("config-import-ok", result.stdout)
+
+    def test_spot_config_operator_verified_env_flag_is_loaded(self) -> None:
+        env = os.environ.copy()
+        repo_root = Path(__file__).resolve().parents[2]
+        env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
+        env["SPOT_CONFIG_OPERATOR_VERIFIED"] = "true"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import backend.config as config; print(config.SPOT_CONFIG_OPERATOR_VERIFIED)",
+            ],
+            cwd=repo_root,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "True")
 
 
 class V24HealthCounterTests(unittest.TestCase):

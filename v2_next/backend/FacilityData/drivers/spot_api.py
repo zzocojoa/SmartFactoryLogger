@@ -58,7 +58,16 @@ _SPOT_FOCUS_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
-_SPOT_DIAGNOSTIC_OUTPUT_PARAMS = ("alarmstatus", "signalpc")
+_SPOT_DIAGNOSTIC_OUTPUT_PARAMS = (
+    "alarmstatus",
+    "signalpc",
+    "d1temperature",
+    "d2temperature",
+    "e1out",
+    "e2out",
+    "itemperature",
+    "appnumber",
+)
 _SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
 _SPOT_DIAGNOSTIC_MAX_AGE_FLOOR_SEC = 3.0
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
@@ -403,6 +412,29 @@ def _spot_diagnostics_max_age_sec() -> float:
     except (TypeError, ValueError):
         refresh_interval = 1.0
     return max(_SPOT_DIAGNOSTIC_MAX_AGE_FLOOR_SEC, refresh_interval * 2.0)
+
+
+def _spot_configuration_snapshot() -> Dict[str, Any]:
+    return {
+        "spot_model_info": str(getattr(config, "SPOT_MODEL_INFO", "") or ""),
+        "spot_app_mode": str(getattr(config, "SPOT_APP_MODE", "") or ""),
+        "spot_range_min_c": getattr(config, "SPOT_RANGE_MIN_C", None),
+        "spot_range_max_c": getattr(config, "SPOT_RANGE_MAX_C", None),
+        "spot_analog_4ma_c": getattr(config, "SPOT_ANALOG_4MA_C", None),
+        "spot_analog_20ma_c": getattr(config, "SPOT_ANALOG_20MA_C", None),
+        "low_signal_alarm_enabled": bool(getattr(config, "SPOT_LOW_SIGNAL_ALARM_ENABLED", False)),
+        "low_signal_threshold_pc": getattr(config, "SPOT_LOW_SIGNAL_THRESHOLD_PC", None),
+        "low_signal_comparator": str(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR", "") or ""),
+        "low_signal_comparator_verified": bool(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED", False)),
+        "low_signal_config_source": str(getattr(config, "SPOT_LOW_SIGNAL_CONFIG_SOURCE", "") or ""),
+        "peak_picker_enabled": bool(getattr(config, "SPOT_PEAK_PICKER_ENABLED", False)),
+        "limiter_enabled": bool(getattr(config, "SPOT_LIMITER_ENABLED", False)),
+        "averager_enabled": bool(getattr(config, "SPOT_AVERAGER_ENABLED", False)),
+        "modemaster_enabled": bool(getattr(config, "SPOT_MODEMASTER_ENABLED", False)),
+        "ratio_raw_enabled": bool(getattr(config, "SPOT_RATIO_RAW_ENABLED", False)),
+        "window_obscuration_pc": getattr(config, "SPOT_WINDOW_OBSCURATION_PC", None),
+        "focus_mm": getattr(config, "SPOT_FOCUS_MM", None),
+    }
 
 
 async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str) -> tuple[str, str]:
@@ -1038,6 +1070,8 @@ def _publish_spot_temperature_snapshot(
     if classification.raw_validity == SpotRawValidity.NOT_EVALUATED:
         raw_value_text = None
     diagnostics_payload = _latest_spot_diagnostics_for_poll(poll_completed_at)
+    configuration_payload = _spot_configuration_snapshot()
+    internal_temperature = _cached_internal_temperature(poll_completed_at)
 
     with _spot_temperature_snapshot_lock:
         _spot_observation_seq += 1
@@ -1080,6 +1114,9 @@ def _publish_spot_temperature_snapshot(
             "cache_fallback_allowed": cache_fallback_allowed,
             "spot_temperature_url": temp_url,
         }
+        _spot_temperature_snapshot.update(configuration_payload)
+        if internal_temperature is not None:
+            _spot_temperature_snapshot["itemperature"] = internal_temperature
         _spot_temperature_snapshot.update(diagnostics_payload)
         _spot_temperature_snapshot["spot_diagnostic_evidence_codes"] = encode_spot_diagnostic_evidence_codes(
             _spot_temperature_snapshot

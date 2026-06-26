@@ -1,14 +1,18 @@
+import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from backend.FacilityData.spot_observation_fact import (
+    SPOT_OBSERVATION_FACT_COLUMNS,
     SpotObservationFactWriter,
     build_spot_observation_fact,
     build_spot_observation_key,
     derive_spot_diagnostic_evidence_codes,
     encode_spot_diagnostic_evidence_codes,
 )
+from scripts.validate_csv_v2_shadow import validate_spot_observation_fact_invariants
 
 
 class SpotObservationFactTests(unittest.TestCase):
@@ -78,6 +82,87 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertIn("svc-1:8", rows[2])
             self.assertFalse(spool_path.exists())
 
+    def test_writer_archives_existing_fact_when_header_mismatches_current_schema(self) -> None:
+        snapshot = {
+            "spot_service_instance_id": "svc-current",
+            "spot_poll_seq": 10,
+            "spot_observation_seq": 10,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "455.0",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            old_columns = SPOT_OBSERVATION_FACT_COLUMNS[:40]
+            self.assertEqual(len(old_columns), 40)
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(old_columns)
+                writer.writerow(["legacy"] * len(old_columns))
+
+            writer = SpotObservationFactWriter(output_path)
+            fact = writer.write_fact(snapshot)
+
+            self.assertIsNotNone(fact)
+            archives = list(output_path.parent.glob("spot_observation_fact.*.schema-mismatch.csv"))
+            self.assertEqual(len(archives), 1)
+            with archives[0].open("r", encoding="utf-8-sig", newline="") as handle:
+                archived_rows = list(csv.reader(handle))
+            self.assertEqual(archived_rows[0], old_columns)
+            self.assertEqual(len(archived_rows[1]), len(old_columns))
+
+            with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.reader(handle))
+            self.assertEqual(rows[0], SPOT_OBSERVATION_FACT_COLUMNS)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(len(rows[1]), len(SPOT_OBSERVATION_FACT_COLUMNS))
+            self.assertIn("svc-current:10", rows[1])
+
+    def test_spool_flush_archives_mismatched_existing_fact_before_writing_pending_rows(self) -> None:
+        pending_snapshot = {
+            "spot_service_instance_id": "svc-spooled",
+            "spot_poll_seq": 11,
+            "spot_observation_seq": 11,
+            "spot_poll_status": "timeout",
+            "spot_raw_validity": "not_received",
+        }
+        success_snapshot = {
+            "spot_service_instance_id": "svc-current",
+            "spot_poll_seq": 12,
+            "spot_observation_seq": 12,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "456.0",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            output_path = tmp_path / "spot_observation_fact.csv"
+            spool_path = tmp_path / "spot_observation_fact.failed.jsonl"
+            old_columns = SPOT_OBSERVATION_FACT_COLUMNS[:40]
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(old_columns)
+                writer.writerow(["legacy"] * len(old_columns))
+            spool_path.write_text(
+                json.dumps(build_spot_observation_fact(pending_snapshot), ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            writer = SpotObservationFactWriter(output_path, spool_path=spool_path)
+            fact = writer.write_fact(success_snapshot)
+
+            self.assertIsNotNone(fact)
+            self.assertFalse(spool_path.exists())
+            archives = list(output_path.parent.glob("spot_observation_fact.*.schema-mismatch.csv"))
+            self.assertEqual(len(archives), 1)
+            with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.reader(handle))
+            self.assertEqual(rows[0], SPOT_OBSERVATION_FACT_COLUMNS)
+            self.assertEqual(len(rows), 3)
+            self.assertTrue(all(len(row) == len(SPOT_OBSERVATION_FACT_COLUMNS) for row in rows[1:]))
+            self.assertIn("svc-spooled:11", rows[1])
+            self.assertIn("svc-current:12", rows[2])
+
     def test_build_fact_uses_missing_diagnostics_status(self) -> None:
         fact = build_spot_observation_fact(
             {
@@ -100,6 +185,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
             "alarmstatus": "LOW SIGNAL",
             "signalpc": "3.2",
+            "peak_picker_enabled": True,
             "peak_picker_off_mode": "reset",
             "actuator_scan_state": "scanning",
             "spot_diagnostic_evidence_codes": '["target_absent_verified"]',
@@ -110,6 +196,7 @@ class SpotObservationFactTests(unittest.TestCase):
 
         self.assertEqual(fact["diagnostics_capture_status"], "same_response")
         self.assertEqual(fact["diagnostics_age_ms"], "0.0")
+        self.assertIn("alarm_low_signal", fact["spot_diagnostic_evidence_codes"])
         self.assertEqual(fact["alarmstatus"], "LOW SIGNAL")
         self.assertEqual(fact["signalpc"], "3.2")
         self.assertEqual(fact["peak_picker_off_mode"], "reset")
@@ -120,12 +207,13 @@ class SpotObservationFactTests(unittest.TestCase):
                 "actuator_scanning",
                 "alarm_low_signal",
                 "peak_picker_off_mode_reset_configured",
+                "signalpc_present_threshold_unknown",
                 "target_absent_verified",
             },
         )
         self.assertEqual(
             encode_spot_diagnostic_evidence_codes(snapshot),
-            '["actuator_scanning","alarm_low_signal","peak_picker_off_mode_reset_configured","target_absent_verified"]',
+            '["actuator_scanning","alarm_low_signal","peak_picker_off_mode_reset_configured","signalpc_present_threshold_unknown","target_absent_verified"]',
         )
 
     def test_numeric_alarmstatus_bit_four_derives_alarm_low_signal(self) -> None:
@@ -139,9 +227,10 @@ class SpotObservationFactTests(unittest.TestCase):
         )
         self.assertEqual(derive_spot_diagnostic_evidence_codes({"alarmstatus": "0"}), ())
 
-    def test_signalpc_with_configured_lte_threshold_derives_signal_below_threshold(self) -> None:
+    def test_signalpc_with_configured_lte_threshold_derives_signal_below_threshold_when_alarm_enabled(self) -> None:
         snapshot = {
             "signalpc": "3.2",
+            "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lte",
         }
@@ -149,60 +238,141 @@ class SpotObservationFactTests(unittest.TestCase):
         self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ("signal_below_threshold",))
         self.assertEqual(encode_spot_diagnostic_evidence_codes(snapshot), '["signal_below_threshold"]')
 
+    def test_signalpc_below_threshold_alarm_disabled_records_non_causal_evidence(self) -> None:
+        snapshot = {
+            "signalpc": "1.5",
+            "low_signal_alarm_enabled": False,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+        }
+
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(snapshot),
+            ("signal_below_configured_threshold_alarm_disabled",),
+        )
+
     def test_signalpc_threshold_edge_respects_lt_and_lte_comparators(self) -> None:
         lte_snapshot = {
             "signalpc": "5.0",
+            "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lte",
         }
         lt_snapshot = {
             "signalpc": "5.0",
+            "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lt",
         }
 
         self.assertEqual(derive_spot_diagnostic_evidence_codes(lte_snapshot), ("signal_below_threshold",))
-        self.assertEqual(derive_spot_diagnostic_evidence_codes(lt_snapshot), ())
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(lt_snapshot),
+            ("signal_at_or_above_configured_threshold",),
+        )
 
-    def test_signalpc_without_valid_threshold_or_invalid_value_does_not_set_low(self) -> None:
+    def test_signalpc_without_threshold_records_threshold_unknown(self) -> None:
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes({"signalpc": "3.2"}),
+            ("signalpc_present_threshold_unknown",),
+        )
+
+    def test_signalpc_at_or_above_configured_threshold_records_non_low_evidence(self) -> None:
+        snapshot = {
+            "signalpc": "6.0",
+            "low_signal_alarm_enabled": False,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+        }
+
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(snapshot),
+            ("signal_at_or_above_configured_threshold",),
+        )
+
+    def test_invalid_signalpc_value_does_not_set_low(self) -> None:
         cases = [
-            {"signalpc": "3.2"},
-            {"signalpc": "3.2", "low_signal_threshold_pc": "5.0"},
-            {
-                "signalpc": "3.2",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "unknown",
-            },
-            {
-                "signalpc": "5.1",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "lte",
-            },
-            {
-                "signalpc": "not-a-number",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "lte",
-            },
-            {
-                "signalpc": "nan",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "lte",
-            },
-            {
-                "signalpc": "101",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "lte",
-            },
-            {
-                "signalpc": "3.2",
-                "low_signal_threshold_pc": "nan",
-                "low_signal_comparator": "lte",
-            },
+            {"signalpc": "not-a-number", "low_signal_threshold_pc": "5.0", "low_signal_comparator": "lte"},
+            {"signalpc": "nan", "low_signal_threshold_pc": "5.0", "low_signal_comparator": "lte"},
+            {"signalpc": "101", "low_signal_threshold_pc": "5.0", "low_signal_comparator": "lte"},
         ]
 
         for snapshot in cases:
             with self.subTest(snapshot=snapshot):
                 self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ())
+
+    def test_valid_signalpc_with_invalid_threshold_records_threshold_unknown(self) -> None:
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(
+                {"signalpc": "3.2", "low_signal_threshold_pc": "nan", "low_signal_comparator": "lte"}
+            ),
+            ("signalpc_present_threshold_unknown",),
+        )
+
+    def test_peak_picker_disabled_does_not_emit_reset_evidence(self) -> None:
+        snapshot = {"peak_picker_enabled": False, "peak_picker_off_mode": "reset"}
+
+        self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ())
+
+    def test_spot_observation_fact_validator_accepts_alarmstatus_bit4_with_evidence(self) -> None:
+        snapshot = {
+            "spot_service_instance_id": "svc-1",
+            "spot_poll_seq": 9,
+            "spot_observation_seq": 9,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "invalid_sentinel",
+            "alarmstatus": "0x10",
+            "signalpc": "6.0",
+            "low_signal_alarm_enabled": False,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+            "peak_picker_enabled": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            writer = SpotObservationFactWriter(output_path)
+            fact = writer.write_fact(snapshot)
+
+            self.assertIsNotNone(fact)
+            assert fact is not None
+            self.assertIn("spot_diagnostic_evidence_codes", fact)
+            self.assertIn("alarm_low_signal", fact["spot_diagnostic_evidence_codes"])
+            self.assertEqual(validate_spot_observation_fact_invariants(output_path), [])
+
+    def test_spot_observation_fact_validator_rejects_row_length_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(SPOT_OBSERVATION_FACT_COLUMNS)
+                writer.writerow([""] * (len(SPOT_OBSERVATION_FACT_COLUMNS) - 1))
+
+            failures = validate_spot_observation_fact_invariants(output_path)
+
+        self.assertTrue(any("columns, expected" in failure for failure in failures))
+
+    def test_spot_observation_fact_validator_rejects_alarmstatus_bit4_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            row = {column: "" for column in SPOT_OBSERVATION_FACT_COLUMNS}
+            row.update(
+                {
+                    "alarmstatus": "16",
+                    "spot_diagnostic_evidence_codes": "[]",
+                    "low_signal_alarm_enabled": "false",
+                    "low_signal_threshold_pc": "2.0",
+                    "low_signal_comparator": "lt",
+                    "peak_picker_enabled": "false",
+                }
+            )
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
+                writer.writeheader()
+                writer.writerow(row)
+
+            failures = validate_spot_observation_fact_invariants(output_path)
+
+        self.assertTrue(any("alarmstatus bit4 requires alarm_low_signal" in failure for failure in failures))
 
 
 if __name__ == "__main__":
