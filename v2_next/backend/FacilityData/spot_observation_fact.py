@@ -9,10 +9,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from backend.FacilityData.spot_low_signal import (
+    LOW_SIGNAL_ALARM_BIT,
+    LOW_SIGNAL_COMPARATORS,
+    derive_low_signal_evidence,
+)
 
-SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.0.0"
-LOW_SIGNAL_ALARM_BIT_MASK = 1 << 4
-LOW_SIGNAL_COMPARATORS = frozenset({"lt", "lte"})
+
+SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.1.0"
+LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
         "actuator_position_changed",
@@ -21,7 +26,10 @@ SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
         "detector_below_measurement_range",
         "measurement_range_configured",
         "peak_picker_off_mode_reset_configured",
+        "signal_at_or_above_configured_threshold",
+        "signal_below_configured_threshold_alarm_disabled",
         "signal_below_threshold",
+        "signalpc_present_threshold_unknown",
         "target_absent_verified",
         "target_out_of_fov_evidence",
     }
@@ -33,6 +41,7 @@ SPOT_DIAGNOSTIC_FACT_FIELDS = (
     "d2temperature",
     "e1out",
     "e2out",
+    "itemperature",
     "appnumber",
     "instrument_info",
     "peak_picker_enabled",
@@ -71,6 +80,7 @@ SPOT_OBSERVATION_FACT_COLUMNS = [
     "d2temperature",
     "e1out",
     "e2out",
+    "itemperature",
     "appnumber",
     "instrument_info",
     "peak_picker_enabled",
@@ -80,6 +90,15 @@ SPOT_OBSERVATION_FACT_COLUMNS = [
     "actuator_position",
     "actuator_scan_state",
     "actuator_peak_found",
+    "low_signal_alarm_enabled",
+    "low_signal_threshold_pc",
+    "low_signal_comparator",
+    "low_signal_comparator_verified",
+    "spot_app_mode",
+    "spot_range_min_c",
+    "spot_range_max_c",
+    "window_obscuration_pc",
+    "focus_mm",
 ]
 
 
@@ -199,6 +218,7 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
         "d2temperature": _text(snapshot.get("d2temperature")),
         "e1out": _text(snapshot.get("e1out")),
         "e2out": _text(snapshot.get("e2out")),
+        "itemperature": _text(snapshot.get("itemperature")),
         "appnumber": _text(snapshot.get("appnumber")),
         "instrument_info": _text(snapshot.get("instrument_info")),
         "peak_picker_enabled": _text(snapshot.get("peak_picker_enabled")),
@@ -208,6 +228,15 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
         "actuator_position": _text(snapshot.get("actuator_position")),
         "actuator_scan_state": _text(snapshot.get("actuator_scan_state")),
         "actuator_peak_found": _text(snapshot.get("actuator_peak_found")),
+        "low_signal_alarm_enabled": _text(snapshot.get("low_signal_alarm_enabled")),
+        "low_signal_threshold_pc": _text(snapshot.get("low_signal_threshold_pc")),
+        "low_signal_comparator": _text(snapshot.get("low_signal_comparator")),
+        "low_signal_comparator_verified": _text(snapshot.get("low_signal_comparator_verified")),
+        "spot_app_mode": _text(snapshot.get("spot_app_mode")),
+        "spot_range_min_c": _text(snapshot.get("spot_range_min_c")),
+        "spot_range_max_c": _text(snapshot.get("spot_range_max_c")),
+        "window_obscuration_pc": _text(snapshot.get("window_obscuration_pc")),
+        "focus_mm": _text(snapshot.get("focus_mm")),
     }
 
 
@@ -230,12 +259,20 @@ def derive_spot_diagnostic_evidence_codes(snapshot: Mapping[str, Any]) -> tuple[
         evidence.add("measurement_range_configured")
     if _truthy(snapshot.get("detector_below_measurement_range")):
         evidence.add("detector_below_measurement_range")
-    if _truthy(snapshot.get("signal_below_threshold")):
-        evidence.add("signal_below_threshold")
-    if _signalpc_below_configured_threshold(snapshot) is True:
-        evidence.add("signal_below_threshold")
+    if not _truthy(snapshot.get("low_signal_alarm_enabled")):
+        evidence.discard("signal_below_threshold")
 
-    if _alarmstatus_low_signal_active(snapshot.get("alarmstatus")):
+    alarmstatus = _alarmstatus_byte_or_none(snapshot.get("alarmstatus"))
+    low_signal = derive_low_signal_evidence(
+        alarmstatus=alarmstatus,
+        signalpc=_signal_percent_or_none(snapshot.get("signalpc")),
+        low_signal_alarm_enabled=_truthy(snapshot.get("low_signal_alarm_enabled")),
+        low_signal_threshold_pc=_signal_percent_or_none(snapshot.get("low_signal_threshold_pc")),
+        low_signal_comparator=_low_signal_comparator_or_none(snapshot.get("low_signal_comparator")),
+    )
+    evidence.update(str(code) for code in low_signal["evidence_codes"])
+
+    if alarmstatus is None and _alarmstatus_low_signal_active(snapshot.get("alarmstatus")):
         evidence.add("alarm_low_signal")
 
     actuator_scan_state = _normalize_token(snapshot.get("actuator_scan_state"))
@@ -243,7 +280,12 @@ def derive_spot_diagnostic_evidence_codes(snapshot: Mapping[str, Any]) -> tuple[
         evidence.add("actuator_scanning")
 
     peak_picker_off_mode = _normalize_token(snapshot.get("peak_picker_off_mode"))
-    if peak_picker_off_mode in {"reset", "reset_output", "resetting", "off_mode_reset"}:
+    if _truthy(snapshot.get("peak_picker_enabled")) and peak_picker_off_mode in {
+        "reset",
+        "reset_output",
+        "resetting",
+        "off_mode_reset",
+    }:
         evidence.add("peak_picker_off_mode_reset_configured")
 
     return tuple(sorted(code for code in evidence if code in SPOT_DIAGNOSTIC_EVIDENCE_CODES))
@@ -273,7 +315,15 @@ def parse_spot_diagnostic_evidence_codes(value: Any) -> tuple[str, ...]:
 
 
 def _has_diagnostic_payload(snapshot: Mapping[str, Any]) -> bool:
-    return any(_text(snapshot.get(field)).strip() for field in SPOT_DIAGNOSTIC_FACT_FIELDS)
+    return any(_diagnostic_value_present(snapshot.get(field)) for field in SPOT_DIAGNOSTIC_FACT_FIELDS)
+
+
+def _diagnostic_value_present(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    return bool(_text(value).strip())
 
 
 def _truthy(value: Any) -> bool:

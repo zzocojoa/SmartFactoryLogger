@@ -216,6 +216,16 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, text="LOW SIGNAL", request=request)
             if url == "http://spot.local/output?p=signalpc":
                 return httpx.Response(200, text="3.2", request=request)
+            if url == "http://spot.local/output?p=d1temperature":
+                return httpx.Response(200, text="345.7", request=request)
+            if url == "http://spot.local/output?p=d2temperature":
+                return httpx.Response(200, text="319.1", request=request)
+            if url == "http://spot.local/output?p=e1out":
+                return httpx.Response(200, text="57", request=request)
+            if url == "http://spot.local/output?p=e2out":
+                return httpx.Response(200, text="53", request=request)
+            if url == "http://spot.local/output?p=appnumber":
+                return httpx.Response(200, text="App1", request=request)
             if url == "http://spot.local/output?p=temperature":
                 return httpx.Response(200, text="6553.4", request=request)
             return httpx.Response(404, text="not found", request=request)
@@ -231,12 +241,29 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["diagnostics_capture_status"], "async_enriched")
         self.assertEqual(diagnostics["alarmstatus"], "LOW SIGNAL")
         self.assertEqual(diagnostics["signalpc"], "3.2")
-        self.assertEqual(diagnostics["spot_diagnostic_evidence_codes"], '["alarm_low_signal"]')
+        self.assertEqual(
+            diagnostics["spot_diagnostic_evidence_codes"],
+            '["alarm_low_signal","signal_at_or_above_configured_threshold"]',
+        )
+        self.assertEqual(diagnostics["d1temperature"], "345.7")
+        self.assertEqual(diagnostics["d2temperature"], "319.1")
+        self.assertEqual(diagnostics["e1out"], "57")
+        self.assertEqual(diagnostics["e2out"], "53")
+        self.assertEqual(diagnostics["appnumber"], "App1")
+        self.assertEqual(diagnostics["low_signal_alarm_enabled"], False)
+        self.assertEqual(diagnostics["low_signal_threshold_pc"], 2.0)
+        self.assertEqual(diagnostics["low_signal_comparator"], "lt")
+        self.assertEqual(diagnostics["spot_app_mode"], "App1: AL E")
         self.assertIsNotNone(fact)
         assert fact is not None
         self.assertEqual(fact["diagnostics_capture_status"], "async_enriched")
         self.assertIn("http://spot.local/output?p=alarmstatus", requests)
         self.assertIn("http://spot.local/output?p=signalpc", requests)
+        self.assertIn("http://spot.local/output?p=d1temperature", requests)
+        self.assertIn("http://spot.local/output?p=d2temperature", requests)
+        self.assertIn("http://spot.local/output?p=e1out", requests)
+        self.assertIn("http://spot.local/output?p=e2out", requests)
+        self.assertIn("http://spot.local/output?p=appnumber", requests)
 
     async def test_ametek_over_range_sentinel_uses_invalid_sentinel_error(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

@@ -1613,6 +1613,20 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertIn("position-specific label", metadata["schema_metadata"]["header_policy"])
             self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.3.0")
             self.assertEqual(metadata["schema_metadata"]["operator_metadata_version"], "1.0.0")
+            spot_config = metadata["spot_configuration_snapshot"]
+            self.assertEqual(spot_config["spot_ip"], "10.1.10.50")
+            self.assertEqual(spot_config["spot_model_info"], "SPOT+ AL")
+            self.assertEqual(spot_config["spot_app_mode"], "App1: AL E")
+            self.assertEqual(spot_config["low_signal_threshold_pc"], 2.0)
+            self.assertEqual(spot_config["low_signal_comparator"], "lt")
+            self.assertFalse(spot_config["low_signal_alarm_enabled"])
+            self.assertFalse(spot_config["low_signal_comparator_verified"])
+            self.assertFalse(spot_config["peak_picker_enabled"])
+            self.assertEqual(spot_config["window_obscuration_pc"], 12.0)
+            self.assertEqual(spot_config["focus_mm"], 6071)
+            self.assertEqual(spot_config["config_source"], "spot_web_server_screenshot")
+            self.assertTrue(spot_config["config_operator_verified"])
+            self.assertTrue(spot_config["config_captured_at"].endswith("Z"))
             self.assertEqual(
                 metadata["schema_metadata"]["position_read_feature_flag"],
                 "EXTRUDER.position_read_enabled or POSITION_READ_ENABLED",

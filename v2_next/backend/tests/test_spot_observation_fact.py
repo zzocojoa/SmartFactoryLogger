@@ -100,6 +100,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
             "alarmstatus": "LOW SIGNAL",
             "signalpc": "3.2",
+            "peak_picker_enabled": True,
             "peak_picker_off_mode": "reset",
             "actuator_scan_state": "scanning",
             "spot_diagnostic_evidence_codes": '["target_absent_verified"]',
@@ -120,12 +121,13 @@ class SpotObservationFactTests(unittest.TestCase):
                 "actuator_scanning",
                 "alarm_low_signal",
                 "peak_picker_off_mode_reset_configured",
+                "signalpc_present_threshold_unknown",
                 "target_absent_verified",
             },
         )
         self.assertEqual(
             encode_spot_diagnostic_evidence_codes(snapshot),
-            '["actuator_scanning","alarm_low_signal","peak_picker_off_mode_reset_configured","target_absent_verified"]',
+            '["actuator_scanning","alarm_low_signal","peak_picker_off_mode_reset_configured","signalpc_present_threshold_unknown","target_absent_verified"]',
         )
 
     def test_numeric_alarmstatus_bit_four_derives_alarm_low_signal(self) -> None:
@@ -139,9 +141,10 @@ class SpotObservationFactTests(unittest.TestCase):
         )
         self.assertEqual(derive_spot_diagnostic_evidence_codes({"alarmstatus": "0"}), ())
 
-    def test_signalpc_with_configured_lte_threshold_derives_signal_below_threshold(self) -> None:
+    def test_signalpc_with_configured_lte_threshold_derives_signal_below_threshold_when_alarm_enabled(self) -> None:
         snapshot = {
             "signalpc": "3.2",
+            "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lte",
         }
@@ -149,60 +152,81 @@ class SpotObservationFactTests(unittest.TestCase):
         self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ("signal_below_threshold",))
         self.assertEqual(encode_spot_diagnostic_evidence_codes(snapshot), '["signal_below_threshold"]')
 
+    def test_signalpc_below_threshold_alarm_disabled_records_non_causal_evidence(self) -> None:
+        snapshot = {
+            "signalpc": "1.5",
+            "low_signal_alarm_enabled": False,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+        }
+
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(snapshot),
+            ("signal_below_configured_threshold_alarm_disabled",),
+        )
+
     def test_signalpc_threshold_edge_respects_lt_and_lte_comparators(self) -> None:
         lte_snapshot = {
             "signalpc": "5.0",
+            "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lte",
         }
         lt_snapshot = {
             "signalpc": "5.0",
+            "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lt",
         }
 
         self.assertEqual(derive_spot_diagnostic_evidence_codes(lte_snapshot), ("signal_below_threshold",))
-        self.assertEqual(derive_spot_diagnostic_evidence_codes(lt_snapshot), ())
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(lt_snapshot),
+            ("signal_at_or_above_configured_threshold",),
+        )
 
-    def test_signalpc_without_valid_threshold_or_invalid_value_does_not_set_low(self) -> None:
+    def test_signalpc_without_threshold_records_threshold_unknown(self) -> None:
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes({"signalpc": "3.2"}),
+            ("signalpc_present_threshold_unknown",),
+        )
+
+    def test_signalpc_at_or_above_configured_threshold_records_non_low_evidence(self) -> None:
+        snapshot = {
+            "signalpc": "6.0",
+            "low_signal_alarm_enabled": False,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+        }
+
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(snapshot),
+            ("signal_at_or_above_configured_threshold",),
+        )
+
+    def test_invalid_signalpc_value_does_not_set_low(self) -> None:
         cases = [
-            {"signalpc": "3.2"},
-            {"signalpc": "3.2", "low_signal_threshold_pc": "5.0"},
-            {
-                "signalpc": "3.2",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "unknown",
-            },
-            {
-                "signalpc": "5.1",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "lte",
-            },
-            {
-                "signalpc": "not-a-number",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "lte",
-            },
-            {
-                "signalpc": "nan",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "lte",
-            },
-            {
-                "signalpc": "101",
-                "low_signal_threshold_pc": "5.0",
-                "low_signal_comparator": "lte",
-            },
-            {
-                "signalpc": "3.2",
-                "low_signal_threshold_pc": "nan",
-                "low_signal_comparator": "lte",
-            },
+            {"signalpc": "not-a-number", "low_signal_threshold_pc": "5.0", "low_signal_comparator": "lte"},
+            {"signalpc": "nan", "low_signal_threshold_pc": "5.0", "low_signal_comparator": "lte"},
+            {"signalpc": "101", "low_signal_threshold_pc": "5.0", "low_signal_comparator": "lte"},
         ]
 
         for snapshot in cases:
             with self.subTest(snapshot=snapshot):
                 self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ())
+
+    def test_valid_signalpc_with_invalid_threshold_records_threshold_unknown(self) -> None:
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(
+                {"signalpc": "3.2", "low_signal_threshold_pc": "nan", "low_signal_comparator": "lte"}
+            ),
+            ("signalpc_present_threshold_unknown",),
+        )
+
+    def test_peak_picker_disabled_does_not_emit_reset_evidence(self) -> None:
+        snapshot = {"peak_picker_enabled": False, "peak_picker_off_mode": "reset"}
+
+        self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ())
 
 
 if __name__ == "__main__":

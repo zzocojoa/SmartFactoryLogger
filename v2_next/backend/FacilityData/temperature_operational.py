@@ -12,6 +12,7 @@ from backend.FacilityData.spot_observation import (
     SpotRawValidity,
     SpotSourceFreshness,
 )
+from backend.FacilityData.spot_low_signal import derive_low_signal_evidence
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -189,6 +190,53 @@ def _derive_expectedness(status: str, phase: str) -> str:
     return "unknown"
 
 
+def derive_under_range_cause_candidate(
+    *,
+    alarmstatus: int | None,
+    signalpc: float | None,
+    low_signal_alarm_enabled: bool,
+    low_signal_threshold_pc: float | None,
+    low_signal_comparator: str | None,
+    phase_evidence_codes: Iterable[str] = (),
+    peak_picker_enabled: bool = False,
+    peak_picker_off_mode: Optional[str] = None,
+) -> dict[str, object]:
+    low_signal = derive_low_signal_evidence(
+        alarmstatus=alarmstatus,
+        signalpc=signalpc,
+        low_signal_alarm_enabled=low_signal_alarm_enabled,
+        low_signal_threshold_pc=low_signal_threshold_pc,
+        low_signal_comparator=low_signal_comparator,
+    )
+    evidence = [str(code) for code in low_signal["evidence_codes"]]
+    evidence.extend(str(code) for code in phase_evidence_codes if str(code))
+
+    if "alarm_low_signal" in evidence:
+        return {
+            "temperature_under_range_cause_candidate": "low_signal_candidate",
+            "temperature_cause_confidence": 0.85,
+            "temperature_cause_evidence_codes": sorted(set(evidence)),
+        }
+    if low_signal["numeric_low_signal"] is True and low_signal_alarm_enabled is True:
+        return {
+            "temperature_under_range_cause_candidate": "low_signal_candidate",
+            "temperature_cause_confidence": 0.65,
+            "temperature_cause_evidence_codes": sorted(set(evidence)),
+        }
+    if peak_picker_enabled and _is_peak_picker_reset_mode(peak_picker_off_mode):
+        evidence.append("peak_picker_off_mode_reset_configured")
+        return {
+            "temperature_under_range_cause_candidate": "peak_picker_reset_candidate",
+            "temperature_cause_confidence": 0.75,
+            "temperature_cause_evidence_codes": sorted(set(evidence)),
+        }
+    return {
+        "temperature_under_range_cause_candidate": "unknown",
+        "temperature_cause_confidence": 0.0,
+        "temperature_cause_evidence_codes": sorted(set(evidence)),
+    }
+
+
 def _derive_under_range_cause(
     status: str,
     phase: str,
@@ -206,20 +254,27 @@ def _derive_under_range_cause(
     }:
         evidence.add("phase_setup_candidate")
     sorted_evidence = sorted(evidence)
+    if "alarm_low_signal" in evidence:
+        return "low_signal_candidate", 0.85, _json_list(sorted_evidence)
+    if "signal_below_threshold" in evidence:
+        return "low_signal_candidate", 0.65, _json_list(sorted_evidence)
     if "peak_picker_off_mode_reset_configured" in evidence:
         return "peak_picker_reset_candidate", 0.75, _json_list(sorted_evidence)
     if "target_absent_verified" in evidence or "target_out_of_fov_evidence" in evidence:
         return "target_out_of_fov_candidate", 0.6, _json_list(sorted_evidence)
     if "actuator_scanning" in evidence or "actuator_position_changed" in evidence:
         return "alignment_change_candidate", 0.55, _json_list(sorted_evidence)
-    if "signal_below_threshold" in evidence or "alarm_low_signal" in evidence:
-        return "low_signal_candidate", 0.6, _json_list(sorted_evidence)
     if {
         "measurement_range_configured",
         "detector_below_measurement_range",
     }.issubset(evidence):
         return "below_measurement_range_candidate", 0.65, _json_list(sorted_evidence)
     return "unknown", 0.0, _json_list(sorted_evidence)
+
+
+def _is_peak_picker_reset_mode(value: Optional[str]) -> bool:
+    normalized = "" if value is None else str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized in {"reset", "reset_output", "resetting", "off_mode_reset"}
 
 
 def _json_list(values: list[str]) -> str:

@@ -84,7 +84,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
             "low_signal_candidate",
         )
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.6")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.65")
         self.assertEqual(
             row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
             '["phase_setup_candidate","signal_below_threshold"]',
