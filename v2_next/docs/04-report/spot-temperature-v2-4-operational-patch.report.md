@@ -286,7 +286,12 @@ Post-merge local evidence update, 2026-06-26:
 - Corrected build order is backend PyInstaller first, then NSIS: `backend/.venv/Scripts/python.exe -m PyInstaller --noconfirm --clean build_specs/SmartFactoryBackend.spec` from `backend/`, then `npm run dist` from `v2_next/`.
 - The corrected backend executable `backend/dist/SmartFactoryBackend.exe` was rebuilt at 2026-06-26 11:36:56 with SHA-256 `8833596CD7865AD148EF1FE243055485FC67214BAF6682554A67C705372E7FCA`.
 - The corrected NSIS installer was rebuilt at 2026-06-26 11:37:53 with SHA-256 `200FF781FE0385ACA0EEB623004365924BE751477C24C1C8BACD9D6266C31C94`; this supersedes the `61D25C...` installer.
-- Remaining gap: install the corrected `200FF781...` installer, confirm the server creates/selects a current-header v2.4 CSV with `process_segment_id`, then run every real downstream CSV consumer replay and record the result before broader operational promotion.
+- Operator-provided server-PC evidence after installing the corrected `200FF781...` installer reported `runtime_kind=frozen` and `executable_mtime=2026-06-26T11:37:50`.
+- Corrected server-PC full-bundle smoke PASS: `spot_temperature.v2_4_operational.enabled=true`, `schema_version=2.4.0`, `rows_total=450`, `observation_fact_enabled=true`, `observation_fact_link_failure_count=0`, and `observation_fact_write_failure_count=0`.
+- Corrected server-PC CSV header PASS: `Factory_Integrated_Log_v2_20260626_114019.csv` was selected as the current-header CSV, its sidecar metadata and `spot_observation_fact.csv` existed, and the header contained `process_segment_id`, `changeover_candidate_id`, and `spot_observation_key`.
+- Corrected server-PC row sample PASS: latest sampled rows `444` through `453` had `schema_version=2.4.0`, `temperature_output_status=valid`, `process_phase_candidate=production_stable`, non-empty `process_segment_id=seg_f2752e5385d5c615`, blank `changeover_candidate_id`, and non-empty `spot_observation_key`. Phase counts were `production_stable=452` and `unknown=1`.
+- Corrected server-PC metadata PASS: `schema_version=2.4.0`, `active_schema_version=2.4.0`, and all promotion bundle flags were `true`.
+- Remaining gap: run every real downstream CSV consumer against the corrected current-header server CSV and record consumer name/version, input path, row count, exit status, rejected row count, and handling of `process_segment_id` plus `production_stabilizing` before broader operational promotion.
 
 ---
 
