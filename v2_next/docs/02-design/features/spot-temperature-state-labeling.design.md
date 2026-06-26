@@ -18,7 +18,7 @@ v2.3.0 is an instrumentation and shadow-logging schema. It must not be reinterpr
 - Keep extrusion process state, SPOT target state, SPOT poll/cache/source freshness, and final temperature usability status as separate concepts.
 - Preserve raw SPOT temperature evidence before validation normalizes invalid values to `None`.
 - Avoid label leakage by separating realtime online labels from post-hoc inferred segment labels.
-- Keep post-hoc inferred segment fields out of realtime append-only CSV rows.
+- Keep post-hoc inferred segment labels out of realtime append-only CSV rows. Later v2.4 operational schema work may add causal realtime segment keys, but not future-context inferred labels.
 - Preserve existing v2 `sample_seq`; do not append a duplicate column with the same name.
 - Treat `Temperature` as a legacy effective value whose actual measurement time and origin must be read from metadata fields.
 - Append new CSV columns only after schema rollover checks prevent mixed-header files.
@@ -521,7 +521,7 @@ spot_value_age_ms
 
 The existing v2 `sample_seq` column is reused and must not be appended again. Row identity is `(logger_service_instance_id, sample_seq)`.
 
-The following fields are explicitly excluded from realtime append-only CSV rows:
+For v2.3 instrumentation rows, the following fields are explicitly excluded from realtime append-only CSV rows. v2.4 operational schema work may add a causal realtime process_segment_id; the inferred state/confidence fields remain excluded:
 
 ```text
 process_segment_id

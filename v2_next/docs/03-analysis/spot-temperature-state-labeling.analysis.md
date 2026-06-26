@@ -18,7 +18,7 @@ Operational promotion readiness: blocked
 
 ## Summary
 
-The current implementation matches the approved instrumentation/shadow design. CSV v2.3.0 remains a permanent shadow schema, realtime CSV rows do not carry future-context segment labels, and `Temperature` remains a legacy effective value with origin/time fields required for interpretation.
+The current implementation matches the approved instrumentation/shadow design. CSV v2.3.0 remains a permanent shadow schema, realtime CSV rows do not carry future-context inferred labels, and `Temperature` remains a legacy effective value with origin/time fields required for interpretation. Later v2.4 operational schema work separately promotes a causal `process_segment_id` realtime key; that does not promote post-hoc inferred segment labels to realtime truth.
 
 No server-PC SPOT behavior is assumed as fact. `no_target` remains available only through verified sentinel configuration, and the current metadata records `server_pc_verified=false` for the sentinel map.
 
@@ -62,7 +62,7 @@ No server-PC SPOT behavior is assumed as fact. `no_target` remains available onl
   Evidence: `backend/FacilityData/process_state.py::infer_process_segment_facts` and `scripts/infer_process_segments_for_csv.py`.
 - [x] `billet_change_pause` is inferred only post-hoc when stopped segment is between same-context extrusion segments.
   Evidence: `ProcessSegmentFactInferenceTests` in `backend/tests/test_real_plc.py`.
-- [x] Realtime v2 columns exclude `process_segment_id`, `extruder_process_state_inferred`, and related future-context fields.
+- [x] Realtime v2.3 columns exclude `process_segment_id`, `extruder_process_state_inferred`, and related future-context fields. v2.4 operational schema work supersedes only the `process_segment_id` exclusion with a causal realtime segment key.
   Evidence: `ProcessSegmentFactInferenceTests::test_realtime_v2_columns_do_not_contain_posthoc_segment_fields`.
 - [x] CSV replay preserves v2.3 shadow fields and blank Temperature semantics.
   Evidence: `backend/FacilityData/drivers/csv_replay.py`; `backend/tests/test_csv_replay_driver.py`.

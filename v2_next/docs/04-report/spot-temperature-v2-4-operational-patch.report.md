@@ -64,7 +64,7 @@ PR #68 is merge-ready for the default-off v2.4 implementation scope at report ti
 - [x] `temperature_output_status`, `temperature_unavailable_reason`, expectedness, cause, confidence, and row freshness fields added.
 - [x] stale row precedence prevents old sentinel values from being interpreted as current operational state.
 - [x] realtime `process_phase_candidate` implemented without SPOT status or future context.
-- [x] Count 0..2 production motion is kept out of `production_stable` through the startup promotion gate; Count 3 remains eligible for stable promotion.
+- [x] Count 0..2 production motion is kept out of `production_stable`; general rows use `process_segment_id`, and eligible changeover lifecycles carry one `changeover_candidate_id` through `production_stabilizing`.
 - [x] CSV logger runtime state supplies recent production motion, count hold duration, and previous operator context.
 - [x] v2.3/v2.4 schema constants split and feature-flagged at file-open time.
 - [x] known v2.3/v2.4 header transitions roll over instead of mixing schemas in one CSV.
@@ -183,7 +183,7 @@ CSV and fact outputs:
   - `temperature_unavailable_reason`
   - `process_phase_candidate`
   - `spot_observation_key`
-- `[operator-provided evidence]` latest sampled realtime CSV rows `6140` through `6144` reported `schema_version=2.4.0`, `temperature_output_status=valid`, non-empty `process_phase_candidate=idle_candidate`, and non-empty `spot_observation_key`.
+- `[operator-provided evidence]` latest sampled realtime CSV rows `6140` through `6144` reported `schema_version=2.4.0`, `temperature_output_status=valid`, non-empty `process_phase_candidate=idle_candidate`, non-empty `process_segment_id`, blank `changeover_candidate_id`, and non-empty `spot_observation_key`.
 - `[operator-provided evidence]` sidecar metadata parsed as JSON with `schema_metadata.schema_version=2.4.0`, `spot_temperature_shadow_metadata.schema_version=2.4.0`, and promotion bundle flags all `true`.
 
 Verdict: PASS for the controlled three-flag full-bundle server smoke. This validates server installation, frozen runtime startup, v2.4 operational health counters, realtime v2.4 CSV field emission, SPOT observation fact emission, and sidecar metadata readability under the enabled promotion bundle.
@@ -207,7 +207,7 @@ Scope note: This smoke does not claim downstream consumer compatibility, legacy 
 - [x] Add first-class v2.4 aggregate counters to `/health` before declaring long-running operational observability complete.
 - [x] Add runtime config guardrails so partial promotion flag combinations cannot be accidentally used in production rollout.
 - [x] Run controlled server-PC promotion smoke with all three promotion flags enabled together. Evidence level: [operator-provided evidence].
-- [ ] Design `production_stabilizing` as a separate future enum only after reviewing CSV schema, validator, and downstream consumer compatibility.
+- [x] Split `process_segment_id` from `changeover_candidate_id`; `production_stabilizing` is now the terminal lifecycle candidate for eligible changeover IDs.
 - [ ] Verify downstream v2.4 consumer compatibility before any legacy `Temperature_quality` semantic promotion.
 - [ ] Keep rollback drill documented: disable `CSV_V2_OPERATIONAL_FIELDS_ENABLED` and roll over to v2.3-compatible output if v2.4 consumers fail.
 

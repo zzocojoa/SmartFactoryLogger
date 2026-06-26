@@ -167,7 +167,36 @@ class ChangeoverCandidateResolutionFactTests(unittest.TestCase):
             "pre_changeover_hold_candidate_confirmed_by_future_operator_context_changed",
         )
 
-    def test_repeated_candidate_id_is_split_by_contiguous_occurrence(self) -> None:
+    def test_general_idle_candidate_id_is_rejected_not_confirmed_as_changeover(self) -> None:
+        rows = [
+            _row(500, candidate_id="chg_idle", phase="idle_candidate", timestamp_utc="2026-06-25T00:00:00Z"),
+            _row(501, candidate_id="chg_idle", phase="idle_candidate", timestamp_utc="2026-06-25T00:00:01Z"),
+        ]
+
+        resolution_facts = infer_changeover_candidate_resolution_facts(rows, source_file_id="sha256:abc")
+        event_facts = infer_process_phase_event_facts(rows, source_file_id="sha256:abc")
+
+        self.assertEqual(resolution_facts[0]["confirmation_outcome"], "rejected")
+        self.assertEqual(resolution_facts[0]["resolution_reason"], "idle_candidate_mapped_posthoc")
+        self.assertEqual(event_facts[0]["process_phase_confirmed"], "unknown")
+        self.assertEqual(event_facts[0]["phase_confirmation_state"], "posthoc_rejected")
+
+    def test_lifecycle_candidate_confirms_terminal_production_stabilizing_phase(self) -> None:
+        rows = [
+            _row(600, candidate_id="chg_lifecycle", phase="die_change_candidate"),
+            _row(601, candidate_id="chg_lifecycle", phase="setup_alignment_candidate"),
+            _row(602, candidate_id="chg_lifecycle", phase="production_stabilizing"),
+        ]
+
+        resolution_facts = infer_changeover_candidate_resolution_facts(rows, source_file_id="sha256:abc")
+        event_facts = infer_process_phase_event_facts(rows, source_file_id="sha256:abc")
+
+        self.assertEqual(len(resolution_facts), 1)
+        self.assertEqual(resolution_facts[0]["confirmation_outcome"], "confirmed")
+        self.assertEqual(resolution_facts[0]["resolution_reason"], "production_stabilizing_mapped_posthoc")
+        self.assertEqual(event_facts[0]["process_phase_confirmed"], "production_stabilizing")
+        self.assertEqual(event_facts[0]["phase_confirmation_state"], "posthoc_confirmed")
+    def test_same_candidate_id_across_noncontiguous_rows_is_one_lifecycle(self) -> None:
         rows = [
             {
                 "changeover_candidate_id": "chg_repeat",
@@ -202,16 +231,12 @@ class ChangeoverCandidateResolutionFactTests(unittest.TestCase):
         resolution_facts = infer_changeover_candidate_resolution_facts(rows, source_file_id="sha256:abc")
         event_facts = infer_process_phase_event_facts(rows, source_file_id="sha256:abc")
 
-        self.assertEqual([fact["changeover_candidate_id"] for fact in resolution_facts], [
-            "chg_repeat__seq_1",
-            "chg_repeat__seq_4",
-        ])
-        self.assertEqual([fact["sample_seq_start"] for fact in resolution_facts], ["1", "4"])
-        self.assertEqual([fact["sample_seq_end"] for fact in resolution_facts], ["2", "4"])
-        self.assertEqual([fact["source_changeover_candidate_id"] for fact in event_facts], [
-            "chg_repeat__seq_1",
-            "chg_repeat__seq_4",
-        ])
+        self.assertEqual(len(resolution_facts), 1)
+        self.assertEqual(resolution_facts[0]["changeover_candidate_id"], "chg_repeat")
+        self.assertEqual(resolution_facts[0]["sample_seq_start"], "1")
+        self.assertEqual(resolution_facts[0]["sample_seq_end"], "4")
+        self.assertEqual(len(event_facts), 1)
+        self.assertEqual(event_facts[0]["source_changeover_candidate_id"], "chg_repeat")
 
 
 if __name__ == "__main__":

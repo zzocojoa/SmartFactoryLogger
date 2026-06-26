@@ -69,6 +69,8 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "under_range")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], "setup_candidate")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_segment_id")], "")
+        self.assertTrue(row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")].startswith("chg_"))
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_observation_key")], "spot-service-1:14")
 
     def test_low_count_high_motion_under_range_does_not_promote_to_production_stable(self) -> None:
@@ -156,8 +158,15 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             self.build_v2_row(service, valid_again_row, 5),
         ]
 
+        segment_id = rows[0][V2_4_CSV_COLUMNS.index("process_segment_id")]
+        pre_changeover_id = rows[1][V2_4_CSV_COLUMNS.index("changeover_candidate_id")]
+
         self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
+        self.assertTrue(segment_id.startswith("seg_"))
+        self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_segment_id")], "")
+        self.assertTrue(pre_changeover_id.startswith("chg_"))
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "expected_candidate")
         self.assertEqual(
@@ -165,9 +174,13 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             "below_measurement_range_candidate",
         )
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
+        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], pre_changeover_id)
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("temperature_output_status")], "source_error")
         self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
+        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], pre_changeover_id)
         self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
+        self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
+        self.assertTrue(rows[4][V2_4_CSV_COLUMNS.index("process_segment_id")].startswith("seg_"))
 
     def test_build_v2_row_passes_previous_operator_context_for_stopped_change(self) -> None:
         service = CSVLoggerService()
@@ -206,8 +219,87 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], "die_change_candidate")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "expected_candidate")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_segment_id")], "")
         self.assertTrue(row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")].startswith("chg_"))
 
+    def test_changeover_candidate_id_spans_lifecycle_and_excludes_general_segments(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        production_row = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:00",
+                "Speed": 1.0,
+                "Press": 35.0,
+                "Count": 20,
+                "Spot": 500.0,
+                "extruder_process_state_online": "extruding",
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "temperature_value_origin": "current_observation",
+                "cache_fallback_allowed": True,
+                "spot_device_status_code": None,
+                "spot_temperature_observed_c": 500.0,
+                "spot_temperature_raw": "500.0",
+            }
+        )
+        die_change_row = production_row.model_copy(
+            update={
+                "Time": "2026-06-25T08:00:05",
+                "Speed": 0.0,
+                "Press": 0.0,
+                "Count": 20,
+                "Product_No_operator": "200",
+                "Mold_No_operator": "8",
+                "extruder_process_state_online": "stopped",
+            }
+        )
+        setup_alignment_row = die_change_row.model_copy(
+            update={
+                "Time": "2026-06-25T08:00:10",
+                "Speed": 1.0,
+                "Press": 35.0,
+                "Count": 0,
+                "extruder_process_state_online": "extruding",
+            }
+        )
+        stabilizing_row = setup_alignment_row.model_copy(
+            update={
+                "Time": "2026-06-25T08:00:15",
+                "Count": 3,
+            }
+        )
+        stable_after_row = stabilizing_row.model_copy(
+            update={
+                "Time": "2026-06-25T08:00:20",
+                "Count": 4,
+            }
+        )
+
+        rows = [
+            self.build_v2_row(service, production_row, 1),
+            self.build_v2_row(service, die_change_row, 2),
+            self.build_v2_row(service, setup_alignment_row, 3),
+            self.build_v2_row(service, stabilizing_row, 4),
+            self.build_v2_row(service, stable_after_row, 5),
+        ]
+        segment_id_before = rows[0][V2_4_CSV_COLUMNS.index("process_segment_id")]
+        changeover_id = rows[1][V2_4_CSV_COLUMNS.index("changeover_candidate_id")]
+        segment_id_after = rows[4][V2_4_CSV_COLUMNS.index("process_segment_id")]
+
+        self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
+        self.assertTrue(segment_id_before.startswith("seg_"))
+        self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "die_change_candidate")
+        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "setup_alignment_candidate")
+        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stabilizing")
+        self.assertTrue(changeover_id.startswith("chg_"))
+        for row in rows[1:4]:
+            self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_segment_id")], "")
+            self.assertEqual(row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")], changeover_id)
+        self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
+        self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
+        self.assertTrue(segment_id_after.startswith("seg_"))
+        self.assertNotEqual(segment_id_after, segment_id_before)
     def test_stale_row_preserves_raw_device_status_but_outputs_stale(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
