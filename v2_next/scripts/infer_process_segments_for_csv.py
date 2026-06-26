@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from hashlib import sha256
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 from backend.FacilityData.process_state import PROCESS_SEGMENT_FACT_COLUMNS, infer_process_segment_facts
 
 
