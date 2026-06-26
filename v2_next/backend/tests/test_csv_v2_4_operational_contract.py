@@ -14,7 +14,10 @@ from backend.FacilityData.repository import (
     V2_4_CSV_COLUMNS,
 )
 from backend.FacilityData.schemas import FactoryData
-from scripts.validate_csv_v2_shadow import validate_v2_4_operational_invariants
+from scripts.validate_csv_v2_shadow import (
+    validate_spot_configuration_snapshot,
+    validate_v2_4_operational_invariants,
+)
 
 
 class CsvV24OperationalContractTests(unittest.TestCase):
@@ -372,6 +375,91 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
 
         self.assertEqual(validate_v2_4_operational_invariants([row], header), [])
+
+    def test_spot_configuration_validator_accepts_non_current_valid_profile_by_default(self) -> None:
+        metadata = {
+            "spot_configuration_snapshot": {
+                "spot_model_info": "SPOT+ AL",
+                "spot_app_mode": "App2: AL E",
+                "spot_range_min_c": 100.0,
+                "spot_range_max_c": 1200.0,
+                "spot_analog_4ma_c": 100.0,
+                "spot_analog_20ma_c": 1000.0,
+                "low_signal_alarm_enabled": True,
+                "low_signal_threshold_pc": 10.0,
+                "low_signal_comparator": "lte",
+                "low_signal_comparator_verified": True,
+                "peak_picker_enabled": True,
+                "limiter_enabled": True,
+                "averager_enabled": False,
+                "modemaster_enabled": False,
+                "spot_ratio_raw_enabled": False,
+                "window_obscuration_pc": 25.0,
+                "focus_mm": 5000,
+                "config_operator_verified": True,
+            }
+        }
+
+        self.assertEqual(validate_spot_configuration_snapshot(metadata, [], []), [])
+
+    def test_spot_configuration_validator_requires_current_server_profile_only_when_requested(self) -> None:
+        metadata = {
+            "spot_configuration_snapshot": {
+                "spot_model_info": "SPOT+ AL",
+                "spot_app_mode": "App2: AL E",
+                "spot_range_min_c": 100.0,
+                "spot_range_max_c": 1200.0,
+                "spot_analog_4ma_c": 100.0,
+                "spot_analog_20ma_c": 1000.0,
+                "low_signal_alarm_enabled": True,
+                "low_signal_threshold_pc": 10.0,
+                "low_signal_comparator": "lte",
+                "low_signal_comparator_verified": True,
+                "peak_picker_enabled": True,
+                "limiter_enabled": True,
+                "averager_enabled": False,
+                "modemaster_enabled": False,
+                "spot_ratio_raw_enabled": False,
+                "window_obscuration_pc": 25.0,
+                "focus_mm": 5000,
+                "config_operator_verified": True,
+            }
+        }
+
+        failures = validate_spot_configuration_snapshot(
+            metadata,
+            [],
+            [],
+            require_current_server_promotion_profile=True,
+        )
+
+        self.assertTrue(
+            any("current server promotion profile spot_configuration_snapshot.low_signal_threshold_pc" in failure
+                for failure in failures)
+        )
+        self.assertTrue(
+            any("current server promotion profile spot_configuration_snapshot.focus_mm" in failure for failure in failures)
+        )
+
+    def test_spot_configuration_validator_still_rejects_invalid_generic_ranges(self) -> None:
+        metadata = {
+            "spot_configuration_snapshot": {
+                "low_signal_alarm_enabled": False,
+                "low_signal_threshold_pc": 101.0,
+                "low_signal_comparator": "bad",
+                "low_signal_comparator_verified": False,
+                "spot_range_min_c": 900.0,
+                "spot_range_max_c": 200.0,
+                "window_obscuration_pc": -1.0,
+            }
+        }
+
+        failures = validate_spot_configuration_snapshot(metadata, [], [])
+
+        self.assertIn("spot_configuration_snapshot.low_signal_threshold_pc must be 0.0..100.0", failures)
+        self.assertIn("spot_configuration_snapshot.low_signal_comparator must be lt/lte/unknown", failures)
+        self.assertIn("spot_configuration_snapshot.spot_range_min_c must be <= spot_range_max_c", failures)
+        self.assertIn("spot_configuration_snapshot.window_obscuration_pc must be 0.0..100.0", failures)
 
     def test_v2_4_runtime_summary_counts_operational_rows(self) -> None:
         service = CSVLoggerService()
