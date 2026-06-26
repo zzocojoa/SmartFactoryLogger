@@ -116,6 +116,7 @@ V2_4_OPERATIONAL_COLUMNS = [
     "process_phase_candidate",
     "process_phase_rule_version",
     "phase_confirmation_state",
+    "process_segment_id",
     "changeover_candidate_id",
     "spot_observation_key",
 ]
@@ -168,11 +169,14 @@ Metadata must record `active_schema_version`, active column hash, operational fl
 | `spot_effective_freshness_at_row` | enum | `fresh`, `stale`, `unknown` | row freshness classifier |
 | `spot_effective_value_age_ms_at_row` | float/blank | finite non-negative | monotonic value age |
 | `spot_row_age_clock_status` | enum | `ok`, `clock_anomaly`, `unknown` | row clock classifier |
-| `process_phase_candidate` | enum | `production_stable`, `setup_candidate`, `pre_changeover_hold_candidate`, `die_change_candidate`, `setup_alignment_candidate`, `changeover_candidate`, `idle_candidate`, `unknown` | process candidate classifier |
+| `process_phase_candidate` | enum | `production_stable`, `setup_candidate`, `pre_changeover_hold_candidate`, `die_change_candidate`, `setup_alignment_candidate`, `changeover_candidate`, `production_stabilizing`, `idle_candidate`, `unknown` | process candidate classifier |
 | `process_phase_rule_version` | text | deterministic version | process candidate classifier |
 | `phase_confirmation_state` | enum | `realtime_candidate`, `unknown`, blank | realtime row only |
-| `changeover_candidate_id` | text/blank | deterministic candidate id | process candidate classifier |
+| `process_segment_id` | text/blank | `seg_` + stable hash | general process segment key for production/idle/unknown rows |
+| `changeover_candidate_id` | text/blank | `chg_` + stable hash from `logger_service_instance_id` and `candidate_start_sample_seq` | changeover lifecycle key only |
 | `spot_observation_key` | text/blank | `{spot_service_instance_id}:{spot_poll_seq}` | SPOT snapshot |
+
+ID contract note: `process_segment_id` owns general production/idle/unknown segments. `changeover_candidate_id` is reserved for changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be regenerated from phase/Count on each row. A lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`.
 
 Realtime CSV는 confirmed `changeover_event_id`를 소유하지 않는다.
 
@@ -203,7 +207,7 @@ count(changeover_candidate_resolution_fact where changeover_candidate_id = X) ==
 confirmation_outcome in confirmed/rejected/merged/split
 ```
 
-A split still has one candidate-resolution row; multiple confirmed event rows are represented in `process_phase_event_fact` and linked through `source_changeover_candidate_id`.
+A lifecycle ID may contain non-contiguous realtime candidate rows; post-hoc grouping keeps one candidate-resolution row and one terminal `process_phase_event_fact` row for that `changeover_candidate_id`. Legacy or polluted IDs whose rows only contain general `idle_candidate`, `production_stable`, or `unknown` phases are excluded from changeover facts.
 
 ### 3.4 Post-Hoc Process Phase Event Fact
 
@@ -230,11 +234,11 @@ Candidate-to-confirmed mapping:
 ```text
 setup_candidate               -> setup
 setup_alignment_candidate     -> setup_alignment
-pre_changeover_hold_candidate -> pre_changeover_hold
+pre_changeover_hold_candidate -> pre_changeover_hold only with future evidence; otherwise unknown/posthoc_rejected
 die_change_candidate          -> die_change
 changeover_candidate          -> changeover
-production_stable             -> production_stable
-idle_candidate                -> idle
+production_stable             -> excluded from changeover facts; use process_segment_id-based segment analysis
+idle_candidate                -> excluded from changeover facts; use process_segment_id-based segment analysis
 unknown                       -> unknown
 ```
 
@@ -410,15 +414,18 @@ Realtime phase is candidate-only and cannot use SPOT status as an input. Rules m
 | Condition | `process_phase_candidate` |
 |---|---|
 | Count in 0..2 and low speed/press | `setup_candidate` |
+| Count in 0..2 and production motion or online extruding before Count 3 is observed | `setup_alignment_candidate` |
 | Count > 2, recent production motion exists, currently stopped, Speed/MainPress/BilletLength are stopped, and Count is held for the configured duration | `pre_changeover_hold_candidate` |
 | current row has operator-entered die/mold change marker or mold id differs from the last committed operator context while stopped | `die_change_candidate` |
 | product or mold context transition is already observed at or before the current row while stopped | `changeover_candidate` |
 | actuator scan/alignment evidence while stopped | `setup_alignment_candidate` |
-| sustained extruding | `production_stable` |
+| sustained extruding outside the Count 0..2 startup gate, including Count >= 3 or unknown Count | `production_stable`; if an eligible changeover lifecycle is active, the first production row becomes `production_stabilizing` |
 | idle low speed/press without setup evidence | `idle_candidate` |
 | insufficient context | `unknown` |
 
-`pre_changeover_hold_candidate` must not look ahead to a later Count reset or future 품번/금형 변경. Later Count reset or product/mold change may only be used by post-hoc facts to confirm `pre_changeover_hold`.
+`pre_changeover_hold_candidate` must not look ahead to a later Count reset or future product/mold change. Later Count reset, product/mold change, or die-change marker may only be used by post-hoc facts to confirm `pre_changeover_hold` within the evidence window. Without that future evidence, the fact row must stay `unknown` with `phase_confirmation_state=posthoc_rejected`.
+
+The Count 0..2 stable promotion gate is intentionally process-only. It does not use SPOT status. Count 3 is the first low-count boundary that may leave startup alignment; if an eligible changeover lifecycle is active, that terminal row is `production_stabilizing`, otherwise it may be `production_stable`.
 
 Candidate-to-confirmed mapping is fixed in Section 3.4 and must be covered by tests.
 
@@ -528,8 +535,8 @@ The two timeout rows must not reuse the earlier valid temperature.
 - realtime nonblank `spot_observation_key` links to exactly one fact row when `SPOT_OBSERVATION_FACT_ENABLED=true`.
 - fact writer failure does not stop SPOT polling.
 - post-hoc script writes resolution and event facts without mutating source CSV.
-- every `changeover_candidate_id` has exactly one row in `changeover_candidate_resolution_fact`.
-- split candidates have one resolution row and one or more linked `process_phase_event_fact` rows.
+- every `changeover_candidate_id` has exactly one row in `changeover_candidate_resolution_fact`, and general idle/production rows use `process_segment_id` instead of `changeover_candidate_id`.
+- a repeated non-contiguous `changeover_candidate_id` still produces one lifecycle resolution row and one terminal `process_phase_event_fact` row.
 - promotion bundle requires `CSV_V2_OPERATIONAL_FIELDS_ENABLED=true`, `SPOT_OBSERVATION_FACT_ENABLED=true`, and `PROCESS_PHASE_EVENT_FACT_ENABLED=true` together.
 
 ### 7.3 Evidence Replay### 7.3 Evidence Replay
@@ -597,7 +604,7 @@ Match rate alone is not sufficient for report or operational promotion.
 | Observation uniqueness | observation fact has zero duplicate `{spot_service_instance_id, spot_poll_seq}` keys |
 | Link coverage | when the promotion bundle is enabled, each realtime nonblank `spot_observation_key` links to exactly one fact row |
 | Candidate lifecycle integrity | every `changeover_candidate_id` has exactly one terminal row in `changeover_candidate_resolution_fact` and no orphan event rows |
-| Split grain integrity | split candidates have one resolution row and multiple linked event rows only when needed |
+| Lifecycle grain integrity | repeated non-contiguous `changeover_candidate_id` values still produce one resolution row and one terminal event row |
 | Failure isolation | fact writer failure does not stop SPOT polling |
 | Future-context isolation | realtime candidate logic does not use later Count reset or product/mold changes |
 | Compatibility | v2.3 and v2.4 validator plus downstream consumer checks pass |

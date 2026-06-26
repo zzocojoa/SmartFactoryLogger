@@ -189,6 +189,7 @@ V2_4_OPERATIONAL_COLUMNS = [
     "process_phase_candidate",
     "process_phase_rule_version",
     "phase_confirmation_state",
+    "process_segment_id",
     "changeover_candidate_id",
     "spot_observation_key",
 ]
@@ -203,6 +204,20 @@ V2_CSV_COLUMNS = V2_3_CSV_COLUMNS
 CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
 
 
+_CHANGEOVER_LIFECYCLE_PHASES = {
+    "setup_candidate",
+    "pre_changeover_hold_candidate",
+    "die_change_candidate",
+    "setup_alignment_candidate",
+    "changeover_candidate",
+}
+_CHANGEOVER_TERMINAL_EVIDENCE_PHASES = {
+    "setup_candidate",
+    "die_change_candidate",
+    "setup_alignment_candidate",
+    "changeover_candidate",
+}
+_PROCESS_SEGMENT_PHASES = {"production_stable", "idle_candidate", "unknown"}
 @dataclass(frozen=True)
 class V2CsvContract:
     schema_version: str
@@ -218,6 +233,12 @@ class _ProcessPhaseRuntimeState:
     count_value: Optional[int] = None
     count_first_observed_at: Optional[datetime] = None
     count_recent_production_motion: bool = False
+    active_changeover_candidate_id: Optional[str] = None
+    active_changeover_start_sample_seq: Optional[int] = None
+    active_changeover_terminal_eligible: bool = False
+    process_segment_id: Optional[str] = None
+    process_segment_phase: Optional[str] = None
+    process_segment_start_sample_seq: Optional[int] = None
 
 
 def _v2_column_hash(columns: Iterable[str]) -> str:
@@ -927,20 +948,24 @@ class CSVLoggerService:
         ]
         return row
 
-    def _derive_process_phase_decision(self, data: FactoryData, timestamp: datetime) -> ProcessPhaseDecision:
+    def _derive_process_phase_decision(
+        self,
+        data: FactoryData,
+        timestamp: datetime,
+        sample_seq: int,
+    ) -> ProcessPhaseDecision:
         phase_input = self._process_phase_input_for_row(data, timestamp)
         if data.process_phase_candidate:
             decision = ProcessPhaseDecision(
                 process_phase_candidate=data.process_phase_candidate,
                 process_phase_rule_version=data.process_phase_rule_version or PROCESS_PHASE_RULE_VERSION,
                 phase_confirmation_state=data.phase_confirmation_state or "realtime_candidate",
-                changeover_candidate_id=data.changeover_candidate_id or "",
             )
         else:
             decision = derive_process_phase_candidate(phase_input)
+        decision = self._assign_process_phase_ids(decision, sample_seq)
         self._commit_process_phase_operator_context(data, decision)
         return decision
-
     def _process_phase_input_for_row(self, data: FactoryData, timestamp: datetime) -> ProcessPhaseInput:
         state = self._process_phase_runtime_state
         previous_product_no = state.committed_product_no
@@ -1011,6 +1036,88 @@ class CSVLoggerService:
             return
         self._process_phase_runtime_state.committed_product_no = product_no
         self._process_phase_runtime_state.committed_mold_no = mold_no
+
+    def _assign_process_phase_ids(
+        self,
+        decision: ProcessPhaseDecision,
+        sample_seq: int,
+    ) -> ProcessPhaseDecision:
+        phase = decision.process_phase_candidate or "unknown"
+        process_segment_id = ""
+        changeover_candidate_id = ""
+        close_changeover_after_row = False
+        state = self._process_phase_runtime_state
+
+        if phase == "production_stable" and state.active_changeover_candidate_id:
+            if state.active_changeover_terminal_eligible:
+                phase = "production_stabilizing"
+                changeover_candidate_id = state.active_changeover_candidate_id
+                close_changeover_after_row = True
+            else:
+                self._clear_active_changeover_candidate()
+                process_segment_id = self._process_segment_id_for_phase(phase, sample_seq)
+        elif phase in _CHANGEOVER_LIFECYCLE_PHASES or phase == "production_stabilizing":
+            self._clear_active_process_segment()
+            changeover_candidate_id = self._changeover_candidate_id_for_row(sample_seq)
+            if phase in _CHANGEOVER_TERMINAL_EVIDENCE_PHASES or phase == "production_stabilizing":
+                state.active_changeover_terminal_eligible = True
+            if phase == "production_stabilizing":
+                close_changeover_after_row = True
+        else:
+            process_segment_id = self._process_segment_id_for_phase(phase, sample_seq)
+
+        assigned = ProcessPhaseDecision(
+            process_phase_candidate=phase,
+            process_phase_rule_version=decision.process_phase_rule_version,
+            phase_confirmation_state=decision.phase_confirmation_state,
+            process_segment_id=process_segment_id,
+            changeover_candidate_id=changeover_candidate_id,
+        )
+        if close_changeover_after_row:
+            self._clear_active_changeover_candidate()
+        return assigned
+
+    def _changeover_candidate_id_for_row(self, sample_seq: int) -> str:
+        state = self._process_phase_runtime_state
+        if not state.active_changeover_candidate_id:
+            state.active_changeover_start_sample_seq = sample_seq
+            state.active_changeover_terminal_eligible = False
+            state.active_changeover_candidate_id = self._row_scoped_id(
+                "chg",
+                str(self.logger_service_instance_id),
+                str(sample_seq),
+            )
+        return state.active_changeover_candidate_id
+
+    def _clear_active_process_segment(self) -> None:
+        state = self._process_phase_runtime_state
+        state.process_segment_id = None
+        state.process_segment_phase = None
+        state.process_segment_start_sample_seq = None
+
+    def _clear_active_changeover_candidate(self) -> None:
+        state = self._process_phase_runtime_state
+        state.active_changeover_candidate_id = None
+        state.active_changeover_start_sample_seq = None
+        state.active_changeover_terminal_eligible = False
+
+    def _process_segment_id_for_phase(self, phase: str, sample_seq: int) -> str:
+        segment_phase = phase if phase in _PROCESS_SEGMENT_PHASES else "unknown"
+        state = self._process_phase_runtime_state
+        if state.process_segment_id and state.process_segment_phase == segment_phase:
+            return state.process_segment_id
+        state.process_segment_phase = segment_phase
+        state.process_segment_start_sample_seq = sample_seq
+        state.process_segment_id = self._row_scoped_id(
+            "seg",
+            str(self.logger_service_instance_id),
+            segment_phase,
+            str(sample_seq),
+        )
+        return state.process_segment_id
+
+    def _row_scoped_id(self, prefix: str, *parts: str) -> str:
+        return prefix + "_" + hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
     def _has_process_phase_production_motion(self, data: FactoryData) -> bool:
         online_state = (data.extruder_process_state_online or "").strip()
@@ -1161,7 +1268,7 @@ class CSVLoggerService:
             SPOT_TEMPERATURE_RAW_MAX_LENGTH,
         )
         contract = self._get_active_v2_contract()
-        process_phase_decision = self._derive_process_phase_decision(data, timestamp)
+        process_phase_decision = self._derive_process_phase_decision(data, timestamp, sample_seq)
         operational_decision = self._derive_temperature_operational_decision(
             data,
             process_phase_decision.process_phase_candidate,
@@ -1271,6 +1378,7 @@ class CSVLoggerService:
             self._escape_csv_text(process_phase_decision.process_phase_candidate),
             self._escape_csv_text(process_phase_decision.process_phase_rule_version),
             self._escape_csv_text(process_phase_decision.phase_confirmation_state),
+            self._escape_csv_text(process_phase_decision.process_segment_id),
             self._escape_csv_text(process_phase_decision.changeover_candidate_id),
             self._escape_csv_text(spot_observation_key),
         ]

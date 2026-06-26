@@ -186,6 +186,7 @@ V2_4_OPERATIONAL_COLUMNS = [
     "process_phase_candidate",
     "process_phase_rule_version",
     "phase_confirmation_state",
+    "process_segment_id",
     "changeover_candidate_id",
     "spot_observation_key",
 ]
@@ -531,6 +532,7 @@ V2_4_OPERATIONAL_ENUM_VALUES = {
         "die_change_candidate",
         "setup_alignment_candidate",
         "changeover_candidate",
+        "production_stabilizing",
         "idle_candidate",
         "unknown",
     },

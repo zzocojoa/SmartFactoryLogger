@@ -64,13 +64,16 @@ PR #68 is merge-ready for the default-off v2.4 implementation scope at report ti
 - [x] `temperature_output_status`, `temperature_unavailable_reason`, expectedness, cause, confidence, and row freshness fields added.
 - [x] stale row precedence prevents old sentinel values from being interpreted as current operational state.
 - [x] realtime `process_phase_candidate` implemented without SPOT status or future context.
+- [x] Count 0..2 production motion is kept out of `production_stable`; general rows use `process_segment_id`, and eligible changeover lifecycles carry one `changeover_candidate_id` through `production_stabilizing`.
 - [x] CSV logger runtime state supplies recent production motion, count hold duration, and previous operator context.
 - [x] v2.3/v2.4 schema constants split and feature-flagged at file-open time.
 - [x] known v2.3/v2.4 header transitions roll over instead of mixing schemas in one CSV.
 - [x] v2.4 metadata records active schema, rule versions, feature flag state, and promotion bundle metadata.
 - [x] `spot_observation_fact.py` emits idempotent per-poll facts and isolates writer failure through failure count plus JSONL retry spool.
 - [x] `changeover_candidate_resolution_fact.py` emits candidate resolution and process phase event facts.
-- [x] repeated candidate ids are split by contiguous occurrence and sample sequence to avoid merging unrelated candidate windows.
+- [x] post-hoc changeover facts ignore legacy/polluted idle-only IDs; general idle/production intervals belong to `process_segment_id` segment analysis.
+- [x] `pre_changeover_hold_candidate` only confirms post-hoc when later Count reset, operator context change, or die-change marker evidence exists; otherwise it is `posthoc_rejected`.
+- [x] repeated lifecycle candidate IDs can span non-contiguous realtime rows and still produce one terminal lifecycle fact; unrelated general segments use `process_segment_id` instead.
 - [x] `scripts/infer_process_phase_events_for_csv.py` is gated by `PROCESS_PHASE_EVENT_FACT_ENABLED` and never mutates the source CSV.
 - [x] `scripts/validate_csv_v2_shadow.py` supports `2.4.0` while preserving `2.1.0` through `2.3.0` checks.
 
@@ -181,7 +184,7 @@ CSV and fact outputs:
   - `temperature_unavailable_reason`
   - `process_phase_candidate`
   - `spot_observation_key`
-- `[operator-provided evidence]` latest sampled realtime CSV rows `6140` through `6144` reported `schema_version=2.4.0`, `temperature_output_status=valid`, non-empty `process_phase_candidate=idle_candidate`, and non-empty `spot_observation_key`.
+- `[operator-provided evidence]` latest sampled realtime CSV rows `6140` through `6144` reported `schema_version=2.4.0`, `temperature_output_status=valid`, non-empty `process_phase_candidate=idle_candidate`, non-empty `process_segment_id`, blank `changeover_candidate_id`, and non-empty `spot_observation_key`.
 - `[operator-provided evidence]` sidecar metadata parsed as JSON with `schema_metadata.schema_version=2.4.0`, `spot_temperature_shadow_metadata.schema_version=2.4.0`, and promotion bundle flags all `true`.
 
 Verdict: PASS for the controlled three-flag full-bundle server smoke. This validates server installation, frozen runtime startup, v2.4 operational health counters, realtime v2.4 CSV field emission, SPOT observation fact emission, and sidecar metadata readability under the enabled promotion bundle.
@@ -205,8 +208,64 @@ Scope note: This smoke does not claim downstream consumer compatibility, legacy 
 - [x] Add first-class v2.4 aggregate counters to `/health` before declaring long-running operational observability complete.
 - [x] Add runtime config guardrails so partial promotion flag combinations cannot be accidentally used in production rollout.
 - [x] Run controlled server-PC promotion smoke with all three promotion flags enabled together. Evidence level: [operator-provided evidence].
+- [x] Split `process_segment_id` from `changeover_candidate_id`; `production_stabilizing` is now the terminal lifecycle candidate for eligible changeover IDs.
 - [ ] Verify downstream v2.4 consumer compatibility before any legacy `Temperature_quality` semantic promotion.
 - [ ] Keep rollback drill documented: disable `CSV_V2_OPERATIONAL_FIELDS_ENABLED` and roll over to v2.3-compatible output if v2.4 consumers fail.
+
+---
+
+### 7.1 Downstream Consumer Replay Gate
+
+This gate is mandatory after merge and before broader operational promotion because v2.4 now appends `process_segment_id` and adds `production_stabilizing` to `process_phase_candidate`.
+
+Required server-PC evidence:
+
+1. Install the NSIS build produced from the merged commit.
+2. Enable the full promotion bundle together: `CSV_V2_OPERATIONAL_FIELDS_ENABLED=true`, `SPOT_OBSERVATION_FACT_ENABLED=true`, and `PROCESS_PHASE_EVENT_FACT_ENABLED=true`.
+3. Run the server-PC full-bundle smoke again and capture `/health`, `/stats`, latest v2.4 CSV header, sidecar metadata parse, and fact-file presence.
+4. Run each downstream CSV consumer against the latest server-PC v2.4 CSV and matching `.metadata.json` sidecar.
+5. Record the consumer name/version, input CSV path, input row count, rejected row count, exit status, and whether the consumer accepted both `process_segment_id` and `production_stabilizing`.
+
+PowerShell evidence collection scaffold:
+
+```powershell
+$dir = "$env:APPDATA\SmartFactoryLogger\logs\test_data"
+$csv = Get-ChildItem $dir -Filter "Factory_Integrated_Log_v2*.csv" -File |
+  Where-Object { $_.Length -gt 0 } |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+$metadata = [System.IO.Path]::ChangeExtension($csv.FullName, ".metadata.json")
+
+$header = Get-Content -LiteralPath $csv.FullName -First 1 -Encoding UTF8
+@(
+  "schema_version",
+  "temperature_output_status",
+  "process_phase_candidate",
+  "process_segment_id",
+  "changeover_candidate_id",
+  "spot_observation_key"
+) | ForEach-Object {
+  [pscustomobject]@{ field = $_; present = $header.Contains($_) }
+}
+
+Get-Content -LiteralPath $metadata -Raw -Encoding UTF8 |
+  ConvertFrom-Json |
+  Select-Object -ExpandProperty schema_metadata |
+  Select-Object schema_version,active_schema_version,promotion_bundle_required_flags
+
+Import-Csv -LiteralPath $csv.FullName |
+  Select-Object -Last 20 schema_version,sample_seq,process_phase_candidate,process_segment_id,changeover_candidate_id,spot_observation_key
+```
+
+Replay PASS criteria:
+
+- latest server-PC CSV is `schema_version=2.4.0` and contains `process_segment_id`.
+- sidecar metadata parses as JSON and records all three promotion flags as `true`.
+- downstream consumer exits successfully with zero rejected rows caused by exact column count or unknown enum values.
+- at least one replay sample or synthetic fixture proves the consumer does not fail on `process_phase_candidate=production_stabilizing`.
+- if any consumer fails, rollback is to disable the full v2.4 promotion bundle and roll over to v2.3-compatible output before production use.
+
+Current PR local evidence: generated v2.4 consumer replay with `process_segment_id`, `changeover_candidate_id`, `process_phase_candidate`, and `production_stabilizing` passed `scripts.validate_csv_v2_shadow.validate`. This local validator replay is not a substitute for server-PC downstream consumer replay.
 
 ---
 

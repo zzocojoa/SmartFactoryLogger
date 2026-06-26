@@ -100,6 +100,7 @@ FACTORY_DATA_ENUM_VALUES = {
         "die_change_candidate",
         "setup_alignment_candidate",
         "changeover_candidate",
+        "production_stabilizing",
         "idle_candidate",
         "unknown",
     },
@@ -277,6 +278,7 @@ class FactoryData(BaseModel):
     process_phase_candidate: Optional[str] = None
     process_phase_rule_version: Optional[str] = None
     phase_confirmation_state: Optional[str] = None
+    process_segment_id: Optional[str] = None
     changeover_candidate_id: Optional[str] = None
     spot_observation_key: Optional[str] = None
 
