@@ -1587,6 +1587,26 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertTrue(v2_files[0].with_suffix(".metadata.json").exists())
             self.assertTrue(v2_files[1].with_suffix(".metadata.json").exists())
 
+    def test_v2_sidecar_records_config_operator_verified_only_when_flag_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
+            timestamp = service._parse_timestamp(self.create_data())
+
+            with patch("backend.FacilityData.repository.config.SPOT_CONFIG_OPERATOR_VERIFIED", True):
+                handle, _ = service._open_v2_log_file(
+                    timestamp.strftime("%Y%m%d_%H%M%S"),
+                    "Factory_Integrated_Log_v2",
+                )
+                service._close_file(handle)
+
+            v2_file = next(log_dir.glob("Factory_Integrated_Log_v2_*.csv"))
+            metadata = json.loads(v2_file.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(metadata["spot_configuration_snapshot"]["config_operator_verified"])
+
     def test_v2_writer_creates_separate_file_and_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
@@ -1625,7 +1645,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertEqual(spot_config["window_obscuration_pc"], 12.0)
             self.assertEqual(spot_config["focus_mm"], 6071)
             self.assertEqual(spot_config["config_source"], "spot_web_server_screenshot")
-            self.assertTrue(spot_config["config_operator_verified"])
+            self.assertFalse(spot_config["config_operator_verified"])
             self.assertTrue(spot_config["config_captured_at"].endswith("Z"))
             self.assertEqual(
                 metadata["schema_metadata"]["position_read_feature_flag"],

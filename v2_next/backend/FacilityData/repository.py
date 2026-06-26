@@ -658,7 +658,7 @@ class CSVLoggerService:
             "focus_mm": int(getattr(config, "SPOT_FOCUS_MM", 0)),
             "config_source": "spot_web_server_screenshot",
             "config_captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "config_operator_verified": True,
+            "config_operator_verified": bool(getattr(config, "SPOT_CONFIG_OPERATOR_VERIFIED", False)),
         }
 
 

@@ -596,6 +596,28 @@ class ConfigPromotionBundleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("config-import-ok", result.stdout)
 
+    def test_spot_config_operator_verified_env_flag_is_loaded(self) -> None:
+        env = os.environ.copy()
+        repo_root = Path(__file__).resolve().parents[2]
+        env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
+        env["SPOT_CONFIG_OPERATOR_VERIFIED"] = "true"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import backend.config as config; print(config.SPOT_CONFIG_OPERATOR_VERIFIED)",
+            ],
+            cwd=repo_root,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "True")
+
 
 class V24HealthCounterTests(unittest.TestCase):
     def test_spot_temperature_health_exposes_v2_4_operational_counters(self) -> None:
