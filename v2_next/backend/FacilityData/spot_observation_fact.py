@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+from datetime import datetime, timezone
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -127,12 +128,43 @@ class SpotObservationFactWriter:
             return None
 
     def _append_fact(self, fact: Mapping[str, str]) -> None:
-        write_header = not self.output_path.exists() or self.output_path.stat().st_size == 0
+        write_header = self._prepare_output_file_for_append()
         with self.output_path.open("a", encoding="utf-8-sig", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
             if write_header:
                 writer.writeheader()
             writer.writerow(fact)
+
+    def _prepare_output_file_for_append(self) -> bool:
+        if not self.output_path.exists() or self.output_path.stat().st_size == 0:
+            return True
+        if self._existing_header_matches_current_schema():
+            return False
+        self._archive_mismatched_output_file()
+        return True
+
+    def _existing_header_matches_current_schema(self) -> bool:
+        try:
+            with self.output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                existing_header = next(csv.reader(handle), [])
+        except (OSError, UnicodeError, csv.Error):
+            return False
+        return existing_header == SPOT_OBSERVATION_FACT_COLUMNS
+
+    def _archive_mismatched_output_file(self) -> None:
+        archive_path = self._next_schema_mismatch_archive_path()
+        self.output_path.rename(archive_path)
+
+    def _next_schema_mismatch_archive_path(self) -> Path:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        suffix = self.output_path.suffix or ".csv"
+        archive_stem = f"{self.output_path.stem}.{timestamp}.schema-mismatch"
+        candidate = self.output_path.with_name(f"{archive_stem}{suffix}")
+        for index in range(1, 1000):
+            if not candidate.exists():
+                return candidate
+            candidate = self.output_path.with_name(f"{archive_stem}.{index}{suffix}")
+        raise FileExistsError(f"Could not allocate archive path for {self.output_path}")
 
     def _flush_spool(self) -> None:
         spool_path = self._effective_spool_path()

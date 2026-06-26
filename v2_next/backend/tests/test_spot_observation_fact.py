@@ -1,3 +1,5 @@
+import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -79,6 +81,87 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertIn("svc-1:7", rows[1])
             self.assertIn("svc-1:8", rows[2])
             self.assertFalse(spool_path.exists())
+
+    def test_writer_archives_existing_fact_when_header_mismatches_current_schema(self) -> None:
+        snapshot = {
+            "spot_service_instance_id": "svc-current",
+            "spot_poll_seq": 10,
+            "spot_observation_seq": 10,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "455.0",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            old_columns = SPOT_OBSERVATION_FACT_COLUMNS[:40]
+            self.assertEqual(len(old_columns), 40)
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(old_columns)
+                writer.writerow(["legacy"] * len(old_columns))
+
+            writer = SpotObservationFactWriter(output_path)
+            fact = writer.write_fact(snapshot)
+
+            self.assertIsNotNone(fact)
+            archives = list(output_path.parent.glob("spot_observation_fact.*.schema-mismatch.csv"))
+            self.assertEqual(len(archives), 1)
+            with archives[0].open("r", encoding="utf-8-sig", newline="") as handle:
+                archived_rows = list(csv.reader(handle))
+            self.assertEqual(archived_rows[0], old_columns)
+            self.assertEqual(len(archived_rows[1]), len(old_columns))
+
+            with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.reader(handle))
+            self.assertEqual(rows[0], SPOT_OBSERVATION_FACT_COLUMNS)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(len(rows[1]), len(SPOT_OBSERVATION_FACT_COLUMNS))
+            self.assertIn("svc-current:10", rows[1])
+
+    def test_spool_flush_archives_mismatched_existing_fact_before_writing_pending_rows(self) -> None:
+        pending_snapshot = {
+            "spot_service_instance_id": "svc-spooled",
+            "spot_poll_seq": 11,
+            "spot_observation_seq": 11,
+            "spot_poll_status": "timeout",
+            "spot_raw_validity": "not_received",
+        }
+        success_snapshot = {
+            "spot_service_instance_id": "svc-current",
+            "spot_poll_seq": 12,
+            "spot_observation_seq": 12,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "456.0",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            output_path = tmp_path / "spot_observation_fact.csv"
+            spool_path = tmp_path / "spot_observation_fact.failed.jsonl"
+            old_columns = SPOT_OBSERVATION_FACT_COLUMNS[:40]
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(old_columns)
+                writer.writerow(["legacy"] * len(old_columns))
+            spool_path.write_text(
+                json.dumps(build_spot_observation_fact(pending_snapshot), ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            writer = SpotObservationFactWriter(output_path, spool_path=spool_path)
+            fact = writer.write_fact(success_snapshot)
+
+            self.assertIsNotNone(fact)
+            self.assertFalse(spool_path.exists())
+            archives = list(output_path.parent.glob("spot_observation_fact.*.schema-mismatch.csv"))
+            self.assertEqual(len(archives), 1)
+            with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.reader(handle))
+            self.assertEqual(rows[0], SPOT_OBSERVATION_FACT_COLUMNS)
+            self.assertEqual(len(rows), 3)
+            self.assertTrue(all(len(row) == len(SPOT_OBSERVATION_FACT_COLUMNS) for row in rows[1:]))
+            self.assertIn("svc-spooled:11", rows[1])
+            self.assertIn("svc-current:12", rows[2])
 
     def test_build_fact_uses_missing_diagnostics_status(self) -> None:
         fact = build_spot_observation_fact(
@@ -256,6 +339,18 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertIn("alarm_low_signal", fact["spot_diagnostic_evidence_codes"])
             self.assertEqual(validate_spot_observation_fact_invariants(output_path), [])
 
+    def test_spot_observation_fact_validator_rejects_row_length_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(SPOT_OBSERVATION_FACT_COLUMNS)
+                writer.writerow([""] * (len(SPOT_OBSERVATION_FACT_COLUMNS) - 1))
+
+            failures = validate_spot_observation_fact_invariants(output_path)
+
+        self.assertTrue(any("columns, expected" in failure for failure in failures))
+
     def test_spot_observation_fact_validator_rejects_alarmstatus_bit4_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "spot_observation_fact.csv"
@@ -271,8 +366,6 @@ class SpotObservationFactTests(unittest.TestCase):
                 }
             )
             with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
-                import csv
-
                 writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
                 writer.writeheader()
                 writer.writerow(row)

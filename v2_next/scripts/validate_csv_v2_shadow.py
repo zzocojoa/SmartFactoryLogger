@@ -787,8 +787,10 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
     failures: list[str] = []
     indices = {column: header.index(column) for column in required_columns}
     for row_number, row in enumerate(rows, start=2):
-        if max(indices.values()) >= len(row):
-            failures.append(f"spot_observation_fact row {row_number} shorter than required diagnostic columns")
+        if len(row) != len(header):
+            failures.append(
+                f"spot_observation_fact row {row_number} has {len(row)} columns, expected {len(header)}"
+            )
             continue
         evidence_codes = _parse_json_string_list(row[indices["spot_diagnostic_evidence_codes"]].strip())
         alarmstatus = _parse_alarmstatus_byte(row[indices["alarmstatus"]])
