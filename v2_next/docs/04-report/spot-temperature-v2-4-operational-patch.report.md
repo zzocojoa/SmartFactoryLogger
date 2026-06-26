@@ -214,6 +214,61 @@ Scope note: This smoke does not claim downstream consumer compatibility, legacy 
 
 ---
 
+### 7.1 Downstream Consumer Replay Gate
+
+This gate is mandatory after merge and before broader operational promotion because v2.4 now appends `process_segment_id` and adds `production_stabilizing` to `process_phase_candidate`.
+
+Required server-PC evidence:
+
+1. Install the NSIS build produced from the merged commit.
+2. Enable the full promotion bundle together: `CSV_V2_OPERATIONAL_FIELDS_ENABLED=true`, `SPOT_OBSERVATION_FACT_ENABLED=true`, and `PROCESS_PHASE_EVENT_FACT_ENABLED=true`.
+3. Run the server-PC full-bundle smoke again and capture `/health`, `/stats`, latest v2.4 CSV header, sidecar metadata parse, and fact-file presence.
+4. Run each downstream CSV consumer against the latest server-PC v2.4 CSV and matching `.metadata.json` sidecar.
+5. Record the consumer name/version, input CSV path, input row count, rejected row count, exit status, and whether the consumer accepted both `process_segment_id` and `production_stabilizing`.
+
+PowerShell evidence collection scaffold:
+
+```powershell
+$dir = "$env:APPDATA\SmartFactoryLogger\logs\test_data"
+$csv = Get-ChildItem $dir -Filter "Factory_Integrated_Log_v2*.csv" -File |
+  Where-Object { $_.Length -gt 0 } |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+$metadata = [System.IO.Path]::ChangeExtension($csv.FullName, ".metadata.json")
+
+$header = Get-Content -LiteralPath $csv.FullName -First 1 -Encoding UTF8
+@(
+  "schema_version",
+  "temperature_output_status",
+  "process_phase_candidate",
+  "process_segment_id",
+  "changeover_candidate_id",
+  "spot_observation_key"
+) | ForEach-Object {
+  [pscustomobject]@{ field = $_; present = $header.Contains($_) }
+}
+
+Get-Content -LiteralPath $metadata -Raw -Encoding UTF8 |
+  ConvertFrom-Json |
+  Select-Object -ExpandProperty schema_metadata |
+  Select-Object schema_version,active_schema_version,promotion_bundle_required_flags
+
+Import-Csv -LiteralPath $csv.FullName |
+  Select-Object -Last 20 schema_version,sample_seq,process_phase_candidate,process_segment_id,changeover_candidate_id,spot_observation_key
+```
+
+Replay PASS criteria:
+
+- latest server-PC CSV is `schema_version=2.4.0` and contains `process_segment_id`.
+- sidecar metadata parses as JSON and records all three promotion flags as `true`.
+- downstream consumer exits successfully with zero rejected rows caused by exact column count or unknown enum values.
+- at least one replay sample or synthetic fixture proves the consumer does not fail on `process_phase_candidate=production_stabilizing`.
+- if any consumer fails, rollback is to disable the full v2.4 promotion bundle and roll over to v2.3-compatible output before production use.
+
+Current PR local evidence: generated v2.4 consumer replay with `process_segment_id`, `changeover_candidate_id`, `process_phase_candidate`, and `production_stabilizing` passed `scripts.validate_csv_v2_shadow.validate`. This local validator replay is not a substitute for server-PC downstream consumer replay.
+
+---
+
 ## 8. Related Documents
 
 - `docs/01-plan/features/spot-temperature-v2-4-operational-patch.plan.md`
