@@ -389,6 +389,33 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 self.assertEqual(next(csv.reader(handle)), V2_4_CSV_COLUMNS)
             self.assertNotEqual(files[0].name, files[1].name)
 
+    def test_schema_rollover_accepts_prior_v2_4_prefix_header_when_contract_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+            )
+            original_path = log_dir / "Factory_Integrated_Log_v2_20260626_000000.csv"
+            prior_v2_4_columns = [column for column in V2_4_CSV_COLUMNS if column != "process_segment_id"]
+            with original_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(prior_v2_4_columns)
+
+            handle, _ = service._open_v2_log_file("20260626_000000", "Factory_Integrated_Log_v2")
+            service._close_file(handle)
+
+            rollover_path = log_dir / "Factory_Integrated_Log_v2_20260626_000000_2_4_0.csv"
+            self.assertTrue(rollover_path.exists())
+            with original_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                self.assertEqual(next(csv.reader(handle)), prior_v2_4_columns)
+            with rollover_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                self.assertEqual(next(csv.reader(handle)), V2_4_CSV_COLUMNS)
+
     def test_v1_temperature_index_remains_stable(self) -> None:
         self.assertEqual(V1_CSV_COLUMNS.index("Temperature"), 2)
 
