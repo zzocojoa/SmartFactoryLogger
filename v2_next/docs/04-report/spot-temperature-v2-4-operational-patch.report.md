@@ -212,6 +212,7 @@ Scope note: This smoke does not claim downstream consumer compatibility, legacy 
 - [x] Run controlled server-PC promotion smoke with all three promotion flags enabled together. Evidence level: [operator-provided evidence].
 - [x] Split `process_segment_id` from `changeover_candidate_id`; `production_stabilizing` is now the terminal lifecycle candidate for eligible changeover IDs.
 - [x] Verify downstream v2.4 consumer compatibility before any legacy `Temperature_quality` semantic promotion.
+- [ ] Confirm the SPOT Alarms -> Low Signal % threshold source and add the runtime `low_signal_threshold_pc` / `low_signal_comparator` supply path in a separate PR; until then numeric `signalpc` remains captured-only unless those values are explicitly supplied.
 - [ ] Keep rollback drill documented: disable `CSV_V2_OPERATIONAL_FIELDS_ENABLED` and roll over to v2.3-compatible output if v2.4 consumers fail.
 
 ---
