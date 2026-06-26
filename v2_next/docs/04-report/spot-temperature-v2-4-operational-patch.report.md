@@ -280,7 +280,13 @@ Post-merge local evidence update, 2026-06-26:
 - The same synthetic fixture passed `scripts/infer_process_segments_for_csv.py` with `process_segment_fact_rows=3`.
 - Operator-provided server-PC full-bundle evidence after installing the PR #70 build reported `schema_version=2.4.0`, promotion flags enabled, metadata and fact file present, and healthy `/stats`. However, the selected latest server CSV `Factory_Integrated_Log_v2_20260626_000000.csv` did not contain `process_segment_id` in the header, so the downstream replay gate remained FAIL.
 - Local follow-up fixed the schema rollover recognition path so prior v2 prefix-compatible headers can roll over to the current `2.4.0` header instead of blocking same-day migration to `process_segment_id`.
-- Remaining gap: rebuild and reinstall the rollover fix, confirm the server creates/selects a current-header v2.4 CSV with `process_segment_id`, then run every real downstream CSV consumer replay and record the result before broader operational promotion.
+- PR #71 merged to `master` at `ba3090a374bb20d13ef936186bc3e935c24f3736` with CI `Build Windows artifacts` success.
+- A first local PR #71 installer attempt with SHA-256 `61D25C984DDD7E59D5B05CDDE99348B21FC119A02CFB55D8BAFD120EE2C5E32F` was invalid for server replay because `npm run dist` packaged the stale `backend/dist/SmartFactoryBackend.exe` from 2026-06-25 15:38:40.
+- Operator-provided server-PC evidence for that stale-backend installer still showed no `process_segment_id` in the latest CSV candidates, including newly created `Factory_Integrated_Log_v2_20260626_112930.csv`; the downstream replay gate remained FAIL.
+- Corrected build order is backend PyInstaller first, then NSIS: `backend/.venv/Scripts/python.exe -m PyInstaller --noconfirm --clean build_specs/SmartFactoryBackend.spec` from `backend/`, then `npm run dist` from `v2_next/`.
+- The corrected backend executable `backend/dist/SmartFactoryBackend.exe` was rebuilt at 2026-06-26 11:36:56 with SHA-256 `8833596CD7865AD148EF1FE243055485FC67214BAF6682554A67C705372E7FCA`.
+- The corrected NSIS installer was rebuilt at 2026-06-26 11:37:53 with SHA-256 `200FF781FE0385ACA0EEB623004365924BE751477C24C1C8BACD9D6266C31C94`; this supersedes the `61D25C...` installer.
+- Remaining gap: install the corrected `200FF781...` installer, confirm the server creates/selects a current-header v2.4 CSV with `process_segment_id`, then run every real downstream CSV consumer replay and record the result before broader operational promotion.
 
 ---
 
