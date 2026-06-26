@@ -51,13 +51,8 @@ class TemperatureOperationalTests(unittest.TestCase):
         self.assertEqual(decision.temperature_cause_confidence, 0.0)
         self.assertEqual(json.loads(decision.temperature_cause_evidence_codes), ["phase_setup_candidate"])
 
-    def test_under_range_cause_requires_direct_diagnostic_evidence(self) -> None:
+    def test_under_range_cause_uses_non_config_diagnostic_evidence(self) -> None:
         cases = [
-            (
-                ("peak_picker_off_mode_reset_configured",),
-                "peak_picker_reset_candidate",
-                0.75,
-            ),
             (
                 ("target_absent_verified",),
                 "target_out_of_fov_candidate",
@@ -67,11 +62,6 @@ class TemperatureOperationalTests(unittest.TestCase):
                 ("actuator_position_changed",),
                 "alignment_change_candidate",
                 0.55,
-            ),
-            (
-                ("signal_below_threshold",),
-                "low_signal_candidate",
-                0.65,
             ),
             (
                 ("measurement_range_configured", "detector_below_measurement_range"),
@@ -98,7 +88,52 @@ class TemperatureOperationalTests(unittest.TestCase):
                 self.assertEqual(decision.temperature_cause_confidence, expected_confidence)
                 self.assertIn("phase_setup_candidate", json.loads(decision.temperature_cause_evidence_codes))
 
-    def test_under_range_signalpc_threshold_evidence_promotes_low_signal_candidate(self) -> None:
+    def test_stale_string_evidence_alone_does_not_promote_config_sensitive_causes(self) -> None:
+        for evidence_code in (
+            "alarm_low_signal",
+            "signal_below_threshold",
+            "peak_picker_off_mode_reset_configured",
+        ):
+            with self.subTest(evidence_code=evidence_code):
+                decision = derive_temperature_operational_fields(
+                    TemperatureOperationalInput(
+                        poll_status="success",
+                        raw_validity="invalid_sentinel",
+                        source_freshness="fresh",
+                        temperature_value_origin="none",
+                        spot_device_status_code="temperature_under_range",
+                        spot_effective_age_ms_at_row=100.0,
+                        process_phase_candidate="setup_candidate",
+                        evidence_codes=(evidence_code,),
+                    )
+                )
+
+                self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+                self.assertEqual(decision.temperature_cause_confidence, 0.0)
+                self.assertIn(evidence_code, json.loads(decision.temperature_cause_evidence_codes))
+
+    def test_under_range_alarmstatus_bit4_promotes_low_signal_candidate(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                process_phase_candidate="setup_candidate",
+                alarmstatus=0x10,
+            )
+        )
+
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "low_signal_candidate")
+        self.assertEqual(decision.temperature_cause_confidence, 0.85)
+        self.assertEqual(
+            json.loads(decision.temperature_cause_evidence_codes),
+            ["alarm_low_signal", "phase_setup_candidate"],
+        )
+
+    def test_under_range_signalpc_threshold_config_promotes_low_signal_candidate(self) -> None:
         evidence_codes = derive_spot_diagnostic_evidence_codes(
             {
                 "signalpc": "3.2",
@@ -118,6 +153,11 @@ class TemperatureOperationalTests(unittest.TestCase):
                 spot_effective_age_ms_at_row=100.0,
                 process_phase_candidate="setup_candidate",
                 evidence_codes=evidence_codes,
+                alarmstatus=0,
+                signalpc=3.2,
+                low_signal_alarm_enabled=True,
+                low_signal_threshold_pc=5.0,
+                low_signal_comparator="lte",
             )
         )
 

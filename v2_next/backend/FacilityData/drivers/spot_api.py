@@ -58,7 +58,16 @@ _SPOT_FOCUS_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
-_SPOT_DIAGNOSTIC_OUTPUT_PARAMS = ("alarmstatus", "signalpc", "d1temperature", "d2temperature", "e1out", "e2out", "appnumber")
+_SPOT_DIAGNOSTIC_OUTPUT_PARAMS = (
+    "alarmstatus",
+    "signalpc",
+    "d1temperature",
+    "d2temperature",
+    "e1out",
+    "e2out",
+    "itemperature",
+    "appnumber",
+)
 _SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
 _SPOT_DIAGNOSTIC_MAX_AGE_FLOOR_SEC = 3.0
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")

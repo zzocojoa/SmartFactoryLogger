@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Optional
+from typing import Iterable, Optional, cast
 
 from backend.FacilityData.spot_observation import (
     SPOT_OVER_RANGE_DEVICE_STATUS_CODE,
@@ -52,6 +52,13 @@ class TemperatureOperationalInput:
     process_phase_candidate: str = "unknown"
     evidence_codes: Iterable[str] = ()
     state_decision: Optional[TemperatureStateDecision] = None
+    alarmstatus: int | None = None
+    signalpc: float | None = None
+    low_signal_alarm_enabled: bool = False
+    low_signal_threshold_pc: float | None = None
+    low_signal_comparator: str | None = None
+    peak_picker_enabled: bool = False
+    peak_picker_off_mode: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -86,11 +93,7 @@ def derive_temperature_operational_fields(
 
     status, reason = _derive_status_and_reason(input_state, state_decision, row_freshness, clock_status)
     expectedness = _derive_expectedness(status, input_state.process_phase_candidate)
-    cause, confidence, evidence_json = _derive_under_range_cause(
-        status,
-        input_state.process_phase_candidate,
-        input_state.evidence_codes,
-    )
+    cause, confidence, evidence_json = _derive_under_range_cause(status, input_state)
     return TemperatureOperationalDecision(
         temperature_output_status=status,
         temperature_unavailable_reason=reason,
@@ -239,27 +242,44 @@ def derive_under_range_cause_candidate(
 
 def _derive_under_range_cause(
     status: str,
-    phase: str,
-    evidence_codes: Iterable[str],
+    input_state: TemperatureOperationalInput,
 ) -> tuple[str, Optional[float], str]:
     if status != TemperatureOutputStatus.UNDER_RANGE.value:
         return "", None, ""
-    evidence = set(str(code) for code in evidence_codes if str(code))
-    if phase in {
+    evidence = set(str(code) for code in input_state.evidence_codes if str(code))
+    phase_evidence: list[str] = []
+    if input_state.process_phase_candidate in {
         "setup_candidate",
         "setup_alignment_candidate",
         "pre_changeover_hold_candidate",
         "die_change_candidate",
         "changeover_candidate",
     }:
+        phase_evidence.append("phase_setup_candidate")
         evidence.add("phase_setup_candidate")
+
+    config_aware = derive_under_range_cause_candidate(
+        alarmstatus=input_state.alarmstatus,
+        signalpc=input_state.signalpc,
+        low_signal_alarm_enabled=input_state.low_signal_alarm_enabled,
+        low_signal_threshold_pc=input_state.low_signal_threshold_pc,
+        low_signal_comparator=input_state.low_signal_comparator,
+        phase_evidence_codes=phase_evidence,
+        peak_picker_enabled=input_state.peak_picker_enabled,
+        peak_picker_off_mode=input_state.peak_picker_off_mode,
+    )
+    config_aware_evidence = cast(Iterable[object], config_aware["temperature_cause_evidence_codes"])
+    evidence.update(str(code) for code in config_aware_evidence)
+    config_aware_cause = str(config_aware["temperature_under_range_cause_candidate"])
+    config_aware_confidence = cast(float, config_aware["temperature_cause_confidence"])
+    if config_aware_cause != "unknown":
+        return (
+            config_aware_cause,
+            config_aware_confidence,
+            _json_list(sorted(evidence)),
+        )
+
     sorted_evidence = sorted(evidence)
-    if "alarm_low_signal" in evidence:
-        return "low_signal_candidate", 0.85, _json_list(sorted_evidence)
-    if "signal_below_threshold" in evidence:
-        return "low_signal_candidate", 0.65, _json_list(sorted_evidence)
-    if "peak_picker_off_mode_reset_configured" in evidence:
-        return "peak_picker_reset_candidate", 0.75, _json_list(sorted_evidence)
     if "target_absent_verified" in evidence or "target_out_of_fov_evidence" in evidence:
         return "target_out_of_fov_candidate", 0.6, _json_list(sorted_evidence)
     if "actuator_scanning" in evidence or "actuator_position_changed" in evidence:

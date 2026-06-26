@@ -462,6 +462,13 @@ class RealPLCDriver(BasePLCDriver):
             "spot_snapshot_age_ms",
             "spot_value_age_ms",
             "spot_diagnostic_evidence_codes",
+            "alarmstatus",
+            "signalpc",
+            "low_signal_alarm_enabled",
+            "low_signal_threshold_pc",
+            "low_signal_comparator",
+            "peak_picker_enabled",
+            "peak_picker_off_mode",
         )
         fields = {key: metadata.get(key) for key in passthrough_keys}
         raw_value_text = metadata.get("spot_raw_value_text")

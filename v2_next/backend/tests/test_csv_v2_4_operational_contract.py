@@ -76,10 +76,18 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertTrue(row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")].startswith("chg_"))
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_observation_key")], "spot-service-1:14")
 
-    def test_v2_4_row_uses_spot_diagnostic_evidence_codes_for_under_range_cause(self) -> None:
+    def test_v2_4_row_uses_signalpc_config_for_under_range_low_signal_cause(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
-        data = self.create_data().model_copy(update={"spot_diagnostic_evidence_codes": '["signal_below_threshold"]'})
+        data = self.create_data().model_copy(
+            update={
+                "spot_diagnostic_evidence_codes": '["signal_below_threshold"]',
+                "signalpc": 3.2,
+                "low_signal_alarm_enabled": True,
+                "low_signal_threshold_pc": 5.0,
+                "low_signal_comparator": "lte",
+            }
+        )
 
         row = self.build_v2_row(service, data)
 
@@ -91,6 +99,34 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(
             row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
             '["phase_setup_candidate","signal_below_threshold"]',
+        )
+
+    def test_v2_4_row_ignores_stale_low_signal_evidence_without_config_inputs(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(update={"spot_diagnostic_evidence_codes": '["signal_below_threshold"]'})
+
+        row = self.build_v2_row(service, data)
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")], "unknown")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.0")
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
+            '["phase_setup_candidate","signal_below_threshold"]',
+        )
+
+    def test_v2_4_row_uses_alarmstatus_bit4_for_under_range_low_signal_cause(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(update={"alarmstatus": "0x10"})
+
+        row = self.build_v2_row(service, data)
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")], "low_signal_candidate")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.85")
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
+            '["alarm_low_signal","phase_setup_candidate"]',
         )
 
     def test_low_count_high_motion_under_range_does_not_promote_to_production_stable(self) -> None:
