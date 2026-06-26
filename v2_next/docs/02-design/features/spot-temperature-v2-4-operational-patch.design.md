@@ -207,7 +207,7 @@ count(changeover_candidate_resolution_fact where changeover_candidate_id = X) ==
 confirmation_outcome in confirmed/rejected/merged/split
 ```
 
-A lifecycle ID may contain non-contiguous realtime candidate rows; post-hoc grouping keeps one candidate-resolution row and one terminal `process_phase_event_fact` row for that `changeover_candidate_id`.
+A lifecycle ID may contain non-contiguous realtime candidate rows; post-hoc grouping keeps one candidate-resolution row and one terminal `process_phase_event_fact` row for that `changeover_candidate_id`. Legacy or polluted IDs whose rows only contain general `idle_candidate`, `production_stable`, or `unknown` phases are excluded from changeover facts.
 
 ### 3.4 Post-Hoc Process Phase Event Fact
 
@@ -237,8 +237,8 @@ setup_alignment_candidate     -> setup_alignment
 pre_changeover_hold_candidate -> pre_changeover_hold only with future evidence; otherwise unknown/posthoc_rejected
 die_change_candidate          -> die_change
 changeover_candidate          -> changeover
-production_stable             -> production_stable
-idle_candidate                -> idle
+production_stable             -> excluded from changeover facts; use process_segment_id-based segment analysis
+idle_candidate                -> excluded from changeover facts; use process_segment_id-based segment analysis
 unknown                       -> unknown
 ```
 

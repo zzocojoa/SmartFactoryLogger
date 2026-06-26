@@ -57,6 +57,15 @@ _CANDIDATE_TO_CONFIRMED = {
     "unknown": "unknown",
 }
 
+_CHANGEOVER_LIFECYCLE_CANDIDATE_PHASES = {
+    "setup_candidate",
+    "setup_alignment_candidate",
+    "pre_changeover_hold_candidate",
+    "die_change_candidate",
+    "changeover_candidate",
+    "production_stabilizing",
+}
+
 _PHASE_CONFIRMATION_PRECEDENCE = (
     "production_stabilizing",
     "setup_alignment_candidate",
@@ -159,10 +168,14 @@ def _group_candidate_rows(rows: Sequence[Mapping[str, object]]) -> list[_Candida
             rows_by_candidate[candidate_id] = []
             candidate_order.append(candidate_id)
         rows_by_candidate[candidate_id].append(row)
-    return [
-        _CandidateRows(candidate_id=candidate_id, rows=tuple(rows_by_candidate[candidate_id]))
-        for candidate_id in candidate_order
-    ]
+    grouped: list[_CandidateRows] = []
+    for candidate_id in candidate_order:
+        candidate_rows = tuple(rows_by_candidate[candidate_id])
+        representative_phase = _representative_candidate_phase("", candidate_rows)
+        if representative_phase not in _CHANGEOVER_LIFECYCLE_CANDIDATE_PHASES:
+            continue
+        grouped.append(_CandidateRows(candidate_id=candidate_id, rows=candidate_rows))
+    return grouped
 
 def _confirm_candidate_phase(
     phase_candidate: str,

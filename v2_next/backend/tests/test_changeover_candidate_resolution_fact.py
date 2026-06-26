@@ -167,7 +167,7 @@ class ChangeoverCandidateResolutionFactTests(unittest.TestCase):
             "pre_changeover_hold_candidate_confirmed_by_future_operator_context_changed",
         )
 
-    def test_general_idle_candidate_id_is_rejected_not_confirmed_as_changeover(self) -> None:
+    def test_general_idle_candidate_id_is_ignored_by_changeover_facts(self) -> None:
         rows = [
             _row(500, candidate_id="chg_idle", phase="idle_candidate", timestamp_utc="2026-06-25T00:00:00Z"),
             _row(501, candidate_id="chg_idle", phase="idle_candidate", timestamp_utc="2026-06-25T00:00:01Z"),
@@ -176,10 +176,8 @@ class ChangeoverCandidateResolutionFactTests(unittest.TestCase):
         resolution_facts = infer_changeover_candidate_resolution_facts(rows, source_file_id="sha256:abc")
         event_facts = infer_process_phase_event_facts(rows, source_file_id="sha256:abc")
 
-        self.assertEqual(resolution_facts[0]["confirmation_outcome"], "rejected")
-        self.assertEqual(resolution_facts[0]["resolution_reason"], "idle_candidate_mapped_posthoc")
-        self.assertEqual(event_facts[0]["process_phase_confirmed"], "unknown")
-        self.assertEqual(event_facts[0]["phase_confirmation_state"], "posthoc_rejected")
+        self.assertEqual(resolution_facts, [])
+        self.assertEqual(event_facts, [])
 
     def test_lifecycle_candidate_confirms_terminal_production_stabilizing_phase(self) -> None:
         rows = [
