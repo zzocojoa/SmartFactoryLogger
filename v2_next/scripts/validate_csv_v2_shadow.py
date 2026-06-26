@@ -708,6 +708,77 @@ def validate_spot_configuration_snapshot(metadata: dict, rows: list[list[str]], 
     return failures
 
 
+def _parse_bool_text(value: str) -> bool | None:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off", "disabled"}:
+        return False
+    return None
+
+
+def _parse_alarmstatus_byte(value: str) -> int | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = int(text, 0)
+    except ValueError:
+        return None
+    if parsed < 0 or parsed > 255:
+        return None
+    return parsed
+
+
+def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
+    header, rows = read_csv(fact_path)
+    required_columns = [
+        "alarmstatus",
+        "spot_diagnostic_evidence_codes",
+        "low_signal_alarm_enabled",
+        "low_signal_threshold_pc",
+        "low_signal_comparator",
+        "peak_picker_enabled",
+    ]
+    missing_columns = [column for column in required_columns if column not in header]
+    if missing_columns:
+        return ["spot_observation_fact header missing columns: " + ", ".join(missing_columns)]
+
+    failures: list[str] = []
+    indices = {column: header.index(column) for column in required_columns}
+    for row_number, row in enumerate(rows, start=2):
+        if max(indices.values()) >= len(row):
+            failures.append(f"spot_observation_fact row {row_number} shorter than required diagnostic columns")
+            continue
+        evidence_codes = _parse_json_string_list(row[indices["spot_diagnostic_evidence_codes"]].strip())
+        alarmstatus = _parse_alarmstatus_byte(row[indices["alarmstatus"]])
+        if alarmstatus is not None and (alarmstatus & 0x10) and "alarm_low_signal" not in evidence_codes:
+            failures.append(
+                f"spot_observation_fact row {row_number} alarmstatus bit4 requires alarm_low_signal evidence"
+            )
+        threshold = row[indices["low_signal_threshold_pc"]].strip()
+        if threshold:
+            parsed_threshold = _parse_finite_float(threshold)
+            if parsed_threshold is None or not 0.0 <= parsed_threshold <= 100.0:
+                failures.append(f"spot_observation_fact row {row_number} low_signal_threshold_pc must be 0.0..100.0")
+        comparator = row[indices["low_signal_comparator"]].strip().lower()
+        if comparator and comparator not in {"lt", "lte", "unknown"}:
+            failures.append(f"spot_observation_fact row {row_number} low_signal_comparator must be lt/lte/unknown")
+        low_signal_alarm_enabled = _parse_bool_text(row[indices["low_signal_alarm_enabled"]])
+        if row[indices["low_signal_alarm_enabled"]].strip() and low_signal_alarm_enabled is None:
+            failures.append(f"spot_observation_fact row {row_number} low_signal_alarm_enabled must be true/false")
+        if low_signal_alarm_enabled is False and "signal_below_threshold" in evidence_codes:
+            failures.append(
+                f"spot_observation_fact row {row_number} signal_below_threshold is forbidden when low signal alarm is disabled"
+            )
+        peak_picker_enabled = _parse_bool_text(row[indices["peak_picker_enabled"]])
+        if peak_picker_enabled is False and "peak_picker_off_mode_reset_configured" in evidence_codes:
+            failures.append(
+                f"spot_observation_fact row {row_number} peak_picker evidence is forbidden when Peak Picker is disabled"
+            )
+    return failures
+
+
 def validate_sample_seq(rows: list[list[str]], header: list[str]) -> tuple[bool, str]:
     if "sample_seq" not in header:
         return False, "missing sample_seq"
@@ -738,7 +809,12 @@ def position_summary(rows: list[list[str]], header: list[str], column: str) -> s
     )
 
 
-def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
+def validate(
+    v1_path: Path | None,
+    v2_path: Path,
+    metadata_path: Path,
+    spot_observation_fact_path: Path | None = None,
+) -> int:
     failures: list[str] = []
     warnings: list[str] = []
 
@@ -870,6 +946,9 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
                 f"metadata {field_name}.mapping_status={actual_status!r}, expected {expected_status!r}"
             )
 
+    if spot_observation_fact_path is not None:
+        failures.extend(validate_spot_observation_fact_invariants(spot_observation_fact_path))
+
     for column in ("MainRamPosition_D0010", "ContainerPosition_D0012"):
         values = parse_float_values(v2_rows, v2_header, column)
         if not values:
@@ -879,6 +958,7 @@ def validate(v1_path: Path | None, v2_path: Path, metadata_path: Path) -> int:
     print(f"v1_file={v1_path if v1_path is not None else 'not provided'}")
     print(f"v2_file={v2_path}")
     print(f"metadata_file={metadata_path}")
+    print(f"spot_observation_fact_file={spot_observation_fact_path if spot_observation_fact_path is not None else 'not provided'}")
     print(f"v1_rows={len(v1_rows) if v1_path is not None else 'not checked'}")
     print(f"v2_rows={len(v2_rows)}")
     print(f"row_delta={row_delta}")
@@ -977,6 +1057,11 @@ def main() -> int:
         help="Factory_Integrated_Log_v2_*.metadata.json",
     )
     parser.add_argument(
+        "--spot-observation-fact",
+        type=Path,
+        help="Optional spot_observation_fact.csv for SPOT diagnostic invariant validation",
+    )
+    parser.add_argument(
         "--v1-glob",
         help="Glob for v1 Factory_Integrated_Log_YYYYMMDD_HHMMSS.csv files",
     )
@@ -1001,7 +1086,7 @@ def main() -> int:
 
     if args.v2 is None or args.metadata is None:
         parser.error("--v2 and --metadata are required for single-file validation")
-    return validate(args.v1, args.v2, args.metadata)
+    return validate(args.v1, args.v2, args.metadata, args.spot_observation_fact)
 
 
 if __name__ == "__main__":

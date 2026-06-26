@@ -16,7 +16,7 @@ from backend.FacilityData.spot_low_signal import (
 )
 
 
-SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.1.0"
+SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.2.0"
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
@@ -74,6 +74,7 @@ SPOT_OBSERVATION_FACT_COLUMNS = [
     "diagnostics_captured_at",
     "diagnostics_capture_status",
     "diagnostics_age_ms",
+    "spot_diagnostic_evidence_codes",
     "alarmstatus",
     "signalpc",
     "d1temperature",
@@ -190,6 +191,7 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
     diagnostics_age_ms = _text(snapshot.get("diagnostics_age_ms"))
     if diagnostics_present and not diagnostics_age_ms:
         diagnostics_age_ms = "0.0"
+    evidence_codes = encode_spot_diagnostic_evidence_codes(snapshot)
     return {
         "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
         "spot_observation_key": build_spot_observation_key(snapshot),
@@ -212,6 +214,7 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
         "diagnostics_captured_at": diagnostics_captured_at,
         "diagnostics_capture_status": diagnostics_capture_status,
         "diagnostics_age_ms": diagnostics_age_ms,
+        "spot_diagnostic_evidence_codes": evidence_codes,
         "alarmstatus": _text(snapshot.get("alarmstatus")),
         "signalpc": _text(snapshot.get("signalpc")),
         "d1temperature": _text(snapshot.get("d1temperature")),

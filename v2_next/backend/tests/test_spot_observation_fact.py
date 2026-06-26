@@ -3,12 +3,14 @@ import unittest
 from pathlib import Path
 
 from backend.FacilityData.spot_observation_fact import (
+    SPOT_OBSERVATION_FACT_COLUMNS,
     SpotObservationFactWriter,
     build_spot_observation_fact,
     build_spot_observation_key,
     derive_spot_diagnostic_evidence_codes,
     encode_spot_diagnostic_evidence_codes,
 )
+from scripts.validate_csv_v2_shadow import validate_spot_observation_fact_invariants
 
 
 class SpotObservationFactTests(unittest.TestCase):
@@ -111,6 +113,7 @@ class SpotObservationFactTests(unittest.TestCase):
 
         self.assertEqual(fact["diagnostics_capture_status"], "same_response")
         self.assertEqual(fact["diagnostics_age_ms"], "0.0")
+        self.assertIn("alarm_low_signal", fact["spot_diagnostic_evidence_codes"])
         self.assertEqual(fact["alarmstatus"], "LOW SIGNAL")
         self.assertEqual(fact["signalpc"], "3.2")
         self.assertEqual(fact["peak_picker_off_mode"], "reset")
@@ -227,6 +230,56 @@ class SpotObservationFactTests(unittest.TestCase):
         snapshot = {"peak_picker_enabled": False, "peak_picker_off_mode": "reset"}
 
         self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ())
+
+    def test_spot_observation_fact_validator_accepts_alarmstatus_bit4_with_evidence(self) -> None:
+        snapshot = {
+            "spot_service_instance_id": "svc-1",
+            "spot_poll_seq": 9,
+            "spot_observation_seq": 9,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "invalid_sentinel",
+            "alarmstatus": "0x10",
+            "signalpc": "6.0",
+            "low_signal_alarm_enabled": False,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+            "peak_picker_enabled": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            writer = SpotObservationFactWriter(output_path)
+            fact = writer.write_fact(snapshot)
+
+            self.assertIsNotNone(fact)
+            assert fact is not None
+            self.assertIn("spot_diagnostic_evidence_codes", fact)
+            self.assertIn("alarm_low_signal", fact["spot_diagnostic_evidence_codes"])
+            self.assertEqual(validate_spot_observation_fact_invariants(output_path), [])
+
+    def test_spot_observation_fact_validator_rejects_alarmstatus_bit4_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            row = {column: "" for column in SPOT_OBSERVATION_FACT_COLUMNS}
+            row.update(
+                {
+                    "alarmstatus": "16",
+                    "spot_diagnostic_evidence_codes": "[]",
+                    "low_signal_alarm_enabled": "false",
+                    "low_signal_threshold_pc": "2.0",
+                    "low_signal_comparator": "lt",
+                    "peak_picker_enabled": "false",
+                }
+            )
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                import csv
+
+                writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
+                writer.writeheader()
+                writer.writerow(row)
+
+            failures = validate_spot_observation_fact_invariants(output_path)
+
+        self.assertTrue(any("alarmstatus bit4 requires alarm_low_signal" in failure for failure in failures))
 
 
 if __name__ == "__main__":
