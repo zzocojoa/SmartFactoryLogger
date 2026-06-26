@@ -187,6 +187,7 @@ class SpotSnapshotTests(unittest.TestCase):
                 "spot_http_status_code": 200,
                 "spot_device_status_code": "temperature_under_range",
                 "spot_error_code": None,
+                "spot_diagnostic_evidence_codes": '["alarm_low_signal"]',
             },
         )
 
@@ -201,6 +202,7 @@ class SpotSnapshotTests(unittest.TestCase):
         self.assertEqual(data.temperature_status_shadow, "invalid_value")
         self.assertEqual(data.temperature_value_origin, "none")
         self.assertFalse(data.cache_fallback_allowed)
+        self.assertEqual(data.spot_diagnostic_evidence_codes, '["alarm_low_signal"]')
 
 class OnlineProcessStateTests(unittest.TestCase):
     def test_ext_snapshot_stale_missing_or_error_forces_unknown(self) -> None:

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import socket
 
-print(">>> REAL DRIVER V5 (NON-BLOCKING/SELECT) LOADED <<<") # VERSION CHECK
+print(">>> REAL DRIVER V5 (NON-BLOCKING/SELECT) LOADED <<<")  # VERSION CHECK
 
 import httpx
 
@@ -274,26 +274,26 @@ class RealPLCDriver(BasePLCDriver):
                     pass
             self.sock_ext = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock_ext.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            
+
             # Non-Blocking Connect (Force Timeout)
             self.sock_ext.setblocking(False)
             err = self.sock_ext.connect_ex((config.EXTRUDER_IP, config.EXTRUDER_PORT))
-            
+
             if err != 0:
                 # Wait for writeability (connection success)
                 _, writable, _ = select.select([], [self.sock_ext], [], self.ext_timeout)
                 if not writable:
                     raise socket.timeout("Connect timeout (Non-Blocking)")
-                
+
                 # Check for socket errors
                 err = self.sock_ext.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
                 if err != 0:
-                     raise OSError(err, "Connect failed")
+                    raise OSError(err, "Connect failed")
 
             # CRITICAL: Keep Non-Blocking Mode permanently!
             # self.sock_ext.setblocking(True)  <-- REMOVED
             # self.sock_ext.settimeout(...)    <-- REMOVED
-            
+
             self.ext_retry_interval = 1.0
             self.ext_next_retry = 0.0
             # print(f"[RealDriver] Connected to Extruder ({config.EXTRUDER_IP})")
@@ -461,6 +461,7 @@ class RealPLCDriver(BasePLCDriver):
             "spot_last_valid_value_at",
             "spot_snapshot_age_ms",
             "spot_value_age_ms",
+            "spot_diagnostic_evidence_codes",
         )
         fields = {key: metadata.get(key) for key in passthrough_keys}
         raw_value_text = metadata.get("spot_raw_value_text")
@@ -897,7 +898,7 @@ class RealPLCDriver(BasePLCDriver):
                 t_select_start = time.time()
                 r, _, _ = select.select([self.sock_ext], [], [], remaining)
                 t_select_end = time.time()
-                
+
                 if not r:
                     msg = (
                         f"[recv_until] context={context}, select_timeout=true, loop={loop_count}, "
@@ -919,7 +920,7 @@ class RealPLCDriver(BasePLCDriver):
                     )
                     print(msg)
                     config._config_log("WARNING", msg)
-                    
+
             except socket.timeout:
                 msg = (
                     f"[recv_until] context={context}, socket_timeout=true, loop={loop_count}, "

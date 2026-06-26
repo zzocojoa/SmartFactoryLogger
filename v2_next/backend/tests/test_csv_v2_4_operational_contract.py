@@ -73,6 +73,23 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertTrue(row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")].startswith("chg_"))
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_observation_key")], "spot-service-1:14")
 
+    def test_v2_4_row_uses_spot_diagnostic_evidence_codes_for_under_range_cause(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(update={"spot_diagnostic_evidence_codes": '["signal_below_threshold"]'})
+
+        row = self.build_v2_row(service, data)
+
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
+            "low_signal_candidate",
+        )
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.6")
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
+            '["phase_setup_candidate","signal_below_threshold"]',
+        )
+
     def test_low_count_high_motion_under_range_does_not_promote_to_production_stable(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
@@ -171,8 +188,9 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "expected_candidate")
         self.assertEqual(
             rows[1][V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
-            "below_measurement_range_candidate",
+            "unknown",
         )
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.0")
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], pre_changeover_id)
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("temperature_output_status")], "source_error")
@@ -300,6 +318,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertTrue(segment_id_after.startswith("seg_"))
         self.assertNotEqual(segment_id_after, segment_id_before)
+
     def test_stale_row_preserves_raw_device_status_but_outputs_stale(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)

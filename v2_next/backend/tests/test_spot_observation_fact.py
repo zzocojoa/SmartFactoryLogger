@@ -6,6 +6,8 @@ from backend.FacilityData.spot_observation_fact import (
     SpotObservationFactWriter,
     build_spot_observation_fact,
     build_spot_observation_key,
+    derive_spot_diagnostic_evidence_codes,
+    encode_spot_diagnostic_evidence_codes,
 )
 
 
@@ -76,7 +78,6 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertIn("svc-1:8", rows[2])
             self.assertFalse(spool_path.exists())
 
-
     def test_build_fact_uses_missing_diagnostics_status(self) -> None:
         fact = build_spot_observation_fact(
             {
@@ -89,6 +90,43 @@ class SpotObservationFactTests(unittest.TestCase):
 
         self.assertEqual(fact["diagnostics_capture_status"], "missing")
         self.assertEqual(fact["spot_observation_key"], "svc-1:1")
+
+    def test_build_fact_preserves_diagnostics_and_derives_evidence_codes(self) -> None:
+        snapshot = {
+            "spot_service_instance_id": "svc-1",
+            "spot_poll_seq": 2,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "invalid_sentinel",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
+            "alarmstatus": "LOW SIGNAL",
+            "signalpc": "3.2",
+            "peak_picker_off_mode": "reset",
+            "actuator_scan_state": "scanning",
+            "spot_diagnostic_evidence_codes": '["target_absent_verified"]',
+        }
+
+        fact = build_spot_observation_fact(snapshot)
+        evidence_codes = derive_spot_diagnostic_evidence_codes(snapshot)
+
+        self.assertEqual(fact["diagnostics_capture_status"], "same_response")
+        self.assertEqual(fact["diagnostics_age_ms"], "0.0")
+        self.assertEqual(fact["alarmstatus"], "LOW SIGNAL")
+        self.assertEqual(fact["signalpc"], "3.2")
+        self.assertEqual(fact["peak_picker_off_mode"], "reset")
+        self.assertEqual(fact["actuator_scan_state"], "scanning")
+        self.assertEqual(
+            set(evidence_codes),
+            {
+                "actuator_scanning",
+                "alarm_low_signal",
+                "peak_picker_off_mode_reset_configured",
+                "target_absent_verified",
+            },
+        )
+        self.assertEqual(
+            encode_spot_diagnostic_evidence_codes(snapshot),
+            '["actuator_scanning","alarm_low_signal","peak_picker_off_mode_reset_configured","target_absent_verified"]',
+        )
 
 
 if __name__ == "__main__":

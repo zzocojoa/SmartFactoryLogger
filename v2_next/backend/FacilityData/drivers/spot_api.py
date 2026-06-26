@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, TypedDict
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -23,7 +23,10 @@ from backend.FacilityData.spot_observation import (
     classify_spot_raw_response,
     derive_spot_target_observed_shadow,
 )
-from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
+from backend.FacilityData.spot_observation_fact import (
+    SpotObservationFactWriter,
+    encode_spot_diagnostic_evidence_codes,
+)
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -55,6 +58,9 @@ _SPOT_FOCUS_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
+_SPOT_DIAGNOSTIC_OUTPUT_PARAMS = ("alarmstatus", "signalpc")
+_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
+_SPOT_DIAGNOSTIC_MAX_AGE_FLOOR_SEC = 3.0
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 _img_fetch_lock = asyncio.Lock()
 _live_img_fetch_lock = asyncio.Lock()
@@ -84,6 +90,10 @@ _internal_temp_last_error_message: Optional[str] = None
 _internal_temp_last_upstream_status: Optional[int] = None
 _internal_temp_last_url: Optional[str] = None
 _internal_temp_last_success_at = 0.0
+_spot_diagnostics_lock = threading.Lock()
+_spot_diagnostics_snapshot: Optional[Dict[str, Any]] = None
+_spot_diagnostics_last_error_code: Optional[str] = None
+_spot_diagnostics_last_error_message: Optional[str] = None
 _spot_temperature_snapshot_lock = threading.Lock()
 _spot_service_instance_id = str(uuid4())
 _spot_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -91,6 +101,7 @@ _spot_poll_seq = 0
 _spot_observation_seq = 0
 _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
 _spot_observation_fact_writer: Optional[SpotObservationFactWriter] = None
+_spot_diagnostics_prefetch_task: Optional[asyncio.Task[None]] = None
 _spot_last_valid_value_at: Optional[float] = None
 _spot_temperature_cache_suppressed_until_valid = False
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
@@ -374,6 +385,85 @@ def _resolve_spot_internal_temperature_url() -> str:
     if not temp_url:
         raise SpotInternalTemperatureConfigError(temp_url)
     return temp_url
+
+
+def _resolve_spot_output_url(param: str) -> str:
+    base_url = str(config.SPOT_URL or "").strip() or f"http://{config.SPOT_IP}/output?p=temperature"
+    parts = urlsplit(base_url)
+    if not parts.scheme or not parts.netloc:
+        raise SpotTemperatureConfigError(base_url)
+    query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key.lower() != "p"]
+    query.append(("p", param))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path or "/output", urlencode(query), ""))
+
+
+def _spot_diagnostics_max_age_sec() -> float:
+    try:
+        refresh_interval = float(config.SPOT_REFRESH_INTERVAL or 1.0)
+    except (TypeError, ValueError):
+        refresh_interval = 1.0
+    return max(_SPOT_DIAGNOSTIC_MAX_AGE_FLOOR_SEC, refresh_interval * 2.0)
+
+
+async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str) -> tuple[str, str]:
+    url = _resolve_spot_output_url(param)
+    response = await client.get(url)
+    response.raise_for_status()
+    return param, response.text.strip()[:_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS]
+
+
+async def _refresh_spot_diagnostics(client: httpx.AsyncClient) -> None:
+    global _spot_diagnostics_last_error_code
+    global _spot_diagnostics_last_error_message
+    global _spot_diagnostics_snapshot
+
+    results = await asyncio.gather(
+        *(_request_spot_diagnostic_output(client, param) for param in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS),
+        return_exceptions=True,
+    )
+    payload: Dict[str, Any] = {}
+    errors: list[str] = []
+    for result in results:
+        if isinstance(result, BaseException):
+            errors.append(f"{result.__class__.__name__}: {_format_exception_message(result)}")
+            continue
+        key, value = result
+        payload[key] = value
+
+    captured_at = time.time()
+    status = "async_enriched" if payload else "error"
+    snapshot: Dict[str, Any] = {
+        "diagnostics_captured_at": _epoch_to_utc_iso(captured_at),
+        "_diagnostics_captured_at_epoch": captured_at,
+        "diagnostics_capture_status": status,
+        **payload,
+    }
+    with _spot_diagnostics_lock:
+        _spot_diagnostics_snapshot = snapshot
+        _spot_diagnostics_last_error_code = "spot-diagnostics-fetch-error" if errors else None
+        _spot_diagnostics_last_error_message = "; ".join(errors)[:512] if errors else None
+
+
+async def _refresh_spot_diagnostics_safely(client: httpx.AsyncClient, logger: Any) -> None:
+    try:
+        await _refresh_spot_diagnostics(client)
+    except Exception as exc:
+        global _spot_diagnostics_last_error_code
+        global _spot_diagnostics_last_error_message
+        global _spot_diagnostics_snapshot
+        captured_at = time.time()
+        with _spot_diagnostics_lock:
+            _spot_diagnostics_snapshot = {
+                "diagnostics_captured_at": _epoch_to_utc_iso(captured_at),
+                "_diagnostics_captured_at_epoch": captured_at,
+                "diagnostics_capture_status": "error",
+            }
+            _spot_diagnostics_last_error_code = "spot-diagnostics-fetch-error"
+            _spot_diagnostics_last_error_message = _format_exception_message(exc)[:512]
+        logger.warning(
+            "Spot diagnostics fetch failed",
+            extra={"code": "spot-diagnostics-fetch-error", "error": _format_exception_message(exc)},
+        )
 
 
 async def _request_spot_image_from_url(client: httpx.AsyncClient, image_url: str) -> bytes:
@@ -893,10 +983,38 @@ def _write_spot_observation_fact_safely(snapshot: Dict[str, Any]) -> None:
 
 def get_spot_observation_fact_health() -> Dict[str, Any]:
     writer = _spot_observation_fact_writer
+    with _spot_diagnostics_lock:
+        diagnostics_status = (
+            str(_spot_diagnostics_snapshot.get("diagnostics_capture_status"))
+            if _spot_diagnostics_snapshot is not None
+            else "missing"
+        )
     return {
         "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
         "write_failure_count": int(writer.failure_count) if writer is not None else 0,
+        "diagnostics_capture_status": diagnostics_status,
+        "diagnostics_last_error_code": _spot_diagnostics_last_error_code,
+        "diagnostics_last_error_message": _spot_diagnostics_last_error_message,
     }
+
+
+def _latest_spot_diagnostics_for_poll(poll_completed_at: float) -> Dict[str, Any]:
+    with _spot_diagnostics_lock:
+        snapshot = dict(_spot_diagnostics_snapshot) if _spot_diagnostics_snapshot is not None else None
+    if snapshot is None:
+        return {"diagnostics_capture_status": "missing", "diagnostics_age_ms": ""}
+
+    captured_epoch = snapshot.get("_diagnostics_captured_at_epoch")
+    if not isinstance(captured_epoch, (float, int)) or captured_epoch <= 0:
+        return {"diagnostics_capture_status": "missing", "diagnostics_age_ms": ""}
+
+    age_sec = poll_completed_at - float(captured_epoch)
+    if age_sec < 0 or age_sec > _spot_diagnostics_max_age_sec():
+        return {"diagnostics_capture_status": "missing", "diagnostics_age_ms": ""}
+
+    payload = {key: value for key, value in snapshot.items() if not key.startswith("_")}
+    payload["diagnostics_age_ms"] = f"{max(0.0, age_sec * 1000.0):.3f}"
+    return payload
 
 
 def _publish_spot_temperature_snapshot(
@@ -919,6 +1037,7 @@ def _publish_spot_temperature_snapshot(
     raw_value_text = classification.raw_value_text
     if classification.raw_validity == SpotRawValidity.NOT_EVALUATED:
         raw_value_text = None
+    diagnostics_payload = _latest_spot_diagnostics_for_poll(poll_completed_at)
 
     with _spot_temperature_snapshot_lock:
         _spot_observation_seq += 1
@@ -961,6 +1080,10 @@ def _publish_spot_temperature_snapshot(
             "cache_fallback_allowed": cache_fallback_allowed,
             "spot_temperature_url": temp_url,
         }
+        _spot_temperature_snapshot.update(diagnostics_payload)
+        _spot_temperature_snapshot["spot_diagnostic_evidence_codes"] = encode_spot_diagnostic_evidence_codes(
+            _spot_temperature_snapshot
+        )
         snapshot_for_fact = dict(_spot_temperature_snapshot)
     _write_spot_observation_fact_safely(snapshot_for_fact)
 
@@ -1272,7 +1395,7 @@ def _get_http_client() -> httpx.AsyncClient:
         timeout = httpx.Timeout(
             connect=1.0,
             # ?臾먮뼗 ??疫???쀫립??5?λ뜄以??遺얜뼄.
-            read=5.0, 
+            read=5.0,
             write=1.0,
             pool=5.0,
         )
@@ -1416,7 +1539,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
     global _img_failure_count
     global _img_cache_state
     now = time.time()
-    
+
     # 筌?Ŋ??????筌왖揶쎛 ??됱몵筌?筌앸맩??獄쏆꼹??
     cached_image = _cached_image_data()
     if cached_image is not None:
@@ -1430,7 +1553,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
                 _logger.warning("Spot stale serve: age_sec=%.3f", age)
         _img_cache_state = next_cache_state
         return _build_cached_image_response(now, cached_image, cache_status=cache_status)
-    
+
     # 筌?Ŋ?녶첎? ??쑴堉??됱몵筌??λ뜃由?嚥≪뮆諭띄몴??袁る퉸 ??甕?筌욊낯??揶쎛?紐꾩궔??
     try:
         image_url = _resolve_spot_image_url()
@@ -1448,7 +1571,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             _img_cache_state = next_cache_state
             return _build_cached_image_response(backoff_cached_now, cached_image, cache_status=cache_status)
         raise SpotImageBackoffError(image_url, retry_after)
-    
+
     async with _img_fetch_lock:
         # ?醫됲닊 ??얜굣 ??筌?Ŋ?녺몴???쇰뻻 ?類ㅼ뵥??뺣뼄.
         cached_image = _cached_image_data()
@@ -1462,7 +1585,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         locked_retry_after = _retry_after_sec(time.time())
         if locked_retry_after is not None and locked_retry_after > 0.0:
             raise SpotImageBackoffError(image_url, locked_retry_after)
-        
+
         client = _get_http_client()
         try:
             data = await _request_spot_image(client, image_url)
@@ -1557,11 +1680,12 @@ _prefetch_running = False
 async def _prefetch_loop():
     """獄쏄퉫???깆뒲??뽯퓠??筌왖??우읅??곗쨮 SPOT ???筌왖 ?袁ⓥ봺??뤿Ф (??뺚봺?袁る뱜 獄쎻뫗? 嚥≪뮇彛??怨몄뒠)."""
     global _img_cache_state, _img_failure_count, _img_last_error, _internal_temp_prefetch_task, _prefetch_running
+    global _spot_diagnostics_prefetch_task
     _prefetch_running = True
 
     interval = max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
     next_tick = time.time()
-    
+
     while _prefetch_running:
         try:
             client = _get_http_client()
@@ -1606,13 +1730,18 @@ async def _prefetch_loop():
                         },
                     )
 
+            if config.SPOT_URL and (
+                _spot_diagnostics_prefetch_task is None or _spot_diagnostics_prefetch_task.done()
+            ):
+                _spot_diagnostics_prefetch_task = asyncio.create_task(_refresh_spot_diagnostics_safely(client, _logger))
+
             if config.SPOT_INTERNAL_TEMPERATURE_URL and (
                 _internal_temp_prefetch_task is None or _internal_temp_prefetch_task.done()
             ):
                 _internal_temp_prefetch_task = asyncio.create_task(
                     _refresh_spot_internal_temperature_safely(client, _logger)
                 )
-                    
+
         except asyncio.CancelledError:
             break
         except SpotImageConfigError as exc:
@@ -1660,18 +1789,18 @@ async def _prefetch_loop():
                     await asyncio.sleep(backoff)
                     next_tick = time.time()
                     continue
-        
+
         # ??뺚봺?袁る뱜 獄쎻뫗?: ??쇱벉 ??쎈뻬 ??볦퍢 ?④쑴沅?
         next_tick += interval
         now = time.time()
         sleep_time = next_tick - now
-        
+
         if sleep_time > 0:
             await asyncio.sleep(sleep_time)
         else:
             # ?臾믩씜????댭???살삋 椰꾨챶????쇱벉 ??쎈뻬 ??뽰젎????? 筌왖??野껋럩??癰귣똻???뺣뼄.
             next_tick = now
-            await asyncio.sleep(0.1) # 筌ㅼ뮇??0.1????곷뻼??곗쨮 ?袁⑥쨮?紐꾧퐣 ?癒?? 獄쎻뫗?
+            await asyncio.sleep(0.1)  # 筌ㅼ뮇??0.1????곷뻼??곗쨮 ?袁⑥쨮?紐꾧퐣 ?癒?? 獄쎻뫗?
 
 
 async def start_prefetch_loop():
@@ -1679,16 +1808,24 @@ async def start_prefetch_loop():
     global _prefetch_task, _prefetch_running
     if _prefetch_task and not _prefetch_task.done():
         return  # ??? ??쎈뻬 餓?
-    
+
     _prefetch_running = True
     _prefetch_task = asyncio.create_task(_prefetch_loop())
 
 
 async def stop_prefetch_loop():
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф 餓λ쵐?."""
-    global _internal_temp_prefetch_task, _prefetch_task, _prefetch_running
+    global _internal_temp_prefetch_task, _prefetch_task, _prefetch_running, _spot_diagnostics_prefetch_task
     _prefetch_running = False
-    
+
+    if _spot_diagnostics_prefetch_task:
+        _spot_diagnostics_prefetch_task.cancel()
+        try:
+            await _spot_diagnostics_prefetch_task
+        except asyncio.CancelledError:
+            pass
+        _spot_diagnostics_prefetch_task = None
+
     if _prefetch_task:
         _prefetch_task.cancel()
         try:
@@ -1757,7 +1894,7 @@ def _parse_spot_focus_position(
             f"url={focus_url}; status_code={upstream_status}; body={raw_focus[:200]}",
             focus_url=focus_url,
             upstream_status=upstream_status,
-    )
+        )
     return int(raw_focus)
 
 
