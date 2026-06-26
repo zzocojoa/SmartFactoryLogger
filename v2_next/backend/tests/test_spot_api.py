@@ -88,6 +88,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api._internal_temp_last_upstream_status = None
         spot_api._internal_temp_last_url = None
         spot_api._internal_temp_last_success_at = 0.0
+        with spot_api._spot_diagnostics_lock:
+            spot_api._spot_diagnostics_snapshot = None
+            spot_api._spot_diagnostics_last_error_code = None
+            spot_api._spot_diagnostics_last_error_message = None
+        spot_api._spot_diagnostics_prefetch_task = None
         with spot_api._spot_temperature_snapshot_lock:
             spot_api._spot_service_instance_id = "test-spot-service-instance"
             spot_api._spot_service_started_at = "2026-06-22T00:00:00Z"
@@ -199,6 +204,39 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["spot_target_state_observed_source"], "unknown")
         self.assertIsNone(diagnostics["spot_temperature_observed_c"])
         self.assertIsNone(diagnostics["spot_temperature_effective_c"])
+
+    async def test_spot_diagnostics_enrich_under_range_evidence_without_blocking_poll(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+        requests: list[str] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            requests.append(url)
+            if url == "http://spot.local/output?p=alarmstatus":
+                return httpx.Response(200, text="LOW SIGNAL", request=request)
+            if url == "http://spot.local/output?p=signalpc":
+                return httpx.Response(200, text="3.2", request=request)
+            if url == "http://spot.local/output?p=temperature":
+                return httpx.Response(200, text="6553.4", request=request)
+            return httpx.Response(404, text="not found", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await spot_api._refresh_spot_diagnostics_safely(client, spot_api._logger)
+            with self.assertRaises(spot_api.SpotTemperatureFetchError):
+                await spot_api._refresh_spot_temperature(client)
+
+        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        fact = spot_api.get_spot_temperature_poll_snapshot()
+
+        self.assertEqual(diagnostics["diagnostics_capture_status"], "async_enriched")
+        self.assertEqual(diagnostics["alarmstatus"], "LOW SIGNAL")
+        self.assertEqual(diagnostics["signalpc"], "3.2")
+        self.assertEqual(diagnostics["spot_diagnostic_evidence_codes"], '["alarm_low_signal"]')
+        self.assertIsNotNone(fact)
+        assert fact is not None
+        self.assertEqual(fact["diagnostics_capture_status"], "async_enriched")
+        self.assertIn("http://spot.local/output?p=alarmstatus", requests)
+        self.assertIn("http://spot.local/output?p=signalpc", requests)
 
     async def test_ametek_over_range_sentinel_uses_invalid_sentinel_error(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

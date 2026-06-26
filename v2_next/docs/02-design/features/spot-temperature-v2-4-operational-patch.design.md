@@ -291,7 +291,7 @@ spot_poll_seq
 | `actuator_scan_state` | actuator scan state |
 | `actuator_peak_found` | actuator peak found state |
 
-Additional REST calls for diagnostics must not delay the SPOT poll critical path. Diagnostics may be captured from the same response, or added by asynchronous enrichment with `diagnostics_capture_status=async_enriched` and bounded `diagnostics_age_ms`.
+Additional REST calls for diagnostics must not delay the SPOT poll critical path. The initial runtime collector fetches `alarmstatus` and `signalpc` through asynchronous enrichment, records `diagnostics_capture_status=async_enriched`, and bounds `diagnostics_age_ms`. Later detector, range, Peak Picker, and actuator sources must follow the same non-blocking pattern.
 
 Writer failure must not stop SPOT polling. Implement failure counters and retry/local spool behavior.
 
@@ -359,20 +359,27 @@ Final expected/unexpected/indeterminate is written only to post-hoc fact as `tem
 - `peak_picker_reset_candidate` only when `peak_picker_off_mode_reset_configured` evidence is present.
 - `target_out_of_fov_candidate` only when actuator/camera evidence supports it.
 - `alignment_change_candidate` only when actuator scan/change evidence supports it.
-- `low_signal_candidate` only when signal diagnostic evidence supports it.
-- `below_measurement_range_candidate` only when configured range and process evidence support it.
+- `low_signal_candidate` only when signal diagnostic evidence supports it. `alarm_low_signal` is derived from `alarmstatus` bit 4 or a textual low-signal alarm. `signal_below_threshold` is derived from `signalpc` only when a finite `low_signal_threshold_pc` in `0..100` and `low_signal_comparator` of `lt` or `lte` are explicitly supplied; `signalpc` alone is captured diagnostics, not a low-signal claim.
+- `below_measurement_range_candidate` only when configured measurement range and detector evidence both support it; setup/process phase evidence alone is never sufficient.
 - No final non-candidate physical cause is allowed in this patch.
 
 Evidence codes are stable identifiers serialized in CSV as a sorted JSON array string. Blank means no evidence was evaluated; `[]` means evaluated with no supporting code.
+
+`spot_observation_fact` diagnostic columns are the source of direct equipment evidence. Runtime metadata exposes normalized `spot_diagnostic_evidence_codes`; the realtime CSV does not add another raw diagnostics column, but `temperature_cause_evidence_codes` consumes those normalized codes when deriving under-range cause candidates. Missing or stale diagnostics must keep the cause candidate at `unknown` unless another direct code is present.
 
 Initial evidence codes:
 
 ```text
 phase_setup_candidate
 actuator_scanning
+actuator_position_changed
 signal_below_threshold
 alarm_low_signal
 peak_picker_off_mode_reset_configured
+target_absent_verified
+target_out_of_fov_evidence
+measurement_range_configured
+detector_below_measurement_range
 ```
 
 When multiple cause candidates are supported, choose the highest-priority candidate in this order and keep all supporting evidence codes:
@@ -385,6 +392,8 @@ peak_picker_reset_candidate
 -> below_measurement_range_candidate
 -> unknown
 ```
+
+When only `phase_setup_candidate` is present, emit `temperature_under_range_cause_candidate=unknown`, `temperature_cause_confidence=0.0`, and keep `temperature_cause_evidence_codes=["phase_setup_candidate"]`. A setup phase can make under-range expected, but it does not prove the material is physically below the AMETEK measurement range.
 
 `temperature_cause_confidence` must be deterministic from evidence strength and bounded to `0.0..1.0`; no candidate may exceed `0.9` without at least one direct equipment diagnostic code.
 

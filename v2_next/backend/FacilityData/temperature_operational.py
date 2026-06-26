@@ -197,19 +197,28 @@ def _derive_under_range_cause(
     if status != TemperatureOutputStatus.UNDER_RANGE.value:
         return "", None, ""
     evidence = set(str(code) for code in evidence_codes if str(code))
-    if phase in {"setup_candidate", "pre_changeover_hold_candidate", "die_change_candidate"}:
+    if phase in {
+        "setup_candidate",
+        "setup_alignment_candidate",
+        "pre_changeover_hold_candidate",
+        "die_change_candidate",
+        "changeover_candidate",
+    }:
         evidence.add("phase_setup_candidate")
-    if phase == "setup_alignment_candidate":
-        evidence.add("actuator_scanning")
     sorted_evidence = sorted(evidence)
     if "peak_picker_off_mode_reset_configured" in evidence:
         return "peak_picker_reset_candidate", 0.75, _json_list(sorted_evidence)
-    if "actuator_scanning" in evidence:
+    if "target_absent_verified" in evidence or "target_out_of_fov_evidence" in evidence:
+        return "target_out_of_fov_candidate", 0.6, _json_list(sorted_evidence)
+    if "actuator_scanning" in evidence or "actuator_position_changed" in evidence:
         return "alignment_change_candidate", 0.55, _json_list(sorted_evidence)
     if "signal_below_threshold" in evidence or "alarm_low_signal" in evidence:
         return "low_signal_candidate", 0.6, _json_list(sorted_evidence)
-    if "phase_setup_candidate" in evidence:
-        return "below_measurement_range_candidate", 0.35, _json_list(sorted_evidence)
+    if {
+        "measurement_range_configured",
+        "detector_below_measurement_range",
+    }.issubset(evidence):
+        return "below_measurement_range_candidate", 0.65, _json_list(sorted_evidence)
     return "unknown", 0.0, _json_list(sorted_evidence)
 
 

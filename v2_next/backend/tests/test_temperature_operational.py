@@ -1,5 +1,7 @@
+import json
 import unittest
 
+from backend.FacilityData.spot_observation_fact import derive_spot_diagnostic_evidence_codes
 from backend.FacilityData.temperature_operational import (
     TemperatureOperationalInput,
     derive_temperature_operational_fields,
@@ -23,8 +25,106 @@ class TemperatureOperationalTests(unittest.TestCase):
         self.assertEqual(decision.temperature_output_status, "under_range")
         self.assertEqual(decision.temperature_unavailable_reason, "under_range")
         self.assertEqual(decision.temperature_expectedness_candidate, "expected_candidate")
-        self.assertEqual(decision.temperature_under_range_cause_candidate, "below_measurement_range_candidate")
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+        self.assertEqual(decision.temperature_cause_confidence, 0.0)
+        self.assertEqual(json.loads(decision.temperature_cause_evidence_codes), ["phase_setup_candidate"])
         self.assertEqual(decision.spot_effective_freshness_at_row, "fresh")
+
+    def test_under_range_setup_alignment_without_diagnostics_keeps_unknown_cause(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                process_phase_candidate="setup_alignment_candidate",
+            )
+        )
+
+        self.assertEqual(decision.temperature_output_status, "under_range")
+        self.assertEqual(decision.temperature_expectedness_candidate, "expected_candidate")
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+        self.assertEqual(decision.temperature_cause_confidence, 0.0)
+        self.assertEqual(json.loads(decision.temperature_cause_evidence_codes), ["phase_setup_candidate"])
+
+    def test_under_range_cause_requires_direct_diagnostic_evidence(self) -> None:
+        cases = [
+            (
+                ("peak_picker_off_mode_reset_configured",),
+                "peak_picker_reset_candidate",
+                0.75,
+            ),
+            (
+                ("target_absent_verified",),
+                "target_out_of_fov_candidate",
+                0.6,
+            ),
+            (
+                ("actuator_position_changed",),
+                "alignment_change_candidate",
+                0.55,
+            ),
+            (
+                ("signal_below_threshold",),
+                "low_signal_candidate",
+                0.6,
+            ),
+            (
+                ("measurement_range_configured", "detector_below_measurement_range"),
+                "below_measurement_range_candidate",
+                0.65,
+            ),
+        ]
+        for evidence_codes, expected_cause, expected_confidence in cases:
+            with self.subTest(expected_cause=expected_cause):
+                decision = derive_temperature_operational_fields(
+                    TemperatureOperationalInput(
+                        poll_status="success",
+                        raw_validity="invalid_sentinel",
+                        source_freshness="fresh",
+                        temperature_value_origin="none",
+                        spot_device_status_code="temperature_under_range",
+                        spot_effective_age_ms_at_row=100.0,
+                        process_phase_candidate="setup_candidate",
+                        evidence_codes=evidence_codes,
+                    )
+                )
+
+                self.assertEqual(decision.temperature_under_range_cause_candidate, expected_cause)
+                self.assertEqual(decision.temperature_cause_confidence, expected_confidence)
+                self.assertIn("phase_setup_candidate", json.loads(decision.temperature_cause_evidence_codes))
+
+    def test_under_range_signalpc_threshold_evidence_promotes_low_signal_candidate(self) -> None:
+        evidence_codes = derive_spot_diagnostic_evidence_codes(
+            {
+                "signalpc": "3.2",
+                "low_signal_threshold_pc": "5.0",
+                "low_signal_comparator": "lte",
+            }
+        )
+
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                process_phase_candidate="setup_candidate",
+                evidence_codes=evidence_codes,
+            )
+        )
+
+        self.assertEqual(evidence_codes, ("signal_below_threshold",))
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "low_signal_candidate")
+        self.assertEqual(decision.temperature_cause_confidence, 0.6)
+        self.assertEqual(
+            json.loads(decision.temperature_cause_evidence_codes),
+            ["phase_setup_candidate", "signal_below_threshold"],
+        )
 
     def test_stale_precedence_preserves_raw_sentinel_but_outputs_stale(self) -> None:
         decision = derive_temperature_operational_fields(

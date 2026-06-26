@@ -2,12 +2,47 @@ from __future__ import annotations
 
 import csv
 import json
+import math
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 
 
 SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.0.0"
+LOW_SIGNAL_ALARM_BIT_MASK = 1 << 4
+LOW_SIGNAL_COMPARATORS = frozenset({"lt", "lte"})
+SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
+    {
+        "actuator_position_changed",
+        "actuator_scanning",
+        "alarm_low_signal",
+        "detector_below_measurement_range",
+        "measurement_range_configured",
+        "peak_picker_off_mode_reset_configured",
+        "signal_below_threshold",
+        "target_absent_verified",
+        "target_out_of_fov_evidence",
+    }
+)
+SPOT_DIAGNOSTIC_FACT_FIELDS = (
+    "alarmstatus",
+    "signalpc",
+    "d1temperature",
+    "d2temperature",
+    "e1out",
+    "e2out",
+    "appnumber",
+    "instrument_info",
+    "peak_picker_enabled",
+    "peak_picker_threshold",
+    "peak_picker_off_delay_ms",
+    "peak_picker_off_mode",
+    "actuator_position",
+    "actuator_scan_state",
+    "actuator_peak_found",
+)
 SPOT_OBSERVATION_FACT_COLUMNS = [
     "spot_observation_fact_schema_version",
     "spot_observation_key",
@@ -128,6 +163,14 @@ def build_spot_observation_key(snapshot: Mapping[str, Any]) -> str:
 
 def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
     completed_at = _text(snapshot.get("spot_last_poll_completed_at"))
+    diagnostics_present = _has_diagnostic_payload(snapshot)
+    diagnostics_capture_status = _text(snapshot.get("diagnostics_capture_status"))
+    if not diagnostics_capture_status:
+        diagnostics_capture_status = "same_response" if diagnostics_present else "missing"
+    diagnostics_captured_at = _text(snapshot.get("diagnostics_captured_at")) or completed_at
+    diagnostics_age_ms = _text(snapshot.get("diagnostics_age_ms"))
+    if diagnostics_present and not diagnostics_age_ms:
+        diagnostics_age_ms = "0.0"
     return {
         "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
         "spot_observation_key": build_spot_observation_key(snapshot),
@@ -147,25 +190,170 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
         "spot_last_poll_started_at": _text(snapshot.get("spot_last_poll_started_at")),
         "spot_last_poll_completed_at": completed_at,
         "spot_poll_duration_ms": _text(snapshot.get("spot_poll_duration_ms")),
-        "diagnostics_captured_at": completed_at,
-        "diagnostics_capture_status": "missing",
-        "diagnostics_age_ms": "",
-        "alarmstatus": "",
-        "signalpc": "",
-        "d1temperature": "",
-        "d2temperature": "",
-        "e1out": "",
-        "e2out": "",
-        "appnumber": "",
-        "instrument_info": "",
-        "peak_picker_enabled": "",
-        "peak_picker_threshold": "",
-        "peak_picker_off_delay_ms": "",
-        "peak_picker_off_mode": "",
-        "actuator_position": "",
-        "actuator_scan_state": "",
-        "actuator_peak_found": "",
+        "diagnostics_captured_at": diagnostics_captured_at,
+        "diagnostics_capture_status": diagnostics_capture_status,
+        "diagnostics_age_ms": diagnostics_age_ms,
+        "alarmstatus": _text(snapshot.get("alarmstatus")),
+        "signalpc": _text(snapshot.get("signalpc")),
+        "d1temperature": _text(snapshot.get("d1temperature")),
+        "d2temperature": _text(snapshot.get("d2temperature")),
+        "e1out": _text(snapshot.get("e1out")),
+        "e2out": _text(snapshot.get("e2out")),
+        "appnumber": _text(snapshot.get("appnumber")),
+        "instrument_info": _text(snapshot.get("instrument_info")),
+        "peak_picker_enabled": _text(snapshot.get("peak_picker_enabled")),
+        "peak_picker_threshold": _text(snapshot.get("peak_picker_threshold")),
+        "peak_picker_off_delay_ms": _text(snapshot.get("peak_picker_off_delay_ms")),
+        "peak_picker_off_mode": _text(snapshot.get("peak_picker_off_mode")),
+        "actuator_position": _text(snapshot.get("actuator_position")),
+        "actuator_scan_state": _text(snapshot.get("actuator_scan_state")),
+        "actuator_peak_found": _text(snapshot.get("actuator_peak_found")),
     }
+
+
+def encode_spot_diagnostic_evidence_codes(snapshot: Mapping[str, Any]) -> str:
+    codes = derive_spot_diagnostic_evidence_codes(snapshot)
+    if not codes and not _has_diagnostic_payload(snapshot) and not snapshot.get("spot_diagnostic_evidence_codes"):
+        return ""
+    return json.dumps(list(codes), ensure_ascii=False, separators=(",", ":"))
+
+
+def derive_spot_diagnostic_evidence_codes(snapshot: Mapping[str, Any]) -> tuple[str, ...]:
+    evidence = set(parse_spot_diagnostic_evidence_codes(snapshot.get("spot_diagnostic_evidence_codes")))
+    if _truthy(snapshot.get("target_absent_verified")):
+        evidence.add("target_absent_verified")
+    if _truthy(snapshot.get("target_out_of_fov_evidence")):
+        evidence.add("target_out_of_fov_evidence")
+    if _truthy(snapshot.get("actuator_position_changed")):
+        evidence.add("actuator_position_changed")
+    if _truthy(snapshot.get("measurement_range_configured")):
+        evidence.add("measurement_range_configured")
+    if _truthy(snapshot.get("detector_below_measurement_range")):
+        evidence.add("detector_below_measurement_range")
+    if _truthy(snapshot.get("signal_below_threshold")):
+        evidence.add("signal_below_threshold")
+    if _signalpc_below_configured_threshold(snapshot) is True:
+        evidence.add("signal_below_threshold")
+
+    if _alarmstatus_low_signal_active(snapshot.get("alarmstatus")):
+        evidence.add("alarm_low_signal")
+
+    actuator_scan_state = _normalize_token(snapshot.get("actuator_scan_state"))
+    if actuator_scan_state in {"active", "in_progress", "moving", "scan", "scanning"}:
+        evidence.add("actuator_scanning")
+
+    peak_picker_off_mode = _normalize_token(snapshot.get("peak_picker_off_mode"))
+    if peak_picker_off_mode in {"reset", "reset_output", "resetting", "off_mode_reset"}:
+        evidence.add("peak_picker_off_mode_reset_configured")
+
+    return tuple(sorted(code for code in evidence if code in SPOT_DIAGNOSTIC_EVIDENCE_CODES))
+
+
+def parse_spot_diagnostic_evidence_codes(value: Any) -> tuple[str, ...]:
+    if value is None or value == "":
+        return ()
+    raw_values: Iterable[Any]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                parsed = []
+            raw_values = parsed if isinstance(parsed, list) else []
+        else:
+            raw_values = re.split(r"[,;|\s]+", stripped)
+    elif isinstance(value, Iterable) and not isinstance(value, Mapping):
+        raw_values = value
+    else:
+        raw_values = ()
+    return tuple(sorted({str(code) for code in raw_values if str(code) in SPOT_DIAGNOSTIC_EVIDENCE_CODES}))
+
+
+def _has_diagnostic_payload(snapshot: Mapping[str, Any]) -> bool:
+    return any(_text(snapshot.get(field)).strip() for field in SPOT_DIAGNOSTIC_FACT_FIELDS)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "enabled"}
+
+
+def _signalpc_below_configured_threshold(snapshot: Mapping[str, Any]) -> Optional[bool]:
+    signalpc = _signal_percent_or_none(snapshot.get("signalpc"))
+    threshold = _signal_percent_or_none(snapshot.get("low_signal_threshold_pc"))
+    comparator = _low_signal_comparator_or_none(snapshot.get("low_signal_comparator"))
+    if signalpc is None or threshold is None or comparator is None:
+        return None
+    if comparator == "lt":
+        return signalpc < threshold
+    return signalpc <= threshold
+
+
+def _signal_percent_or_none(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (float, int)):
+        parsed = float(value)
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("%"):
+            text = text[:-1].strip()
+        try:
+            parsed = float(text)
+        except ValueError:
+            return None
+    if not math.isfinite(parsed) or parsed < 0.0 or parsed > 100.0:
+        return None
+    return parsed
+
+
+def _low_signal_comparator_or_none(value: Any) -> Optional[str]:
+    raw = _text(value).strip().lower()
+    if raw in LOW_SIGNAL_COMPARATORS:
+        return raw
+    if raw == "<":
+        return "lt"
+    if raw in {"<=", "le"}:
+        return "lte"
+    return None
+
+
+def _alarmstatus_low_signal_active(value: Any) -> bool:
+    alarmstatus = _alarmstatus_byte_or_none(value)
+    if alarmstatus is not None:
+        return bool(alarmstatus & LOW_SIGNAL_ALARM_BIT_MASK)
+    normalized = _normalize_token(value)
+    return "low_signal" in normalized or "lowsignal" in normalized
+
+
+def _alarmstatus_byte_or_none(value: Any) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        parsed = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = int(text, 0)
+        except ValueError:
+            return None
+    if parsed < 0 or parsed > 255:
+        return None
+    return parsed
+
+
+def _normalize_token(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", _text(value).strip().lower()).strip("_")
 
 
 def _text(value: Any) -> str:

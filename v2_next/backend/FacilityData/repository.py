@@ -29,7 +29,10 @@ from backend.FacilityData.process_phase import (
     ProcessPhaseInput,
     derive_process_phase_candidate,
 )
-from backend.FacilityData.spot_observation_fact import build_spot_observation_key
+from backend.FacilityData.spot_observation_fact import (
+    build_spot_observation_key,
+    parse_spot_diagnostic_evidence_codes,
+)
 from backend.FacilityData.temperature_operational import (
     SPOT_ROW_FRESHNESS_RULE_VERSION,
     TEMPERATURE_OPERATIONAL_RULE_VERSION,
@@ -1179,6 +1182,7 @@ class CSVLoggerService:
                 if data.spot_effective_value_age_ms_at_row is not None
                 else data.spot_value_age_ms,
                 process_phase_candidate=process_phase_candidate,
+                evidence_codes=parse_spot_diagnostic_evidence_codes(data.spot_diagnostic_evidence_codes),
             )
         )
 

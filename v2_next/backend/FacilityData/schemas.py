@@ -201,7 +201,7 @@ class FactoryData(BaseModel):
     extruder_snapshot_error: Optional[str] = None
     ls_snapshot_error: Optional[str] = None
     spot_snapshot_error: Optional[str] = None
-    
+
     # KPIs
     Speed: Optional[float] = None
     Press: Optional[float] = None
@@ -222,7 +222,7 @@ class FactoryData(BaseModel):
     operator_metadata_valid: Optional[bool] = None
     operator_metadata_missing_fields: Optional[list[str]] = None
     operator_metadata_updated_at: Optional[str] = None
-    
+
     # Temperatures
     Spot: Optional[float] = None
     Temp_F: Optional[float] = None
@@ -281,6 +281,7 @@ class FactoryData(BaseModel):
     process_segment_id: Optional[str] = None
     changeover_candidate_id: Optional[str] = None
     spot_observation_key: Optional[str] = None
+    spot_diagnostic_evidence_codes: Optional[str] = None
 
     # Molds
     Mold1: Optional[float] = None
@@ -289,7 +290,7 @@ class FactoryData(BaseModel):
     Mold4: Optional[float] = None
     Mold5: Optional[float] = None
     Mold6: Optional[float] = None
-    
+
     # Environment
     At_Temp: Optional[float] = None
     At_Pre: Optional[float] = None
