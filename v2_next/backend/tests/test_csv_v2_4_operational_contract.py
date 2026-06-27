@@ -215,14 +215,14 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         ]
 
         segment_id = rows[0][V2_4_CSV_COLUMNS.index("process_segment_id")]
-        pre_changeover_id = rows[1][V2_4_CSV_COLUMNS.index("changeover_candidate_id")]
+        weak_segment_id = rows[1][V2_4_CSV_COLUMNS.index("process_segment_id")]
 
         self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
         self.assertTrue(segment_id.startswith("seg_"))
         self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
-        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
-        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_segment_id")], "")
-        self.assertTrue(pre_changeover_id.startswith("chg_"))
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "possible_pre_changeover_hold")
+        self.assertTrue(weak_segment_id.startswith("seg_"))
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "expected_candidate")
         self.assertEqual(
@@ -230,11 +230,13 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             "unknown",
         )
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.0")
-        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
-        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], pre_changeover_id)
+        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "possible_pre_changeover_hold")
+        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_segment_id")], weak_segment_id)
+        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("temperature_output_status")], "source_error")
-        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "pre_changeover_hold_candidate")
-        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], pre_changeover_id)
+        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "possible_pre_changeover_hold")
+        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_segment_id")], weak_segment_id)
+        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
         self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertTrue(rows[4][V2_4_CSV_COLUMNS.index("process_segment_id")].startswith("seg_"))

@@ -51,6 +51,7 @@ _CANDIDATE_TO_CONFIRMED = {
     "setup_candidate": "setup",
     "setup_alignment_candidate": "setup_alignment",
     "pre_changeover_hold_candidate": "pre_changeover_hold",
+    "possible_pre_changeover_hold": "pre_changeover_hold",
     "die_change_candidate": "die_change",
     "changeover_candidate": "changeover",
     "production_stabilizing": "production_stabilizing",
@@ -61,6 +62,7 @@ _CHANGEOVER_LIFECYCLE_CANDIDATE_PHASES = {
     "setup_candidate",
     "setup_alignment_candidate",
     "pre_changeover_hold_candidate",
+    "possible_pre_changeover_hold",
     "die_change_candidate",
     "changeover_candidate",
     "production_stabilizing",
@@ -73,7 +75,11 @@ _PHASE_CONFIRMATION_PRECEDENCE = (
     "changeover_candidate",
     "setup_candidate",
     "pre_changeover_hold_candidate",
+    "possible_pre_changeover_hold",
 )
+
+_WEAK_PRE_CHANGEOVER_PHASE = "possible_pre_changeover_hold"
+
 
 @dataclass(frozen=True)
 class _CandidateRows:
@@ -93,7 +99,7 @@ def infer_changeover_candidate_resolution_facts(
     source_file_id: str,
 ) -> list[dict[str, str]]:
     facts: list[dict[str, str]] = []
-    for candidate in _group_candidate_rows(rows):
+    for candidate in _group_candidate_rows(rows, source_file_id=source_file_id):
         start = candidate.rows[0]
         end = candidate.rows[-1]
         phase = _text(start, "process_phase_candidate") or "unknown"
@@ -127,7 +133,7 @@ def infer_process_phase_event_facts(
     source_file_id: str,
 ) -> list[dict[str, str]]:
     facts: list[dict[str, str]] = []
-    for candidate in _group_candidate_rows(rows):
+    for candidate in _group_candidate_rows(rows, source_file_id=source_file_id):
         start = candidate.rows[0]
         end = candidate.rows[-1]
         phase_candidate = _text(start, "process_phase_candidate") or "unknown"
@@ -157,7 +163,11 @@ def infer_process_phase_event_facts(
     return facts
 
 
-def _group_candidate_rows(rows: Sequence[Mapping[str, object]]) -> list[_CandidateRows]:
+def _group_candidate_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    source_file_id: str,
+) -> list[_CandidateRows]:
     rows_by_candidate: dict[str, list[Mapping[str, object]]] = {}
     candidate_order: list[str] = []
     for row in rows:
@@ -168,6 +178,7 @@ def _group_candidate_rows(rows: Sequence[Mapping[str, object]]) -> list[_Candida
             rows_by_candidate[candidate_id] = []
             candidate_order.append(candidate_id)
         rows_by_candidate[candidate_id].append(row)
+
     grouped: list[_CandidateRows] = []
     for candidate_id in candidate_order:
         candidate_rows = tuple(rows_by_candidate[candidate_id])
@@ -175,7 +186,53 @@ def _group_candidate_rows(rows: Sequence[Mapping[str, object]]) -> list[_Candida
         if representative_phase not in _CHANGEOVER_LIFECYCLE_CANDIDATE_PHASES:
             continue
         grouped.append(_CandidateRows(candidate_id=candidate_id, rows=candidate_rows))
+    grouped.extend(_confirmed_weak_pre_changeover_segments(rows, source_file_id=source_file_id))
+    return sorted(grouped, key=lambda candidate: _to_int(_text(candidate.rows[0], "sample_seq")) or 0)
+
+
+def _confirmed_weak_pre_changeover_segments(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    source_file_id: str,
+) -> list[_CandidateRows]:
+    rows_by_segment: dict[str, list[Mapping[str, object]]] = {}
+    segment_order: list[str] = []
+    for row in rows:
+        if _text(row, "changeover_candidate_id"):
+            continue
+        if _text(row, "process_phase_candidate") != _WEAK_PRE_CHANGEOVER_PHASE:
+            continue
+        segment_id = _text(row, "process_segment_id")
+        if not segment_id:
+            continue
+        if segment_id not in rows_by_segment:
+            rows_by_segment[segment_id] = []
+            segment_order.append(segment_id)
+        rows_by_segment[segment_id].append(row)
+
+    grouped: list[_CandidateRows] = []
+    for segment_id in segment_order:
+        segment_rows = tuple(rows_by_segment[segment_id])
+        if not _pre_changeover_future_evidence(segment_rows, rows):
+            continue
+        grouped.append(
+            _CandidateRows(
+                candidate_id=_synthetic_changeover_candidate_id(source_file_id, segment_id, segment_rows),
+                rows=segment_rows,
+            )
+        )
     return grouped
+
+
+def _synthetic_changeover_candidate_id(
+    source_file_id: str,
+    segment_id: str,
+    rows: Sequence[Mapping[str, object]],
+) -> str:
+    start_seq = _text(rows[0], "sample_seq") if rows else ""
+    key = "|".join([source_file_id, segment_id, start_seq])
+    return "chg_" + sha256(key.encode("utf-8")).hexdigest()[:16]
+
 
 def _confirm_candidate_phase(
     phase_candidate: str,
@@ -184,7 +241,7 @@ def _confirm_candidate_phase(
 ) -> _PhaseConfirmation:
     representative_phase = _representative_candidate_phase(phase_candidate, candidate_rows)
     confirmed_phase = _CANDIDATE_TO_CONFIRMED.get(representative_phase, "unknown")
-    if representative_phase != "pre_changeover_hold_candidate":
+    if representative_phase not in {"pre_changeover_hold_candidate", _WEAK_PRE_CHANGEOVER_PHASE}:
         return _PhaseConfirmation(
             confirmed_phase=confirmed_phase,
             reason=f"{representative_phase}_mapped_posthoc",

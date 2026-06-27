@@ -220,7 +220,7 @@ _CHANGEOVER_TERMINAL_EVIDENCE_PHASES = {
     "setup_alignment_candidate",
     "changeover_candidate",
 }
-_PROCESS_SEGMENT_PHASES = {"production_stable", "idle_candidate", "unknown"}
+_PROCESS_SEGMENT_PHASES = {"production_stable", "possible_pre_changeover_hold", "idle_candidate", "unknown"}
 @dataclass(frozen=True)
 class V2CsvContract:
     schema_version: str

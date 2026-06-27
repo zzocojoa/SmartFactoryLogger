@@ -184,6 +184,7 @@ def _derive_expectedness(status: str, phase: str) -> str:
             "setup_candidate",
             "setup_alignment_candidate",
             "pre_changeover_hold_candidate",
+            "possible_pre_changeover_hold",
             "die_change_candidate",
             "changeover_candidate",
         }:

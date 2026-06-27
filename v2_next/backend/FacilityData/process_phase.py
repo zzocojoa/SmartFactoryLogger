@@ -12,6 +12,7 @@ PROCESS_PHASE_CANDIDATES = {
     "production_stable",
     "setup_candidate",
     "pre_changeover_hold_candidate",
+    "possible_pre_changeover_hold",
     "die_change_candidate",
     "setup_alignment_candidate",
     "changeover_candidate",
@@ -85,7 +86,7 @@ def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPha
         and low_press
         and (input_state.count_held_sec or 0.0) >= _COUNT_HELD_FOR_CHANGEOVER_SEC
     ):
-        phase = "pre_changeover_hold_candidate"
+        phase = "possible_pre_changeover_hold"
     elif online_state == "idle_candidate" or (low_speed and low_press):
         phase = "idle_candidate"
 
