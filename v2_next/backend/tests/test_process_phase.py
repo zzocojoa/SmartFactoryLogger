@@ -40,6 +40,21 @@ class ProcessPhaseCandidateTests(unittest.TestCase):
         self.assertEqual(decision.process_phase_candidate, "production_stable")
         self.assertEqual(decision.changeover_candidate_id, "")
 
+    def test_recent_production_stop_maps_to_possible_pre_changeover_hold(self) -> None:
+        decision = derive_process_phase_candidate(
+            ProcessPhaseInput(
+                speed=0.0,
+                press=0.0,
+                count=12,
+                extruder_process_state_online="stopped",
+                count_held_sec=30.0,
+                recent_production_motion=True,
+            )
+        )
+
+        self.assertEqual(decision.process_phase_candidate, "possible_pre_changeover_hold")
+        self.assertEqual(decision.changeover_candidate_id, "")
+
     def test_changeover_candidate_does_not_require_spot_status(self) -> None:
         decision = derive_process_phase_candidate(
             ProcessPhaseInput(

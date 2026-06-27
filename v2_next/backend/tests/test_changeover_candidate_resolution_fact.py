@@ -236,6 +236,79 @@ class ChangeoverCandidateResolutionFactTests(unittest.TestCase):
         self.assertEqual(len(event_facts), 1)
         self.assertEqual(event_facts[0]["source_changeover_candidate_id"], "chg_repeat")
 
+    def test_weak_pre_changeover_without_future_evidence_does_not_create_candidate_fact(self) -> None:
+        rows = [
+            {
+                "changeover_candidate_id": "",
+                "process_segment_id": "seg_weak",
+                "process_phase_candidate": "possible_pre_changeover_hold",
+                "temperature_expectedness_candidate": "expected_candidate",
+                "Product_No_operator": "100",
+                "Mold_No_operator": "7",
+                "Count": "12",
+                "logger_service_instance_id": "logger-1",
+                "sample_seq": "700",
+                "timestamp_utc": "2026-06-25T00:00:00Z",
+            },
+            {
+                "changeover_candidate_id": "",
+                "process_segment_id": "seg_after",
+                "process_phase_candidate": "production_stable",
+                "Product_No_operator": "100",
+                "Mold_No_operator": "7",
+                "Count": "12",
+                "logger_service_instance_id": "logger-1",
+                "sample_seq": "701",
+                "timestamp_utc": "2026-06-25T00:02:00Z",
+            },
+        ]
 
+        resolution_facts = infer_changeover_candidate_resolution_facts(rows, source_file_id="sha256:abc")
+        event_facts = infer_process_phase_event_facts(rows, source_file_id="sha256:abc")
+
+        self.assertEqual(resolution_facts, [])
+        self.assertEqual(event_facts, [])
+
+    def test_weak_pre_changeover_confirms_with_future_evidence(self) -> None:
+        rows = [
+            {
+                "changeover_candidate_id": "",
+                "process_segment_id": "seg_weak",
+                "process_phase_candidate": "possible_pre_changeover_hold",
+                "temperature_expectedness_candidate": "expected_candidate",
+                "Product_No_operator": "100",
+                "Mold_No_operator": "7",
+                "Count": "12",
+                "logger_service_instance_id": "logger-1",
+                "sample_seq": "800",
+                "timestamp_utc": "2026-06-25T00:00:00Z",
+            },
+            {
+                "changeover_candidate_id": "",
+                "process_segment_id": "seg_reset",
+                "process_phase_candidate": "setup_alignment_candidate",
+                "Product_No_operator": "100",
+                "Mold_No_operator": "7",
+                "Count": "0",
+                "logger_service_instance_id": "logger-1",
+                "sample_seq": "801",
+                "timestamp_utc": "2026-06-25T00:03:00Z",
+            },
+        ]
+
+        resolution_facts = infer_changeover_candidate_resolution_facts(rows, source_file_id="sha256:abc")
+        event_facts = infer_process_phase_event_facts(rows, source_file_id="sha256:abc")
+
+        self.assertEqual(len(resolution_facts), 1)
+        self.assertTrue(resolution_facts[0]["changeover_candidate_id"].startswith("chg_"))
+        self.assertEqual(resolution_facts[0]["confirmation_outcome"], "confirmed")
+        self.assertEqual(
+            resolution_facts[0]["resolution_reason"],
+            "pre_changeover_hold_candidate_confirmed_by_future_count_reset_to_0",
+        )
+        self.assertEqual(len(event_facts), 1)
+        self.assertEqual(event_facts[0]["source_changeover_candidate_id"], resolution_facts[0]["changeover_candidate_id"])
+        self.assertEqual(event_facts[0]["process_phase_confirmed"], "pre_changeover_hold")
+        self.assertEqual(event_facts[0]["phase_confirmation_state"], "posthoc_confirmed")
 if __name__ == "__main__":
     unittest.main()
