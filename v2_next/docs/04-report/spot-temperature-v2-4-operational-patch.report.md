@@ -193,6 +193,24 @@ Verdict: PASS for the controlled three-flag full-bundle server smoke. This valid
 
 Scope note: This smoke does not claim downstream consumer compatibility, legacy `Temperature_quality` semantic promotion, alerting policy changes, or ML input readiness.
 
+### 5.5 Independent Fact-Copy Verification After PR #79
+
+Evidence level: `[independent verifier B direct parse of operator-provided server copy]`. Development and verification run on a different computer from the onsite server PC, so the live server `%APPDATA%\SmartFactoryLogger\logs\test_data` path was not directly accessible from the verification environment. This section therefore does not relabel the copied artifact as live-path access.
+
+- Fact copy inspected: `C:\Users\user\Desktop\test\온도\spot_observation_fact.csv`
+- Parser: Python `csv` with `newline=""`, so quoted SPOT raw payload newlines were handled as CSV field content rather than row breaks.
+- Validator: `scripts.validate_csv_v2_shadow.validate_spot_observation_fact_invariants(path)`
+- Header: 47 columns, matching `backend.FacilityData.spot_observation_fact.SPOT_OBSERVATION_FACT_COLUMNS`.
+- Rows: 45,079; row length mismatches: 0.
+- Schema versions: `1.2.0` for all 45,079 rows.
+- Validator failures: 0.
+- Poll status counts: `success=45,072`, `timeout=7`.
+- Raw validity counts: `valid_temperature=32,322`, `invalid_sentinel=12,750`, `not_received=7`.
+- Latest parsed row: `spot_observation_key=d26aa58b-a639-455a-8a5c-5c31c43f5b93:3370`, `spot_poll_status=success`, `spot_raw_validity=valid_temperature`, `spot_http_status_code=200`, `diagnostics_capture_status=async_enriched`, `alarmstatus=0`, `signalpc=5`, `itemperature=37.9`, `spot_diagnostic_evidence_codes=["signal_at_or_above_configured_threshold"]`.
+- Schema mismatch archives in the provided copy folder: 0.
+
+Verdict: PASS for independent fact-copy validation. This proves the provided server fact artifact conforms to the current 1.2.0 fact schema and repository invariant validator. It does not prove live-path filesystem access by verifier B.
+
 ---
 
 ## 6. Learnings
