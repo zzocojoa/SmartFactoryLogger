@@ -408,6 +408,7 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
     cache_index = header.index("spot_cache_status") if "spot_cache_status" in header else None
     freshness_index = header.index("spot_source_freshness") if "spot_source_freshness" in header else None
     output_status_index = header.index("temperature_output_status") if "temperature_output_status" in header else None
+    raw_validity_index = header.index("spot_raw_validity") if "spot_raw_validity" in header else None
 
     for row_number, row in enumerate(rows, start=2):
         if max(temperature_index, origin_index, observed_index, last_valid_index) >= len(row):
@@ -420,6 +421,11 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
         last_valid_at = row[last_valid_index].strip()
         cache_status = row[cache_index].strip() if cache_index is not None and cache_index < len(row) else ""
         freshness = row[freshness_index].strip() if freshness_index is not None and freshness_index < len(row) else ""
+        raw_validity = (
+            row[raw_validity_index].strip()
+            if raw_validity_index is not None and raw_validity_index < len(row)
+            else ""
+        )
         output_status = (
             row[output_status_index].strip()
             if output_status_index is not None and output_status_index < len(row)
@@ -457,18 +463,32 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
                 observed_value = _parse_finite_float(observed)
                 if observed_value is None:
                     failures.append(f"row {row_number} populated spot_temperature_observed_c must be finite")
-                elif not (
-                    cache_status == "available_not_used"
-                    and freshness == "stale"
-                    and (not output_status or output_status == "stale")
+                elif not _origin_none_allows_populated_observed(
+                    cache_status=cache_status,
+                    freshness=freshness,
+                    output_status=output_status,
+                    raw_validity=raw_validity,
                 ):
                     failures.append(
                         f"row {row_number} origin none permits populated spot_temperature_observed_c "
-                        "only for stale available_not_used rows"
+                        "only for stale available_not_used rows or stale expired valid-temperature rows"
                     )
 
     return failures
 
+
+def _origin_none_allows_populated_observed(
+    *,
+    cache_status: str,
+    freshness: str,
+    output_status: str,
+    raw_validity: str,
+) -> bool:
+    if freshness != "stale" or output_status not in {"", "stale"}:
+        return False
+    if cache_status == "available_not_used":
+        return True
+    return cache_status == "expired" and raw_validity == "valid_temperature"
 
 def _parse_decimal_value(value: str) -> Decimal | None:
     try:
@@ -505,6 +525,8 @@ def validate_spot_invalid_sentinel_invariants(rows: list[list[str]], header: lis
         return ["v2 header missing invalid sentinel invariant columns: " + ", ".join(missing_columns)]
 
     indices = {column: header.index(column) for column in required_columns}
+    source_freshness_index = header.index("spot_source_freshness") if "spot_source_freshness" in header else None
+    cache_status_index = header.index("spot_cache_status") if "spot_cache_status" in header else None
     failures: list[str] = []
     for row_number, row in enumerate(rows, start=2):
         if max(indices.values()) >= len(row):
@@ -519,12 +541,26 @@ def validate_spot_invalid_sentinel_invariants(rows: list[list[str]], header: lis
             failures.append(f"row {row_number} invalid_sentinel raw value is not documented 6553.4/6553.5 sentinel")
             continue
 
+        source_freshness = (
+            row[source_freshness_index].strip()
+            if source_freshness_index is not None and source_freshness_index < len(row)
+            else ""
+        )
+        cache_status = (
+            row[cache_status_index].strip()
+            if cache_status_index is not None and cache_status_index < len(row)
+            else ""
+        )
+        expected_temperature_status = (
+            "stale" if source_freshness == "stale" and cache_status == "expired" else "invalid_value"
+        )
+
         expected_values = {
             "spot_poll_status": "success",
             "spot_device_status_code": expected_device_status,
             "spot_error_code": "",
             "cache_fallback_allowed": "false",
-            "temperature_status_shadow": "invalid_value",
+            "temperature_status_shadow": expected_temperature_status,
             "spot_target_state_observed_shadow": "unknown",
             "temperature_value_origin": "none",
             "Temperature": "",
@@ -594,6 +630,7 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
     required_columns = [
         "Temperature",
         "spot_raw_validity",
+        "spot_source_freshness",
         "spot_device_status_code",
         "spot_effective_freshness_at_row",
         "temperature_output_status",
@@ -629,6 +666,7 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
             continue
         temperature = row[indices["Temperature"]].strip()
         raw_validity = row[indices["spot_raw_validity"]].strip()
+        source_freshness = row[indices["spot_source_freshness"]].strip()
         device_status = row[indices["spot_device_status_code"]].strip()
         row_freshness = row[indices["spot_effective_freshness_at_row"]].strip()
         output_status = row[indices["temperature_output_status"]].strip()
@@ -639,12 +677,12 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
 
         if output_status and output_status != "valid" and temperature:
             failures.append(f"row {row_number} non-valid temperature_output_status requires blank Temperature")
-        if row_freshness == "stale":
+        if row_freshness == "stale" or source_freshness == "stale":
             if output_status != "stale":
                 failures.append(f"row {row_number} stale freshness requires temperature_output_status=stale")
             if unavailable_reason != "stale_observation":
                 failures.append(f"row {row_number} stale freshness requires temperature_unavailable_reason=stale_observation")
-        if raw_validity == "invalid_sentinel" and row_freshness != "stale":
+        if raw_validity == "invalid_sentinel" and row_freshness != "stale" and source_freshness != "stale":
             expected_status = {
                 "temperature_under_range": "under_range",
                 "temperature_over_range": "over_range",

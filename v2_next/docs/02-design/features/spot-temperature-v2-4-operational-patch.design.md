@@ -333,7 +333,7 @@ startup / clock anomaly
 | unknown freshness | blank | `unknown` | `unknown_freshness` | `none` |
 | missing unknown | blank | `unknown` | `unknown` | `none` |
 
-If the last raw observation was `6553.4` and the row age is stale, the row keeps `spot_device_status_code=temperature_under_range`, but emits `temperature_output_status=stale` and `temperature_unavailable_reason=stale_observation`. This prevents an old sentinel from being interpreted as the current operational state.
+If the last raw observation was `6553.4` and the row age or source freshness is stale, the row keeps `spot_device_status_code=temperature_under_range`, but emits `temperature_output_status=stale` and `temperature_unavailable_reason=stale_observation`. This prevents an old sentinel from being interpreted as the current operational state. Stale diagnostic rows may keep a finite `spot_temperature_observed_c` with `temperature_value_origin=none` only when the cache is not used (`available_not_used`) or when an expired valid-temperature observation is retained for diagnostics.
 
 ### 4.2 Expectedness Candidate Rules
 
@@ -611,7 +611,7 @@ Match rate alone is not sufficient for report or operational promotion.
 | Schema atomicity | one CSV file contains exactly one schema version, one matching header, and one file-open active column contract |
 | Sentinel invariant | all `6553.4` / `6553.5` rows have blank `Temperature` |
 | Cache suppression | after sentinel, timeout rows do not reuse the previous valid temperature before a new valid poll |
-| Stale precedence | stale rows preserve raw `spot_device_status_code` but emit `temperature_output_status=stale` |
+| Stale precedence | stale rows preserve raw `spot_device_status_code` and bounded diagnostics, but emit `temperature_output_status=stale` |
 | Observation uniqueness | observation fact has zero duplicate `{spot_service_instance_id, spot_poll_seq}` keys |
 | Link coverage | when the promotion bundle is enabled, each realtime nonblank `spot_observation_key` links to exactly one fact row |
 | Candidate lifecycle integrity | every `changeover_candidate_id` has exactly one terminal row in `changeover_candidate_resolution_fact` and no orphan event rows |
