@@ -32,9 +32,17 @@ class ProcessPhaseCandidateTests(unittest.TestCase):
                 self.assertEqual(decision.process_phase_candidate, "setup_alignment_candidate")
                 self.assertEqual(decision.changeover_candidate_id, "")
 
-    def test_count_three_high_motion_can_promote_to_production_stable(self) -> None:
+    def test_count_three_high_motion_maps_to_production_stabilizing(self) -> None:
         decision = derive_process_phase_candidate(
             ProcessPhaseInput(speed=1.0, press=35.0, count=3, extruder_process_state_online="extruding")
+        )
+
+        self.assertEqual(decision.process_phase_candidate, "production_stabilizing")
+        self.assertEqual(decision.changeover_candidate_id, "")
+
+    def test_count_four_high_motion_can_promote_to_production_stable(self) -> None:
+        decision = derive_process_phase_candidate(
+            ProcessPhaseInput(speed=1.0, press=35.0, count=4, extruder_process_state_online="extruding")
         )
 
         self.assertEqual(decision.process_phase_candidate, "production_stable")

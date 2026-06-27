@@ -187,6 +187,7 @@ def _derive_expectedness(status: str, phase: str) -> str:
             "possible_pre_changeover_hold",
             "die_change_candidate",
             "changeover_candidate",
+            "production_stabilizing",
         }:
             return "expected_candidate"
         if phase == "production_stable":

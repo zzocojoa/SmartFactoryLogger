@@ -6,7 +6,7 @@ from typing import Optional
 from backend import constants
 
 
-PROCESS_PHASE_RULE_VERSION = "process-phase-candidate-v1"
+PROCESS_PHASE_RULE_VERSION = "process-phase-candidate-v2"
 
 PROCESS_PHASE_CANDIDATES = {
     "production_stable",
@@ -22,6 +22,7 @@ PROCESS_PHASE_CANDIDATES = {
 }
 
 _LOW_COUNT_MAX = 2
+_STABILIZING_COUNT_MAX = 3
 _COUNT_HELD_FOR_CHANGEOVER_SEC = 30.0
 
 
@@ -60,6 +61,7 @@ def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPha
     low_speed = speed is not None and speed <= constants.SPEED_IDLE_MAX
     low_press = press is not None and press <= constants.PRESS_IDLE_MAX
     low_count_startup = count is not None and 0 <= count <= _LOW_COUNT_MAX
+    stabilizing_count = count is not None and _LOW_COUNT_MAX < count <= _STABILIZING_COUNT_MAX
     production_motion = online_state == "extruding" or (
         speed is not None and speed > constants.CYCLE_SPEED_THRESHOLD
     )
@@ -69,6 +71,8 @@ def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPha
         phase = "setup_candidate"
     elif low_count_startup and production_motion:
         phase = "setup_alignment_candidate"
+    elif stabilizing_count and production_motion:
+        phase = "production_stabilizing"
     elif production_motion:
         phase = "production_stable"
     elif input_state.actuator_scanning and low_speed:
@@ -80,7 +84,7 @@ def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPha
         phase = "changeover_candidate"
     elif (
         count is not None
-        and count > _LOW_COUNT_MAX
+        and count > _STABILIZING_COUNT_MAX
         and input_state.recent_production_motion
         and low_speed
         and low_press
