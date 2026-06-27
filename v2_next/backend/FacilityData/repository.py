@@ -220,7 +220,13 @@ _CHANGEOVER_TERMINAL_EVIDENCE_PHASES = {
     "setup_alignment_candidate",
     "changeover_candidate",
 }
-_PROCESS_SEGMENT_PHASES = {"production_stable", "possible_pre_changeover_hold", "idle_candidate", "unknown"}
+_PROCESS_SEGMENT_PHASES = {
+    "production_stable",
+    "production_stabilizing",
+    "possible_pre_changeover_hold",
+    "idle_candidate",
+    "unknown",
+}
 @dataclass(frozen=True)
 class V2CsvContract:
     schema_version: str
@@ -1084,7 +1090,10 @@ class CSVLoggerService:
         close_changeover_after_row = False
         state = self._process_phase_runtime_state
 
-        if phase == "production_stable" and state.active_changeover_candidate_id:
+        if phase == "production_stabilizing" and state.active_changeover_candidate_id:
+            changeover_candidate_id = state.active_changeover_candidate_id
+            close_changeover_after_row = True
+        elif phase == "production_stable" and state.active_changeover_candidate_id:
             if state.active_changeover_terminal_eligible:
                 phase = "production_stabilizing"
                 changeover_candidate_id = state.active_changeover_candidate_id
@@ -1092,13 +1101,11 @@ class CSVLoggerService:
             else:
                 self._clear_active_changeover_candidate()
                 process_segment_id = self._process_segment_id_for_phase(phase, sample_seq)
-        elif phase in _CHANGEOVER_LIFECYCLE_PHASES or phase == "production_stabilizing":
+        elif phase in _CHANGEOVER_LIFECYCLE_PHASES:
             self._clear_active_process_segment()
             changeover_candidate_id = self._changeover_candidate_id_for_row(sample_seq)
-            if phase in _CHANGEOVER_TERMINAL_EVIDENCE_PHASES or phase == "production_stabilizing":
+            if phase in _CHANGEOVER_TERMINAL_EVIDENCE_PHASES:
                 state.active_changeover_terminal_eligible = True
-            if phase == "production_stabilizing":
-                close_changeover_after_row = True
         else:
             process_segment_id = self._process_segment_id_for_phase(phase, sample_seq)
 

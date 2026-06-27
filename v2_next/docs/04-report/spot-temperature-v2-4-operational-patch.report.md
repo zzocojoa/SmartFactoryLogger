@@ -66,7 +66,7 @@ PR #68 is merge-ready for the default-off v2.4 implementation scope at report ti
 - [x] `alarmstatus` and `signalpc` are collected through non-blocking SPOT diagnostics enrichment, preserved in `spot_observation_fact`, normalized into `spot_diagnostic_evidence_codes`, and passed through RealPLC into `temperature_cause_evidence_codes` for v2.4 rows. `alarmstatus` bit 4 is authoritative low-signal evidence; `signalpc` numeric evidence is emitted only when `low_signal_threshold_pc` and `low_signal_comparator` are explicitly supplied, so threshold-unknown `signalpc` remains captured-only.
 - [x] stale row precedence prevents old sentinel values from being interpreted as current operational state.
 - [x] realtime `process_phase_candidate` implemented without SPOT status or future context.
-- [x] Count 0..2 production motion is kept out of `production_stable`; general and weak pre-changeover rows use `process_segment_id`, and eligible strong changeover lifecycles carry one `changeover_candidate_id` through `production_stabilizing`.
+- [x] Count 0..2 production motion is kept out of `production_stable`; Count 3 production motion is kept in `production_stabilizing`; general and weak pre-changeover rows use `process_segment_id`, and eligible strong changeover lifecycles carry one `changeover_candidate_id` through `production_stabilizing`.
 - [x] CSV logger runtime state supplies recent production motion, count hold duration, and previous operator context.
 - [x] v2.3/v2.4 schema constants split and feature-flagged at file-open time.
 - [x] known v2.3/v2.4 header transitions roll over instead of mixing schemas in one CSV.
@@ -337,6 +337,9 @@ Post-merge local evidence update, 2026-06-26:
 - Actual server CSV repo-internal downstream replay PASS: `scripts/infer_process_segments_for_csv.py` produced `process_segment_fact_rows=11` at `C:/tmp/sfl-actual-20260626-114019-process-segments.csv`.
 - Actual server CSV repo-internal process phase replay PASS with all promotion flags enabled: `scripts/infer_process_phase_events_for_csv.py` produced `changeover_candidate_resolution_fact_rows=0` and `process_phase_event_fact_rows=0`, expected for this sample because it has no changeover lifecycle rows.
 - Actual server CSV replay driver PASS: `CsvReplayDriver` loaded 3,124 rows from the server CSV and `connect()` returned `True`.
+- Count 3 policy replay evidence level: independent verifier direct parse of an operator-provided server CSV copy, not direct live server `%APPDATA%` path access. The replay input was `Factory_Integrated_Log_v2_20260627_005508.csv`, SHA-256 `352D56B4D52CFBA266168F6C7503FEC1B30A26B123B7A7D2CAB97839E0CA2BD1`, 147,456 rows.
+- Count 0..3 replay PASS: original copied CSV had 17,521 Count 0..3 rows and 1,899 `production_stable` rows at Count 3. Runtime-state replay with `process_phase_candidate` cleared remapped Count 3 to `production_stabilizing=1,904`, `idle_candidate=406`, and `unknown=206`, with Count 0..3 `production_stable` violations reduced to 0.
+- Count 3 ID contract replay PASS: standalone Count 3 `production_stabilizing` rows used `process_segment_id` without `changeover_candidate_id` for 1,899 rows; only 5 active lifecycle rows retained `changeover_candidate_id`.
 - Downstream consumer gate CLOSED for the current operation scope: repo-internal downstream replay is PASS on the actual server CSV, and the operator confirmed there are currently no repo-out CSV consumers such as Excel macros, MES/ETL jobs, or external analysis programs. If a repo-out consumer is introduced later, it must be dry-run with the v2.4 CSV before relying on it operationally.
 
 ---

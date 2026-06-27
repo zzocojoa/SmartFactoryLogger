@@ -176,7 +176,7 @@ Metadata must record `active_schema_version`, active column hash, operational fl
 | `changeover_candidate_id` | text/blank | `chg_` + stable hash from `logger_service_instance_id` and `candidate_start_sample_seq` | changeover lifecycle key only |
 | `spot_observation_key` | text/blank | `{spot_service_instance_id}:{spot_poll_seq}` | SPOT snapshot |
 
-ID contract note: `process_segment_id` owns general production/idle/unknown segments and realtime weak `possible_pre_changeover_hold` segments. `changeover_candidate_id` is reserved for strong changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be generated for evidence-free weak hold rows. A strong lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`, while weak `possible_pre_changeover_hold` can be promoted only by post-hoc future evidence.
+ID contract note: `process_segment_id` owns general production/stabilizing/idle/unknown segments and realtime weak `possible_pre_changeover_hold` segments. `changeover_candidate_id` is reserved for strong changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be generated for evidence-free weak hold rows or standalone Count 3 stabilization. A strong lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`, while weak `possible_pre_changeover_hold` can be promoted only by post-hoc future evidence.
 
 Realtime CSV는 confirmed `changeover_event_id`를 소유하지 않는다.
 
@@ -425,17 +425,18 @@ Realtime phase is candidate-only and cannot use SPOT status as an input. Rules m
 |---|---|
 | Count in 0..2 and low speed/press | `setup_candidate` |
 | Count in 0..2 and production motion or online extruding before Count 3 is observed | `setup_alignment_candidate` |
-| Count > 2, recent production motion exists, currently stopped, Speed/MainPress/BilletLength are stopped, and Count is held for the configured duration, but no current-row die/change evidence exists | `possible_pre_changeover_hold` |
+| Count 3 and production motion or online extruding | `production_stabilizing` |
+| Count > 3, recent production motion exists, currently stopped, Speed/MainPress/BilletLength are stopped, and Count is held for the configured duration, but no current-row die/change evidence exists | `possible_pre_changeover_hold` |
 | current row has operator-entered die/mold change marker or mold id differs from the last committed operator context while stopped | `die_change_candidate` |
 | product or mold context transition is already observed at or before the current row while stopped | `changeover_candidate` |
 | actuator scan/alignment evidence while stopped | `setup_alignment_candidate` |
-| sustained extruding outside the Count 0..2 startup gate, including Count >= 3 or unknown Count | `production_stable`; if an eligible changeover lifecycle is active, the first production row becomes `production_stabilizing` |
+| sustained extruding outside the Count 0..3 startup/stabilizing gate, including Count >= 4 or unknown Count | `production_stable`; if an eligible changeover lifecycle is active, the first production row becomes `production_stabilizing` |
 | idle low speed/press without setup evidence | `idle_candidate` |
 | insufficient context | `unknown` |
 
 Realtime `possible_pre_changeover_hold` must not look ahead to a later Count reset or future product/mold change and must keep `changeover_candidate_id` blank. Later Count reset, product/mold change, or die-change marker may only be used by post-hoc facts to synthesize a candidate and confirm `pre_changeover_hold` within the evidence window. Without that future evidence, no changeover candidate fact is generated for the weak segment.
 
-The Count 0..2 stable promotion gate is intentionally process-only. It does not use SPOT status. Count 3 is the first low-count boundary that may leave startup alignment; if an eligible changeover lifecycle is active, that terminal row is `production_stabilizing`, otherwise it may be `production_stable`.
+The Count 0..3 stable promotion gate is intentionally process-only. It does not use SPOT status. Count 0..2 stays in setup alignment when production motion exists; Count 3 is treated as `production_stabilizing`; Count >= 4 or unknown Count may become `production_stable`.
 
 Candidate-to-confirmed mapping is fixed in Section 3.4 and must be covered by tests.
 
