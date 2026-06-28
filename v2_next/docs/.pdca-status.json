@@ -420,6 +420,64 @@
         "memory-diagnostics-r11-tests-ci"
       ],
       "implementationPolicy": "ranked_micro_pdca",
+      "prInclusionPolicy": {
+        "decision": "separate_docs_pr_after_code_prs",
+        "docsBranch": "codex/memory-diagnostics-pdca-docs",
+        "codeBranches": {
+          "backendCore": "codex/memory-diagnostics-backend-core",
+          "frontendUi": "codex/memory-diagnostics-frontend-ui"
+        },
+        "docsPrScope": [
+          "docs/.pdca-status.json",
+          "docs/01-plan/features/memory-diagnostics-*.plan.md",
+          "docs/02-design/features/memory-diagnostics-*.design.md",
+          "docs/02-design/features/memory-diagnostics-*.do.md",
+          "docs/03-analysis/memory-diagnostics-*.analysis.md",
+          "docs/04-report/memory-diagnostics-*.report.md"
+        ],
+        "mergeGate": "Do not merge the docs PR until backendCore and frontendUi PRs are merged, or revise this policy and the roadmap report to match any changed code PR scope.",
+        "rankToCodeBranches": {
+          "memory-diagnostics-r01-collector-contract": [
+            "codex/memory-diagnostics-backend-core"
+          ],
+          "memory-diagnostics-r02-plc-history": [
+            "codex/memory-diagnostics-backend-core"
+          ],
+          "memory-diagnostics-r03-csv-logger-runtime": [
+            "codex/memory-diagnostics-backend-core"
+          ],
+          "memory-diagnostics-r04-spot-cache": [
+            "codex/memory-diagnostics-backend-core"
+          ],
+          "memory-diagnostics-r05-budget-severity": [
+            "codex/memory-diagnostics-backend-core",
+            "codex/memory-diagnostics-frontend-ui"
+          ],
+          "memory-diagnostics-r06-leak-slope": [
+            "codex/memory-diagnostics-backend-core",
+            "codex/memory-diagnostics-frontend-ui"
+          ],
+          "memory-diagnostics-r07-gc-snapshot": [
+            "codex/memory-diagnostics-backend-core",
+            "codex/memory-diagnostics-frontend-ui"
+          ],
+          "memory-diagnostics-r08-electron-memory": [
+            "codex/memory-diagnostics-backend-core",
+            "codex/memory-diagnostics-frontend-ui"
+          ],
+          "memory-diagnostics-r09-frontend-exactness": [
+            "codex/memory-diagnostics-frontend-ui"
+          ],
+          "memory-diagnostics-r10-export-v2": [
+            "codex/memory-diagnostics-backend-core",
+            "codex/memory-diagnostics-frontend-ui"
+          ],
+          "memory-diagnostics-r11-tests-ci": [
+            "codex/memory-diagnostics-backend-core",
+            "codex/memory-diagnostics-frontend-ui"
+          ]
+        }
+      },
       "nextFeature": null,
       "completedAt": "2026-06-27T18:17:18.867Z"
     },

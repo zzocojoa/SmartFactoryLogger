@@ -28,6 +28,26 @@ The memory diagnostics hardening roadmap completed all ranked child features fro
 - R10 `memory-diagnostics-r10-export-v2`: forensic export v2 schema with recursive redaction.
 - R11 `memory-diagnostics-r11-tests-ci`: health/CI guardrails for memory diagnostics regressions.
 
+## PR Inclusion Policy
+- Decision: keep PDCA roadmap, analysis, report, and `.pdca-status.json` changes in a separate docs PR from `codex/memory-diagnostics-pdca-docs`.
+- Merge gate: the docs PR must merge only after `codex/memory-diagnostics-backend-core` and `codex/memory-diagnostics-frontend-ui` are merged, or this report and `.pdca-status.json` must be revised to match any changed code PR scope.
+- Code PR scope: `codex/memory-diagnostics-backend-core` owns backend collectors, API contracts, Electron main/preload packaging, and backend tests. `codex/memory-diagnostics-frontend-ui` owns renderer types, UI, view model, settings controls, and frontend tests.
+- Docs PR scope: all memory diagnostics PDCA documents stay together because the child reports summarize cross-branch evidence and the roadmap completion status depends on both code PRs.
+
+| Rank | Code branch evidence | Merge dependency |
+| --- | --- | --- |
+| R01 collector contract | `codex/memory-diagnostics-backend-core` | backend core PR |
+| R02 PLC history | `codex/memory-diagnostics-backend-core` | backend core PR |
+| R03 CSV logger runtime | `codex/memory-diagnostics-backend-core` | backend core PR |
+| R04 SPOT cache | `codex/memory-diagnostics-backend-core` | backend core PR |
+| R05 budget severity | `codex/memory-diagnostics-backend-core`, `codex/memory-diagnostics-frontend-ui` | both code PRs |
+| R06 leak slope | `codex/memory-diagnostics-backend-core`, `codex/memory-diagnostics-frontend-ui` | both code PRs |
+| R07 GC snapshot | `codex/memory-diagnostics-backend-core`, `codex/memory-diagnostics-frontend-ui` | both code PRs |
+| R08 Electron memory | `codex/memory-diagnostics-backend-core`, `codex/memory-diagnostics-frontend-ui` | both code PRs |
+| R09 frontend exactness | `codex/memory-diagnostics-frontend-ui` | frontend UI PR |
+| R10 export v2 | `codex/memory-diagnostics-backend-core`, `codex/memory-diagnostics-frontend-ui` | both code PRs |
+| R11 tests and CI | `codex/memory-diagnostics-backend-core`, `codex/memory-diagnostics-frontend-ui` | both code PRs |
+
 ## Validation
 - R10 targeted backend export tests: passed, 27 tests.
 - R10 sanitized export smoke: passed, no raw password/live image URL remained in JSON output.
@@ -35,9 +55,10 @@ The memory diagnostics hardening roadmap completed all ranked child features fro
 - R11 targeted frontend memory tests: passed, 2 files and 12 tests.
 - Final `npm run health`: passed, including frontend typecheck/lint/tests and backend ruff/mypy/tests.
 - Final `git diff --check`: passed with CRLF conversion warnings only.
+- PR inclusion audit: docs-only branch `codex/memory-diagnostics-pdca-docs` now records the code branch mapping and merge gate for `.pdca-status.json` and child report consistency.
 
 ## Production Evidence Gap
 Local automated validation is complete. Long-running production soak evidence on the real workstation is still needed to confirm alert thresholds, leak-slope signal quality, and operator usefulness under live workload.
 
 ## Next Action
-Run a production soak with export capture before and after an operating shift, then review leak suspects and severity alerts against actual process behavior.
+Merge the backend core and frontend UI code PRs first, then merge this docs PR after confirming the rank-to-branch mapping above still matches the final PR diffs. After docs merge, run a production soak with export capture before and after an operating shift.
