@@ -320,7 +320,18 @@ export interface MemoryCollectorBudgetFields {
   growth_bytes_per_min?: number | null;
 }
 
-export interface MemoryCollectorItem extends MemoryCollectorRuntimeFields, MemoryCollectorBudgetFields {
+export interface CsvLoggerRuntimeFields {
+  queue_size?: number | null;
+  queue_maxsize?: number | null;
+  queue_ratio?: number | null;
+  drop_count?: number | null;
+  last_drop_at?: number | null;
+  last_enqueue_at?: number | null;
+  writer_lag_sec?: number | null;
+  estimated_queue_bytes?: number | null;
+}
+
+export interface MemoryCollectorItem extends MemoryCollectorRuntimeFields, MemoryCollectorBudgetFields, CsvLoggerRuntimeFields {
   name: string;
   kind: string;
   exactness: MemoryExactness;
@@ -329,7 +340,7 @@ export interface MemoryCollectorItem extends MemoryCollectorRuntimeFields, Memor
   note?: string | null;
 }
 
-export interface MemoryCollectorDeltaItem extends MemoryCollectorRuntimeFields, MemoryCollectorBudgetFields {
+export interface MemoryCollectorDeltaItem extends MemoryCollectorRuntimeFields, MemoryCollectorBudgetFields, CsvLoggerRuntimeFields {
   name: string;
   kind: string;
   exactness: MemoryExactness;
