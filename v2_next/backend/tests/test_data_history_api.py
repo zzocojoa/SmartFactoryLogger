@@ -1,5 +1,8 @@
+import json
 import time
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -135,6 +138,143 @@ class DataHistoryApiTests(unittest.TestCase):
         self.assertTrue(response_payload["truncated"])
         self.assertEqual(response_payload["oldest_timestamp_ms"], timestamp_ms[0])
         self.assertEqual([item["timestamp_ms"] for item in response_payload["samples"]], timestamp_ms)
+
+    def test_history_memory_summary_estimates_from_bounded_sample(self) -> None:
+        base_sec = time.time() - 10.0
+        for idx in range(4):
+            backend_app.plc_service._record_history_sample(
+                self.build_sample(f"2026-05-21T00:00:0{idx}.000Z", float(idx), idx),
+                base_sec + idx,
+            )
+
+        summary = backend_app.plc_service.get_history_memory_summary(sample_size=2)
+
+        self.assertEqual(summary["count"], 4)
+        self.assertEqual(summary["max_samples"], backend_app.plc_service.HISTORY_MAX_SAMPLES)
+        self.assertEqual(summary["sample_size"], 2)
+        self.assertGreater(summary["sampled_bytes"], 0)
+        self.assertGreater(summary["estimated_bytes"], 0)
+        self.assertGreater(summary["avg_bytes_per_sample"], 0)
+        self.assertAlmostEqual(
+            summary["fill_ratio"],
+            4 / backend_app.plc_service.HISTORY_MAX_SAMPLES,
+        )
+        self.assertIsNotNone(summary["oldest_timestamp_ms"])
+        self.assertIsNotNone(summary["newest_timestamp_ms"])
+
+    def test_history_memory_summary_empty_history_is_zero_safe(self) -> None:
+        summary = backend_app.plc_service.get_history_memory_summary(sample_size=128)
+
+        self.assertEqual(summary["count"], 0)
+        self.assertEqual(summary["sample_size"], 0)
+        self.assertEqual(summary["sampled_bytes"], 0)
+        self.assertEqual(summary["estimated_bytes"], 0)
+        self.assertEqual(summary["avg_bytes_per_sample"], 0)
+        self.assertEqual(summary["fill_ratio"], 0)
+        self.assertIsNone(summary["oldest_timestamp_ms"])
+        self.assertIsNone(summary["newest_timestamp_ms"])
+
+    def test_plc_history_collector_estimates_without_holding_lock(self) -> None:
+        base_sec = time.time() - 10.0
+        for idx in range(2):
+            backend_app.plc_service._record_history_sample(
+                self.build_sample(f"2026-05-21T00:01:0{idx}.000Z", float(idx), idx),
+                base_sec + idx,
+            )
+
+        def estimate_without_lock(sample_items: list[object]) -> int:
+            self.assertFalse(backend_app.plc_service.history_lock.locked())
+            self.assertEqual(len(sample_items), 1)
+            return 2048
+
+        with patch(
+            "backend.FacilityData.service.estimate_size_bytes",
+            side_effect=estimate_without_lock,
+        ) as estimator:
+            summary = backend_app.plc_service.get_history_memory_summary(sample_size=1)
+
+        estimator.assert_called_once()
+        self.assertEqual(summary["count"], 2)
+        self.assertEqual(summary["sample_size"], 1)
+        self.assertEqual(summary["sampled_bytes"], 2048)
+        self.assertEqual(summary["estimated_bytes"], 4096)
+
+    def test_plc_history_collector_is_registered_and_reports_summary(self) -> None:
+        backend_app.plc_service._record_history_sample(
+            self.build_sample("2026-05-21T00:02:00.000Z", 42.0, 1),
+            time.time(),
+        )
+
+        self.assertIn("facility.plc_history", backend_app.memory_service._collectors)
+        collector_item = backend_app._collect_plc_history()
+
+        self.assertEqual(collector_item["name"], "facility.plc_history")
+        self.assertEqual(collector_item["kind"], "deque")
+        self.assertEqual(collector_item["items"], 1)
+        self.assertGreater(collector_item["bytes"], 0)
+        self.assertIn("count=1", collector_item["note"])
+        self.assertIn("fill=", collector_item["note"])
+        self.assertIn("avg=", collector_item["note"])
+
+
+class MemoryApiTests(unittest.TestCase):
+    def test_memory_gc_endpoint_returns_snapshot(self) -> None:
+        expected = {
+            "captured_at": "2026-06-27T17:30:00+00:00",
+            "latency_ms": 12.5,
+            "collected": {"gen0": 1, "gen1": 2, "gen2": 3, "total": 6},
+            "before": {"rss_bytes": 100, "uss_bytes": 80, "private_bytes": None},
+            "after": {"rss_bytes": 90, "uss_bytes": 70, "private_bytes": None},
+            "delta": {"rss_bytes": -10, "uss_bytes": -10, "private_bytes": None},
+        }
+
+        with patch.object(backend_app.memory_service, "capture_gc_snapshot", return_value=expected):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.post("/api/memory/gc")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected)
+
+    def test_memory_gc_endpoint_returns_500_on_failure(self) -> None:
+        with patch.object(backend_app.memory_service, "capture_gc_snapshot", side_effect=RuntimeError("gc boom")):
+            with patch.object(backend_app._logger, "error") as error_log:
+                client = TestClient(backend_app.app, raise_server_exceptions=False)
+                try:
+                    response = client.post("/api/memory/gc")
+                finally:
+                    client.close()
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "gc boom")
+        self.assertTrue(
+            any(call.args[0] == "Memory GC snapshot failed: %s" for call in error_log.call_args_list)
+        )
+
+
+class ElectronPreloadContractTests(unittest.TestCase):
+    repo_root = Path(__file__).resolve().parents[2]
+
+    def test_preload_exposes_only_memory_bridge(self) -> None:
+        preload_text = (self.repo_root / "preload.js").read_text(encoding="utf-8")
+
+        self.assertIn("contextBridge.exposeInMainWorld('smartFactoryElectron'", preload_text)
+        self.assertIn("getMemory: () => ipcRenderer.invoke('sfl:get-electron-memory')", preload_text)
+        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 1)
+        self.assertNotIn("ipcRenderer.send", preload_text)
+        self.assertNotIn("ipcRenderer.on", preload_text)
+        self.assertNotIn("ipcRenderer.once", preload_text)
+        self.assertNotIn("...args", preload_text)
+
+    def test_main_registers_memory_ipc_and_packaged_files_include_preload(self) -> None:
+        main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")
+        package_payload = json.loads((self.repo_root / "package.json").read_text(encoding="utf-8"))
+
+        self.assertIn("preload: resolvePreloadPath()", main_text)
+        self.assertIn("ipcMain.handle('sfl:get-electron-memory'", main_text)
+        self.assertIn("preload.js", package_payload["build"]["files"])
 
 
 if __name__ == "__main__":

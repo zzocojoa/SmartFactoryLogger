@@ -235,6 +235,7 @@ _QUIET_ACCESS_PATHS = {
     "/api/memory/state",
     "/api/memory/details",
     "/api/memory/export/latest",
+    "/api/memory/gc",
     "/api/memory/profiler/start",
     "/api/memory/profiler/stop",
     "/api/config",
@@ -818,21 +819,54 @@ def _collect_plc_state() -> dict[str, Any]:
     )
 
 
+def _collect_plc_history() -> dict[str, Any]:
+    summary = plc_service.get_history_memory_summary(sample_size=128)
+    return _memory_result(
+        "facility.plc_history",
+        "deque",
+        int(summary["estimated_bytes"]),
+        items=int(summary["count"]),
+        note=(
+            f"count={summary['count']} max={summary['max_samples']} "
+            f"fill={summary['fill_ratio']:.2f} "
+            f"avg={summary['avg_bytes_per_sample']:.0f}B"
+        ),
+    )
+
+
 def _collect_csv_logger() -> dict[str, Any]:
     runtime_state = logger_service.get_runtime_state()
+    queue_size = int(runtime_state.get("queue_size") or 0)
+    queue_maxsize = int(runtime_state.get("queue_maxsize") or 0)
+    buffer_size = int(runtime_state.get("buffer_size") or 0)
+    estimated_queue_bytes = int(runtime_state.get("estimated_queue_bytes") or 0)
+    writer_lag_sec = runtime_state.get("writer_lag_sec")
+    lag_note = f"{float(writer_lag_sec):.1f}s" if writer_lag_sec is not None else "n/a"
     payload = {
-        "queue_size": int(runtime_state.get("queue_size") or 0),
-        "buffer_size": int(runtime_state.get("buffer_size") or 0),
+        "queue_size": queue_size,
+        "queue_maxsize": queue_maxsize,
+        "queue_ratio": runtime_state.get("queue_ratio"),
+        "drop_count": runtime_state.get("drop_count"),
+        "last_drop_at": runtime_state.get("last_drop_at"),
+        "last_enqueue_at": runtime_state.get("last_enqueue_at"),
+        "last_write_at": runtime_state.get("last_write_at"),
+        "writer_lag_sec": writer_lag_sec,
+        "payload_bytes_ema": runtime_state.get("payload_bytes_ema"),
+        "estimated_queue_bytes": estimated_queue_bytes,
+        "buffer_size": buffer_size,
         "auto_save": runtime_state.get("auto_save"),
         "log_path": runtime_state.get("log_path"),
     }
-    return _memory_result(
+    result = _memory_result(
         "facility.csv_logger",
         "queue",
-        _estimate_mapping_bytes(payload),
-        items=int(runtime_state.get("queue_size") or 0) + int(runtime_state.get("buffer_size") or 0),
-        note=f"queue={runtime_state.get('queue_size')} buffer={runtime_state.get('buffer_size')}",
+        estimated_queue_bytes + _estimate_mapping_bytes(payload),
+        items=queue_size + buffer_size,
+        note=f"queue={queue_size}/{queue_maxsize} drop={runtime_state.get('drop_count')} lag={lag_note}",
     )
+    result["items_ratio"] = runtime_state.get("queue_ratio")
+    result["items_capacity"] = queue_maxsize
+    return result
 
 
 def _collect_config_manager() -> dict[str, Any]:
@@ -858,24 +892,76 @@ def _collect_config_manager() -> dict[str, Any]:
     )
 
 
+def _format_memory_note_seconds(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        return f"{float(value):.1f}s"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_memory_note_timestamp(value: Any) -> str:
+    if value is None:
+        return "none"
+    try:
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return "none"
+
+
+def _collect_spot_image_cache() -> dict[str, Any]:
+    summary = spot_control.get_image_cache_memory_summary()
+    image_bytes = int(summary.get("image_bytes") or 0)
+    note = (
+        f"state={summary.get('image_cache_state')} "
+        f"age={_format_memory_note_seconds(summary.get('image_age_sec'))} "
+        f"fail={summary.get('image_failure_count')} "
+        f"retry_at={_format_memory_note_timestamp(summary.get('image_next_retry_at'))}"
+    )
+    return _memory_result(
+        "spot.image_cache",
+        "cache",
+        image_bytes,
+        items=1 if image_bytes else 0,
+        note=note,
+        exactness="exact",
+    )
+
+
+def _collect_spot_live_cache() -> dict[str, Any]:
+    summary = spot_control.get_image_cache_memory_summary()
+    live_image_bytes = int(summary.get("live_image_bytes") or 0)
+    note = (
+        f"state={summary.get('live_image_cache_state')} "
+        f"age={_format_memory_note_seconds(summary.get('live_image_age_sec'))} "
+        f"fail={summary.get('live_image_failure_count')} "
+        f"retry_at={_format_memory_note_timestamp(summary.get('live_image_next_retry_at'))} "
+        f"url_present={bool(summary.get('live_image_url_present'))}"
+    )
+    return _memory_result(
+        "spot.live_cache",
+        "cache",
+        live_image_bytes,
+        items=1 if live_image_bytes else 0,
+        note=note,
+        exactness="exact",
+    )
+
+
 def _collect_spot_cache() -> dict[str, Any]:
-    image_bytes = 0
-    image_data = spot_control._img_cache.get("data")
-    if isinstance(image_data, (bytes, bytearray)):
-        image_bytes = len(image_data)
-    payload = {
-        "image_bytes": image_bytes,
-        "temperature": spot_control._img_cache.get("temp"),
-        "fetched_at": spot_control._img_cache.get("time"),
-        "temperature_at": spot_control._img_cache.get("temp_time"),
-    }
-    note = "cached image metadata and byte length"
+    summary = spot_control.get_image_cache_memory_summary()
+    image_bytes = int(summary.get("image_bytes") or 0)
+    live_image_bytes = int(summary.get("live_image_bytes") or 0)
+    total_bytes = int(summary.get("total_bytes") or image_bytes + live_image_bytes)
+    note = "compatibility alias; split=spot.image_cache,spot.live_cache"
     return _memory_result(
         "spot.cache",
         "cache",
-        image_bytes + _estimate_mapping_bytes(payload),
-        items=1,
+        total_bytes,
+        items=int(image_bytes > 0) + int(live_image_bytes > 0),
         note=note,
+        exactness="exact",
     )
 
 
@@ -883,8 +969,11 @@ def _register_memory_collectors() -> None:
     memory_service.register_collector("observability.requests", _collect_observability_requests)
     memory_service.register_collector("observability.errors", _collect_observability_errors)
     memory_service.register_collector("facility.plc_state", _collect_plc_state)
+    memory_service.register_collector("facility.plc_history", _collect_plc_history)
     memory_service.register_collector("facility.csv_logger", _collect_csv_logger)
     memory_service.register_collector("configuration.snapshot", _collect_config_manager)
+    memory_service.register_collector("spot.image_cache", _collect_spot_image_cache)
+    memory_service.register_collector("spot.live_cache", _collect_spot_live_cache)
     memory_service.register_collector("spot.cache", _collect_spot_cache)
 
 
@@ -1918,6 +2007,15 @@ def capture_memory_snapshot():
         return memory_service.capture_snapshot()
     except Exception as exc:
         _logger.error("Memory snapshot failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/memory/gc")
+def capture_memory_gc_snapshot():
+    try:
+        return memory_service.capture_gc_snapshot()
+    except Exception as exc:
+        _logger.error("Memory GC snapshot failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

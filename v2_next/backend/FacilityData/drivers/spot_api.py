@@ -1396,6 +1396,71 @@ def get_live_image_diagnostics() -> Dict[str, Any]:
     }
 
 
+def _cache_payload_bytes(value: Any) -> int:
+    if isinstance(value, (bytes, bytearray)):
+        return len(value)
+    return 0
+
+
+def _cache_age_for_payload(cached_at: Any, now: float, bytes_value: int) -> Optional[float]:
+    if bytes_value <= 0:
+        return None
+    try:
+        captured_at = float(cached_at or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if captured_at <= 0.0:
+        return None
+    return max(0.0, now - captured_at)
+
+
+def _live_image_cache_state(now: float, live_image_bytes: int) -> str:
+    if live_image_bytes <= 0:
+        return "empty"
+    cached_at = float(_live_img_cache.get("time") or 0.0)
+    if cached_at <= 0.0:
+        return "empty"
+    if now - cached_at > _LIVE_IMG_SHARED_FRAME_TTL_SEC:
+        return "stale"
+    return "fresh"
+
+
+def get_image_cache_memory_summary() -> Dict[str, Any]:
+    now = time.time()
+    image_bytes = _cache_payload_bytes(_img_cache.get("data"))
+    live_image_bytes = _cache_payload_bytes(_live_img_cache.get("data"))
+    image_cache_status = _cache_status(now)
+    live_image_cache_state = _live_image_cache_state(now, live_image_bytes)
+    live_image_url_present = any(
+        str(value or "").strip()
+        for value in (
+            _live_img_cache.get("url"),
+            _live_img_last_url,
+            getattr(config, "SPOT_LIVE_IMAGE_URL", ""),
+            getattr(config, "SPOT_IMAGE_URL", ""),
+        )
+    )
+    return {
+        "image_bytes": image_bytes,
+        "image_age_sec": _cache_age_for_payload(_img_cache.get("time"), now, image_bytes),
+        "image_cache_state": _cache_state_for_status(image_cache_status),
+        "image_cache_status": image_cache_status,
+        "image_failure_count": int(_img_failure_count),
+        "image_next_retry_at": _img_next_retry_at,
+        "image_retry_after_sec": _retry_after_sec(now),
+        "image_current_backoff_sec": _current_backoff_sec(),
+        "live_image_bytes": live_image_bytes,
+        "live_image_age_sec": _cache_age_for_payload(_live_img_cache.get("time"), now, live_image_bytes),
+        "live_image_cache_state": live_image_cache_state,
+        "live_image_url_present": bool(live_image_url_present),
+        "live_image_failure_count": int(_live_img_failure_count),
+        "live_image_next_retry_at": _live_img_next_retry_at,
+        "live_image_retry_after_sec": _live_retry_after_sec(now),
+        "live_image_current_backoff_sec": _current_live_backoff_sec(),
+        "total_bytes": image_bytes + live_image_bytes,
+    }
+
+
 def _build_internal_temperature_diagnostics(now: float, *, include_cached_at: bool) -> Dict[str, Any]:
     internal_temperature = _cached_internal_temperature(now)
     internal_temperature_at = float(_internal_temp_cache.get("temp_time") or 0.0)
