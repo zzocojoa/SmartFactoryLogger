@@ -7,6 +7,7 @@ import type {
   LatestExportPathResponse,
   MemoryDetailsData,
   MemoryExportRequest,
+  MemoryGCSnapshotData,
   MemoryStateData,
   ObservabilityExportRequest,
   PathHealthRequestItem,
@@ -26,6 +27,7 @@ import {
   fetchObservabilityErrors,
   fetchStats,
   postBrowseFolder,
+  postCaptureMemoryGc,
   postCaptureMemorySnapshot,
   postClearObservabilityErrors,
   postConnectionTest,
@@ -69,6 +71,8 @@ export const systemService = {
   stopMemoryProfiler: () => postStopMemoryProfiler(),
 
   captureMemorySnapshot: () => postCaptureMemorySnapshot(),
+
+  captureMemoryGc: (): Promise<MemoryGCSnapshotData> => postCaptureMemoryGc(),
 
   exportMemory: (params: MemoryExportRequest) => postMemoryExport(params),
 

@@ -3,6 +3,7 @@ import type {
   ConnectionTestResponse,
   HealthSnapshot,
   MemoryDetailsResponse,
+  MemoryGCSnapshot,
   MemoryStateResponse,
   ObservabilityErrorsResponse,
   PathHealthResult,
@@ -65,3 +66,4 @@ export type CommLogInfoResponse = CommLogInfo;
 export type ConnectionTestData = ConnectionTestResponse;
 export type MemoryStateData = MemoryStateResponse;
 export type MemoryDetailsData = MemoryDetailsResponse;
+export type MemoryGCSnapshotData = MemoryGCSnapshot;

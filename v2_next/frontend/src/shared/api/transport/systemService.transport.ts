@@ -8,6 +8,7 @@ import type {
   LatestExportPathResponse,
   MemoryDetailsData,
   MemoryExportRequest,
+  MemoryGCSnapshotData,
   MemoryStateData,
   ObservabilityErrorsData,
   ObservabilityExportRequest,
@@ -78,6 +79,11 @@ export const postStopMemoryProfiler = async () => {
 
 export const postCaptureMemorySnapshot = async () => {
   const response = await apiClient.post('/api/memory/snapshot');
+  return response.data;
+};
+
+export const postCaptureMemoryGc = async (): Promise<MemoryGCSnapshotData> => {
+  const response = await apiClient.post<MemoryGCSnapshotData>('/api/memory/gc');
   return response.data;
 };
 

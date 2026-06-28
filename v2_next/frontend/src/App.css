@@ -2457,12 +2457,19 @@ body {
   gap: 6px;
   max-height: 360px;
   overflow-y: auto;
-  min-width: 760px;
+  min-width: 1060px;
 }
 
 .settings-memory-table-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1.4fr) repeat(5, minmax(80px, 0.7fr)) minmax(140px, 1fr);
+  grid-template-columns:
+    minmax(160px, 1.3fr)
+    minmax(86px, 0.65fr)
+    repeat(4, minmax(70px, 0.65fr))
+    minmax(76px, 0.65fr)
+    minmax(88px, 0.7fr)
+    minmax(84px, 0.65fr)
+    minmax(140px, 1fr);
   gap: 8px;
   padding: 8px 10px;
   border-radius: 8px;

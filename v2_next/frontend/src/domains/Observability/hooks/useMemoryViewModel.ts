@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { systemService } from '../api/systemService';
 import type {
+  ElectronMemorySnapshot,
+  ElectronProcessMemoryInfo,
+  ElectronProcessMetric,
   FrontendErrorEntry,
   FrontendMemorySnapshot,
   FrontendMemorySupport,
@@ -8,7 +11,9 @@ import type {
   MemoryAlertItem,
   MemoryCollectorDeltaItem,
   MemoryCollectorItem,
+  MemoryCollectorSource,
   MemoryDetailsResponse,
+  MemoryExactness,
   MemoryStateResponse,
   MemoryTabLeaderState,
   ObservabilityErrorsResponse,
@@ -112,6 +117,7 @@ interface UseMemoryViewModel {
   startMemoryProfiler: () => Promise<void>;
   stopMemoryProfiler: () => Promise<void>;
   captureMemorySnapshot: () => Promise<void>;
+  captureMemoryGc: () => Promise<void>;
   exportMemory: () => Promise<string | null>;
   openMemoryExportFile: () => Promise<void>;
   openMemoryExportFolder: () => Promise<void>;
@@ -169,14 +175,17 @@ const buildCollector = (
   kind: string,
   bytes: number,
   items: number | null,
-  note: string | null
+  note: string | null,
+  exactness: MemoryExactness = 'estimated',
+  source: MemoryCollectorSource | null = 'frontend'
 ): MemoryCollectorItem => ({
   name,
   kind,
-  exactness: 'estimated',
+  exactness,
   bytes,
   items,
   note,
+  source,
 });
 
 const sortCollectors = (items: MemoryCollectorItem[]): MemoryCollectorItem[] => {
@@ -192,9 +201,9 @@ const sortGrowth = (items: MemoryCollectorDeltaItem[]): MemoryCollectorDeltaItem
   });
 };
 
-const readBrowserMemorySupport = async (): Promise<FrontendMemorySupport> => {
+export const readBrowserMemorySupport = async (): Promise<FrontendMemorySupport> => {
   if (typeof window === 'undefined') {
-    return { mode: 'unsupported', supported: false };
+    return { mode: 'unsupported', supported: false, exactness: 'unavailable' };
   }
   const perf = performance as ExtendedPerformance;
   if (typeof perf.measureUserAgentSpecificMemory === 'function') {
@@ -203,6 +212,7 @@ const readBrowserMemorySupport = async (): Promise<FrontendMemorySupport> => {
       return {
         mode: 'uasm',
         supported: true,
+        exactness: 'observed',
         used_bytes: result.bytes,
         breakdown: (result.breakdown ?? []).map((item) => ({
           name: item.attribution?.map((entry) => entry.scope).join(', ') || 'unknown',
@@ -210,19 +220,91 @@ const readBrowserMemorySupport = async (): Promise<FrontendMemorySupport> => {
         })),
       };
     } catch {
-      return { mode: 'unsupported', supported: false };
+      return { mode: 'unsupported', supported: false, exactness: 'unavailable' };
     }
   }
   if (perf.memory) {
     return {
       mode: 'performance-memory',
       supported: true,
+      exactness: 'observed',
       used_bytes: perf.memory.usedJSHeapSize,
       total_bytes: perf.memory.totalJSHeapSize,
       limit_bytes: perf.memory.jsHeapSizeLimit,
     };
   }
-  return { mode: 'unsupported', supported: false };
+  return { mode: 'unsupported', supported: false, exactness: 'unavailable' };
+};
+
+const emptyElectronMemorySnapshot = (
+  source: ElectronMemorySnapshot['source'],
+  error: string | null = null
+): ElectronMemorySnapshot => ({
+  supported: false,
+  source,
+  captured_at: Date.now() / 1000,
+  process: null,
+  metrics: [],
+  v8_heap: null,
+  error,
+});
+
+const normalizeElectronMemorySnapshot = (
+  value: Partial<ElectronMemorySnapshot> | null | undefined
+): ElectronMemorySnapshot => {
+  const metrics = value?.metrics;
+  return {
+    supported: Boolean(value?.supported),
+    source: value?.source === 'electron' ? 'electron' : 'browser',
+    captured_at: typeof value?.captured_at === 'number' ? value.captured_at : Date.now() / 1000,
+    process: value?.process ?? null,
+    metrics: Array.isArray(metrics) ? metrics : [],
+    v8_heap: value?.v8_heap ?? null,
+    error: typeof value?.error === 'string' ? value.error : null,
+  };
+};
+
+export const readElectronMemorySnapshot = async (): Promise<ElectronMemorySnapshot> => {
+  if (typeof window === 'undefined') {
+    return emptyElectronMemorySnapshot('browser');
+  }
+  const bridge = window.smartFactoryElectron;
+  if (!bridge || typeof bridge.getMemory !== 'function') {
+    return emptyElectronMemorySnapshot('browser');
+  }
+  try {
+    return normalizeElectronMemorySnapshot(await bridge.getMemory());
+  } catch (error) {
+    return emptyElectronMemorySnapshot(
+      'electron',
+      error instanceof Error ? error.message : 'electron memory bridge failed'
+    );
+  }
+};
+
+const kilobytesToBytes = (value: unknown): number | null => {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value * 1024)) : null;
+};
+
+const resolveElectronProcessBytes = (info: ElectronProcessMemoryInfo | null | undefined): number | null => {
+  if (!info) {
+    return null;
+  }
+  return (
+    kilobytesToBytes(info.privateBytes) ??
+    kilobytesToBytes(info.workingSetSize) ??
+    kilobytesToBytes(info.peakWorkingSetSize) ??
+    null
+  );
+};
+
+const resolveElectronMetricBytes = (metric: ElectronProcessMetric): number => {
+  return (
+    kilobytesToBytes(metric.memory?.privateBytes) ??
+    kilobytesToBytes(metric.memory?.workingSetSize) ??
+    kilobytesToBytes(metric.memory?.peakWorkingSetSize) ??
+    0
+  );
 };
 
 const findHistoryPointAtOrBefore = <T extends { captured_at: number }>(
@@ -259,12 +341,17 @@ const buildCollectorGrowth = (
         share_ratio: totalBytes > 0 ? currentBytes / totalBytes : 0,
         items: sourceItem?.items ?? null,
         note: sourceItem?.note ?? null,
+        source: sourceItem?.source ?? null,
       };
     })
   ).slice(0, 12);
 };
 
-const buildFrontendAlerts = (
+const exceedsGrowthBudget = (deltaBytes: number, ratio: number): boolean => {
+  return deltaBytes >= FRONTEND_GROWTH_WARN_BYTES || ratio >= GROWTH_WARN_RATIO;
+};
+
+export const buildFrontendAlerts = (
   backendMemory: MemoryStateResponse | null,
   frontendSnapshot: FrontendMemorySnapshot,
   refreshError: string | null
@@ -292,17 +379,22 @@ const buildFrontendAlerts = (
         (previousFrontendPoint.heap_used_bytes ?? 0) > 0
           ? heapDelta / (previousFrontendPoint.heap_used_bytes ?? 1)
           : 0;
-      if (
-        appDelta >= FRONTEND_GROWTH_WARN_BYTES ||
-        heapDelta >= FRONTEND_GROWTH_WARN_BYTES ||
-        appRatio >= GROWTH_WARN_RATIO ||
-        heapRatio >= GROWTH_WARN_RATIO
-      ) {
+      const observedHeapGrowth =
+        frontendSnapshot.support.exactness === 'observed' && exceedsGrowthBudget(heapDelta, heapRatio);
+      const estimatedAppGrowth = exceedsGrowthBudget(appDelta, appRatio);
+      if (observedHeapGrowth) {
         alerts.push({
           key: 'frontend-growth',
           severity: 'warn',
           title: 'Frontend growth',
-          detail: `1분 증가량 app ${Math.round(appDelta / 1024 / 1024)}MB / heap ${Math.round(heapDelta / 1024 / 1024)}MB`,
+          detail: `Observed heap 1분 증가 ${Math.round(heapDelta / 1024 / 1024)}MB / app estimate ${Math.round(appDelta / 1024 / 1024)}MB`,
+        });
+      } else if (estimatedAppGrowth) {
+        alerts.push({
+          key: 'frontend-estimated-growth',
+          severity: 'info',
+          title: 'Estimated frontend growth',
+          detail: `Low-confidence ${frontendSnapshot.support.exactness} app estimate increased ${Math.round(appDelta / 1024 / 1024)}MB in 1분.`,
         });
       }
     }
@@ -432,6 +524,7 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
   const detailsInFlightRef = useRef(false);
   const exportMetaInFlightRef = useRef(false);
   const exportBusyRef = useRef(false);
+  const gcActionRef = useRef(false);
   const profilerActionRef = useRef<'start' | 'stop' | null>(null);
   const executeSummarySyncRef = useRef<((reason: string) => Promise<void>) | null>(null);
   const summaryRef = useRef<MemoryStateResponse | null>(null);
@@ -470,6 +563,7 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
   const [memoryActionState, setMemoryActionState] = useState<MemoryActionState>({
     refresh: false,
     snapshot: false,
+    gc: false,
     profiler_action: null,
     export: false,
   });
@@ -569,7 +663,10 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
   }, []);
 
   const captureFrontendMemory = useCallback(async (): Promise<FrontendMemorySnapshot> => {
-    const support = await readBrowserMemorySupport();
+    const [support, electron] = await Promise.all([
+      readBrowserMemorySupport(),
+      readElectronMemorySnapshot(),
+    ]);
     const aiSnapshot = getAIDiagnostics();
     const localStorageBytes = typeof window !== 'undefined' ? readStorageBytes(window.localStorage) : 0;
     const sessionStorageBytes = typeof window !== 'undefined' ? readStorageBytes(window.sessionStorage) : 0;
@@ -581,6 +678,9 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
         : 0;
     const timeSeriesBytes =
       collectorInputs.seriesStats.count * 96 + frameCount * 2048 + (collectorInputs.timeSeriesAllFrame ? 4096 : 0);
+    const electronProcessBytes = resolveElectronProcessBytes(electron.process);
+    const electronMetricsBytes = electron.metrics.reduce((total, item) => total + resolveElectronMetricBytes(item), 0);
+    const electronBytes = Math.max(electronMetricsBytes, electronProcessBytes ?? 0);
     const collectors = sortCollectors([
       buildCollector(
         'frontend.series_buffer',
@@ -596,6 +696,14 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
         frameCount,
         `frames=${frameCount} max=${collectorInputs.seriesStats.maxPoints ?? '--'}`
       ),
+      buildCollector(
+        'frontend.browser_heap',
+        'heap',
+        support.used_bytes ?? 0,
+        support.supported ? 1 : 0,
+        `mode=${support.mode}`,
+        support.exactness
+      ),
       buildCollector('frontend.layout_snapshot', 'layout', estimateStructuredBytes(collectorInputs.layoutSnapshot), collectorInputs.layoutSnapshot ? 1 : 0, 'saved dashboard layout'),
       buildCollector('frontend.observability_errors', 'list', estimateSerializedBytes(collectorInputs.observabilityErrors), collectorInputs.observabilityErrors?.items?.length ?? 0, 'backend error queue mirror'),
       buildCollector('frontend.browser_errors', 'list', estimateSerializedBytes(collectorInputs.frontErrors), collectorInputs.frontErrors.length, 'front error buffer'),
@@ -603,8 +711,21 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
       buildCollector('frontend.ai_chat', 'chat', aiSnapshot.estimatedBytes, aiSnapshot.messageCount, `tools=${aiSnapshot.toolCount}`),
       buildCollector('frontend.settings_form', 'form', estimateSerializedBytes(collectorInputs.settingsForm), collectorInputs.settingsForm ? Object.keys(collectorInputs.settingsForm).length : 0, 'settings draft state'),
       buildCollector('frontend.pending_config', 'snapshot', estimateSerializedBytes({ settingsPending: collectorInputs.settingsPending, externalConfigPending: collectorInputs.externalConfigPending }), 2, 'pending config snapshots'),
-      buildCollector('frontend.local_storage', 'storage', localStorageBytes, typeof window !== 'undefined' ? window.localStorage.length : 0, 'browser localStorage'),
-      buildCollector('frontend.session_storage', 'storage', sessionStorageBytes, typeof window !== 'undefined' ? window.sessionStorage.length : 0, 'browser sessionStorage'),
+      buildCollector('frontend.local_storage', 'storage', localStorageBytes, typeof window !== 'undefined' ? window.localStorage.length : 0, 'browser localStorage', 'estimated-enumerated'),
+      buildCollector('frontend.session_storage', 'storage', sessionStorageBytes, typeof window !== 'undefined' ? window.sessionStorage.length : 0, 'browser sessionStorage', 'estimated-enumerated'),
+      ...(electron.supported
+        ? [
+            buildCollector(
+              'frontend.electron_processes',
+              'electron',
+              electronBytes,
+              electron.metrics.length,
+              `processes=${electron.metrics.length} source=${electron.source}`,
+              'observed',
+              'electron'
+            ),
+          ]
+        : []),
     ]);
     const previousCollectors = frontendCollectorHistoryRef.current[frontendCollectorHistoryRef.current.length - 1]?.items ?? [];
     const appBytes = collectors.reduce((total, item) => total + item.bytes, 0);
@@ -612,6 +733,7 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
     return {
       captured_at: capturedAt,
       support,
+      electron,
       top_consumers: collectors.slice(0, 12),
       growth: buildCollectorGrowth(collectors, previousCollectors),
       alerts: [],
@@ -764,7 +886,7 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
     if (leaderMode === 'follower' || leaderMode === 'recovering') {
       return;
     }
-    if (refreshInFlightRef.current || profilerActionRef.current || exportBusyRef.current) {
+    if (refreshInFlightRef.current || profilerActionRef.current || exportBusyRef.current || gcActionRef.current) {
       return;
     }
     refreshInFlightRef.current = true;
@@ -901,6 +1023,36 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
     }
     scheduleSummarySync('snapshot', true);
   }, [scheduleSummarySync, syncDetails, syncFrontend]);
+
+  const captureMemoryGc = useCallback(async (): Promise<void> => {
+    if (gcActionRef.current) {
+      return;
+    }
+    gcActionRef.current = true;
+    setMemoryActionState((current) => ({ ...current, gc: true }));
+    setMemoryDetailsBusy(true);
+    try {
+      const snapshot = await systemService.captureMemoryGc();
+      setBackendMemoryDetails((current) => (
+        current
+          ? {
+              ...current,
+              latest_gc_snapshot: snapshot,
+            }
+          : current
+      ));
+      await syncDetails();
+      detailsLoadedRef.current = true;
+      if (frontendRef.current) {
+        commitDecoratedFrontend(frontendRef.current, frontendRef.current.refresh_error ?? null);
+      }
+    } finally {
+      gcActionRef.current = false;
+      setMemoryDetailsBusy(false);
+      setMemoryActionState((current) => ({ ...current, gc: false }));
+    }
+    scheduleSummarySync('gc-snapshot', true);
+  }, [commitDecoratedFrontend, scheduleSummarySync, syncDetails]);
 
   const runProfilerAction = useCallback(
     async (mode: 'start' | 'stop'): Promise<void> => {
@@ -1224,6 +1376,7 @@ export const useMemoryViewModel = (params: MemoryViewModelParams): UseMemoryView
     startMemoryProfiler,
     stopMemoryProfiler,
     captureMemorySnapshot,
+    captureMemoryGc,
     exportMemory,
     openMemoryExportFile,
     openMemoryExportFolder,
