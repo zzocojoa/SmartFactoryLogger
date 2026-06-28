@@ -226,6 +226,7 @@ export function useSettingsFormHandlers({
   const scrollToSettingsSection = useCallback(
     (id: string) => {
       const target = settingsSectionRefs.current[id];
+      const container = settingsScrollRef.current;
       if (!target) return;
       
       isManualScrollingRef.current = true;
@@ -234,7 +235,20 @@ export function useSettingsFormHandlers({
         isManualScrollingRef.current = false;
       }, 1000); // Wait for smooth scroll to finish
 
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (container) {
+        const rectTargetTop =
+          target.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+        const targetTop = Math.max(rectTargetTop, target.offsetTop);
+        container.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+        window.setTimeout(() => {
+          const remainingDelta = target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+          if (Math.abs(remainingDelta) > 4) {
+            container.scrollTo({ top: Math.max(0, container.scrollTop + remainingDelta), behavior: 'auto' });
+          }
+        }, 650);
+      } else {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       setActiveSettingsSection(id);
     },
     []

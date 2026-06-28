@@ -621,6 +621,21 @@ export function SettingsModal(props: SettingsModalProps) {
                     </button>
                   ))}
                 </div>
+                <div className="settings-nav-select">
+                  <label>
+                    <span>Menu</span>
+                    <select
+                      value={activeSettingsSection}
+                      onChange={(event) => scrollToSettingsSection(event.target.value)}
+                    >
+                      {settingsSections.map((section) => (
+                        <option key={section.id} value={section.id}>
+                          {section.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
                 <div className="settings-content" ref={settingsScrollRef as React.RefObject<HTMLDivElement>}>
                   <div className="settings-form">
                     {/* Summary Section */}
