@@ -2097,7 +2097,7 @@ body {
 .settings-form::after {
   content: "";
   display: block;
-  flex: 0 0 clamp(960px, 160vh, 1400px);
+  flex: 0 0 clamp(260px, 38vh, 420px);
 }
 
 .settings-body {
@@ -2203,13 +2203,12 @@ body {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  min-height: clamp(360px, calc(100vh - 260px), 560px);
   overflow-wrap: anywhere;
   scroll-margin-top: 0;
 }
 
 #settings-observability {
-  min-height: clamp(460px, 62vh, 560px);
+  min-height: clamp(420px, 56vh, 520px);
 }
 
 .settings-test-grid {
