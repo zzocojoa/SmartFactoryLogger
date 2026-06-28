@@ -2284,6 +2284,124 @@ body {
   gap: 6px;
 }
 
+.settings-observability-brief {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(420px, 1.7fr);
+  gap: 12px;
+  align-items: stretch;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: var(--bg-card-muted);
+  padding: 12px;
+}
+
+.settings-observability-action {
+  margin-top: 6px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.settings-observability-brief-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-observability-brief-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-left: 1px solid var(--border-muted);
+  padding-left: 10px;
+}
+
+.settings-observability-brief-card.warn {
+  border-left-color: rgba(255, 214, 102, 0.7);
+}
+
+.settings-observability-brief-card.error {
+  border-left-color: rgba(255, 107, 107, 0.75);
+}
+
+.settings-observability-card-head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.settings-observability-brief-card strong {
+  display: block;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  overflow-wrap: anywhere;
+}
+
+.settings-observability-brief-card > span:last-child {
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.settings-observability-details-panel {
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0;
+}
+
+.settings-observability-details-panel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  list-style: none;
+}
+
+.settings-observability-details-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-observability-details-panel > summary::after {
+  content: "펼치기";
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.settings-observability-details-panel[open] > summary::after {
+  content: "접기";
+}
+
+.settings-observability-details-panel > summary span:last-child {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.settings-observability-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border-muted);
+  padding: 10px 12px 12px;
+}
+
 .settings-memory-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3638,6 +3756,14 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .settings-observability-brief {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-observability-brief-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .settings-memory-brief-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -3658,6 +3784,17 @@ body {
 
   .settings-memory-brief-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .settings-observability-brief-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-observability-brief-card {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--border-muted);
+    padding-top: 8px;
   }
 
   .settings-memory-brief-metrics > div {

@@ -21,7 +21,7 @@ import type {
   StatsSnapshot,
   SpotConfig,
   SpotPollingDiagnostics,
-  ObservabilityErrorItem,
+  ObservabilityErrorsResponse,
   FrontendErrorEntry,
   CentralStatus,
   CommLogInfo,
@@ -56,6 +56,7 @@ import {
   formatPathMessage,
   getCentralBadge,
   formatCentralTime,
+  buildObservabilitySummary,
 } from './settingsModalHelpers';
 import type { SaveSettingsOptions } from '../../hooks/useConfigViewModel.types';
 import packageJson from '../../../../../package.json';
@@ -142,7 +143,7 @@ export interface SettingsModalProps {
   // Observability
   health: HealthSnapshot | null;
   stats: StatsSnapshot | null;
-  observabilityErrors: any;
+  observabilityErrors: ObservabilityErrorsResponse | null;
   observabilityLoading: boolean;
   loadObservabilityErrors: () => void;
   handleExportObservability: () => void;
@@ -223,7 +224,7 @@ export interface SettingsModalProps {
   commSnapshot: any;
   commDetail: any;
   commSummaryItems: any[];
-  statsWindow: any;
+  statsWindow: StatsSnapshot['window'] | undefined;
   windowErrorRate: number | null;
   hasWindowIssue: boolean;
   windowP95Text: string;
@@ -428,6 +429,16 @@ export function SettingsModal(props: SettingsModalProps) {
   const spotPollingClientText = spotPollingStats?.top_clients?.length
     ? spotPollingStats.top_clients.map((item) => `${item.client} ${item.count}`).join(', ')
     : '--';
+  const observabilitySummary = buildObservabilitySummary({
+    health,
+    stats,
+    observabilityErrors,
+    backendMemoryDetails,
+    frontendMemory,
+    memoryBusy: memoryRefreshInFlight || memorySummaryBusy || memoryDetailsBusy,
+    frontErrorCount: frontErrors.length,
+    spotImageError,
+  });
   const nextPassword = settingsForm?.password.trim() ?? '';
   const trimmedCurrentPassword = currentPassword.trim();
   const trimmedPasswordConfirm = passwordConfirm.trim();
@@ -1233,6 +1244,38 @@ export function SettingsModal(props: SettingsModalProps) {
                       ref={registerSettingsSection('settings-observability')}
                     >
                       <div className="settings-section-title">{LABELS.OPER_OBSERVABILITY}</div>
+
+                      <div className="settings-observability-brief" aria-label="운영 관측성 요약">
+                        <div className="settings-memory-brief-main">
+                          <span className={`settings-test-badge ${observabilitySummary.severity}`}>
+                            {observabilitySummary.status}
+                          </span>
+                          <div>
+                            <div className="settings-memory-brief-title">현재 상태</div>
+                            <div className="settings-memory-brief-detail">{observabilitySummary.detail}</div>
+                            <div className="settings-observability-action">{observabilitySummary.action}</div>
+                          </div>
+                        </div>
+                        <div className="settings-observability-brief-cards">
+                          {observabilitySummary.cards.map((card) => (
+                            <div key={card.key} className={`settings-observability-brief-card ${card.severity}`}>
+                              <div className="settings-observability-card-head">
+                                <span>{card.title}</span>
+                                <span className={`settings-test-badge ${card.severity}`}>{card.status}</span>
+                              </div>
+                              <strong>{card.evidence}</strong>
+                              <span>{card.action}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <details className="settings-observability-details-panel">
+                        <summary>
+                          <span>상세 진단 원자료</span>
+                          <span>/stats, 런타임, 오류 큐, 브라우저 오류</span>
+                        </summary>
+                        <div className="settings-observability-details-body">
                       <div className="settings-test-grid settings-observability-grid">
                         <div className="settings-test-item">
                           <div className="settings-test-header">
@@ -1306,7 +1349,7 @@ export function SettingsModal(props: SettingsModalProps) {
                           </div>
                           {statsWindow?.top_paths?.length ? (
                             <div className="settings-test-message">
-                              Top: {statsWindow.top_paths.map((item: any) => item.path).join(', ')}
+                              Top: {statsWindow.top_paths.map((item) => item.path).join(', ')}
                             </div>
                           ) : (
                             <div className="settings-test-message">Top: --</div>
@@ -1383,7 +1426,7 @@ export function SettingsModal(props: SettingsModalProps) {
                           <div className="settings-error-empty">불러오는 중...</div>
                         ) : observabilityErrors?.items?.length ? (
                           <div className="settings-error-list">
-                            {observabilityErrors.items.map((item: any, index: number) => (
+                            {observabilityErrors.items.map((item, index) => (
                               <div key={`${item.source}-${item.time}-${index}`} className="settings-error-item">
                                 <div className="settings-error-head">
                                   <span className="settings-error-source">{item.source}</span>
@@ -1436,6 +1479,8 @@ export function SettingsModal(props: SettingsModalProps) {
                           <div className="settings-error-empty">{LABELS.NO_BROWSER_ERROR}</div>
                         )}
                       </div>
+                        </div>
+                      </details>
                     </div>
 
                     <MemorySection

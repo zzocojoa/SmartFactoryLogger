@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DashboardLeaderState,
   LayoutSnapshot,
@@ -243,16 +243,18 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
     applyCommLogInfoSnapshot: props.applyCommLogInfoSnapshot,
   });
 
+  const observabilityPanelActive = props.settingsOpen && activeSettingsSection === 'settings-observability';
   const memoryPanelActive = props.settingsOpen && activeSettingsSection === 'settings-memory';
+  const memoryDiagnosticsActive = memoryPanelActive || observabilityPanelActive;
   const seriesStats = useDashboardStore((state) => (
-    memoryPanelActive ? state.seriesStats : EMPTY_SERIES_STATS
+    memoryDiagnosticsActive ? state.seriesStats : EMPTY_SERIES_STATS
   ));
   const timeSeriesAllFrame = useDashboardStore((state) => (
-    memoryPanelActive ? state.timeSeriesAllFrame : null
+    memoryDiagnosticsActive ? state.timeSeriesAllFrame : null
   ));
 
   const memory = useMemoryViewModel({
-    enabled: memoryPanelActive,
+    enabled: memoryDiagnosticsActive,
     seriesStats,
     timeSeriesAllFrame,
     layoutSnapshot: props.layoutSnapshot,
@@ -264,6 +266,35 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
     settingsPending: props.settingsPending,
     externalConfigPending: props.externalConfigPending,
   });
+  const observabilityMemoryRefreshAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    if (!observabilityPanelActive) {
+      observabilityMemoryRefreshAttemptedRef.current = false;
+      return;
+    }
+    if (
+      observabilityMemoryRefreshAttemptedRef.current ||
+      memory.backendMemoryDetails ||
+      memory.memoryRefreshInFlight ||
+      memory.memoryDetailsBusy
+    ) {
+      return;
+    }
+
+    observabilityMemoryRefreshAttemptedRef.current = true;
+    void memory.refreshMemory().catch((error) => {
+      console.error('Observability memory summary refresh failed', error);
+      props.showSettingsToast('메모리/CSV 요약을 새로고침하지 못했습니다.', 'error');
+    });
+  }, [
+    memory.backendMemoryDetails,
+    memory.memoryDetailsBusy,
+    memory.memoryRefreshInFlight,
+    memory.refreshMemory,
+    observabilityPanelActive,
+    props.showSettingsToast,
+  ]);
   const [statusPanelNowTick, setStatusPanelNowTick] = useState<number>(() => Date.now());
   const lastDataAt = useDashboardStore((state) => state.lastDataAt);
   const connected = useDashboardStore((state) => state.connected);
