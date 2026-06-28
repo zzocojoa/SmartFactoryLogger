@@ -176,6 +176,7 @@ export interface SettingsModalProps {
   handleStartMemoryProfiler: () => void;
   handleStopMemoryProfiler: () => void;
   handleCaptureMemorySnapshot: () => void;
+  handleCaptureMemoryGc: () => void;
   handleExportMemory: () => void;
   handleOpenMemoryExportFile: () => void;
   handleOpenMemoryExportFolder: () => void;
@@ -333,6 +334,7 @@ export function SettingsModal(props: SettingsModalProps) {
     handleStartMemoryProfiler,
     handleStopMemoryProfiler,
     handleCaptureMemorySnapshot,
+    handleCaptureMemoryGc,
     handleExportMemory,
     handleOpenMemoryExportFile,
     handleOpenMemoryExportFolder,
@@ -1463,6 +1465,7 @@ export function SettingsModal(props: SettingsModalProps) {
                       onStartProfiler={handleStartMemoryProfiler}
                       onStopProfiler={handleStopMemoryProfiler}
                       onSnapshot={handleCaptureMemorySnapshot}
+                      onGc={handleCaptureMemoryGc}
                       onExport={handleExportMemory}
                       onOpenFile={handleOpenMemoryExportFile}
                       onOpenFolder={handleOpenMemoryExportFolder}

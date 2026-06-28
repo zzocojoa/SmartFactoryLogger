@@ -281,24 +281,76 @@ export interface ObservabilityErrorsResponse {
   };
 }
 
-export interface MemoryCollectorItem {
+export type MemoryCollectorStatus = 'ok' | 'slow' | 'error' | 'stale' | string;
+export type MemoryCollectorSource = 'backend' | 'frontend' | 'electron' | string;
+export type MemorySeverity = 'ok' | 'warn' | 'critical' | string;
+export type MemoryExactness =
+  | 'exact'
+  | 'observed'
+  | 'estimated'
+  | 'estimated-enumerated'
+  | 'unavailable'
+  | (string & {});
+
+export interface MemoryBudget {
+  warn_bytes?: number;
+  critical_bytes?: number;
+  warn_items_ratio?: number;
+  critical_items_ratio?: number;
+  warn_growth_per_min?: number;
+  [key: string]: number | string | boolean | null | undefined;
+}
+
+export interface MemoryCollectorRuntimeFields {
+  latency_ms?: number | null;
+  status?: MemoryCollectorStatus | null;
+  last_ok_at?: string | null;
+  last_error_at?: string | null;
+  error_count?: number | null;
+  stale?: boolean | null;
+  source?: MemoryCollectorSource | null;
+}
+
+export interface MemoryCollectorBudgetFields {
+  severity?: MemorySeverity | null;
+  severity_reasons?: string[];
+  budget?: MemoryBudget | null;
+  items_ratio?: number | null;
+  items_capacity?: number | null;
+  growth_bytes_per_min?: number | null;
+}
+
+export interface MemoryCollectorItem extends MemoryCollectorRuntimeFields, MemoryCollectorBudgetFields {
   name: string;
   kind: string;
-  exactness: 'exact' | 'estimated' | string;
+  exactness: MemoryExactness;
   bytes: number;
   items?: number | null;
   note?: string | null;
 }
 
-export interface MemoryCollectorDeltaItem {
+export interface MemoryCollectorDeltaItem extends MemoryCollectorRuntimeFields, MemoryCollectorBudgetFields {
   name: string;
   kind: string;
-  exactness: 'exact' | 'estimated' | string;
+  exactness: MemoryExactness;
   bytes: number;
   delta_bytes: number;
   share_ratio: number;
   items?: number | null;
   note?: string | null;
+}
+
+export interface MemoryLeakSuspect {
+  name: string;
+  source: 'process' | 'collector' | string;
+  classification: 'leak_suspect' | string;
+  slope_bytes_per_min: number;
+  monotonic_ratio: number;
+  baseline_bytes: number;
+  latest_bytes: number;
+  increase_ratio: number;
+  sample_count: number;
+  budget?: MemoryBudget | null;
 }
 
 export interface MemoryAlertItem {
@@ -328,6 +380,24 @@ export interface BackendMemorySample {
   gc_gen0: number;
   gc_gen1: number;
   gc_gen2: number;
+}
+
+export interface MemoryGCSnapshot {
+  captured_at: string;
+  latency_ms: number;
+  collected: {
+    gen0: number;
+    gen1: number;
+    gen2: number;
+    total: number;
+  };
+  before: Partial<BackendMemorySample>;
+  after: Partial<BackendMemorySample>;
+  delta: {
+    rss_bytes?: number | null;
+    uss_bytes?: number | null;
+    private_bytes?: number | null;
+  };
 }
 
 export interface MemoryProfilerState {
@@ -363,6 +433,8 @@ export interface MemoryDetailsResponse {
     captured_at: number;
     items: MemoryCollectorItem[];
   }>;
+  leak_suspects: MemoryLeakSuspect[];
+  latest_gc_snapshot?: MemoryGCSnapshot | null;
   latest_tracemalloc_diff: TracemallocDiffItem[];
 }
 
@@ -383,6 +455,7 @@ export interface DashboardLeaderState {
 export interface MemoryActionState {
   refresh: boolean;
   snapshot: boolean;
+  gc?: boolean;
   profiler_action: 'start' | 'stop' | null;
   export: boolean;
 }
@@ -390,6 +463,7 @@ export interface MemoryActionState {
 export interface FrontendMemorySupport {
   mode: 'uasm' | 'performance-memory' | 'unsupported';
   supported: boolean;
+  exactness: MemoryExactness;
   used_bytes?: number | null;
   total_bytes?: number | null;
   limit_bytes?: number | null;
@@ -399,9 +473,55 @@ export interface FrontendMemorySupport {
   }>;
 }
 
+export type ElectronMemorySource = 'electron' | 'browser';
+
+export interface ElectronMetricValueMap {
+  [key: string]: number | string | boolean | null | undefined;
+}
+
+export interface ElectronProcessMemoryInfo extends ElectronMetricValueMap {
+  workingSetSize?: number | null;
+  peakWorkingSetSize?: number | null;
+  privateBytes?: number | null;
+  sharedBytes?: number | null;
+}
+
+export interface ElectronProcessMetric {
+  pid: number;
+  type: string;
+  name?: string;
+  serviceName?: string;
+  creationTime?: number;
+  cpu?: ElectronMetricValueMap | null;
+  memory?: ElectronMetricValueMap | null;
+  sandboxed?: boolean;
+  integrityLevel?: string;
+}
+
+export interface ElectronMemorySnapshot {
+  supported: boolean;
+  source: ElectronMemorySource;
+  captured_at: number;
+  process: ElectronProcessMemoryInfo | null;
+  metrics: ElectronProcessMetric[];
+  v8_heap?: ElectronMetricValueMap | null;
+  error?: string | null;
+}
+
+export interface SmartFactoryElectronBridge {
+  getMemory: () => Promise<ElectronMemorySnapshot>;
+}
+
+declare global {
+  interface Window {
+    smartFactoryElectron?: SmartFactoryElectronBridge;
+  }
+}
+
 export interface FrontendMemorySnapshot {
   captured_at: number;
   support: FrontendMemorySupport;
+  electron?: ElectronMemorySnapshot | null;
   top_consumers: MemoryCollectorItem[];
   growth: MemoryCollectorDeltaItem[];
   alerts: MemoryAlertItem[];

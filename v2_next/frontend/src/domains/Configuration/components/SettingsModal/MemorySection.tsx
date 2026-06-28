@@ -1,12 +1,17 @@
 import React, { useMemo, useState } from 'react';
 import type {
   BackendMemorySample,
+  ElectronMemorySnapshot,
+  ElectronProcessMetric,
   FrontendMemorySnapshot,
   HealthSnapshot,
   MemoryActionState,
   MemoryAlertItem,
   MemoryCollectorDeltaItem,
   MemoryCollectorItem,
+  MemoryGCSnapshot,
+  MemoryLeakSuspect,
+  MemorySeverity,
   MemoryDetailsResponse,
   MemoryStateResponse,
   MemoryTabLeaderState,
@@ -40,13 +45,14 @@ interface MemorySectionProps {
   onStartProfiler: () => void;
   onStopProfiler: () => void;
   onSnapshot: () => void;
+  onGc: () => void;
   onExport: () => void;
   onOpenFile: () => void;
   onOpenFolder: () => void;
   onCopyPath: () => void;
 }
 
-type SortMode = 'delta' | 'size';
+type SortMode = 'severity' | 'delta' | 'size';
 
 interface FrontendHistorySample {
   captured_at: number;
@@ -114,7 +120,38 @@ const formatExactness = (value: string | null | undefined): string => {
   if (value === 'estimated') {
     return 'estimated';
   }
+  if (value === 'observed') {
+    return 'observed';
+  }
+  if (value === 'estimated-enumerated') {
+    return 'estimated-enumerated';
+  }
+  if (value === 'unavailable') {
+    return 'unavailable';
+  }
   return value;
+};
+
+const formatLatencyMs = (value: number | null | undefined): string => {
+  if (value == null || Number.isNaN(value)) {
+    return '--';
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ms`;
+};
+
+const formatCpuPercent = (value: number | null | undefined): string => {
+  if (value == null || Number.isNaN(value)) {
+    return '--';
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+};
+
+const formatCollectorStatus = (item: Pick<MemoryCollectorItem, 'status' | 'stale'>): string => {
+  const status = item.status || '--';
+  if (item.stale && status !== 'stale' && status !== '--') {
+    return `${status} stale`;
+  }
+  return status;
 };
 
 const formatItems = (value: number | null | undefined): string => {
@@ -195,6 +232,37 @@ const getDeltaClassName = (value: number | null | undefined): string => {
   return value > 0 ? 'settings-memory-value-warn' : 'settings-memory-value-ok';
 };
 
+const electronKilobytesToBytes = (value: unknown): number | null => {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value * 1024)) : null;
+};
+
+const getElectronProcessBytes = (snapshot: ElectronMemorySnapshot | null | undefined): number | null => {
+  const info = snapshot?.process;
+  if (!info) {
+    return null;
+  }
+  return (
+    electronKilobytesToBytes(info.privateBytes) ??
+    electronKilobytesToBytes(info.workingSetSize) ??
+    electronKilobytesToBytes(info.peakWorkingSetSize) ??
+    null
+  );
+};
+
+const getElectronMetricBytes = (metric: ElectronProcessMetric): number => {
+  return (
+    electronKilobytesToBytes(metric.memory?.privateBytes) ??
+    electronKilobytesToBytes(metric.memory?.workingSetSize) ??
+    electronKilobytesToBytes(metric.memory?.peakWorkingSetSize) ??
+    0
+  );
+};
+
+const getElectronCpuPercent = (metric: ElectronProcessMetric): number | null => {
+  const value = metric.cpu?.percentCPUUsage;
+  return typeof value === 'number' ? value : null;
+};
+
 const getAlertClassName = (severity: MemoryAlertItem['severity']): string => {
   if (severity === 'error') {
     return 'settings-memory-alert-error';
@@ -203,6 +271,59 @@ const getAlertClassName = (severity: MemoryAlertItem['severity']): string => {
     return 'settings-memory-alert-warn';
   }
   return 'settings-memory-alert-info';
+};
+
+const getCollectorStatusClassName = (item: Pick<MemoryCollectorItem, 'status' | 'stale'>): string => {
+  if (item.status === 'error') {
+    return 'settings-test-badge error';
+  }
+  if (item.status === 'slow' || item.status === 'stale' || item.stale) {
+    return 'settings-test-badge warn';
+  }
+  if (item.status === 'ok') {
+    return 'settings-test-badge ok';
+  }
+  return 'settings-test-badge idle';
+};
+
+const getExactnessClassName = (value: string | null | undefined): string => {
+  if (value === 'exact' || value === 'observed') {
+    return 'settings-test-badge ok';
+  }
+  if (value === 'unavailable') {
+    return 'settings-test-badge warn';
+  }
+  if (value === 'estimated-enumerated') {
+    return 'settings-test-badge idle';
+  }
+  return 'settings-test-badge idle';
+};
+
+const getMemorySeverityRank = (severity: MemorySeverity | null | undefined): number => {
+  if (severity === 'critical') {
+    return 2;
+  }
+  if (severity === 'warn') {
+    return 1;
+  }
+  return 0;
+};
+
+const formatMemorySeverity = (severity: MemorySeverity | null | undefined): string => {
+  return severity || 'ok';
+};
+
+const getMemorySeverityClassName = (severity: MemorySeverity | null | undefined): string => {
+  if (severity === 'critical') {
+    return 'settings-test-badge error';
+  }
+  if (severity === 'warn') {
+    return 'settings-test-badge warn';
+  }
+  if (!severity || severity === 'ok') {
+    return 'settings-test-badge ok';
+  }
+  return 'settings-test-badge idle';
 };
 
 const getWindowDelta = <T extends { captured_at: number }>(
@@ -248,6 +369,16 @@ const toGrowthFallback = (items: MemoryCollectorItem[]): MemoryCollectorDeltaIte
 
 const sortGrowthItems = (items: MemoryCollectorDeltaItem[], sortMode: SortMode): MemoryCollectorDeltaItem[] => {
   return [...items].sort((left, right) => {
+    if (sortMode === 'severity') {
+      const severityDelta = getMemorySeverityRank(right.severity) - getMemorySeverityRank(left.severity);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+      if (right.delta_bytes !== left.delta_bytes) {
+        return right.delta_bytes - left.delta_bytes;
+      }
+      return right.bytes - left.bytes;
+    }
     if (sortMode === 'size') {
       if (right.bytes !== left.bytes) {
         return right.bytes - left.bytes;
@@ -324,6 +455,13 @@ const ConsumerTable = ({
         <div className="settings-memory-sort-group">
           <button
             type="button"
+            className={`settings-memory-sort-button ${sortMode === 'severity' ? 'active' : ''}`}
+            onClick={() => onSortModeChange('severity')}
+          >
+            severity
+          </button>
+          <button
+            type="button"
             className={`settings-memory-sort-button ${sortMode === 'delta' ? 'active' : ''}`}
             onClick={() => onSortModeChange('delta')}
           >
@@ -341,25 +479,146 @@ const ConsumerTable = ({
       <div className="settings-memory-table">
         <div className="settings-memory-table-row settings-memory-table-head">
           <span>name</span>
+          <span>severity</span>
           <span>size</span>
           <span>delta</span>
           <span>share</span>
           <span>items</span>
           <span>exact</span>
+          <span>status</span>
+          <span>latency</span>
           <span>note</span>
         </div>
         {rows.map((item) => (
           <div key={item.name} className="settings-memory-table-row">
             <span className="settings-memory-cell-strong">{item.name}</span>
+            <span>
+              <span className={getMemorySeverityClassName(item.severity)}>{formatMemorySeverity(item.severity)}</span>
+            </span>
             <span>{formatBytes(item.bytes)}</span>
             <span className={getDeltaClassName(item.delta_bytes)}>{formatDeltaBytes(item.delta_bytes)}</span>
             <span>{formatPercent(item.share_ratio)}</span>
             <span>{formatItems(item.items)}</span>
-            <span>{formatExactness(item.exactness)}</span>
+            <span>
+              <span className={getExactnessClassName(item.exactness)}>{formatExactness(item.exactness)}</span>
+            </span>
+            <span>
+              <span className={getCollectorStatusClassName(item)}>{formatCollectorStatus(item)}</span>
+            </span>
+            <span>{formatLatencyMs(item.latency_ms)}</span>
             <span className="settings-memory-note">{item.note ?? '--'}</span>
           </div>
         ))}
         {!rows.length && <div className="settings-error-empty">데이터 없음</div>}
+      </div>
+    </div>
+  );
+};
+
+const LeakSuspectList = ({ items }: { items: MemoryLeakSuspect[] }) => {
+  if (!items.length) {
+    return null;
+  }
+  return (
+    <div className="settings-observability-errors">
+      <div className="settings-comm-log-header">
+        <span className="settings-comm-log-label">누수 의심</span>
+        <span className="settings-observability-count">{items.length}</span>
+      </div>
+      <div className="settings-error-list">
+        {items.map((item) => (
+          <div key={`${item.source}-${item.name}`} className="settings-error-item">
+            <div className="settings-error-head">
+              <span className="settings-error-source">{item.name}</span>
+              <span className="settings-test-badge warn">의심</span>
+            </div>
+            <div className="settings-error-message">
+              {item.source} | slope {formatBytes(Math.max(0, Math.round(item.slope_bytes_per_min)))}/min |
+              monotonic {formatPercent(item.monotonic_ratio)} | increase {formatPercent(item.increase_ratio - 1)}
+              | samples {item.sample_count}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const GCSnapshotPanel = ({ snapshot }: { snapshot: MemoryGCSnapshot | null | undefined }) => {
+  if (!snapshot) {
+    return null;
+  }
+  return (
+    <div className="settings-test-item settings-memory-card">
+      <div className="settings-memory-card-header">
+        <span className="settings-memory-card-title">GC 비교</span>
+        <span className="settings-test-badge idle">{formatLatencyMs(snapshot.latency_ms)}</span>
+      </div>
+      <div className="settings-memory-card-grid">
+        <span>RSS before</span>
+        <span>{formatBytes(snapshot.before?.rss_bytes)}</span>
+        <span>RSS after</span>
+        <span>{formatBytes(snapshot.after?.rss_bytes)}</span>
+        <span>RSS delta</span>
+        <span className={getDeltaClassName(snapshot.delta?.rss_bytes ?? 0)}>
+          {formatDeltaBytes(snapshot.delta?.rss_bytes)}
+        </span>
+        <span>USS delta</span>
+        <span className={getDeltaClassName(snapshot.delta?.uss_bytes ?? 0)}>
+          {formatDeltaBytes(snapshot.delta?.uss_bytes)}
+        </span>
+        <span>Private delta</span>
+        <span className={getDeltaClassName(snapshot.delta?.private_bytes ?? 0)}>
+          {formatDeltaBytes(snapshot.delta?.private_bytes)}
+        </span>
+        <span>collected</span>
+        <span>{snapshot.collected.total.toLocaleString()}</span>
+      </div>
+    </div>
+  );
+};
+
+const ElectronMemoryPanel = ({ snapshot }: { snapshot: ElectronMemorySnapshot | null | undefined }) => {
+  const topMetrics = useMemo(() => {
+    return [...(snapshot?.metrics ?? [])]
+      .sort((left, right) => getElectronMetricBytes(right) - getElectronMetricBytes(left))
+      .slice(0, 4);
+  }, [snapshot]);
+  const processBytes = getElectronProcessBytes(snapshot);
+  const metricsBytes = topMetrics.reduce((total, item) => total + getElectronMetricBytes(item), 0);
+  const v8Used = typeof snapshot?.v8_heap?.used_heap_size === 'number' ? snapshot.v8_heap.used_heap_size : null;
+  const v8Limit = typeof snapshot?.v8_heap?.heap_size_limit === 'number' ? snapshot.v8_heap.heap_size_limit : null;
+
+  return (
+    <div className="settings-test-item settings-memory-card">
+      <div className="settings-memory-card-header">
+        <span className="settings-memory-card-title">Electron Processes</span>
+        <span className={`settings-test-badge ${snapshot?.supported ? 'ok' : 'idle'}`}>
+          {snapshot?.supported ? 'ELECTRON' : 'UNAVAILABLE'}
+        </span>
+      </div>
+      <div className="settings-memory-card-value">{formatBytes(processBytes ?? metricsBytes)}</div>
+      <div className="settings-memory-card-grid">
+        <span>process private</span>
+        <span>{formatBytes(processBytes)}</span>
+        <span>process count</span>
+        <span>{snapshot?.metrics?.length ?? 0}</span>
+        <span>V8 used</span>
+        <span>{formatBytes(v8Used)}</span>
+        <span>V8 limit</span>
+        <span>{formatBytes(v8Limit)}</span>
+      </div>
+      <div className="settings-memory-runtime">
+        {topMetrics.length ? (
+          topMetrics.map((metric) => (
+            <span key={`${metric.type}-${metric.pid}`}>
+              {metric.type} {metric.pid}: {formatBytes(getElectronMetricBytes(metric))} / CPU{' '}
+              {formatCpuPercent(getElectronCpuPercent(metric))}
+            </span>
+          ))
+        ) : (
+          <span>{snapshot?.error ?? 'Electron bridge not available'}</span>
+        )}
       </div>
     </div>
   );
@@ -418,23 +677,27 @@ export const MemorySection = ({
   onStartProfiler,
   onStopProfiler,
   onSnapshot,
+  onGc,
   onExport,
   onOpenFile,
   onOpenFolder,
   onCopyPath,
 }: MemorySectionProps) => {
-  const [backendSortMode, setBackendSortMode] = useState<SortMode>('delta');
-  const [frontendSortMode, setFrontendSortMode] = useState<SortMode>('delta');
+  const [backendSortMode, setBackendSortMode] = useState<SortMode>('severity');
+  const [frontendSortMode, setFrontendSortMode] = useState<SortMode>('severity');
 
   const backendSummary = backendMemory?.summary ?? null;
   const backendHistory = backendMemory?.history ?? [];
   const frontendHistory = frontendMemory?.history ?? [];
   const profiler = backendMemory?.profiler ?? null;
   const frontendSupport = frontendMemory?.support ?? null;
+  const electronSnapshot = frontendMemory?.electron ?? null;
   const alerts = frontendMemory?.alerts ?? [];
   const backendGrowth = backendMemoryDetails?.backend_growth?.length
     ? backendMemoryDetails.backend_growth
     : toGrowthFallback(backendMemoryDetails?.backend_top_consumers ?? []);
+  const leakSuspects = backendMemoryDetails?.leak_suspects ?? [];
+  const latestGcSnapshot = backendMemoryDetails?.latest_gc_snapshot ?? null;
   const frontendGrowth = frontendMemory?.growth?.length
     ? frontendMemory.growth
     : toGrowthFallback(frontendMemory?.top_consumers ?? []);
@@ -516,7 +779,7 @@ export const MemorySection = ({
           type="button"
           className="settings-test-button"
           onClick={onRefresh}
-          disabled={memorySummaryBusy || memoryActionState.snapshot}
+          disabled={memorySummaryBusy || memoryActionState.snapshot || Boolean(memoryActionState.gc)}
         >
           {memoryActionState.refresh ? '수집 중...' : '새로고침'}
         </button>
@@ -540,9 +803,17 @@ export const MemorySection = ({
           type="button"
           className="settings-test-button"
           onClick={onSnapshot}
-          disabled={memoryActionState.snapshot}
+          disabled={memoryActionState.snapshot || Boolean(memoryActionState.gc)}
         >
           즉시 snapshot
+        </button>
+        <button
+          type="button"
+          className="settings-test-button"
+          onClick={onGc}
+          disabled={Boolean(memoryActionState.gc) || memoryActionState.snapshot}
+        >
+          {memoryActionState.gc ? 'GC 실행 중...' : 'GC 비교'}
         </button>
         <button
           type="button"
@@ -553,6 +824,8 @@ export const MemorySection = ({
           {memoryExportBusy ? '내보내는 중...' : 'export'}
         </button>
       </div>
+
+      <GCSnapshotPanel snapshot={latestGcSnapshot} />
 
       <div className="settings-memory-summary">
         <div className="settings-test-item settings-memory-card">
@@ -577,11 +850,13 @@ export const MemorySection = ({
           </div>
         </div>
 
+        <ElectronMemoryPanel snapshot={electronSnapshot} />
+
         <div className="settings-test-item settings-memory-card">
           <div className="settings-memory-card-header">
             <span className="settings-memory-card-title">Frontend Heap / App</span>
-            <span className={`settings-test-badge ${frontendSupport?.supported ? (frontendGrowthWarn ? 'warn' : 'ok') : 'idle'}`}>
-              {frontendSupport?.mode ?? 'unsupported'}
+            <span className={getExactnessClassName(frontendSupport?.exactness ?? 'unavailable')}>
+              {formatExactness(frontendSupport?.exactness ?? 'unavailable')}
             </span>
           </div>
           <div className="settings-memory-card-value-group">
@@ -599,6 +874,10 @@ export const MemorySection = ({
             <span className={getDeltaClassName(frontendHeapDelta1m)}>{formatDeltaBytes(frontendHeapDelta1m)}</span>
             <span>App 1분 증가</span>
             <span className={getDeltaClassName(frontendAppDelta1m)}>{formatDeltaBytes(frontendAppDelta1m)}</span>
+            <span>Browser API</span>
+            <span>{frontendSupport?.mode ?? 'unsupported'}</span>
+            <span>App exactness</span>
+            <span>estimated</span>
             <span>Heap 피크</span>
             <span>{formatBytes(frontendHeapPeak)}</span>
             <span>App 피크</span>
@@ -680,6 +959,7 @@ export const MemorySection = ({
       </div>
 
       <div className="settings-memory-grid">
+        <LeakSuspectList items={leakSuspects} />
         <ConsumerTable
           title="Backend growth"
           items={backendGrowth}

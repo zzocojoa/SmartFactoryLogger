@@ -69,6 +69,7 @@ type ManagedSettingsModalProps =
   | 'handleStartMemoryProfiler'
   | 'handleStopMemoryProfiler'
   | 'handleCaptureMemorySnapshot'
+  | 'handleCaptureMemoryGc'
   | 'handleExportMemory'
   | 'handleOpenMemoryExportFile'
   | 'handleOpenMemoryExportFolder'
@@ -367,6 +368,16 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
     }
   }, [memory, props]);
 
+  const handleCaptureMemoryGc = useCallback(async (): Promise<void> => {
+    try {
+      await memory.captureMemoryGc();
+      props.showSettingsToast('메모리 GC 비교를 완료했습니다.', 'ok');
+    } catch (error) {
+      console.error('Memory GC snapshot failed', error);
+      props.showSettingsToast('메모리 GC 비교를 실행하지 못했습니다.', 'error');
+    }
+  }, [memory, props]);
+
   const handleExportMemory = useCallback(async (): Promise<void> => {
     try {
       const path = await memory.exportMemory();
@@ -438,6 +449,7 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
       handleStartMemoryProfiler,
       handleStopMemoryProfiler,
       handleCaptureMemorySnapshot,
+      handleCaptureMemoryGc,
       handleExportMemory,
       handleOpenMemoryExportFile,
       handleOpenMemoryExportFolder,
@@ -495,6 +507,7 @@ export const SettingsModalContainer = (props: SettingsModalContainerProps): JSX.
       handleStartMemoryProfiler,
       handleStopMemoryProfiler,
       handleCaptureMemorySnapshot,
+      handleCaptureMemoryGc,
       handleExportMemory,
       handleOpenMemoryExportFile,
       handleOpenMemoryExportFolder,
