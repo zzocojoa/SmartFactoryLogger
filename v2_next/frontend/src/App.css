@@ -1474,6 +1474,7 @@ body {
 .settings-content-wrapper {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -1535,9 +1536,13 @@ body {
 
 .settings-content {
   flex: 1;
+  min-width: 0;
   padding: 24px 32px;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   scroll-behavior: smooth;
+  scroll-padding-top: 0;
   background: var(--bg-modal);
   position: relative;
 }
@@ -1546,6 +1551,7 @@ body {
   max-width: 1200px;
   width: 100%;
   margin: 0 auto 32px;
+  box-sizing: border-box;
   animation: fadeInSection 0.5s ease backwards;
 }
 
@@ -2084,6 +2090,14 @@ body {
   flex-direction: column;
   gap: 16px;
   width: 100%;
+  min-width: 0;
+  padding-bottom: 0;
+}
+
+.settings-form::after {
+  content: "";
+  display: block;
+  flex: 0 0 clamp(960px, 160vh, 1400px);
 }
 
 .settings-body {
@@ -2098,6 +2112,7 @@ body {
   border-radius: 12px;
   border: 1px solid var(--border-muted);
   background: var(--bg-card);
+  min-width: 0;
 }
 
 .settings-nav-select label {
@@ -2187,11 +2202,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  scroll-margin-top: 12px;
+  min-width: 0;
+  min-height: clamp(360px, calc(100vh - 260px), 560px);
+  overflow-wrap: anywhere;
+  scroll-margin-top: 0;
 }
 
 #settings-observability {
-  min-height: min(560px, 62vh);
+  min-height: clamp(460px, 62vh, 560px);
 }
 
 .settings-test-grid {
@@ -2288,6 +2306,25 @@ body {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-section :is(
+  .settings-summary-value,
+  .settings-comm-value,
+  .settings-comm-summary-value,
+  .settings-test-title,
+  .settings-test-message,
+  .settings-error-message,
+  .settings-error-detail,
+  .settings-path-message,
+  .settings-path-meta,
+  .settings-memory-brief-detail,
+  .settings-memory-alert-detail,
+  .settings-memory-export-path
+) {
+  min-width: 0;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
@@ -2480,6 +2517,10 @@ body {
   font-size: 0.68rem;
   color: var(--text-muted);
   margin-bottom: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .settings-memory-brief-metrics strong {
@@ -2488,7 +2529,9 @@ body {
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .settings-memory-details-panel {
@@ -2598,7 +2641,7 @@ body {
 
 .settings-memory-card-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 10px;
   font-size: 0.75rem;
   color: var(--text-secondary);
@@ -2606,7 +2649,9 @@ body {
 
 .settings-memory-card-grid span {
   min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .settings-memory-card-grid span:nth-child(2n) {
@@ -2677,6 +2722,7 @@ body {
 
 .settings-memory-table-shell {
   min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -2737,7 +2783,7 @@ body {
 .settings-memory-table-row span {
   min-width: 0;
   overflow-wrap: anywhere;
-  word-break: break-word;
+  word-break: break-all;
 }
 
 .settings-memory-cell-strong {
@@ -3695,6 +3741,10 @@ body {
 }
 
 @media (max-width: 900px) {
+  .settings-content-wrapper {
+    flex-direction: column;
+  }
+
   .settings-body {
     grid-template-columns: 1fr;
   }
@@ -3705,6 +3755,11 @@ body {
 
   .settings-nav-select {
     display: block;
+    margin: 12px 12px 0;
+  }
+
+  .settings-content {
+    padding: 12px;
   }
 
   .settings-threshold-header {
