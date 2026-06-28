@@ -1,541 +1,2255 @@
 {
-    "version":  "2.0",
-    "lastUpdated":  "2026-06-25T04:00:00.000Z",
-    "activeFeatures":  [
-                           "spot-live-image",
-                           "spot-temperature-state-labeling",
-                           "spot-temperature-v2-4-operational-patch"
-                       ],
-    "primaryFeature":  "spot-temperature-v2-4-operational-patch",
-    "features":  {
-                     "spot-live-image":  {
-                                             "phase":  "completed",
-                                             "matchRate":  null,
-                                             "iterationCount":  3,
-                                             "documents":  {
-
-                                                           },
-                                             "taskChain":  [
-                                                               {
-                                                                   "phase":  "plan",
-                                                                   "status":  "completed",
-                                                                   "createdAt":  "2026-06-11T01:56:04.883Z",
-                                                                   "completedAt":  "2026-06-11T01:57:33.963Z"
-                                                               },
-                                                               {
-                                                                   "phase":  "design",
-                                                                   "status":  "completed",
-                                                                   "createdAt":  "2026-06-11T01:56:04.883Z",
-                                                                   "completedAt":  "2026-06-11T01:57:45.327Z"
-                                                               },
-                                                               {
-                                                                   "phase":  "do",
-                                                                   "status":  "completed",
-                                                                   "createdAt":  "2026-06-11T01:56:04.883Z",
-                                                                   "completedAt":  "2026-06-11T02:25:11.322Z"
-                                                               },
-                                                               {
-                                                                   "phase":  "check",
-                                                                   "status":  "completed",
-                                                                   "createdAt":  "2026-06-11T01:56:04.883Z",
-                                                                   "completedAt":  "2026-06-11T02:26:13.444Z"
-                                                               },
-                                                               {
-                                                                   "phase":  "report",
-                                                                   "status":  "completed",
-                                                                   "createdAt":  "2026-06-11T01:56:04.883Z",
-                                                                   "completedAt":  "2026-06-11T02:26:53.888Z"
-                                                               }
-                                                           ],
-                                             "timestamps":  {
-                                                                "started":  "2026-06-11T01:56:04.884Z",
-                                                                "lastUpdated":  "2026-06-11T02:26:53.888Z"
-                                                            },
-                                             "completedAt":  "2026-06-11T02:26:53.885Z"
-                                         },
-                     "spot-temperature-state-labeling":  {
-                                                             "phase":  "completed",
-                                                             "matchRate":  100,
-                                                             "iterationCount":  15,
-                                                             "documents":  {
-                                                                               "plan":  {
-                                                                                            "path":  "docs/01-plan/features/spot-temperature-state-labeling.plan.md",
-                                                                                            "document_version":  "1.0.10",
-                                                                                            "status":  "completed",
-                                                                                            "approved_at":  "2026-06-22",
-                                                                                            "approved_by":  "user",
-                                                                                            "git_commit":  null,
-                                                                                            "dataset_id":  "spot-temperature-gap-20260619-20260620",
-                                                                                            "dataset_sha256":  [
-                                                                                                                   "AA708210E2D60D7E68895BAB13F3CD6C731F835E0E5D04543C12E697493C83A0",
-                                                                                                                   "DFD988624D11A0CDF585D45B8A337D1DBC4A057507006FDD0567CF856913E634",
-                                                                                                                   "261EA580E55267A197E6ED8923E6467AED8DEAE4ABDD10C11F4645130F843B32",
-                                                                                                                   "8D69FD5165ACEB0BDCC184A60A4DB1DFAF0750698B060C79033A1AEE517DE71F"
-                                                                                                               ],
-                                                                                            "lastUpdated":  "2026-06-24T00:00:00Z"
-                                                                                        },
-                                                                               "design":  {
-                                                                                              "path":  "docs/02-design/features/spot-temperature-state-labeling.design.md",
-                                                                                              "document_version":  "1.0.10",
-                                                                                              "status":  "conditionally_approved",
-                                                                                              "approved_at":  "2026-06-22T15:12:39.880Z",
-                                                                                              "approved_by":  "user",
-                                                                                              "git_commit":  null,
-                                                                                              "do_scope":  "instrumentation_only",
-                                                                                              "instrumentation_do_requirements":  [
-                                                                                                                                      "schema_rollover_guard_required",
-                                                                                                                                      "immutable_poll_snapshot_required",
-                                                                                                                                      "logger_service_instance_id_required",
-                                                                                                                                      "spot_source_freshness_fields_required",
-                                                                                                                                      "cache_fallback_allowed_required",
-                                                                                                                                      "sidecar_rule_version_metadata_required"
-                                                                                                                                  ],
-                                                                                              "operational_promotion_blockers":  [
-                                                                                                                                     "server_pc_spot_no_target_response_unverified",
-                                                                                                                                     "server_pc_poll_freshness_threshold_unverified",
-                                                                                                                                     "downstream_v2_3_consumer_compatibility_unverified",
-                                                                                                                                     "legacy_reason_policy_pending",
-                                                                                                                                     "operational_schema_v2_4_plus_fields_required"
-                                                                                                                                 ],
-                                                                                              "operational_promotion_blocker_scope":  "future_promotion_gate_not_pr65_code_blocker",
-                                                                                              "promotion_requires_separate_pr":  true,
-                                                                                              "prohibited_until_promotion":  [
-                                                                                                                                 "temperature_status_shadow_as_operational_truth",
-                                                                                                                                 "spot_target_shadow_fields_as_operational_truth",
-                                                                                                                                 "alert_suppression_from_shadow_labels",
-                                                                                                                                 "legacy_reason_remapping_from_shadow_labels",
-                                                                                                                                 "ml_training_or_inference_input_from_shadow_labels"
-                                                                                                                             ],
-                                                                                              "resolved_documentation_items":  [
-                                                                                                                                   "online_process_state_priority_defined",
-                                                                                                                                   "billet_change_pause_run_boundary_policy_defined",
-                                                                                                                                   "realtime_confidence_policy_defined",
-                                                                                                                                   "poller_stale_duration_metric_defined",
-                                                                                                                                   "cache_fallback_allowed_policy_defined",
-                                                                                                                                   "spot_raw_validity_not_evaluated_defined",
-                                                                                                                                   "v2_3_shadow_only_promotion_boundary_defined",
-                                                                                                                                   "sidecar_git_commit_null_policy_defined",
-                                                                                                                                   "stale_snapshot_transport_cache_fallback_policy_aligned",
-                                                                                                                                   "v2_3_permanent_shadow_boundary_aligned",
-                                                                                                                                   "temperature_effective_value_invariant_rechecked",
-                                                                                                                                   "development_replay_consumer_v2_3_contract_checked",
-                                                                                                                                   "enum_mismatch_validation_implemented",
-                                                                                                                                   "spot_sequence_invariant_validation_implemented",
-                                                                                                                                   "ametek_rest_under_over_range_sentinel_contract_documented",
-                                                                                                                                   "raw_capture_6553_4_under_range_evidence_recorded",
-                                                                                                                                   "verified_no_target_kept_separate_from_range_sentinels"
-                                                                                                                               ],
-                                                                                              "implemented_do_items":  [
-                                                                                                                           "spot_raw_validity_classifier_added",
-                                                                                                                           "spot_target_observed_freshness_gate_added",
-                                                                                                                           "temperature_status_shadow_decision_table_added",
-                                                                                                                           "spot_numeric_validation_hardened",
-                                                                                                                           "v2_header_append_guard_added",
-                                                                                                                           "sidecar_logger_identity_and_shadow_metadata_added",
-                                                                                                                           "spot_api_immutable_poll_snapshot_added",
-                                                                                                                           "spot_api_shadow_diagnostics_added",
-                                                                                                                           "stale_snapshot_transport_cache_fallback_policy_implemented",
-                                                                                                                           "real_plc_spot_snapshot_metadata_join_added",
-                                                                                                                           "v2_3_shadow_csv_fields_emitted",
-                                                                                                                           "csv_v2_shadow_validator_supports_2_3",
-                                                                                                                           "v2_3_shadow_csv_contract_tests_added",
-                                                                                                                           "temperature_origin_none_clears_legacy_temperature_value",
-                                                                                                                           "compose_layer_changeover_candidate_from_valid_metadata_change_added",
-                                                                                                                           "source_freshness_unknown_after_first_poll_maps_unknown_missing",
-                                                                                                                           "real_plc_spot_diagnostics_read_after_cache_probe",
-                                                                                                                           "csv_replay_driver_preserves_v2_3_shadow_fields",
-                                                                                                                           "csv_replay_driver_preserves_temperature_null_for_origin_none",
-                                                                                                                           "factory_data_shadow_enum_validation_added",
-                                                                                                                           "factory_data_spot_sequence_invariant_validation_added",
-                                                                                                                           "csv_v2_shadow_validator_checks_shadow_enum_values",
-                                                                                                                           "csv_v2_shadow_validator_checks_row_unique_key_scope",
-                                                                                                                           "csv_v2_shadow_validator_checks_temperature_origin_invariants",
-                                                                                                                           "health_exposes_shadow_spot_temperature_source_health",
-                                                                                                                           "posthoc_process_segment_fact_pipeline_added",
-                                                                                                                           "posthoc_billet_change_pause_requires_same_inferred_run_context",
-                                                                                                                           "spot_observation_decision_table_tests_tracked",
-                                                                                                                           "online_process_state_priority_tests_added",
-                                                                                                                           "spot_invalid_sentinel_defaults_include_ametek_range_sentinels",
-                                                                                                                           "spot_api_rejects_6553_4_and_6553_5_as_invalid_sentinel",
-                                                                                                                           "csv_v2_shadow_validator_checks_ametek_sentinel_map",
-                                                                                                                           "decimal_equivalent_ametek_sentinel_classification_added",
-                                                                                                                           "spot_invalid_sentinel_device_status_preserved_to_csv",
-                                                                                                                           "spot_invalid_sentinel_cache_suppression_latch_added",
-                                                                                                                           "sentinel_sidecar_provenance_hardened",
-                                                                                                                           "csv_v2_shadow_validator_checks_invalid_sentinel_row_contract"
-                                                                                                                       ],
-                                                                                              "remaining_do_items":  [
-
-                                                                                                                     ],
-                                                                                              "lastUpdated":  "2026-06-24T00:00:00Z"
-                                                                                          },
-                                                                               "analysis":  {
-                                                                                                "path":  "docs/03-analysis/spot-temperature-state-labeling.analysis.md",
-                                                                                                "document_version":  "1.0.2",
-                                                                                                "status":  "completed_local_instrumentation_check",
-                                                                                                "match_rate":  100,
-                                                                                                "scope":  "local_instrumentation_only",
-                                                                                                "operational_promotion_blocked":  true,
-                                                                                                "blockers":  [
-                                                                                                                 "server_pc_spot_no_target_response_unverified",
-                                                                                                                 "server_pc_poll_freshness_threshold_unverified",
-                                                                                                                 "downstream_v2_3_consumer_compatibility_unverified",
-                                                                                                                 "legacy_reason_policy_pending",
-                                                                                                                 "operational_schema_v2_4_plus_fields_required"
-                                                                                                             ],
-                                                                                                "blocker_scope":  "future_operational_promotion_only",
-                                                                                                "shadow_fields_operational_truth_allowed":  false,
-                                                                                                "shadow_fields_ml_input_allowed":  false,
-                                                                                                "local_asset_recovery":  {
-                                                                                                                             "stable_ref":  "refs/local/pr65-harness-reference-assets",
-                                                                                                                             "portable_patch":  "C:\\tmp\\pr65-harness-reference-assets.patch",
-                                                                                                                             "restore_command":  "git apply --binary C:\\tmp\\pr65-harness-reference-assets.patch"
-                                                                                                                         },
-                                                                                                "lastUpdated":  "2026-06-24T00:00:00Z"
-                                                                                            },
-                                                                               "report":  {
-                                                                                              "path":  "docs/04-report/spot-temperature-state-labeling.report.md",
-                                                                                              "document_version":  "1.0.2",
-                                                                                              "status":  "completed_local_instrumentation_report",
-                                                                                              "scope":  "local_instrumentation_only",
-                                                                                              "operational_promotion_blocked":  true,
-                                                                                              "blocker_scope":  "future_operational_promotion_only_not_pr65_merge_blocker",
-                                                                                              "promotion_requires_server_pc_evidence":  true,
-                                                                                              "promotion_requires_separate_pr":  true,
-                                                                                              "shadow_fields_operational_truth_allowed":  false,
-                                                                                              "shadow_fields_ml_input_allowed":  false,
-                                                                                              "local_asset_recovery":  {
-                                                                                                                           "stable_ref":  "refs/local/pr65-harness-reference-assets",
-                                                                                                                           "portable_patch":  "C:\\tmp\\pr65-harness-reference-assets.patch"
-                                                                                                                       },
-                                                                                              "lastUpdated":  "2026-06-24T00:00:00Z"
-                                                                                          }
-                                                                           },
-                                                             "taskChain":  [
-                                                                               {
-                                                                                   "phase":  "plan",
-                                                                                   "status":  "completed",
-                                                                                   "createdAt":  "2026-06-22T12:48:48.706Z",
-                                                                                   "completedAt":  "2026-06-22T12:49:32.662Z"
-                                                                               },
-                                                                               {
-                                                                                   "phase":  "design",
-                                                                                   "status":  "completed",
-                                                                                   "createdAt":  "2026-06-22T12:48:48.706Z",
-                                                                                   "completedAt":  "2026-06-22T12:51:20.174Z"
-                                                                               },
-                                                                               {
-                                                                                   "phase":  "do",
-                                                                                   "status":  "completed",
-                                                                                   "createdAt":  "2026-06-22T12:48:48.706Z",
-                                                                                   "completedAt":  "2026-06-22T17:24:19.410Z"
-                                                                               },
-                                                                               {
-                                                                                   "phase":  "check",
-                                                                                   "status":  "completed",
-                                                                                   "createdAt":  "2026-06-22T12:48:48.706Z",
-                                                                                   "completedAt":  "2026-06-22T17:29:57.518Z"
-                                                                               },
-                                                                               {
-                                                                                   "phase":  "report",
-                                                                                   "status":  "completed",
-                                                                                   "createdAt":  "2026-06-22T12:48:48.706Z",
-                                                                                   "completedAt":  "2026-06-22T17:34:54.296Z"
-                                                                               }
-                                                                           ],
-                                                             "timestamps":  {
-                                                                                "started":  "2026-06-22T12:48:48.707Z",
-                                                                                "lastUpdated":  "2026-06-24T00:00:00Z"
-                                                                            },
-                                                             "reviewStatus":  "local_instrumentation_completed_operational_promotion_blocked",
-                                                             "doScope":  "instrumentation_only",
-                                                             "completedAt":  "2026-06-22T17:34:54.290Z"
-                                                         },
-                     "spot-temperature-v2-4-operational-patch":  {
-                                                                     "phase":  "completed",
-                                                                     "matchRate":  90,
-                                                                     "iterationCount":  9,
-                                                                     "taskChain":  [
-                                                                                       {
-                                                                                           "phase":  "plan",
-                                                                                           "status":  "completed",
-                                                                                           "createdAt":  "2026-06-24T14:16:07.076Z",
-                                                                                           "completedAt":  "2026-06-24T14:19:38.616Z"
-                                                                                       },
-                                                                                       {
-                                                                                           "phase":  "design",
-                                                                                           "status":  "completed",
-                                                                                           "createdAt":  "2026-06-24T14:16:07.076Z",
-                                                                                           "completedAt":  "2026-06-24T14:30:02.870Z"
-                                                                                       },
-                                                                                       {
-                                                                                           "phase":  "do",
-                                                                                           "status":  "completed",
-                                                                                           "createdAt":  "2026-06-24T14:16:07.076Z",
-                                                                                           "completedAt":  "2026-06-24T23:01:57.236Z"
-                                                                                       },
-                                                                                       {
-                                                                                           "phase":  "check",
-                                                                                           "status":  "completed",
-                                                                                           "createdAt":  "2026-06-24T14:16:07.076Z",
-                                                                                           "completedAt":  "2026-06-24T23:01:57.236Z"
-                                                                                       },
-                                                                                       {
-                                                                                           "phase":  "report",
-                                                                                           "status":  "completed",
-                                                                                           "createdAt":  "2026-06-24T14:16:07.076Z",
-                                                                                           "completedAt":  "2026-06-25T02:25:25.721Z"
-                                                                                       }
-                                                                                   ],
-                                                                     "timestamps":  {
-                                                                                        "started":  "2026-06-24T14:16:07.077Z",
-                                                                                        "lastUpdated":  "2026-06-25T04:00:00.000Z"
-                                                                                    },
-                                                                     "documents":  {
-                                                                                       "plan":  {
-                                                                                                    "path":  "docs/01-plan/features/spot-temperature-v2-4-operational-patch.plan.md",
-                                                                                                    "status":  "completed"
-                                                                                                },
-                                                                                       "design":  {
-                                                                                                      "path":  "docs/02-design/features/spot-temperature-v2-4-operational-patch.design.md",
-                                                                                                      "document_version":  "1.1.1",
-                                                                                                      "status":  "completed"
-                                                                                                  },
-                                                                                       "analysis":  {
-                                                                                                      "path":  "docs/03-analysis/spot-temperature-v2-4-operational-patch.analysis.md",
-                                                                                                      "status":  "completed_post_implementation_gap_analysis",
-                                                                                                      "match_rate":  90,
-                                                                                                      "iteration":  9
-                                                                                                    },
-                                                                                       "report":  {
-                                                                                                      "path":  "docs/04-report/spot-temperature-v2-4-operational-patch.report.md",
-                                                                                                      "status":  "completed_implementation_report",
-                                                                                                      "match_rate":  90,
-                                                                                                      "scope":  "default_off_v2_4_operational_contract",
-                                                                                                      "operational_promotion_blocked":  true,
-                                                                                                      "blocker_scope":  "future_operational_promotion_only_not_pr68_merge_blocker",
-                                                                                                      "promotion_requires_bundle_flags":  true,
-                                                                                                      "lastUpdated":  "2026-06-25T04:00:00.000Z"
-                                                                                                  }
-                                                                                   },
-                                                                     "manualFollowUp":  {
-                                                                                            "status":  "completed_nonblocking_followup",
-                                                                                            "matchRate":  100,
-                                                                                            "iteration":  10,
-                                                                                            "source":  "manual audit after NONBLOCK-1 and NONBLOCK-2 implementation; bkit_pdca_analyze was not rerun",
-                                                                                            "closedItems":  [
-                                                                                                                "v2_4_health_aggregate_counters",
-                                                                                                                "v2_4_promotion_bundle_guard"
-                                                                                                            ],
-                                                                                            "lastUpdated":  "2026-06-25T04:00:00.000Z"
-                                                                                        },
-                                                                     "reviewStatus":  "completed_report_ready_for_merge",
-                                                                     "completedAt":  "2026-06-25T02:25:25.721Z"
-                                                                 }
-                 },
-    "pipeline":  {
-                     "currentFeature":  "spot-temperature-state-labeling",
-                     "currentPhase":  "completed",
-                     "level":  "Dynamic"
-                 },
-    "session":  {
-                    "startedAt":  "2026-06-11T01:56:04.880Z",
-                    "onboardingCompleted":  false,
-                    "lastActivity":  "2026-06-25T04:00:00.000Z"
-                },
-    "history":  [
-                    {
-                        "feature":  "spot-live-image",
-                        "from":  "plan",
-                        "to":  "design",
-                        "timestamp":  "2026-06-11T01:57:33.958Z"
-                    },
-                    {
-                        "feature":  "spot-live-image",
-                        "action":  "phase_complete",
-                        "phase":  "plan",
-                        "nextPhase":  "design",
-                        "timestamp":  "2026-06-11T01:57:33.960Z"
-                    },
-                    {
-                        "feature":  "spot-live-image",
-                        "from":  "design",
-                        "to":  "do",
-                        "timestamp":  "2026-06-11T01:57:45.323Z"
-                    },
-                    {
-                        "feature":  "spot-live-image",
-                        "action":  "phase_complete",
-                        "phase":  "design",
-                        "nextPhase":  "do",
-                        "timestamp":  "2026-06-11T01:57:45.325Z"
-                    },
-                    {
-                        "feature":  "spot-live-image",
-                        "from":  "do",
-                        "to":  "check",
-                        "timestamp":  "2026-06-11T02:25:11.317Z"
-                    },
-                    {
-                        "feature":  "spot-live-image",
-                        "action":  "phase_complete",
-                        "phase":  "do",
-                        "nextPhase":  "check",
-                        "timestamp":  "2026-06-11T02:25:11.320Z"
-                    },
-                    {
-                        "feature":  "spot-live-image",
-                        "from":  "check",
-                        "to":  "act",
-                        "timestamp":  "2026-06-11T02:26:13.442Z"
-                    },
-                    {
-                        "feature":  "spot-live-image",
-                        "action":  "phase_complete",
-                        "phase":  "check",
-                        "nextPhase":  "act",
-                        "timestamp":  "2026-06-11T02:26:13.443Z"
-                    },
-                    {
-                        "feature":  "spot-live-image",
-                        "action":  "phase_complete",
-                        "phase":  "report",
-                        "nextPhase":  "completed",
-                        "timestamp":  "2026-06-11T02:26:53.886Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "from":  "plan",
-                        "to":  "design",
-                        "timestamp":  "2026-06-22T12:49:32.658Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "action":  "phase_complete",
-                        "phase":  "plan",
-                        "nextPhase":  "design",
-                        "timestamp":  "2026-06-22T12:49:32.659Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "from":  "design",
-                        "to":  "do",
-                        "timestamp":  "2026-06-22T12:51:20.171Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "action":  "phase_complete",
-                        "phase":  "design",
-                        "nextPhase":  "do",
-                        "timestamp":  "2026-06-22T12:51:20.172Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "from":  "do",
-                        "to":  "check",
-                        "timestamp":  "2026-06-22T17:24:19.406Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "action":  "phase_complete",
-                        "phase":  "do",
-                        "nextPhase":  "check",
-                        "timestamp":  "2026-06-22T17:24:19.407Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "from":  "check",
-                        "to":  "act",
-                        "timestamp":  "2026-06-22T17:29:57.514Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "action":  "phase_complete",
-                        "phase":  "check",
-                        "nextPhase":  "act",
-                        "timestamp":  "2026-06-22T17:29:57.515Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "action":  "phase_complete",
-                        "phase":  "report",
-                        "nextPhase":  "completed",
-                        "timestamp":  "2026-06-22T17:34:54.292Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "action":  "sentinel_contract_update",
-                        "phase":  "act",
-                        "timestamp":  "2026-06-23T13:35:30Z",
-                        "evidence":  "ametek_rest_pdf_and_raw_capture_20260623"
-                    },
-                    {
-                        "feature":  "spot-temperature-state-labeling",
-                        "action":  "sentinel_contract_patch",
-                        "phase":  "act",
-                        "timestamp":  "2026-06-24T00:00:00Z",
-                        "evidence":  "decimal_classification_device_status_cache_suppression_tests_20260624"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "from":  "plan",
-                        "to":  "design",
-                        "timestamp":  "2026-06-24T14:19:38.613Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "action":  "phase_complete",
-                        "phase":  "plan",
-                        "nextPhase":  "design",
-                        "timestamp":  "2026-06-24T14:19:38.614Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "from":  "design",
-                        "to":  "design",
-                        "timestamp":  "2026-06-24T14:26:11.122Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "from":  "design",
-                        "to":  "do",
-                        "timestamp":  "2026-06-24T14:30:02.866Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "action":  "phase_complete",
-                        "phase":  "design",
-                        "nextPhase":  "do",
-                        "timestamp":  "2026-06-24T14:30:02.868Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "from":  "check",
-                        "to":  "act",
-                        "timestamp":  "2026-06-24T16:03:20.886Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "action":  "phase_complete",
-                        "phase":  "check",
-                        "nextPhase":  "act",
-                        "timestamp":  "2026-06-24T16:03:20.887Z"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "action":  "post_implementation_analyze",
-                        "phase":  "act",
-                        "matchRate":  90,
-                        "iteration":  8,
-                        "timestamp":  "2026-06-24T23:01:57.236Z",
-                        "evidence":  "local_health_passed_codex_cli_blocked_by_policy_local_prelanding_review_clean"
-                    },
-                    {
-                        "feature":  "spot-temperature-v2-4-operational-patch",
-                        "action":  "phase_complete",
-                        "phase":  "report",
-                        "nextPhase":  "completed",
-                        "timestamp":  "2026-06-25T02:25:25.723Z"
-                    }
-                ]
+  "version": "2.0",
+  "lastUpdated": "2026-06-27T18:17:18.867Z",
+  "activeFeatures": [
+    "spot-live-image",
+    "spot-temperature-state-labeling",
+    "spot-temperature-v2-4-operational-patch",
+    "memory-diagnostics-hardening",
+    "memory-diagnostics-r01-collector-contract",
+    "memory-diagnostics-r02-plc-history",
+    "memory-diagnostics-r03-csv-logger-runtime",
+    "memory-diagnostics-r04-spot-cache",
+    "memory-diagnostics-r05-budget-severity",
+    "memory-diagnostics-r06-leak-slope",
+    "memory-diagnostics-r07-gc-snapshot",
+    "memory-diagnostics-r08-electron-memory",
+    "memory-diagnostics-r09-frontend-exactness",
+    "memory-diagnostics-r10-export-v2",
+    "memory-diagnostics-r11-tests-ci"
+  ],
+  "primaryFeature": "memory-diagnostics-hardening",
+  "features": {
+    "spot-live-image": {
+      "phase": "completed",
+      "matchRate": null,
+      "iterationCount": 3,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T01:57:33.963Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T01:57:45.327Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T02:25:11.322Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T02:26:13.444Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-11T01:56:04.883Z",
+          "completedAt": "2026-06-11T02:26:53.888Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-11T01:56:04.884Z",
+        "lastUpdated": "2026-06-11T02:26:53.888Z"
+      },
+      "completedAt": "2026-06-11T02:26:53.885Z"
+    },
+    "spot-temperature-state-labeling": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 15,
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/spot-temperature-state-labeling.plan.md",
+          "document_version": "1.0.10",
+          "status": "completed",
+          "approved_at": "2026-06-22",
+          "approved_by": "user",
+          "git_commit": null,
+          "dataset_id": "spot-temperature-gap-20260619-20260620",
+          "dataset_sha256": [
+            "AA708210E2D60D7E68895BAB13F3CD6C731F835E0E5D04543C12E697493C83A0",
+            "DFD988624D11A0CDF585D45B8A337D1DBC4A057507006FDD0567CF856913E634",
+            "261EA580E55267A197E6ED8923E6467AED8DEAE4ABDD10C11F4645130F843B32",
+            "8D69FD5165ACEB0BDCC184A60A4DB1DFAF0750698B060C79033A1AEE517DE71F"
+          ],
+          "lastUpdated": "2026-06-24T00:00:00Z"
+        },
+        "design": {
+          "path": "docs/02-design/features/spot-temperature-state-labeling.design.md",
+          "document_version": "1.0.10",
+          "status": "conditionally_approved",
+          "approved_at": "2026-06-22T15:12:39.880Z",
+          "approved_by": "user",
+          "git_commit": null,
+          "do_scope": "instrumentation_only",
+          "instrumentation_do_requirements": [
+            "schema_rollover_guard_required",
+            "immutable_poll_snapshot_required",
+            "logger_service_instance_id_required",
+            "spot_source_freshness_fields_required",
+            "cache_fallback_allowed_required",
+            "sidecar_rule_version_metadata_required"
+          ],
+          "operational_promotion_blockers": [
+            "server_pc_spot_no_target_response_unverified",
+            "server_pc_poll_freshness_threshold_unverified",
+            "downstream_v2_3_consumer_compatibility_unverified",
+            "legacy_reason_policy_pending",
+            "operational_schema_v2_4_plus_fields_required"
+          ],
+          "operational_promotion_blocker_scope": "future_promotion_gate_not_pr65_code_blocker",
+          "promotion_requires_separate_pr": true,
+          "prohibited_until_promotion": [
+            "temperature_status_shadow_as_operational_truth",
+            "spot_target_shadow_fields_as_operational_truth",
+            "alert_suppression_from_shadow_labels",
+            "legacy_reason_remapping_from_shadow_labels",
+            "ml_training_or_inference_input_from_shadow_labels"
+          ],
+          "resolved_documentation_items": [
+            "online_process_state_priority_defined",
+            "billet_change_pause_run_boundary_policy_defined",
+            "realtime_confidence_policy_defined",
+            "poller_stale_duration_metric_defined",
+            "cache_fallback_allowed_policy_defined",
+            "spot_raw_validity_not_evaluated_defined",
+            "v2_3_shadow_only_promotion_boundary_defined",
+            "sidecar_git_commit_null_policy_defined",
+            "stale_snapshot_transport_cache_fallback_policy_aligned",
+            "v2_3_permanent_shadow_boundary_aligned",
+            "temperature_effective_value_invariant_rechecked",
+            "development_replay_consumer_v2_3_contract_checked",
+            "enum_mismatch_validation_implemented",
+            "spot_sequence_invariant_validation_implemented",
+            "ametek_rest_under_over_range_sentinel_contract_documented",
+            "raw_capture_6553_4_under_range_evidence_recorded",
+            "verified_no_target_kept_separate_from_range_sentinels"
+          ],
+          "implemented_do_items": [
+            "spot_raw_validity_classifier_added",
+            "spot_target_observed_freshness_gate_added",
+            "temperature_status_shadow_decision_table_added",
+            "spot_numeric_validation_hardened",
+            "v2_header_append_guard_added",
+            "sidecar_logger_identity_and_shadow_metadata_added",
+            "spot_api_immutable_poll_snapshot_added",
+            "spot_api_shadow_diagnostics_added",
+            "stale_snapshot_transport_cache_fallback_policy_implemented",
+            "real_plc_spot_snapshot_metadata_join_added",
+            "v2_3_shadow_csv_fields_emitted",
+            "csv_v2_shadow_validator_supports_2_3",
+            "v2_3_shadow_csv_contract_tests_added",
+            "temperature_origin_none_clears_legacy_temperature_value",
+            "compose_layer_changeover_candidate_from_valid_metadata_change_added",
+            "source_freshness_unknown_after_first_poll_maps_unknown_missing",
+            "real_plc_spot_diagnostics_read_after_cache_probe",
+            "csv_replay_driver_preserves_v2_3_shadow_fields",
+            "csv_replay_driver_preserves_temperature_null_for_origin_none",
+            "factory_data_shadow_enum_validation_added",
+            "factory_data_spot_sequence_invariant_validation_added",
+            "csv_v2_shadow_validator_checks_shadow_enum_values",
+            "csv_v2_shadow_validator_checks_row_unique_key_scope",
+            "csv_v2_shadow_validator_checks_temperature_origin_invariants",
+            "health_exposes_shadow_spot_temperature_source_health",
+            "posthoc_process_segment_fact_pipeline_added",
+            "posthoc_billet_change_pause_requires_same_inferred_run_context",
+            "spot_observation_decision_table_tests_tracked",
+            "online_process_state_priority_tests_added",
+            "spot_invalid_sentinel_defaults_include_ametek_range_sentinels",
+            "spot_api_rejects_6553_4_and_6553_5_as_invalid_sentinel",
+            "csv_v2_shadow_validator_checks_ametek_sentinel_map",
+            "decimal_equivalent_ametek_sentinel_classification_added",
+            "spot_invalid_sentinel_device_status_preserved_to_csv",
+            "spot_invalid_sentinel_cache_suppression_latch_added",
+            "sentinel_sidecar_provenance_hardened",
+            "csv_v2_shadow_validator_checks_invalid_sentinel_row_contract"
+          ],
+          "remaining_do_items": [],
+          "lastUpdated": "2026-06-24T00:00:00Z"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/spot-temperature-state-labeling.analysis.md",
+          "document_version": "1.0.2",
+          "status": "completed_local_instrumentation_check",
+          "match_rate": 100,
+          "scope": "local_instrumentation_only",
+          "operational_promotion_blocked": true,
+          "blockers": [
+            "server_pc_spot_no_target_response_unverified",
+            "server_pc_poll_freshness_threshold_unverified",
+            "downstream_v2_3_consumer_compatibility_unverified",
+            "legacy_reason_policy_pending",
+            "operational_schema_v2_4_plus_fields_required"
+          ],
+          "blocker_scope": "future_operational_promotion_only",
+          "shadow_fields_operational_truth_allowed": false,
+          "shadow_fields_ml_input_allowed": false,
+          "local_asset_recovery": {
+            "stable_ref": "refs/local/pr65-harness-reference-assets",
+            "portable_patch": "C:\\tmp\\pr65-harness-reference-assets.patch",
+            "restore_command": "git apply --binary C:\\tmp\\pr65-harness-reference-assets.patch"
+          },
+          "lastUpdated": "2026-06-24T00:00:00Z"
+        },
+        "report": {
+          "path": "docs/04-report/spot-temperature-state-labeling.report.md",
+          "document_version": "1.0.2",
+          "status": "completed_local_instrumentation_report",
+          "scope": "local_instrumentation_only",
+          "operational_promotion_blocked": true,
+          "blocker_scope": "future_operational_promotion_only_not_pr65_merge_blocker",
+          "promotion_requires_server_pc_evidence": true,
+          "promotion_requires_separate_pr": true,
+          "shadow_fields_operational_truth_allowed": false,
+          "shadow_fields_ml_input_allowed": false,
+          "local_asset_recovery": {
+            "stable_ref": "refs/local/pr65-harness-reference-assets",
+            "portable_patch": "C:\\tmp\\pr65-harness-reference-assets.patch"
+          },
+          "lastUpdated": "2026-06-24T00:00:00Z"
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T12:49:32.662Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T12:51:20.174Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T17:24:19.410Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T17:29:57.518Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-22T12:48:48.706Z",
+          "completedAt": "2026-06-22T17:34:54.296Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-22T12:48:48.707Z",
+        "lastUpdated": "2026-06-24T00:00:00Z"
+      },
+      "reviewStatus": "local_instrumentation_completed_operational_promotion_blocked",
+      "doScope": "instrumentation_only",
+      "completedAt": "2026-06-22T17:34:54.290Z"
+    },
+    "spot-temperature-v2-4-operational-patch": {
+      "phase": "completed",
+      "matchRate": 90,
+      "iterationCount": 9,
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-24T14:16:07.076Z",
+          "completedAt": "2026-06-24T14:19:38.616Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-24T14:16:07.076Z",
+          "completedAt": "2026-06-24T14:30:02.870Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-24T14:16:07.076Z",
+          "completedAt": "2026-06-24T23:01:57.236Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-24T14:16:07.076Z",
+          "completedAt": "2026-06-24T23:01:57.236Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-24T14:16:07.076Z",
+          "completedAt": "2026-06-25T02:25:25.721Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-24T14:16:07.077Z",
+        "lastUpdated": "2026-06-25T04:00:00.000Z"
+      },
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/spot-temperature-v2-4-operational-patch.plan.md",
+          "status": "completed"
+        },
+        "design": {
+          "path": "docs/02-design/features/spot-temperature-v2-4-operational-patch.design.md",
+          "document_version": "1.1.1",
+          "status": "completed"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/spot-temperature-v2-4-operational-patch.analysis.md",
+          "status": "completed_post_implementation_gap_analysis",
+          "match_rate": 90,
+          "iteration": 9
+        },
+        "report": {
+          "path": "docs/04-report/spot-temperature-v2-4-operational-patch.report.md",
+          "status": "completed_implementation_report",
+          "match_rate": 90,
+          "scope": "default_off_v2_4_operational_contract",
+          "operational_promotion_blocked": true,
+          "blocker_scope": "future_operational_promotion_only_not_pr68_merge_blocker",
+          "promotion_requires_bundle_flags": true,
+          "lastUpdated": "2026-06-25T04:00:00.000Z"
+        }
+      },
+      "manualFollowUp": {
+        "status": "completed_nonblocking_followup",
+        "matchRate": 100,
+        "iteration": 10,
+        "source": "manual audit after NONBLOCK-1 and NONBLOCK-2 implementation; bkit_pdca_analyze was not rerun",
+        "closedItems": [
+          "v2_4_health_aggregate_counters",
+          "v2_4_promotion_bundle_guard"
+        ],
+        "lastUpdated": "2026-06-25T04:00:00.000Z"
+      },
+      "reviewStatus": "completed_report_ready_for_merge",
+      "completedAt": "2026-06-25T02:25:25.721Z"
+    },
+    "memory-diagnostics-hardening": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-hardening.plan.md",
+          "status": "completed"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-hardening.design.md",
+          "status": "completed"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-hardening.do.md",
+          "status": "completed_implementation_guide"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-hardening.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-hardening.report.md",
+          "status": "completed_roadmap_report",
+          "match_rate": 100,
+          "child_ranks_completed": 11
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T14:24:48.274Z",
+          "completedAt": "2026-06-27T14:29:59.168Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T14:24:48.274Z",
+          "completedAt": "2026-06-27T14:30:24.676Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T14:24:48.274Z",
+          "completedAt": "2026-06-27T18:17:18.867Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T14:24:48.274Z",
+          "completedAt": "2026-06-27T18:17:18.867Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T14:24:48.274Z",
+          "completedAt": "2026-06-27T18:17:18.867Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T14:24:48.275Z",
+        "lastUpdated": "2026-06-27T18:17:18.867Z"
+      },
+      "childFeatures": [
+        "memory-diagnostics-r01-collector-contract",
+        "memory-diagnostics-r02-plc-history",
+        "memory-diagnostics-r03-csv-logger-runtime",
+        "memory-diagnostics-r04-spot-cache",
+        "memory-diagnostics-r05-budget-severity",
+        "memory-diagnostics-r06-leak-slope",
+        "memory-diagnostics-r07-gc-snapshot",
+        "memory-diagnostics-r08-electron-memory",
+        "memory-diagnostics-r09-frontend-exactness",
+        "memory-diagnostics-r10-export-v2",
+        "memory-diagnostics-r11-tests-ci"
+      ],
+      "implementationPolicy": "ranked_micro_pdca",
+      "nextFeature": null,
+      "completedAt": "2026-06-27T18:17:18.867Z"
+    },
+    "memory-diagnostics-r01-collector-contract": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 1,
+      "title": "Memory collector execution safety and common contract",
+      "queueStatus": "completed",
+      "dependsOn": [],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r01-collector-contract.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r01-collector-contract.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r01-collector-contract.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r01-collector-contract.analysis.md",
+          "status": "completed_match_rate_analysis",
+          "match_rate": 100
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r01-collector-contract.report.md",
+          "status": "completed_rank_report",
+          "match_rate": 100
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:22:02.800Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:21:47.308Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:21:55.213Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:22:02.802Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T16:22:02.803Z"
+      },
+      "completedAt": "2026-06-27T16:22:02.800Z"
+    },
+    "memory-diagnostics-r02-plc-history": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 2,
+      "title": "PLC history memory collector",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r01-collector-contract"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r02-plc-history.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r02-plc-history.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r02-plc-history.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r02-plc-history.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r02-plc-history.report.md",
+          "status": "completed_implementation_report",
+          "match_rate": 100,
+          "lastUpdated": "2026-06-27T16:35:40.237Z"
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:35:40.237Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:35:40.237Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:35:40.237Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:35:40.237Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:35:40.237Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:35:40.237Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T16:35:40.237Z"
+      },
+      "completedAt": "2026-06-27T16:35:40.237Z",
+      "reviewStatus": "completed_report_ready_for_next_rank"
+    },
+    "memory-diagnostics-r03-csv-logger-runtime": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 3,
+      "title": "CSV logger queue drop lag diagnostics",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r02-plc-history"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r03-csv-logger-runtime.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r03-csv-logger-runtime.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r03-csv-logger-runtime.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r03-csv-logger-runtime.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r03-csv-logger-runtime.report.md",
+          "status": "completed_implementation_report",
+          "match_rate": 100
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:35:40.237Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T16:35:40.237Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:00:35.806Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:00:13.599Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:00:20.280Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:00:35.807Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T17:00:35.809Z"
+      },
+      "completedAt": "2026-06-27T17:00:35.806Z"
+    },
+    "memory-diagnostics-r04-spot-cache": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 4,
+      "title": "SPOT image and live cache collectors",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r03-csv-logger-runtime"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r04-spot-cache.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r04-spot-cache.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r04-spot-cache.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r04-spot-cache.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r04-spot-cache.report.md",
+          "status": "completed_implementation_report",
+          "match_rate": 100,
+          "lastUpdated": "2026-06-27T17:09:00.226Z"
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:09:00.223Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:08:45.159Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:08:52.701Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:09:00.224Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T17:09:00.226Z"
+      },
+      "completedAt": "2026-06-27T17:09:00.223Z"
+    },
+    "memory-diagnostics-r05-budget-severity": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 5,
+      "title": "Collector budget and severity engine",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r04-spot-cache"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r05-budget-severity.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r05-budget-severity.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r05-budget-severity.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r05-budget-severity.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r05-budget-severity.report.md",
+          "status": "completed_implementation_report",
+          "match_rate": 100,
+          "lastUpdated": "2026-06-27T17:19:36.958Z"
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:19:36.955Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:19:16.022Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:19:24.403Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:19:36.956Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T17:19:36.958Z"
+      },
+      "completedAt": "2026-06-27T17:19:36.955Z"
+    },
+    "memory-diagnostics-r06-leak-slope": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 6,
+      "title": "Slope based leak suspect detector",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r05-budget-severity"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r06-leak-slope.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r06-leak-slope.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r06-leak-slope.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r06-leak-slope.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r06-leak-slope.report.md",
+          "status": "completed_implementation_report",
+          "match_rate": 100,
+          "lastUpdated": "2026-06-27T17:27:11.699Z"
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:27:11.695Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:26:49.256Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:27:02.624Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:27:11.697Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T17:27:11.699Z"
+      },
+      "completedAt": "2026-06-27T17:27:11.695Z"
+    },
+    "memory-diagnostics-r07-gc-snapshot": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 2,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 7,
+      "title": "Manual GC before after snapshot",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r06-leak-slope"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r07-gc-snapshot.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r07-gc-snapshot.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r07-gc-snapshot.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r07-gc-snapshot.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 2
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r07-gc-snapshot.report.md",
+          "status": "completed_implementation_report",
+          "match_rate": 100,
+          "lastUpdated": "2026-06-27T17:43:42.064Z"
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:43:42.060Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:43:24.888Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:43:32.687Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:43:42.061Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T17:43:42.064Z"
+      },
+      "completedAt": "2026-06-27T17:43:42.060Z"
+    },
+    "memory-diagnostics-r08-electron-memory": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 8,
+      "title": "Electron main renderer process memory",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r07-gc-snapshot"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r08-electron-memory.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r08-electron-memory.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r08-electron-memory.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r08-electron-memory.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r08-electron-memory.report.md",
+          "status": "completed_rank_report",
+          "match_rate": 100
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:54:42.335Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:54:42.335Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:54:42.335Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T17:54:42.335Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T17:54:42.335Z"
+      },
+      "completedAt": "2026-06-27T17:54:42.335Z"
+    },
+    "memory-diagnostics-r09-frontend-exactness": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 9,
+      "title": "Frontend memory exactness classification",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r08-electron-memory"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r09-frontend-exactness.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r09-frontend-exactness.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r09-frontend-exactness.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r09-frontend-exactness.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r09-frontend-exactness.report.md",
+          "status": "completed_rank_report",
+          "match_rate": 100
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:01:13.951Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:01:13.951Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:01:13.951Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:01:13.951Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T18:01:13.951Z"
+      },
+      "completedAt": "2026-06-27T18:01:13.951Z"
+    },
+    "memory-diagnostics-r10-export-v2": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 10,
+      "title": "Forensic memory export schema v2",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r09-frontend-exactness"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r10-export-v2.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r10-export-v2.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r10-export-v2.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r10-export-v2.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r10-export-v2.report.md",
+          "status": "completed_rank_report",
+          "match_rate": 100
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:09:15.121Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:09:15.121Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:09:15.121Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:09:15.121Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T18:09:15.121Z"
+      },
+      "completedAt": "2026-06-27T18:09:15.121Z"
+    },
+    "memory-diagnostics-r11-tests-ci": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "rank": 11,
+      "title": "Memory diagnostics tests and CI guardrail",
+      "queueStatus": "completed",
+      "dependsOn": [
+        "memory-diagnostics-r10-export-v2"
+      ],
+      "sequentialPolicy": "Complete Plan -> Design -> Do -> Check(analyze) -> Act(iterate) -> Report for this rank before starting the next rank.",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/memory-diagnostics-r11-tests-ci.plan.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/01-plan/features/memory-diagnostics-hardening.plan.md"
+        },
+        "design": {
+          "path": "docs/02-design/features/memory-diagnostics-r11-tests-ci.design.md",
+          "status": "completed_rank_scope",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.design.md"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/memory-diagnostics-r11-tests-ci.do.md",
+          "status": "completed_implementation_checklist",
+          "parent": "docs/02-design/features/memory-diagnostics-hardening.do.md"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/memory-diagnostics-r11-tests-ci.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/memory-diagnostics-r11-tests-ci.report.md",
+          "status": "completed_rank_report",
+          "match_rate": 100
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T15:56:59.552Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:17:18.867Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:17:18.867Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:17:18.867Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-27T15:56:59.552Z",
+          "completedAt": "2026-06-27T18:17:18.867Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-27T15:56:59.552Z",
+        "lastUpdated": "2026-06-27T18:17:18.867Z"
+      },
+      "completedAt": "2026-06-27T18:17:18.867Z"
+    }
+  },
+  "pipeline": {
+    "currentFeature": "memory-diagnostics-hardening",
+    "currentPhase": "completed",
+    "level": "Dynamic",
+    "lastUpdated": "2026-06-27T18:17:18.867Z"
+  },
+  "session": {
+    "startedAt": "2026-06-11T01:56:04.880Z",
+    "onboardingCompleted": false,
+    "lastActivity": "2026-06-27T18:17:18.867Z"
+  },
+  "history": [
+    {
+      "feature": "spot-live-image",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-06-11T01:57:33.958Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-06-11T01:57:33.960Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-06-11T01:57:45.323Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-06-11T01:57:45.325Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-06-11T02:25:11.317Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-06-11T02:25:11.320Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-11T02:26:13.442Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-11T02:26:13.443Z"
+    },
+    {
+      "feature": "spot-live-image",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-11T02:26:53.886Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-06-22T12:49:32.658Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-06-22T12:49:32.659Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-06-22T12:51:20.171Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-06-22T12:51:20.172Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-06-22T17:24:19.406Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-06-22T17:24:19.407Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-22T17:29:57.514Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-22T17:29:57.515Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-22T17:34:54.292Z"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "sentinel_contract_update",
+      "phase": "act",
+      "timestamp": "2026-06-23T13:35:30Z",
+      "evidence": "ametek_rest_pdf_and_raw_capture_20260623"
+    },
+    {
+      "feature": "spot-temperature-state-labeling",
+      "action": "sentinel_contract_patch",
+      "phase": "act",
+      "timestamp": "2026-06-24T00:00:00Z",
+      "evidence": "decimal_classification_device_status_cache_suppression_tests_20260624"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-06-24T14:19:38.613Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-06-24T14:19:38.614Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-06-24T14:26:11.122Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-06-24T14:30:02.866Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-06-24T14:30:02.868Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-24T16:03:20.886Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-24T16:03:20.887Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "action": "post_implementation_analyze",
+      "phase": "act",
+      "matchRate": 90,
+      "iteration": 8,
+      "timestamp": "2026-06-24T23:01:57.236Z",
+      "evidence": "local_health_passed_codex_cli_blocked_by_policy_local_prelanding_review_clean"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-patch",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-25T02:25:25.723Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-06-27T14:29:59.163Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-06-27T14:29:59.165Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-06-27T14:30:08.805Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-06-27T14:30:24.673Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-06-27T14:30:24.675Z"
+    },
+    {
+      "feature": "memory-diagnostics-r01-collector-contract",
+      "action": "ranked_pdca_feature_created",
+      "phase": "do",
+      "rank": 1,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r02-plc-history",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 2,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r03-csv-logger-runtime",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 3,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r04-spot-cache",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 4,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r05-budget-severity",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 5,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r06-leak-slope",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 6,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r07-gc-snapshot",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 7,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r08-electron-memory",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 8,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r09-frontend-exactness",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 9,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r10-export-v2",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 10,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r11-tests-ci",
+      "action": "ranked_pdca_feature_created",
+      "phase": "plan",
+      "rank": 11,
+      "parentFeature": "memory-diagnostics-hardening",
+      "timestamp": "2026-06-27T15:56:59.552Z"
+    },
+    {
+      "feature": "memory-diagnostics-r01-collector-contract",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T16:21:47.306Z"
+    },
+    {
+      "feature": "memory-diagnostics-r01-collector-contract",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T16:21:47.308Z"
+    },
+    {
+      "feature": "memory-diagnostics-r01-collector-contract",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T16:21:55.212Z"
+    },
+    {
+      "feature": "memory-diagnostics-r01-collector-contract",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T16:21:55.213Z"
+    },
+    {
+      "feature": "memory-diagnostics-r01-collector-contract",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T16:22:02.802Z"
+    },
+    {
+      "feature": "memory-diagnostics-r02-plc-history",
+      "action": "activated_after_rank_completion",
+      "phase": "do",
+      "rank": 2,
+      "parentFeature": "memory-diagnostics-hardening",
+      "previousFeature": "memory-diagnostics-r01-collector-contract",
+      "timestamp": "2026-06-27T16:22:02.803Z"
+    },
+    {
+      "feature": "memory-diagnostics-r02-plc-history",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T16:34:18.160Z"
+    },
+    {
+      "feature": "memory-diagnostics-r02-plc-history",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T16:34:18.161Z"
+    },
+    {
+      "feature": "memory-diagnostics-r02-plc-history",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T16:34:26.656Z"
+    },
+    {
+      "feature": "memory-diagnostics-r02-plc-history",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T16:34:26.658Z"
+    },
+    {
+      "feature": "memory-diagnostics-r02-plc-history",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T16:34:36.960Z"
+    },
+    {
+      "feature": "memory-diagnostics-r02-plc-history",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 2,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r03-csv-logger-runtime",
+      "timestamp": "2026-06-27T16:35:40.237Z"
+    },
+    {
+      "feature": "memory-diagnostics-r03-csv-logger-runtime",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 3,
+      "previousFeature": "memory-diagnostics-r02-plc-history",
+      "timestamp": "2026-06-27T16:35:40.237Z"
+    },
+    {
+      "feature": "memory-diagnostics-r03-csv-logger-runtime",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T17:00:13.598Z"
+    },
+    {
+      "feature": "memory-diagnostics-r03-csv-logger-runtime",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T17:00:13.599Z"
+    },
+    {
+      "feature": "memory-diagnostics-r03-csv-logger-runtime",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T17:00:20.279Z"
+    },
+    {
+      "feature": "memory-diagnostics-r03-csv-logger-runtime",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T17:00:20.280Z"
+    },
+    {
+      "feature": "memory-diagnostics-r03-csv-logger-runtime",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T17:00:35.807Z"
+    },
+    {
+      "feature": "memory-diagnostics-r03-csv-logger-runtime",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 3,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r04-spot-cache",
+      "timestamp": "2026-06-27T17:00:35.809Z"
+    },
+    {
+      "feature": "memory-diagnostics-r04-spot-cache",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 4,
+      "previousFeature": "memory-diagnostics-r03-csv-logger-runtime",
+      "timestamp": "2026-06-27T17:00:35.809Z"
+    },
+    {
+      "feature": "memory-diagnostics-r04-spot-cache",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T17:08:45.158Z"
+    },
+    {
+      "feature": "memory-diagnostics-r04-spot-cache",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T17:08:45.159Z"
+    },
+    {
+      "feature": "memory-diagnostics-r04-spot-cache",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T17:08:52.699Z"
+    },
+    {
+      "feature": "memory-diagnostics-r04-spot-cache",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T17:08:52.701Z"
+    },
+    {
+      "feature": "memory-diagnostics-r04-spot-cache",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T17:09:00.224Z"
+    },
+    {
+      "feature": "memory-diagnostics-r04-spot-cache",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 4,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r05-budget-severity",
+      "timestamp": "2026-06-27T17:09:00.226Z"
+    },
+    {
+      "feature": "memory-diagnostics-r05-budget-severity",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 5,
+      "previousFeature": "memory-diagnostics-r04-spot-cache",
+      "timestamp": "2026-06-27T17:09:00.226Z"
+    },
+    {
+      "feature": "memory-diagnostics-r05-budget-severity",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T17:19:16.021Z"
+    },
+    {
+      "feature": "memory-diagnostics-r05-budget-severity",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T17:19:16.022Z"
+    },
+    {
+      "feature": "memory-diagnostics-r05-budget-severity",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T17:19:24.402Z"
+    },
+    {
+      "feature": "memory-diagnostics-r05-budget-severity",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T17:19:24.403Z"
+    },
+    {
+      "feature": "memory-diagnostics-r05-budget-severity",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T17:19:36.956Z"
+    },
+    {
+      "feature": "memory-diagnostics-r05-budget-severity",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 5,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r06-leak-slope",
+      "timestamp": "2026-06-27T17:19:36.958Z"
+    },
+    {
+      "feature": "memory-diagnostics-r06-leak-slope",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 6,
+      "previousFeature": "memory-diagnostics-r05-budget-severity",
+      "timestamp": "2026-06-27T17:19:36.958Z"
+    },
+    {
+      "feature": "memory-diagnostics-r06-leak-slope",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T17:26:49.254Z"
+    },
+    {
+      "feature": "memory-diagnostics-r06-leak-slope",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T17:26:49.256Z"
+    },
+    {
+      "feature": "memory-diagnostics-r06-leak-slope",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T17:27:02.623Z"
+    },
+    {
+      "feature": "memory-diagnostics-r06-leak-slope",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T17:27:02.624Z"
+    },
+    {
+      "feature": "memory-diagnostics-r06-leak-slope",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T17:27:11.697Z"
+    },
+    {
+      "feature": "memory-diagnostics-r06-leak-slope",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 6,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r07-gc-snapshot",
+      "timestamp": "2026-06-27T17:27:11.699Z"
+    },
+    {
+      "feature": "memory-diagnostics-r07-gc-snapshot",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 7,
+      "previousFeature": "memory-diagnostics-r06-leak-slope",
+      "timestamp": "2026-06-27T17:27:11.699Z"
+    },
+    {
+      "feature": "memory-diagnostics-r07-gc-snapshot",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T17:43:24.887Z"
+    },
+    {
+      "feature": "memory-diagnostics-r07-gc-snapshot",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T17:43:24.888Z"
+    },
+    {
+      "feature": "memory-diagnostics-r07-gc-snapshot",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T17:43:32.686Z"
+    },
+    {
+      "feature": "memory-diagnostics-r07-gc-snapshot",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T17:43:32.687Z"
+    },
+    {
+      "feature": "memory-diagnostics-r07-gc-snapshot",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T17:43:42.061Z"
+    },
+    {
+      "feature": "memory-diagnostics-r07-gc-snapshot",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 7,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r08-electron-memory",
+      "timestamp": "2026-06-27T17:43:42.064Z"
+    },
+    {
+      "feature": "memory-diagnostics-r08-electron-memory",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 8,
+      "previousFeature": "memory-diagnostics-r07-gc-snapshot",
+      "timestamp": "2026-06-27T17:43:42.064Z"
+    },
+    {
+      "feature": "memory-diagnostics-r08-electron-memory",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T17:53:33.423Z"
+    },
+    {
+      "feature": "memory-diagnostics-r08-electron-memory",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T17:53:33.424Z"
+    },
+    {
+      "feature": "memory-diagnostics-r08-electron-memory",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T17:53:43.286Z"
+    },
+    {
+      "feature": "memory-diagnostics-r08-electron-memory",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T17:53:43.287Z"
+    },
+    {
+      "feature": "memory-diagnostics-r08-electron-memory",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T17:53:52.374Z"
+    },
+    {
+      "feature": "memory-diagnostics-r08-electron-memory",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 8,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r09-frontend-exactness",
+      "timestamp": "2026-06-27T17:54:42.335Z"
+    },
+    {
+      "feature": "memory-diagnostics-r09-frontend-exactness",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 9,
+      "previousFeature": "memory-diagnostics-r08-electron-memory",
+      "timestamp": "2026-06-27T17:54:42.335Z"
+    },
+    {
+      "feature": "memory-diagnostics-r09-frontend-exactness",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T18:00:40.138Z"
+    },
+    {
+      "feature": "memory-diagnostics-r09-frontend-exactness",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T18:00:40.139Z"
+    },
+    {
+      "feature": "memory-diagnostics-r09-frontend-exactness",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T18:00:47.994Z"
+    },
+    {
+      "feature": "memory-diagnostics-r09-frontend-exactness",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T18:00:47.995Z"
+    },
+    {
+      "feature": "memory-diagnostics-r09-frontend-exactness",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T18:00:58.395Z"
+    },
+    {
+      "feature": "memory-diagnostics-r09-frontend-exactness",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 9,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r10-export-v2",
+      "timestamp": "2026-06-27T18:01:13.951Z"
+    },
+    {
+      "feature": "memory-diagnostics-r10-export-v2",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 10,
+      "previousFeature": "memory-diagnostics-r09-frontend-exactness",
+      "timestamp": "2026-06-27T18:01:13.951Z"
+    },
+    {
+      "feature": "memory-diagnostics-r10-export-v2",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T18:08:07.919Z"
+    },
+    {
+      "feature": "memory-diagnostics-r10-export-v2",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T18:08:07.920Z"
+    },
+    {
+      "feature": "memory-diagnostics-r10-export-v2",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T18:08:15.398Z"
+    },
+    {
+      "feature": "memory-diagnostics-r10-export-v2",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T18:08:15.400Z"
+    },
+    {
+      "feature": "memory-diagnostics-r10-export-v2",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T18:08:25.022Z"
+    },
+    {
+      "feature": "memory-diagnostics-r10-export-v2",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 10,
+      "matchRate": 100,
+      "nextFeature": "memory-diagnostics-r11-tests-ci",
+      "timestamp": "2026-06-27T18:09:15.121Z"
+    },
+    {
+      "feature": "memory-diagnostics-r11-tests-ci",
+      "action": "ranked_pdca_feature_activated",
+      "phase": "do",
+      "rank": 11,
+      "previousFeature": "memory-diagnostics-r10-export-v2",
+      "timestamp": "2026-06-27T18:09:15.121Z"
+    },
+    {
+      "feature": "memory-diagnostics-r11-tests-ci",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T18:15:14.085Z"
+    },
+    {
+      "feature": "memory-diagnostics-r11-tests-ci",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T18:15:14.086Z"
+    },
+    {
+      "feature": "memory-diagnostics-r11-tests-ci",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T18:15:21.724Z"
+    },
+    {
+      "feature": "memory-diagnostics-r11-tests-ci",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T18:15:21.726Z"
+    },
+    {
+      "feature": "memory-diagnostics-r11-tests-ci",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T18:15:30.491Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-06-27T18:16:31.317Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-06-27T18:16:31.318Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-06-27T18:16:42.926Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-06-27T18:16:42.927Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-06-27T18:16:50.350Z"
+    },
+    {
+      "feature": "memory-diagnostics-r11-tests-ci",
+      "action": "ranked_pdca_feature_completed",
+      "phase": "report",
+      "rank": 11,
+      "matchRate": 100,
+      "nextFeature": null,
+      "timestamp": "2026-06-27T18:17:18.867Z"
+    },
+    {
+      "feature": "memory-diagnostics-hardening",
+      "action": "roadmap_pdca_completed",
+      "phase": "report",
+      "matchRate": 100,
+      "childRanksCompleted": 11,
+      "timestamp": "2026-06-27T18:17:18.867Z"
+    }
+  ]
 }
