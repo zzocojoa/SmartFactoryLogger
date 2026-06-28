@@ -58,4 +58,3 @@ Both use `exactness="exact"`. `spot.cache`는 compatibility alias로 유지할�
 ## 7. Analyze Evidence
 
 bkit analyze는 public summary function, app collector split, private dict 접근 제거 또는 축소, raw URL 미노출을 확인해야 한다.
-

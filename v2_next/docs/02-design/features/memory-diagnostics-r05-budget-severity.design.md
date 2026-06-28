@@ -67,4 +67,3 @@ bytes desc
 ## 7. Analyze Evidence
 
 bkit analyze는 budget table, `_apply_budget`, collector item fields, UI severity sorting을 확인해야 한다.
-

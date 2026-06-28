@@ -44,4 +44,3 @@ PLC history deque는 상시 resident buffer 후보 중 가장 크다. 현재 최
 ## 7. Rollback
 
 문제가 생기면 `_register_memory_collectors()`에서 `facility.plc_history` 등록만 제거한다. PLC history 저장 로직은 변경하지 않으므로 데이터 손실 rollback은 필요 없다.
-

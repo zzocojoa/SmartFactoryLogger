@@ -44,4 +44,3 @@ CSV writer 지연이나 queue 적체가 메모리 증가의 원인인지 확인�
 ## 7. Rollback
 
 runtime counter와 collector bytes 계산을 기존 mapping estimate 방식으로 되돌린다. CSV 저장 데이터와 파일 schema는 변경하지 않는다.
-

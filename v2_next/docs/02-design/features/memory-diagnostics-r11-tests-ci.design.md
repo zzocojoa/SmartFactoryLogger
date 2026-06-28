@@ -52,4 +52,3 @@ Final report must record:
 ## 7. Analyze Evidence
 
 bkit analyze는 tests existence, package script coverage, schema regression behavior, final report readiness를 확인해야 한다.
-

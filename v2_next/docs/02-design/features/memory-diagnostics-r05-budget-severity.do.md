@@ -41,4 +41,3 @@
 - [ ] gap iterate를 완료한다.
 - [ ] report 문서를 작성한다.
 - [ ] 다음 feature 시작 가능 상태로 status를 갱신한다.
-

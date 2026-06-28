@@ -45,4 +45,3 @@
 ## 7. Rollback
 
 `POST /api/memory/gc` endpoint와 UI 버튼을 제거한다. MemoryService process sample 수집 로직은 원상 유지한다.
-

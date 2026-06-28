@@ -46,4 +46,3 @@
 ## 7. Rollback
 
 v2 payload builder를 되돌려 기존 export payload로 복귀한다. export endpoint URL은 유지해 operator workflow를 깨지 않는다.
-

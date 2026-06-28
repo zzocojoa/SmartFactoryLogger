@@ -59,4 +59,3 @@ latest_bytes >= baseline_bytes * 1.20
 ## 7. Analyze Evidence
 
 bkit analyze는 slope helper, trend analysis 호출 위치, `self._latest_leak_suspects`, API field, UI wording을 확인해야 한다.
-

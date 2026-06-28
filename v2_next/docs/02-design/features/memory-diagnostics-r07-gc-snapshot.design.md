@@ -51,4 +51,3 @@ Profiler controls 근처에 GC 비교 버튼을 추가한다. 실행 중 loading
 ## 7. Analyze Evidence
 
 bkit analyze는 manual endpoint, service method, `self._last_gc_snapshot`, UI button/result, export inclusion 준비를 확인해야 한다.
-

@@ -43,4 +43,3 @@
 - [x] No iterate pass required.
 - [x] Wrote `docs/04-report/memory-diagnostics-r02-plc-history.report.md`.
 - [x] Status is ready to move to `memory-diagnostics-r03-csv-logger-runtime`.
-

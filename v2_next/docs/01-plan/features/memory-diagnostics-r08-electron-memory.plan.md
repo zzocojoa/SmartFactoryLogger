@@ -45,4 +45,3 @@ Python backend 메모리와 Electron main, renderer, GPU/utility process 메모�
 ## 7. Rollback
 
 preload 설정과 IPC handler를 제거하면 browser/backend-only memory 진단으로 돌아간다. backend API는 영향을 받지 않는다.
-

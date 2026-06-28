@@ -43,4 +43,3 @@ SPOT 일반 image cache와 live frame cache를 분리해 어느 쪽이 메모리
 ## 7. Rollback
 
 새 collector 등록을 제거하고 기존 `spot.cache` collector로 되돌린다. SPOT 제어 동작과 image fetch 경로는 변경하지 않는다.
-

@@ -39,4 +39,3 @@ R02 adds direct memory diagnostics for `PLCService.history`, the highest-probabi
 ## Next Step
 
 Start `memory-diagnostics-r03-csv-logger-runtime` and implement CSV logger queue/drop/lag diagnostics only.
-

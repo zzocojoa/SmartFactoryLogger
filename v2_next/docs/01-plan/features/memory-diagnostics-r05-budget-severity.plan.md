@@ -44,4 +44,3 @@
 ## 7. Rollback
 
 severity field와 UI 정렬만 비활성화하면 기존 size/delta 기반 테이블로 돌아간다. collector 원천 데이터는 유지한다.
-

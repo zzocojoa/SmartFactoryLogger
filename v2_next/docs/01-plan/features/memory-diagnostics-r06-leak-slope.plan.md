@@ -45,4 +45,3 @@
 ## 7. Rollback
 
 trend analysis 호출과 UI leak suspect section을 제거한다. 기존 process/collector history 저장은 유지한다.
-

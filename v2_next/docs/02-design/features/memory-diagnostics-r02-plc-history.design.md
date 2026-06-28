@@ -67,4 +67,3 @@ Note는 count, max, fill ratio, average bytes per sample을 포함한다.
 ## 7. Analyze Evidence
 
 bkit analyze는 service method 존재, lock 밖 size estimate, app collector 등록, note/detail field를 확인해야 한다.
-
