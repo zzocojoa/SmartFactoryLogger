@@ -148,6 +148,13 @@ describe('MemorySection collector runtime contract', () => {
     expect(screen.getByText('warn')).toBeInTheDocument();
   });
 
+  it('renders leak suspect section with empty state when no suspects are present', () => {
+    renderMemorySection(buildDetails(buildCollector({ name: 'ok.collector' })));
+
+    expect(screen.getByText('누수 의심')).toBeInTheDocument();
+    expect(screen.getByText('누수 의심 없음')).toBeInTheDocument();
+  });
+
   it('renders leak suspects as suspicion wording only when present', () => {
     renderMemorySection(
       buildDetails(buildCollector({ name: 'ok.collector' }), [

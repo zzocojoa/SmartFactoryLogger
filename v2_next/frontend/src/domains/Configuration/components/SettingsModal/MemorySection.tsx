@@ -516,9 +516,6 @@ const ConsumerTable = ({
 };
 
 const LeakSuspectList = ({ items }: { items: MemoryLeakSuspect[] }) => {
-  if (!items.length) {
-    return null;
-  }
   return (
     <div className="settings-observability-errors">
       <div className="settings-comm-log-header">
@@ -539,6 +536,7 @@ const LeakSuspectList = ({ items }: { items: MemoryLeakSuspect[] }) => {
             </div>
           </div>
         ))}
+        {!items.length && <div className="settings-error-empty">누수 의심 없음</div>}
       </div>
     </div>
   );
