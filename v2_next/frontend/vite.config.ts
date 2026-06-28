@@ -15,6 +15,7 @@ type UnknownObject = {
 };
 
 const SUPPORTED_GRAFANA_SCENES_VERSION = '6.52.0';
+const MOMENT_TIMEZONE_BROWSER_ENTRY = 'node_modules/moment-timezone/builds/moment-timezone-with-data-10-year-range.js';
 
 const isUnknownObject = (value: unknown): value is UnknownObject => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -162,10 +163,27 @@ const resolveGrafanaScenesEntry = (): string => {
   );
 };
 
+const resolveMomentTimezoneBrowserEntry = (): string => {
+  const browserEntry = resolve(__dirname, MOMENT_TIMEZONE_BROWSER_ENTRY);
+
+  if (existsSync(browserEntry)) {
+    return browserEntry;
+  }
+
+  throw new Error(
+    [
+      'moment-timezone browser bundle could not be resolved.',
+      'Keep moment-timezone as a direct frontend dependency because Vite aliases this package explicitly.',
+      `Expected entry: ${browserEntry}`,
+    ].join('\n')
+  );
+};
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiTarget = env.VITE_API_BASE_URL || 'http://localhost:8000';
   const grafanaScenesEntry: string = resolveGrafanaScenesEntry();
+  const momentTimezoneBrowserEntry: string = resolveMomentTimezoneBrowserEntry();
 
   return {
     base: './',
@@ -196,8 +214,8 @@ export default defineConfig(({ mode }) => {
         },
         {
           find: /^moment-timezone$/,
-          // Grafana only needs near-term timezone rules for dashboard telemetry.
-          replacement: resolve(__dirname, 'node_modules/moment-timezone/builds/moment-timezone-with-data-10-year-range.js'),
+          // Dashboard telemetry uses near-term ranges; keep the smaller direct dependency bundle.
+          replacement: momentTimezoneBrowserEntry,
         },
         {
           find: /^react-router-dom$/,
