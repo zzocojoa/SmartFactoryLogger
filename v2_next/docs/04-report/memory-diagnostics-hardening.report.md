@@ -65,8 +65,22 @@ The memory diagnostics hardening roadmap completed all ranked child features fro
 - PR inclusion audit: docs-only branch `codex/memory-diagnostics-pdca-docs` now records the code branch mapping and merge gate for `.pdca-status.json` and child report consistency.
 - PDCA status reader audit: automation guidance now documents that root-level `currentPhase` is not part of the schema and readers must use `features.*.phase`, with `pipeline.currentPhase` as cursor-only metadata.
 
-## Production Evidence Gap
+## Production Soak Plan
 Local automated validation is complete. Long-running production soak evidence on the real workstation is still needed to confirm alert thresholds, leak-slope signal quality, and operator usefulness under live workload.
 
+The first production evidence pass must capture memory export data before and after one operating shift. Do not commit raw exports to the repository. Raw files may include workstation paths, runtime arguments, equipment state, network details, or other operational context.
+
+Required evidence steps:
+- Capture a pre-shift memory export after the workstation reaches normal idle or startup state.
+- Capture a post-shift memory export after the same workstation completes a representative operating shift.
+- Record the application commit, capture timestamps, shift duration, workstation role, and whether redaction was reviewed.
+- Compare collector status, memory severity, leak suspects, GC deltas, Electron memory, and export redaction results between the two captures.
+- Store only a scrubbed summary, sanitized export, or file hash in project documentation. Keep raw export files outside Git unless explicitly reviewed and approved.
+
+Pass criteria:
+- No unredacted secrets, live image URLs, raw argv secrets, internal-only paths, or sensitive equipment identifiers appear in the committed evidence.
+- Memory severity and leak-slope signals are explainable for the observed workload.
+- Collector health and latency remain bounded enough for operator use during a normal shift.
+
 ## Next Action
-Merge the backend core and frontend UI code PRs first, then merge this docs PR after confirming the rank-to-branch mapping above still matches the final PR diffs. After docs merge, run a production soak with export capture before and after an operating shift.
+Run the production soak plan above on the operating workstation, then add a scrubbed evidence reference or sanitized summary to this report.
