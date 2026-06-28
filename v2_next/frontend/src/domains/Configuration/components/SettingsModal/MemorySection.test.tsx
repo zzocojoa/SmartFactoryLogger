@@ -151,8 +151,24 @@ describe('MemorySection collector runtime contract', () => {
   it('renders leak suspect section with empty state when no suspects are present', () => {
     renderMemorySection(buildDetails(buildCollector({ name: 'ok.collector' })));
 
-    expect(screen.getByText('누수 의심')).toBeInTheDocument();
+    expect(screen.getAllByText('누수 의심').length).toBeGreaterThan(0);
     expect(screen.getByText('누수 의심 없음')).toBeInTheDocument();
+  });
+
+  it('renders operator summary and folds raw diagnostics metadata by default', () => {
+    renderMemorySection(buildDetails(buildCollector({ name: 'ok.collector' })));
+
+    expect(screen.getByText('현재 상태')).toBeInTheDocument();
+    expect(screen.getByText('최근 샘플 기준 특이 증가 신호가 없습니다.')).toBeInTheDocument();
+    expect(screen.getByText('상세 진단 정보')).toBeInTheDocument();
+    expect(screen.getByText('리더/수집/요청 메타데이터')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '즉시 스냅샷' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'GC 전후 비교' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '내보내기' })).toBeInTheDocument();
+
+    const rawDetails = screen.getByText('상세 진단 정보').closest('details');
+    expect(rawDetails).not.toBeNull();
+    expect(rawDetails).not.toHaveAttribute('open');
   });
 
   it('renders leak suspects as suspicion wording only when present', () => {
@@ -173,7 +189,7 @@ describe('MemorySection collector runtime contract', () => {
       ])
     );
 
-    expect(screen.getByText('누수 의심')).toBeInTheDocument();
+    expect(screen.getAllByText('누수 의심').length).toBeGreaterThan(0);
     expect(screen.getByText('process.rss_bytes')).toBeInTheDocument();
     expect(screen.getByText('의심')).toBeInTheDocument();
     expect(screen.queryByText('확정')).not.toBeInTheDocument();

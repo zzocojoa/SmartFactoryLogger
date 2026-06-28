@@ -549,7 +549,7 @@ const GCSnapshotPanel = ({ snapshot }: { snapshot: MemoryGCSnapshot | null | und
   return (
     <div className="settings-test-item settings-memory-card">
       <div className="settings-memory-card-header">
-        <span className="settings-memory-card-title">GC 비교</span>
+        <span className="settings-memory-card-title">GC 전후 비교</span>
         <span className="settings-test-badge idle">{formatLatencyMs(snapshot.latency_ms)}</span>
       </div>
       <div className="settings-memory-card-grid">
@@ -739,38 +739,105 @@ export const MemorySection = ({
       (frontendHeapDelta1m >= FRONTEND_GROWTH_WARN_BYTES ||
         frontendHeapDelta1m /
           Math.max((latestFrontendPoint?.heap_used_bytes ?? 0) - frontendHeapDelta1m, 1) >= GROWTH_WARN_RATIO));
+  const hasErrorAlert = alerts.some((alert) => alert.severity === 'error');
+  const warningAlertCount = alerts.filter((alert) => alert.severity === 'warn' || alert.severity === 'error').length;
+  const hasWarningSignal = Boolean(leakSuspects.length || backendGrowthWarn || frontendGrowthWarn || warningAlertCount);
+  const memoryBriefStatus = backendStale || hasErrorAlert ? '확인 필요' : hasWarningSignal ? '주의' : '정상';
+  const memoryBriefBadgeClass = backendStale || hasErrorAlert ? 'error' : hasWarningSignal ? 'warn' : 'ok';
+  const memoryBriefDetail = backendStale
+    ? '최근 수집 오류가 있어 최신 상태가 아닙니다.'
+    : leakSuspects.length
+      ? `${leakSuspects.length}개 누수 의심 항목을 확인하세요.`
+      : backendGrowthWarn || frontendGrowthWarn
+        ? '최근 1분 증가량이 기준을 넘었습니다.'
+        : warningAlertCount
+          ? `${warningAlertCount}개 경고가 있습니다.`
+          : '최근 샘플 기준 특이 증가 신호가 없습니다.';
+  const collectionStateLabel =
+    memoryRefreshInFlight || memorySummaryBusy ? '요약 수집 중' : memoryDetailsBusy ? '상세 수집 중' : '대기';
+  const lastCollectionLabel =
+    memoryRefreshInFlight || memorySummaryBusy || memoryDetailsBusy
+      ? collectionStateLabel
+      : formatAgeFromMs(lastSummaryAt ?? frontendMemory?.last_refresh_at ?? null);
+  const latestGcRssDeltaLabel = latestGcSnapshot
+    ? `${formatDeltaBytes(latestGcSnapshot.delta?.rss_bytes)} RSS`
+    : '아직 없음';
+  const profilerStatusLabel = profiler?.enabled
+    ? profilerActionBusy
+      ? '전환 중'
+      : '켜짐'
+    : profilerActionBusy
+      ? '전환 중'
+      : '꺼짐';
+  const exportStatusLabel = memoryActionState.export ? '진행 중' : memoryExportPath ? '준비됨' : '없음';
 
   return (
     <div className="settings-section" id="settings-memory" ref={sectionRef}>
       <div className="settings-section-title">메모리 진단</div>
 
-      <div className="settings-test-meta">
-        <span>리더 상태: {leaderModeLabel}</span>
-        <span>리더 탭: {memoryLeader?.leader_tab_id ?? '--'}</span>
-        <span>자동 주기: {Math.max(1, Math.round(memoryRefreshIntervalMs / 1000))}s</span>
-        <span>마지막 export: {formatTimestampMs(lastExportAt ?? null)}</span>
-        <span>수집 상태: {memorySummaryBusy ? 'summary in-flight' : memoryDetailsBusy ? 'details in-flight' : 'idle'}</span>
+      <div className="settings-memory-brief" aria-label="메모리 진단 요약">
+        <div className="settings-memory-brief-main">
+          <span className={`settings-test-badge ${memoryBriefBadgeClass}`}>{memoryBriefStatus}</span>
+          <div>
+            <div className="settings-memory-brief-title">현재 상태</div>
+            <div className="settings-memory-brief-detail">{memoryBriefDetail}</div>
+          </div>
+        </div>
+        <div className="settings-memory-brief-metrics">
+          <div>
+            <span>누수 의심</span>
+            <strong>{leakSuspects.length ? `${leakSuspects.length}건` : '없음'}</strong>
+          </div>
+          <div>
+            <span>마지막 GC</span>
+            <strong>{latestGcRssDeltaLabel}</strong>
+          </div>
+          <div>
+            <span>마지막 수집</span>
+            <strong>{lastCollectionLabel}</strong>
+          </div>
+          <div>
+            <span>상세 추적</span>
+            <strong>{profilerStatusLabel}</strong>
+          </div>
+        </div>
       </div>
 
-      <div className="settings-test-meta">
-        <span>상태: {backendStale ? 'stale' : 'fresh'}</span>
-        <span>수집: {memorySummaryBusy ? 'summary' : memoryDetailsBusy ? 'details' : 'idle'}</span>
-        <span>Profiler: {profiler?.enabled ? (profilerActionBusy ? 'transition' : 'on') : profilerActionBusy ? 'transition' : 'off'}</span>
-        <span>Export: {memoryActionState.export ? 'in-flight' : memoryExportPath ? 'ready' : 'empty'}</span>
-        <span>마지막 수집: {formatTimestampMs(lastSummaryAt ?? frontendMemory?.last_refresh_at ?? null)}</span>
-        <span>마지막 export: {formatTimestampMs(lastExportAt ?? null)}</span>
-      </div>
+      <details className="settings-memory-details-panel">
+        <summary>
+          <span>상세 진단 정보</span>
+          <span>리더/수집/요청 메타데이터</span>
+        </summary>
+        <div className="settings-memory-details-grid">
+          <div className="settings-test-meta">
+            <span>리더 상태: {leaderModeLabel}</span>
+            <span>리더 탭: {memoryLeader?.leader_tab_id ?? '--'}</span>
+            <span>자동 주기: {Math.max(1, Math.round(memoryRefreshIntervalMs / 1000))}s</span>
+            <span>마지막 내보내기: {formatTimestampMs(lastExportAt ?? null)}</span>
+            <span>수집 상태: {collectionStateLabel}</span>
+          </div>
 
-      <div className="settings-test-meta">
-        <span>leader: {leaderModeLabel}</span>
-        <span>leader id: {memoryLeader?.leader_tab_id ?? '--'}</span>
-        <span>주기: {Math.max(1, Math.round(memoryRefreshIntervalMs / 1000))}s</span>
-        <span>summary req: {summaryRequestCount}</span>
-        <span>details req: {detailsRequestCount}</span>
-        <span>details 시각: {formatTimestampMs(lastDetailsAt ?? null)}</span>
-        <span>export meta: {formatTimestampMs(lastExportMetaAt ?? null)}</span>
-        <span>마지막 이유: {lastSummaryReason ?? '--'}</span>
-      </div>
+          <div className="settings-test-meta">
+            <span>상태: {backendStale ? 'stale' : 'fresh'}</span>
+            <span>수집: {memorySummaryBusy ? 'summary' : memoryDetailsBusy ? 'details' : 'idle'}</span>
+            <span>상세 추적: {profilerStatusLabel}</span>
+            <span>내보내기: {exportStatusLabel}</span>
+            <span>마지막 수집: {formatTimestampMs(lastSummaryAt ?? frontendMemory?.last_refresh_at ?? null)}</span>
+            <span>마지막 내보내기: {formatTimestampMs(lastExportAt ?? null)}</span>
+          </div>
+
+          <div className="settings-test-meta">
+            <span>리더: {leaderModeLabel}</span>
+            <span>리더 ID: {memoryLeader?.leader_tab_id ?? '--'}</span>
+            <span>주기: {Math.max(1, Math.round(memoryRefreshIntervalMs / 1000))}s</span>
+            <span>요약 요청: {summaryRequestCount}</span>
+            <span>상세 요청: {detailsRequestCount}</span>
+            <span>상세 시각: {formatTimestampMs(lastDetailsAt ?? null)}</span>
+            <span>내보내기 메타: {formatTimestampMs(lastExportMetaAt ?? null)}</span>
+            <span>마지막 이유: {lastSummaryReason ?? '--'}</span>
+          </div>
+        </div>
+      </details>
 
       <div className="settings-memory-actions">
         <button
@@ -803,7 +870,7 @@ export const MemorySection = ({
           onClick={onSnapshot}
           disabled={memoryActionState.snapshot || Boolean(memoryActionState.gc)}
         >
-          즉시 snapshot
+          즉시 스냅샷
         </button>
         <button
           type="button"
@@ -811,7 +878,7 @@ export const MemorySection = ({
           onClick={onGc}
           disabled={Boolean(memoryActionState.gc) || memoryActionState.snapshot}
         >
-          {memoryActionState.gc ? 'GC 실행 중...' : 'GC 비교'}
+          {memoryActionState.gc ? 'GC 실행 중...' : 'GC 전후 비교'}
         </button>
         <button
           type="button"
@@ -819,7 +886,7 @@ export const MemorySection = ({
           onClick={onExport}
           disabled={memoryExportBusy}
         >
-          {memoryExportBusy ? '내보내는 중...' : 'export'}
+          {memoryExportBusy ? '내보내는 중...' : '내보내기'}
         </button>
       </div>
 
@@ -928,7 +995,7 @@ export const MemorySection = ({
           <div className="settings-memory-card-grid">
             <span>시작 시각</span>
             <span>{formatIsoTimestamp(profiler?.started_at ?? null)}</span>
-            <span>마지막 snapshot</span>
+            <span>마지막 스냅샷</span>
             <span>{formatIsoTimestamp(profiler?.last_snapshot_at ?? null)}</span>
             <span>마지막 diff</span>
             <span>{formatIsoTimestamp(profiler?.last_diff_at ?? null)}</span>
@@ -980,13 +1047,13 @@ export const MemorySection = ({
           </div>
           <div className="settings-memory-history">
             <div className="settings-memory-history-row settings-memory-history-head">
-              <span>time</span>
-              <span>backend rss</span>
-              <span>rss delta</span>
-              <span>frontend app</span>
-              <span>app delta</span>
-              <span>frontend heap</span>
-              <span>heap delta</span>
+              <span>시각</span>
+              <span>Backend RSS</span>
+              <span>RSS 변화</span>
+              <span>Frontend App</span>
+              <span>App 변화</span>
+              <span>Frontend Heap</span>
+              <span>Heap 변화</span>
             </div>
             {historyRows.map((row) => (
               <div key={row.key} className="settings-memory-history-row">
@@ -1008,13 +1075,13 @@ export const MemorySection = ({
 
       <div className="settings-test-item settings-memory-export">
         <div className="settings-memory-card-header">
-          <span className="settings-memory-card-title">Export</span>
+          <span className="settings-memory-card-title">내보내기</span>
           <span className={`settings-test-badge ${memoryExportPath ? 'ok' : 'idle'}`}>
-            {memoryExportPath ? 'READY' : 'EMPTY'}
+            {memoryExportPath ? '준비됨' : '없음'}
           </span>
         </div>
         <div className="settings-memory-export-path">{memoryExportPath ?? '--'}</div>
-        <div className="settings-test-message">export 상태: {memoryActionState.export ? '내보내는 중' : 'idle'}</div>
+        <div className="settings-test-message">내보내기 상태: {memoryActionState.export ? '내보내는 중' : '대기'}</div>
         <div className="settings-observability-actions">
           <button type="button" className="settings-test-button" onClick={onCopyPath} disabled={!memoryExportPath}>
             경로 복사

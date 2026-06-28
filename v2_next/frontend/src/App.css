@@ -2290,6 +2290,118 @@ body {
   gap: 8px;
 }
 
+.settings-memory-actions .settings-test-button {
+  min-height: 36px;
+}
+
+.settings-memory-brief {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(360px, 1.5fr);
+  gap: 12px;
+  align-items: stretch;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: var(--bg-card-muted);
+  padding: 12px;
+}
+
+.settings-memory-brief-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-memory-brief-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.settings-memory-brief-detail {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.settings-memory-brief-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-memory-brief-metrics > div {
+  min-width: 0;
+  border-left: 1px solid var(--border-muted);
+  padding-left: 10px;
+}
+
+.settings-memory-brief-metrics span {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.settings-memory-brief-metrics strong {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  overflow-wrap: anywhere;
+}
+
+.settings-memory-details-panel {
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0;
+}
+
+.settings-memory-details-panel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  list-style: none;
+}
+
+.settings-memory-details-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-memory-details-panel > summary::after {
+  content: "펼치기";
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.settings-memory-details-panel[open] > summary::after {
+  content: "접기";
+}
+
+.settings-memory-details-panel > summary span:last-child {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.settings-memory-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  border-top: 1px solid var(--border-muted);
+  padding: 10px 12px 12px;
+}
+
 .settings-memory-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -3522,6 +3634,14 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .settings-memory-brief {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-memory-brief-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .settings-memory-card-value-group {
     grid-template-columns: 1fr;
   }
@@ -3534,6 +3654,17 @@ body {
 
   .settings-memory-card-grid span:nth-child(2n) {
     text-align: left;
+  }
+
+  .settings-memory-brief-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-memory-brief-metrics > div {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--border-muted);
+    padding-top: 8px;
   }
 }
 
