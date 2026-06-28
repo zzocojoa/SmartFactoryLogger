@@ -48,6 +48,13 @@ The memory diagnostics hardening roadmap completed all ranked child features fro
 | R10 export v2 | `codex/memory-diagnostics-backend-core`, `codex/memory-diagnostics-frontend-ui` | both code PRs |
 | R11 tests and CI | `codex/memory-diagnostics-backend-core`, `codex/memory-diagnostics-frontend-ui` | both code PRs |
 
+## PDCA Status Reader Contract
+- `.pdca-status.json` intentionally does not define a root-level `currentPhase`.
+- Automation must read `features[primaryFeature].phase` for the canonical primary feature phase.
+- Automation must read `features[featureName].phase` for per-feature status.
+- `pipeline.currentPhase` is a session cursor and must not override `features.*.phase`.
+- `recovery.currentPhase` is optional future recovery metadata; readers may use it only when a recovery block exists.
+
 ## Validation
 - R10 targeted backend export tests: passed, 27 tests.
 - R10 sanitized export smoke: passed, no raw password/live image URL remained in JSON output.
@@ -56,6 +63,7 @@ The memory diagnostics hardening roadmap completed all ranked child features fro
 - Final `npm run health`: passed, including frontend typecheck/lint/tests and backend ruff/mypy/tests.
 - Final `git diff --check`: passed with CRLF conversion warnings only.
 - PR inclusion audit: docs-only branch `codex/memory-diagnostics-pdca-docs` now records the code branch mapping and merge gate for `.pdca-status.json` and child report consistency.
+- PDCA status reader audit: automation guidance now documents that root-level `currentPhase` is not part of the schema and readers must use `features.*.phase`, with `pipeline.currentPhase` as cursor-only metadata.
 
 ## Production Evidence Gap
 Local automated validation is complete. Long-running production soak evidence on the real workstation is still needed to confirm alert thresholds, leak-slope signal quality, and operator usefulness under live workload.

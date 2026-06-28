@@ -19,6 +19,14 @@
     "memory-diagnostics-r11-tests-ci"
   ],
   "primaryFeature": "memory-diagnostics-hardening",
+  "statusReaderPolicy": {
+    "rootCurrentPhase": "not_defined",
+    "canonicalPrimaryPhasePath": "features[primaryFeature].phase",
+    "featurePhasePath": "features[featureName].phase",
+    "pipelineCurrentPhasePath": "pipeline.currentPhase",
+    "optionalRecoveryPhasePath": "recovery.currentPhase",
+    "readerGuidance": "Automation must not require a root-level currentPhase. Use features[primaryFeature].phase for the canonical primary feature phase, features[featureName].phase for per-feature status, pipeline.currentPhase only as a session cursor, and recovery.currentPhase only if a future recovery block is present."
+  },
   "features": {
     "spot-live-image": {
       "phase": "completed",
