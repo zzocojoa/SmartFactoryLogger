@@ -2187,7 +2187,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  scroll-margin-top: 120px;
+  scroll-margin-top: 12px;
+}
+
+#settings-observability {
+  min-height: min(560px, 62vh);
 }
 
 .settings-test-grid {
@@ -2265,6 +2269,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  min-width: 0;
 }
 
 .settings-observability-export {
@@ -2282,6 +2287,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .settings-observability-brief {
@@ -2293,6 +2300,7 @@ body {
   border-radius: 8px;
   background: var(--bg-card-muted);
   padding: 12px;
+  min-width: 0;
 }
 
 .settings-observability-action {
@@ -2307,6 +2315,7 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  min-width: 0;
 }
 
 .settings-observability-brief-card {
@@ -2364,12 +2373,14 @@ body {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
   padding: 0;
+  min-width: 0;
 }
 
 .settings-observability-details-panel > summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 9px 12px;
   cursor: pointer;
@@ -2397,6 +2408,8 @@ body {
 .settings-observability-details-panel > summary span:last-child {
   color: var(--text-muted);
   font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .settings-observability-details-body {
@@ -2405,6 +2418,7 @@ body {
   gap: 10px;
   border-top: 1px solid var(--border-muted);
   padding: 10px 12px 12px;
+  min-width: 0;
 }
 
 .settings-memory-actions {
@@ -2722,6 +2736,7 @@ body {
 
 .settings-memory-table-row span {
   min-width: 0;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -3073,11 +3088,18 @@ body {
   gap: 2px;
   font-size: 0.75rem;
   color: var(--text-muted);
+  min-width: 0;
+}
+
+.settings-test-meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .settings-test-message {
   font-size: 0.75rem;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
