@@ -258,4 +258,3 @@ describe('MemorySection collector runtime contract', () => {
     expect(screen.getByText(/CPU 1\.50%/)).toBeInTheDocument();
   });
 });
-
