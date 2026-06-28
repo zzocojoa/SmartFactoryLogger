@@ -69,6 +69,32 @@ const resolveManualChunk = (id: string): string | undefined => {
     return 'vendor-moment';
   }
 
+  if (normalizedId.includes('/node_modules/@grafana/scenes/')) {
+    return 'vendor-grafana-scenes';
+  }
+
+  if (normalizedId.includes('/node_modules/@grafana/ui/')) {
+    return 'vendor-grafana-ui';
+  }
+
+  if (normalizedId.includes('/node_modules/@grafana/data/')) {
+    return 'vendor-grafana-data';
+  }
+
+  if (normalizedId.includes('/node_modules/@grafana/runtime/')) {
+    return 'vendor-grafana-runtime';
+  }
+
+  if (
+    normalizedId.includes('/node_modules/@grafana/schema/') ||
+    normalizedId.includes('/node_modules/@grafana/i18n/') ||
+    normalizedId.includes('/node_modules/@grafana/faro-core/') ||
+    normalizedId.includes('/node_modules/@grafana/faro-web-sdk/') ||
+    normalizedId.includes('/node_modules/@grafana/e2e-selectors/')
+  ) {
+    return 'vendor-grafana-support';
+  }
+
   if (normalizedId.includes('/node_modules/@grafana/')) {
     return 'vendor-grafana';
   }
@@ -81,10 +107,6 @@ const resolveManualChunk = (id: string): string | undefined => {
     normalizedId.includes('/node_modules/scheduler/')
   ) {
     return 'vendor-react';
-  }
-
-  if (normalizedId.includes('/node_modules/monaco-editor/')) {
-    return 'vendor-monaco';
   }
 
   if (normalizedId.includes('/node_modules/uplot/')) {
@@ -171,6 +193,11 @@ export default defineConfig(({ mode }) => {
         {
           find: '@grafana/scenes',
           replacement: grafanaScenesEntry,
+        },
+        {
+          find: /^moment-timezone$/,
+          // Grafana only needs near-term timezone rules for dashboard telemetry.
+          replacement: resolve(__dirname, 'node_modules/moment-timezone/builds/moment-timezone-with-data-10-year-range.js'),
         },
         {
           find: /^react-router-dom$/,
