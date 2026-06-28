@@ -65,22 +65,41 @@ The memory diagnostics hardening roadmap completed all ranked child features fro
 - PR inclusion audit: docs-only branch `codex/memory-diagnostics-pdca-docs` now records the code branch mapping and merge gate for `.pdca-status.json` and child report consistency.
 - PDCA status reader audit: automation guidance now documents that root-level `currentPhase` is not part of the schema and readers must use `features.*.phase`, with `pipeline.currentPhase` as cursor-only metadata.
 
-## Production Soak Plan
-Local automated validation is complete. Long-running production soak evidence on the real workstation is still needed to confirm alert thresholds, leak-slope signal quality, and operator usefulness under live workload.
+## Production Soak Evidence
+Local automated validation is complete. A comparison-ready pre/post memory evidence pass was recorded on 2026-06-28 without committing raw exports. The pre-shift artifact is an existing sanitized bundle. The post-shift artifact was generated with the same backend export builder used by `POST /api/memory/export` after user approval because the live backend API was not listening on `127.0.0.1:8000` during capture. Treat this pass as workstation post-shift evidence, not as proof that the live API path was exercised.
 
-The first production evidence pass must capture memory export data before and after one operating shift. Do not commit raw exports to the repository. Raw files may include workstation paths, runtime arguments, equipment state, network details, or other operational context.
+Artifact identity:
 
-Required evidence steps:
-- Capture a pre-shift memory export after the workstation reaches normal idle or startup state.
-- Capture a post-shift memory export after the same workstation completes a representative operating shift.
-- Record the application commit, capture timestamps, shift duration, workstation role, and whether redaction was reviewed.
-- Compare collector status, memory severity, leak suspects, GC deltas, Electron memory, and export redaction results between the two captures.
-- Store only a scrubbed summary, sanitized export, or file hash in project documentation. Keep raw export files outside Git unless explicitly reviewed and approved.
+| Capture | Artifact | Timestamp | Size | SHA-256 |
+| --- | --- | --- | ---: | --- |
+| Pre-shift baseline | `sfl-memory-precheck-idle-baseline-20260628.sanitized.zip` | generated `2026-06-27T15:31:50+00:00`, mtime `2026-06-27T15:37:13.1116276Z` | 85,771 bytes | `5754b07957902d2bb9639c9a90fb9f0718b397f5d714b2f44b87fb20f0c5002c` |
+| Post-shift capture | `memory_snapshot_20260628_170059.json` | generated `2026-06-28T08:00:59+00:00`, mtime `2026-06-28T08:00:59.8835050Z` | 66,404 bytes | `8fc62c81119019df586e265e5e2d19a7a3a7a03b8712eb53b83c9398cf0f6240` |
 
-Pass criteria:
-- No unredacted secrets, live image URLs, raw argv secrets, internal-only paths, or sensitive equipment identifiers appear in the committed evidence.
-- Memory severity and leak-slope signals are explainable for the observed workload.
-- Collector health and latency remain bounded enough for operator use during a normal shift.
+Redaction and scrub checks:
+
+| Capture | Result |
+| --- | --- |
+| Pre-shift baseline | 18 zip entries, 10 JSON entries, 0 parse failures with UTF-8 BOM handling, 0 credential assignments, 0 unredacted credential assignments, 0 raw Windows path literals. The sanitized bundle still contains 11 raw URL literals in text/log entries, so the raw bundle stays outside Git and this report records only scrubbed metadata. |
+| Post-shift capture | Export v2 redaction flag applied, 0 credential assignments, 0 unredacted credential assignments, 0 raw URL literals, 0 raw Windows path literals. |
+
+Memory comparison:
+
+| Metric | Pre-shift | Post-shift | Delta |
+| --- | ---: | ---: | ---: |
+| RSS | 277.70 MiB | 306.65 MiB | +28.95 MiB |
+| Private bytes | 239.33 MiB | 295.12 MiB | +55.79 MiB |
+| USS | 225.02 MiB | 293.08 MiB | +68.06 MiB |
+| VMS | 239.33 MiB | 295.12 MiB | +55.79 MiB |
+| Backend top consumers | 6 | 9 | +3 |
+| Backend growth entries | 6 | 9 | +3 |
+| Leak suspects | not available in baseline bundle | 0 | n/a |
+| Collector runtime entries | not available in baseline bundle | 9 | n/a |
+
+Operational interpretation:
+- The committed evidence contains only artifact hashes, sizes, timestamps, redaction counts, and aggregate memory metrics.
+- The post-shift capture reported no leak suspects and had 9 collector runtime entries.
+- The pre-shift bundle predates some export v2 analysis fields, so leak suspect and collector runtime comparison is post-only for this evidence pass.
+- For a stronger production gate, repeat the post-shift capture through the live Electron/FastAPI API while the operating app is running.
 
 ## Next Action
-Run the production soak plan above on the operating workstation, then add a scrubbed evidence reference or sanitized summary to this report.
+Use this hash-bound evidence as the first scrubbed production soak record. Replace it with a live API capture if the release gate requires proof that the packaged Electron/FastAPI path performed the export during an operating shift.
