@@ -148,6 +148,7 @@ interface BuildObservabilitySummaryInput {
   memoryBusy: boolean;
   frontErrorCount: number;
   spotImageError: string | null;
+  nowSec?: number;
 }
 
 interface ChannelStatus {
@@ -186,10 +187,25 @@ const statusTextForSeverity = (severity: ObservabilitySummarySeverity): string =
   return '정상';
 };
 
+const getActiveBackoffWaitSec = (
+  channel: CommChannelMetrics | null | undefined,
+  nowSec: number
+): number => {
+  if (!channel) {
+    return 0;
+  }
+  const nextRetryAt = channel.next_retry_at ?? 0;
+  if (nextRetryAt > nowSec) {
+    return Math.max(0, nextRetryAt - nowSec);
+  }
+  return channel.connected === false ? Math.max(0, channel.backoff_sec ?? 0) : 0;
+};
+
 const buildChannelStatus = (
   label: string,
   channel: CommChannelMetrics | null | undefined,
-  fallbackConnected?: boolean
+  fallbackConnected: boolean | undefined,
+  nowSec: number
 ): ChannelStatus => {
   if (!channel && fallbackConnected === undefined) {
     return {
@@ -200,7 +216,7 @@ const buildChannelStatus = (
   }
 
   const connected = channel?.connected ?? fallbackConnected ?? null;
-  const backoffSec = channel?.backoff_sec ?? 0;
+  const activeBackoffWaitSec = getActiveBackoffWaitSec(channel, nowSec);
   const currentDowntimeSec = channel?.current_downtime_sec ?? 0;
   const failureCount =
     (channel?.connect_failures ?? 0) +
@@ -215,11 +231,11 @@ const buildChannelStatus = (
       evidence: `${label} 중단 ${formatOptionalSeconds(currentDowntimeSec)}`,
     };
   }
-  if (backoffSec > 0 || failureCount > 0 || recoveryCount > 0) {
+  if (activeBackoffWaitSec > 0 || failureCount > 0 || recoveryCount > 0) {
     return {
       label,
       severity: 'warn',
-      evidence: `${label} 실패 ${failureCount}, 복구 ${recoveryCount}, 백오프 ${formatOptionalSeconds(backoffSec)}`,
+      evidence: `${label} 실패 ${failureCount}, 복구 ${recoveryCount}, 대기 ${formatOptionalSeconds(activeBackoffWaitSec)}`,
     };
   }
   return {
@@ -334,9 +350,10 @@ export const buildObservabilitySummary = ({
   memoryBusy,
   frontErrorCount,
   spotImageError,
+  nowSec = Date.now() / 1000,
 }: BuildObservabilitySummaryInput): ObservabilitySummary => {
-  const exStatus = buildChannelStatus('EX', health?.comm?.extruder, health?.driver_connected);
-  const lsStatus = buildChannelStatus('LS', health?.comm?.ls_plc, health?.thread_alive);
+  const exStatus = buildChannelStatus('EX', health?.comm?.extruder, health?.driver_connected, nowSec);
+  const lsStatus = buildChannelStatus('LS', health?.comm?.ls_plc, health?.thread_alive, nowSec);
   const spotStatus = buildSpotStatus(health?.comm?.spot, spotImageError);
   const communicationSeverity = mergeObservabilitySeverity(exStatus.severity, lsStatus.severity, spotStatus.severity);
 
@@ -365,7 +382,7 @@ export const buildObservabilitySummary = ({
   const commChannels = [health?.comm?.extruder, health?.comm?.ls_plc];
   const backoffCount = commChannels.reduce((total, channel) => total + (channel?.backoff_count ?? 0), 0);
   const recoveryCount = commChannels.reduce((total, channel) => total + (channel?.recovery_count ?? 0), 0);
-  const activeBackoffSec = commChannels.reduce((total, channel) => total + (channel?.backoff_sec ?? 0), 0);
+  const activeBackoffSec = commChannels.reduce((total, channel) => total + getActiveBackoffWaitSec(channel, nowSec), 0);
   const recoverySeverity: ObservabilitySummarySeverity = activeBackoffSec > 0
     ? 'error'
     : backoffCount > 0 || recoveryCount > 0
