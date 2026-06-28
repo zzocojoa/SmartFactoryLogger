@@ -1,8 +1,9 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const kill = require('tree-kill');
 const fs = require('fs');
+const v8 = require('v8');
 
 let mainWindow;
 let backendProcess;
@@ -41,11 +42,59 @@ log(`--- App Starting (isPackaged: ${app.isPackaged}) ---`);
 log(`Executable Path: ${process.executablePath}`);
 log(`App Path: ${app.getAppPath()}`);
 
+function resolvePreloadPath() {
+  return path.join(__dirname, 'preload.js');
+}
+
+function cloneProcessMetric(metric) {
+  return {
+    pid: metric.pid,
+    type: metric.type,
+    name: metric.name,
+    serviceName: metric.serviceName,
+    creationTime: metric.creationTime,
+    cpu: metric.cpu,
+    memory: metric.memory,
+    sandboxed: metric.sandboxed,
+    integrityLevel: metric.integrityLevel,
+  };
+}
+
+async function captureElectronMemory() {
+  try {
+    return {
+      supported: true,
+      source: 'electron',
+      captured_at: Date.now() / 1000,
+      process: await process.getProcessMemoryInfo(),
+      metrics: app.getAppMetrics().map(cloneProcessMetric),
+      v8_heap: v8.getHeapStatistics(),
+      error: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      supported: false,
+      source: 'electron',
+      captured_at: Date.now() / 1000,
+      process: null,
+      metrics: [],
+      v8_heap: null,
+      error: message,
+    };
+  }
+}
+
+function registerMemoryIpcHandlers() {
+  ipcMain.handle('sfl:get-electron-memory', async () => captureElectronMemory());
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     webPreferences: {
+      preload: resolvePreloadPath(),
       nodeIntegration: false,
       contextIsolation: true,
     },
@@ -148,6 +197,7 @@ function startBackend() {
 
 app.whenReady().then(() => {
   log("App ready, starting backend and window...");
+  registerMemoryIpcHandlers();
   startBackend();
   createWindow();
 

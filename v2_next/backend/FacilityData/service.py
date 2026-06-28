@@ -15,6 +15,7 @@ from backend.FacilityData.operator_metadata import operator_metadata_store
 from backend.FacilityData.repository import logger_service
 from backend.Configuration.Configuration_DB_Manager import config_manager
 from backend.Observability.Observability_Logic_Status import StatusEvaluator
+from backend.Observability.memory_service import estimate_size_bytes
 from backend.Observability.service import observability_service
 
 OPERATOR_METADATA_RUNTIME_STATE_VERSION = "1.0.0"
@@ -319,6 +320,40 @@ class PLCService:
                 history_instance_id=self.history_instance_id,
                 truncated=truncated,
             )
+
+    def get_history_memory_summary(self, sample_size: int = 128) -> dict[str, Any]:
+        bounded_sample_size = max(1, int(sample_size))
+        with self.history_lock:
+            count = len(self.history)
+            max_samples = self.HISTORY_MAX_SAMPLES
+            oldest_timestamp_ms = self.history[0].timestamp_ms if self.history else None
+            newest_timestamp_ms = self.history[-1].timestamp_ms if self.history else None
+            if count <= bounded_sample_size:
+                sample_items = list(self.history)
+            else:
+                step = max(1, count // bounded_sample_size)
+                sample_items = [
+                    item
+                    for idx, item in enumerate(self.history)
+                    if idx % step == 0
+                ][:bounded_sample_size]
+
+        sample_count = len(sample_items)
+        sampled_bytes = estimate_size_bytes(sample_items) if sample_count else 0
+        avg_bytes_per_sample = sampled_bytes / max(sample_count, 1)
+        estimated_bytes = int(avg_bytes_per_sample * count)
+
+        return {
+            "count": count,
+            "max_samples": max_samples,
+            "oldest_timestamp_ms": oldest_timestamp_ms,
+            "newest_timestamp_ms": newest_timestamp_ms,
+            "sample_size": sample_count,
+            "sampled_bytes": sampled_bytes,
+            "estimated_bytes": estimated_bytes,
+            "avg_bytes_per_sample": avg_bytes_per_sample,
+            "fill_ratio": count / max(max_samples, 1),
+        }
 
     def clear_data_history(self) -> None:
         with self.history_lock:

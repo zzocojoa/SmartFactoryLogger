@@ -719,6 +719,82 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(float(diagnostics["retry_after_sec"]), 0.0)
         self.assertLessEqual(float(diagnostics["retry_after_sec"]), 2.0)
 
+    def test_image_cache_memory_summary_splits_static_and_live_bytes_without_url(self) -> None:
+        now = 1_777_660_900.0
+        raw_live_url = "http://spot.local/live.jpg?token=secret-token"
+        spot_api._img_cache["data"] = b"static-cache"
+        spot_api._img_cache["time"] = now - 3.0
+        spot_api._img_failure_count = 2
+        spot_api._img_next_retry_at = now + 2.0
+        spot_api._live_img_cache = {"data": b"live-frame", "time": now - 0.02, "url": raw_live_url}
+        spot_api._live_img_last_url = raw_live_url
+        spot_api._live_img_failure_count = 1
+        spot_api._live_img_next_retry_at = now + 1.0
+
+        with patch.object(spot_api.time, "time", return_value=now):
+            summary: dict[str, Any] = spot_api.get_image_cache_memory_summary()
+
+        self.assertEqual(summary["image_bytes"], len(b"static-cache"))
+        self.assertEqual(summary["live_image_bytes"], len(b"live-frame"))
+        self.assertEqual(summary["total_bytes"], len(b"static-cache") + len(b"live-frame"))
+        self.assertEqual(summary["image_age_sec"], 3.0)
+        self.assertAlmostEqual(float(summary["live_image_age_sec"]), 0.02)
+        self.assertEqual(summary["image_cache_state"], "cache")
+        self.assertEqual(summary["live_image_cache_state"], "fresh")
+        self.assertEqual(summary["image_failure_count"], 2)
+        self.assertEqual(summary["live_image_failure_count"], 1)
+        self.assertEqual(summary["image_next_retry_at"], now + 2.0)
+        self.assertEqual(summary["live_image_next_retry_at"], now + 1.0)
+        self.assertTrue(summary["live_image_url_present"])
+        self.assertNotIn(raw_live_url, str(summary))
+        self.assertNotIn("secret-token", str(summary))
+
+    def test_spot_live_cache_collector_reports_live_bytes(self) -> None:
+        from backend import app as backend_app
+
+        raw_live_url = "http://spot.local/live.jpg?token=secret-token"
+        summary: dict[str, Any] = {
+            "image_bytes": 12,
+            "image_age_sec": 3.0,
+            "image_cache_state": "cache",
+            "image_failure_count": 2,
+            "image_next_retry_at": 1_777_660_902.0,
+            "live_image_bytes": 9,
+            "live_image_age_sec": 0.02,
+            "live_image_cache_state": "fresh",
+            "live_image_url_present": True,
+            "live_image_failure_count": 1,
+            "live_image_next_retry_at": 1_777_660_901.0,
+            "total_bytes": 21,
+        }
+
+        with patch.object(
+            backend_app.spot_control,
+            "get_image_cache_memory_summary",
+            Mock(return_value=summary),
+        ):
+            image_cache = backend_app._collect_spot_image_cache()
+            live_cache = backend_app._collect_spot_live_cache()
+            compatibility_alias = backend_app._collect_spot_cache()
+
+        self.assertIn("spot.image_cache", backend_app.memory_service._collectors)
+        self.assertIn("spot.live_cache", backend_app.memory_service._collectors)
+        self.assertIn("spot.cache", backend_app.memory_service._collectors)
+        self.assertEqual(image_cache["name"], "spot.image_cache")
+        self.assertEqual(image_cache["bytes"], 12)
+        self.assertEqual(image_cache["exactness"], "exact")
+        self.assertIn("fail=2", str(image_cache["note"]))
+        self.assertEqual(live_cache["name"], "spot.live_cache")
+        self.assertEqual(live_cache["bytes"], 9)
+        self.assertEqual(live_cache["exactness"], "exact")
+        self.assertIn("url_present=True", str(live_cache["note"]))
+        self.assertEqual(compatibility_alias["name"], "spot.cache")
+        self.assertEqual(compatibility_alias["bytes"], 21)
+        self.assertEqual(compatibility_alias["exactness"], "exact")
+        self.assertIn("split=spot.image_cache,spot.live_cache", str(compatibility_alias["note"]))
+        self.assertNotIn(raw_live_url, str([image_cache, live_cache, compatibility_alias]))
+        self.assertNotIn("secret-token", str([image_cache, live_cache, compatibility_alias]))
+
     async def test_cold_cache_backoff_fast_fails_without_upstream_call(self) -> None:
         spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
         spot_api._img_failure_count = 1

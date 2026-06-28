@@ -4,6 +4,7 @@ from collections import deque
 from datetime import datetime, timezone
 import gc
 import logging
+import platform
 import sys
 import threading
 import time
@@ -17,6 +18,48 @@ MemoryCollectorResult = Dict[str, Any]
 MemoryCollector = Callable[[], MemoryCollectorResult]
 
 _IGNORED_TYPES = (type, type(sys))
+_SEVERITY_RANK = {"ok": 0, "warn": 1, "critical": 2}
+DEFAULT_MEMORY_BUDGETS: dict[str, dict[str, float]] = {
+    "process.rss_bytes": {
+        "warn_growth_per_min": 32 * 1024 * 1024,
+    },
+    "process.uss_bytes": {
+        "warn_growth_per_min": 32 * 1024 * 1024,
+    },
+    "process.private_bytes": {
+        "warn_growth_per_min": 32 * 1024 * 1024,
+    },
+    "facility.plc_history": {
+        "warn_bytes": 150 * 1024 * 1024,
+        "critical_bytes": 300 * 1024 * 1024,
+        "warn_growth_per_min": 32 * 1024 * 1024,
+    },
+    "facility.csv_logger": {
+        "warn_items_ratio": 0.70,
+        "critical_items_ratio": 0.90,
+        "warn_growth_per_min": 16 * 1024 * 1024,
+    },
+    "spot.live_cache": {
+        "warn_bytes": 10 * 1024 * 1024,
+        "critical_bytes": 50 * 1024 * 1024,
+    },
+}
+_LEAK_SUSPECT_MIN_POINTS = 4
+_LEAK_SUSPECT_MIN_MONOTONIC_RATIO = 0.75
+_LEAK_SUSPECT_MIN_BASELINE_RATIO = 1.20
+_MEMORY_EXPORT_SCHEMA_VERSION = "memory-export-v2"
+_REDACTED_VALUE = "[REDACTED]"
+_SENSITIVE_KEY_FRAGMENTS = (
+    "password",
+    "token",
+    "secret",
+    "authorization",
+    "api_key",
+    "private_key",
+)
+_SENSITIVE_NORMALIZED_KEY_FRAGMENTS = tuple(
+    fragment.replace("_", "").replace("-", "") for fragment in _SENSITIVE_KEY_FRAGMENTS
+) + ("liveimageurl",)
 
 
 def _utc_iso(ts: float) -> str:
@@ -37,6 +80,119 @@ def _coerce_items(value: Any) -> int | None:
         return int(value)
     except Exception:
         return None
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _optional_delta(after: Any, before: Any) -> int | None:
+    if after is None or before is None:
+        return None
+    try:
+        return int(after) - int(before)
+    except Exception:
+        return None
+
+
+def _is_sensitive_key(key: Any) -> bool:
+    lowered = str(key).lower()
+    normalized = lowered.replace("_", "").replace("-", "")
+    return any(fragment in lowered for fragment in _SENSITIVE_KEY_FRAGMENTS) or any(
+        fragment in normalized for fragment in _SENSITIVE_NORMALIZED_KEY_FRAGMENTS
+    )
+
+
+def _redact_sensitive(value: Any) -> tuple[Any, int]:
+    if isinstance(value, Mapping):
+        redacted: dict[Any, Any] = {}
+        redacted_count = 0
+        for key, item in value.items():
+            if _is_sensitive_key(key):
+                redacted[key] = _REDACTED_VALUE
+                redacted_count += 1
+                continue
+            redacted_item, item_count = _redact_sensitive(item)
+            redacted[key] = redacted_item
+            redacted_count += item_count
+        return redacted, redacted_count
+
+    if isinstance(value, list):
+        redacted_items = []
+        redacted_count = 0
+        for item in value:
+            redacted_item, item_count = _redact_sensitive(item)
+            redacted_items.append(redacted_item)
+            redacted_count += item_count
+        return redacted_items, redacted_count
+
+    if isinstance(value, tuple):
+        redacted_items = []
+        redacted_count = 0
+        for item in value:
+            redacted_item, item_count = _redact_sensitive(item)
+            redacted_items.append(redacted_item)
+            redacted_count += item_count
+        return tuple(redacted_items), redacted_count
+
+    if isinstance(value, (set, frozenset)):
+        redacted_items = []
+        redacted_count = 0
+        for item in value:
+            redacted_item, item_count = _redact_sensitive(item)
+            redacted_items.append(redacted_item)
+            redacted_count += item_count
+        return redacted_items, redacted_count
+
+    return value, 0
+
+
+def _redact_argv(argv: Iterable[str]) -> list[str]:
+    redacted: list[str] = []
+    redact_next = False
+    for raw_arg in argv:
+        arg = str(raw_arg)
+        if redact_next:
+            redacted.append(_REDACTED_VALUE)
+            redact_next = False
+            continue
+
+        key_part = arg.split("=", 1)[0].split(":", 1)[0]
+        if not _is_sensitive_key(key_part):
+            redacted.append(arg)
+            continue
+
+        if "=" in arg:
+            key, _value = arg.split("=", 1)
+            redacted.append(f"{key}={_REDACTED_VALUE}")
+        elif ":" in arg:
+            key, _value = arg.split(":", 1)
+            redacted.append(f"{key}:{_REDACTED_VALUE}")
+        else:
+            redacted.append(arg)
+            redact_next = True
+    return redacted
+
+
+def _append_note(note: Any, extra: str) -> str:
+    if note:
+        return f"{note}; {extra}"
+    return extra
+
+
+def _promote_severity(current: str, candidate: str) -> str:
+    if _SEVERITY_RANK.get(candidate, 0) > _SEVERITY_RANK.get(current, 0):
+        return candidate
+    return current
+
+
+def _collector_error_note(exc: Exception) -> str:
+    return f"collector failed ({type(exc).__name__})"
 
 
 def estimate_size_bytes(value: Any) -> int:
@@ -98,19 +254,123 @@ def _estimate_size_bytes(value: Any, seen: set[int]) -> int:
 
 
 def _normalize_collector_result(name: str, raw: Mapping[str, Any]) -> Dict[str, Any]:
-    return {
-        "name": str(raw.get("name") or name),
-        "kind": str(raw.get("kind") or "unknown"),
-        "exactness": str(raw.get("exactness") or "estimated"),
-        "bytes": _coerce_int(raw.get("bytes")),
-        "items": _coerce_items(raw.get("items")),
-        "note": raw.get("note"),
+    return _apply_budget(
+        {
+            "name": str(raw.get("name") or name),
+            "kind": str(raw.get("kind") or "unknown"),
+            "exactness": str(raw.get("exactness") or "estimated"),
+            "bytes": _coerce_int(raw.get("bytes")),
+            "items": _coerce_items(raw.get("items")),
+            "items_ratio": _coerce_optional_float(raw.get("items_ratio")),
+            "items_capacity": _coerce_items(raw.get("items_capacity")),
+            "note": raw.get("note"),
+        }
+    )
+
+
+def _resolve_items_ratio(item: Mapping[str, Any]) -> float | None:
+    ratio = _coerce_optional_float(item.get("items_ratio"))
+    if ratio is not None:
+        return ratio
+    items = _coerce_optional_float(item.get("items"))
+    capacity = _coerce_optional_float(item.get("items_capacity"))
+    if items is None or capacity is None or capacity <= 0:
+        return None
+    return items / capacity
+
+
+def _apply_budget(
+    item: Dict[str, Any],
+    previous: Mapping[str, Any] | None = None,
+    *,
+    growth_bytes_per_min: float | None = None,
+) -> Dict[str, Any]:
+    name = str(item.get("name") or "")
+    budget = DEFAULT_MEMORY_BUDGETS.get(name)
+    severity = "ok"
+    reasons: list[str] = []
+
+    if budget:
+        bytes_value = _coerce_int(item.get("bytes"))
+        critical_bytes = _coerce_optional_float(budget.get("critical_bytes"))
+        warn_bytes = _coerce_optional_float(budget.get("warn_bytes"))
+        if critical_bytes is not None and bytes_value >= critical_bytes:
+            severity = _promote_severity(severity, "critical")
+            reasons.append(f"bytes>={int(critical_bytes)}")
+        elif warn_bytes is not None and bytes_value >= warn_bytes:
+            severity = _promote_severity(severity, "warn")
+            reasons.append(f"bytes>={int(warn_bytes)}")
+
+        items_ratio = _resolve_items_ratio(item)
+        critical_items_ratio = _coerce_optional_float(budget.get("critical_items_ratio"))
+        warn_items_ratio = _coerce_optional_float(budget.get("warn_items_ratio"))
+        if items_ratio is not None:
+            if critical_items_ratio is not None and items_ratio >= critical_items_ratio:
+                severity = _promote_severity(severity, "critical")
+                reasons.append(f"items_ratio>={critical_items_ratio:.2f}")
+            elif warn_items_ratio is not None and items_ratio >= warn_items_ratio:
+                severity = _promote_severity(severity, "warn")
+                reasons.append(f"items_ratio>={warn_items_ratio:.2f}")
+
+        if growth_bytes_per_min is None and previous is not None:
+            growth_bytes_per_min = _coerce_optional_float(item.get("growth_bytes_per_min"))
+        warn_growth_per_min = _coerce_optional_float(budget.get("warn_growth_per_min"))
+        if (
+            growth_bytes_per_min is not None
+            and warn_growth_per_min is not None
+            and growth_bytes_per_min >= warn_growth_per_min
+        ):
+            severity = _promote_severity(severity, "warn")
+            reasons.append(f"growth_bytes_per_min>={int(warn_growth_per_min)}")
+
+    item["severity"] = severity
+    item["severity_reasons"] = reasons
+    item["budget"] = dict(budget) if budget else None
+    return item
+
+
+def _collector_severity_rank(item: Mapping[str, Any]) -> int:
+    return _SEVERITY_RANK.get(str(item.get("severity") or "ok"), 0)
+
+
+def _build_growth_item(
+    name: str,
+    source_item: Mapping[str, Any],
+    current_bytes: int,
+    previous_bytes: int,
+    total_current_bytes: int,
+    *,
+    growth_bytes_per_min: float | None,
+) -> Dict[str, Any]:
+    item = {
+        "name": name,
+        "kind": str(source_item.get("kind") or "unknown"),
+        "exactness": str(source_item.get("exactness") or "estimated"),
+        "bytes": current_bytes,
+        "delta_bytes": current_bytes - previous_bytes,
+        "share_ratio": (current_bytes / total_current_bytes) if total_current_bytes else 0.0,
+        "items": source_item.get("items"),
+        "items_ratio": source_item.get("items_ratio"),
+        "items_capacity": source_item.get("items_capacity"),
+        "growth_bytes_per_min": growth_bytes_per_min,
+        "note": source_item.get("note"),
+        "latency_ms": source_item.get("latency_ms"),
+        "status": source_item.get("status"),
+        "last_ok_at": source_item.get("last_ok_at"),
+        "last_error_at": source_item.get("last_error_at"),
+        "error_count": source_item.get("error_count"),
+        "stale": source_item.get("stale"),
+        "source": source_item.get("source"),
     }
+    return _apply_budget(item, growth_bytes_per_min=growth_bytes_per_min)
 
 
 def _build_growth_payload(
     current_collectors: Iterable[Mapping[str, Any]],
     previous_collectors: Iterable[Mapping[str, Any]],
+    *,
+    current_captured_at: float | None = None,
+    previous_captured_at: float | None = None,
 ) -> list[Dict[str, Any]]:
     current_map = {str(item.get("name") or ""): dict(item) for item in current_collectors}
     previous_map = {str(item.get("name") or ""): dict(item) for item in previous_collectors}
@@ -124,24 +384,100 @@ def _build_growth_payload(
         current_bytes = _coerce_int(current_item.get("bytes")) if current_item else 0
         previous_bytes = _coerce_int(previous_item.get("bytes")) if previous_item else 0
         source_item = current_item or previous_item or {}
+        elapsed_sec = (
+            max(0.001, current_captured_at - previous_captured_at)
+            if current_captured_at is not None and previous_captured_at is not None
+            else None
+        )
+        delta_bytes = current_bytes - previous_bytes
+        growth_bytes_per_min = (
+            (delta_bytes / elapsed_sec) * 60.0 if elapsed_sec is not None and delta_bytes > 0 else None
+        )
         payload.append(
-            {
-                "name": name,
-                "kind": str(source_item.get("kind") or "unknown"),
-                "exactness": str(source_item.get("exactness") or "estimated"),
-                "bytes": current_bytes,
-                "delta_bytes": current_bytes - previous_bytes,
-                "share_ratio": (current_bytes / total_current_bytes) if total_current_bytes else 0.0,
-                "items": source_item.get("items"),
-                "note": source_item.get("note"),
-            }
+            _build_growth_item(
+                name,
+                source_item,
+                current_bytes,
+                previous_bytes,
+                total_current_bytes,
+                growth_bytes_per_min=growth_bytes_per_min,
+            )
         )
 
     return sorted(
         payload,
-        key=lambda item: (int(item.get("delta_bytes") or 0), int(item.get("bytes") or 0)),
+        key=lambda item: (
+            _collector_severity_rank(item),
+            int(item.get("delta_bytes") or 0),
+            int(item.get("bytes") or 0),
+        ),
         reverse=True,
     )
+
+
+def _calc_slope_bytes_per_min(points: list[tuple[float, int]]) -> float:
+    if len(points) < _LEAK_SUSPECT_MIN_POINTS:
+        return 0.0
+    ordered_points = sorted(points, key=lambda point: point[0])
+    first_ts = ordered_points[0][0]
+    xs = [(timestamp - first_ts) / 60.0 for timestamp, _ in ordered_points]
+    ys = [float(value) for _, value in ordered_points]
+    x_mean = sum(xs) / len(xs)
+    y_mean = sum(ys) / len(ys)
+    denominator = sum((x - x_mean) ** 2 for x in xs)
+    if denominator <= 0.0:
+        return 0.0
+    numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
+    return numerator / denominator
+
+
+def _calc_monotonic_ratio(points: list[tuple[float, int]]) -> float:
+    if len(points) < 2:
+        return 0.0
+    ordered_values = [value for _, value in sorted(points, key=lambda point: point[0])]
+    comparisons = len(ordered_values) - 1
+    increases = sum(1 for previous, current in zip(ordered_values, ordered_values[1:]) if current > previous)
+    return increases / comparisons if comparisons else 0.0
+
+
+def _build_leak_suspect(
+    *,
+    name: str,
+    source: str,
+    points: list[tuple[float, int]],
+    budget: Mapping[str, Any] | None,
+) -> Dict[str, Any] | None:
+    if len(points) < _LEAK_SUSPECT_MIN_POINTS or not budget:
+        return None
+    ordered_points = sorted(points, key=lambda point: point[0])
+    baseline_bytes = max(0, int(ordered_points[0][1]))
+    latest_bytes = max(0, int(ordered_points[-1][1]))
+    if baseline_bytes <= 0:
+        return None
+    warn_growth_per_min = _coerce_optional_float(budget.get("warn_growth_per_min"))
+    if warn_growth_per_min is None or warn_growth_per_min <= 0.0:
+        return None
+    slope = _calc_slope_bytes_per_min(ordered_points)
+    monotonic_ratio = _calc_monotonic_ratio(ordered_points)
+    increase_ratio = latest_bytes / baseline_bytes
+    if (
+        slope < warn_growth_per_min
+        or monotonic_ratio < _LEAK_SUSPECT_MIN_MONOTONIC_RATIO
+        or increase_ratio < _LEAK_SUSPECT_MIN_BASELINE_RATIO
+    ):
+        return None
+    return {
+        "name": name,
+        "source": source,
+        "classification": "leak_suspect",
+        "slope_bytes_per_min": slope,
+        "monotonic_ratio": monotonic_ratio,
+        "baseline_bytes": baseline_bytes,
+        "latest_bytes": latest_bytes,
+        "increase_ratio": increase_ratio,
+        "sample_count": len(ordered_points),
+        "budget": dict(budget),
+    }
 
 
 class MemoryService:
@@ -164,6 +500,9 @@ class MemoryService:
         self._collectors: dict[str, MemoryCollector] = {}
         self._collector_cache: list[Dict[str, Any]] = []
         self._collector_cache_at: Optional[float] = None
+        self._collector_runtime_state: dict[str, Dict[str, Any]] = {}
+        self._collector_latency_warn_ms = 250.0
+        self._collector_stale_after_sec = 60.0
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -175,6 +514,8 @@ class MemoryService:
         self._latest_summary: dict[str, Any] = {}
         self._latest_summary_state: dict[str, Any] = {}
         self._latest_details_state: dict[str, Any] = {}
+        self._latest_leak_suspects: list[Dict[str, Any]] = []
+        self._last_gc_snapshot: dict[str, Any] | None = None
         self._latest_tracemalloc_diff: list[Dict[str, Any]] = []
         self._latest_capture_latency: Dict[str, Any] = {}
         self._profiler_enabled = False
@@ -304,6 +645,35 @@ class MemoryService:
         state["capture_latency"] = latency
         return state
 
+    def capture_gc_snapshot(self) -> Dict[str, Any]:
+        started_perf = time.perf_counter()
+        before = self._build_process_sample()
+        collected = {
+            "gen0": int(gc.collect(0)),
+            "gen1": int(gc.collect(1)),
+            "gen2": int(gc.collect(2)),
+        }
+        collected["total"] = collected["gen0"] + collected["gen1"] + collected["gen2"]
+        after = self._build_process_sample()
+        latency_ms = round((time.perf_counter() - started_perf) * 1000.0, 3)
+        captured_at = _coerce_optional_float(after.get("captured_at")) or time.time()
+        snapshot = {
+            "captured_at": after.get("captured_at_iso") or _utc_iso(captured_at),
+            "latency_ms": latency_ms,
+            "collected": collected,
+            "before": dict(before),
+            "after": dict(after),
+            "delta": {
+                "rss_bytes": _optional_delta(after.get("rss_bytes"), before.get("rss_bytes")),
+                "uss_bytes": _optional_delta(after.get("uss_bytes"), before.get("uss_bytes")),
+                "private_bytes": _optional_delta(after.get("private_bytes"), before.get("private_bytes")),
+            },
+        }
+        with self._state_lock:
+            self._last_gc_snapshot = snapshot
+            self._latest_details_state = self._build_details_state_locked()
+        return snapshot
+
     def get_summary_state(self) -> Dict[str, Any]:
         with self._state_lock:
             return dict(self._latest_summary_state)
@@ -311,6 +681,43 @@ class MemoryService:
     def get_details_state(self) -> Dict[str, Any]:
         with self._state_lock:
             return dict(self._latest_details_state)
+
+    def get_budget_results(self) -> Dict[str, Any]:
+        with self._state_lock:
+            items = list(self._latest_top_consumers) + list(self._latest_backend_growth)
+
+        results: dict[str, Any] = {}
+        for item in items:
+            name = str(item.get("name") or "")
+            if not name or name in results:
+                continue
+            budget = item.get("budget")
+            results[name] = {
+                "severity": item.get("severity"),
+                "severity_reasons": list(item.get("severity_reasons") or []),
+                "budget": dict(budget) if isinstance(budget, Mapping) else budget,
+                "bytes": item.get("bytes"),
+                "items": item.get("items"),
+                "items_capacity": item.get("items_capacity"),
+                "items_ratio": item.get("items_ratio"),
+                "delta_bytes": item.get("delta_bytes"),
+                "growth_bytes_per_min": item.get("growth_bytes_per_min"),
+                "source": item.get("source"),
+                "status": item.get("status"),
+            }
+        return results
+
+    def get_leak_suspects(self) -> list[Dict[str, Any]]:
+        with self._state_lock:
+            return [dict(item) for item in self._latest_leak_suspects]
+
+    def get_collector_runtime_state(self) -> Dict[str, Any]:
+        with self._state_lock:
+            return {name: dict(state) for name, state in self._collector_runtime_state.items()}
+
+    def get_last_gc_snapshot(self) -> Dict[str, Any] | None:
+        with self._state_lock:
+            return dict(self._last_gc_snapshot) if self._last_gc_snapshot else None
 
     def get_state(self) -> Dict[str, Any]:
         summary_state = self.get_summary_state()
@@ -323,15 +730,51 @@ class MemoryService:
     def build_export_payload(self, frontend_snapshot: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         summary_state = self.get_summary_state()
         details_state = self.get_details_state()
+        frontend_state = dict(frontend_snapshot or {}) if isinstance(frontend_snapshot, Mapping) else {}
         payload = {
+            "schema_version": _MEMORY_EXPORT_SCHEMA_VERSION,
+            "generated_at": _utc_iso(time.time()),
+            "runtime": self._build_export_runtime_payload(),
             "summary_state": summary_state,
             "details_state": details_state,
+            "frontend": frontend_state,
+            "analysis": self._build_export_analysis_payload(summary_state, details_state),
             **summary_state,
             **details_state,
         }
-        payload["generated_at"] = _utc_iso(time.time())
-        payload["frontend"] = dict(frontend_snapshot or {})
-        return payload
+        redacted_payload, redacted_count = _redact_sensitive(payload)
+        if not isinstance(redacted_payload, dict):
+            redacted_payload = {}
+        redacted_payload["redaction"] = {
+            "applied": True,
+            "redacted_value": _REDACTED_VALUE,
+            "redacted_fields": redacted_count,
+            "key_fragments": list(_SENSITIVE_KEY_FRAGMENTS),
+            "normalized_key_fragments": list(_SENSITIVE_NORMALIZED_KEY_FRAGMENTS),
+        }
+        return redacted_payload
+
+    def _build_export_runtime_payload(self) -> Dict[str, Any]:
+        return {
+            "pid": int(self._process.pid),
+            "python_version": sys.version,
+            "platform": platform.platform(),
+            "argv": _redact_argv(sys.argv),
+        }
+
+    def _build_export_analysis_payload(
+        self,
+        summary_state: Mapping[str, Any],
+        details_state: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "budget_results": self.get_budget_results(),
+            "leak_suspects": self.get_leak_suspects(),
+            "collector_runtime_state": self.get_collector_runtime_state(),
+            "last_gc_snapshot": self.get_last_gc_snapshot(),
+            "profiler": dict(summary_state.get("profiler") or {}),
+            "latest_tracemalloc_diff": list(details_state.get("latest_tracemalloc_diff") or []),
+        }
 
     def _loop(self) -> None:
         while not self._stop_event.wait(self._sample_interval_sec):
@@ -349,19 +792,30 @@ class MemoryService:
 
     def _apply_snapshot(self, sample: Mapping[str, Any], collectors: list[Dict[str, Any]]) -> None:
         top_consumers = sorted(collectors, key=lambda item: int(item.get("bytes") or 0), reverse=True)
+        captured_at = float(sample.get("captured_at") or time.time())
         collector_snapshot = {
-            "captured_at": float(sample.get("captured_at") or time.time()),
+            "captured_at": captured_at,
             "items": [dict(item) for item in collectors],
         }
 
         with self._state_lock:
-            previous_collectors = self._collector_history[-1]["items"] if self._collector_history else []
-            backend_growth = _build_growth_payload(collectors, previous_collectors)
+            previous_snapshot = self._collector_history[-1] if self._collector_history else None
+            previous_collectors = previous_snapshot["items"] if previous_snapshot else []
+            previous_captured_at = (
+                _coerce_optional_float(previous_snapshot.get("captured_at")) if previous_snapshot else None
+            )
+            backend_growth = _build_growth_payload(
+                collectors,
+                previous_collectors,
+                current_captured_at=captured_at,
+                previous_captured_at=previous_captured_at,
+            )
             self._history.append(dict(sample))
             self._collector_history.append(collector_snapshot)
             self._latest_summary = dict(sample)
             self._latest_top_consumers = top_consumers[:20]
             self._latest_backend_growth = backend_growth[:20]
+            self._latest_leak_suspects = self._build_leak_suspects_locked()
             self._latest_summary_state = self._build_summary_state_locked()
             self._latest_details_state = self._build_details_state_locked()
 
@@ -423,31 +877,138 @@ class MemoryService:
             and collector_cache_at is not None
             and (now - collector_cache_at) < self._profiler_collector_interval_sec
         ):
-            return collector_cache
+            return [self._refresh_collector_runtime_fields(item, now) for item in collector_cache]
 
         with self._collector_lock:
             collectors = list(self._collectors.items())
         results: list[Dict[str, Any]] = []
         for name, collector in collectors:
+            if not force:
+                cached_item = self._build_cached_collector_reuse(name, now)
+                if cached_item is not None:
+                    results.append(cached_item)
+                    continue
+
+            started_perf = time.perf_counter()
             try:
                 raw = collector()
             except Exception as exc:
-                results.append(
-                    {
-                        "name": name,
-                        "kind": "error",
-                        "exactness": "estimated",
-                        "bytes": 0,
-                        "items": None,
-                        "note": str(exc),
-                    }
-                )
+                latency_ms = round((time.perf_counter() - started_perf) * 1000.0, 3)
+                results.append(self._record_collector_error(name, exc, latency_ms, now))
                 continue
-            results.append(_normalize_collector_result(name, raw))
+            latency_ms = round((time.perf_counter() - started_perf) * 1000.0, 3)
+            normalized = _normalize_collector_result(name, raw)
+            results.append(self._record_collector_success(name, normalized, latency_ms, now))
         with self._state_lock:
             self._collector_cache = [dict(item) for item in results]
             self._collector_cache_at = now
         return results
+
+    def _record_collector_success(
+        self,
+        name: str,
+        item: Dict[str, Any],
+        latency_ms: float,
+        now: float,
+    ) -> Dict[str, Any]:
+        status = "slow" if latency_ms >= self._collector_latency_warn_ms else "ok"
+        with self._state_lock:
+            state = dict(self._collector_runtime_state.get(name, {}))
+            state["last_ok_at"] = now
+            state["last_latency_ms"] = latency_ms
+            state["last_status"] = status
+            state["last_value_at"] = now
+            item.update(self._build_collector_contract_fields(state, latency_ms, status, now, stale=False))
+            state["last_value"] = dict(item)
+            self._collector_runtime_state[name] = state
+        return item
+
+    def _record_collector_error(
+        self,
+        name: str,
+        exc: Exception,
+        latency_ms: float,
+        now: float,
+    ) -> Dict[str, Any]:
+        with self._state_lock:
+            state = dict(self._collector_runtime_state.get(name, {}))
+            state["last_error_at"] = now
+            state["error_count"] = int(state.get("error_count") or 0) + 1
+            state["last_latency_ms"] = latency_ms
+            state["last_status"] = "error"
+            stale = self._is_collector_state_stale(state, now)
+            self._collector_runtime_state[name] = state
+            return _apply_budget({
+                "name": name,
+                "kind": "error",
+                "exactness": "estimated",
+                "bytes": 0,
+                "items": None,
+                "note": _collector_error_note(exc),
+                **self._build_collector_contract_fields(state, latency_ms, "error", now, stale=stale),
+            })
+
+    def _build_cached_collector_reuse(self, name: str, now: float) -> Dict[str, Any] | None:
+        with self._state_lock:
+            state = dict(self._collector_runtime_state.get(name, {}))
+            if state.get("last_status") != "slow":
+                return None
+            last_value_at = _coerce_optional_float(state.get("last_value_at"))
+            last_value = state.get("last_value")
+            if last_value_at is None or not isinstance(last_value, Mapping):
+                return None
+            if (now - last_value_at) >= self._collector_stale_after_sec:
+                return None
+            item = dict(last_value)
+            latency_ms = _coerce_optional_float(state.get("last_latency_ms"))
+            stale = self._is_collector_state_stale(state, now)
+            item.update(self._build_collector_contract_fields(state, latency_ms, "stale", now, stale=stale))
+            item["note"] = _append_note(item.get("note"), "cached previous collector result")
+            return item
+
+    def _refresh_collector_runtime_fields(self, item: Mapping[str, Any], now: float) -> Dict[str, Any]:
+        name = str(item.get("name") or "")
+        refreshed = dict(item)
+        with self._state_lock:
+            state = dict(self._collector_runtime_state.get(name, {}))
+        if not state:
+            return refreshed
+        stale = self._is_collector_state_stale(state, now)
+        current_status = str(refreshed.get("status") or state.get("last_status") or "ok")
+        status = "stale" if stale and current_status in {"ok", "slow"} else current_status
+        latency_ms = _coerce_optional_float(refreshed.get("latency_ms"))
+        if latency_ms is None:
+            latency_ms = _coerce_optional_float(state.get("last_latency_ms"))
+        refreshed.update(self._build_collector_contract_fields(state, latency_ms, status, now, stale=stale))
+        return refreshed
+
+    def _build_collector_contract_fields(
+        self,
+        state: Mapping[str, Any],
+        latency_ms: float | None,
+        status: str,
+        now: float,
+        *,
+        stale: bool | None = None,
+    ) -> Dict[str, Any]:
+        stale_value = self._is_collector_state_stale(state, now) if stale is None else stale
+        last_ok_at = _coerce_optional_float(state.get("last_ok_at"))
+        last_error_at = _coerce_optional_float(state.get("last_error_at"))
+        return {
+            "latency_ms": round(latency_ms, 3) if latency_ms is not None else None,
+            "status": status,
+            "last_ok_at": _utc_iso(last_ok_at) if last_ok_at is not None else None,
+            "last_error_at": _utc_iso(last_error_at) if last_error_at is not None else None,
+            "error_count": int(state.get("error_count") or 0),
+            "stale": bool(stale_value),
+            "source": "backend",
+        }
+
+    def _is_collector_state_stale(self, state: Mapping[str, Any], now: float) -> bool:
+        last_ok_at = _coerce_optional_float(state.get("last_ok_at"))
+        if last_ok_at is None:
+            return False
+        return (now - last_ok_at) >= self._collector_stale_after_sec
 
     def _capture_profiler_diff(self, force: bool) -> None:
         with self._state_lock:
@@ -542,6 +1103,52 @@ class MemoryService:
             "detail_refresh_interval_sec": self._profiler_collector_interval_sec,
         }
 
+    def _build_leak_suspects_locked(self) -> list[Dict[str, Any]]:
+        suspects: list[Dict[str, Any]] = []
+        for field in ("rss_bytes", "uss_bytes", "private_bytes"):
+            points = [
+                (float(sample.get("captured_at") or 0.0), _coerce_int(sample.get(field)))
+                for sample in self._history
+                if sample.get(field) is not None
+            ]
+            suspect = _build_leak_suspect(
+                name=f"process.{field}",
+                source="process",
+                points=points,
+                budget=DEFAULT_MEMORY_BUDGETS.get(f"process.{field}"),
+            )
+            if suspect is not None:
+                suspects.append(suspect)
+
+        collector_points: dict[str, list[tuple[float, int]]] = {}
+        for snapshot in self._collector_history:
+            captured_at = _coerce_optional_float(snapshot.get("captured_at"))
+            if captured_at is None:
+                continue
+            for item in snapshot.get("items") or []:
+                if not isinstance(item, Mapping):
+                    continue
+                name = str(item.get("name") or "")
+                if not name:
+                    continue
+                collector_points.setdefault(name, []).append((captured_at, _coerce_int(item.get("bytes"))))
+
+        for name, points in collector_points.items():
+            suspect = _build_leak_suspect(
+                name=name,
+                source="collector",
+                points=points,
+                budget=DEFAULT_MEMORY_BUDGETS.get(name),
+            )
+            if suspect is not None:
+                suspects.append(suspect)
+
+        return sorted(
+            suspects,
+            key=lambda item: (float(item.get("slope_bytes_per_min") or 0.0), int(item.get("latest_bytes") or 0)),
+            reverse=True,
+        )
+
     def _build_summary_state_locked(self) -> Dict[str, Any]:
         return {
             "summary": dict(self._latest_summary),
@@ -555,6 +1162,8 @@ class MemoryService:
             "backend_top_consumers": list(self._latest_top_consumers),
             "backend_growth": list(self._latest_backend_growth),
             "collector_history": list(self._collector_history),
+            "leak_suspects": list(self._latest_leak_suspects),
+            "latest_gc_snapshot": dict(self._last_gc_snapshot) if self._last_gc_snapshot else None,
             "latest_tracemalloc_diff": list(self._latest_tracemalloc_diff),
             "capture_latency": dict(self._latest_capture_latency),
         }

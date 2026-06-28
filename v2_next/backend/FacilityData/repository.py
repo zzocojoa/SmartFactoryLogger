@@ -280,6 +280,12 @@ class CSVLoggerService:
         self._logpath_warned = False
         self._buffer_size = 0
         self._last_batch_size = 0
+        self._drop_count = 0
+        self._last_drop_at: Optional[float] = None
+        self._last_enqueue_at: Optional[float] = None
+        self._last_write_at: Optional[float] = None
+        self._payload_bytes_ema: Optional[float] = None
+        self._runtime_lock = threading.Lock()
         self._sample_seq = 0
         self.logger_service_instance_id = str(uuid4())
         self.logger_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -317,10 +323,27 @@ class CSVLoggerService:
     def enqueue(self, data: FactoryData) -> None:
         if not self.running:
             return
+        payload_bytes = self._estimate_factory_data_bytes(data)
+        now = time.time()
+        with self._runtime_lock:
+            self._last_enqueue_at = now
+            if self._payload_bytes_ema is None:
+                self._payload_bytes_ema = float(payload_bytes)
+            else:
+                self._payload_bytes_ema = (self._payload_bytes_ema * 0.8) + (float(payload_bytes) * 0.2)
         try:
             self.queue.put_nowait(data)
         except queue.Full:
+            with self._runtime_lock:
+                self._drop_count += 1
+                self._last_drop_at = time.time()
             self.logger.warning("CSV log queue full. Dropping data.")
+
+    def _estimate_factory_data_bytes(self, data: FactoryData) -> int:
+        try:
+            return max(0, len(data.model_dump_json()) * 2)
+        except Exception:
+            return 1024
 
     def apply_config(
         self,
@@ -1613,6 +1636,7 @@ class CSVLoggerService:
             return False
         writer.writerows([row for row, _ in rows])
         handle.flush()
+        self._mark_write_completed()
         return True
 
     def _flush_v2_buffer(
@@ -1628,7 +1652,12 @@ class CSVLoggerService:
             return False
         writer.writerows([row for row, _ in rows])
         handle.flush()
+        self._mark_write_completed()
         return True
+
+    def _mark_write_completed(self) -> None:
+        with self._runtime_lock:
+            self._last_write_at = time.time()
 
     def _close_file(self, handle: Optional[object]) -> None:
         if handle is None:
@@ -1645,8 +1674,29 @@ class CSVLoggerService:
             log_path = str(self.active_log_dir)
             csv_v2_enabled = self.csv_v2_enabled
             csv_v2_operational_fields_enabled = self.csv_v2_operational_fields_enabled
+        queue_size = self.queue.qsize()
+        queue_maxsize = self.queue.maxsize
+        with self._runtime_lock:
+            drop_count = self._drop_count
+            last_drop_at = self._last_drop_at
+            last_enqueue_at = self._last_enqueue_at
+            last_write_at = self._last_write_at
+            payload_bytes_ema = self._payload_bytes_ema
+        now = time.time()
+        queue_ratio = queue_size / queue_maxsize if queue_maxsize > 0 else 0.0
+        writer_lag_sec = (now - last_write_at) if last_write_at is not None else None
+        estimated_queue_bytes = int(queue_size * payload_bytes_ema) if payload_bytes_ema is not None else 0
         return {
-            "queue_size": self.queue.qsize(),
+            "queue_size": queue_size,
+            "queue_maxsize": queue_maxsize,
+            "queue_ratio": queue_ratio,
+            "drop_count": drop_count,
+            "last_drop_at": last_drop_at,
+            "last_enqueue_at": last_enqueue_at,
+            "last_write_at": last_write_at,
+            "writer_lag_sec": writer_lag_sec,
+            "payload_bytes_ema": payload_bytes_ema,
+            "estimated_queue_bytes": estimated_queue_bytes,
             "buffer_size": self._buffer_size,
             "last_batch_size": self._last_batch_size,
             "running": self.running,
