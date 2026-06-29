@@ -1,12 +1,27 @@
 import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FactoryData, HealthSnapshot, StatsSnapshot } from '../../../../shared/types';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import type { StatusPanelSource } from '../../hooks/useStatusPanel';
 import type { DashboardHeaderProps } from './DashboardHeader';
 import { DashboardHeader } from './DashboardHeader';
+
+const appCss = readFileSync(resolve(process.cwd(), 'src/App.css'), 'utf8');
+
+const getCssRuleBody = (selector: string): string => {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = appCss.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+
+  if (!match) {
+    throw new Error(`CSS rule not found: ${selector}`);
+  }
+
+  return match[1];
+};
 
 const buildHealthSnapshot = (): HealthSnapshot => ({
   running: true,
@@ -184,6 +199,7 @@ describe('DashboardHeader mobile header', () => {
     const drawerScope = within(drawer);
 
     expect(drawerScope.getByText('창녕 2호기 Smart Factory')).toBeInTheDocument();
+    expect(drawerScope.getByText('Status details')).toBeInTheDocument();
     expect(drawerScope.getByText('Running')).toBeInTheDocument();
     expect(drawerScope.getByText('Last')).toBeInTheDocument();
     expect(drawerScope.getByText('Avg')).toBeInTheDocument();
@@ -192,6 +208,46 @@ describe('DashboardHeader mobile header', () => {
     expect(drawerScope.getByText('EX OK')).toBeInTheDocument();
     expect(drawerScope.getByText('LS OK')).toBeInTheDocument();
     expect(drawerScope.getByText('SPOT OK')).toBeInTheDocument();
+  });
+
+  it('keeps diagnostics out of the topbar while grouping drawer commands', () => {
+    const { container } = render(<DashboardHeader {...buildProps({ menuOpen: true })} />);
+
+    const topbarCommands = container.querySelector('.header-command-group');
+    expect(topbarCommands).not.toBeNull();
+    expect(container.querySelector('.header-command-group > .status-actions')).not.toBeInTheDocument();
+    expect(container.querySelector('.header-controls .status-meta')).not.toBeInTheDocument();
+
+    const drawer = container.querySelector('#dashboard-menu-drawer');
+    expect(drawer).not.toBeNull();
+    const drawerScope = within(drawer as HTMLElement);
+
+    expect(drawerScope.getByText('Commands')).toBeInTheDocument();
+    expect(drawerScope.getByRole('button', { name: 'Reconnect' })).toBeInTheDocument();
+    expect(drawerScope.getByRole('button', { name: 'Diagnosis' })).toBeInTheDocument();
+  });
+
+  it('keeps overflow drawer details visible outside compact media queries', () => {
+    expect(getCssRuleBody('.mobile-menu-details')).toMatch(/display:\s*flex/);
+    expect(getCssRuleBody('.mobile-menu-details')).not.toMatch(/display:\s*none/);
+    expect(getCssRuleBody('.header-overflow-section')).toMatch(/display:\s*flex/);
+    expect(appCss).toMatch(
+      /@media \(max-width: 520px\)[\s\S]*\.status-comm \.status-comm-item:not\(\.status-comm-summary\)\s*\{[\s\S]*display:\s*none/
+    );
+    expect(appCss).toMatch(
+      /@media \(max-width: 520px\)[\s\S]*\.status-comm-summary\s*\{[\s\S]*display:\s*inline-flex/
+    );
+  });
+
+  it('clips operator alert decoration without restoring global scene overflow clipping', () => {
+    const alertGlowRule = getCssRuleBody('.operator-card-alert-glow');
+
+    expect(alertGlowRule).toMatch(/inset:\s*0/);
+    expect(alertGlowRule).toMatch(/overflow:\s*hidden/);
+    expect(alertGlowRule).toMatch(/contain:\s*paint/);
+    expect(appCss).not.toMatch(
+      /\.App:not\(\.layout-editing\)\s+\.scene-container\s*\{[^}]*overflow-x:\s*hidden/
+    );
   });
 
   it('shows a required operator metadata indicator when the latest sample is invalid', () => {
@@ -226,8 +282,8 @@ describe('DashboardHeader mobile header', () => {
     render(<DashboardHeader {...buildProps({ menuOpen: true })} />);
 
     expect(screen.getAllByRole('button', { name: 'Snapshot' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Reconnect' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Diagnosis' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Reconnect' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Diagnosis' })).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: '알림' })).toHaveLength(2);
   });
 

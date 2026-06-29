@@ -107,6 +107,34 @@ const getMobileCommLabel = (badge: CommBadge): string => {
   return badge.key || badge.text.split(' ')[0] || badge.text;
 };
 
+const getCommSummary = (
+  badges: CommBadge[]
+): { text: string; title: string; state: CommBadge['state'] } => {
+  if (badges.length === 0) {
+    return { text: 'Comm --', title: 'No communication status', state: 'idle' };
+  }
+
+  const errorCount = badges.filter((badge) => badge.state === 'error').length;
+  const warnCount = badges.filter((badge) => badge.state === 'warn').length;
+  const idleCount = badges.filter((badge) => badge.state === 'idle').length;
+  const issueCount = errorCount + warnCount + idleCount;
+  let state: CommBadge['state'] = 'ok';
+
+  if (errorCount > 0) {
+    state = 'error';
+  } else if (warnCount > 0) {
+    state = 'warn';
+  } else if (idleCount > 0) {
+    state = 'idle';
+  }
+
+  return {
+    text: issueCount === 0 ? 'Comm OK' : `Comm ${issueCount}!`,
+    title: badges.map((badge) => badge.text).join(' | '),
+    state,
+  };
+};
+
 export interface DashboardHeaderProps {
   activeCycle: string;
   appTitle?: string;
@@ -243,6 +271,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     dataPollingIntervalMs,
     dataPollingFailureCount,
   });
+  const commSummary = getCommSummary(commBadges);
 
   useEffect(() => {
     const tick = window.setInterval(() => setNowTick(Date.now()), STATUS_PANEL_TICK_MS);
@@ -433,84 +462,58 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
         <h1>{appTitle}</h1>
       </div>
       <div className="header-controls">
-        <div className="status-panel" title={statusTitle}>
-          <div className={`status-badge ${statusClass}`}>{statusLabel}</div>
-          <div className="status-meta">
-            <span className="status-meta-item">
-              <span className="status-meta-label">Last</span>
-              <span className="status-meta-value">{lastUpdateText}</span>
-            </span>
-            <span className="status-meta-item">
-              <span className="status-meta-label">Avg</span>
-              <span className="status-meta-value">{avgLatencyText}</span>
-            </span>
-            <span className="status-meta-item">
-              <span className="status-meta-label">Errors</span>
-              <span className="status-meta-value">{errorCountText}</span>
-            </span>
-            <span className="status-meta-item" title={errorQueueTitle}>
-              <span className="status-meta-label">ErrQ</span>
-              <span className="status-meta-value">{errorQueueText}</span>
-            </span>
-          </div>
-          {commBadges.length > 0 && (
-            <div className="status-comm">
-              {commBadges.map((badge) => (
+        <div className="header-status-summary">
+          <div className="status-panel" title={statusTitle}>
+            <div className={`status-badge ${statusClass}`}>{statusLabel}</div>
+            {commBadges.length > 0 && (
+              <div className="status-comm" aria-label="Communication status summary">
+                {commBadges.map((badge) => (
+                  <span
+                    key={badge.key}
+                    className={`status-comm-item ${badge.state}`}
+                    title={badge.title}
+                    aria-label={badge.text}
+                  >
+                    <span className="status-comm-label-full">{badge.text}</span>
+                    <span className="status-comm-label-mobile" aria-hidden="true">{getMobileCommLabel(badge)}</span>
+                  </span>
+                ))}
                 <span
-                  key={badge.key}
-                  className={`status-comm-item ${badge.state}`}
-                  title={badge.title}
-                  aria-label={badge.text}
+                  className={`status-comm-summary status-comm-item ${commSummary.state}`}
+                  title={commSummary.title}
+                  aria-label={commSummary.title}
                 >
-                  <span className="status-comm-label-full">{badge.text}</span>
-                  <span className="status-comm-label-mobile" aria-hidden="true">{getMobileCommLabel(badge)}</span>
+                  {commSummary.text}
                 </span>
-              ))}
+              </div>
+            )}
+          </div>
+
+          {hasOperatorMetadataSample && (
+            <div
+              className={`operator-required-indicator ${operatorMetadataNeedsAttention ? 'attention' : 'ok'}`}
+              aria-label={operatorMetadataNeedsAttention ? 'Operator metadata required' : 'Operator metadata applied'}
+              title={operatorMetadataNeedsAttention ? '작업 정보 필수값을 확인하세요.' : '작업 정보 필수값이 적용되어 있습니다.'}
+            >
+              <span className="operator-required-dot" aria-hidden="true" />
+              <span className="operator-required-indicator-label">{operatorMetadataIndicatorLabel}</span>
             </div>
           )}
         </div>
 
-        {hasOperatorMetadataSample && (
-          <div
-            className={`operator-required-indicator ${operatorMetadataNeedsAttention ? 'attention' : 'ok'}`}
-            aria-label={operatorMetadataNeedsAttention ? 'Operator metadata required' : 'Operator metadata applied'}
-            title={operatorMetadataNeedsAttention ? '작업 정보 필수값을 확인하세요.' : '작업 정보 필수값이 적용되어 있습니다.'}
-          >
-            <span className="operator-required-dot" aria-hidden="true" />
-            <span className="operator-required-indicator-label">{operatorMetadataIndicatorLabel}</span>
+        <div className="header-command-group">
+          <div className="snapshot-control">
+            <button
+              className={`status-action snapshot-action ${snapshotLoading ? 'loading' : ''}`}
+              onClick={handleSnapshot}
+              disabled={snapshotLoading}
+              aria-disabled={snapshotLoading}
+              aria-label="Snapshot"
+              title={settingsForm?.snapshotPath ? `Save to: ${settingsForm.snapshotPath}` : 'Snapshot'}
+            >
+              <span className="snapshot-action-label">Snapshot</span>
+            </button>
           </div>
-        )}
-
-        <div className="snapshot-control">
-          <button
-            className={`status-action ${snapshotLoading ? 'loading' : ''}`}
-            onClick={handleSnapshot}
-            disabled={snapshotLoading}
-            aria-disabled={snapshotLoading}
-            title={settingsForm?.snapshotPath ? `Save to: ${settingsForm.snapshotPath}` : 'Snapshot'}
-          >
-            Snapshot
-          </button>
-        </div>
-
-        <div className="status-actions">
-          <button
-            className="status-action"
-            onClick={handleReconnect}
-            disabled={reconnectBusy}
-            aria-disabled={reconnectBusy}
-          >
-            Reconnect
-          </button>
-          <button
-            className="status-action"
-            onClick={handleDiagnosis}
-            disabled={diagnosisBusy}
-            aria-disabled={diagnosisBusy}
-          >
-            Diagnosis
-          </button>
-        </div>
 
         <button
           className="notify-bell"
@@ -542,76 +545,82 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           )}
           <div
             id="dashboard-menu-drawer"
-            className={`menu-dropdown ${menuOpen ? 'open' : ''}`}
+            className={`menu-dropdown header-overflow-panel ${menuOpen ? 'open' : ''}`}
             role="region"
             aria-label="상세 메뉴"
             aria-hidden={!menuOpen}
             hidden={!menuOpen}
           >
             <div className="mobile-menu-details" aria-label="모바일 상세 상태">
-              <div className="mobile-menu-title">{appTitle}</div>
-              <div className="mobile-menu-status">
-                <span className={`status-badge ${statusClass}`}>{statusLabel}</span>
-              </div>
-              <div className="mobile-menu-metrics">
-                <span>
-                  <span className="mobile-menu-metric-label">Last</span>
-                  <span className="mobile-menu-metric-value">{lastUpdateText}</span>
-                </span>
-                <span>
-                  <span className="mobile-menu-metric-label">Avg</span>
-                  <span className="mobile-menu-metric-value">{avgLatencyText}</span>
-                </span>
-                <span>
-                  <span className="mobile-menu-metric-label">Errors</span>
-                  <span className="mobile-menu-metric-value">{errorCountText}</span>
-                </span>
-                <span title={errorQueueTitle}>
-                  <span className="mobile-menu-metric-label">ErrQ</span>
-                  <span className="mobile-menu-metric-value">{errorQueueText}</span>
-                </span>
-              </div>
-              {commBadges.length > 0 && (
-                <div className="mobile-menu-comm">
-                  {commBadges.map((badge) => (
-                    <span key={badge.key} className={`status-comm-item ${badge.state}`} title={badge.title}>
-                      {badge.text}
-                    </span>
-                  ))}
+              <div className="header-overflow-section">
+                <div className="menu-section-title">Status details</div>
+                <div className="mobile-menu-title">{appTitle}</div>
+                <div className="mobile-menu-status">
+                  <span className={`status-badge ${statusClass}`}>{statusLabel}</span>
                 </div>
-              )}
-              <div className="mobile-menu-actions">
-                <button
-                  className="menu-item"
-                  onClick={handleSnapshot}
-                  disabled={snapshotLoading}
-                  aria-disabled={snapshotLoading}
-                >
-                  Snapshot
-                </button>
-                <button
-                  className="menu-item"
-                  onClick={handleReconnect}
-                  disabled={reconnectBusy}
-                  aria-disabled={reconnectBusy}
-                >
-                  Reconnect
-                </button>
-                <button
-                  className="menu-item"
-                  onClick={handleDiagnosis}
-                  disabled={diagnosisBusy}
-                  aria-disabled={diagnosisBusy}
-                >
-                  Diagnosis
-                </button>
-                <button
-                  className="menu-item"
-                  onClick={handleToggleMobileNotifications}
-                  aria-pressed={notificationsOpen}
-                >
-                  알림{unreadCount > 0 ? ` ${unreadCount}` : ''}
-                </button>
+                <div className="mobile-menu-metrics">
+                  <span>
+                    <span className="mobile-menu-metric-label">Last</span>
+                    <span className="mobile-menu-metric-value">{lastUpdateText}</span>
+                  </span>
+                  <span>
+                    <span className="mobile-menu-metric-label">Avg</span>
+                    <span className="mobile-menu-metric-value">{avgLatencyText}</span>
+                  </span>
+                  <span>
+                    <span className="mobile-menu-metric-label">Errors</span>
+                    <span className="mobile-menu-metric-value">{errorCountText}</span>
+                  </span>
+                  <span title={errorQueueTitle}>
+                    <span className="mobile-menu-metric-label">ErrQ</span>
+                    <span className="mobile-menu-metric-value">{errorQueueText}</span>
+                  </span>
+                </div>
+                {commBadges.length > 0 && (
+                  <div className="mobile-menu-comm">
+                    {commBadges.map((badge) => (
+                      <span key={badge.key} className={`status-comm-item ${badge.state}`} title={badge.title}>
+                        {badge.text}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="header-overflow-section">
+                <div className="menu-section-title">Commands</div>
+                <div className="mobile-menu-actions">
+                  <button
+                    className="menu-item"
+                    onClick={handleSnapshot}
+                    disabled={snapshotLoading}
+                    aria-disabled={snapshotLoading}
+                  >
+                    Snapshot
+                  </button>
+                  <button
+                    className="menu-item"
+                    onClick={handleReconnect}
+                    disabled={reconnectBusy}
+                    aria-disabled={reconnectBusy}
+                  >
+                    Reconnect
+                  </button>
+                  <button
+                    className="menu-item"
+                    onClick={handleDiagnosis}
+                    disabled={diagnosisBusy}
+                    aria-disabled={diagnosisBusy}
+                  >
+                    Diagnosis
+                  </button>
+                  <button
+                    className="menu-item"
+                    onClick={handleToggleMobileNotifications}
+                    aria-pressed={notificationsOpen}
+                  >
+                    알림{unreadCount > 0 ? ` ${unreadCount}` : ''}
+                  </button>
+                </div>
               </div>
               <div className="menu-divider" />
             </div>
@@ -831,6 +840,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                 Auto
               </button>
             </div>
+          </div>
           </div>
         </div>
       </div>
