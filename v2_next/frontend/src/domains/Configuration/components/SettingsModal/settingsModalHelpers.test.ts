@@ -293,6 +293,56 @@ describe('buildObservabilitySummary', () => {
     );
   });
 
+  it('surfaces the dominant 5xx polling route in the HTTP summary', () => {
+    const summary = buildObservabilitySummary({
+      health: null,
+      stats: {
+        uptime_sec: 60,
+        total_requests: 24,
+        avg_latency_ms: 12,
+        error_count: 3,
+        total_http_5xx_count: 3,
+        last: { latency_ms: 10, path: '/api/spot/live_image', status: 503, timestamp: 1 },
+        window: {
+          window_sec: 60,
+          request_count: 24,
+          error_count: 3,
+          http_error_count: 3,
+          http_5xx_count: 3,
+          error_rate: 0.125,
+          avg_latency_ms: 12,
+          p95_latency_ms: 20,
+        },
+        polling: {
+          window_sec: 60,
+          paths: {
+            '/api/spot/live_image': {
+              count: 20,
+              requests_per_sec: 0.333,
+              avg_latency_ms: 9,
+              error_rate: 0.15,
+              http_4xx_count: 0,
+              http_5xx_count: 3,
+              unique_clients: 1,
+              top_clients: [{ client: '127.0.0.1', count: 20 }],
+            },
+          },
+        },
+      },
+      observabilityErrors: null,
+      backendMemoryDetails: emptyMemoryDetails(),
+      frontendMemory: null,
+      memoryBusy: false,
+      frontErrorCount: 0,
+      spotImageError: null,
+    });
+
+    const httpCard = summary.cards.find((card) => card.key === 'http');
+
+    expect(httpCard?.evidence).toContain('route /api/spot/live_image 3건');
+    expect(httpCard?.action).toBe('5xx 발생 route를 기준으로 SPOT live/proxy 또는 해당 API handler를 확인.');
+  });
+
   it('parses CSV collector queue drop and lag evidence', () => {
     const summary = buildObservabilitySummary({
       health: null,

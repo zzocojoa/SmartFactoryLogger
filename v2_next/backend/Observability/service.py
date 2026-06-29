@@ -46,6 +46,7 @@ _SUMMARY_ONLY_PATH_PREFIXES = (
 
 
 _PERFORMANCE_CONTRACT_VERSION = "1.0"
+_ERROR_SUMMARY_LIMIT = 12
 
 
 def _performance_thresholds() -> Dict[str, Any]:
@@ -100,6 +101,34 @@ def _p95(values: List[float]) -> Optional[float]:
     idx = int(math.ceil(0.95 * len(values_sorted))) - 1
     idx = max(0, min(idx, len(values_sorted) - 1))
     return float(values_sorted[idx])
+
+
+def _coerce_status_code(value: Optional[int]) -> Optional[int]:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        status_code = int(value)
+    except (TypeError, ValueError):
+        return None
+    return status_code if status_code > 0 else None
+
+
+def _summary_key(value: Any, fallback: str = "unknown") -> str:
+    text = str(value if value is not None else fallback).strip()
+    if not text:
+        return fallback
+    return text[:160]
+
+
+def _increment_count(target: Dict[str, int], key: str, count: int = 1) -> None:
+    target[key] = target.get(key, 0) + max(1, int(count))
+
+
+def _top_counts(source: Dict[str, int], limit: int = _ERROR_SUMMARY_LIMIT) -> List[Dict[str, Any]]:
+    return [
+        {"key": key, "count": int(count)}
+        for key, count in sorted(source.items(), key=lambda item: (-item[1], item[0]))[:limit]
+    ]
 
 
 class ObservabilityService:
@@ -266,14 +295,24 @@ class ObservabilityService:
         elif level == "info":
             log_method = self._logger.info
 
+        source = _summary_key(entry.get("source"))
+        path = _summary_key(entry.get("path"), "none")
+        status = _summary_key(entry.get("status_code"), "none")
+        error_type = _summary_key(entry.get("error_type"), "none")
         log_method(
-            "Observability error recorded",
+            "Observability error recorded source=%s status=%s type=%s path=%s",
+            source,
+            status,
+            error_type,
+            path,
             extra={
                 "error_source": entry.get("source"),
                 "error_message": entry.get("message"),
                 "error_detail": entry.get("detail"),
                 "error_path": entry.get("path"),
                 "error_level": entry.get("level"),
+                "error_status_code": entry.get("status_code"),
+                "error_type": entry.get("error_type"),
                 "error_repeat": entry.get("repeat"),
                 "error_time": entry.get("time"),
             },
@@ -287,6 +326,8 @@ class ObservabilityService:
         detail: Optional[str] = None,
         path: Optional[str] = None,
         level: str = "error",
+        status_code: Optional[int] = None,
+        error_type: Optional[str] = None,
     ) -> None:
         now = time.time()
         entry = {
@@ -297,6 +338,8 @@ class ObservabilityService:
             "detail": detail,
             "path": path,
             "level": level,
+            "status_code": _coerce_status_code(status_code),
+            "error_type": error_type,
             "repeat": 1,
         }
         log_entry = entry
@@ -306,6 +349,9 @@ class ObservabilityService:
                 if (
                     last.get("source") == source
                     and last.get("message") == message
+                    and last.get("path") == path
+                    and last.get("status_code") == entry["status_code"]
+                    and last.get("error_type") == error_type
                     and now - float(last.get("time", 0)) <= 5.0
                 ):
                     last["time"] = now
@@ -315,6 +361,10 @@ class ObservabilityService:
                         last["detail"] = detail
                     if path:
                         last["path"] = path
+                    if entry["status_code"] is not None:
+                        last["status_code"] = entry["status_code"]
+                    if error_type:
+                        last["error_type"] = error_type
                     log_entry = dict(last)
                     self._log_error_event(log_entry)
                     return
@@ -476,6 +526,8 @@ class ObservabilityService:
                 "requests_per_sec": round(count / self.window_sec, 3) if self.window_sec else 0.0,
                 "avg_latency_ms": round(float(entry["latency_total_ms"]) / count, 3),
                 "error_rate": (error_count / count) if count else None,
+                "http_4xx_count": int(entry["http_4xx_count"]),
+                "http_5xx_count": int(entry["http_5xx_count"]),
                 "unique_clients": len(clients),
                 "top_clients": [
                     {
@@ -504,17 +556,46 @@ class ObservabilityService:
         with self._lock:
             last = self._errors[-1] if self._errors else None
             queue_size = len(self._errors)
+            repeat_total = 0
             source_counts: Dict[str, int] = {}
+            source_repeat_counts: Dict[str, int] = {}
+            type_counts: Dict[str, int] = {}
+            message_counts: Dict[str, int] = {}
+            status_counts: Dict[str, int] = {}
+            path_counts: Dict[str, int] = {}
+            route_status_counts: Dict[str, int] = {}
             for item in self._errors:
+                repeat = max(1, int(item.get("repeat") or 1))
+                repeat_total += repeat
                 source = str(item.get("source") or "unknown")
                 source_counts[source] = source_counts.get(source, 0) + 1
+                _increment_count(source_repeat_counts, _summary_key(source), repeat)
+                _increment_count(type_counts, _summary_key(item.get("error_type")), repeat)
+                _increment_count(message_counts, _summary_key(item.get("message")), repeat)
+                status_key = _summary_key(item.get("status_code"), "none")
+                _increment_count(status_counts, status_key, repeat)
+                path_key = _summary_key(item.get("path"), "none")
+                _increment_count(path_counts, path_key, repeat)
+                _increment_count(route_status_counts, f"{path_key} {status_key}", repeat)
         return {
             "queue_size": queue_size,
+            "repeat_total": repeat_total,
             "last_error_at": last.get("time") if last else None,
             "last_error_source": last.get("source") if last else None,
             "last_error_message": last.get("message") if last else None,
             "last_error_repeat": last.get("repeat") if last else None,
             "source_counts": source_counts,
+            "source_repeat_counts": source_repeat_counts,
+            "type_counts": type_counts,
+            "status_counts": status_counts,
+            "path_counts": path_counts,
+            "route_status_counts": route_status_counts,
+            "top_sources": _top_counts(source_repeat_counts),
+            "top_types": _top_counts(type_counts),
+            "top_messages": _top_counts(message_counts),
+            "top_statuses": _top_counts(status_counts),
+            "top_paths": _top_counts(path_counts),
+            "top_route_statuses": _top_counts(route_status_counts),
         }
 
     def get_error_summary(self) -> Dict[str, Any]:

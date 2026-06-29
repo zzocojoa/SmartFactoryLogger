@@ -1198,6 +1198,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail["diagnostics"], diagnostics)
         self.assertEqual(exception.headers, {"Retry-After": "3", "X-Spot-Retry-After-Ms": "2001"})
         record_mock.assert_called_once()
+        _, record_kwargs = record_mock.call_args
+        self.assertEqual(record_kwargs["path"], "/api/spot/proxy_image")
+        self.assertEqual(record_kwargs["status_code"], 502)
+        self.assertEqual(record_kwargs["error_type"], "upstream-timeout")
+        self.assertNotIn("spot.local", record_kwargs["detail"])
+        self.assertNotIn("diagnostics", record_kwargs["detail"])
 
     async def test_proxy_image_backoff_error_returns_503_with_retry_headers(self) -> None:
         from backend import app as backend_app
@@ -1233,7 +1239,13 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detail["diagnostics"]["proxy_state"], "backoff")
         self.assertEqual(detail["diagnostics"]["retry_after_sec"], 2.001)
         self.assertEqual(exception.headers, {"Retry-After": "3", "X-Spot-Retry-After-Ms": "2001"})
-        record_mock.assert_not_called()
+        record_mock.assert_called_once()
+        _, record_kwargs = record_mock.call_args
+        self.assertEqual(record_kwargs["path"], "/api/spot/proxy_image")
+        self.assertEqual(record_kwargs["status_code"], 503)
+        self.assertEqual(record_kwargs["error_type"], "retry-backoff-active")
+        self.assertNotIn("spot.local", record_kwargs["detail"])
+        self.assertNotIn("diagnostics", record_kwargs["detail"])
 
     async def test_proxy_image_payload_rejection_response_includes_payload_rejection_header(self) -> None:
         from backend import app as backend_app
@@ -1341,6 +1353,40 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend_app._stats_error_count, original_error_count + 1)
         self.assertEqual(backend_app._stats_last_status, 500)
 
+    async def test_request_stats_records_generic_api_5xx_route_status_and_type(self) -> None:
+        from backend import app as backend_app
+        from starlette.requests import Request as StarletteRequest
+        from starlette.responses import Response as StarletteResponse
+
+        request = StarletteRequest(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/memory/export/open-file",
+                "headers": [],
+                "client": ("testclient", 50000),
+                "scheme": "http",
+                "server": ("testserver", 80),
+                "query_string": b"",
+            }
+        )
+        record_mock: Mock = Mock()
+
+        async def return_service_unavailable(_: object) -> StarletteResponse:
+            return StarletteResponse(status_code=503)
+
+        with patch.object(backend_app.observability_service, "record_error", record_mock):
+            response = await backend_app.record_request_stats(request, return_service_unavailable)
+
+        self.assertEqual(response.status_code, 503)
+        record_mock.assert_called_once_with(
+            "api",
+            "HTTP 503",
+            path="/api/memory/export/open-file",
+            status_code=503,
+            error_type="http_5xx",
+        )
+
     async def test_proxy_image_forbidden_and_unauthorized_are_counted_as_request_errors(self) -> None:
         from backend import app as backend_app
 
@@ -1428,8 +1474,58 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(live_stats["count"], 3)
         self.assertEqual(live_stats["success_count"], 2)
         self.assertEqual(live_stats["failure_count"], 1)
+        self.assertEqual(live_stats["http_5xx_count"], 1)
         self.assertEqual(live_stats["stale_count"], 1)
         self.assertEqual(live_stats["avg_age_sec"], 0.5)
+
+    def test_error_summary_groups_source_type_status_path_and_repeat(self) -> None:
+        from backend.Observability.service import ObservabilityService
+
+        service = ObservabilityService(window_sec=60.0, max_requests=100, max_errors=20)
+
+        service.record_error(
+            "spot_live_image",
+            "SPOT live image retry backoff active",
+            path="/api/spot/live_image",
+            status_code=503,
+            error_type="live-backoff-active",
+        )
+        service.record_error(
+            "spot_live_image",
+            "SPOT live image retry backoff active",
+            path="/api/spot/live_image",
+            status_code=503,
+            error_type="live-backoff-active",
+        )
+
+        summary = service.get_error_summary()
+
+        self.assertEqual(summary["queue_size"], 1)
+        self.assertEqual(summary["repeat_total"], 2)
+        self.assertEqual(summary["source_repeat_counts"]["spot_live_image"], 2)
+        self.assertEqual(summary["type_counts"]["live-backoff-active"], 2)
+        self.assertEqual(summary["status_counts"]["503"], 2)
+        self.assertEqual(summary["path_counts"]["/api/spot/live_image"], 2)
+        self.assertEqual(summary["route_status_counts"]["/api/spot/live_image 503"], 2)
+
+    def test_error_log_message_includes_sanitized_route_status_and_type(self) -> None:
+        from backend.Observability.service import ObservabilityService
+
+        service = ObservabilityService(window_sec=60.0, max_requests=100, max_errors=20)
+
+        with self.assertLogs("SmartFactoryLoggerV2", level="ERROR") as captured:
+            service.record_error(
+                "api",
+                "HTTP 503",
+                path="/api/memory/export/open-file",
+                status_code=503,
+                error_type="http_5xx",
+            )
+
+        self.assertIn(
+            "Observability error recorded source=api status=503 type=http_5xx path=/api/memory/export/open-file",
+            "\n".join(captured.output),
+        )
 
     async def test_live_image_endpoint_returns_jpeg_with_no_store_headers(self) -> None:
         from backend import app as backend_app
@@ -1467,6 +1563,292 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "upstream")
         self.assertEqual(response.headers.get("X-Spot-Live-Image-Age"), "0.000")
         record_mock.assert_called_once_with(200, 0.0, False)
+
+    def test_live_image_backoff_with_stale_cache_returns_200_stale_response(self) -> None:
+        from backend import app as backend_app
+
+        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        stale_bytes = b"\xff\xd8stale-live-frame\xff\xd9"
+        spot_api._live_img_cache = {
+            "data": stale_bytes,
+            "time": time.time() - 2.0,
+            "url": "http://spot.local/live.jpg",
+        }
+        spot_api._live_img_failure_count = 1
+        spot_api._record_live_image_error("upstream-timeout", "timeout", "http://spot.local/live.jpg")
+        spot_api._record_live_image_backoff(1.25)
+        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
+        record_error_mock: Mock = Mock()
+        record_result_mock: Mock = Mock()
+
+        with (
+            patch.object(spot_api, "_request_spot_image", request_mock),
+            patch.object(backend_app.observability_service, "record_error", record_error_mock),
+            patch.object(backend_app.observability_service, "record_spot_live_image_result", record_result_mock),
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/live_image")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, stale_bytes)
+        self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "stale-cache")
+        self.assertEqual(response.headers.get("X-SFL-Image-Source"), "stale-cache")
+        self.assertEqual(response.headers.get("X-SFL-Image-Stale"), "true")
+        self.assertEqual(response.headers.get("X-SFL-Image-Fallback-Code"), "live-backoff-active")
+        request_mock.assert_not_awaited()
+        record_error_mock.assert_called_once()
+        _, record_kwargs = record_error_mock.call_args
+        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
+        self.assertEqual(record_kwargs["status_code"], 200)
+        self.assertEqual(record_kwargs["error_type"], "live-backoff-active")
+        self.assertEqual(record_kwargs["level"], "warning")
+        record_result_mock.assert_called_once()
+        _, _, is_stale = record_result_mock.call_args.args
+        self.assertTrue(is_stale)
+
+    def test_live_image_upstream_timeout_with_stale_cache_returns_200_stale_response(self) -> None:
+        from backend import app as backend_app
+
+        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        stale_bytes = b"\xff\xd8stale-live-frame\xff\xd9"
+        spot_api._live_img_cache = {
+            "data": stale_bytes,
+            "time": time.time() - 2.0,
+            "url": "http://spot.local/live.jpg",
+        }
+        image_error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "SPOT image upstream timed out",
+            image_url="http://spot.local/live.jpg",
+            upstream_status=None,
+        )
+        request_mock: AsyncMock = AsyncMock(side_effect=image_error)
+        record_error_mock: Mock = Mock()
+        record_result_mock: Mock = Mock()
+
+        with (
+            patch.object(spot_api, "_request_spot_image", request_mock),
+            patch.object(backend_app.observability_service, "record_error", record_error_mock),
+            patch.object(backend_app.observability_service, "record_spot_live_image_result", record_result_mock),
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/live_image")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, stale_bytes)
+        self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "stale-cache")
+        self.assertEqual(response.headers.get("X-SFL-Image-Source"), "stale-cache")
+        self.assertEqual(response.headers.get("X-SFL-Image-Stale"), "true")
+        self.assertEqual(response.headers.get("X-SFL-Image-Fallback-Code"), "upstream-timeout")
+        request_mock.assert_awaited_once()
+        record_error_mock.assert_called_once()
+        _, record_kwargs = record_error_mock.call_args
+        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
+        self.assertEqual(record_kwargs["status_code"], 200)
+        self.assertEqual(record_kwargs["error_type"], "upstream-timeout")
+        self.assertEqual(record_kwargs["level"], "warning")
+        record_result_mock.assert_called_once()
+        _, _, is_stale = record_result_mock.call_args.args
+        self.assertTrue(is_stale)
+
+    def test_live_image_upstream_timeout_without_cache_keeps_502_response(self) -> None:
+        from backend import app as backend_app
+
+        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+        image_error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "SPOT image upstream timed out",
+            image_url="http://spot.local/live.jpg",
+            upstream_status=None,
+        )
+        record_error_mock: Mock = Mock()
+
+        with (
+            patch.object(spot_api, "_request_spot_image", AsyncMock(side_effect=image_error)),
+            patch.object(backend_app.observability_service, "record_error", record_error_mock),
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/live_image")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotEqual(response.headers.get("X-SFL-Image-Stale"), "true")
+        record_error_mock.assert_called_once()
+        _, record_kwargs = record_error_mock.call_args
+        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
+        self.assertEqual(record_kwargs["status_code"], 502)
+        self.assertEqual(record_kwargs["error_type"], "upstream-timeout")
+
+    def test_live_image_backoff_with_over_age_stale_cache_keeps_503_response(self) -> None:
+        from backend import app as backend_app
+
+        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        spot_api._live_img_cache = {
+            "data": b"\xff\xd8too-old-live-frame\xff\xd9",
+            "time": time.time() - 10.0,
+            "url": "http://spot.local/live.jpg",
+        }
+        spot_api._live_img_failure_count = 1
+        spot_api._record_live_image_error("upstream-timeout", "timeout", "http://spot.local/live.jpg")
+        spot_api._record_live_image_backoff(1.25)
+        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
+        record_error_mock: Mock = Mock()
+
+        with (
+            patch.object(spot_api, "_request_spot_image", request_mock),
+            patch.object(backend_app.observability_service, "record_error", record_error_mock),
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/live_image")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotEqual(response.headers.get("X-SFL-Image-Stale"), "true")
+        request_mock.assert_not_awaited()
+        record_error_mock.assert_called_once()
+        _, record_kwargs = record_error_mock.call_args
+        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
+        self.assertEqual(record_kwargs["status_code"], 503)
+        self.assertEqual(record_kwargs["error_type"], "live-backoff-active")
+
+    def test_live_image_upstream_timeout_with_over_age_stale_cache_keeps_502_response(self) -> None:
+        from backend import app as backend_app
+
+        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        spot_api._live_img_cache = {
+            "data": b"\xff\xd8too-old-live-frame\xff\xd9",
+            "time": time.time() - 10.0,
+            "url": "http://spot.local/live.jpg",
+        }
+        image_error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "SPOT image upstream timed out",
+            image_url="http://spot.local/live.jpg",
+            upstream_status=None,
+        )
+        record_error_mock: Mock = Mock()
+
+        with (
+            patch.object(spot_api, "_request_spot_image", AsyncMock(side_effect=image_error)),
+            patch.object(backend_app.observability_service, "record_error", record_error_mock),
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/live_image")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotEqual(response.headers.get("X-SFL-Image-Stale"), "true")
+        record_error_mock.assert_called_once()
+        _, record_kwargs = record_error_mock.call_args
+        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
+        self.assertEqual(record_kwargs["status_code"], 502)
+        self.assertEqual(record_kwargs["error_type"], "upstream-timeout")
+
+    def test_live_image_fresh_shared_frame_cache_still_returns_200_response(self) -> None:
+        from backend import app as backend_app
+
+        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+        image_bytes = b"\xff\xd8fresh-live-frame\xff\xd9"
+        spot_api._live_img_cache = {
+            "data": image_bytes,
+            "time": time.time(),
+            "url": "http://spot.local/live.jpg",
+        }
+        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
+        record_result_mock: Mock = Mock()
+
+        with (
+            patch.object(spot_api, "_request_spot_image", request_mock),
+            patch.object(backend_app.observability_service, "record_spot_live_image_result", record_result_mock),
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/live_image")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, image_bytes)
+        self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "shared-frame")
+        self.assertNotEqual(response.headers.get("X-SFL-Image-Stale"), "true")
+        request_mock.assert_not_awaited()
+        record_result_mock.assert_called_once()
+        _, _, is_stale = record_result_mock.call_args.args
+        self.assertFalse(is_stale)
+
+    async def test_live_image_backoff_records_route_status_and_error_type(self) -> None:
+        from backend import app as backend_app
+
+        image_error = spot_api.SpotLiveImageBackoffError("http://spot.local/live.jpg", 1.25)
+        record_mock: Mock = Mock()
+
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "fetch_live_image_async",
+                AsyncMock(side_effect=image_error),
+            ),
+            patch.object(backend_app.spot_control, "get_live_image_diagnostics", Mock(return_value={})),
+            patch.object(backend_app.observability_service, "record_error", record_mock),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.live_spot_image()
+
+        exception = raised.exception
+
+        self.assertEqual(exception.status_code, 503)
+        self.assertEqual(exception.headers.get("Retry-After"), "2")
+        self.assertEqual(exception.headers.get("X-Spot-Retry-After-Ms"), "1250")
+        self.assertIn("no-store", exception.headers.get("Cache-Control", ""))
+        record_mock.assert_called_once()
+        record_args, record_kwargs = record_mock.call_args
+        self.assertEqual(record_args[:2], ("spot_live_image", "SPOT live image retry backoff active"))
+        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
+        self.assertEqual(record_kwargs["status_code"], 503)
+        self.assertEqual(record_kwargs["error_type"], "live-backoff-active")
+
+    def test_live_image_backoff_records_single_handler_error_via_middleware(self) -> None:
+        from backend import app as backend_app
+
+        image_error = spot_api.SpotLiveImageBackoffError("http://spot.local/live.jpg", 1.25)
+        record_mock: Mock = Mock()
+
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "fetch_live_image_async",
+                AsyncMock(side_effect=image_error),
+            ),
+            patch.object(backend_app.spot_control, "get_live_image_diagnostics", Mock(return_value={})),
+            patch.object(backend_app.observability_service, "record_error", record_mock),
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.get("/api/spot/live_image")
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 503)
+        record_mock.assert_called_once()
+        record_args, record_kwargs = record_mock.call_args
+        self.assertEqual(record_args[:2], ("spot_live_image", "SPOT live image retry backoff active"))
+        self.assertEqual(record_kwargs["status_code"], 503)
 
     def test_move_focus_uses_ametek_focus_control_endpoint(self) -> None:
         spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"

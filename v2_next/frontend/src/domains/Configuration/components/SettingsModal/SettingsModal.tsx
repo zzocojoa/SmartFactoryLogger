@@ -1392,7 +1392,7 @@ export function SettingsModal(props: SettingsModalProps) {
                             메시지: {stats?.errors?.last_error_message ?? '--'}
                           </div>
                           <div className="settings-test-message">
-                            source: {stats?.errors?.source_counts ? Object.entries(stats.errors.source_counts).map(([key, value]) => `${key} ${value}`).join(', ') : '--'}
+                            source: {stats?.errors?.top_sources?.length ? stats.errors.top_sources.map((item) => `${item.key} ${item.count}`).join(', ') : stats?.errors?.source_counts ? Object.entries(stats.errors.source_counts).map(([key, value]) => `${key} ${value}`).join(', ') : '--'}
                           </div>
                           <div className="settings-observability-actions">
                             <button
@@ -1435,7 +1435,13 @@ export function SettingsModal(props: SettingsModalProps) {
                           </span>
                         </div>
                         <div className="settings-test-message">
-                          source: {observabilityErrors?.summary?.source_counts ? Object.entries(observabilityErrors.summary.source_counts).map(([key, value]) => `${key} ${value}`).join(', ') : '--'}
+                          source: {observabilityErrors?.summary?.top_sources?.length ? observabilityErrors.summary.top_sources.map((item) => `${item.key} ${item.count}`).join(', ') : observabilityErrors?.summary?.source_counts ? Object.entries(observabilityErrors.summary.source_counts).map(([key, value]) => `${key} ${value}`).join(', ') : '--'}
+                        </div>
+                        <div className="settings-test-message">
+                          route/status: {observabilityErrors?.summary?.top_route_statuses?.length ? observabilityErrors.summary.top_route_statuses.map((item) => `${item.key} ${item.count}`).join(', ') : '--'}
+                        </div>
+                        <div className="settings-test-message">
+                          type: {observabilityErrors?.summary?.top_types?.length ? observabilityErrors.summary.top_types.map((item) => `${item.key} ${item.count}`).join(', ') : '--'}
                         </div>
                         {observabilityLoading ? (
                           <div className="settings-error-empty">불러오는 중...</div>
@@ -1453,6 +1459,11 @@ export function SettingsModal(props: SettingsModalProps) {
                                   )}
                                 </div>
                                 <div className="settings-error-message">{item.message}</div>
+                                {(item.status_code || item.error_type) && (
+                                  <div className="settings-error-detail">
+                                    status {item.status_code ?? '--'} / type {item.error_type ?? '--'}
+                                  </div>
+                                )}
                                 {item.detail && <div className="settings-error-detail">{item.detail}</div>}
                                 {item.path && <div className="settings-error-detail">{item.path}</div>}
                               </div>

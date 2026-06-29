@@ -232,11 +232,23 @@ export interface StatsSnapshot {
   };
   errors?: {
     queue_size: number;
+    repeat_total?: number;
     last_error_at?: number | null;
     last_error_source?: string | null;
     last_error_message?: string | null;
     last_error_repeat?: number | null;
     source_counts?: Record<string, number>;
+    source_repeat_counts?: Record<string, number>;
+    type_counts?: Record<string, number>;
+    status_counts?: Record<string, number>;
+    path_counts?: Record<string, number>;
+    route_status_counts?: Record<string, number>;
+    top_sources?: Array<{ key: string; count: number }>;
+    top_types?: Array<{ key: string; count: number }>;
+    top_messages?: Array<{ key: string; count: number }>;
+    top_statuses?: Array<{ key: string; count: number }>;
+    top_paths?: Array<{ key: string; count: number }>;
+    top_route_statuses?: Array<{ key: string; count: number }>;
   };
   polling?: {
     window_sec: number;
@@ -245,6 +257,8 @@ export interface StatsSnapshot {
       requests_per_sec: number;
       avg_latency_ms?: number | null;
       error_rate?: number | null;
+      http_4xx_count?: number;
+      http_5xx_count?: number;
       unique_clients: number;
       top_clients: Array<{
         client: string;
@@ -265,6 +279,8 @@ export interface ObservabilityErrorItem {
   message: string;
   detail?: string | null;
   path?: string | null;
+  status_code?: number | null;
+  error_type?: string | null;
   level?: string | null;
   repeat?: number;
 }
@@ -278,6 +294,18 @@ export interface ObservabilityErrorsResponse {
     last_error_message?: string | null;
     last_error_repeat?: number | null;
     source_counts?: Record<string, number>;
+    repeat_total?: number;
+    source_repeat_counts?: Record<string, number>;
+    type_counts?: Record<string, number>;
+    status_counts?: Record<string, number>;
+    path_counts?: Record<string, number>;
+    route_status_counts?: Record<string, number>;
+    top_sources?: Array<{ key: string; count: number }>;
+    top_types?: Array<{ key: string; count: number }>;
+    top_messages?: Array<{ key: string; count: number }>;
+    top_statuses?: Array<{ key: string; count: number }>;
+    top_paths?: Array<{ key: string; count: number }>;
+    top_route_statuses?: Array<{ key: string; count: number }>;
   };
 }
 

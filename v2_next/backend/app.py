@@ -1648,12 +1648,15 @@ async def record_request_stats(request: Request, call_next):
             dict(response.headers),
         )
 
-        if status_code >= 500 and not is_spot_payload_rejection:
+        is_spot_image_route = request.url.path in {_SPOT_PROXY_IMAGE_PATH, _SPOT_LIVE_IMAGE_PATH}
+        if status_code >= 500 and not is_spot_payload_rejection and not is_spot_image_route:
             try:
                 observability_service.record_error(
                     "api",
                     f"HTTP {status_code}",
                     path=request.url.path,
+                    status_code=status_code,
+                    error_type="http_5xx",
                 )
             except Exception:
                 pass
@@ -1664,6 +1667,8 @@ async def record_request_stats(request: Request, call_next):
                 "api",
                 str(exc),
                 path=request.url.path,
+                status_code=500,
+                error_type=exc.__class__.__name__,
             )
         except Exception:
             pass
@@ -2937,6 +2942,27 @@ async def live_spot_image():
         if meta.get("source"):
             headers["X-Spot-Live-Image-Source"] = str(meta["source"])
         is_stale = str(meta.get("status") or "") == "stale"
+        if is_stale:
+            headers["X-SFL-Image-Stale"] = "true"
+        if str(meta.get("source") or "") == "stale-cache":
+            headers["X-SFL-Image-Source"] = "stale-cache"
+        fallback_error_code = meta.get("fallback_error_code")
+        if fallback_error_code:
+            headers["X-SFL-Image-Fallback-Code"] = str(fallback_error_code)
+            observability_service.record_error(
+                "spot_live_image",
+                "SPOT live image stale cache fallback",
+                detail=str({
+                    "code": fallback_error_code,
+                    "fallback_reason": meta.get("fallback_reason"),
+                    "upstream_status": meta.get("fallback_upstream_status"),
+                    "retry_after_sec": meta.get("retry_after_sec"),
+                }),
+                path=_SPOT_LIVE_IMAGE_PATH,
+                status_code=200,
+                error_type=str(fallback_error_code),
+                level="warning",
+            )
         observability_service.record_spot_live_image_result(
             200,
             float(age_sec) if age_sec is not None else None,
@@ -2958,6 +2984,18 @@ async def live_spot_image():
         diagnostics = spot_control.get_live_image_diagnostics()
         diagnostics["live_retry_after_sec"] = exc.retry_after_sec
         headers.update(_spot_retry_headers_from_value(exc.retry_after_sec))
+        observability_service.record_error(
+            "spot_live_image",
+            "SPOT live image retry backoff active",
+            detail=str({
+                "code": exc.code,
+                "upstream_status": exc.upstream_status,
+                "retry_after_sec": exc.retry_after_sec,
+            }),
+            path=_SPOT_LIVE_IMAGE_PATH,
+            status_code=503,
+            error_type=exc.code,
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -2973,6 +3011,19 @@ async def live_spot_image():
         headers.update(_spot_retry_headers_from_diagnostics(diagnostics))
         if exc.code in _SPOT_PAYLOAD_REJECTION_CODES:
             headers["X-Spot-Payload-Rejection"] = "1"
+        observability_service.record_error(
+            "spot_live_image",
+            "SPOT live image upstream failure",
+            detail=str({
+                "code": exc.code,
+                "upstream_status": exc.upstream_status,
+                "payload_rejection": exc.code in _SPOT_PAYLOAD_REJECTION_CODES,
+            }),
+            path=_SPOT_LIVE_IMAGE_PATH,
+            status_code=502,
+            error_type=exc.code,
+            level="warning" if exc.code in _SPOT_PAYLOAD_REJECTION_CODES else "error",
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -2985,6 +3036,17 @@ async def live_spot_image():
         ) from exc
     except Exception as exc:
         diagnostics = spot_control.get_live_image_diagnostics()
+        observability_service.record_error(
+            "spot_live_image",
+            "SPOT live image unexpected failure",
+            detail=str({
+                "code": "unknown",
+                "error_type": exc.__class__.__name__,
+            }),
+            path=_SPOT_LIVE_IMAGE_PATH,
+            status_code=502,
+            error_type=exc.__class__.__name__,
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -3040,11 +3102,11 @@ async def proxy_spot_image():
             "SPOT image proxy misconfigured",
             detail=str({
                 "code": "config-missing",
-                "message": str(exc),
-                "diagnostics": diagnostics,
             }),
             path="/api/spot/proxy_image",
             level="warning",
+            status_code=404,
+            error_type="config-missing",
         )
         raise HTTPException(
             status_code=404,
@@ -3061,6 +3123,18 @@ async def proxy_spot_image():
         diagnostics["cache_status"] = "empty"
         diagnostics["proxy_state"] = "backoff"
         diagnostics["retry_after_sec"] = exc.retry_after_sec
+        observability_service.record_error(
+            "spot_proxy",
+            "SPOT image proxy retry backoff active",
+            detail=str({
+                "code": exc.code,
+                "upstream_status": exc.upstream_status,
+                "retry_after_sec": exc.retry_after_sec,
+            }),
+            path="/api/spot/proxy_image",
+            status_code=503,
+            error_type=exc.code,
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -3083,12 +3157,12 @@ async def proxy_spot_image():
                 "SPOT image proxy upstream failure",
                 detail=str({
                     "code": exc.code,
-                    "message": str(exc),
                     "upstream_status": exc.upstream_status,
-                    "image_url": exc.image_url,
-                    "diagnostics": diagnostics,
+                    "payload_rejection": False,
                 }),
                 path="/api/spot/proxy_image",
+                status_code=502,
+                error_type=exc.code,
             )
         raise HTTPException(
             status_code=502,
@@ -3108,10 +3182,11 @@ async def proxy_spot_image():
             "SPOT image proxy unexpected failure",
             detail=str({
                 "code": "unknown",
-                "message": str(exc),
-                "diagnostics": diagnostics,
+                "error_type": exc.__class__.__name__,
             }),
             path="/api/spot/proxy_image",
+            status_code=502,
+            error_type=exc.__class__.__name__,
         )
         raise HTTPException(
             status_code=502,

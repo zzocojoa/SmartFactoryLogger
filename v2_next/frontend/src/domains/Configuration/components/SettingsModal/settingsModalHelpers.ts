@@ -177,6 +177,22 @@ const formatSummaryCount = (value: number | null | undefined): string => {
   return value == null ? '--' : String(value);
 };
 
+const buildHttp5xxRouteEvidence = (stats: StatsSnapshot | null): string | null => {
+  const entries = Object.entries(stats?.polling?.paths ?? {})
+    .map(([path, item]) => ({
+      path,
+      count: item.http_5xx_count ?? 0,
+    }))
+    .filter((item) => item.count > 0)
+    .sort((left, right) => right.count - left.count || left.path.localeCompare(right.path))
+    .slice(0, 3);
+
+  if (!entries.length) {
+    return null;
+  }
+  return entries.map((item) => `${item.path} ${item.count}건`).join(', ');
+};
+
 const statusTextForSeverity = (severity: ObservabilitySummarySeverity): string => {
   if (severity === 'error') {
     return '조치 필요';
@@ -362,6 +378,14 @@ export const buildObservabilitySummary = ({
   const windowErrorCount = window?.http_error_count ?? window?.error_count ?? null;
   const windowP95 = window?.p95_latency_ms ?? null;
   const window5xx = window?.http_5xx_count ?? 0;
+  const http5xxRouteEvidence = buildHttp5xxRouteEvidence(stats);
+  const httpEvidence = [
+    `요청 ${formatSummaryCount(window?.request_count)}`,
+    `에러 ${formatSummaryCount(windowErrorCount)}`,
+    `5xx ${formatSummaryCount(window5xx)}`,
+    `p95 ${formatOptionalNumber(windowP95)}ms`,
+    http5xxRouteEvidence ? `route ${http5xxRouteEvidence}` : null,
+  ].filter((item): item is string => Boolean(item)).join(', ');
   const httpSeverity: ObservabilitySummarySeverity = !stats
     ? 'warn'
     : window5xx > 0
@@ -420,9 +444,11 @@ export const buildObservabilitySummary = ({
       title: 'HTTP 응답',
       severity: httpSeverity,
       status: statusTextForSeverity(httpSeverity),
-      evidence: `요청 ${formatSummaryCount(window?.request_count)}, 에러 ${formatSummaryCount(windowErrorCount)}, p95 ${formatOptionalNumber(windowP95)}ms`,
+      evidence: httpEvidence,
       action: httpSeverity === 'error'
-        ? '대시보드 응답 지연. 서버 부하 또는 이미지 요청 확인.'
+        ? (http5xxRouteEvidence
+            ? '5xx 발생 route를 기준으로 SPOT live/proxy 또는 해당 API handler를 확인.'
+            : '대시보드 응답 지연. 서버 부하 또는 이미지 요청 확인.')
         : httpSeverity === 'warn'
           ? '응답 지표가 기준을 넘었습니다. Top path와 4xx/5xx 상세 확인.'
           : '조치 없음.',

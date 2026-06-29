@@ -1542,17 +1542,74 @@ def _cached_image_data() -> Optional[bytes]:
     return data
 
 
-def _cached_live_image_data(now: float, image_url: str) -> Optional[bytes]:
+def _cached_live_image_data(now: float, image_url: str, *, allow_stale: bool = False) -> Optional[bytes]:
     data = _live_img_cache.get("data")
     cached_url = str(_live_img_cache.get("url") or "")
     cached_at = float(_live_img_cache.get("time") or 0.0)
     if cached_url != image_url:
         return None
-    if now - cached_at > _LIVE_IMG_SHARED_FRAME_TTL_SEC:
+    cache_age_sec = max(0.0, now - cached_at)
+    if allow_stale:
+        if cache_age_sec > _max_stale_age_sec():
+            return None
+    elif cache_age_sec > _LIVE_IMG_SHARED_FRAME_TTL_SEC:
         return None
     if not isinstance(data, bytes) or not data:
         return None
     return data
+
+
+def _build_live_image_meta(
+    now: float,
+    image_url: str,
+    status: str,
+    source: str,
+    *,
+    retry_after_sec: Optional[float] = None,
+    fallback_error_code: Optional[str] = None,
+    fallback_upstream_status: Optional[int] = None,
+    fallback_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    captured_at = float(_live_img_cache.get("time") or now)
+    meta: Dict[str, Any] = {
+        "status": status,
+        "source": source,
+        "captured_at": captured_at,
+        "age_sec": max(0.0, now - captured_at),
+        "image_url": image_url,
+        "max_stale_age_sec": _max_stale_age_sec(),
+        "retry_after_sec": _live_retry_after_sec(now) if retry_after_sec is None else retry_after_sec,
+    }
+    if fallback_error_code:
+        meta["fallback"] = True
+        meta["fallback_reason"] = fallback_reason or "stale-cache"
+        meta["fallback_error_code"] = fallback_error_code
+        meta["fallback_upstream_status"] = fallback_upstream_status
+    return meta
+
+
+def _build_live_stale_cache_response(
+    now: float,
+    image_url: str,
+    *,
+    fallback_error_code: str,
+    fallback_upstream_status: Optional[int],
+    fallback_reason: str,
+    retry_after_sec: Optional[float] = None,
+) -> Optional[tuple[bytes, Dict[str, Any]]]:
+    cached_image = _cached_live_image_data(now, image_url, allow_stale=True)
+    if cached_image is None:
+        return None
+    return cached_image, _build_live_image_meta(
+        now,
+        image_url,
+        "stale",
+        "stale-cache",
+        retry_after_sec=retry_after_sec,
+        fallback_error_code=fallback_error_code,
+        fallback_upstream_status=fallback_upstream_status,
+        fallback_reason=fallback_reason,
+    )
 
 
 def _cache_status(now: float) -> str:
@@ -1717,36 +1774,40 @@ async def fetch_live_image_async() -> tuple[bytes, Dict[str, Any]]:
     now = time.time()
     cached_image = _cached_live_image_data(now, image_url)
     if cached_image is not None:
-        captured_at = float(_live_img_cache.get("time") or now)
-        return cached_image, {
-            "status": "ok",
-            "source": "shared-frame",
-            "captured_at": captured_at,
-            "age_sec": max(0.0, now - captured_at),
-            "image_url": image_url,
-            "retry_after_sec": _live_retry_after_sec(now),
-        }
+        return cached_image, _build_live_image_meta(now, image_url, "ok", "shared-frame")
 
     retry_after = _live_retry_after_sec(now)
     if retry_after is not None and retry_after > 0.0:
+        stale_response = _build_live_stale_cache_response(
+            now,
+            image_url,
+            fallback_error_code="live-backoff-active",
+            fallback_upstream_status=None,
+            fallback_reason="backoff-active",
+            retry_after_sec=retry_after,
+        )
+        if stale_response is not None:
+            return stale_response
         raise SpotLiveImageBackoffError(image_url, retry_after)
 
     async with _live_img_fetch_lock:
         locked_now = time.time()
         cached_image = _cached_live_image_data(locked_now, image_url)
         if cached_image is not None:
-            captured_at = float(_live_img_cache.get("time") or locked_now)
-            return cached_image, {
-                "status": "ok",
-                "source": "shared-frame",
-                "captured_at": captured_at,
-                "age_sec": max(0.0, locked_now - captured_at),
-                "image_url": image_url,
-                "retry_after_sec": _live_retry_after_sec(locked_now),
-            }
+            return cached_image, _build_live_image_meta(locked_now, image_url, "ok", "shared-frame")
 
         locked_retry_after = _live_retry_after_sec(locked_now)
         if locked_retry_after is not None and locked_retry_after > 0.0:
+            stale_response = _build_live_stale_cache_response(
+                locked_now,
+                image_url,
+                fallback_error_code="live-backoff-active",
+                fallback_upstream_status=None,
+                fallback_reason="backoff-active",
+                retry_after_sec=locked_retry_after,
+            )
+            if stale_response is not None:
+                return stale_response
             raise SpotLiveImageBackoffError(image_url, locked_retry_after)
 
         client = _get_http_client()
@@ -1756,6 +1817,15 @@ async def fetch_live_image_async() -> tuple[bytes, Dict[str, Any]]:
             _record_live_image_error(exc.code, str(exc), exc.image_url)
             _live_img_failure_count = min(_live_img_failure_count + 1, 10)
             _record_live_image_backoff(_current_live_backoff_sec())
+            stale_response = _build_live_stale_cache_response(
+                time.time(),
+                image_url,
+                fallback_error_code=exc.code,
+                fallback_upstream_status=exc.upstream_status,
+                fallback_reason="upstream-failure",
+            )
+            if stale_response is not None:
+                return stale_response
             raise
 
         captured_at = time.time()
@@ -1763,14 +1833,7 @@ async def fetch_live_image_async() -> tuple[bytes, Dict[str, Any]]:
         _live_img_cache["time"] = captured_at
         _live_img_cache["url"] = image_url
         _record_live_image_success(image_url)
-        return data, {
-            "status": "ok",
-            "source": "upstream",
-            "captured_at": captured_at,
-            "age_sec": 0.0,
-            "image_url": image_url,
-            "retry_after_sec": None,
-        }
+        return data, _build_live_image_meta(captured_at, image_url, "ok", "upstream", retry_after_sec=None)
 
 
 # --- 獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ---
