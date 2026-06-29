@@ -1,8 +1,11 @@
 import asyncio
+import json
 import logging
+import queue
 import re
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, TypedDict
@@ -27,6 +30,7 @@ from backend.FacilityData.spot_observation_fact import (
     SpotObservationFactWriter,
     encode_spot_diagnostic_evidence_codes,
 )
+from backend.FacilityData.spot_image_fact import SpotImageCaptureWriter
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
@@ -118,6 +122,33 @@ _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "i
 # Async HTTP client reused for connection pooling.
 _http_client: Optional[httpx.AsyncClient] = None
 _logger = logging.getLogger("spot_control")
+
+
+@dataclass(frozen=True)
+class _SpotImageCaptureEvent:
+    image_bytes: bytes
+    captured_at: float
+    source_url: str
+    source: str
+    image_age_ms: Optional[float]
+    observation_snapshot: Optional[Dict[str, Any]]
+
+
+_SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
+_SPOT_IMAGE_CAPTURE_QUEUE: queue.Queue[_SpotImageCaptureEvent] = queue.Queue(maxsize=_SPOT_IMAGE_CAPTURE_QUEUE_MAX)
+_SPOT_IMAGE_CAPTURE_STOP = threading.Event()
+_spot_image_capture_lock = threading.Lock()
+_spot_image_capture_thread: Optional[threading.Thread] = None
+_spot_image_capture_writer: Optional[SpotImageCaptureWriter] = None
+_spot_image_capture_last_enqueue_at = 0.0
+_spot_image_capture_last_write_at = 0.0
+_spot_image_capture_last_error_at = 0.0
+_spot_image_capture_last_error_code: Optional[str] = None
+_spot_image_capture_last_error_message: Optional[str] = None
+_spot_image_capture_enqueued_count = 0
+_spot_image_capture_written_count = 0
+_spot_image_capture_dropped_count = 0
+_spot_image_capture_failure_count = 0
 
 
 class SpotImageConfigError(ValueError):
@@ -235,6 +266,293 @@ class SpotActuatorControlError(RuntimeError):
         super().__init__(message)
         self.actuator_url = actuator_url
         self.upstream_status = upstream_status
+
+
+def _spot_image_capture_mode() -> str:
+    if not bool(getattr(config, "SPOT_IMAGE_CAPTURE_ENABLED", False)):
+        return "off"
+    mode = str(getattr(config, "SPOT_IMAGE_CAPTURE_MODE", "event") or "event").strip().lower()
+    if mode not in {"off", "event", "interval", "all"}:
+        return "event"
+    return mode
+
+
+def _spot_image_capture_log_path() -> Path:
+    return Path(getattr(config, "LOG_PATH", Path("logs/data")))
+
+
+def _spot_image_capture_root() -> Path:
+    raw_path = str(getattr(config, "SPOT_IMAGE_CAPTURE_PATH", "spot_images") or "spot_images").strip()
+    configured_path = Path(raw_path or "spot_images")
+    if configured_path.is_absolute():
+        return configured_path
+    return _spot_image_capture_log_path() / configured_path
+
+
+def _get_spot_image_capture_writer() -> SpotImageCaptureWriter:
+    global _spot_image_capture_writer
+    with _spot_image_capture_lock:
+        if _spot_image_capture_writer is None:
+            _spot_image_capture_writer = SpotImageCaptureWriter(
+                log_path=_spot_image_capture_log_path(),
+                capture_root=_spot_image_capture_root(),
+                retention_days=int(getattr(config, "SPOT_IMAGE_CAPTURE_RETENTION_DAYS", 7) or 0),
+            )
+        return _spot_image_capture_writer
+
+
+def _start_spot_image_capture_worker() -> None:
+    global _spot_image_capture_thread
+    with _spot_image_capture_lock:
+        if _spot_image_capture_thread is not None and _spot_image_capture_thread.is_alive():
+            return
+        _SPOT_IMAGE_CAPTURE_STOP.clear()
+        _spot_image_capture_thread = threading.Thread(
+            target=_spot_image_capture_worker,
+            name="spot-image-capture-writer",
+            daemon=True,
+        )
+        _spot_image_capture_thread.start()
+
+
+def _spot_image_capture_worker() -> None:
+    global _spot_image_capture_failure_count
+    global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
+    global _spot_image_capture_last_write_at, _spot_image_capture_written_count
+    while not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty():
+        try:
+            event = _SPOT_IMAGE_CAPTURE_QUEUE.get(timeout=0.1)
+        except queue.Empty:
+            continue
+        try:
+            writer = _get_spot_image_capture_writer()
+            writer.write_capture(
+                image_bytes=event.image_bytes,
+                captured_at=event.captured_at,
+                source_url=event.source_url,
+                source=event.source,
+                image_age_ms=event.image_age_ms,
+                observation_snapshot=event.observation_snapshot,
+            )
+            with _spot_image_capture_lock:
+                _spot_image_capture_written_count += 1
+                _spot_image_capture_last_write_at = time.time()
+                _spot_image_capture_last_error_code = None
+                _spot_image_capture_last_error_message = None
+        except Exception as exc:  # pragma: no cover - exercised through integration-style tests
+            with _spot_image_capture_lock:
+                _spot_image_capture_failure_count += 1
+                _spot_image_capture_last_error_at = time.time()
+                _spot_image_capture_last_error_code = exc.__class__.__name__
+                _spot_image_capture_last_error_message = "capture writer failed"
+            _logger.warning(
+                "SPOT image capture writer failed",
+                extra={
+                    "error_type": exc.__class__.__name__,
+                },
+            )
+        finally:
+            _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
+
+
+def flush_spot_image_capture_queue(timeout_sec: float = 2.0) -> bool:
+    deadline = time.time() + max(0.0, timeout_sec)
+    while time.time() < deadline:
+        if getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) == 0:
+            return True
+        time.sleep(0.01)
+    return getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) == 0
+
+
+def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> None:
+    _SPOT_IMAGE_CAPTURE_STOP.set()
+    thread = _spot_image_capture_thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=max(0.0, timeout_sec))
+
+
+def _reset_spot_image_capture_state_for_tests() -> None:
+    global _spot_image_capture_writer, _spot_image_capture_thread
+    global _spot_image_capture_enqueued_count, _spot_image_capture_written_count, _spot_image_capture_dropped_count
+    global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
+    global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
+    stop_spot_image_capture_writer(timeout_sec=0.5)
+    while True:
+        try:
+            _SPOT_IMAGE_CAPTURE_QUEUE.get_nowait()
+            _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
+        except queue.Empty:
+            break
+    with _spot_image_capture_lock:
+        _spot_image_capture_writer = None
+        _spot_image_capture_thread = None
+        _spot_image_capture_enqueued_count = 0
+        _spot_image_capture_written_count = 0
+        _spot_image_capture_dropped_count = 0
+        _spot_image_capture_failure_count = 0
+        _spot_image_capture_last_enqueue_at = 0.0
+        _spot_image_capture_last_write_at = 0.0
+        _spot_image_capture_last_error_at = 0.0
+        _spot_image_capture_last_error_code = None
+        _spot_image_capture_last_error_message = None
+    _SPOT_IMAGE_CAPTURE_STOP.clear()
+
+
+def get_spot_image_capture_health() -> Dict[str, Any]:
+    with _spot_image_capture_lock:
+        return {
+            "enabled": _spot_image_capture_mode() != "off",
+            "mode": _spot_image_capture_mode(),
+            "queue_size": _SPOT_IMAGE_CAPTURE_QUEUE.qsize(),
+            "queue_capacity": _SPOT_IMAGE_CAPTURE_QUEUE_MAX,
+            "enqueued_count": _spot_image_capture_enqueued_count,
+            "written_count": _spot_image_capture_written_count,
+            "dropped_count": _spot_image_capture_dropped_count,
+            "failure_count": _spot_image_capture_failure_count,
+            "last_enqueue_at": _spot_image_capture_last_enqueue_at or None,
+            "last_write_at": _spot_image_capture_last_write_at or None,
+            "last_error_at": _spot_image_capture_last_error_at or None,
+            "last_error_code": _spot_image_capture_last_error_code,
+            "last_error_message": _spot_image_capture_last_error_message,
+        }
+
+
+def _spot_image_capture_evidence_codes(snapshot: Dict[str, Any]) -> set[str]:
+    value = snapshot.get("spot_diagnostic_evidence_codes")
+    if value is None:
+        return set()
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return set()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError:
+                parsed = []
+            if isinstance(parsed, list):
+                return {str(item) for item in parsed}
+        return {part.strip() for part in stripped.replace(";", ",").split(",") if part.strip()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item) for item in value}
+    return set()
+
+
+def _spot_image_capture_output_status(snapshot: Dict[str, Any]) -> str:
+    explicit = str(snapshot.get("temperature_output_status") or "").strip()
+    if explicit:
+        return explicit
+    device_status = str(snapshot.get("spot_device_status_code") or "").strip()
+    if device_status == "temperature_under_range":
+        return "under_range"
+    if device_status == "temperature_over_range":
+        return "over_range"
+    raw_validity = str(snapshot.get("spot_raw_validity") or "").strip()
+    if raw_validity == SpotRawValidity.VALID_TEMPERATURE.value:
+        return "valid"
+    poll_status = str(snapshot.get("spot_poll_status") or "").strip()
+    if poll_status in {"timeout", "connection_error", "http_error", "config_missing"}:
+        return "source_error"
+    return raw_validity
+
+
+def _alarmstatus_bit4_active(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        return bool(int(str(value).strip(), 0) & (1 << 4))
+    except (TypeError, ValueError):
+        return False
+
+
+def _signal_below_capture_threshold(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        signal_pc = float(value)
+    except (TypeError, ValueError):
+        return False
+    threshold = float(getattr(config, "SPOT_LOW_SIGNAL_THRESHOLD_PC", 2.0) or 2.0)
+    return signal_pc < threshold
+
+
+def _spot_image_capture_event_matches(snapshot: Optional[Dict[str, Any]]) -> bool:
+    if snapshot is None:
+        return False
+    output_status = _spot_image_capture_output_status(snapshot)
+    if output_status in {"under_range", "over_range", "stale", "source_error"}:
+        return True
+    process_phase = str(snapshot.get("process_phase_candidate") or "").strip()
+    if process_phase in {"setup_candidate", "setup_alignment_candidate", "die_change_candidate", "changeover_candidate"}:
+        return True
+    evidence = _spot_image_capture_evidence_codes(snapshot)
+    if evidence.intersection(
+        {
+            "target_out_of_fov_evidence",
+            "actuator_scanning",
+            "actuator_position_changed",
+            "signal_below_threshold",
+            "alarm_low_signal",
+            "detector_below_measurement_range",
+        }
+    ):
+        return True
+    if _alarmstatus_bit4_active(snapshot.get("alarmstatus")):
+        return True
+    return _signal_below_capture_threshold(snapshot.get("signalpc"))
+
+
+def _should_enqueue_spot_image_capture(mode: str, snapshot: Optional[Dict[str, Any]]) -> bool:
+    if mode == "off":
+        return False
+    if mode in {"all", "interval"}:
+        return True
+    return _spot_image_capture_event_matches(snapshot)
+
+
+def _maybe_enqueue_spot_image_capture(
+    *,
+    image_bytes: bytes,
+    captured_at: float,
+    image_url: str,
+    source: str,
+    image_age_ms: Optional[float] = None,
+) -> None:
+    global _spot_image_capture_dropped_count, _spot_image_capture_enqueued_count, _spot_image_capture_last_enqueue_at
+    mode = _spot_image_capture_mode()
+    if mode == "off":
+        return
+    max_bytes = int(getattr(config, "SPOT_IMAGE_CAPTURE_MAX_BYTES", 2_000_000) or 1)
+    if len(image_bytes) > max_bytes:
+        with _spot_image_capture_lock:
+            _spot_image_capture_dropped_count += 1
+        return
+    snapshot = get_spot_temperature_poll_snapshot() if bool(
+        getattr(config, "SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION", True)
+    ) else None
+    if not _should_enqueue_spot_image_capture(mode, snapshot):
+        return
+    min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
+    now = time.time()
+    with _spot_image_capture_lock:
+        if min_interval_sec > 0.0 and now - _spot_image_capture_last_enqueue_at < min_interval_sec:
+            return
+        event = _SpotImageCaptureEvent(
+            image_bytes=bytes(image_bytes),
+            captured_at=captured_at,
+            source_url=image_url,
+            source=source,
+            image_age_ms=image_age_ms,
+            observation_snapshot=dict(snapshot) if snapshot is not None else None,
+        )
+        try:
+            _SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
+        except queue.Full:
+            _spot_image_capture_dropped_count += 1
+            return
+        _spot_image_capture_enqueued_count += 1
+        _spot_image_capture_last_enqueue_at = now
+    _start_spot_image_capture_worker()
 
 
 def _format_exception_message(exc: BaseException) -> str:
@@ -1755,10 +2073,18 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             _img_failure_count = min(_img_failure_count + 1, 10)
             _record_image_backoff(_current_backoff_sec())
             raise
+        captured_at = time.time()
         _img_cache["data"] = data
-        _img_cache["time"] = time.time()
+        _img_cache["time"] = captured_at
         _img_cache_state = "upstream"
         _record_image_success()
+        _maybe_enqueue_spot_image_capture(
+            image_bytes=data,
+            captured_at=captured_at,
+            image_url=image_url,
+            source="proxy_upstream",
+            image_age_ms=0.0,
+        )
         return data, _build_image_meta(time.time(), "ok", "upstream")
 
 
@@ -1833,6 +2159,13 @@ async def fetch_live_image_async() -> tuple[bytes, Dict[str, Any]]:
         _live_img_cache["time"] = captured_at
         _live_img_cache["url"] = image_url
         _record_live_image_success(image_url)
+        _maybe_enqueue_spot_image_capture(
+            image_bytes=data,
+            captured_at=captured_at,
+            image_url=image_url,
+            source="live_upstream",
+            image_age_ms=0.0,
+        )
         return data, _build_live_image_meta(captured_at, image_url, "ok", "upstream", retry_after_sec=None)
 
 
@@ -1859,8 +2192,9 @@ async def _prefetch_loop():
                 data = await _request_spot_image(client, image_url)
 
                 if data:
+                    captured_at = time.time()
                     _img_cache["data"] = data
-                    _img_cache["time"] = time.time()
+                    _img_cache["time"] = captured_at
                     _img_cache_state = "upstream"
                     if _img_failure_count > 0:
                         _logger.info(
@@ -1869,6 +2203,13 @@ async def _prefetch_loop():
                         )
                     _img_failure_count = 0
                     _record_image_success()
+                    _maybe_enqueue_spot_image_capture(
+                        image_bytes=data,
+                        captured_at=captured_at,
+                        image_url=image_url,
+                        source="prefetch_upstream",
+                        image_age_ms=0.0,
+                    )
 
             if config.SPOT_URL:
                 try:
@@ -2005,6 +2346,7 @@ async def stop_prefetch_loop():
         except asyncio.CancelledError:
             pass
         _internal_temp_prefetch_task = None
+    stop_spot_image_capture_writer()
 
 
 def get_cached_spot_temp() -> float:

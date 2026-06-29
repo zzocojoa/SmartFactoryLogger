@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-06-27T18:17:18.867Z",
+  "lastUpdated": "2026-06-29T15:20:00.000Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -16,9 +16,10 @@
     "memory-diagnostics-r08-electron-memory",
     "memory-diagnostics-r09-frontend-exactness",
     "memory-diagnostics-r10-export-v2",
-    "memory-diagnostics-r11-tests-ci"
+    "memory-diagnostics-r11-tests-ci",
+    "spot-image-evidence-capture"
   ],
-  "primaryFeature": "memory-diagnostics-hardening",
+  "primaryFeature": "spot-image-evidence-capture",
   "statusReaderPolicy": {
     "rootCurrentPhase": "not_defined",
     "canonicalPrimaryPhasePath": "features[primaryFeature].phase",
@@ -1415,18 +1416,93 @@
         "lastUpdated": "2026-06-27T18:17:18.867Z"
       },
       "completedAt": "2026-06-27T18:17:18.867Z"
+    },
+    "spot-image-evidence-capture": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "title": "SPOT image evidence capture",
+      "queueStatus": "completed",
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/spot-image-evidence-capture.plan.md",
+          "status": "completed"
+        },
+        "design": {
+          "path": "docs/02-design/features/spot-image-evidence-capture.design.md",
+          "status": "completed"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/spot-image-evidence-capture.do.md",
+          "status": "completed_implementation_checklist"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/spot-image-evidence-capture.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100,
+          "iteration": 1
+        },
+        "report": {
+          "path": "docs/04-report/spot-image-evidence-capture.report.md",
+          "status": "completed_feature_report",
+          "match_rate": 100
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-06-29T15:20:00.000Z",
+          "completedAt": "2026-06-29T15:20:00.000Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-06-29T15:20:00.000Z",
+          "completedAt": "2026-06-29T15:20:00.000Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-06-29T15:20:00.000Z",
+          "completedAt": "2026-06-29T15:20:00.000Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-06-29T15:20:00.000Z",
+          "completedAt": "2026-06-29T15:20:00.000Z"
+        },
+        {
+          "phase": "act",
+          "status": "completed",
+          "createdAt": "2026-06-29T15:20:00.000Z",
+          "completedAt": "2026-06-29T15:20:00.000Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-06-29T15:20:00.000Z",
+          "completedAt": "2026-06-29T15:20:00.000Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-06-29T15:20:00.000Z",
+        "lastUpdated": "2026-06-29T15:20:00.000Z"
+      },
+      "completedAt": "2026-06-29T15:20:00.000Z"
     }
   },
   "pipeline": {
-    "currentFeature": "memory-diagnostics-hardening",
+    "currentFeature": "spot-image-evidence-capture",
     "currentPhase": "completed",
     "level": "Dynamic",
-    "lastUpdated": "2026-06-27T18:17:18.867Z"
+    "lastUpdated": "2026-06-29T15:20:00.000Z"
   },
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-06-27T18:17:18.867Z"
+    "lastActivity": "2026-06-29T15:20:00.000Z"
   },
   "history": [
     {
@@ -2316,6 +2392,13 @@
       "matchRate": 100,
       "childRanksCompleted": 11,
       "timestamp": "2026-06-27T18:17:18.867Z"
+    },
+    {
+      "feature": "spot-image-evidence-capture",
+      "action": "feature_pdca_completed",
+      "phase": "report",
+      "matchRate": 100,
+      "timestamp": "2026-06-29T15:20:00.000Z"
     }
   ]
 }

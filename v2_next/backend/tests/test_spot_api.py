@@ -1,8 +1,11 @@
 import asyncio
+import csv
+import tempfile
 import time
 import unittest
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from urllib.request import Request as UrlRequest
 from unittest.mock import AsyncMock, Mock, patch
@@ -45,6 +48,20 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.original_spot_focus_step: int = int(spot_api.config.SPOT_FOCUS_STEP)
         self.original_spot_actuator_url: str = str(spot_api.config.SPOT_ACTUATOR_URL)
         self.original_spot_actuator_step: int = int(spot_api.config.SPOT_ACTUATOR_STEP)
+        self.original_log_path: Path = Path(spot_api.config.LOG_PATH)
+        self.original_spot_image_capture_enabled: bool = bool(spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED)
+        self.original_spot_image_capture_mode: str = str(spot_api.config.SPOT_IMAGE_CAPTURE_MODE)
+        self.original_spot_image_capture_path: str = str(spot_api.config.SPOT_IMAGE_CAPTURE_PATH)
+        self.original_spot_image_capture_min_interval_sec: float = float(
+            spot_api.config.SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC
+        )
+        self.original_spot_image_capture_retention_days: int = int(
+            spot_api.config.SPOT_IMAGE_CAPTURE_RETENTION_DAYS
+        )
+        self.original_spot_image_capture_max_bytes: int = int(spot_api.config.SPOT_IMAGE_CAPTURE_MAX_BYTES)
+        self.original_spot_image_capture_link_to_observation: bool = bool(
+            spot_api.config.SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION
+        )
         self.reset_spot_state()
 
     def tearDown(self) -> None:
@@ -57,6 +74,14 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api.config.SPOT_FOCUS_STEP = self.original_spot_focus_step
         spot_api.config.SPOT_ACTUATOR_URL = self.original_spot_actuator_url
         spot_api.config.SPOT_ACTUATOR_STEP = self.original_spot_actuator_step
+        spot_api.config.LOG_PATH = self.original_log_path
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = self.original_spot_image_capture_enabled
+        spot_api.config.SPOT_IMAGE_CAPTURE_MODE = self.original_spot_image_capture_mode
+        spot_api.config.SPOT_IMAGE_CAPTURE_PATH = self.original_spot_image_capture_path
+        spot_api.config.SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = self.original_spot_image_capture_min_interval_sec
+        spot_api.config.SPOT_IMAGE_CAPTURE_RETENTION_DAYS = self.original_spot_image_capture_retention_days
+        spot_api.config.SPOT_IMAGE_CAPTURE_MAX_BYTES = self.original_spot_image_capture_max_bytes
+        spot_api.config.SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION = self.original_spot_image_capture_link_to_observation
         self.reset_spot_state()
 
     def reset_spot_state(self) -> None:
@@ -101,6 +126,45 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_temperature_snapshot = None
             spot_api._spot_last_valid_value_at = None
             spot_api._spot_temperature_cache_suppressed_until_valid = False
+        spot_api._reset_spot_image_capture_state_for_tests()
+
+    def configure_image_capture(self, log_path: Path, *, mode: str = "all", max_bytes: int = 2_000_000) -> None:
+        spot_api.config.LOG_PATH = log_path
+        spot_api.config.SPOT_IMAGE_CAPTURE_ENABLED = True
+        spot_api.config.SPOT_IMAGE_CAPTURE_MODE = mode
+        spot_api.config.SPOT_IMAGE_CAPTURE_PATH = "spot_images"
+        spot_api.config.SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = 0.0
+        spot_api.config.SPOT_IMAGE_CAPTURE_RETENTION_DAYS = 7
+        spot_api.config.SPOT_IMAGE_CAPTURE_MAX_BYTES = max_bytes
+        spot_api.config.SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION = True
+
+    def read_spot_image_fact_rows(self, log_path: Path) -> list[dict[str, str]]:
+        fact_path = log_path / "spot_image_fact.csv"
+        if not fact_path.exists():
+            return []
+        with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            return list(csv.DictReader(handle))
+
+    def set_spot_temperature_snapshot(self, **overrides: Any) -> None:
+        snapshot: dict[str, Any] = {
+            "spot_service_instance_id": "test-spot-service-instance",
+            "spot_poll_seq": 7,
+            "sample_seq": 70,
+            "spot_last_poll_completed_at": "2026-06-29T06:00:00Z",
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_device_status_code": None,
+            "spot_diagnostic_evidence_codes": "[]",
+            "signalpc": "55.0",
+            "alarmstatus": "0",
+            "process_phase_candidate": "production_stable",
+            "focus_mm": "6071",
+            "low_signal_threshold_pc": "2.0",
+            "peak_picker_enabled": "False",
+        }
+        snapshot.update(overrides)
+        with spot_api._spot_temperature_snapshot_lock:
+            spot_api._spot_temperature_snapshot = snapshot
 
     def test_spot_temperature_diagnostics_before_first_poll_are_startup_pending(self) -> None:
         diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
@@ -1791,6 +1855,136 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         record_result_mock.assert_called_once()
         _, _, is_stale = record_result_mock.call_args.args
         self.assertFalse(is_stale)
+
+    async def test_live_image_upstream_capture_writes_image_fact_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+            self.set_spot_temperature_snapshot(
+                spot_poll_seq=42,
+                spot_raw_validity="invalid_sentinel",
+                spot_device_status_code="temperature_under_range",
+                spot_diagnostic_evidence_codes='["target_out_of_fov_evidence"]',
+                signalpc="1.5",
+            )
+            image_bytes = b"\xff\xd8live-capture\xff\xd9"
+
+            with patch.object(spot_api, "_request_spot_image", AsyncMock(return_value=image_bytes)):
+                data, meta = await spot_api.fetch_live_image_async()
+
+            self.assertEqual(data, image_bytes)
+            self.assertEqual(meta["source"], "upstream")
+            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
+            rows = self.read_spot_image_fact_rows(log_path)
+
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row["spot_image_size_bytes"], str(len(image_bytes)))
+            self.assertEqual(row["spot_image_mime"], "image/jpeg")
+            self.assertEqual(row["spot_image_source"], "live_upstream")
+            self.assertEqual(row["spot_image_linked_observation_key"], "test-spot-service-instance:42")
+            self.assertEqual(row["temperature_output_status_nearest"], "under_range")
+            self.assertEqual(row["temperature_under_range_cause_candidate_nearest"], "target_out_of_fov_candidate")
+            self.assertEqual(len(row["spot_image_source_url_hash"]), 64)
+            self.assertTrue((log_path / row["spot_image_path"]).exists())
+            self.assertNotIn("http://spot.local", ",".join(row.values()))
+
+    async def test_live_image_shared_frame_cache_does_not_duplicate_image_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+            image_bytes = b"\xff\xd8shared-frame-capture\xff\xd9"
+            request_mock = AsyncMock(return_value=image_bytes)
+
+            with patch.object(spot_api, "_request_spot_image", request_mock):
+                first_data, first_meta = await spot_api.fetch_live_image_async()
+                second_data, second_meta = await spot_api.fetch_live_image_async()
+
+            self.assertEqual(first_data, image_bytes)
+            self.assertEqual(second_data, image_bytes)
+            self.assertEqual(first_meta["source"], "upstream")
+            self.assertEqual(second_meta["source"], "shared-frame")
+            self.assertEqual(request_mock.await_count, 1)
+            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
+            self.assertEqual(len(self.read_spot_image_fact_rows(log_path)), 1)
+
+    def test_event_mode_captures_under_range_snapshot_and_skips_valid_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="event")
+            spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+            image_bytes = b"\xff\xd8event-capture\xff\xd9"
+
+            self.set_spot_temperature_snapshot(spot_poll_seq=1, spot_raw_validity="valid_temperature")
+            spot_api._maybe_enqueue_spot_image_capture(
+                image_bytes=image_bytes,
+                captured_at=time.time(),
+                image_url="http://spot.local/image.jpg",
+                source="prefetch_upstream",
+                image_age_ms=0.0,
+            )
+            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=1.0))
+            self.assertEqual(self.read_spot_image_fact_rows(log_path), [])
+
+            self.set_spot_temperature_snapshot(
+                spot_poll_seq=2,
+                spot_raw_validity="invalid_sentinel",
+                spot_device_status_code="temperature_under_range",
+                spot_diagnostic_evidence_codes='["target_out_of_fov_evidence"]',
+            )
+            spot_api._maybe_enqueue_spot_image_capture(
+                image_bytes=image_bytes,
+                captured_at=time.time(),
+                image_url="http://spot.local/image.jpg",
+                source="prefetch_upstream",
+                image_age_ms=0.0,
+            )
+            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
+            rows = self.read_spot_image_fact_rows(log_path)
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["spot_image_linked_observation_key"], "test-spot-service-instance:2")
+            self.assertEqual(rows[0]["temperature_output_status_nearest"], "under_range")
+
+    def test_image_capture_drops_oversized_payload_before_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all", max_bytes=4)
+
+            spot_api._maybe_enqueue_spot_image_capture(
+                image_bytes=b"12345",
+                captured_at=time.time(),
+                image_url="http://spot.local/image.jpg",
+                source="prefetch_upstream",
+                image_age_ms=0.0,
+            )
+
+            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=1.0))
+            self.assertEqual(self.read_spot_image_fact_rows(log_path), [])
+            self.assertEqual(spot_api.get_spot_image_capture_health()["dropped_count"], 1)
+
+    async def test_image_capture_writer_failure_does_not_break_live_image_fetch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            blocker = log_path / "capture-blocker"
+            blocker.write_text("not a directory", encoding="utf-8")
+            spot_api.config.SPOT_IMAGE_CAPTURE_PATH = "capture-blocker"
+            spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+            image_bytes = b"\xff\xd8writer-failure-isolated\xff\xd9"
+
+            with patch.object(spot_api, "_request_spot_image", AsyncMock(return_value=image_bytes)):
+                data, meta = await spot_api.fetch_live_image_async()
+
+            self.assertEqual(data, image_bytes)
+            self.assertEqual(meta["source"], "upstream")
+            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
+            health = spot_api.get_spot_image_capture_health()
+            self.assertEqual(health["enqueued_count"], 1)
+            self.assertEqual(health["failure_count"], 1)
+            self.assertEqual(self.read_spot_image_fact_rows(log_path), [])
 
     async def test_live_image_backoff_records_route_status_and_error_type(self) -> None:
         from backend import app as backend_app
