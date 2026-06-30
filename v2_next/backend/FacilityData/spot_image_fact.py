@@ -46,6 +46,8 @@ SPOT_IMAGE_FACT_COLUMNS = [
     "peak_picker_enabled",
 ]
 
+_MANAGED_IMAGE_EXTENSIONS = {".jpg", ".png", ".gif", ".bmp", ".webp", ".bin"}
+
 
 @dataclass
 class SpotImageCaptureWriter:
@@ -148,16 +150,59 @@ class SpotImageCaptureWriter:
         self.last_cleanup_at = now
         cutoff = now - (self.retention_days * 86400.0)
         try:
-            for path in self.capture_root.rglob("*"):
-                if path.is_file() and path.stat().st_mtime < cutoff:
-                    path.unlink(missing_ok=True)
-            for path in sorted((p for p in self.capture_root.rglob("*") if p.is_dir()), reverse=True):
+            for day_dir in self._iter_managed_day_dirs():
+                for path in day_dir.glob("spotimg_*"):
+                    if self._is_managed_capture_file(path) and path.stat().st_mtime < cutoff:
+                        path.unlink(missing_ok=True)
+            self._cleanup_empty_managed_dirs()
+        except OSError:
+            return
+
+    def _iter_managed_day_dirs(self) -> tuple[Path, ...]:
+        if not self.capture_root.exists() or not self.capture_root.is_dir():
+            return ()
+        day_dirs: list[Path] = []
+        for year_dir in self.capture_root.iterdir():
+            if not year_dir.is_dir() or not _is_date_component(year_dir.name, 4):
+                continue
+            for month_dir in year_dir.iterdir():
+                if not month_dir.is_dir() or not _is_date_component(month_dir.name, 2, 1, 12):
+                    continue
+                for day_dir in month_dir.iterdir():
+                    if day_dir.is_dir() and _is_date_component(day_dir.name, 2, 1, 31):
+                        day_dirs.append(day_dir)
+        return tuple(day_dirs)
+
+    def _is_managed_capture_file(self, path: Path) -> bool:
+        if not path.is_file() or not _is_managed_capture_stem(path.stem):
+            return False
+        if path.suffix.lower() not in _MANAGED_IMAGE_EXTENSIONS:
+            return False
+        try:
+            relative = path.relative_to(self.capture_root)
+        except ValueError:
+            return False
+        parts = relative.parts
+        return (
+            len(parts) == 4
+            and _is_date_component(parts[0], 4)
+            and _is_date_component(parts[1], 2, 1, 12)
+            and _is_date_component(parts[2], 2, 1, 31)
+        )
+
+    def _cleanup_empty_managed_dirs(self) -> None:
+        for day_dir in sorted(self._iter_managed_day_dirs(), reverse=True):
+            try:
+                day_dir.rmdir()
+            except OSError:
+                continue
+            month_dir = day_dir.parent
+            year_dir = month_dir.parent
+            for path in (month_dir, year_dir):
                 try:
                     path.rmdir()
                 except OSError:
-                    continue
-        except OSError:
-            return
+                    break
 
 
 def build_spot_image_fact(
@@ -227,6 +272,33 @@ def image_metadata(image_bytes: bytes) -> tuple[str, Optional[int], Optional[int
     if len(image_bytes) >= 12 and image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
         return "image/webp", None, None, ".webp"
     return "application/octet-stream", None, None, ".bin"
+
+
+def _is_date_component(value: str, width: int, minimum: Optional[int] = None, maximum: Optional[int] = None) -> bool:
+    if len(value) != width or not value.isdigit():
+        return False
+    number = int(value)
+    if minimum is not None and number < minimum:
+        return False
+    if maximum is not None and number > maximum:
+        return False
+    return True
+
+
+def _is_managed_capture_stem(stem: str) -> bool:
+    parts = stem.split("_")
+    if len(parts) != 3 or parts[0] != "spotimg":
+        return False
+    timestamp, digest = parts[1], parts[2]
+    timestamp_digits = timestamp[:8] + timestamp[9:21]
+    return (
+        len(timestamp) == 22
+        and timestamp[8] == "T"
+        and timestamp[21] == "Z"
+        and timestamp_digits.isdigit()
+        and len(digest) == 12
+        and all(char in "0123456789abcdef" for char in digest.lower())
+    )
 
 
 def _png_size(image_bytes: bytes) -> tuple[Optional[int], Optional[int]]:

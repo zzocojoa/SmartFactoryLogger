@@ -16,7 +16,8 @@ The feature saves selected fresh upstream SPOT images to local evidence storage 
 - Connected capture to fresh upstream success from proxy, prefetch, and live image fetch paths.
 - Added event-mode gating for under-range, over-range, source error, setup/changeover, low signal, actuator, and target-out-of-FOV evidence.
 - Added capture health counters through SPOT config diagnostics.
-- Added regression tests for write, gate, duplicate prevention, oversize drop, and writer failure isolation.
+- Limited retention cleanup to managed `spotimg_*` evidence files so unrelated files under the capture root are preserved.
+- Added regression tests for write, gate, duplicate prevention, oversize drop, writer failure isolation, and retention cleanup file preservation.
 
 ## Operational Defaults
 
@@ -60,7 +61,7 @@ Because the feature is default-off, disabling the setting stops new image/fact w
 
 ## Remaining Risk
 
-- Disk use can grow if capture is enabled too broadly.
+- Disk use can grow if capture is enabled too broadly. Retention cleanup does not manage unrelated operator files in the capture root.
 - Image evidence may contain production visual context and should be treated as operational evidence.
 - Image evidence improves under-range diagnosis, not temperature accuracy.
 - Production validation should confirm fact row quality during real die change and setup phases.

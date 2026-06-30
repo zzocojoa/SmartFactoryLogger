@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import os
 import tempfile
 import time
 import unittest
@@ -15,6 +16,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend.FacilityData.drivers import spot_api
+from backend.FacilityData.spot_image_fact import SpotImageCaptureWriter
 
 FocusUrlopenTarget = str | UrlRequest
 
@@ -1964,6 +1966,43 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=1.0))
             self.assertEqual(self.read_spot_image_fact_rows(log_path), [])
             self.assertEqual(spot_api.get_spot_image_capture_health()["dropped_count"], 1)
+
+    def test_image_capture_retention_cleanup_deletes_only_managed_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            capture_root = log_path / "absolute_capture_root"
+            old_day_dir = capture_root / "2026" / "06" / "28"
+            new_day_dir = capture_root / "2026" / "06" / "29"
+            manual_dir = capture_root / "manual"
+            old_day_dir.mkdir(parents=True)
+            new_day_dir.mkdir(parents=True)
+            manual_dir.mkdir(parents=True)
+            stale_managed = old_day_dir / "spotimg_20260628T000000000000Z_deadbeef1234.jpg"
+            stale_general = old_day_dir / "operator-note.txt"
+            stale_lookalike_in_date_tree = old_day_dir / "spotimg_manual.jpg"
+            stale_lookalike_outside_date_tree = manual_dir / "spotimg_20260628T000000000000Z_deadbeef1234.jpg"
+            fresh_managed = new_day_dir / "spotimg_20260629T000000000000Z_deadbeef1234.jpg"
+
+            now = time.time()
+            old_mtime = now - (3 * 86400.0)
+            for path in (stale_managed, stale_general, stale_lookalike_in_date_tree, stale_lookalike_outside_date_tree):
+                path.write_bytes(b"old")
+                os.utime(path, (old_mtime, old_mtime))
+            fresh_managed.write_bytes(b"new")
+
+            writer = SpotImageCaptureWriter(
+                log_path=log_path,
+                capture_root=capture_root,
+                retention_days=1,
+                last_cleanup_at=0.0,
+            )
+            writer._cleanup_retention(now)
+
+            self.assertFalse(stale_managed.exists())
+            self.assertTrue(stale_general.exists())
+            self.assertTrue(stale_lookalike_in_date_tree.exists())
+            self.assertTrue(stale_lookalike_outside_date_tree.exists())
+            self.assertTrue(fresh_managed.exists())
 
     async def test_image_capture_writer_failure_does_not_break_live_image_fetch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

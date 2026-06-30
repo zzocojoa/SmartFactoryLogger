@@ -48,7 +48,7 @@ Operators and investigators need evidence for why SPOT temperature is unavailabl
 - Default-off and backward compatible.
 - Bounded memory through a fixed-size queue.
 - Atomic file writes using temp file then replace.
-- Retention cleanup best-effort and isolated.
+- Retention cleanup best-effort and isolated to managed `spotimg_*` evidence files under `YYYY/MM/DD`.
 - Fact schema stable and header guarded.
 - Tests must be included in `npm run health`.
 
@@ -59,12 +59,14 @@ Operators and investigators need evidence for why SPOT temperature is unavailabl
 - Event mode captures under-range evidence and skips valid-temperature evidence.
 - Oversized image bytes are dropped before enqueue.
 - Writer failure does not break `fetch_live_image_async`.
+- Retention cleanup deletes stale managed evidence and preserves general files under the capture root.
 - `python -m unittest backend.tests.test_spot_api` passes.
 - `npm run health` passes.
 
 ## Risks
 
 - Disk growth if capture is enabled with `all`.
+- Data loss if retention cleanup touches unrelated files in an absolute capture path.
 - Sensitive environment metadata in paths.
 - Poll loop interference if writes are synchronous.
 - False confidence if users assume images improve temperature values.
@@ -73,6 +75,7 @@ Operators and investigators need evidence for why SPOT temperature is unavailabl
 
 - Default off.
 - Min interval, max bytes, retention days, bounded queue.
+- Retention cleanup only deletes managed `spotimg_*` evidence files with known image extensions under the date-tree path.
 - Store URL hash, not URL.
 - Queue writer thread isolates disk I/O.
 - PDCA docs and fact schema state that image evidence is diagnostic only.

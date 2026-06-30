@@ -49,6 +49,7 @@ SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION = True
 ```
 
 Relative capture paths resolve under `config.LOG_PATH`.
+Absolute capture paths are allowed for operational storage, but retention cleanup is target-limited to managed evidence files only.
 
 ## Fact Schema
 
@@ -106,7 +107,8 @@ Event mode captures when the nearest SPOT snapshot indicates one of:
 
 - Do not store raw source URL in the fact file.
 - Do not add new response headers with camera IP or path.
-- Image files remain local evidence under the configured log directory.
+- Image files remain local evidence under the configured evidence storage path.
+- Retention cleanup must never delete general files under the capture root. It may only remove stale managed evidence files matching the generated `spotimg_<UTC timestamp>_<sha12>` name, known image extensions, and `YYYY/MM/DD` directories created by this feature.
 
 ## Tests
 
@@ -116,3 +118,4 @@ Event mode captures when the nearest SPOT snapshot indicates one of:
 - Shared-frame cache hit does not persist duplicate fact.
 - Oversized images are dropped.
 - Writer failure is isolated from `fetch_live_image_async`.
+- Retention cleanup deletes stale managed evidence while preserving general files in the capture root.

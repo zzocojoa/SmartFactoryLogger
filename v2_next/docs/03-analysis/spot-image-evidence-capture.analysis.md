@@ -26,6 +26,7 @@ This does not change temperature calculation. Images are stored only to explain 
   - `<LOG_PATH>/spot_image_fact.csv`
   - image files under `<LOG_PATH>/spot_images/YYYY/MM/DD/`
 - Raw camera URL is not written to fact rows; only SHA-256 hash is stored.
+- Retention cleanup is restricted to managed `spotimg_*` evidence files with known image extensions under the `YYYY/MM/DD` tree.
 
 ## Validation
 
@@ -49,7 +50,7 @@ Mitigation:
 - bounded queue
 - max bytes
 - min interval
-- retention cleanup
+- retention cleanup that preserves unrelated files under the capture root
 
 ### Polling Interference
 
