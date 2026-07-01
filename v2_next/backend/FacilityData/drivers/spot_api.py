@@ -141,6 +141,7 @@ _SPOT_IMAGE_CAPTURE_STOP = threading.Event()
 _spot_image_capture_lock = threading.Lock()
 _spot_image_capture_thread: Optional[threading.Thread] = None
 _spot_image_capture_writer: Optional[SpotImageCaptureWriter] = None
+_spot_image_capture_writer_signature: Optional[tuple[Path, Path, int, float]] = None
 _spot_image_capture_last_enqueue_at = 0.0
 _spot_image_capture_last_write_at = 0.0
 _spot_image_capture_last_error_at = 0.0
@@ -290,16 +291,35 @@ def _spot_image_capture_root() -> Path:
     return _spot_image_capture_log_path() / configured_path
 
 
+def _spot_image_capture_retention_days() -> int:
+    return int(getattr(config, "SPOT_IMAGE_CAPTURE_RETENTION_DAYS", 7) or 0)
+
+
+def _spot_image_capture_link_stale_threshold_ms() -> float:
+    return float(getattr(config, "SPOT_REFRESH_INTERVAL", 3.0) or 3.0) * 3.0 * 1000.0
+
+
+def _spot_image_capture_config_signature() -> tuple[Path, Path, int, float]:
+    return (
+        _spot_image_capture_log_path(),
+        _spot_image_capture_root(),
+        _spot_image_capture_retention_days(),
+        _spot_image_capture_link_stale_threshold_ms(),
+    )
+
+
 def _get_spot_image_capture_writer() -> SpotImageCaptureWriter:
-    global _spot_image_capture_writer
+    global _spot_image_capture_writer, _spot_image_capture_writer_signature
     with _spot_image_capture_lock:
-        if _spot_image_capture_writer is None:
+        signature = _spot_image_capture_config_signature()
+        if _spot_image_capture_writer is None or _spot_image_capture_writer_signature != signature:
             _spot_image_capture_writer = SpotImageCaptureWriter(
-                log_path=_spot_image_capture_log_path(),
-                capture_root=_spot_image_capture_root(),
-                retention_days=int(getattr(config, "SPOT_IMAGE_CAPTURE_RETENTION_DAYS", 7) or 0),
-                link_stale_threshold_ms=float(getattr(config, "SPOT_REFRESH_INTERVAL", 3.0) or 3.0) * 3.0 * 1000.0,
+                log_path=signature[0],
+                capture_root=signature[1],
+                retention_days=signature[2],
+                link_stale_threshold_ms=signature[3],
             )
+            _spot_image_capture_writer_signature = signature
         return _spot_image_capture_writer
 
 
@@ -375,7 +395,7 @@ def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> None:
 
 
 def _reset_spot_image_capture_state_for_tests() -> None:
-    global _spot_image_capture_writer, _spot_image_capture_thread
+    global _spot_image_capture_writer, _spot_image_capture_writer_signature, _spot_image_capture_thread
     global _spot_image_capture_enqueued_count, _spot_image_capture_written_count, _spot_image_capture_dropped_count
     global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
@@ -388,6 +408,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
             break
     with _spot_image_capture_lock:
         _spot_image_capture_writer = None
+        _spot_image_capture_writer_signature = None
         _spot_image_capture_thread = None
         _spot_image_capture_enqueued_count = 0
         _spot_image_capture_written_count = 0

@@ -1970,6 +1970,39 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.read_spot_image_fact_rows(log_path), [])
             self.assertEqual(spot_api.get_spot_image_capture_health()["dropped_count"], 1)
 
+    def test_image_capture_writer_rebuilds_when_capture_path_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            image_bytes = b"\xff\xd8writer-reload\xff\xd9"
+
+            spot_api.config.SPOT_IMAGE_CAPTURE_PATH = "spot_images_a"
+            spot_api._maybe_enqueue_spot_image_capture(
+                image_bytes=image_bytes,
+                captured_at=time.time(),
+                image_url="http://spot.local/image.jpg",
+                source="prefetch_upstream",
+                image_age_ms=0.0,
+            )
+            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
+
+            spot_api.config.SPOT_IMAGE_CAPTURE_PATH = "spot_images_b"
+            spot_api._maybe_enqueue_spot_image_capture(
+                image_bytes=image_bytes,
+                captured_at=time.time(),
+                image_url="http://spot.local/image.jpg",
+                source="prefetch_upstream",
+                image_age_ms=0.0,
+            )
+            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
+
+            rows = self.read_spot_image_fact_rows(log_path)
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(rows[0]["spot_image_path"].startswith("spot_images_a/"))
+            self.assertTrue(rows[1]["spot_image_path"].startswith("spot_images_b/"))
+            self.assertTrue((log_path / rows[0]["spot_image_path"]).exists())
+            self.assertTrue((log_path / rows[1]["spot_image_path"]).exists())
+
     def test_image_capture_retention_cleanup_deletes_only_managed_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)

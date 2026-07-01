@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import glob
 import json
 import math
@@ -45,6 +46,25 @@ SUPPORTED_CSV_SCHEMA_VERSIONS = {
     CSV_SCHEMA_VERSION_V2_3,
     CSV_SCHEMA_VERSION_V2_4,
 }
+SPOT_IMAGE_FACT_REQUIRED_COLUMNS = [
+    "spot_image_capture_id",
+    "spot_image_path",
+    "spot_image_sha256",
+    "spot_image_size_bytes",
+    "spot_image_mime",
+    "spot_image_link_age_ms",
+    "spot_image_link_status",
+    "spot_image_linked_observation_key",
+]
+SPOT_IMAGE_LINK_STATUSES = {
+    "fresh",
+    "stale",
+    "missing_observation",
+    "unlinked_observation",
+    "unknown_age",
+    "clock_anomaly",
+}
+HEX_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 EXPECTED_SPOT_INVALID_SENTINEL_VALUES = {"6553.4", "6553.5"}
 EXPECTED_SPOT_INVALID_SENTINEL_MEANINGS = {
     "6553.4": "under_range",
@@ -860,6 +880,132 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
     return failures
 
 
+def validate_spot_image_fact_manifest(metadata: dict, metadata_path: Path) -> list[str]:
+    manifest = metadata.get("spot_image_fact_manifest")
+    if not isinstance(manifest, dict):
+        return ["metadata missing spot_image_fact_manifest block"]
+
+    failures: list[str] = []
+    enabled = manifest.get("enabled")
+    if not isinstance(enabled, bool):
+        failures.append("spot_image_fact_manifest.enabled must be boolean")
+    mode = str(manifest.get("mode") or "")
+    if mode not in {"off", "event", "interval", "all"}:
+        failures.append("spot_image_fact_manifest.mode must be off/event/interval/all")
+
+    fact_path_text = str(manifest.get("fact_path") or "").strip()
+    capture_root_text = str(manifest.get("capture_root") or "").strip()
+    if not fact_path_text:
+        failures.append("spot_image_fact_manifest.fact_path must be populated")
+    if not capture_root_text:
+        failures.append("spot_image_fact_manifest.capture_root must be populated")
+
+    row_count = _parse_non_negative_int(manifest.get("row_count"))
+    if row_count is None:
+        failures.append("spot_image_fact_manifest.row_count must be a non-negative integer")
+        row_count = 0
+
+    for key in ("written", "dropped", "failure"):
+        value = manifest.get(key)
+        if value is not None and _parse_non_negative_int(value) is None:
+            failures.append(f"spot_image_fact_manifest.{key} must be null or a non-negative integer")
+
+    manifest_sha = manifest.get("sha256")
+    if manifest_sha is not None and not _is_sha256_text(str(manifest_sha)):
+        failures.append("spot_image_fact_manifest.sha256 must be null or lowercase SHA-256")
+
+    if not fact_path_text:
+        return failures
+
+    fact_path = Path(fact_path_text)
+    if not fact_path.exists():
+        if row_count > 0 or manifest_sha:
+            failures.append("spot_image_fact_manifest.fact_path does not exist despite non-empty manifest stats")
+        return failures
+
+    try:
+        fact_hash = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+    except OSError:
+        failures.append("spot_image_fact_manifest.fact_path could not be read")
+        return failures
+    if manifest_sha and fact_hash != manifest_sha:
+        failures.append("spot_image_fact_manifest.sha256 does not match fact file")
+
+    try:
+        header, rows = read_csv(fact_path)
+    except Exception as exc:  # pragma: no cover - defensive CLI guard
+        failures.append(f"spot_image_fact_manifest.fact_path CSV read failed: {exc.__class__.__name__}")
+        return failures
+
+    if len(rows) != row_count:
+        failures.append(
+            f"spot_image_fact_manifest.row_count={row_count}, actual spot_image_fact rows={len(rows)}"
+        )
+    missing_columns = [column for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS if column not in header]
+    if missing_columns and rows:
+        failures.append("spot_image_fact header missing columns: " + ", ".join(missing_columns))
+        return failures
+
+    if rows:
+        indices = {column: header.index(column) for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS}
+        fact_parent = fact_path.parent.resolve()
+        for row_number, row in enumerate(rows, start=2):
+            if len(row) != len(header):
+                failures.append(f"spot_image_fact row {row_number} has {len(row)} columns, expected {len(header)}")
+                continue
+            row_sha = row[indices["spot_image_sha256"]].strip()
+            if not _is_sha256_text(row_sha):
+                failures.append(f"spot_image_fact row {row_number} spot_image_sha256 must be lowercase SHA-256")
+            link_status = row[indices["spot_image_link_status"]].strip()
+            if link_status not in SPOT_IMAGE_LINK_STATUSES:
+                failures.append(f"spot_image_fact row {row_number} spot_image_link_status={link_status!r} is invalid")
+            linked_key = row[indices["spot_image_linked_observation_key"]].strip()
+            if link_status == "fresh" and ":" not in linked_key:
+                failures.append(f"spot_image_fact row {row_number} fresh link requires spot_image_linked_observation_key")
+            image_path = row[indices["spot_image_path"]].strip()
+            if _is_unsafe_relative_path(image_path):
+                failures.append(f"spot_image_fact row {row_number} spot_image_path must be a safe relative path")
+                continue
+            resolved_image_path = (fact_parent / image_path).resolve()
+            if not _is_within_directory(resolved_image_path, fact_parent):
+                failures.append(f"spot_image_fact row {row_number} spot_image_path escapes the log directory")
+
+    return failures
+
+
+def _parse_non_negative_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def _is_sha256_text(value: str) -> bool:
+    return bool(HEX_SHA256_RE.fullmatch(value.strip()))
+
+
+def _is_unsafe_relative_path(value: str) -> bool:
+    if not value:
+        return True
+    path = Path(value)
+    if path.is_absolute():
+        return True
+    return any(part in {"", ".", ".."} for part in path.parts)
+
+
+def _is_within_directory(path: Path, directory: Path) -> bool:
+    try:
+        path.relative_to(directory)
+        return True
+    except ValueError:
+        return False
+
+
 def validate_sample_seq(rows: list[list[str]], header: list[str]) -> tuple[bool, str]:
     if "sample_seq" not in header:
         return False, "missing sample_seq"
@@ -962,6 +1108,7 @@ def validate(
                     require_current_server_promotion_profile=require_current_server_promotion_profile,
                 )
             )
+            failures.extend(validate_spot_image_fact_manifest(metadata, metadata_path))
 
         shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
         if not isinstance(shadow_metadata, dict):
