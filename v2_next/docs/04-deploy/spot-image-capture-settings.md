@@ -33,6 +33,9 @@ Available settings:
 - Use `all` only for short manual investigations because it can grow disk usage quickly.
 - Keep path relative, for example `spot_images\incident_20260701`.
 - UI and `/api/config` saves reject absolute, rooted, or parent-traversal paths.
+- Runtime writer settings are re-read before each queued write. A saved log path,
+  capture path, retention, or SPOT refresh change should apply to the next capture
+  without restarting the app.
 - After diagnostics, save Enabled off and Mode off.
 
 ## Verification
@@ -55,6 +58,8 @@ When evidence capture is enabled for a short diagnostic run, `spot_image_fact.cs
 must include `spot_image_link_age_ms` and `spot_image_link_status`. The matching
 CSV v2 sidecar should include `spot_image_fact_manifest` with the fact path,
 capture root, row count, SHA-256, writer counters, and last write time.
+`scripts/validate_csv_v2_shadow.py` validates the manifest shape, fact row count,
+fact SHA-256, safe relative image paths, and link status values.
 
 Startup, missing-completion, and non-positive poll sequence snapshots should not
 produce a linked observation key; those rows are intentionally unlinked rather

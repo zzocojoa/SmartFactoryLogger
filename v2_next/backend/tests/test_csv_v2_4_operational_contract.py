@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import os
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from backend.FacilityData.repository import (
 )
 from backend.FacilityData.schemas import FactoryData
 from scripts.validate_csv_v2_shadow import (
+    validate_spot_image_fact_manifest,
     validate_spot_configuration_snapshot,
     validate_spot_invalid_sentinel_invariants,
     validate_temperature_value_origin_invariants,
@@ -24,6 +26,17 @@ from scripts.validate_csv_v2_shadow import (
 
 
 class CsvV24OperationalContractTests(unittest.TestCase):
+    image_fact_header = [
+        "spot_image_capture_id",
+        "spot_image_path",
+        "spot_image_sha256",
+        "spot_image_size_bytes",
+        "spot_image_mime",
+        "spot_image_link_age_ms",
+        "spot_image_link_status",
+        "spot_image_linked_observation_key",
+    ]
+
     def create_data(self) -> FactoryData:
         return FactoryData(
             Time="2026-06-25T08:00:00",
@@ -51,6 +64,85 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             spot_value_age_ms=10.0,
             spot_temperature_raw="6553.4",
         )
+
+    def write_image_fact(self, fact_path: Path, rows: list[list[str]]) -> str:
+        with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(self.image_fact_header)
+            writer.writerows(rows)
+        return hashlib.sha256(fact_path.read_bytes()).hexdigest()
+
+    def image_fact_metadata(self, fact_path: Path, capture_root: Path, *, row_count: int, sha256: str | None) -> dict:
+        return {
+            "spot_image_fact_manifest": {
+                "enabled": True,
+                "mode": "event",
+                "fact_path": str(fact_path),
+                "capture_root": str(capture_root),
+                "row_count": row_count,
+                "sha256": sha256,
+                "written": row_count,
+                "dropped": 0,
+                "failure": 0,
+                "last_write_at": 1782896400.0,
+            }
+        }
+
+    def test_spot_image_fact_manifest_validator_accepts_matching_fact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            fact_path = log_dir / "spot_image_fact.csv"
+            capture_root = log_dir / "spot_images"
+            fact_hash = self.write_image_fact(
+                fact_path,
+                [
+                    [
+                        "spotimg_20260701T010856283905Z_fe0d2cf21603",
+                        "spot_images/2026/07/01/spotimg_20260701T010856283905Z_fe0d2cf21603.jpg",
+                        "a" * 64,
+                        "9064",
+                        "image/jpeg",
+                        "125.0",
+                        "fresh",
+                        "svc-1:42",
+                    ]
+                ],
+            )
+            metadata = self.image_fact_metadata(fact_path, capture_root, row_count=1, sha256=fact_hash)
+
+            failures = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
+
+        self.assertEqual(failures, [])
+
+    def test_spot_image_fact_manifest_validator_rejects_mismatched_stats_and_link(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            fact_path = log_dir / "spot_image_fact.csv"
+            capture_root = log_dir / "spot_images"
+            self.write_image_fact(
+                fact_path,
+                [
+                    [
+                        "spotimg_20260701T010856283905Z_fe0d2cf21603",
+                        "../escape.jpg",
+                        "not-a-sha",
+                        "9064",
+                        "image/jpeg",
+                        "125.0",
+                        "fresh",
+                        "",
+                    ]
+                ],
+            )
+            metadata = self.image_fact_metadata(fact_path, capture_root, row_count=2, sha256="0" * 64)
+
+            failures = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
+
+        self.assertIn("spot_image_fact_manifest.sha256 does not match fact file", failures)
+        self.assertIn("spot_image_fact_manifest.row_count=2, actual spot_image_fact rows=1", failures)
+        self.assertIn("spot_image_fact row 2 spot_image_sha256 must be lowercase SHA-256", failures)
+        self.assertIn("spot_image_fact row 2 fresh link requires spot_image_linked_observation_key", failures)
+        self.assertIn("spot_image_fact row 2 spot_image_path must be a safe relative path", failures)
 
     def build_v2_row(
         self,
