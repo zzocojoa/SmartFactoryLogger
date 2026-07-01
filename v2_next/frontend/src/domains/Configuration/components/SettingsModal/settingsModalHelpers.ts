@@ -14,6 +14,7 @@ import type {
   MemoryDetailsResponse,
   ObservabilityErrorsResponse,
   PathHealthResult,
+  SpotImageCaptureMode,
   StatsSnapshot,
 } from '../../../../shared/types';
 import { STATUS_ERROR_RATE_WARN, STATUS_P95_WARN_MS } from '../../../../shared/constants/logic';
@@ -23,6 +24,29 @@ interface StatusBadge {
   label: string;
   className: 'idle' | 'ok' | 'warn' | 'error';
 }
+
+export const SPOT_IMAGE_CAPTURE_MODE_OPTIONS: Array<{ value: SpotImageCaptureMode; label: string }> = [
+  { value: 'off', label: 'Off' },
+  { value: 'event', label: 'Event only' },
+  { value: 'interval', label: 'Interval' },
+  { value: 'all', label: 'All frames' },
+];
+
+export const getSpotImageCaptureModeLabel = (mode: SpotImageCaptureMode): string => (
+  SPOT_IMAGE_CAPTURE_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode
+);
+
+export const formatSpotImageCaptureSummary = (
+  enabled: boolean,
+  mode: SpotImageCaptureMode,
+  retentionDays: string,
+): string => {
+  if (!enabled) {
+    return 'Off';
+  }
+  const retention = retentionDays.trim() || '0';
+  return `${getSpotImageCaptureModeLabel(mode)} / ${retention}d retention`;
+};
 
 // ─── Connection Test Badges ───────────────────────────────────────
 

@@ -6,7 +6,8 @@ import {
   ConfigApplyResult,
   ThresholdState,
   CentralStatus,
-  ConfigUpdateResponse
+  ConfigUpdateResponse,
+  SpotImageCaptureMode
 } from '../../../shared/types';
 import { LABELS, MESSAGES } from '../../../shared/constants/uiText';
 import { useModal } from '../../../shared/hooks/useGlobalModalContext';
@@ -45,6 +46,54 @@ const isIntegerInRangeInput = (value: string, min: number, max: number): boolean
   }
   const parsed = Number.parseInt(value.trim(), 10);
   return parsed >= min && parsed <= max;
+};
+
+const isNonNegativeIntegerInput = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return false;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) && parsed >= 0;
+};
+
+const isNonNegativeNumberInput = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  const parsed = Number.parseFloat(trimmed);
+  return Number.isFinite(parsed) && parsed >= 0;
+};
+
+const isSafeRelativePathInput = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('\\')) {
+    return false;
+  }
+  return trimmed.split(/[\\/]+/).every((part) => part.length > 0 && part !== '.' && part !== '..');
+};
+
+const SPOT_IMAGE_CAPTURE_MODES: SpotImageCaptureMode[] = ['off', 'event', 'interval', 'all'];
+const DEFAULT_SPOT_IMAGE_CAPTURE_PATH = 'spot_images';
+const DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = 1;
+const DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES = 2_000_000;
+const DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS = 7;
+
+const normalizeSpotImageCaptureMode = (
+  mode: string | null | undefined,
+  enabled: boolean,
+): SpotImageCaptureMode => {
+  if (!enabled) {
+    return 'off';
+  }
+  const normalized = (mode ?? '').trim().toLowerCase();
+  return SPOT_IMAGE_CAPTURE_MODES.includes(normalized as SpotImageCaptureMode)
+    ? normalized as SpotImageCaptureMode
+    : 'off';
 };
 
 
@@ -136,6 +185,8 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     const toStr = (value?: string) => value ?? '';
     const toBool = (value?: boolean) => Boolean(value);
     const nextThresholdState = buildThresholdStateFromConfig(thresholds);
+    const imageCapture = values.spot.image_capture;
+    const spotImageCaptureEnabled = Boolean(imageCapture?.enabled);
     const nextForm: SettingsFormState = {
       extruderIp: values.extruder.ip ?? '',
       extruderPort: values.extruder.port?.toString() ?? '',
@@ -144,6 +195,19 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       spotIp: values.spot.ip ?? '',
       spotRefreshInterval: values.spot.refresh_interval?.toString() ?? '',
       spotActuatorStep: toOptionalNumberText(values.spot.actuator_step),
+      spotImageCaptureEnabled,
+      spotImageCaptureMode: normalizeSpotImageCaptureMode(imageCapture?.mode, spotImageCaptureEnabled),
+      spotImageCapturePath: imageCapture?.path ?? DEFAULT_SPOT_IMAGE_CAPTURE_PATH,
+      spotImageCaptureMinIntervalSec: toOptionalNumberText(
+        imageCapture?.min_interval_sec ?? DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC,
+      ),
+      spotImageCaptureMaxBytes: toOptionalNumberText(
+        imageCapture?.max_bytes ?? DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES,
+      ),
+      spotImageCaptureRetentionDays: toOptionalNumberText(
+        imageCapture?.retention_days ?? DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS,
+      ),
+      spotImageCaptureLinkToObservation: imageCapture?.link_to_observation ?? true,
       thresholdMasterOn: toBool(thresholdsEnable.master_on),
       thresholdSpeedEnabled: toBool(thresholdsEnable.speed),
       thresholdSpeedValue: toStr(thresholdsValues.speed),
@@ -309,6 +373,24 @@ export const useConfigViewModel = (): UseConfigViewModel => {
     if (!isPositiveIntegerInput(settingsForm.spotActuatorStep)) {
       errors.spotActuatorStep = '양의 정수를 입력하세요.';
     }
+    if (
+      !SPOT_IMAGE_CAPTURE_MODES.includes(settingsForm.spotImageCaptureMode) ||
+      (settingsForm.spotImageCaptureEnabled && settingsForm.spotImageCaptureMode === 'off')
+    ) {
+      errors.spotImageCaptureMode = '저장을 켤 때는 event, interval, all 중 하나를 선택하세요.';
+    }
+    if (!isSafeRelativePathInput(settingsForm.spotImageCapturePath)) {
+      errors.spotImageCapturePath = '로그 디렉터리 아래 상대 경로를 입력하세요.';
+    }
+    if (!isNonNegativeNumberInput(settingsForm.spotImageCaptureMinIntervalSec)) {
+      errors.spotImageCaptureMinIntervalSec = '0 이상의 숫자를 입력하세요.';
+    }
+    if (!isPositiveIntegerInput(settingsForm.spotImageCaptureMaxBytes)) {
+      errors.spotImageCaptureMaxBytes = '1 이상의 byte 제한값을 입력하세요.';
+    }
+    if (!isNonNegativeIntegerInput(settingsForm.spotImageCaptureRetentionDays)) {
+      errors.spotImageCaptureRetentionDays = '0 이상의 일수를 입력하세요.';
+    }
     if (!isIntegerInRangeInput(settingsForm.operatorMetadataDowntimeResetHours, 1, 72)) {
       errors.operatorMetadataDowntimeResetHours = '1-72시간 사이의 값을 입력하세요.';
     }
@@ -426,6 +508,21 @@ export const useConfigViewModel = (): UseConfigViewModel => {
       if (!isAuto) setSettingsError('?묒쓽 ?뺤닔瑜??낅젰?섏꽭??');
       return false;
     }
+    const spotImageCaptureMode = settingsForm.spotImageCaptureEnabled
+      ? normalizeSpotImageCaptureMode(settingsForm.spotImageCaptureMode, true)
+      : 'off';
+    const spotImageCaptureMinIntervalSec = Math.max(
+      0,
+      toFloat(settingsForm.spotImageCaptureMinIntervalSec) ?? DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC,
+    );
+    const spotImageCaptureMaxBytes = Math.max(
+      1,
+      toPositiveInt(settingsForm.spotImageCaptureMaxBytes) ?? DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES,
+    );
+    const spotImageCaptureRetentionDays = Math.max(
+      0,
+      toInt(settingsForm.spotImageCaptureRetentionDays) ?? DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS,
+    );
     const operatorMetadataDowntimeResetHours = Math.max(
       1,
       Math.min(72, toPositiveInt(settingsForm.operatorMetadataDowntimeResetHours) ?? 8),
@@ -450,6 +547,15 @@ export const useConfigViewModel = (): UseConfigViewModel => {
         ip: settingsForm.spotIp.trim() || undefined,
         refresh_interval: toFloat(settingsForm.spotRefreshInterval),
         actuator_step: spotActuatorStep,
+        image_capture: {
+          enabled: settingsForm.spotImageCaptureEnabled,
+          mode: spotImageCaptureMode,
+          path: settingsForm.spotImageCapturePath.trim() || DEFAULT_SPOT_IMAGE_CAPTURE_PATH,
+          min_interval_sec: spotImageCaptureMinIntervalSec,
+          max_bytes: spotImageCaptureMaxBytes,
+          retention_days: spotImageCaptureRetentionDays,
+          link_to_observation: settingsForm.spotImageCaptureLinkToObservation,
+        },
       },
       thresholds: {
         enable: {

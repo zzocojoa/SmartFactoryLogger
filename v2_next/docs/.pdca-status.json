@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-06-29T15:20:00.000Z",
+  "lastUpdated": "2026-07-01T01:30:00.000Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -17,9 +17,10 @@
     "memory-diagnostics-r09-frontend-exactness",
     "memory-diagnostics-r10-export-v2",
     "memory-diagnostics-r11-tests-ci",
-    "spot-image-evidence-capture"
+    "spot-image-evidence-capture",
+    "spot-image-capture-settings-ui"
   ],
-  "primaryFeature": "spot-image-evidence-capture",
+  "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
     "rootCurrentPhase": "not_defined",
     "canonicalPrimaryPhasePath": "features[primaryFeature].phase",
@@ -1491,10 +1492,80 @@
         "lastUpdated": "2026-06-29T15:20:00.000Z"
       },
       "completedAt": "2026-06-29T15:20:00.000Z"
+    },
+    "spot-image-capture-settings-ui": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 1,
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/spot-image-capture-settings-ui.plan.md",
+          "status": "completed"
+        },
+        "design": {
+          "path": "docs/02-design/features/spot-image-capture-settings-ui.design.md",
+          "status": "completed"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/spot-image-capture-settings-ui.do.md",
+          "status": "completed_implementation_checklist"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/spot-image-capture-settings-ui.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100
+        },
+        "report": {
+          "path": "docs/04-report/spot-image-capture-settings-ui.report.md",
+          "status": "completed_feature_report",
+          "match_rate": 100
+        },
+        "deploy": {
+          "path": "docs/04-deploy/spot-image-capture-settings.md",
+          "status": "completed_operational_settings"
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-01T01:30:00.000Z",
+          "completedAt": "2026-07-01T01:30:00.000Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-01T01:30:00.000Z",
+          "completedAt": "2026-07-01T01:30:00.000Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-07-01T01:30:00.000Z",
+          "completedAt": "2026-07-01T01:30:00.000Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-07-01T01:30:00.000Z",
+          "completedAt": "2026-07-01T01:30:00.000Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-07-01T01:30:00.000Z",
+          "completedAt": "2026-07-01T01:30:00.000Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-01T01:30:00.000Z",
+        "lastUpdated": "2026-07-01T01:30:00.000Z"
+      },
+      "completedAt": "2026-07-01T01:30:00.000Z"
     }
   },
   "pipeline": {
-    "currentFeature": "spot-image-evidence-capture",
+    "currentFeature": "spot-image-capture-settings-ui",
     "currentPhase": "completed",
     "level": "Dynamic",
     "lastUpdated": "2026-06-29T15:20:00.000Z"
@@ -2399,6 +2470,15 @@
       "phase": "report",
       "matchRate": 100,
       "timestamp": "2026-06-29T15:20:00.000Z"
+    }
+  ],
+  "timeline": [
+    {
+      "feature": "spot-image-capture-settings-ui",
+      "action": "feature_pdca_completed",
+      "phase": "report",
+      "matchRate": 100,
+      "timestamp": "2026-07-01T01:30:00.000Z"
     }
   ]
 }

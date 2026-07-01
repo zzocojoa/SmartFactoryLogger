@@ -134,6 +134,18 @@ def _positive_int(value: int, fallback: int) -> int:
     return fallback
 
 
+_SPOT_IMAGE_CAPTURE_MODES = {"off", "event", "interval", "all"}
+
+
+def _normalize_spot_image_capture_mode(value: Optional[str], enabled: bool) -> str:
+    if not enabled:
+        return "off"
+    mode = (value or config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE).strip().lower()
+    if mode not in _SPOT_IMAGE_CAPTURE_MODES:
+        return config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE
+    return mode
+
+
 def _load_ls_targets(parser: configparser.ConfigParser) -> list[tuple[str, str]]:
     if parser.has_section("LS_PLC_TARGETS"):
         targets: list[tuple[str, str]] = []
@@ -268,6 +280,62 @@ class ConfigManager:
             "SPOT_WIDGET_HEIGHT",
             _get_int(parser, "SPOT", "widgetheight", config.DEFAULT_SPOT_WIDGET_HEIGHT),
         )
+        spot_image_capture_enabled = _env_bool(
+            "SPOT_IMAGE_CAPTURE_ENABLED",
+            _get_bool(parser, "SPOT", "imagecaptureenabled", config.DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED),
+        )
+        spot_image_capture_mode = _normalize_spot_image_capture_mode(
+            os.getenv(
+                "SPOT_IMAGE_CAPTURE_MODE",
+                _get(parser, "SPOT", "imagecapturemode", config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE),
+            ),
+            spot_image_capture_enabled,
+        )
+        spot_image_capture_path = os.getenv(
+            "SPOT_IMAGE_CAPTURE_PATH",
+            _get(parser, "SPOT", "imagecapturepath", config.DEFAULT_SPOT_IMAGE_CAPTURE_PATH)
+            or config.DEFAULT_SPOT_IMAGE_CAPTURE_PATH,
+        )
+        spot_image_capture_min_interval_sec = max(
+            0.0,
+            _env_float(
+                "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC",
+                _get_float(
+                    parser,
+                    "SPOT",
+                    "imagecaptureminintervalsec",
+                    config.DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC,
+                ),
+            ),
+        )
+        spot_image_capture_max_bytes = max(
+            1,
+            _env_int(
+                "SPOT_IMAGE_CAPTURE_MAX_BYTES",
+                _get_int(parser, "SPOT", "imagecapturemaxbytes", config.DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES),
+            ),
+        )
+        spot_image_capture_retention_days = max(
+            0,
+            _env_int(
+                "SPOT_IMAGE_CAPTURE_RETENTION_DAYS",
+                _get_int(
+                    parser,
+                    "SPOT",
+                    "imagecaptureretentiondays",
+                    config.DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS,
+                ),
+            ),
+        )
+        spot_image_capture_link_to_observation = _env_bool(
+            "SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION",
+            _get_bool(
+                parser,
+                "SPOT",
+                "imagecapturelinktoobservation",
+                config.DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION,
+            ),
+        )
         operator_metadata_downtime_reset_hours = _env_int(
             "OPERATOR_METADATA_DOWNTIME_RESET_HOURS",
             _get_int(
@@ -344,6 +412,15 @@ class ConfigManager:
                 "actuator_url": spot_actuator_url,
                 "widget_width": spot_widget_width,
                 "widget_height": spot_widget_height,
+                "image_capture": {
+                    "enabled": spot_image_capture_enabled,
+                    "mode": spot_image_capture_mode,
+                    "path": spot_image_capture_path,
+                    "min_interval_sec": spot_image_capture_min_interval_sec,
+                    "max_bytes": spot_image_capture_max_bytes,
+                    "retention_days": spot_image_capture_retention_days,
+                    "link_to_observation": spot_image_capture_link_to_observation,
+                },
             },
             "settings": settings,
             "logging": logging_cfg,
@@ -425,6 +502,13 @@ class ConfigManager:
             "spot.actuator_url",
             "spot.widget_width",
             "spot.widget_height",
+            "spot.image_capture.enabled",
+            "spot.image_capture.mode",
+            "spot.image_capture.path",
+            "spot.image_capture.min_interval_sec",
+            "spot.image_capture.max_bytes",
+            "spot.image_capture.retention_days",
+            "spot.image_capture.link_to_observation",
         }
         plc_keys = {
             "extruder.ip",
@@ -563,6 +647,46 @@ class ConfigManager:
                 )
                 config.SPOT_WIDGET_WIDTH = int(spot_cfg.get("widget_width", config.DEFAULT_SPOT_WIDGET_WIDTH))
                 config.SPOT_WIDGET_HEIGHT = int(spot_cfg.get("widget_height", config.DEFAULT_SPOT_WIDGET_HEIGHT))
+                image_capture_cfg = spot_cfg.get("image_capture") or {}
+                image_capture_enabled = bool(
+                    image_capture_cfg.get("enabled", config.DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED)
+                )
+                config.SPOT_IMAGE_CAPTURE_ENABLED = image_capture_enabled
+                config.SPOT_IMAGE_CAPTURE_MODE = _normalize_spot_image_capture_mode(
+                    image_capture_cfg.get("mode", config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE),
+                    image_capture_enabled,
+                )
+                config.SPOT_IMAGE_CAPTURE_PATH = str(
+                    image_capture_cfg.get("path") or config.DEFAULT_SPOT_IMAGE_CAPTURE_PATH
+                )
+                config.SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = max(
+                    0.0,
+                    float(
+                        image_capture_cfg.get(
+                            "min_interval_sec",
+                            config.DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC,
+                        )
+                    ),
+                )
+                config.SPOT_IMAGE_CAPTURE_MAX_BYTES = max(
+                    1,
+                    int(image_capture_cfg.get("max_bytes", config.DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES)),
+                )
+                config.SPOT_IMAGE_CAPTURE_RETENTION_DAYS = max(
+                    0,
+                    int(
+                        image_capture_cfg.get(
+                            "retention_days",
+                            config.DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS,
+                        )
+                    ),
+                )
+                config.SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION = bool(
+                    image_capture_cfg.get(
+                        "link_to_observation",
+                        config.DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION,
+                    )
+                )
                 applied.extend(sorted(spot_changed))
             except Exception:
                 pending.extend(sorted(spot_changed))

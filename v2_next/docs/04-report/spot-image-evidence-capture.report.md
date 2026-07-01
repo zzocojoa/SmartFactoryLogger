@@ -23,7 +23,7 @@ The feature saves selected fresh upstream SPOT images to local evidence storage 
 
 ```text
 SPOT_IMAGE_CAPTURE_ENABLED = False
-SPOT_IMAGE_CAPTURE_MODE = event
+SPOT_IMAGE_CAPTURE_MODE = off
 SPOT_IMAGE_CAPTURE_PATH = spot_images
 SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = 1.0
 SPOT_IMAGE_CAPTURE_RETENTION_DAYS = 7

@@ -3354,6 +3354,68 @@ body {
   color: var(--text-muted);
 }
 
+.settings-spot-capture {
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-spot-capture-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-spot-capture-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.settings-spot-capture-summary {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.settings-spot-capture-warning {
+  color: var(--state-warn);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.settings-spot-capture-grid {
+  margin-top: 0;
+}
+
+.settings-spot-capture-path {
+  grid-column: span 2;
+}
+
+@media (max-width: 720px) {
+  .settings-spot-capture-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settings-spot-capture-head .settings-toggle {
+    align-self: flex-start;
+  }
+
+  .settings-spot-capture-path {
+    grid-column: auto;
+  }
+}
+
 .settings-spot-preview {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);

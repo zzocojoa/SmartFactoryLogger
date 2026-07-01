@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { FrontendMemorySnapshot, MemoryDetailsResponse } from '../../../../shared/types';
-import { buildObservabilitySummary } from './settingsModalHelpers';
+import {
+  SPOT_IMAGE_CAPTURE_MODE_OPTIONS,
+  buildObservabilitySummary,
+  formatSpotImageCaptureSummary,
+  getSpotImageCaptureModeLabel,
+} from './settingsModalHelpers';
 
 const emptyMemoryDetails = (): MemoryDetailsResponse => ({
   backend_top_consumers: [],
@@ -24,6 +29,18 @@ const emptyFrontendMemory = (): FrontendMemorySnapshot => ({
   alerts: [],
   last_refresh_at: 1,
   history: [],
+});
+
+describe('spot image capture helpers', () => {
+  it('keeps off as the first and safest capture mode option', () => {
+    expect(SPOT_IMAGE_CAPTURE_MODE_OPTIONS[0]).toEqual({ value: 'off', label: 'Off' });
+    expect(getSpotImageCaptureModeLabel('all')).toBe('All frames');
+  });
+
+  it('formats disabled capture as off regardless of the retained mode value', () => {
+    expect(formatSpotImageCaptureSummary(false, 'all', '7')).toBe('Off');
+    expect(formatSpotImageCaptureSummary(true, 'event', '7')).toBe('Event only / 7d retention');
+  });
 });
 
 describe('buildObservabilitySummary', () => {

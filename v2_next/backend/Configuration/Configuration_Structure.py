@@ -7,6 +7,16 @@ class NetConfig(BaseModel):
     port: Optional[int] = None
 
 
+class SpotImageCaptureConfig(BaseModel):
+    enabled: Optional[bool] = None
+    mode: Optional[str] = None
+    path: Optional[str] = None
+    min_interval_sec: Optional[float] = None
+    max_bytes: Optional[int] = None
+    retention_days: Optional[int] = None
+    link_to_observation: Optional[bool] = None
+
+
 class SpotConfig(BaseModel):
     ip: Optional[str] = None
     url: Optional[str] = None
@@ -28,6 +38,7 @@ class SpotConfig(BaseModel):
     actuator_url: Optional[str] = None
     widget_width: Optional[int] = None
     widget_height: Optional[int] = None
+    image_capture: Optional[SpotImageCaptureConfig] = None
 
 
 class SettingsConfig(BaseModel):
