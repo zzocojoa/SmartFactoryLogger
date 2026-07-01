@@ -4,7 +4,7 @@ import csv
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -61,6 +61,7 @@ class SpotImageCaptureWriter:
     failure_count: int = 0
     written_count: int = 0
     last_cleanup_at: float = 0.0
+    _known_facts_by_capture_id: Optional[dict[str, dict[str, str]]] = field(default=None, init=False, repr=False)
 
     @property
     def fact_path(self) -> Path:
@@ -87,6 +88,15 @@ class SpotImageCaptureWriter:
         output_path = self.capture_root / captured_dt.strftime("%Y") / captured_dt.strftime("%m") / captured_dt.strftime("%d")
         output_path.mkdir(parents=True, exist_ok=True)
         image_path = output_path / f"{capture_id}{extension}"
+
+        existing_fact = self._existing_fact_for_capture_id(capture_id)
+        if existing_fact is not None:
+            if not image_path.exists():
+                tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
+                tmp_path.write_bytes(image_bytes)
+                tmp_path.replace(image_path)
+            return dict(existing_fact)
+
         tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
         tmp_path.write_bytes(image_bytes)
         tmp_path.replace(image_path)
@@ -108,6 +118,7 @@ class SpotImageCaptureWriter:
             observation_snapshot=observation_snapshot,
         )
         self._append_fact(fact)
+        self._remember_fact(fact)
         self.written_count += 1
         self._cleanup_retention(time.time())
         return fact
@@ -148,7 +159,37 @@ class SpotImageCaptureWriter:
             f"{self.fact_path.stem}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}.schema-mismatch.csv"
         )
         self.fact_path.rename(archive_path)
+        self._known_facts_by_capture_id = {}
         return True
+
+    def _existing_fact_for_capture_id(self, capture_id: str) -> Optional[dict[str, str]]:
+        facts_by_id = self._load_known_facts_by_capture_id()
+        fact = facts_by_id.get(capture_id)
+        return dict(fact) if fact is not None else None
+
+    def _load_known_facts_by_capture_id(self) -> dict[str, dict[str, str]]:
+        if self._known_facts_by_capture_id is not None:
+            return self._known_facts_by_capture_id
+        facts_by_id: dict[str, dict[str, str]] = {}
+        if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
+            try:
+                with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    if reader.fieldnames == SPOT_IMAGE_FACT_COLUMNS:
+                        for row in reader:
+                            capture_id = str(row.get("spot_image_capture_id") or "").strip()
+                            if capture_id:
+                                facts_by_id[capture_id] = dict(row)
+            except (OSError, UnicodeError, csv.Error):
+                facts_by_id = {}
+        self._known_facts_by_capture_id = facts_by_id
+        return facts_by_id
+
+    def _remember_fact(self, fact: Mapping[str, str]) -> None:
+        capture_id = str(fact.get("spot_image_capture_id") or "").strip()
+        if not capture_id:
+            return
+        self._load_known_facts_by_capture_id()[capture_id] = dict(fact)
 
     def _cleanup_retention(self, now: float) -> None:
         if self.retention_days <= 0 or now - self.last_cleanup_at < 3600.0:
