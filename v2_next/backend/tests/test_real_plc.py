@@ -1645,6 +1645,17 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertEqual(spot_config["config_source"], "spot_web_server_screenshot")
             self.assertTrue(spot_config["config_operator_verified"])
             self.assertTrue(spot_config["config_captured_at"].endswith("Z"))
+            image_fact_manifest = metadata["spot_image_fact_manifest"]
+            self.assertFalse(image_fact_manifest["enabled"])
+            self.assertEqual(image_fact_manifest["mode"], "off")
+            self.assertEqual(image_fact_manifest["fact_path"], str(log_dir / "spot_image_fact.csv"))
+            self.assertEqual(image_fact_manifest["capture_root"], str(log_dir / "spot_images"))
+            self.assertEqual(image_fact_manifest["row_count"], 0)
+            self.assertIsNone(image_fact_manifest["sha256"])
+            self.assertEqual(image_fact_manifest["written"], 0)
+            self.assertEqual(image_fact_manifest["dropped"], 0)
+            self.assertEqual(image_fact_manifest["failure"], 0)
+            self.assertIsNone(image_fact_manifest["last_write_at"])
             self.assertEqual(
                 metadata["schema_metadata"]["position_read_feature_flag"],
                 "EXTRUDER.position_read_enabled or POSITION_READ_ENABLED",

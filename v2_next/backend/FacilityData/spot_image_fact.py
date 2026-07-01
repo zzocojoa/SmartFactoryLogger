@@ -25,6 +25,8 @@ SPOT_IMAGE_FACT_COLUMNS = [
     "spot_image_status",
     "spot_image_source",
     "spot_image_age_ms",
+    "spot_image_link_age_ms",
+    "spot_image_link_status",
     "spot_image_linked_observation_key",
     "spot_service_instance_id",
     "spot_poll_seq_nearest",
@@ -55,6 +57,7 @@ class SpotImageCaptureWriter:
     capture_root: Path
     retention_days: int = 7
     fact_filename: str = "spot_image_fact.csv"
+    link_stale_threshold_ms: float = 9000.0
     failure_count: int = 0
     written_count: int = 0
     last_cleanup_at: float = 0.0
@@ -71,6 +74,7 @@ class SpotImageCaptureWriter:
         source_url: str,
         source: str,
         image_age_ms: Optional[float],
+        link_checked_at: Optional[float],
         observation_snapshot: Optional[Mapping[str, Any]],
     ) -> dict[str, str]:
         sha256 = hashlib.sha256(image_bytes).hexdigest()
@@ -99,6 +103,8 @@ class SpotImageCaptureWriter:
             height=height,
             source=source,
             image_age_ms=image_age_ms,
+            link_checked_at=link_checked_at,
+            link_stale_threshold_ms=self.link_stale_threshold_ms,
             observation_snapshot=observation_snapshot,
         )
         self._append_fact(fact)
@@ -218,9 +224,18 @@ def build_spot_image_fact(
     height: Optional[int],
     source: str,
     image_age_ms: Optional[float],
+    link_checked_at: Optional[float],
     observation_snapshot: Optional[Mapping[str, Any]],
+    link_stale_threshold_ms: float = 9000.0,
 ) -> dict[str, str]:
     snapshot = observation_snapshot or {}
+    linked_observation_key = build_spot_observation_key(snapshot)
+    link_age_ms, link_status = _derive_link_age_and_status(
+        snapshot=snapshot,
+        link_checked_at=link_checked_at,
+        linked_observation_key=linked_observation_key,
+        stale_threshold_ms=link_stale_threshold_ms,
+    )
     return {
         "spot_image_capture_id": capture_id,
         "spot_image_captured_at": captured_iso,
@@ -234,7 +249,9 @@ def build_spot_image_fact(
         "spot_image_status": "captured",
         "spot_image_source": source,
         "spot_image_age_ms": _format_optional_float(image_age_ms),
-        "spot_image_linked_observation_key": build_spot_observation_key(snapshot),
+        "spot_image_link_age_ms": _format_optional_float(link_age_ms),
+        "spot_image_link_status": link_status,
+        "spot_image_linked_observation_key": linked_observation_key,
         "spot_service_instance_id": _text(snapshot.get("spot_service_instance_id")),
         "spot_poll_seq_nearest": _text(snapshot.get("spot_poll_seq")),
         "sample_seq_nearest": _text(snapshot.get("sample_seq")),
@@ -254,6 +271,93 @@ def build_spot_image_fact(
         "low_signal_threshold_pc": _text(snapshot.get("low_signal_threshold_pc")),
         "peak_picker_enabled": _text(snapshot.get("peak_picker_enabled")),
     }
+
+
+def build_spot_image_fact_manifest(
+    *,
+    log_path: Path,
+    capture_root: Path,
+    enabled: bool,
+    mode: str,
+    health: Optional[Mapping[str, Any]] = None,
+    fact_filename: str = "spot_image_fact.csv",
+) -> dict[str, Any]:
+    fact_path = log_path / fact_filename
+    row_count, sha256 = _fact_file_stats(fact_path)
+    health_data = health or {}
+    return {
+        "enabled": bool(enabled),
+        "mode": str(mode or "off"),
+        "fact_path": str(fact_path),
+        "capture_root": str(capture_root),
+        "row_count": row_count,
+        "sha256": sha256,
+        "written": _optional_int(health_data.get("written_count")),
+        "dropped": _optional_int(health_data.get("dropped_count")),
+        "failure": _optional_int(health_data.get("failure_count")),
+        "last_write_at": health_data.get("last_write_at"),
+    }
+
+
+def _derive_link_age_and_status(
+    *,
+    snapshot: Mapping[str, Any],
+    link_checked_at: Optional[float],
+    linked_observation_key: str,
+    stale_threshold_ms: float,
+) -> tuple[Optional[float], str]:
+    if not snapshot:
+        return None, "missing_observation"
+    if not linked_observation_key:
+        return None, "unlinked_observation"
+    completed_at_epoch = _snapshot_completed_at_epoch(snapshot)
+    if completed_at_epoch is None or link_checked_at is None:
+        return None, "unknown_age"
+    age_ms = (float(link_checked_at) - completed_at_epoch) * 1000.0
+    if age_ms < 0:
+        return age_ms, "clock_anomaly"
+    if age_ms > stale_threshold_ms:
+        return age_ms, "stale"
+    return age_ms, "fresh"
+
+
+def _snapshot_completed_at_epoch(snapshot: Mapping[str, Any]) -> Optional[float]:
+    epoch_value = snapshot.get("_spot_last_poll_completed_at_epoch")
+    try:
+        if epoch_value is not None:
+            return float(epoch_value)
+    except (TypeError, ValueError):
+        pass
+    text = _text(snapshot.get("spot_last_poll_completed_at"))
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except ValueError:
+        return None
+
+
+def _fact_file_stats(fact_path: Path) -> tuple[int, Optional[str]]:
+    if not fact_path.exists() or fact_path.stat().st_size == 0:
+        return 0, None
+    row_count = 0
+    try:
+        with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.reader(handle)
+            next(reader, None)
+            row_count = sum(1 for row in reader if row)
+    except (OSError, UnicodeError, csv.Error):
+        row_count = 0
+    try:
+        sha256 = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+    except OSError:
+        sha256 = None
+    return row_count, sha256
 
 
 def image_metadata(image_bytes: bytes) -> tuple[str, Optional[int], Optional[int], str]:
@@ -421,6 +525,13 @@ def _format_optional_float(value: Optional[float]) -> str:
     if value is None:
         return ""
     return f"{float(value):.3f}"
+
+
+def _optional_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _text(value: Any) -> str:

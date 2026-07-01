@@ -33,6 +33,7 @@ from backend.FacilityData.spot_observation_fact import (
     build_spot_observation_key,
     parse_spot_diagnostic_evidence_codes,
 )
+from backend.FacilityData.spot_image_fact import build_spot_image_fact_manifest
 from backend.FacilityData.temperature_operational import (
     SPOT_ROW_FRESHNESS_RULE_VERSION,
     TEMPERATURE_OPERATIONAL_RULE_VERSION,
@@ -691,6 +692,27 @@ class CSVLoggerService:
             "config_operator_verified": bool(getattr(config, "SPOT_CONFIG_OPERATOR_VERIFIED", False)),
         }
 
+    def _spot_image_fact_manifest(self, log_path: Path) -> dict[str, Any]:
+        raw_capture_path = str(getattr(config, "SPOT_IMAGE_CAPTURE_PATH", "spot_images") or "spot_images").strip()
+        capture_root = Path(raw_capture_path or "spot_images")
+        if not capture_root.is_absolute():
+            capture_root = log_path / capture_root
+        try:
+            from backend.FacilityData.drivers import spot_api
+
+            health = spot_api.get_spot_image_capture_health()
+        except Exception:
+            health = {}
+        mode = str(health.get("mode") or getattr(config, "SPOT_IMAGE_CAPTURE_MODE", "off") or "off")
+        enabled = bool(health.get("enabled", getattr(config, "SPOT_IMAGE_CAPTURE_ENABLED", False)))
+        return build_spot_image_fact_manifest(
+            log_path=log_path,
+            capture_root=capture_root,
+            enabled=enabled,
+            mode=mode,
+            health=health,
+        )
+
 
     def _resolve_clean_git_commit(self) -> Optional[str]:
         repo_root = Path(__file__).resolve().parents[2]
@@ -773,6 +795,7 @@ class CSVLoggerService:
             },
             "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(active_contract),
             "spot_configuration_snapshot": self._spot_configuration_snapshot(),
+            "spot_image_fact_manifest": self._spot_image_fact_manifest(sidecar_path.parent),
             "sensor_metadata": [
                 {
                     "column_name": "Product_No_operator",
@@ -1236,7 +1259,56 @@ class CSVLoggerService:
             return default
         return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "enabled"}
 
-    def _derive_temperature_operational_decision(self, data: FactoryData, process_phase_candidate: str):
+    def _spot_row_freshness_threshold_ms(self) -> float:
+        return float(getattr(config, "SPOT_REFRESH_INTERVAL", 3.0) or 3.0) * 3.0 * 1000.0
+
+    def _timestamp_age_ms_at_row(self, row_timestamp: datetime, source_timestamp: Optional[str]) -> Optional[float]:
+        source_dt = self._parse_utc_timestamp_text(source_timestamp)
+        if source_dt is None:
+            return None
+        row_dt = row_timestamp
+        if row_dt.tzinfo is None:
+            row_dt = row_dt.replace(tzinfo=timezone.utc)
+        age_ms = (row_dt.astimezone(timezone.utc) - source_dt.astimezone(timezone.utc)).total_seconds() * 1000.0
+        return age_ms
+
+    def _parse_utc_timestamp_text(self, value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            if text.endswith("Z"):
+                text = f"{text[:-1]}+00:00"
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    def _effective_age_ms_at_row(
+        self,
+        *,
+        row_timestamp: datetime,
+        explicit_age_ms: Optional[float],
+        source_timestamp: Optional[str],
+        fallback_age_ms: Optional[float],
+    ) -> Optional[float]:
+        if explicit_age_ms is not None:
+            return explicit_age_ms
+        row_age = self._timestamp_age_ms_at_row(row_timestamp, source_timestamp)
+        if row_age is not None:
+            return row_age
+        return fallback_age_ms
+
+    def _derive_temperature_operational_decision(
+        self,
+        data: FactoryData,
+        process_phase_candidate: str,
+        row_timestamp: datetime,
+    ):
         return derive_temperature_operational_fields(
             TemperatureOperationalInput(
                 poll_status=data.spot_poll_status or "not_attempted",
@@ -1249,12 +1321,19 @@ class CSVLoggerService:
                 temperature_value_origin=data.temperature_value_origin or "none",
                 spot_device_status_code=data.spot_device_status_code,
                 spot_error_code=data.spot_error_code,
-                spot_effective_age_ms_at_row=data.spot_effective_age_ms_at_row
-                if data.spot_effective_age_ms_at_row is not None
-                else data.spot_snapshot_age_ms,
-                spot_effective_value_age_ms_at_row=data.spot_effective_value_age_ms_at_row
-                if data.spot_effective_value_age_ms_at_row is not None
-                else data.spot_value_age_ms,
+                spot_effective_age_ms_at_row=self._effective_age_ms_at_row(
+                    row_timestamp=row_timestamp,
+                    explicit_age_ms=data.spot_effective_age_ms_at_row,
+                    source_timestamp=data.spot_last_poll_completed_at,
+                    fallback_age_ms=data.spot_snapshot_age_ms,
+                ),
+                spot_effective_value_age_ms_at_row=self._effective_age_ms_at_row(
+                    row_timestamp=row_timestamp,
+                    explicit_age_ms=data.spot_effective_value_age_ms_at_row,
+                    source_timestamp=data.spot_last_valid_value_at,
+                    fallback_age_ms=data.spot_value_age_ms,
+                ),
+                spot_row_freshness_threshold_ms=self._spot_row_freshness_threshold_ms(),
                 process_phase_candidate=process_phase_candidate,
                 evidence_codes=parse_spot_diagnostic_evidence_codes(data.spot_diagnostic_evidence_codes),
                 alarmstatus=self._optional_alarmstatus(data.alarmstatus),
@@ -1286,6 +1365,10 @@ class CSVLoggerService:
             {
                 "spot_service_instance_id": data.spot_service_instance_id,
                 "spot_poll_seq": data.spot_poll_seq,
+                "spot_last_poll_completed_at": data.spot_last_poll_completed_at,
+                "spot_poll_status": data.spot_poll_status,
+                "temperature_output_status": data.temperature_output_status,
+                "temperature_status_shadow": data.temperature_status_shadow,
             }
         )
 
@@ -1303,10 +1386,17 @@ class CSVLoggerService:
         device_status = str(data.spot_device_status_code or "").strip()
         process_phase = str(process_phase_decision.process_phase_candidate or "unknown")
         row_freshness = str(operational_decision.spot_effective_freshness_at_row or "unknown")
-        fact_link_expected = bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)) and (
-            data.spot_poll_seq is not None
-            or data.spot_observation_seq is not None
-            or bool(data.spot_service_instance_id)
+        fact_link_expected = bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)) and bool(
+            build_spot_observation_key(
+                {
+                    "spot_service_instance_id": data.spot_service_instance_id or "__missing_service_id__",
+                    "spot_poll_seq": data.spot_poll_seq,
+                    "spot_last_poll_completed_at": data.spot_last_poll_completed_at,
+                    "spot_poll_status": data.spot_poll_status,
+                    "temperature_output_status": data.temperature_output_status,
+                    "temperature_status_shadow": data.temperature_status_shadow,
+                }
+            )
         )
         updated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -1373,6 +1463,7 @@ class CSVLoggerService:
         operational_decision = self._derive_temperature_operational_decision(
             data,
             process_phase_decision.process_phase_candidate,
+            ingest_timestamp,
         )
         v1_values = list(v1_row)
         if (

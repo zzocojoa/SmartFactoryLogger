@@ -49,6 +49,7 @@ class TemperatureOperationalInput:
     spot_error_code: Optional[str] = None
     spot_effective_age_ms_at_row: Optional[float] = None
     spot_effective_value_age_ms_at_row: Optional[float] = None
+    spot_row_freshness_threshold_ms: Optional[float] = None
     process_phase_candidate: str = "unknown"
     evidence_codes: Iterable[str] = ()
     state_decision: Optional[TemperatureStateDecision] = None
@@ -78,7 +79,10 @@ class TemperatureOperationalDecision:
 def derive_temperature_operational_fields(
     input_state: TemperatureOperationalInput,
 ) -> TemperatureOperationalDecision:
-    row_freshness, clock_status = derive_spot_row_freshness(input_state.spot_effective_age_ms_at_row)
+    row_freshness, clock_status = derive_spot_row_freshness(
+        input_state.spot_effective_age_ms_at_row,
+        threshold_ms=input_state.spot_row_freshness_threshold_ms or 9000.0,
+    )
     state_decision = input_state.state_decision or derive_temperature_state(
         TemperatureStateInput(
             poll_status=_coerce_poll_status(input_state.poll_status),
@@ -184,7 +188,6 @@ def _derive_expectedness(status: str, phase: str) -> str:
             "setup_candidate",
             "setup_alignment_candidate",
             "pre_changeover_hold_candidate",
-            "possible_pre_changeover_hold",
             "die_change_candidate",
             "changeover_candidate",
             "production_stabilizing",

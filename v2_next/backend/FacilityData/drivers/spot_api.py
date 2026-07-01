@@ -131,6 +131,7 @@ class _SpotImageCaptureEvent:
     source_url: str
     source: str
     image_age_ms: Optional[float]
+    link_checked_at: Optional[float]
     observation_snapshot: Optional[Dict[str, Any]]
 
 
@@ -297,6 +298,7 @@ def _get_spot_image_capture_writer() -> SpotImageCaptureWriter:
                 log_path=_spot_image_capture_log_path(),
                 capture_root=_spot_image_capture_root(),
                 retention_days=int(getattr(config, "SPOT_IMAGE_CAPTURE_RETENTION_DAYS", 7) or 0),
+                link_stale_threshold_ms=float(getattr(config, "SPOT_REFRESH_INTERVAL", 3.0) or 3.0) * 3.0 * 1000.0,
             )
         return _spot_image_capture_writer
 
@@ -332,6 +334,7 @@ def _spot_image_capture_worker() -> None:
                 source_url=event.source_url,
                 source=event.source,
                 image_age_ms=event.image_age_ms,
+                link_checked_at=event.link_checked_at,
                 observation_snapshot=event.observation_snapshot,
             )
             with _spot_image_capture_lock:
@@ -527,9 +530,11 @@ def _maybe_enqueue_spot_image_capture(
         with _spot_image_capture_lock:
             _spot_image_capture_dropped_count += 1
         return
-    snapshot = get_spot_temperature_poll_snapshot() if bool(
-        getattr(config, "SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION", True)
-    ) else None
+    link_checked_at: Optional[float] = None
+    snapshot = None
+    if bool(getattr(config, "SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION", True)):
+        link_checked_at = time.time()
+        snapshot = get_spot_temperature_poll_snapshot()
     if not _should_enqueue_spot_image_capture(mode, snapshot):
         return
     min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
@@ -543,6 +548,7 @@ def _maybe_enqueue_spot_image_capture(
             source_url=image_url,
             source=source,
             image_age_ms=image_age_ms,
+            link_checked_at=link_checked_at,
             observation_snapshot=dict(snapshot) if snapshot is not None else None,
         )
         try:

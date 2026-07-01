@@ -50,3 +50,12 @@ Expected normal state:
 enabled: false
 mode: off
 ```
+
+When evidence capture is enabled for a short diagnostic run, `spot_image_fact.csv`
+must include `spot_image_link_age_ms` and `spot_image_link_status`. The matching
+CSV v2 sidecar should include `spot_image_fact_manifest` with the fact path,
+capture root, row count, SHA-256, writer counters, and last write time.
+
+Startup, missing-completion, and non-positive poll sequence snapshots should not
+produce a linked observation key; those rows are intentionally unlinked rather
+than operational evidence.

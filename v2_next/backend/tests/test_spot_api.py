@@ -1869,6 +1869,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 spot_device_status_code="temperature_under_range",
                 spot_diagnostic_evidence_codes='["target_out_of_fov_evidence"]',
                 signalpc="1.5",
+                _spot_last_poll_completed_at_epoch=time.time(),
             )
             image_bytes = b"\xff\xd8live-capture\xff\xd9"
 
@@ -1886,6 +1887,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row["spot_image_mime"], "image/jpeg")
             self.assertEqual(row["spot_image_source"], "live_upstream")
             self.assertEqual(row["spot_image_linked_observation_key"], "test-spot-service-instance:42")
+            self.assertEqual(row["spot_image_link_status"], "fresh")
+            self.assertGreaterEqual(float(row["spot_image_link_age_ms"]), 0.0)
             self.assertEqual(row["temperature_output_status_nearest"], "under_range")
             self.assertEqual(row["temperature_under_range_cause_candidate_nearest"], "target_out_of_fov_candidate")
             self.assertEqual(len(row["spot_image_source_url_hash"]), 64)
