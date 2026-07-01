@@ -394,6 +394,63 @@ class ConfigurationServiceTests(unittest.TestCase):
 
                     self.assertIn("imagecapturepath = spot_images", config_path.read_text(encoding="utf-8-sig"))
 
+    def test_config_api_rejects_unsafe_spot_image_capture_path_with_400(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[SPOT]",
+                        "ip = 10.1.10.50",
+                        "imagecapturepath = spot_images",
+                        "",
+                    ]
+                ),
+                encoding="utf-8-sig",
+            )
+
+            from fastapi.testclient import TestClient
+
+            from backend import app as backend_app
+            from backend.Configuration import service
+
+            original_config_path = service.config.CONFIG_PATH
+            original_allow_local_config = service.os.environ.get("SFL_ALLOW_LOCAL_CONFIG")
+            service.config.CONFIG_PATH = config_path
+            service.os.environ["SFL_ALLOW_LOCAL_CONFIG"] = "1"
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            response = None
+            try:
+                with mock.patch.object(service.config_meta, "record_local_update", return_value={}):
+                    with mock.patch.object(service.config_manager, "reload", return_value={}):
+                        with mock.patch.object(service.config_manager, "apply_changes", return_value={}):
+                            response = client.post(
+                                "/api/config",
+                                json={
+                                    "spot": {
+                                        "image_capture": {
+                                            "enabled": True,
+                                            "mode": "event",
+                                            "path": "spot_images/../outside_logs",
+                                        }
+                                    }
+                                },
+                            )
+            finally:
+                client.close()
+                service.clear_snapshot_cache()
+                service.config.CONFIG_PATH = original_config_path
+                if original_allow_local_config is None:
+                    service.os.environ.pop("SFL_ALLOW_LOCAL_CONFIG", None)
+                else:
+                    service.os.environ["SFL_ALLOW_LOCAL_CONFIG"] = original_allow_local_config
+
+            self.assertIsNotNone(response)
+            assert response is not None
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("parent path", response.json()["detail"])
+            self.assertIn("imagecapturepath = spot_images", config_path.read_text(encoding="utf-8-sig"))
+
     def test_update_config_hot_reloads_spot_image_capture_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"
