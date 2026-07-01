@@ -188,6 +188,107 @@ function ConvertTo-SafeStatsSample {
   }
 }
 
+function New-Sha256Text {
+  param([string]$Text)
+
+  if ([string]::IsNullOrWhiteSpace($Text)) {
+    return $null
+  }
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+    $hashBytes = $sha.ComputeHash($bytes)
+    return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+  } finally {
+    $sha.Dispose()
+  }
+}
+
+function Get-PathLeafOrNull {
+  param([object]$PathValue)
+
+  if ($null -eq $PathValue) {
+    return $null
+  }
+  $text = [string]$PathValue
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    return $null
+  }
+  $normalized = $text.Trim().TrimEnd([char[]]@('\', '/'))
+  if ([string]::IsNullOrWhiteSpace($normalized)) {
+    return $null
+  }
+  $leaf = Split-Path -Leaf $normalized
+  if ([string]::IsNullOrWhiteSpace($leaf)) {
+    return $normalized
+  }
+  return $leaf
+}
+
+function ConvertTo-SafeImageCaptureStatus {
+  param([object]$ImageCapture)
+
+  if ($null -eq $ImageCapture) {
+    return $null
+  }
+
+  return [ordered]@{
+    enabled = Get-PropertyValue -Object $ImageCapture -Name "enabled"
+    mode = Get-PropertyValue -Object $ImageCapture -Name "mode"
+    queue_size = Get-PropertyValue -Object $ImageCapture -Name "queue_size"
+    queue_capacity = Get-PropertyValue -Object $ImageCapture -Name "queue_capacity"
+    enqueued_count = Get-PropertyValue -Object $ImageCapture -Name "enqueued_count"
+    written_count = Get-PropertyValue -Object $ImageCapture -Name "written_count"
+    dropped_count = Get-PropertyValue -Object $ImageCapture -Name "dropped_count"
+    failure_count = Get-PropertyValue -Object $ImageCapture -Name "failure_count"
+    last_enqueue_at = Get-PropertyValue -Object $ImageCapture -Name "last_enqueue_at"
+    last_write_at = Get-PropertyValue -Object $ImageCapture -Name "last_write_at"
+    last_error_at = Get-PropertyValue -Object $ImageCapture -Name "last_error_at"
+    last_error_code = Get-PropertyValue -Object $ImageCapture -Name "last_error_code"
+  }
+}
+
+function ConvertTo-SafeSpotImageFactManifest {
+  param([object]$Manifest)
+
+  if ($null -eq $Manifest) {
+    return $null
+  }
+
+  $factPath = Get-PropertyValue -Object $Manifest -Name "fact_path"
+  $captureRoot = Get-PropertyValue -Object $Manifest -Name "capture_root"
+
+  return [ordered]@{
+    enabled = Get-PropertyValue -Object $Manifest -Name "enabled"
+    mode = Get-PropertyValue -Object $Manifest -Name "mode"
+    fact_basename = Get-PathLeafOrNull -PathValue $factPath
+    fact_path_sha256 = New-Sha256Text -Text ([string]$factPath)
+    capture_root_basename = Get-PathLeafOrNull -PathValue $captureRoot
+    capture_root_sha256 = New-Sha256Text -Text ([string]$captureRoot)
+    row_count = Get-PropertyValue -Object $Manifest -Name "row_count"
+    sha256 = Get-PropertyValue -Object $Manifest -Name "sha256"
+    written = Get-PropertyValue -Object $Manifest -Name "written"
+    dropped = Get-PropertyValue -Object $Manifest -Name "dropped"
+    failure = Get-PropertyValue -Object $Manifest -Name "failure"
+    last_write_at = Get-PropertyValue -Object $Manifest -Name "last_write_at"
+    path_values_redacted = $true
+  }
+}
+
+function ConvertTo-SafeSpotConfigSample {
+  param([object]$Envelope)
+
+  $body = ConvertFrom-JsonOrNull -Text ([string]$Envelope.body)
+  return [ordered]@{
+    sample = Get-PropertyValue -Object $Envelope -Name "sample"
+    response_status = Get-PropertyValue -Object $Envelope -Name "status_code"
+    image_capture = ConvertTo-SafeImageCaptureStatus -ImageCapture (Get-PropertyValue -Object $body -Name "image_capture")
+    spot_image_fact_manifest = ConvertTo-SafeSpotImageFactManifest -Manifest (
+      Get-PropertyValue -Object $body -Name "spot_image_fact_manifest"
+    )
+  }
+}
+
 function New-RawHashManifest {
   param(
     [string]$RawRoot,
@@ -395,6 +496,7 @@ for ($sample = 1; $sample -le $Samples; $sample += 1) {
 
 $statsSamples = @()
 $errorSamples = @()
+$spotConfigSamples = @()
 Get-ChildItem -LiteralPath $rawRoot -Filter "sample_*_stats.json" | Sort-Object Name | ForEach-Object {
   $envelope = Get-Content -Raw -Encoding UTF8 -LiteralPath $_.FullName | ConvertFrom-Json
   $sampleIndex = [int]($envelope.sample)
@@ -416,6 +518,10 @@ Get-ChildItem -LiteralPath $rawRoot -Filter "sample_*_observability_errors.json"
     items = $items
   }
 }
+Get-ChildItem -LiteralPath $rawRoot -Filter "sample_*_spot_config.json" | Sort-Object Name | ForEach-Object {
+  $envelope = Get-Content -Raw -Encoding UTF8 -LiteralPath $_.FullName | ConvertFrom-Json
+  $spotConfigSamples += ConvertTo-SafeSpotConfigSample -Envelope $envelope
+}
 
 $hashManifest = New-RawHashManifest -RawRoot $rawRoot -SanitizedRoot $sanitizedRoot
 $runAnalysis = ConvertTo-RunAnalysis -StatsSamples $statsSamples -ErrorSamples $errorSamples
@@ -429,8 +535,12 @@ $summary = [ordered]@{
   raw_index = @($rawIndex)
   stats_samples = @($statsSamples)
   error_samples = @($errorSamples)
+  spot_config_samples = @($spotConfigSamples)
   analysis = $runAnalysis
   raw_hash_manifest = @($hashManifest)
+  sanitization = [ordered]@{
+    spot_image_fact_manifest_paths = "fact_path and capture_root are omitted from sanitized summary; basename and SHA-256 are retained."
+  }
 }
 $summaryPath = Join-Path $sanitizedRoot "operational_observability_summary.json"
 $summary | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
