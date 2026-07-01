@@ -17,7 +17,7 @@ from backend.FacilityData.spot_low_signal import (
 )
 
 
-SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.2.0"
+SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.2.1"
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
@@ -207,10 +207,31 @@ class SpotObservationFactWriter:
 
 def build_spot_observation_key(snapshot: Mapping[str, Any]) -> str:
     service_id = _text(snapshot.get("spot_service_instance_id"))
-    poll_seq = _text(snapshot.get("spot_poll_seq"))
-    if not service_id or not poll_seq:
+    poll_seq = _positive_poll_seq_text(snapshot.get("spot_poll_seq"))
+    completed_at = _text(snapshot.get("spot_last_poll_completed_at"))
+    if not service_id or not poll_seq or not completed_at or _is_startup_pending_snapshot(snapshot):
         return ""
     return f"{service_id}:{poll_seq}"
+
+
+def _positive_poll_seq_text(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return ""
+    if parsed <= 0:
+        return ""
+    return str(parsed)
+
+
+def _is_startup_pending_snapshot(snapshot: Mapping[str, Any]) -> bool:
+    return (
+        _text(snapshot.get("spot_poll_status")) == "not_attempted"
+        or _text(snapshot.get("temperature_output_status")) == "startup_pending"
+        or _text(snapshot.get("temperature_status_shadow")) == "startup_pending"
+    )
 
 
 def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:

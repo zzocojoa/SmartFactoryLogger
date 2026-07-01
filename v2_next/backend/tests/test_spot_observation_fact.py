@@ -17,9 +17,28 @@ from scripts.validate_csv_v2_shadow import validate_spot_observation_fact_invari
 
 class SpotObservationFactTests(unittest.TestCase):
     def test_observation_key_is_service_instance_and_poll_seq(self) -> None:
-        snapshot = {"spot_service_instance_id": "svc-1", "spot_poll_seq": 42}
+        snapshot = {
+            "spot_service_instance_id": "svc-1",
+            "spot_poll_seq": 42,
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
+        }
 
         self.assertEqual(build_spot_observation_key(snapshot), "svc-1:42")
+
+    def test_observation_key_requires_positive_poll_seq_completed_at_and_non_startup_state(self) -> None:
+        base = {
+            "spot_service_instance_id": "svc-1",
+            "spot_poll_seq": 42,
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
+            "spot_poll_status": "success",
+        }
+
+        self.assertEqual(build_spot_observation_key({**base, "spot_poll_seq": 0}), "")
+        self.assertEqual(build_spot_observation_key({**base, "spot_poll_seq": -1}), "")
+        self.assertEqual(build_spot_observation_key({**base, "spot_last_poll_completed_at": ""}), "")
+        self.assertEqual(build_spot_observation_key({**base, "spot_poll_status": "not_attempted"}), "")
+        self.assertEqual(build_spot_observation_key({**base, "temperature_output_status": "startup_pending"}), "")
+        self.assertEqual(build_spot_observation_key({**base, "temperature_status_shadow": "startup_pending"}), "")
 
     def test_writer_is_idempotent_per_poll_key(self) -> None:
         snapshot = {
@@ -29,6 +48,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_poll_status": "success",
             "spot_raw_validity": "valid_temperature",
             "spot_raw_value_text": "450.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
         }
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "spot_observation_fact.csv"
@@ -49,6 +69,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_observation_seq": 7,
             "spot_poll_status": "timeout",
             "spot_raw_validity": "not_received",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
         }
         success_snapshot = {
             "spot_service_instance_id": "svc-1",
@@ -57,6 +78,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_poll_status": "success",
             "spot_raw_validity": "valid_temperature",
             "spot_raw_value_text": "455.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:01Z",
         }
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -90,6 +112,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_poll_status": "success",
             "spot_raw_validity": "valid_temperature",
             "spot_raw_value_text": "455.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
         }
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "spot_observation_fact.csv"
@@ -125,6 +148,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_observation_seq": 11,
             "spot_poll_status": "timeout",
             "spot_raw_validity": "not_received",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
         }
         success_snapshot = {
             "spot_service_instance_id": "svc-current",
@@ -133,6 +157,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_poll_status": "success",
             "spot_raw_validity": "valid_temperature",
             "spot_raw_value_text": "456.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:01Z",
         }
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -170,6 +195,7 @@ class SpotObservationFactTests(unittest.TestCase):
                 "spot_poll_seq": 1,
                 "spot_poll_status": "timeout",
                 "spot_raw_validity": "not_received",
+                "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
             }
         )
 
@@ -321,6 +347,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "spot_observation_seq": 9,
             "spot_poll_status": "success",
             "spot_raw_validity": "invalid_sentinel",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
             "alarmstatus": "0x10",
             "signalpc": "6.0",
             "low_signal_alarm_enabled": False,

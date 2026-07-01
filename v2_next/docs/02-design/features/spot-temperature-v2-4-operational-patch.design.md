@@ -151,7 +151,7 @@ flag true -> false
   -> 신규 2.3.0 파일 생성
 ```
 
-Metadata must record `active_schema_version`, active column hash, operational flag state, temperature rule version, process phase rule version, and git commit. 같은 CSV 안에 `2.3.0` 행과 `2.4.0` 행이 섞이면 안 된다.
+Metadata must record `active_schema_version`, active column hash, operational flag state, temperature rule version, process phase rule version, git commit, and `spot_image_fact_manifest`. The manifest records image capture enabled/mode, fact path, capture root, row count, SHA-256, writer counters, and last write time. 같은 CSV 안에 `2.3.0` 행과 `2.4.0` 행이 섞이면 안 된다.
 
 ### 3.2 Realtime v2.4 Columns### 3.2 Realtime v2.4 Columns
 
@@ -174,7 +174,7 @@ Metadata must record `active_schema_version`, active column hash, operational fl
 | `phase_confirmation_state` | enum | `realtime_candidate`, `unknown`, blank | realtime row only |
 | `process_segment_id` | text/blank | `seg_` + stable hash | general process segment key for production/weak-pre-changeover/idle/unknown rows |
 | `changeover_candidate_id` | text/blank | `chg_` + stable hash from `logger_service_instance_id` and `candidate_start_sample_seq` | changeover lifecycle key only |
-| `spot_observation_key` | text/blank | `{spot_service_instance_id}:{spot_poll_seq}` | SPOT snapshot |
+| `spot_observation_key` | text/blank | `{spot_service_instance_id}:{spot_poll_seq}` only when `spot_poll_seq > 0`, `spot_last_poll_completed_at` is present, and the row is not startup pending | SPOT snapshot |
 
 ID contract note: `process_segment_id` owns general production/stabilizing/idle/unknown segments and realtime weak `possible_pre_changeover_hold` segments. `changeover_candidate_id` is reserved for strong changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be generated for evidence-free weak hold rows or standalone Count 3 stabilization. A strong lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`, while weak `possible_pre_changeover_hold` can be promoted only by post-hoc future evidence.
 
@@ -341,7 +341,8 @@ Realtime expectedness is candidate-only.
 
 | Input | `temperature_expectedness_candidate` |
 |---|---|
-| `temperature_output_status=under_range` + `process_phase_candidate` in setup/pre-changeover/die-change/setup-alignment candidates | `expected_candidate` |
+| `temperature_output_status=under_range` + `process_phase_candidate` in setup/pre-changeover/die-change/setup-alignment/production-stabilizing candidates, excluding weak `possible_pre_changeover_hold` | `expected_candidate` |
+| `temperature_output_status=under_range` + weak `possible_pre_changeover_hold` without stronger current evidence | `unknown` |
 | `temperature_output_status=under_range` + `production_stable` | `unexpected_candidate` |
 | `temperature_output_status=over_range` in any phase | `unexpected_candidate` |
 | `temperature_output_status` in `stale`, `source_error`, `startup_pending`, `unknown` | `unknown` |
@@ -405,6 +406,10 @@ Row-time freshness uses same-process monotonic time.
 ```text
 spot_effective_age_ms_at_row = row_created_monotonic - poll_completed_monotonic
 ```
+
+Implementation note: realtime CSV row generation must compute `spot_effective_age_ms_at_row`
+at row write time from `spot_last_poll_completed_at` when explicit row-age input is absent.
+The stale threshold is `SPOT_REFRESH_INTERVAL * 3 * 1000` milliseconds.
 
 Rules:
 
@@ -542,8 +547,8 @@ The two timeout rows must not reuse the earlier valid temperature.
 - v2.4 metadata contains operational rule versions, active schema version, active column hash, feature flag state, freshness threshold, source schema version, and git commit.
 - v2.3 docs/data CSV files still validate.
 - synthetic v2.4 CSV validates operational invariants.
-- observation fact has zero duplicate `{spot_service_instance_id, spot_poll_seq}` keys.
-- realtime nonblank `spot_observation_key` links to exactly one fact row when `SPOT_OBSERVATION_FACT_ENABLED=true`.
+- observation fact has zero duplicate `{spot_service_instance_id, spot_poll_seq}` keys, ignoring startup/no-completion rows whose key is intentionally blank.
+- realtime nonblank `spot_observation_key` links to exactly one fact row when `SPOT_OBSERVATION_FACT_ENABLED=true`; startup, missing-completion, and non-positive poll sequence rows must keep the key blank.
 - fact writer failure does not stop SPOT polling.
 - post-hoc script writes resolution and event facts without mutating source CSV.
 - every `changeover_candidate_id` has exactly one row in `changeover_candidate_resolution_fact`, and general idle/production rows use `process_segment_id` instead of `changeover_candidate_id`.
@@ -613,7 +618,7 @@ Match rate alone is not sufficient for report or operational promotion.
 | Cache suppression | after sentinel, timeout rows do not reuse the previous valid temperature before a new valid poll |
 | Stale precedence | stale rows preserve raw `spot_device_status_code` and bounded diagnostics, but emit `temperature_output_status=stale` |
 | Observation uniqueness | observation fact has zero duplicate `{spot_service_instance_id, spot_poll_seq}` keys |
-| Link coverage | when the promotion bundle is enabled, each realtime nonblank `spot_observation_key` links to exactly one fact row |
+| Link coverage | when the promotion bundle is enabled, each realtime nonblank `spot_observation_key` links to exactly one fact row, and startup/no-completion/non-positive poll sequence rows keep the key blank |
 | Candidate lifecycle integrity | every `changeover_candidate_id` has exactly one terminal row in `changeover_candidate_resolution_fact` and no orphan event rows |
 | Lifecycle grain integrity | repeated non-contiguous `changeover_candidate_id` values still produce one resolution row and one terminal event row |
 | Failure isolation | fact writer failure does not stop SPOT polling |

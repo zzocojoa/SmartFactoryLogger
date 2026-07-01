@@ -70,6 +70,8 @@ spot_image_height
 spot_image_status
 spot_image_source
 spot_image_age_ms
+spot_image_link_age_ms
+spot_image_link_status
 spot_image_linked_observation_key
 spot_service_instance_id
 spot_poll_seq_nearest
@@ -91,7 +93,11 @@ low_signal_threshold_pc
 peak_picker_enabled
 ```
 
-`sample_seq_nearest` and `process_phase_candidate_nearest` remain blank in P0 because image capture lives in the SPOT fetch layer, not the CSV row writer. Observation linkage uses `spot_service_instance_id:spot_poll_seq`.
+`sample_seq_nearest` and `process_phase_candidate_nearest` remain blank in P0 because image capture lives in the SPOT fetch layer, not the CSV row writer. Observation linkage uses `spot_service_instance_id:spot_poll_seq` only when the linked snapshot has `spot_poll_seq > 0`, `spot_last_poll_completed_at`, and is not startup pending.
+
+`spot_image_link_age_ms` is measured from the observation completion timestamp to the link check timestamp. `spot_image_link_status` is one of `fresh`, `stale`, `missing_observation`, `unlinked_observation`, `unknown_age`, or `clock_anomaly`.
+
+CSV sidecar metadata includes `spot_image_fact_manifest` with enabled/mode, fact path, capture root, row count, SHA-256, written/dropped/failure counters, and last write time.
 
 ## Event Gate
 

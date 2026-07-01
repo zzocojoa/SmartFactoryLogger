@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -58,8 +59,17 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         sample_seq: int = 1,
     ) -> list[object]:
         timestamp = service._parse_timestamp(data)
+        ingest_timestamp = timestamp.astimezone()
+        if data.spot_last_poll_completed_at is None:
+            data = data.model_copy(
+                update={
+                    "spot_last_poll_completed_at": ingest_timestamp.astimezone(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z")
+                }
+            )
         v1_row = service._build_row(data, timestamp)
-        return service._build_v2_row(data, timestamp, timestamp.astimezone(), sample_seq, v1_row)
+        return service._build_v2_row(data, timestamp, ingest_timestamp, sample_seq, v1_row)
 
     def test_v2_4_row_appends_operational_fields_and_blanks_legacy_temperature(self) -> None:
         service = CSVLoggerService()
@@ -248,7 +258,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertTrue(weak_segment_id.startswith("seg_"))
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
-        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "expected_candidate")
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], "unknown")
         self.assertEqual(
             rows[1][V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
             "unknown",
@@ -397,6 +407,33 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
 
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_device_status_code")], "temperature_under_range")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "stale")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "stale_observation")
+
+    def test_v2_4_row_computes_effective_age_at_row_from_poll_completed_at(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        poll_completed_at = datetime(2026, 6, 25, 8, 0, 0, tzinfo=timezone.utc)
+        ingest_timestamp = poll_completed_at + timedelta(seconds=4)
+        data = self.create_data().model_copy(
+            update={
+                "Time": poll_completed_at.isoformat(),
+                "spot_last_poll_completed_at": poll_completed_at.isoformat().replace("+00:00", "Z"),
+                "spot_snapshot_age_ms": 10.0,
+                "spot_value_age_ms": 10.0,
+            }
+        )
+        with patch("backend.FacilityData.repository.config.SPOT_REFRESH_INTERVAL", 1.0):
+            row = service._build_v2_row(
+                data,
+                poll_completed_at,
+                ingest_timestamp,
+                1,
+                service._build_row(data, poll_completed_at),
+            )
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_age_ms_at_row")], "4000.0")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "stale")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "stale")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "stale_observation")
 

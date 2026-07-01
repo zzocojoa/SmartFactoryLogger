@@ -51,6 +51,23 @@ class TemperatureOperationalTests(unittest.TestCase):
         self.assertEqual(decision.temperature_cause_confidence, 0.0)
         self.assertEqual(json.loads(decision.temperature_cause_evidence_codes), ["phase_setup_candidate"])
 
+    def test_under_range_possible_pre_changeover_hold_is_not_expected_without_stronger_evidence(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                process_phase_candidate="possible_pre_changeover_hold",
+            )
+        )
+
+        self.assertEqual(decision.temperature_output_status, "under_range")
+        self.assertEqual(decision.temperature_expectedness_candidate, "unknown")
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+
     def test_under_range_cause_uses_non_config_diagnostic_evidence(self) -> None:
         cases = [
             (
