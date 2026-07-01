@@ -282,6 +282,10 @@ class FactoryData(BaseModel):
     process_segment_id: Optional[str] = None
     changeover_candidate_id: Optional[str] = None
     spot_observation_key: Optional[str] = None
+    spot_image_capture_id_nearest: Optional[str] = None
+    spot_image_path_nearest: Optional[str] = None
+    spot_image_link_status_nearest: Optional[str] = None
+    spot_image_link_age_ms_nearest: Optional[float] = None
     spot_diagnostic_evidence_codes: Optional[str] = None
     alarmstatus: Optional[str] = None
     signalpc: Optional[float] = None

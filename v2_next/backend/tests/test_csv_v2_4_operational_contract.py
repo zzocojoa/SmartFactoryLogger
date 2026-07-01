@@ -653,6 +653,66 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
         self.assertEqual(validate_v2_4_operational_invariants([row], header), [])
 
+    def test_v2_4_row_links_latest_spot_image_fact_for_same_observation(self) -> None:
+        header = V2_4_CSV_COLUMNS
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "spot_last_poll_completed_at": "2026-06-24T23:00:00Z",
+            }
+        )
+        latest_fact = {
+            "spot_image_capture_id": "spotimg_20260701T010856283905Z_fe0d2cf21603",
+            "spot_image_path": "spot_images/2026/07/01/spotimg_20260701T010856283905Z_fe0d2cf21603.jpg",
+            "spot_image_link_status": "fresh",
+            "spot_image_link_age_ms": "42.000",
+            "spot_image_linked_observation_key": "spot-service-1:14",
+        }
+
+        with patch("backend.FacilityData.drivers.spot_api.get_latest_spot_image_capture_fact", return_value=latest_fact):
+            timestamp = service._parse_timestamp(data)
+            row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
+
+        self.assertEqual(
+            row[header.index("spot_image_capture_id_nearest")],
+            "spotimg_20260701T010856283905Z_fe0d2cf21603",
+        )
+        self.assertEqual(
+            row[header.index("spot_image_path_nearest")],
+            "spot_images/2026/07/01/spotimg_20260701T010856283905Z_fe0d2cf21603.jpg",
+        )
+        self.assertEqual(row[header.index("spot_image_link_status_nearest")], "fresh")
+        self.assertEqual(row[header.index("spot_image_link_age_ms_nearest")], "42.000")
+        self.assertEqual(validate_v2_4_operational_invariants([row], header), [])
+
+    def test_v2_4_row_leaves_image_link_blank_for_different_observation(self) -> None:
+        header = V2_4_CSV_COLUMNS
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "spot_last_poll_completed_at": "2026-06-24T23:00:00Z",
+            }
+        )
+        latest_fact = {
+            "spot_image_capture_id": "spotimg_20260701T010856283905Z_fe0d2cf21603",
+            "spot_image_path": "spot_images/2026/07/01/spotimg_20260701T010856283905Z_fe0d2cf21603.jpg",
+            "spot_image_link_status": "fresh",
+            "spot_image_link_age_ms": "42.000",
+            "spot_image_linked_observation_key": "spot-service-1:999",
+        }
+
+        with patch("backend.FacilityData.drivers.spot_api.get_latest_spot_image_capture_fact", return_value=latest_fact):
+            timestamp = service._parse_timestamp(data)
+            row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
+
+        self.assertEqual(row[header.index("spot_image_capture_id_nearest")], "")
+        self.assertEqual(row[header.index("spot_image_path_nearest")], "")
+        self.assertEqual(row[header.index("spot_image_link_status_nearest")], "")
+        self.assertEqual(row[header.index("spot_image_link_age_ms_nearest")], "")
+        self.assertEqual(validate_v2_4_operational_invariants([row], header), [])
+
     def test_spot_configuration_validator_accepts_non_current_valid_profile_by_default(self) -> None:
         metadata = {
             "spot_configuration_snapshot": {

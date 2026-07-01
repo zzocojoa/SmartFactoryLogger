@@ -135,6 +135,10 @@ class CsvReplayDriver(BasePLCDriver):
             "spot_last_valid_value_at": self._optional_text(row.get("spot_last_valid_value_at")),
             "spot_snapshot_age_ms": self._optional_float(row.get("spot_snapshot_age_ms")),
             "spot_value_age_ms": self._optional_float(row.get("spot_value_age_ms")),
+            "spot_image_capture_id_nearest": self._optional_text(row.get("spot_image_capture_id_nearest")),
+            "spot_image_path_nearest": self._optional_text(row.get("spot_image_path_nearest")),
+            "spot_image_link_status_nearest": self._optional_text(row.get("spot_image_link_status_nearest")),
+            "spot_image_link_age_ms_nearest": self._optional_float(row.get("spot_image_link_age_ms_nearest")),
         }
         
     def _load_csv(self):

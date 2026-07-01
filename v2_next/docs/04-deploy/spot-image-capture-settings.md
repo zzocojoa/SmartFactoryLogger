@@ -61,6 +61,21 @@ capture root, row count, SHA-256, writer counters, and last write time.
 `scripts/validate_csv_v2_shadow.py` validates the manifest shape, fact row count,
 fact SHA-256, safe relative image paths, and link status values.
 
+CSV v2.4 rows also expose the latest matching image fact link when the capture
+fact references the same `spot_observation_key` as the realtime row:
+
+```text
+spot_image_capture_id_nearest
+spot_image_path_nearest
+spot_image_link_status_nearest
+spot_image_link_age_ms_nearest
+```
+
+These fields are intentionally blank when no image fact has been written yet, or
+when the latest image fact belongs to a different SPOT observation. `spot_image_path_nearest`
+is a relative path under the log directory; raw camera URLs are not written to
+the realtime CSV.
+
 Startup, missing-completion, and non-positive poll sequence snapshots should not
 produce a linked observation key; those rows are intentionally unlinked rather
 than operational evidence.
