@@ -2139,6 +2139,9 @@ def save_config(payload: ConfigUpdate):
     except PermissionError as exc:
         _logger.warning("Config save permission error: %s", exc)
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        _logger.warning("Config save validation error: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         _logger.error("Config save failed: %s", exc)
         raise HTTPException(status_code=500, detail="Config save failed") from exc
