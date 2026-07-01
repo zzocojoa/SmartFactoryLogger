@@ -23,6 +23,7 @@ files = [
   "backend/FacilityData/changeover_candidate_resolution_fact.py",
   "backend/FacilityData/process_phase.py",
   "backend/FacilityData/spot_observation_fact.py",
+  "backend/FacilityData/spot_image_fact.py",
   "backend/FacilityData/temperature_operational.py",
   "backend/FacilityData/drivers/spot_api.py",
 ]

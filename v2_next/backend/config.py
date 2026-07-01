@@ -66,6 +66,13 @@ DEFAULT_SPOT_MODEMASTER_ENABLED = False
 DEFAULT_SPOT_RATIO_RAW_ENABLED = False
 DEFAULT_SPOT_WINDOW_OBSCURATION_PC = 12.0
 DEFAULT_SPOT_FOCUS_MM = 6071
+DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED = False
+DEFAULT_SPOT_IMAGE_CAPTURE_MODE = "event"
+DEFAULT_SPOT_IMAGE_CAPTURE_PATH = "spot_images"
+DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = 1.0
+DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS = 7
+DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES = 2_000_000
+DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION = True
 DEFAULT_LOG_PATH = "logs/data"
 DEFAULT_SNAPSHOT_PATH = "snapshots"
 DEFAULT_AUTO_SAVE = True
@@ -392,6 +399,13 @@ if _safe_is_file(CONFIG_PATH):
     _spot_ip_default = os.getenv("SPOT_IP", _get(CONFIG, "SPOT", "ip", DEFAULT_SPOT_IP) or DEFAULT_SPOT_IP)
     _spot_defaults = {
         "actuatorstep": str(DEFAULT_SPOT_ACTUATOR_STEP),
+        "imagecaptureenabled": str(DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED).lower(),
+        "imagecapturemode": DEFAULT_SPOT_IMAGE_CAPTURE_MODE,
+        "imagecapturepath": DEFAULT_SPOT_IMAGE_CAPTURE_PATH,
+        "imagecaptureminintervalsec": str(DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC),
+        "imagecaptureretentiondays": str(DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS),
+        "imagecapturemaxbytes": str(DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES),
+        "imagecapturelinktoobservation": str(DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION).lower(),
         "internaltemperatureurl": f"http://{_spot_ip_default}/output?p=itemperature",
         "liveimageurl": f"http://{_spot_ip_default}/image.jpg",
     }
@@ -606,6 +620,54 @@ SPOT_FOCUS_MM = _positive_int(SPOT_FOCUS_MM, DEFAULT_SPOT_FOCUS_MM)
 
 # SETTINGS / LOGGING
 LOG_PATH = resolve_storage_path(_get(CONFIG, "SETTINGS", "logpath", DEFAULT_LOG_PATH), "logs", "LogPath")
+SPOT_IMAGE_CAPTURE_ENABLED = _env_bool(
+    "SPOT_IMAGE_CAPTURE_ENABLED",
+    _get_bool(CONFIG, "SPOT", "imagecaptureenabled", DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED),
+)
+SPOT_IMAGE_CAPTURE_MODE = _normalized_choice(
+    os.getenv(
+        "SPOT_IMAGE_CAPTURE_MODE",
+        _get(CONFIG, "SPOT", "imagecapturemode", DEFAULT_SPOT_IMAGE_CAPTURE_MODE),
+    ),
+    {"off", "event", "interval", "all"},
+    DEFAULT_SPOT_IMAGE_CAPTURE_MODE,
+)
+if not SPOT_IMAGE_CAPTURE_ENABLED:
+    SPOT_IMAGE_CAPTURE_MODE = "off"
+SPOT_IMAGE_CAPTURE_PATH = os.getenv(
+    "SPOT_IMAGE_CAPTURE_PATH",
+    _get(CONFIG, "SPOT", "imagecapturepath", DEFAULT_SPOT_IMAGE_CAPTURE_PATH) or DEFAULT_SPOT_IMAGE_CAPTURE_PATH,
+)
+SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = max(
+    0.0,
+    _env_float(
+        "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC",
+        _get_float(CONFIG, "SPOT", "imagecaptureminintervalsec", DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC),
+    ),
+)
+SPOT_IMAGE_CAPTURE_RETENTION_DAYS = max(
+    0,
+    _env_int(
+        "SPOT_IMAGE_CAPTURE_RETENTION_DAYS",
+        _get_int(CONFIG, "SPOT", "imagecaptureretentiondays", DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS),
+    ),
+)
+SPOT_IMAGE_CAPTURE_MAX_BYTES = max(
+    1,
+    _env_int(
+        "SPOT_IMAGE_CAPTURE_MAX_BYTES",
+        _get_int(CONFIG, "SPOT", "imagecapturemaxbytes", DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES),
+    ),
+)
+SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION = _env_bool(
+    "SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION",
+    _get_bool(
+        CONFIG,
+        "SPOT",
+        "imagecapturelinktoobservation",
+        DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION,
+    ),
+)
 AUTO_SAVE = _get_bool(CONFIG, "SETTINGS", "autosave", DEFAULT_AUTO_SAVE)
 _operator_metadata_downtime_reset_hours_raw = _get_int(
     CONFIG,

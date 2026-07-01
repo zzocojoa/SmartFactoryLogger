@@ -2735,6 +2735,7 @@ def spot_config():
         "proxy": spot_control.get_image_proxy_diagnostics(),
         "live_image_url": _SPOT_LIVE_IMAGE_PATH,
         "live": spot_control.get_live_image_diagnostics(),
+        "image_capture": spot_control.get_spot_image_capture_health(),
     }
 
 @app.post("/api/spot/focus")
