@@ -1923,6 +1923,49 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
             self.assertEqual(len(self.read_spot_image_fact_rows(log_path)), 1)
 
+    def test_image_capture_writer_dedupes_same_capture_id_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            capture_root = log_path / "spot_images"
+            captured_at = 1782910800.123456
+            link_checked_at = captured_at + 0.1
+            image_bytes = b"\xff\xd8dedupe-capture\xff\xd9"
+            snapshot = {
+                "spot_service_instance_id": "test-spot-service-instance",
+                "spot_poll_seq": 101,
+                "spot_last_poll_completed_at": "2026-07-01T01:00:00Z",
+                "_spot_last_poll_completed_at_epoch": captured_at,
+                "spot_poll_status": "success",
+                "temperature_output_status": "under_range",
+            }
+
+            first_writer = SpotImageCaptureWriter(log_path=log_path, capture_root=capture_root)
+            first_fact = first_writer.write_capture(
+                image_bytes=image_bytes,
+                captured_at=captured_at,
+                source_url="http://spot.local/image.jpg",
+                source="test",
+                image_age_ms=0.0,
+                link_checked_at=link_checked_at,
+                observation_snapshot=snapshot,
+            )
+            restarted_writer = SpotImageCaptureWriter(log_path=log_path, capture_root=capture_root)
+            second_fact = restarted_writer.write_capture(
+                image_bytes=image_bytes,
+                captured_at=captured_at,
+                source_url="http://spot.local/image.jpg",
+                source="test",
+                image_age_ms=0.0,
+                link_checked_at=link_checked_at,
+                observation_snapshot=snapshot,
+            )
+
+            rows = self.read_spot_image_fact_rows(log_path)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(second_fact, first_fact)
+            self.assertEqual(rows[0]["spot_image_capture_id"], first_fact["spot_image_capture_id"])
+            self.assertTrue((log_path / first_fact["spot_image_path"]).exists())
+
     def test_event_mode_captures_under_range_snapshot_and_skips_valid_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)

@@ -36,6 +36,8 @@ Available settings:
 - Runtime writer settings are re-read before each queued write. A saved log path,
   capture path, retention, or SPOT refresh change should apply to the next capture
   without restarting the app.
+- Replayed or retried writes with the same generated capture id reuse the existing
+  fact row instead of appending a duplicate `spot_image_fact.csv` entry.
 - After diagnostics, save Enabled off and Mode off.
 
 ## Verification
