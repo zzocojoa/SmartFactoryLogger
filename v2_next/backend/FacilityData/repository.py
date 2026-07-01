@@ -196,6 +196,10 @@ V2_4_OPERATIONAL_COLUMNS = [
     "process_segment_id",
     "changeover_candidate_id",
     "spot_observation_key",
+    "spot_image_capture_id_nearest",
+    "spot_image_path_nearest",
+    "spot_image_link_status_nearest",
+    "spot_image_link_age_ms_nearest",
 ]
 
 V2_4_CSV_COLUMNS = [
@@ -1372,6 +1376,42 @@ class CSVLoggerService:
             }
         )
 
+    def _spot_image_link_for_row(self, data: FactoryData, spot_observation_key: str) -> dict[str, str]:
+        explicit = {
+            "spot_image_capture_id_nearest": self._escape_csv_text(data.spot_image_capture_id_nearest or ""),
+            "spot_image_path_nearest": self._escape_csv_text(data.spot_image_path_nearest or ""),
+            "spot_image_link_status_nearest": self._escape_csv_text(data.spot_image_link_status_nearest or ""),
+            "spot_image_link_age_ms_nearest": self._fmt(data.spot_image_link_age_ms_nearest),
+        }
+        if any(explicit.values()):
+            return explicit
+        if not spot_observation_key:
+            return {
+                "spot_image_capture_id_nearest": "",
+                "spot_image_path_nearest": "",
+                "spot_image_link_status_nearest": "",
+                "spot_image_link_age_ms_nearest": "",
+            }
+        try:
+            from backend.FacilityData.drivers import spot_api
+
+            fact = spot_api.get_latest_spot_image_capture_fact()
+        except Exception:
+            fact = {}
+        if fact.get("spot_image_linked_observation_key") != spot_observation_key:
+            return {
+                "spot_image_capture_id_nearest": "",
+                "spot_image_path_nearest": "",
+                "spot_image_link_status_nearest": "",
+                "spot_image_link_age_ms_nearest": "",
+            }
+        return {
+            "spot_image_capture_id_nearest": self._escape_csv_text(fact.get("spot_image_capture_id", "")),
+            "spot_image_path_nearest": self._escape_csv_text(fact.get("spot_image_path", "")),
+            "spot_image_link_status_nearest": self._escape_csv_text(fact.get("spot_image_link_status", "")),
+            "spot_image_link_age_ms_nearest": self._escape_csv_text(fact.get("spot_image_link_age_ms", "")),
+        }
+
     def _record_v2_4_operational_counters(
         self,
         *,
@@ -1548,6 +1588,7 @@ class CSVLoggerService:
         if not contract.operational_fields_enabled:
             return base_row
         spot_observation_key = self._spot_observation_key_for_data(data)
+        spot_image_link = self._spot_image_link_for_row(data, spot_observation_key)
         self._record_v2_4_operational_counters(
             operational_decision=operational_decision,
             process_phase_decision=process_phase_decision,
@@ -1573,6 +1614,10 @@ class CSVLoggerService:
             self._escape_csv_text(process_phase_decision.process_segment_id),
             self._escape_csv_text(process_phase_decision.changeover_candidate_id),
             self._escape_csv_text(spot_observation_key),
+            spot_image_link["spot_image_capture_id_nearest"],
+            spot_image_link["spot_image_path_nearest"],
+            spot_image_link["spot_image_link_status_nearest"],
+            spot_image_link["spot_image_link_age_ms_nearest"],
         ]
 
     def _parse_timestamp(self, data: FactoryData) -> datetime:

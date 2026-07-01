@@ -1894,6 +1894,14 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(row["spot_image_source_url_hash"]), 64)
             self.assertTrue((log_path / row["spot_image_path"]).exists())
             self.assertNotIn("http://spot.local", ",".join(row.values()))
+            latest = spot_api.get_latest_spot_image_capture_fact()
+            health = spot_api.get_spot_image_capture_health()
+            self.assertEqual(latest["spot_image_capture_id"], row["spot_image_capture_id"])
+            self.assertEqual(latest["spot_image_path"], row["spot_image_path"])
+            self.assertEqual(latest["spot_image_link_status"], "fresh")
+            self.assertEqual(health["last_capture_id"], row["spot_image_capture_id"])
+            self.assertEqual(health["last_capture_path"], row["spot_image_path"])
+            self.assertEqual(health["last_capture_link_status"], "fresh")
 
     async def test_live_image_shared_frame_cache_does_not_duplicate_image_capture(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

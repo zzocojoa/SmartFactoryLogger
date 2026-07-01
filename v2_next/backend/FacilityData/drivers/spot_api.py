@@ -151,6 +151,7 @@ _spot_image_capture_enqueued_count = 0
 _spot_image_capture_written_count = 0
 _spot_image_capture_dropped_count = 0
 _spot_image_capture_failure_count = 0
+_spot_image_capture_last_fact: Optional[Dict[str, str]] = None
 
 
 class SpotImageConfigError(ValueError):
@@ -338,7 +339,7 @@ def _start_spot_image_capture_worker() -> None:
 
 
 def _spot_image_capture_worker() -> None:
-    global _spot_image_capture_failure_count
+    global _spot_image_capture_failure_count, _spot_image_capture_last_fact
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_write_at, _spot_image_capture_written_count
     while not _SPOT_IMAGE_CAPTURE_STOP.is_set() or not _SPOT_IMAGE_CAPTURE_QUEUE.empty():
@@ -348,7 +349,7 @@ def _spot_image_capture_worker() -> None:
             continue
         try:
             writer = _get_spot_image_capture_writer()
-            writer.write_capture(
+            fact = writer.write_capture(
                 image_bytes=event.image_bytes,
                 captured_at=event.captured_at,
                 source_url=event.source_url,
@@ -360,6 +361,7 @@ def _spot_image_capture_worker() -> None:
             with _spot_image_capture_lock:
                 _spot_image_capture_written_count += 1
                 _spot_image_capture_last_write_at = time.time()
+                _spot_image_capture_last_fact = dict(fact)
                 _spot_image_capture_last_error_code = None
                 _spot_image_capture_last_error_message = None
         except Exception as exc:  # pragma: no cover - exercised through integration-style tests
@@ -399,6 +401,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_enqueued_count, _spot_image_capture_written_count, _spot_image_capture_dropped_count
     global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
+    global _spot_image_capture_last_fact
     stop_spot_image_capture_writer(timeout_sec=0.5)
     while True:
         try:
@@ -419,11 +422,18 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_last_error_at = 0.0
         _spot_image_capture_last_error_code = None
         _spot_image_capture_last_error_message = None
+        _spot_image_capture_last_fact = None
     _SPOT_IMAGE_CAPTURE_STOP.clear()
+
+
+def get_latest_spot_image_capture_fact() -> Dict[str, str]:
+    with _spot_image_capture_lock:
+        return dict(_spot_image_capture_last_fact or {})
 
 
 def get_spot_image_capture_health() -> Dict[str, Any]:
     with _spot_image_capture_lock:
+        last_fact = _spot_image_capture_last_fact or {}
         return {
             "enabled": _spot_image_capture_mode() != "off",
             "mode": _spot_image_capture_mode(),
@@ -438,6 +448,11 @@ def get_spot_image_capture_health() -> Dict[str, Any]:
             "last_error_at": _spot_image_capture_last_error_at or None,
             "last_error_code": _spot_image_capture_last_error_code,
             "last_error_message": _spot_image_capture_last_error_message,
+            "last_capture_id": last_fact.get("spot_image_capture_id"),
+            "last_capture_path": last_fact.get("spot_image_path"),
+            "last_capture_link_status": last_fact.get("spot_image_link_status"),
+            "last_capture_link_age_ms": last_fact.get("spot_image_link_age_ms"),
+            "last_capture_linked_observation_key": last_fact.get("spot_image_linked_observation_key"),
         }
 
 

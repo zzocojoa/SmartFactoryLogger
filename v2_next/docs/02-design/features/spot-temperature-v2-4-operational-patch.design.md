@@ -152,6 +152,7 @@ flag true -> false
 ```
 
 Metadata must record `active_schema_version`, active column hash, operational flag state, temperature rule version, process phase rule version, git commit, and `spot_image_fact_manifest`. The manifest records image capture enabled/mode, fact path, capture root, row count, SHA-256, writer counters, and last write time. 같은 CSV 안에 `2.3.0` 행과 `2.4.0` 행이 섞이면 안 된다.
+Realtime CSV rows may expose the latest matching SPOT image fact only as relative diagnostic pointers: `spot_image_capture_id_nearest`, `spot_image_path_nearest`, `spot_image_link_status_nearest`, and `spot_image_link_age_ms_nearest`. These fields remain blank unless the latest image fact's linked observation key equals the realtime row `spot_observation_key`; raw camera URLs and image bytes never belong in realtime CSV.
 
 ### 3.2 Realtime v2.4 Columns### 3.2 Realtime v2.4 Columns
 

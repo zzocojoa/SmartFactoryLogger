@@ -225,6 +225,10 @@ V2_4_OPERATIONAL_COLUMNS = [
     "process_segment_id",
     "changeover_candidate_id",
     "spot_observation_key",
+    "spot_image_capture_id_nearest",
+    "spot_image_path_nearest",
+    "spot_image_link_status_nearest",
+    "spot_image_link_age_ms_nearest",
 ]
 
 REQUIRED_V2_COLUMNS = [
@@ -643,6 +647,7 @@ V2_4_OPERATIONAL_ENUM_VALUES = {
         "unknown",
     },
     "phase_confirmation_state": {"realtime_candidate", "unknown"},
+    "spot_image_link_status_nearest": SPOT_IMAGE_LINK_STATUSES,
 }
 
 
@@ -660,6 +665,10 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
         "temperature_cause_evidence_codes",
         "process_phase_candidate",
         "spot_observation_key",
+        "spot_image_capture_id_nearest",
+        "spot_image_path_nearest",
+        "spot_image_link_status_nearest",
+        "spot_image_link_age_ms_nearest",
     ]
     missing_columns = [column for column in required_columns if column not in header]
     if missing_columns:
@@ -694,6 +703,11 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
         cause = row[indices["temperature_under_range_cause_candidate"]].strip()
         confidence = row[indices["temperature_cause_confidence"]].strip()
         evidence_codes = _parse_json_string_list(row[indices["temperature_cause_evidence_codes"]].strip())
+        spot_observation_key = row[indices["spot_observation_key"]].strip()
+        image_capture_id = row[indices["spot_image_capture_id_nearest"]].strip()
+        image_path = row[indices["spot_image_path_nearest"]].strip()
+        image_link_status = row[indices["spot_image_link_status_nearest"]].strip()
+        image_link_age = row[indices["spot_image_link_age_ms_nearest"]].strip()
 
         if output_status and output_status != "valid" and temperature:
             failures.append(f"row {row_number} non-valid temperature_output_status requires blank Temperature")
@@ -724,6 +738,19 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
             parsed_confidence = _parse_finite_float(confidence)
             if parsed_confidence is None or not 0.0 <= parsed_confidence <= 1.0:
                 failures.append(f"row {row_number} temperature_cause_confidence must be 0.0..1.0")
+        if any((image_capture_id, image_path, image_link_status, image_link_age)):
+            if not image_capture_id:
+                failures.append(f"row {row_number} image link requires spot_image_capture_id_nearest")
+            if not image_path:
+                failures.append(f"row {row_number} image link requires spot_image_path_nearest")
+            elif _is_unsafe_relative_path(image_path):
+                failures.append(f"row {row_number} spot_image_path_nearest must be a safe relative path")
+            if not image_link_status:
+                failures.append(f"row {row_number} image link requires spot_image_link_status_nearest")
+            if image_link_status == "fresh" and not spot_observation_key:
+                failures.append(f"row {row_number} fresh image link requires spot_observation_key")
+            if image_link_age and _parse_finite_float(image_link_age) is None:
+                failures.append(f"row {row_number} spot_image_link_age_ms_nearest must be finite when populated")
     return failures
 
 
