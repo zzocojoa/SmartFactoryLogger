@@ -109,6 +109,18 @@ export interface SpotConfig {
     focus_enabled: boolean;
 }
 
+export type SpotImageCaptureMode = 'off' | 'event' | 'interval' | 'all';
+
+export interface SpotImageCaptureConfig {
+  enabled: boolean;
+  mode: SpotImageCaptureMode;
+  path: string;
+  min_interval_sec: number;
+  max_bytes: number;
+  retention_days: number;
+  link_to_observation: boolean;
+}
+
 export interface HealthSnapshot {
   running: boolean;
   thread_alive: boolean;
@@ -669,6 +681,7 @@ export interface ConfigSnapshot {
       actuator_step?: number | null;
       actuator_url?: string | null;
       focus_enabled?: boolean | null;
+      image_capture?: SpotImageCaptureConfig | null;
     };
     thresholds?: {
       values?: {
@@ -722,6 +735,13 @@ export interface SettingsFormState {
   spotIp: string;
   spotRefreshInterval: string;
   spotActuatorStep: string;
+  spotImageCaptureEnabled: boolean;
+  spotImageCaptureMode: SpotImageCaptureMode;
+  spotImageCapturePath: string;
+  spotImageCaptureMinIntervalSec: string;
+  spotImageCaptureMaxBytes: string;
+  spotImageCaptureRetentionDays: string;
+  spotImageCaptureLinkToObservation: boolean;
   thresholdMasterOn: boolean;
   thresholdSpeedEnabled: boolean;
   thresholdSpeedValue: string;

@@ -93,6 +93,32 @@ def _get_bool(parser: configparser.ConfigParser, section: str, option: str, fall
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+_SPOT_IMAGE_CAPTURE_MODES = {"off", "event", "interval", "all"}
+
+
+def _normalize_spot_image_capture_mode(value: Optional[str], enabled: bool) -> str:
+    if not enabled:
+        return "off"
+    mode = (value or config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE).strip().lower()
+    if mode not in _SPOT_IMAGE_CAPTURE_MODES:
+        return config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE
+    return mode
+
+
+def _validate_spot_image_capture_path(value: Optional[str]) -> str:
+    path = (value or "").strip()
+    if path == "":
+        return config.DEFAULT_SPOT_IMAGE_CAPTURE_PATH
+    if path.startswith(("/", "\\")):
+        raise ValueError("SPOT image capture path must be relative to the log directory")
+    if len(path) >= 2 and path[1] == ":" and path[0].isalpha():
+        raise ValueError("SPOT image capture path must not include a drive prefix")
+    parts = path.replace("\\", "/").split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("SPOT image capture path must not contain empty, current, or parent path segments")
+    return path
+
+
 _THRESHOLD_KEYS = [
     "speed",
     "press",
@@ -140,6 +166,16 @@ def get_config_snapshot() -> dict:
     else:
         spot_actuator_ip = spot_ip
     spot_image_url = _get(parser, "SPOT", "imageurl", f"http://{spot_ip}/image.jpg")
+    spot_image_capture_enabled = _get_bool(
+        parser,
+        "SPOT",
+        "imagecaptureenabled",
+        config.DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED,
+    )
+    spot_image_capture_mode = _normalize_spot_image_capture_mode(
+        _get(parser, "SPOT", "imagecapturemode", config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE),
+        spot_image_capture_enabled,
+    )
     spot = {
         "ip": spot_ip,
         "url": _get(parser, "SPOT", "url", f"http://{spot_ip}/output?p=temperature"),
@@ -171,6 +207,39 @@ def get_config_snapshot() -> dict:
         "actuator_url": _get(parser, "SPOT", "actuatorurl", f"http://{spot_actuator_ip}/scan.cgi"),
         "widget_width": _get_int(parser, "SPOT", "widgetwidth", config.DEFAULT_SPOT_WIDGET_WIDTH),
         "widget_height": _get_int(parser, "SPOT", "widgetheight", config.DEFAULT_SPOT_WIDGET_HEIGHT),
+        "image_capture": {
+            "enabled": spot_image_capture_enabled,
+            "mode": spot_image_capture_mode,
+            "path": _get(parser, "SPOT", "imagecapturepath", config.DEFAULT_SPOT_IMAGE_CAPTURE_PATH),
+            "min_interval_sec": max(
+                0.0,
+                _get_float(
+                    parser,
+                    "SPOT",
+                    "imagecaptureminintervalsec",
+                    config.DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC,
+                ),
+            ),
+            "max_bytes": max(
+                1,
+                _get_int(parser, "SPOT", "imagecapturemaxbytes", config.DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES),
+            ),
+            "retention_days": max(
+                0,
+                _get_int(
+                    parser,
+                    "SPOT",
+                    "imagecaptureretentiondays",
+                    config.DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS,
+                ),
+            ),
+            "link_to_observation": _get_bool(
+                parser,
+                "SPOT",
+                "imagecapturelinktoobservation",
+                config.DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION,
+            ),
+        },
     }
 
     operator_metadata_downtime_reset_hours = _get_int(
@@ -413,7 +482,19 @@ def restore_defaults() -> dict:
     payload = ConfigUpdate(
         extruder={"ip": config.DEFAULT_EXTRUDER_IP, "port": config.DEFAULT_EXTRUDER_PORT},
         ls_plc={"ip": config.DEFAULT_LS_IP, "port": config.DEFAULT_LS_PORT},
-        spot={"ip": config.DEFAULT_SPOT_IP, "refresh_interval": config.DEFAULT_SPOT_REFRESH_INTERVAL},
+        spot={
+            "ip": config.DEFAULT_SPOT_IP,
+            "refresh_interval": config.DEFAULT_SPOT_REFRESH_INTERVAL,
+            "image_capture": {
+                "enabled": config.DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED,
+                "mode": config.DEFAULT_SPOT_IMAGE_CAPTURE_MODE,
+                "path": config.DEFAULT_SPOT_IMAGE_CAPTURE_PATH,
+                "min_interval_sec": config.DEFAULT_SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC,
+                "max_bytes": config.DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES,
+                "retention_days": config.DEFAULT_SPOT_IMAGE_CAPTURE_RETENTION_DAYS,
+                "link_to_observation": config.DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION,
+            },
+        },
         settings={
             "logpath": config.DEFAULT_LOG_PATH,
             "snapshotpath": config.DEFAULT_SNAPSHOT_PATH,
@@ -563,6 +644,30 @@ def update_config(
             parser.set("SPOT", "widgetwidth", str(payload.spot.widget_width))
         if payload.spot.widget_height is not None:
             parser.set("SPOT", "widgetheight", str(payload.spot.widget_height))
+        if payload.spot.image_capture is not None:
+            image_capture = payload.spot.image_capture
+            next_enabled = _get_bool(
+                parser,
+                "SPOT",
+                "imagecaptureenabled",
+                config.DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED,
+            )
+            if image_capture.enabled is not None:
+                next_enabled = bool(image_capture.enabled)
+                parser.set("SPOT", "imagecaptureenabled", str(next_enabled).lower())
+            if image_capture.mode is not None or image_capture.enabled is not None:
+                mode = _normalize_spot_image_capture_mode(image_capture.mode, next_enabled)
+                parser.set("SPOT", "imagecapturemode", mode)
+            if image_capture.path is not None:
+                parser.set("SPOT", "imagecapturepath", _validate_spot_image_capture_path(image_capture.path))
+            if image_capture.min_interval_sec is not None:
+                parser.set("SPOT", "imagecaptureminintervalsec", str(max(0.0, image_capture.min_interval_sec)))
+            if image_capture.max_bytes is not None:
+                parser.set("SPOT", "imagecapturemaxbytes", str(max(1, image_capture.max_bytes)))
+            if image_capture.retention_days is not None:
+                parser.set("SPOT", "imagecaptureretentiondays", str(max(0, image_capture.retention_days)))
+            if image_capture.link_to_observation is not None:
+                parser.set("SPOT", "imagecapturelinktoobservation", str(bool(image_capture.link_to_observation)).lower())
 
     if payload.settings:
         _verify_settings_password_change(parser, payload)

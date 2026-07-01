@@ -40,7 +40,7 @@ All values are read from env first, then `config.ini`.
 
 ```python
 SPOT_IMAGE_CAPTURE_ENABLED = False
-SPOT_IMAGE_CAPTURE_MODE = "event"  # off | event | interval | all
+SPOT_IMAGE_CAPTURE_MODE = "off"  # off | event | interval | all
 SPOT_IMAGE_CAPTURE_PATH = "spot_images"
 SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = 1.0
 SPOT_IMAGE_CAPTURE_RETENTION_DAYS = 7

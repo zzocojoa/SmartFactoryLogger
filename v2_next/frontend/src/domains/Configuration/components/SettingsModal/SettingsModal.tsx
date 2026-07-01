@@ -27,6 +27,7 @@ import type {
   CommLogInfo,
   ConfigApplyResult,
   ConfigSnapshot,
+  SpotImageCaptureMode,
   ThresholdKey,
   ThresholdState,
 } from '../../../../shared/types';
@@ -57,6 +58,8 @@ import {
   getCentralBadge,
   formatCentralTime,
   buildObservabilitySummary,
+  SPOT_IMAGE_CAPTURE_MODE_OPTIONS,
+  formatSpotImageCaptureSummary,
 } from './settingsModalHelpers';
 import type { SaveSettingsOptions } from '../../hooks/useConfigViewModel.types';
 import packageJson from '../../../../../package.json';
@@ -1584,6 +1587,127 @@ export function SettingsModal(props: SettingsModalProps) {
                             <span className="settings-field-help error">{validationErrors.spotActuatorStep}</span>
                           )}
                         </label>
+                      </div>
+                      <div className="settings-spot-capture">
+                        <div className="settings-spot-capture-head">
+                          <div>
+                            <div className="settings-spot-capture-title">증거 이미지 저장</div>
+                            <div className="settings-spot-capture-summary">
+                              {formatSpotImageCaptureSummary(
+                                settingsForm.spotImageCaptureEnabled,
+                                settingsForm.spotImageCaptureMode,
+                                settingsForm.spotImageCaptureRetentionDays,
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className={`settings-toggle ${settingsForm.spotImageCaptureEnabled ? 'active' : ''}`}
+                            aria-pressed={settingsForm.spotImageCaptureEnabled}
+                            onClick={() => {
+                              const nextEnabled = !settingsForm.spotImageCaptureEnabled;
+                              updateSettingsField('spotImageCaptureEnabled', nextEnabled);
+                              updateSettingsField('spotImageCaptureMode', nextEnabled ? 'event' : 'off');
+                            }}
+                          >
+                            <span className="settings-toggle-text">
+                              {settingsForm.spotImageCaptureEnabled ? 'ON' : 'OFF'}
+                            </span>
+                          </button>
+                        </div>
+                        <div className="settings-spot-capture-warning">
+                          켜면 디스크 사용량이 증가하고 현장 이미지가 보관됩니다.
+                        </div>
+                        <div className="settings-grid settings-spot-capture-grid">
+                          <label
+                            className={`settings-field ${isSettingsFieldDirty('spotImageCaptureMode') ? 'changed' : ''} ${validationErrors.spotImageCaptureMode ? 'error' : ''}`}
+                          >
+                            저장 모드
+                            <select
+                              value={settingsForm.spotImageCaptureMode}
+                              onChange={(e) => updateSettingsField('spotImageCaptureMode', e.target.value as SpotImageCaptureMode)}
+                            >
+                              {SPOT_IMAGE_CAPTURE_MODE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                            {validationErrors.spotImageCaptureMode && (
+                              <span className="settings-field-help error">{validationErrors.spotImageCaptureMode}</span>
+                            )}
+                          </label>
+                          <label
+                            className={`settings-field settings-spot-capture-path ${isSettingsFieldDirty('spotImageCapturePath') ? 'changed' : ''} ${validationErrors.spotImageCapturePath ? 'error' : ''}`}
+                          >
+                            저장 경로
+                            <input
+                              value={settingsForm.spotImageCapturePath}
+                              onChange={(e) => updateSettingsField('spotImageCapturePath', e.target.value)}
+                            />
+                            <span className="settings-field-help">로그 디렉터리 기준 상대 경로</span>
+                            {validationErrors.spotImageCapturePath && (
+                              <span className="settings-field-help error">{validationErrors.spotImageCapturePath}</span>
+                            )}
+                          </label>
+                          <label
+                            className={`settings-field ${isSettingsFieldDirty('spotImageCaptureMinIntervalSec') ? 'changed' : ''} ${validationErrors.spotImageCaptureMinIntervalSec ? 'error' : ''}`}
+                          >
+                            최소 간격(sec)
+                            <input
+                              inputMode="decimal"
+                              value={settingsForm.spotImageCaptureMinIntervalSec}
+                              onChange={(e) => updateSettingsField('spotImageCaptureMinIntervalSec', e.target.value)}
+                            />
+                            {validationErrors.spotImageCaptureMinIntervalSec && (
+                              <span className="settings-field-help error">{validationErrors.spotImageCaptureMinIntervalSec}</span>
+                            )}
+                          </label>
+                          <label
+                            className={`settings-field ${isSettingsFieldDirty('spotImageCaptureMaxBytes') ? 'changed' : ''} ${validationErrors.spotImageCaptureMaxBytes ? 'error' : ''}`}
+                          >
+                            최대 크기(bytes)
+                            <input
+                              inputMode="numeric"
+                              value={settingsForm.spotImageCaptureMaxBytes}
+                              onChange={(e) => updateSettingsField('spotImageCaptureMaxBytes', e.target.value)}
+                            />
+                            {validationErrors.spotImageCaptureMaxBytes && (
+                              <span className="settings-field-help error">{validationErrors.spotImageCaptureMaxBytes}</span>
+                            )}
+                          </label>
+                          <label
+                            className={`settings-field ${isSettingsFieldDirty('spotImageCaptureRetentionDays') ? 'changed' : ''} ${validationErrors.spotImageCaptureRetentionDays ? 'error' : ''}`}
+                          >
+                            보관 기간(days)
+                            <input
+                              inputMode="numeric"
+                              value={settingsForm.spotImageCaptureRetentionDays}
+                              onChange={(e) => updateSettingsField('spotImageCaptureRetentionDays', e.target.value)}
+                            />
+                            {validationErrors.spotImageCaptureRetentionDays && (
+                              <span className="settings-field-help error">{validationErrors.spotImageCaptureRetentionDays}</span>
+                            )}
+                          </label>
+                          <label
+                            className={`settings-field settings-toggle-field ${isSettingsFieldDirty('spotImageCaptureLinkToObservation') ? 'changed' : ''}`}
+                          >
+                            <span className="settings-toggle-label">관측 행과 연결</span>
+                            <button
+                              type="button"
+                              className={`settings-toggle ${settingsForm.spotImageCaptureLinkToObservation ? 'active' : ''}`}
+                              aria-pressed={settingsForm.spotImageCaptureLinkToObservation}
+                              onClick={() => updateSettingsField(
+                                'spotImageCaptureLinkToObservation',
+                                !settingsForm.spotImageCaptureLinkToObservation,
+                              )}
+                            >
+                              <span className="settings-toggle-text">
+                                {settingsForm.spotImageCaptureLinkToObservation ? 'ON' : 'OFF'}
+                              </span>
+                            </button>
+                          </label>
+                        </div>
                       </div>
                       <div className="settings-spot-preview">
                         <div className="settings-spot-status">

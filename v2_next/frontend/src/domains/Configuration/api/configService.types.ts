@@ -13,10 +13,23 @@ export interface ConfigConnectionPayload {
   port?: number;
 }
 
+export type ConfigSpotImageCaptureMode = 'off' | 'event' | 'interval' | 'all';
+
+export interface ConfigSpotImageCapturePayload {
+  enabled: boolean;
+  mode: ConfigSpotImageCaptureMode;
+  path: string;
+  min_interval_sec: number;
+  max_bytes: number;
+  retention_days: number;
+  link_to_observation: boolean;
+}
+
 export interface ConfigSpotPayload {
   ip?: string;
   refresh_interval?: number;
   actuator_step: number;
+  image_capture?: ConfigSpotImageCapturePayload;
 }
 
 export interface ConfigThresholdEnablePayload {
