@@ -604,7 +604,7 @@ A schema change must not append rows with a new column count to an existing file
 
 Required behavior:
 
-- Force a new file when `CSV_SCHEMA_VERSION` changes.
+- Force a new file when the active CSV schema version changes.
 - Include the full schema version in filename or rollover metadata.
 - Read existing header before append and reject mismatched column count/order.
 - Write a new sidecar for the new schema.
