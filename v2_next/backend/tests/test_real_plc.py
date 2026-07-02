@@ -1109,6 +1109,47 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Temperature_missing_reason")], "source_missing")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("temperature_value_origin")], "none")
 
+    def test_v2_row_sets_origin_none_when_current_observation_is_row_stale(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "Spot": 557.9,
+                "temperature_status_shadow": "ok",
+                "temperature_value_origin": "current_observation",
+                "spot_poll_status": "success",
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "spot_source_freshness": "fresh",
+                "spot_temperature_observed_c": 557.9,
+                "spot_last_valid_value_at": "2026-03-09T07:20:24.012Z",
+                "spot_effective_age_ms_at_row": 10_000.0,
+            }
+        )
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+        columns = list(service._get_active_v2_contract().columns)
+
+        self.assertEqual(v2_row[columns.index("Temperature")], "")
+        self.assertEqual(v2_row[columns.index("temperature_value_origin")], "none")
+        self.assertEqual(v2_row[columns.index("temperature_output_status")], "stale")
+        self.assertEqual(v2_row[columns.index("spot_effective_freshness_at_row")], "stale")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(columns)
+                writer.writerow(v2_row)
+            service._write_v2_sidecar(v2_path, service._get_active_v2_contract())
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 0)
+
     def test_v2_row_records_reset_operator_metadata_as_invalid(self) -> None:
         service = CSVLoggerService()
         data = self.create_data()
