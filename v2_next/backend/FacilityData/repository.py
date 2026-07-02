@@ -16,6 +16,12 @@ from uuid import uuid4
 
 from .. import config
 from .. import constants
+from backend.FacilityData.changeover_candidate_resolution_fact import (
+    CHANGEOVER_CANDIDATE_RESOLUTION_FACT_FILENAME,
+    PROCESS_PHASE_EVENT_FACT_FILENAME,
+    build_changeover_candidate_resolution_fact_manifest,
+    build_process_phase_event_fact_manifest,
+)
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_MEANINGS,
@@ -717,6 +723,16 @@ class CSVLoggerService:
             health=health,
         )
 
+    def _changeover_candidate_resolution_fact_manifest(self, log_path: Path) -> dict[str, Any]:
+        return build_changeover_candidate_resolution_fact_manifest(
+            fact_path=log_path / CHANGEOVER_CANDIDATE_RESOLUTION_FACT_FILENAME,
+        )
+
+    def _process_phase_event_fact_manifest(self, log_path: Path) -> dict[str, Any]:
+        return build_process_phase_event_fact_manifest(
+            fact_path=log_path / PROCESS_PHASE_EVENT_FACT_FILENAME,
+        )
+
 
     def _resolve_clean_git_commit(self) -> Optional[str]:
         repo_root = Path(__file__).resolve().parents[2]
@@ -763,6 +779,10 @@ class CSVLoggerService:
                 "temperature_operational_rule_version": TEMPERATURE_OPERATIONAL_RULE_VERSION,
                 "spot_row_freshness_rule_version": SPOT_ROW_FRESHNESS_RULE_VERSION,
                 "process_phase_rule_version": PROCESS_PHASE_RULE_VERSION,
+                "posthoc_fact_manifests": [
+                    "changeover_candidate_resolution_fact_manifest",
+                    "process_phase_event_fact_manifest",
+                ],
                 "promotion_bundle_required_flags": {
                     "CSV_V2_OPERATIONAL_FIELDS_ENABLED": True,
                     "SPOT_OBSERVATION_FACT_ENABLED": True,
@@ -800,6 +820,10 @@ class CSVLoggerService:
             "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(active_contract),
             "spot_configuration_snapshot": self._spot_configuration_snapshot(),
             "spot_image_fact_manifest": self._spot_image_fact_manifest(sidecar_path.parent),
+            "changeover_candidate_resolution_fact_manifest": (
+                self._changeover_candidate_resolution_fact_manifest(sidecar_path.parent)
+            ),
+            "process_phase_event_fact_manifest": self._process_phase_event_fact_manifest(sidecar_path.parent),
             "sensor_metadata": [
                 {
                     "column_name": "Product_No_operator",

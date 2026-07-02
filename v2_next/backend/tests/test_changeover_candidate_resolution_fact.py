@@ -1,6 +1,14 @@
+import csv
+import hashlib
+import tempfile
 import unittest
+from pathlib import Path
 
 from backend.FacilityData.changeover_candidate_resolution_fact import (
+    CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+    CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION,
+    CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION,
+    build_changeover_candidate_resolution_fact_manifest,
     infer_changeover_candidate_resolution_facts,
     infer_process_phase_event_facts,
 )
@@ -31,6 +39,46 @@ def _row(
 
 
 class ChangeoverCandidateResolutionFactTests(unittest.TestCase):
+    def test_changeover_fact_manifest_records_stats_and_source_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source_csv = tmp_path / "Factory_Integrated_Log_v2_20260625_000000.csv"
+            source_csv.write_text("schema_version,sample_seq\n2.4.0,1\n", encoding="utf-8-sig")
+            source_hash = hashlib.sha256(source_csv.read_bytes()).hexdigest()
+            fact_path = tmp_path / "changeover_candidate_resolution_fact.csv"
+            with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS)
+                writer.writerow(
+                    [
+                        CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION,
+                        "chg_1",
+                        "confirmed",
+                        "2026-06-25T00:00:00Z",
+                        CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION,
+                        f"sha256:{source_hash}",
+                        "logger-1",
+                        "1",
+                        "1",
+                        "",
+                        "0",
+                        "[]",
+                        "setup_candidate_mapped_posthoc",
+                        "0.650",
+                    ]
+                )
+            fact_hash = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+
+            manifest = build_changeover_candidate_resolution_fact_manifest(
+                fact_path=fact_path,
+                source_csv_path=source_csv,
+            )
+
+        self.assertEqual(manifest["row_count"], 1)
+        self.assertEqual(manifest["sha256"], fact_hash)
+        self.assertEqual(manifest["source_csv_sha256"], source_hash)
+        self.assertEqual(manifest["source_file_id"], f"sha256:{source_hash}")
+
     def test_each_candidate_gets_one_terminal_resolution(self) -> None:
         rows = [
             {

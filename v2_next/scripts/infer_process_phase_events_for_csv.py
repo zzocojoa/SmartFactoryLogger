@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from hashlib import sha256
 from pathlib import Path
@@ -15,6 +16,8 @@ from backend import config
 from backend.FacilityData.changeover_candidate_resolution_fact import (
     CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
     PROCESS_PHASE_EVENT_FACT_COLUMNS,
+    build_changeover_candidate_resolution_fact_manifest,
+    build_process_phase_event_fact_manifest,
     infer_changeover_candidate_resolution_facts,
     infer_process_phase_event_facts,
 )
@@ -41,6 +44,7 @@ def infer_process_phase_events_from_csv(
     event_output_path: Path,
     *,
     enabled: Optional[bool] = None,
+    metadata_path: Path | None = None,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     effective_enabled = process_phase_event_fact_enabled() if enabled is None else enabled
     if not effective_enabled:
@@ -63,7 +67,53 @@ def infer_process_phase_events_from_csv(
         writer = csv.DictWriter(handle, fieldnames=PROCESS_PHASE_EVENT_FACT_COLUMNS)
         writer.writeheader()
         writer.writerows(event_facts)
+    update_process_phase_fact_manifests(
+        metadata_path or input_path.with_suffix(".metadata.json"),
+        input_path=input_path,
+        resolution_output_path=resolution_output_path,
+        event_output_path=event_output_path,
+    )
     return resolution_facts, event_facts
+
+
+def update_process_phase_fact_manifests(
+    metadata_path: Path,
+    *,
+    input_path: Path,
+    resolution_output_path: Path,
+    event_output_path: Path,
+) -> bool:
+    if not metadata_path.exists():
+        return False
+
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+    schema_metadata = metadata.get("schema_metadata")
+    if not isinstance(schema_metadata, dict):
+        schema_metadata = {}
+        metadata["schema_metadata"] = schema_metadata
+    manifest_keys = schema_metadata.get("posthoc_fact_manifests")
+    if not isinstance(manifest_keys, list):
+        manifest_keys = []
+        schema_metadata["posthoc_fact_manifests"] = manifest_keys
+    for manifest_key in (
+        "changeover_candidate_resolution_fact_manifest",
+        "process_phase_event_fact_manifest",
+    ):
+        if manifest_key not in manifest_keys:
+            manifest_keys.append(manifest_key)
+
+    metadata["changeover_candidate_resolution_fact_manifest"] = (
+        build_changeover_candidate_resolution_fact_manifest(
+            fact_path=resolution_output_path,
+            source_csv_path=input_path,
+        )
+    )
+    metadata["process_phase_event_fact_manifest"] = build_process_phase_event_fact_manifest(
+        fact_path=event_output_path,
+        source_csv_path=input_path,
+    )
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
 
 
 def main() -> int:
@@ -71,6 +121,11 @@ def main() -> int:
         description="Create post-hoc v2.4 process phase event facts without mutating source CSV rows."
     )
     parser.add_argument("--input", type=Path, required=True, help="Factory_Integrated_Log_v2*.csv input")
+    parser.add_argument(
+        "--metadata",
+        type=Path,
+        help="Optional Factory_Integrated_Log_v2*.metadata.json to update with post-hoc fact manifests",
+    )
     parser.add_argument(
         "--resolution-output",
         type=Path,
@@ -84,6 +139,7 @@ def main() -> int:
             args.input,
             args.resolution_output,
             args.event_output,
+            metadata_path=args.metadata,
         )
     except ProcessPhaseEventFactDisabledError as exc:
         print(str(exc), file=sys.stderr)
