@@ -1,12 +1,25 @@
+import csv
+import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
+
+from backend.FacilityData.changeover_candidate_resolution_fact import (
+    CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+    PROCESS_PHASE_EVENT_FACT_COLUMNS,
+    build_changeover_candidate_resolution_fact_manifest,
+    build_process_phase_event_fact_manifest,
+)
+from backend.FacilityData.repository import CSVLoggerService, V2_4_CSV_COLUMNS
+from backend.FacilityData.schemas import FactoryData
+from scripts.validate_csv_v2_shadow import SPOT_IMAGE_FACT_REQUIRED_COLUMNS
 
 
 class _OperationalObservabilityHandler(BaseHTTPRequestHandler):
@@ -137,6 +150,250 @@ class OperationalObservabilityExportTests(unittest.TestCase):
             self.assertNotIn("fact_path", manifest)
             self.assertNotIn("capture_root", manifest)
             self.assertTrue(manifest["path_values_redacted"])
+
+
+class ServerSmokeCloseoutHelperTests(unittest.TestCase):
+    def _factory_data(self) -> FactoryData:
+        return FactoryData(
+            Time="2026-07-02T23:30:25.000",
+            Status="Running",
+            Speed=4.0,
+            Press=30.0,
+            Count=1,
+            Spot=None,
+            Product_No_operator="100",
+            Mold_No_operator="7",
+            operator_metadata_valid=True,
+            operator_metadata_missing_fields=[],
+            extruder_process_state_online="unknown",
+            spot_poll_status="success",
+            spot_raw_validity="invalid_sentinel",
+            spot_source_freshness="fresh",
+            spot_cache_status="available_not_used",
+            temperature_value_origin="none",
+            temperature_status_shadow="invalid_value",
+            cache_fallback_allowed=False,
+            spot_device_status_code="temperature_under_range",
+            spot_target_state_observed_shadow="unknown",
+            spot_service_instance_id="spot-service-1",
+            spot_poll_seq=14,
+            spot_observation_seq=14,
+            spot_snapshot_age_ms=10.0,
+            spot_value_age_ms=10.0,
+            spot_temperature_raw="6553.4",
+        )
+
+    def _write_csv(self, path: Path, header: list[str], rows: list[list[str]]) -> str:
+        with path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            writer.writerows(rows)
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _write_bundle_fixture(self, bundle: Path) -> Path:
+        bundle.mkdir(parents=True)
+        service = CSVLoggerService()
+        service.fallback_log_dir = bundle
+        service.apply_config(
+            log_path=bundle,
+            auto_save=True,
+            csv_v2_enabled=True,
+            csv_v2_operational_fields_enabled=True,
+        )
+        data = self._factory_data()
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+        v2_path = bundle / "Factory_Integrated_Log_v2_20260702_233025.csv"
+        self._write_csv(v2_path, V2_4_CSV_COLUMNS, [v2_row])
+
+        image_fact = bundle / "spot_image_fact.csv"
+        image_sha = self._write_csv(
+            image_fact,
+            SPOT_IMAGE_FACT_REQUIRED_COLUMNS,
+            [
+                [
+                    "capture-1",
+                    "spot_images/20260702/capture-1.jpg",
+                    "1".zfill(64),
+                    "123",
+                    "image/jpeg",
+                    "100",
+                    "fresh",
+                    "spot-service-1:14",
+                ]
+            ],
+        )
+        resolution_fact = bundle / "changeover_candidate_resolution_fact.csv"
+        event_fact = bundle / "process_phase_event_fact.csv"
+        self._write_csv(resolution_fact, CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS, [])
+        self._write_csv(event_fact, PROCESS_PHASE_EVENT_FACT_COLUMNS, [])
+
+        service._write_v2_sidecar(v2_path, service._get_active_v2_contract())
+        metadata_path = v2_path.with_suffix(".metadata.json")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["spot_image_fact_manifest"].update(
+            {
+                "enabled": True,
+                "mode": "all",
+                "fact_path": str(image_fact),
+                "capture_root": str(bundle / "spot_images"),
+                "row_count": 1,
+                "sha256": image_sha,
+                "written": 1,
+                "dropped": 0,
+                "failure": 0,
+            }
+        )
+        metadata["schema_metadata"]["posthoc_fact_manifests"] = [
+            "changeover_candidate_resolution_fact_manifest",
+            "process_phase_event_fact_manifest",
+        ]
+        metadata["changeover_candidate_resolution_fact_manifest"] = (
+            build_changeover_candidate_resolution_fact_manifest(
+                fact_path=resolution_fact,
+                source_csv_path=v2_path,
+            )
+        )
+        metadata["process_phase_event_fact_manifest"] = build_process_phase_event_fact_manifest(
+            fact_path=event_fact,
+            source_csv_path=v2_path,
+        )
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+
+        (bundle / "spot_config_off.json").write_text(
+            json.dumps({"image_capture": {"enabled": False, "mode": "off", "failure_count": 0}}),
+            encoding="utf-8",
+        )
+        return bundle / "spot_config_off.json"
+
+    def _write_spot_config(self, path: Path, image_capture: dict[str, object]) -> Path:
+        path.write_text(json.dumps({"image_capture": image_capture}), encoding="utf-8")
+        return path
+
+    def _run_closeout_helper(self, bundle: Path, mode: str, spot_config: Path) -> subprocess.CompletedProcess[str]:
+        repo_root = Path(__file__).resolve().parents[2]
+        return subprocess.run(
+            [
+                sys.executable,
+                str(repo_root / "scripts" / "write_server_smoke_closeout.py"),
+                "--bundle",
+                str(bundle),
+                "--mode",
+                mode,
+                "--spot-config-json",
+                str(spot_config),
+            ],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+
+    def test_server_smoke_closeout_records_copied_override_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "server_csv_linkage_bundle_20260702-233303"
+            spot_config = self._write_bundle_fixture(bundle)
+
+            result = self._run_closeout_helper(bundle, "copied", spot_config)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            closeout = json.loads((bundle / "server_smoke_closeout_sanitized.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(closeout["validation_source"], "override")
+        self.assertEqual(closeout["validator_verdict"], "PASS")
+        self.assertEqual(closeout["validator_exit_code"], 0)
+        self.assertFalse(closeout["capture_enabled"])
+        self.assertEqual(closeout["capture_mode"], "off")
+        self.assertEqual(closeout["capture_failure_count"], 0)
+        self.assertEqual(closeout["process_facts"]["changeover_candidate_resolution_fact"]["presence"], "present")
+        self.assertEqual(closeout["process_facts"]["changeover_candidate_resolution_fact"]["validation_source"], "override")
+        self.assertEqual(closeout["process_facts"]["process_phase_event_fact"]["presence"], "present")
+        self.assertEqual(closeout["process_facts"]["process_phase_event_fact"]["validation_source"], "override")
+        self.assertFalse(any(closeout["redaction"].values()))
+        closeout_text = json.dumps(closeout, ensure_ascii=False)
+        self.assertNotIn(str(bundle), closeout_text)
+        self.assertNotIn("://", closeout_text)
+
+    def test_server_smoke_closeout_records_freeze_metadata_manifest_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "server_csv_linkage_bundle_20260702-233303"
+            spot_config = self._write_bundle_fixture(bundle)
+
+            result = self._run_closeout_helper(bundle, "freeze", spot_config)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            closeout = json.loads((bundle / "server_smoke_closeout_sanitized.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(closeout["validation_source"], "metadata_manifest")
+        self.assertEqual(closeout["validator_verdict"], "PASS")
+        self.assertTrue(closeout["spot_image_fact_row_count_match"])
+        self.assertTrue(closeout["spot_image_fact_sha256_match"])
+        self.assertEqual(closeout["process_facts"]["changeover_candidate_resolution_fact"]["validation_source"], "metadata_manifest")
+        self.assertEqual(closeout["process_facts"]["process_phase_event_fact"]["validation_source"], "metadata_manifest")
+        self.assertTrue(closeout["process_facts"]["changeover_candidate_resolution_fact"]["row_count_match"])
+        self.assertTrue(closeout["process_facts"]["process_phase_event_fact"]["row_count_match"])
+        self.assertFalse(any(closeout["redaction"].values()))
+
+    def test_server_smoke_closeout_rejects_missing_capture_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "server_csv_linkage_bundle_20260702-233303"
+            self._write_bundle_fixture(bundle)
+            spot_config = self._write_spot_config(
+                bundle / "spot_config_missing_enabled.json",
+                {"mode": "off", "failure_count": 0},
+            )
+
+            result = self._run_closeout_helper(bundle, "copied", spot_config)
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            closeout = json.loads((bundle / "server_smoke_closeout_sanitized.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(closeout["validator_verdict"], "FAIL")
+        self.assertIsNone(closeout["capture_enabled"])
+        self.assertEqual(closeout["capture_mode"], "off")
+        self.assertEqual(closeout["capture_failure_count"], 0)
+        self.assertIn("image_capture.enabled_missing_or_not_boolean", closeout["capture_validation_errors"])
+
+    def test_server_smoke_closeout_rejects_missing_capture_failure_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "server_csv_linkage_bundle_20260702-233303"
+            self._write_bundle_fixture(bundle)
+            spot_config = self._write_spot_config(
+                bundle / "spot_config_missing_failure_count.json",
+                {"enabled": False, "mode": "off"},
+            )
+
+            result = self._run_closeout_helper(bundle, "copied", spot_config)
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            closeout = json.loads((bundle / "server_smoke_closeout_sanitized.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(closeout["validator_verdict"], "FAIL")
+        self.assertFalse(closeout["capture_enabled"])
+        self.assertEqual(closeout["capture_mode"], "off")
+        self.assertIsNone(closeout["capture_failure_count"])
+        self.assertIn("image_capture.failure_count_missing_or_not_integer", closeout["capture_validation_errors"])
+
+    def test_server_smoke_closeout_rejects_invalid_capture_failure_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "server_csv_linkage_bundle_20260702-233303"
+            self._write_bundle_fixture(bundle)
+            spot_config = self._write_spot_config(
+                bundle / "spot_config_invalid_failure_count.json",
+                {"enabled": False, "mode": "off", "failure_count": "0"},
+            )
+
+            result = self._run_closeout_helper(bundle, "copied", spot_config)
+
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            closeout = json.loads((bundle / "server_smoke_closeout_sanitized.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(closeout["validator_verdict"], "FAIL")
+        self.assertFalse(closeout["capture_enabled"])
+        self.assertEqual(closeout["capture_mode"], "off")
+        self.assertIsNone(closeout["capture_failure_count"])
+        self.assertIn("image_capture.failure_count_missing_or_not_integer", closeout["capture_validation_errors"])
 
 
 if __name__ == "__main__":

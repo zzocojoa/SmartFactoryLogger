@@ -156,11 +156,46 @@ closeout JSON file in the smoke bundle before the final zip is archived. Use
 audit metadata only; it must not contain raw image bytes, camera URLs, secrets,
 or full local paths.
 
+Prefer the helper over hand-written closeout snippets:
+
+```powershell
+py -3 scripts\write_server_smoke_closeout.py `
+  --bundle <server_smoke_bundle_dir> `
+  --mode copied `
+  --api-base <backend-api-base>
+```
+
+Use `--mode copied` for portable bundles copied out of the live log directory.
+The helper passes bundled fact files as explicit overrides and the closeout JSON
+must record `validation_source=override`.
+
+Use `--mode freeze` for an on-machine frozen log directory where the sidecar
+manifest paths still point to the files being validated:
+
+```powershell
+py -3 scripts\write_server_smoke_closeout.py `
+  --bundle <frozen_log_dir> `
+  --mode freeze `
+  --api-base <backend-api-base>
+```
+
+In freeze mode the helper does not pass fact-file overrides. The closeout JSON
+must record `validation_source=metadata_manifest`, with row-count and SHA-256
+matches proving the sidecar manifest matches the current fact files.
+
+For offline review or tests, pass `--spot-config-json <spot_config_response.json>`
+instead of `--api-base`. That JSON must be the sanitized response shape from
+`/api/spot/config`; only the `image_capture` state is copied into the closeout.
+The helper treats `image_capture.enabled`, `image_capture.mode`, and
+`image_capture.failure_count` as required evidence fields: only boolean `false`,
+string `"off"`, and integer `0` are accepted for closeout PASS.
+
 Required fields:
 
 ```json
 {
   "artifact_kind": "server_smoke_bundle",
+  "validation_mode": "copied",
   "bundle_name": "server_csv_linkage_bundle_YYYYMMDD-HHMMSS",
   "csv_file": "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv",
   "metadata_file": "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json",
@@ -188,6 +223,25 @@ Required fields:
   "capture_enabled": false,
   "capture_mode": "off",
   "capture_failure_count": 0,
+  "capture_validation_errors": [],
+  "process_facts": {
+    "changeover_candidate_resolution_fact": {
+      "presence": "present",
+      "validation_source": "override",
+      "fact_file": "changeover_candidate_resolution_fact.csv",
+      "row_count_match": true,
+      "sha256_match": true,
+      "source_csv_sha256_match": true
+    },
+    "process_phase_event_fact": {
+      "presence": "present",
+      "validation_source": "override",
+      "fact_file": "process_phase_event_fact.csv",
+      "row_count_match": true,
+      "sha256_match": true,
+      "source_csv_sha256_match": true
+    }
+  },
   "redaction": {
     "raw_image_included": false,
     "camera_url_included": false,
