@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import logging
+import math
 import queue
 import subprocess
 import threading
@@ -1276,6 +1277,25 @@ class CSVLoggerService:
         age_ms = (row_dt.astimezone(timezone.utc) - source_dt.astimezone(timezone.utc)).total_seconds() * 1000.0
         return age_ms
 
+    def _monotonic_age_ms_at_row(
+        self,
+        *,
+        row_created_monotonic: Optional[float],
+        source_completed_monotonic: Optional[float],
+    ) -> Optional[float]:
+        if row_created_monotonic is None or source_completed_monotonic is None:
+            return None
+        if isinstance(row_created_monotonic, bool) or isinstance(source_completed_monotonic, bool):
+            return None
+        try:
+            row_clock = float(row_created_monotonic)
+            source_clock = float(source_completed_monotonic)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(row_clock) or not math.isfinite(source_clock) or source_clock <= 0:
+            return None
+        return (row_clock - source_clock) * 1000.0
+
     def _parse_utc_timestamp_text(self, value: Optional[str]) -> Optional[datetime]:
         if not value:
             return None
@@ -1296,10 +1316,18 @@ class CSVLoggerService:
         self,
         *,
         row_timestamp: datetime,
+        row_created_monotonic: Optional[float],
         explicit_age_ms: Optional[float],
+        source_completed_monotonic: Optional[float],
         source_timestamp: Optional[str],
         fallback_age_ms: Optional[float],
     ) -> Optional[float]:
+        monotonic_age = self._monotonic_age_ms_at_row(
+            row_created_monotonic=row_created_monotonic,
+            source_completed_monotonic=source_completed_monotonic,
+        )
+        if monotonic_age is not None:
+            return monotonic_age
         if explicit_age_ms is not None:
             return explicit_age_ms
         row_age = self._timestamp_age_ms_at_row(row_timestamp, source_timestamp)
@@ -1312,6 +1340,7 @@ class CSVLoggerService:
         data: FactoryData,
         process_phase_candidate: str,
         row_timestamp: datetime,
+        row_created_monotonic: Optional[float],
     ):
         return derive_temperature_operational_fields(
             TemperatureOperationalInput(
@@ -1327,13 +1356,17 @@ class CSVLoggerService:
                 spot_error_code=data.spot_error_code,
                 spot_effective_age_ms_at_row=self._effective_age_ms_at_row(
                     row_timestamp=row_timestamp,
+                    row_created_monotonic=row_created_monotonic,
                     explicit_age_ms=data.spot_effective_age_ms_at_row,
+                    source_completed_monotonic=data.spot_last_poll_completed_monotonic,
                     source_timestamp=data.spot_last_poll_completed_at,
                     fallback_age_ms=data.spot_snapshot_age_ms,
                 ),
                 spot_effective_value_age_ms_at_row=self._effective_age_ms_at_row(
                     row_timestamp=row_timestamp,
+                    row_created_monotonic=None,
                     explicit_age_ms=data.spot_effective_value_age_ms_at_row,
+                    source_completed_monotonic=None,
                     source_timestamp=data.spot_last_valid_value_at,
                     fallback_age_ms=data.spot_value_age_ms,
                 ),
@@ -1500,10 +1533,12 @@ class CSVLoggerService:
         )
         contract = self._get_active_v2_contract()
         process_phase_decision = self._derive_process_phase_decision(data, timestamp, sample_seq)
+        row_created_monotonic = time.monotonic()
         operational_decision = self._derive_temperature_operational_decision(
             data,
             process_phase_decision.process_phase_candidate,
             ingest_timestamp,
+            row_created_monotonic,
         )
         v1_values = list(v1_row)
         if (

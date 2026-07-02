@@ -260,6 +260,7 @@ class FactoryData(BaseModel):
     spot_response_content_length: Optional[int] = None
     spot_last_poll_started_at: Optional[str] = None
     spot_last_poll_completed_at: Optional[str] = None
+    spot_last_poll_completed_monotonic: Optional[float] = Field(default=None, exclude=True)
     spot_last_response_at: Optional[str] = None
     spot_last_valid_value_at: Optional[str] = None
     spot_snapshot_age_ms: Optional[float] = None

@@ -188,13 +188,16 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, text="448.5", request=request)
 
         transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(transport=transport) as client:
-            await spot_api._refresh_spot_temperature(client)
-
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        with patch.object(spot_api.time, "monotonic", return_value=12345.5):
+            async with httpx.AsyncClient(transport=transport) as client:
+                await spot_api._refresh_spot_temperature(client)
+            diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
         snapshot = spot_api.get_spot_temperature_poll_snapshot()
 
         self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["_spot_last_poll_completed_monotonic"], 12345.5)
+        self.assertEqual(diagnostics["spot_last_poll_completed_monotonic"], 12345.5)
+        self.assertEqual(diagnostics["spot_snapshot_age_ms"], 0.0)
         self.assertEqual(diagnostics["spot_poll_seq"], 1)
         self.assertEqual(diagnostics["spot_observation_seq"], 1)
         self.assertEqual(diagnostics["spot_poll_status"], "success")
@@ -390,10 +393,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             await spot_api._refresh_spot_temperature(client)
 
         stale_epoch = time.time() - 2.0
+        stale_monotonic = time.monotonic() - 2.0
         spot_api._img_cache["temp_time"] = stale_epoch
         with spot_api._spot_temperature_snapshot_lock:
             assert spot_api._spot_temperature_snapshot is not None
             spot_api._spot_temperature_snapshot["_spot_last_poll_completed_at_epoch"] = stale_epoch
+            spot_api._spot_temperature_snapshot["_spot_last_poll_completed_monotonic"] = stale_monotonic
             spot_api._spot_last_valid_value_at = stale_epoch
 
         diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
@@ -423,10 +428,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 await spot_api._refresh_spot_temperature(client)
 
         stale_epoch = time.time() - 2.0
+        stale_monotonic = time.monotonic() - 2.0
         spot_api._img_cache["temp_time"] = stale_epoch
         with spot_api._spot_temperature_snapshot_lock:
             assert spot_api._spot_temperature_snapshot is not None
             spot_api._spot_temperature_snapshot["_spot_last_poll_completed_at_epoch"] = stale_epoch
+            spot_api._spot_temperature_snapshot["_spot_last_poll_completed_monotonic"] = stale_monotonic
 
         diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
 
