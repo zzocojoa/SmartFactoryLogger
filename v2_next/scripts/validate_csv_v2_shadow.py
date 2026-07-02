@@ -1039,7 +1039,7 @@ def validate_spot_image_fact_manifest(
     missing_columns = [column for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS if column not in header]
     if missing_columns and rows:
         failures.append("spot_image_fact header missing columns: " + ", ".join(missing_columns))
-        return failures
+        return failures, summary
 
     if rows:
         indices = {column: header.index(column) for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS}

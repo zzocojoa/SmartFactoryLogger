@@ -2024,6 +2024,56 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertNotIn(str(metadata_path), output_text)
         self.assertNotIn(str(override_fact_path), output_text)
 
+    def test_shadow_validation_script_rejects_malformed_spot_image_fact_without_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+            )
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+            contract = service._get_active_v2_contract()
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(contract.columns)
+                writer.writerow(v2_row)
+
+            fact_path = log_dir / "spot_image_fact.csv"
+            malformed_header = [
+                column for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS if column != "spot_image_link_status"
+            ]
+            with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(malformed_header)
+                writer.writerow(
+                    [
+                        "capture-1",
+                        "spot_images/20260702/capture-1.jpg",
+                        "1".zfill(64),
+                        "123",
+                        "image/jpeg",
+                        "100",
+                        "spot-service:1",
+                    ]
+                )
+            service._write_v2_sidecar(v2_path, contract)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 1)
+        self.assertIn("spot_image_fact header missing columns: spot_image_link_status", output.getvalue())
+
     def test_shadow_validation_script_rejects_origin_none_with_legacy_temperature(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
