@@ -40,6 +40,37 @@ Available settings:
   fact row instead of appending a duplicate `spot_image_fact.csv` entry.
 - After diagnostics, save Enabled off and Mode off.
 
+## Link Semantics
+
+Image links are operational correlation, not an atomic same-cycle guarantee.
+The writer snapshots the latest available SPOT observation when an image capture
+is queued, then records the observation key and nearest fields in
+`spot_image_fact.csv`. CSV v2.4 rows copy the latest image fact into the realtime
+`*_nearest` fields only when the fact's linked observation key matches the row's
+`spot_observation_key`.
+
+`spot_image_link_status` values mean:
+
+- `fresh`: linked observation age was within the stale threshold.
+- `stale`: linked observation existed, but was older than the stale threshold.
+- `missing_observation`: no observation snapshot was available.
+- `unlinked_observation`: the snapshot could not produce a valid observation key.
+- `unknown_age`: age could not be calculated.
+- `clock_anomaly`: calculated age was negative.
+
+The stale threshold follows the runtime SPOT refresh policy
+(`SPOT_REFRESH_INTERVAL * 3`). Helper defaults of `9000` ms are legacy fallbacks
+for tests or callers that do not pass runtime configuration; do not treat that
+fallback as a separate production calibration.
+
+Event-mode capture triggers and temperature cause evidence are separate policies.
+`event` mode may queue an image for under/over-range status, process phase,
+diagnostic evidence, alarm bit 4, or low `signalpc`. A temperature
+`low_signal_candidate` still requires `alarm_low_signal` or `signal_below_threshold`
+evidence. A low `signalpc` value by itself, without a configured
+threshold/comparator and enabled low-signal alarm policy, is retained as diagnostic
+context, not cause proof.
+
 ## Verification
 
 Check runtime policy:
