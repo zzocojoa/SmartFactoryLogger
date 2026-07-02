@@ -94,6 +94,29 @@ capture root, row count, SHA-256, writer counters, and last write time.
 `scripts/validate_csv_v2_shadow.py` validates the manifest shape, fact row count,
 fact SHA-256, safe relative image paths, and link status values.
 
+For an on-machine validation against the original log directory, do not pass a
+fact override. The validator reads `spot_image_fact_manifest.fact_path` and
+requires the manifest row count and SHA-256 to match the current fact file.
+
+For a portable smoke bundle copied while the logger is still running, include
+the bundled fact file explicitly:
+
+```powershell
+py -3 scripts\validate_csv_v2_shadow.py `
+  --v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv `
+  --metadata Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json `
+  --spot-observation-fact spot_observation_fact.csv `
+  --spot-image-fact spot_image_fact.csv
+```
+
+`--spot-image-fact` validates the supplied bundle file directly and reports a
+sanitized `spot_image_fact_*` summary using only file names, row counts, hashes,
+and match booleans. A copied bundle can legitimately report
+`spot_image_fact_row_count_match=false` and `spot_image_fact_sha256_match=false`
+when the sidecar metadata was written before the active fact file finished
+appending. The validator still checks the supplied fact's required columns,
+safe relative image paths, link statuses, and SHA-256 text fields.
+
 CSV v2.4 rows also expose the latest matching image fact link when the capture
 fact references the same `spot_observation_key` as the realtime row:
 
