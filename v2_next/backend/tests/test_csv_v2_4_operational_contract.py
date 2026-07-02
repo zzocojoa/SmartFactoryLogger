@@ -110,9 +110,12 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             )
             metadata = self.image_fact_metadata(fact_path, capture_root, row_count=1, sha256=fact_hash)
 
-            failures = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
+            failures, summary = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
 
         self.assertEqual(failures, [])
+        self.assertEqual(summary["spot_image_fact_validation_source"], "metadata_manifest")
+        self.assertEqual(summary["spot_image_fact_row_count_match"], "true")
+        self.assertEqual(summary["spot_image_fact_sha256_match"], "true")
 
     def test_spot_image_fact_manifest_validator_rejects_mismatched_stats_and_link(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -136,13 +139,44 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             )
             metadata = self.image_fact_metadata(fact_path, capture_root, row_count=2, sha256="0" * 64)
 
-            failures = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
+            failures, summary = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
 
         self.assertIn("spot_image_fact_manifest.sha256 does not match fact file", failures)
         self.assertIn("spot_image_fact_manifest.row_count=2, actual spot_image_fact rows=1", failures)
         self.assertIn("spot_image_fact row 2 spot_image_sha256 must be lowercase SHA-256", failures)
         self.assertIn("spot_image_fact row 2 fresh link requires spot_image_linked_observation_key", failures)
         self.assertIn("spot_image_fact row 2 spot_image_path must be a safe relative path", failures)
+        self.assertEqual(summary["spot_image_fact_row_count_match"], "false")
+        self.assertEqual(summary["spot_image_fact_sha256_match"], "false")
+
+    def test_spot_image_fact_manifest_validator_rejects_missing_header_without_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            fact_path = log_dir / "spot_image_fact.csv"
+            capture_root = log_dir / "spot_images"
+            header = [column for column in self.image_fact_header if column != "spot_image_link_status"]
+            row = [
+                "spotimg_20260701T010856283905Z_fe0d2cf21603",
+                "spot_images/2026/07/01/spotimg_20260701T010856283905Z_fe0d2cf21603.jpg",
+                "a" * 64,
+                "9064",
+                "image/jpeg",
+                "125.0",
+                "svc-1:42",
+            ]
+            with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(header)
+                writer.writerow(row)
+            fact_hash = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+            metadata = self.image_fact_metadata(fact_path, capture_root, row_count=1, sha256=fact_hash)
+
+            failures, summary = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
+
+        self.assertIn("spot_image_fact header missing columns: spot_image_link_status", failures)
+        self.assertEqual(summary["spot_image_fact_actual_row_count"], "1")
+        self.assertEqual(summary["spot_image_fact_row_count_match"], "true")
+        self.assertEqual(summary["spot_image_fact_sha256_match"], "true")
 
     def build_v2_row(
         self,
