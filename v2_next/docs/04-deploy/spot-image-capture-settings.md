@@ -49,6 +49,12 @@ is queued, then records the observation key and nearest fields in
 `*_nearest` fields only when the fact's linked observation key matches the row's
 `spot_observation_key`.
 
+Current policy keeps realtime CSV image links as best-effort diagnostic pointers.
+Guaranteed audit linkage should be implemented as a separate design, starting
+with an offline join over settled realtime CSV and `spot_image_fact.csv`
+artifacts. See
+`docs/03-analysis/spot-realtime-image-linkage-decision.md`.
+
 `spot_image_link_status` values mean:
 
 - `fresh`: linked observation age was within the stale threshold.
