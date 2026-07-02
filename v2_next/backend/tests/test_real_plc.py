@@ -1,9 +1,12 @@
 import csv
+import hashlib
+import io
 import json
-from pathlib import Path
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -16,6 +19,7 @@ from backend.FacilityData.repository import CSVLoggerService, CSV_SCHEMA_VERSION
 from backend.FacilityData.schemas import FactoryData, OperatorMetadata, OperatorMetadataUpdate
 from scripts.validate_csv_v2_shadow import validate as validate_csv_v2_shadow
 from scripts.validate_csv_v2_shadow import validate_many as validate_csv_v2_shadow_many
+from scripts.validate_csv_v2_shadow import SPOT_IMAGE_FACT_REQUIRED_COLUMNS
 from scripts.infer_process_segments_for_csv import infer_process_segments_from_csv
 
 
@@ -933,6 +937,25 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
     def _read_csv_rows(self, path: Path) -> list[list[str]]:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             return list(csv.reader(handle))
+
+    def _write_spot_image_fact_fixture(self, path: Path, rows: int) -> tuple[int, str]:
+        with path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(SPOT_IMAGE_FACT_REQUIRED_COLUMNS)
+            for seq in range(1, rows + 1):
+                writer.writerow(
+                    [
+                        f"capture-{seq}",
+                        f"spot_images/20260702/capture-{seq}.jpg",
+                        f"{seq:064x}",
+                        "123",
+                        "image/jpeg",
+                        "100",
+                        "fresh",
+                        f"spot-service:{seq}",
+                    ]
+                )
+        return rows, hashlib.sha256(path.read_bytes()).hexdigest()
 
     def _list_v1_files(self, log_dir: Path) -> list[Path]:
         return sorted(
@@ -1936,6 +1959,70 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
 
         self.assertEqual(result, 0)
+
+    def test_shadow_validation_script_accepts_portable_spot_image_fact_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp) / "source"
+            bundle_dir = Path(tmp) / "bundle"
+            log_dir.mkdir()
+            bundle_dir.mkdir()
+
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+            )
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+            contract = service._get_active_v2_contract()
+            columns = list(contract.columns)
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(columns)
+                writer.writerow(v2_row)
+
+            stale_count, stale_sha = self._write_spot_image_fact_fixture(log_dir / "spot_image_fact.csv", 1)
+            service._write_v2_sidecar(v2_path, contract)
+
+            metadata_path = v2_path.with_suffix(".metadata.json")
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            manifest = metadata["spot_image_fact_manifest"]
+            manifest["fact_path"] = str(log_dir / "missing_spot_image_fact.csv")
+            manifest["row_count"] = stale_count
+            manifest["sha256"] = stale_sha
+            metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+
+            override_fact_path = bundle_dir / "spot_image_fact.csv"
+            self._write_spot_image_fact_fixture(override_fact_path, 2)
+
+            strict_result = validate_csv_v2_shadow(None, v2_path, metadata_path)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                override_result = validate_csv_v2_shadow(
+                    None,
+                    v2_path,
+                    metadata_path,
+                    spot_image_fact_path=override_fact_path,
+                )
+
+        self.assertEqual(strict_result, 1)
+        self.assertEqual(override_result, 0)
+        output_text = output.getvalue()
+        spot_image_summary_lines = [line for line in output_text.splitlines() if line.startswith("spot_image_fact_")]
+        self.assertIn("spot_image_fact_validation_source=override", spot_image_summary_lines)
+        self.assertIn("spot_image_fact_override_file=spot_image_fact.csv", spot_image_summary_lines)
+        self.assertIn("spot_image_fact_row_count_match=false", spot_image_summary_lines)
+        self.assertIn("spot_image_fact_sha256_match=false", spot_image_summary_lines)
+        self.assertNotIn(str(v2_path), output_text)
+        self.assertNotIn(str(metadata_path), output_text)
+        self.assertNotIn(str(override_fact_path), output_text)
 
     def test_shadow_validation_script_rejects_origin_none_with_legacy_temperature(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
