@@ -62,10 +62,17 @@ class SpotImageCaptureWriter:
     written_count: int = 0
     last_cleanup_at: float = 0.0
     _known_facts_by_capture_id: Optional[dict[str, dict[str, str]]] = field(default=None, init=False, repr=False)
+    _fact_row_count: Optional[int] = field(default=None, init=False, repr=False)
 
     @property
     def fact_path(self) -> Path:
         return self.log_path / self.fact_filename
+
+    @property
+    def fact_row_count(self) -> int:
+        if self._fact_row_count is None:
+            self._load_fact_row_count()
+        return int(self._fact_row_count or 0)
 
     def write_capture(
         self,
@@ -160,6 +167,7 @@ class SpotImageCaptureWriter:
         )
         self.fact_path.rename(archive_path)
         self._known_facts_by_capture_id = {}
+        self._fact_row_count = 0
         return True
 
     def _existing_fact_for_capture_id(self, capture_id: str) -> Optional[dict[str, str]]:
@@ -171,25 +179,48 @@ class SpotImageCaptureWriter:
         if self._known_facts_by_capture_id is not None:
             return self._known_facts_by_capture_id
         facts_by_id: dict[str, dict[str, str]] = {}
+        row_count = 0
         if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
             try:
                 with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
                     reader = csv.DictReader(handle)
                     if reader.fieldnames == SPOT_IMAGE_FACT_COLUMNS:
                         for row in reader:
+                            if row:
+                                row_count += 1
                             capture_id = str(row.get("spot_image_capture_id") or "").strip()
                             if capture_id:
                                 facts_by_id[capture_id] = dict(row)
             except (OSError, UnicodeError, csv.Error):
                 facts_by_id = {}
+                row_count = 0
         self._known_facts_by_capture_id = facts_by_id
+        self._fact_row_count = row_count
         return facts_by_id
+
+    def _load_fact_row_count(self) -> int:
+        row_count = 0
+        if self.fact_path.exists() and self.fact_path.stat().st_size > 0:
+            try:
+                with self.fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    reader = csv.reader(handle)
+                    header = next(reader, [])
+                    if header == SPOT_IMAGE_FACT_COLUMNS:
+                        row_count = sum(1 for row in reader if row)
+            except (OSError, UnicodeError, csv.Error):
+                row_count = 0
+        self._fact_row_count = row_count
+        return row_count
 
     def _remember_fact(self, fact: Mapping[str, str]) -> None:
         capture_id = str(fact.get("spot_image_capture_id") or "").strip()
         if not capture_id:
             return
-        self._load_known_facts_by_capture_id()[capture_id] = dict(fact)
+        facts_by_id = self._load_known_facts_by_capture_id()
+        was_known = capture_id in facts_by_id
+        facts_by_id[capture_id] = dict(fact)
+        if not was_known:
+            self._fact_row_count = int(self._fact_row_count or 0) + 1
 
     def _cleanup_retention(self, now: float) -> None:
         if self.retention_days <= 0 or now - self.last_cleanup_at < 3600.0:

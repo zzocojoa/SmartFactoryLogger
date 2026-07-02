@@ -111,17 +111,19 @@ Do not compare `/api/spot/config` `image_capture.written_count` directly with
 - `image_capture.written_count` is a runtime worker success counter. It increases
   when the capture worker successfully handles a queued capture event. It is not
   an append-row counter and it resets with the backend process.
+- `image_capture.fact_row_count` is the current backend runtime view of actual
+  data rows in `spot_image_fact.csv`. It is initialized from the fact file and
+  increases only when a new fact row is appended.
 - Replayed or retried captures with the same generated capture id reuse the
   existing fact row to prevent duplicate evidence rows. In that path
-  `written_count` may increase while `row_count` does not.
+  `written_count` may increase while `fact_row_count` and manifest `row_count`
+  do not.
 
 Operational rule: `failure_count == 0` means the writer has not reported a
 runtime write failure. Fact completeness is proven by `row_count`, SHA-256, and
-validator results, not by equality with `written_count`.
-
-If an API consumer later needs an explicit append-row metric, add a new
-backward-compatible field such as `appended_row_count` or `fact_row_count`.
-Keep `written_count` unchanged for existing consumers.
+validator results, not by equality with `written_count`. Keep `written_count`
+unchanged for existing consumers; use `fact_row_count` when an API consumer needs
+the current fact-file row count.
 
 For an on-machine validation against the original log directory, do not pass a
 fact override. The validator reads `spot_image_fact_manifest.fact_path` and

@@ -432,7 +432,12 @@ def get_latest_spot_image_capture_fact() -> Dict[str, str]:
         return dict(_spot_image_capture_last_fact or {})
 
 
+def _spot_image_capture_fact_row_count() -> int:
+    return _get_spot_image_capture_writer().fact_row_count
+
+
 def get_spot_image_capture_health() -> Dict[str, Any]:
+    fact_row_count = _spot_image_capture_fact_row_count()
     with _spot_image_capture_lock:
         last_fact = _spot_image_capture_last_fact or {}
         return {
@@ -442,6 +447,7 @@ def get_spot_image_capture_health() -> Dict[str, Any]:
             "queue_capacity": _SPOT_IMAGE_CAPTURE_QUEUE_MAX,
             "enqueued_count": _spot_image_capture_enqueued_count,
             "written_count": _spot_image_capture_written_count,
+            "fact_row_count": fact_row_count,
             "dropped_count": _spot_image_capture_dropped_count,
             "failure_count": _spot_image_capture_failure_count,
             "last_enqueue_at": _spot_image_capture_last_enqueue_at or None,
