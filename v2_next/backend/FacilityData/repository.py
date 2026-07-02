@@ -1541,11 +1541,13 @@ class CSVLoggerService:
             row_created_monotonic,
         )
         v1_values = list(v1_row)
+        temperature_value_origin = data.temperature_value_origin or ""
         if (
             contract.operational_fields_enabled
             and operational_decision.temperature_output_status != "valid"
         ):
             v1_values[V1_CSV_COLUMNS.index("Temperature")] = ""
+            temperature_value_origin = "none"
         base_row = [
             contract.schema_version,
             sample_seq,
@@ -1597,7 +1599,7 @@ class CSVLoggerService:
             self._escape_csv_text(data.spot_raw_validity or ""),
             self._escape_csv_text(data.spot_cache_status or ""),
             self._escape_csv_text(data.spot_source_freshness or ""),
-            self._escape_csv_text(data.temperature_value_origin or ""),
+            self._escape_csv_text(temperature_value_origin),
             self._fmt_optional_bool(data.cache_fallback_allowed, default=False),
             self._escape_csv_text(data.spot_service_instance_id or ""),
             self._escape_csv_text(data.spot_service_started_at or ""),

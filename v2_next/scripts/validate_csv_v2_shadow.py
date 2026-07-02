@@ -433,6 +433,11 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
     freshness_index = header.index("spot_source_freshness") if "spot_source_freshness" in header else None
     output_status_index = header.index("temperature_output_status") if "temperature_output_status" in header else None
     raw_validity_index = header.index("spot_raw_validity") if "spot_raw_validity" in header else None
+    row_freshness_index = (
+        header.index("spot_effective_freshness_at_row")
+        if "spot_effective_freshness_at_row" in header
+        else None
+    )
 
     for row_number, row in enumerate(rows, start=2):
         if max(temperature_index, origin_index, observed_index, last_valid_index) >= len(row):
@@ -453,6 +458,11 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
         output_status = (
             row[output_status_index].strip()
             if output_status_index is not None and output_status_index < len(row)
+            else ""
+        )
+        row_freshness = (
+            row[row_freshness_index].strip()
+            if row_freshness_index is not None and row_freshness_index < len(row)
             else ""
         )
 
@@ -490,12 +500,13 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
                 elif not _origin_none_allows_populated_observed(
                     cache_status=cache_status,
                     freshness=freshness,
+                    row_freshness=row_freshness,
                     output_status=output_status,
                     raw_validity=raw_validity,
                 ):
                     failures.append(
                         f"row {row_number} origin none permits populated spot_temperature_observed_c "
-                        "only for stale available_not_used rows or stale expired valid-temperature rows"
+                        "only for stale diagnostic rows"
                     )
 
     return failures
@@ -505,14 +516,19 @@ def _origin_none_allows_populated_observed(
     *,
     cache_status: str,
     freshness: str,
+    row_freshness: str,
     output_status: str,
     raw_validity: str,
 ) -> bool:
-    if freshness != "stale" or output_status not in {"", "stale"}:
+    if output_status not in {"", "stale"}:
+        return False
+    if freshness != "stale" and row_freshness != "stale":
         return False
     if cache_status == "available_not_used":
         return True
-    return cache_status == "expired" and raw_validity == "valid_temperature"
+    if cache_status == "expired" and raw_validity == "valid_temperature":
+        return True
+    return row_freshness == "stale" and cache_status == "fresh" and raw_validity == "valid_temperature"
 
 def _parse_decimal_value(value: str) -> Decimal | None:
     try:
