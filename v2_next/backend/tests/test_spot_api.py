@@ -1930,6 +1930,30 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
             self.assertEqual(len(self.read_spot_image_fact_rows(log_path)), 1)
 
+    def test_image_capture_health_separates_worker_writes_from_fact_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            captured_at = 1782910800.123456
+            image_bytes = b"\xff\xd8health-row-count-dedupe\xff\xd9"
+
+            for _ in range(2):
+                spot_api._maybe_enqueue_spot_image_capture(
+                    image_bytes=image_bytes,
+                    captured_at=captured_at,
+                    image_url="http://spot.local/image.jpg",
+                    source="prefetch_upstream",
+                    image_age_ms=0.0,
+                )
+                self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
+
+            rows = self.read_spot_image_fact_rows(log_path)
+            health = spot_api.get_spot_image_capture_health()
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(health["written_count"], 2)
+            self.assertEqual(health["fact_row_count"], 1)
+
     def test_image_capture_writer_dedupes_same_capture_id_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
