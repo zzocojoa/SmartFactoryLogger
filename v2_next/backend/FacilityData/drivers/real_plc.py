@@ -458,6 +458,7 @@ class RealPLCDriver(BasePLCDriver):
             "spot_response_content_length",
             "spot_last_poll_started_at",
             "spot_last_poll_completed_at",
+            "spot_last_poll_completed_monotonic",
             "spot_last_valid_value_at",
             "spot_snapshot_age_ms",
             "spot_value_age_ms",
@@ -471,6 +472,8 @@ class RealPLCDriver(BasePLCDriver):
             "peak_picker_off_mode",
         )
         fields = {key: metadata.get(key) for key in passthrough_keys}
+        if fields.get("spot_last_poll_completed_monotonic") is None:
+            fields["spot_last_poll_completed_monotonic"] = metadata.get("_spot_last_poll_completed_monotonic")
         raw_value_text = metadata.get("spot_raw_value_text")
         fields["spot_temperature_raw"] = raw_value_text if raw_value_text is not None else None
         fields["spot_temperature_raw_truncated"] = False

@@ -133,6 +133,7 @@ class SpotSnapshotTests(unittest.TestCase):
                 "spot_response_content_length": 5,
                 "spot_last_poll_started_at": "2026-03-09T07:20:24.000Z",
                 "spot_last_poll_completed_at": "2026-03-09T07:20:24.012Z",
+                "spot_last_poll_completed_monotonic": 12345.5,
                 "spot_last_valid_value_at": "2026-03-09T07:20:24.012Z",
                 "spot_snapshot_age_ms": 188.0,
                 "spot_value_age_ms": 188.0,
@@ -159,6 +160,8 @@ class SpotSnapshotTests(unittest.TestCase):
         self.assertFalse(data.spot_temperature_raw_truncated)
         self.assertEqual(data.spot_raw_payload_encoding, "utf-8-replace")
         self.assertEqual(data.spot_last_response_at, "2026-03-09T07:20:24.012Z")
+        self.assertEqual(data.spot_last_poll_completed_monotonic, 12345.5)
+        self.assertNotIn("spot_last_poll_completed_monotonic", data.model_dump())
 
 
 
