@@ -123,6 +123,202 @@ when the sidecar metadata was written before the active fact file finished
 appending. The validator still checks the supplied fact's required columns,
 safe relative image paths, link statuses, and SHA-256 text fields.
 
+### NSIS Server Smoke Closeout Artifact
+
+Every NSIS server smoke that enables image capture must include a sanitized
+closeout JSON file in the smoke bundle before the final zip is archived. Use
+`server_smoke_closeout_sanitized.json` as the file name. The closeout file is
+audit metadata only; it must not contain raw image bytes, camera URLs, secrets,
+or full local paths.
+
+Required fields:
+
+```json
+{
+  "artifact_kind": "server_smoke_bundle",
+  "bundle_name": "server_csv_linkage_bundle_YYYYMMDD-HHMMSS",
+  "csv_file": "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv",
+  "metadata_file": "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json",
+  "observation_fact_file": "spot_observation_fact.csv",
+  "image_fact_file": "spot_image_fact.csv",
+  "validation_source": "override",
+  "validator_command": [
+    "py -3 scripts\\validate_csv_v2_shadow.py",
+    "--v2",
+    "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv",
+    "--metadata",
+    "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json",
+    "--spot-observation-fact",
+    "spot_observation_fact.csv",
+    "--spot-image-fact",
+    "spot_image_fact.csv"
+  ],
+  "validator_exit_code": 0,
+  "validator_verdict": "PASS",
+  "spot_image_fact_row_count_match": false,
+  "spot_image_fact_sha256_match": false,
+  "v2_rows": 0,
+  "realtime_image_link_rows": 0,
+  "realtime_image_link_blank_rows": 0,
+  "capture_enabled": false,
+  "capture_mode": "off",
+  "capture_failure_count": 0,
+  "redaction": {
+    "raw_image_included": false,
+    "camera_url_included": false,
+    "secret_included": false,
+    "full_path_included": false
+  }
+}
+```
+
+For copied server smoke bundles, `validation_source` must be `override`.
+Do not record this as a strict metadata-manifest pass. Row/hash match values
+must be copied from the validator output exactly as reported.
+
+Run the validator from the repository root, but record only file names in the
+closeout JSON:
+
+```powershell
+$bundleName = "server_csv_linkage_bundle_YYYYMMDD-HHMMSS"
+$bundle = Join-Path $outRoot $bundleName
+$csvFile = "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv"
+$metadataFile = "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json"
+$obsFile = "spot_observation_fact.csv"
+$imageFactFile = "spot_image_fact.csv"
+
+$validatorOutput = & py -3 scripts\validate_csv_v2_shadow.py `
+  --v2 (Join-Path $bundle $csvFile) `
+  --metadata (Join-Path $bundle $metadataFile) `
+  --spot-observation-fact (Join-Path $bundle $obsFile) `
+  --spot-image-fact (Join-Path $bundle $imageFactFile) 2>&1
+$validatorExitCode = $LASTEXITCODE
+$validatorLines = @($validatorOutput | ForEach-Object { [string]$_ })
+```
+
+Extract only sanitized summary keys:
+
+```powershell
+function Get-ValidatorValue($key) {
+  $line = $validatorLines | Where-Object { $_ -like "$key=*" } | Select-Object -First 1
+  if ($line) { return $line.Substring($key.Length + 1) }
+  return ""
+}
+
+$rows = @(Import-Csv -LiteralPath (Join-Path $bundle $csvFile))
+$linkRows = @($rows | Where-Object {
+  $_.spot_image_capture_id_nearest -or
+  $_.spot_image_path_nearest -or
+  $_.spot_image_link_status_nearest -or
+  $_.spot_image_link_age_ms_nearest
+})
+
+$spotConfig = (Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/spot/config" -TimeoutSec 5 -UseBasicParsing).Content | ConvertFrom-Json
+
+$closeout = [ordered]@{
+  artifact_kind = "server_smoke_bundle"
+  bundle_name = $bundleName
+  csv_file = $csvFile
+  metadata_file = $metadataFile
+  observation_fact_file = $obsFile
+  image_fact_file = $imageFactFile
+  validation_source = Get-ValidatorValue "spot_image_fact_validation_source"
+  validator_command = @(
+    "py -3 scripts\validate_csv_v2_shadow.py",
+    "--v2", $csvFile,
+    "--metadata", $metadataFile,
+    "--spot-observation-fact", $obsFile,
+    "--spot-image-fact", $imageFactFile
+  )
+  validator_exit_code = $validatorExitCode
+  validator_verdict = if ($validatorExitCode -eq 0 -and ($validatorLines -contains "PASS")) { "PASS" } else { "FAIL" }
+  spot_image_fact_row_count_match = Get-ValidatorValue "spot_image_fact_row_count_match"
+  spot_image_fact_sha256_match = Get-ValidatorValue "spot_image_fact_sha256_match"
+  v2_rows = [int](Get-ValidatorValue "v2_rows")
+  realtime_image_link_rows = $linkRows.Count
+  realtime_image_link_blank_rows = $rows.Count - $linkRows.Count
+  capture_enabled = [bool]$spotConfig.image_capture.enabled
+  capture_mode = [string]$spotConfig.image_capture.mode
+  capture_failure_count = [int]$spotConfig.image_capture.failure_count
+  redaction = [ordered]@{
+    raw_image_included = $false
+    camera_url_included = $false
+    secret_included = $false
+    full_path_included = $false
+  }
+}
+
+if ($closeout.validator_exit_code -ne 0) { throw "validator failed" }
+if ($closeout.capture_enabled -ne $false -or $closeout.capture_mode -ne "off") {
+  throw "capture closeout is not back to the normal off policy"
+}
+if ($closeout.capture_failure_count -ne 0) { throw "capture failure count is non-zero" }
+
+$closeoutPath = Join-Path $bundle "server_smoke_closeout_sanitized.json"
+$closeout | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $closeoutPath -Encoding UTF8
+```
+
+Before archiving or sharing the bundle, verify that closeout JSON string values
+contain no raw image content, camera URL, secret, or full path. Check values, not
+field names, so redaction flags such as `secret_included=false` are allowed:
+
+```powershell
+$closeoutText = Get-Content -LiteralPath $closeoutPath -Raw
+$closeoutJson = $closeoutText | ConvertFrom-Json
+
+function Get-JsonStringValues($value) {
+  if ($null -eq $value) {
+    return
+  }
+  if ($value -is [string]) {
+    $value
+    return
+  }
+  if ($value -is [System.Collections.IEnumerable] -and $value -isnot [string]) {
+    foreach ($item in $value) {
+      Get-JsonStringValues $item
+    }
+    return
+  }
+  if ($value.PSObject -and $value.PSObject.Properties.Count -gt 0) {
+    foreach ($property in $value.PSObject.Properties) {
+      Get-JsonStringValues $property.Value
+    }
+  }
+}
+
+$stringValues = @(Get-JsonStringValues $closeoutJson)
+$forbiddenValuePatterns = @(
+  "https?://",
+  "^[A-Za-z]:\\",
+  "^\\\\",
+  "password\\s*[:=]",
+  "secret\\s*[:=]",
+  "token\\s*[:=]",
+  "^data:image/",
+  "^/9j/",
+  "^iVBOR"
+)
+
+$hits = @($stringValues | Where-Object {
+  $candidate = $_
+  $forbiddenValuePatterns | Where-Object { $candidate -match $_ }
+})
+if ($hits.Count -gt 0) {
+  throw "closeout JSON contains forbidden sensitive or path-like values"
+}
+```
+
+Archive the bundle only after the closeout JSON is written and redaction checks
+pass. Then record the final zip hash:
+
+```powershell
+$zip = "$bundle.zip"
+if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+Compress-Archive -LiteralPath (Join-Path $bundle "*") -DestinationPath $zip -Force
+Get-FileHash -Algorithm SHA256 -LiteralPath $zip
+```
+
 CSV v2.4 rows also expose the latest matching image fact link when the capture
 fact references the same `spot_observation_key` as the realtime row:
 
