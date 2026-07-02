@@ -46,7 +46,6 @@ from backend.FacilityData.temperature_operational import (
 
 CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
 CSV_SCHEMA_VERSION_V2_4 = "2.4.0"
-CSV_SCHEMA_VERSION = CSV_SCHEMA_VERSION_V2_3
 DERIVATION_VERSION = "cycle-heuristic-v1"
 PROCESS_STATE_ONLINE_RULE_VERSION = "process-state-online-v1"
 OPERATOR_METADATA_VERSION = "1.0.0"

@@ -12,10 +12,18 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from backend import app as backend_app
+from backend.FacilityData import repository as repository_module
 from backend.FacilityData.drivers import real_plc
 from backend.FacilityData.drivers.real_plc import MelsecResponseError, RealPLCDriver, _parse_melsec_values
 from backend.FacilityData.process_state import PROCESS_SEGMENT_FACT_COLUMNS, infer_process_segment_facts
-from backend.FacilityData.repository import CSVLoggerService, CSV_SCHEMA_VERSION, SPOT_TEMPERATURE_SHADOW_COLUMNS, V1_CSV_COLUMNS, V2_CSV_COLUMNS
+from backend.FacilityData.repository import (
+    CSVLoggerService,
+    CSV_SCHEMA_VERSION_V2_3,
+    CSV_SCHEMA_VERSION_V2_4,
+    SPOT_TEMPERATURE_SHADOW_COLUMNS,
+    V1_CSV_COLUMNS,
+    V2_CSV_COLUMNS,
+)
 from backend.FacilityData.schemas import FactoryData, OperatorMetadata, OperatorMetadataUpdate
 from scripts.validate_csv_v2_shadow import validate as validate_csv_v2_shadow
 from scripts.validate_csv_v2_shadow import validate_many as validate_csv_v2_shadow_many
@@ -1153,8 +1161,10 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         v1_row = service._build_row(data, timestamp)
 
         v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
-        columns = list(service._get_active_v2_contract().columns)
+        contract = service._get_active_v2_contract()
+        columns = list(contract.columns)
 
+        self.assertEqual(contract.schema_version, CSV_SCHEMA_VERSION_V2_4)
         self.assertEqual(v2_row[columns.index("Temperature")], "")
         self.assertEqual(v2_row[columns.index("temperature_value_origin")], "none")
         self.assertEqual(v2_row[columns.index("temperature_output_status")], "stale")
@@ -1275,12 +1285,15 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
 
         v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
 
-        self.assertEqual(CSV_SCHEMA_VERSION, "2.3.0")
+        contract = service._get_active_v2_contract()
+        self.assertFalse(hasattr(repository_module, "CSV_SCHEMA_VERSION"))
+        self.assertEqual(contract.schema_version, CSV_SCHEMA_VERSION_V2_3)
+        self.assertEqual(tuple(V2_CSV_COLUMNS), contract.columns)
         self.assertEqual(V2_CSV_COLUMNS.count("sample_seq"), 1)
         for column in SPOT_TEMPERATURE_SHADOW_COLUMNS:
             self.assertIn(column, V2_CSV_COLUMNS)
         self.assertEqual(len(v2_row), len(V2_CSV_COLUMNS))
-        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("schema_version")], "2.3.0")
+        self.assertEqual(v2_row[V2_CSV_COLUMNS.index("schema_version")], CSV_SCHEMA_VERSION_V2_3)
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("logger_service_instance_id")], service.logger_service_instance_id)
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("logger_service_started_at")], service.logger_service_started_at)
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("extruder_process_state_online")], "extruding")

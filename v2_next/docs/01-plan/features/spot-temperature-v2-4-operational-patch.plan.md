@@ -129,7 +129,7 @@ v2.4 필드는 기존 v2.3 필드 뒤에 append-only로 추가한다. 기존 v1/
   - `FactoryData`에 v2.4 optional fields 추가.
   - enum validator 추가.
 - `backend/FacilityData/repository.py`
-  - `CSV_SCHEMA_VERSION`을 `2.4.0`으로 bump하는 설계.
+  - active v2 contract의 `schema_version`을 `2.4.0`으로 전환하는 설계.
   - `V2_CSV_COLUMNS` append-only 확장.
   - `_build_v2_row`에서 v2.4 운영 필드 추가.
   - sidecar metadata에 v2.4 operational rule version과 promotion gate 기록.
@@ -198,7 +198,7 @@ v2.4 필드는 기존 v2.3 필드 뒤에 append-only로 추가한다. 기존 v1/
    - enum 값은 `schemas.py`와 validator에 동일하게 선언한다.
    - 불명확한 값은 `unknown`으로 수렴시키고 raw text를 운영 필드에 직접 쓰지 않는다.
 4. v2.4 CSV schema 추가.
-   - `CSV_SCHEMA_VERSION="2.4.0"`.
+   - active v2 contract `schema_version="2.4.0"`.
    - 기존 `V2_CSV_COLUMNS` 뒤에 v2.4 fields append.
    - header mismatch guard가 기존 파일 append를 막는 동작을 유지한다.
 5. legacy `Temperature_quality` 처리.
