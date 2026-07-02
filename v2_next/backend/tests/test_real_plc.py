@@ -13,6 +13,10 @@ from fastapi.testclient import TestClient
 
 from backend import app as backend_app
 from backend.FacilityData import repository as repository_module
+from backend.FacilityData.changeover_candidate_resolution_fact import (
+    CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+    PROCESS_PHASE_EVENT_FACT_COLUMNS,
+)
 from backend.FacilityData.drivers import real_plc
 from backend.FacilityData.drivers.real_plc import MelsecResponseError, RealPLCDriver, _parse_melsec_values
 from backend.FacilityData.process_state import PROCESS_SEGMENT_FACT_COLUMNS, infer_process_segment_facts
@@ -1736,6 +1740,35 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertEqual(image_fact_manifest["dropped"], 0)
             self.assertEqual(image_fact_manifest["failure"], 0)
             self.assertIsNone(image_fact_manifest["last_write_at"])
+            self.assertEqual(
+                metadata["schema_metadata"]["posthoc_fact_manifests"],
+                [
+                    "changeover_candidate_resolution_fact_manifest",
+                    "process_phase_event_fact_manifest",
+                ],
+            )
+            resolution_fact_manifest = metadata["changeover_candidate_resolution_fact_manifest"]
+            self.assertEqual(resolution_fact_manifest["fact_kind"], "changeover_candidate_resolution_fact")
+            self.assertEqual(
+                resolution_fact_manifest["fact_path"],
+                str(log_dir / "changeover_candidate_resolution_fact.csv"),
+            )
+            self.assertEqual(
+                resolution_fact_manifest["required_columns"],
+                CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+            )
+            self.assertEqual(resolution_fact_manifest["row_count"], 0)
+            self.assertIsNone(resolution_fact_manifest["sha256"])
+            self.assertIsNone(resolution_fact_manifest["source_csv_sha256"])
+            self.assertIsNone(resolution_fact_manifest["source_file_id"])
+            event_fact_manifest = metadata["process_phase_event_fact_manifest"]
+            self.assertEqual(event_fact_manifest["fact_kind"], "process_phase_event_fact")
+            self.assertEqual(event_fact_manifest["fact_path"], str(log_dir / "process_phase_event_fact.csv"))
+            self.assertEqual(event_fact_manifest["required_columns"], PROCESS_PHASE_EVENT_FACT_COLUMNS)
+            self.assertEqual(event_fact_manifest["row_count"], 0)
+            self.assertIsNone(event_fact_manifest["sha256"])
+            self.assertIsNone(event_fact_manifest["source_csv_sha256"])
+            self.assertIsNone(event_fact_manifest["source_file_id"])
             self.assertEqual(
                 metadata["schema_metadata"]["position_read_feature_flag"],
                 "EXTRUDER.position_read_enabled or POSITION_READ_ENABLED",

@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
-from typing import Mapping, Sequence
+from pathlib import Path
+from typing import Any, Mapping, Sequence
 
 
 CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION = "1.0.0"
 CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION = "changeover-candidate-resolution-v1"
 PROCESS_PHASE_EVENT_SCHEMA_VERSION = "1.0.0"
 PROCESS_PHASE_EVENT_RULE_VERSION = "process-phase-event-v1"
+CHANGEOVER_CANDIDATE_RESOLUTION_FACT_FILENAME = "changeover_candidate_resolution_fact.csv"
+PROCESS_PHASE_EVENT_FACT_FILENAME = "process_phase_event_fact.csv"
 _PRE_CHANGEOVER_EVIDENCE_WINDOW = timedelta(seconds=300)
 CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS = [
     "candidate_resolution_schema_version",
@@ -46,6 +50,75 @@ PROCESS_PHASE_EVENT_FACT_COLUMNS = [
     "confirmation_reason",
     "confirmation_confidence",
 ]
+
+
+def build_changeover_candidate_resolution_fact_manifest(
+    *,
+    fact_path: Path,
+    source_csv_path: Path | None = None,
+) -> dict[str, Any]:
+    return _build_fact_manifest(
+        fact_kind="changeover_candidate_resolution_fact",
+        fact_path=fact_path,
+        source_csv_path=source_csv_path,
+        schema_version=CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION,
+        rule_version=CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION,
+        required_columns=CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+    )
+
+
+def build_process_phase_event_fact_manifest(
+    *,
+    fact_path: Path,
+    source_csv_path: Path | None = None,
+) -> dict[str, Any]:
+    return _build_fact_manifest(
+        fact_kind="process_phase_event_fact",
+        fact_path=fact_path,
+        source_csv_path=source_csv_path,
+        schema_version=PROCESS_PHASE_EVENT_SCHEMA_VERSION,
+        rule_version=PROCESS_PHASE_EVENT_RULE_VERSION,
+        required_columns=PROCESS_PHASE_EVENT_FACT_COLUMNS,
+    )
+
+
+def _build_fact_manifest(
+    *,
+    fact_kind: str,
+    fact_path: Path,
+    source_csv_path: Path | None,
+    schema_version: str,
+    rule_version: str,
+    required_columns: Sequence[str],
+) -> dict[str, Any]:
+    row_count, fact_sha256 = _fact_file_stats(fact_path)
+    source_csv_sha256 = _file_sha256(source_csv_path) if source_csv_path is not None else None
+    return {
+        "fact_kind": fact_kind,
+        "schema_version": schema_version,
+        "rule_version": rule_version,
+        "fact_path": str(fact_path),
+        "required_columns": list(required_columns),
+        "row_count": row_count,
+        "sha256": fact_sha256,
+        "source_csv_sha256": source_csv_sha256,
+        "source_file_id": f"sha256:{source_csv_sha256}" if source_csv_sha256 else None,
+    }
+
+
+def _fact_file_stats(fact_path: Path) -> tuple[int, str | None]:
+    if not fact_path.exists() or fact_path.stat().st_size == 0:
+        return 0, None
+    row_count = 0
+    with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.reader(handle)
+        next(reader, None)
+        row_count = sum(1 for row in reader if row)
+    return row_count, _file_sha256(fact_path)
+
+
+def _file_sha256(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
 
 _CANDIDATE_TO_CONFIRMED = {
     "setup_candidate": "setup",

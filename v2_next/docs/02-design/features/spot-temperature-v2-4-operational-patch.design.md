@@ -151,7 +151,7 @@ flag true -> false
   -> 신규 2.3.0 파일 생성
 ```
 
-Metadata must record `active_schema_version`, active column hash, operational flag state, temperature rule version, process phase rule version, git commit, and `spot_image_fact_manifest`. The manifest records image capture enabled/mode, fact path, capture root, row count, SHA-256, writer counters, and last write time. 같은 CSV 안에 `2.3.0` 행과 `2.4.0` 행이 섞이면 안 된다.
+Metadata must record `active_schema_version`, active column hash, operational flag state, temperature rule version, process phase rule version, git commit, `spot_image_fact_manifest`, `changeover_candidate_resolution_fact_manifest`, and `process_phase_event_fact_manifest`. The SPOT image manifest records image capture enabled/mode, fact path, capture root, row count, SHA-256, writer counters, and last write time. The two process phase post-hoc manifests record fact kind, schema/rule version, fact path, required columns, row count, fact SHA-256, source CSV SHA-256, and source file id. 같은 CSV 안에 `2.3.0` 행과 `2.4.0` 행이 섞이면 안 된다.
 Realtime CSV rows may expose the latest matching SPOT image fact only as relative diagnostic pointers: `spot_image_capture_id_nearest`, `spot_image_path_nearest`, `spot_image_link_status_nearest`, and `spot_image_link_age_ms_nearest`. These fields remain blank unless the latest image fact's linked observation key equals the realtime row `spot_observation_key`; raw camera URLs and image bytes never belong in realtime CSV.
 
 ### 3.2 Realtime v2.4 Columns### 3.2 Realtime v2.4 Columns
@@ -601,6 +601,8 @@ PROCESS_PHASE_EVENT_FACT_ENABLED=true
 
 The only allowed runtime states are all three promotion flags disabled or all three enabled together. Partial promotion flag combinations are rejected during backend config import, including fact-only experiments such as `SPOT_OBSERVATION_FACT_ENABLED=true` without the other two flags. CLI/fact smoke tests that exercise v2.4 facts must set the full bundle in a controlled environment.
 
+Promotion bundle validation must verify `spot_image_fact_manifest`, `changeover_candidate_resolution_fact_manifest`, and `process_phase_event_fact_manifest`. For process phase post-hoc facts, the validator checks canonical required columns, manifest row count, fact SHA-256, source CSV SHA-256, and each fact row `source_file_id`. Portable copied bundles may pass explicit fact-file overrides; in that mode row/hash match against the original manifest path is reported for observability, while the override file content and source CSV linkage are still validated.
+
 Rollback:
 
 - Disable v2.4 operational fields and roll over to a new v2.3 file.
@@ -622,6 +624,7 @@ Match rate alone is not sufficient for report or operational promotion.
 | Link coverage | when the promotion bundle is enabled, each realtime nonblank `spot_observation_key` links to exactly one fact row, and startup/no-completion/non-positive poll sequence rows keep the key blank |
 | Candidate lifecycle integrity | every `changeover_candidate_id` has exactly one terminal row in `changeover_candidate_resolution_fact` and no orphan event rows |
 | Lifecycle grain integrity | repeated non-contiguous `changeover_candidate_id` values still produce one resolution row and one terminal event row |
+| Process fact manifest integrity | sidecar contains `changeover_candidate_resolution_fact_manifest` and `process_phase_event_fact_manifest`, and validator confirms required columns, row count, fact SHA-256, and source CSV SHA-256 |
 | Failure isolation | fact writer failure does not stop SPOT polling |
 | Future-context isolation | realtime candidate logic does not use later Count reset or product/mold changes |
 | Compatibility | v2.3 and v2.4 validator pass, and downstream consumers either accept `possible_pre_changeover_hold` / `production_stabilizing` or have an explicit compatibility mapping / documented absence |

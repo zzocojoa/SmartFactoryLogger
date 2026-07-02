@@ -7,9 +7,24 @@ import glob
 import json
 import math
 import re
+import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from statistics import mean
+from typing import Sequence
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from backend.FacilityData.changeover_candidate_resolution_fact import (
+    CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+    CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION,
+    CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION,
+    PROCESS_PHASE_EVENT_FACT_COLUMNS,
+    PROCESS_PHASE_EVENT_RULE_VERSION,
+    PROCESS_PHASE_EVENT_SCHEMA_VERSION,
+)
 
 
 REQUIRED_V1_COLUMNS = [
@@ -1068,6 +1083,209 @@ def validate_spot_image_fact_manifest(
     return failures, summary
 
 
+def _new_process_phase_fact_summary(summary_prefix: str, fact_path: Path | None) -> dict[str, str]:
+    override_file = fact_path.name if fact_path is not None else "not provided"
+    return {
+        f"{summary_prefix}_validation_source": "not_applicable",
+        f"{summary_prefix}_override_provided": _bool_text(fact_path is not None),
+        f"{summary_prefix}_manifest_fact_file": "",
+        f"{summary_prefix}_override_file": override_file,
+        f"{summary_prefix}_verified_file": "not available",
+        f"{summary_prefix}_manifest_row_count": "unknown",
+        f"{summary_prefix}_actual_row_count": "unknown",
+        f"{summary_prefix}_row_count_match": "unknown",
+        f"{summary_prefix}_manifest_sha256": "unknown",
+        f"{summary_prefix}_actual_sha256": "unknown",
+        f"{summary_prefix}_sha256_match": "unknown",
+        f"{summary_prefix}_manifest_source_csv_sha256": "unknown",
+        f"{summary_prefix}_actual_source_csv_sha256": "unknown",
+        f"{summary_prefix}_source_csv_sha256_match": "unknown",
+    }
+
+
+def _posthoc_fact_manifest_required(metadata: dict, manifest_key: str) -> bool:
+    schema_metadata = metadata.get("schema_metadata")
+    if not isinstance(schema_metadata, dict):
+        return False
+    manifest_keys = schema_metadata.get("posthoc_fact_manifests")
+    return isinstance(manifest_keys, list) and manifest_key in manifest_keys
+
+
+def validate_process_phase_fact_manifest(
+    metadata: dict,
+    metadata_path: Path,
+    v2_path: Path,
+    *,
+    manifest_key: str,
+    summary_prefix: str,
+    fact_kind: str,
+    required_columns: Sequence[str],
+    schema_field: str,
+    expected_schema_version: str,
+    rule_field: str,
+    expected_rule_version: str,
+    fact_path: Path | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    manifest = metadata.get(manifest_key)
+    summary = _new_process_phase_fact_summary(summary_prefix, fact_path)
+    summary[f"{summary_prefix}_validation_source"] = "override" if fact_path is not None else "metadata_manifest"
+    if not isinstance(manifest, dict):
+        if _posthoc_fact_manifest_required(metadata, manifest_key) or fact_path is not None:
+            return [f"metadata missing {manifest_key} block"], summary
+        summary[f"{summary_prefix}_validation_source"] = "not_applicable"
+        return [], summary
+
+    failures: list[str] = []
+    if manifest.get("fact_kind") != fact_kind:
+        failures.append(f"{manifest_key}.fact_kind must be {fact_kind!r}")
+    if manifest.get("schema_version") != expected_schema_version:
+        failures.append(f"{manifest_key}.schema_version must be {expected_schema_version!r}")
+    if manifest.get("rule_version") != expected_rule_version:
+        failures.append(f"{manifest_key}.rule_version must be {expected_rule_version!r}")
+
+    fact_path_text = str(manifest.get("fact_path") or "").strip()
+    summary[f"{summary_prefix}_manifest_fact_file"] = _path_basename_text(fact_path_text)
+    if not fact_path_text:
+        failures.append(f"{manifest_key}.fact_path must be populated")
+
+    manifest_columns = manifest.get("required_columns")
+    if manifest_columns != list(required_columns):
+        failures.append(f"{manifest_key}.required_columns must match canonical fact columns")
+
+    row_count = _parse_non_negative_int(manifest.get("row_count"))
+    if row_count is None:
+        failures.append(f"{manifest_key}.row_count must be a non-negative integer")
+        row_count = 0
+    summary[f"{summary_prefix}_manifest_row_count"] = str(row_count)
+
+    manifest_sha = manifest.get("sha256")
+    if manifest_sha is not None and not _is_sha256_text(str(manifest_sha)):
+        failures.append(f"{manifest_key}.sha256 must be null or lowercase SHA-256")
+    manifest_sha_text = str(manifest_sha or "")
+    summary[f"{summary_prefix}_manifest_sha256"] = manifest_sha_text
+
+    actual_source_csv_sha256 = hashlib.sha256(v2_path.read_bytes()).hexdigest()
+    summary[f"{summary_prefix}_actual_source_csv_sha256"] = actual_source_csv_sha256
+    manifest_source_sha = manifest.get("source_csv_sha256")
+    if manifest_source_sha is not None and not _is_sha256_text(str(manifest_source_sha)):
+        failures.append(f"{manifest_key}.source_csv_sha256 must be null or lowercase SHA-256")
+    manifest_source_sha_text = str(manifest_source_sha or "")
+    summary[f"{summary_prefix}_manifest_source_csv_sha256"] = manifest_source_sha_text
+    if manifest_source_sha:
+        source_sha_matches = manifest_source_sha == actual_source_csv_sha256
+        summary[f"{summary_prefix}_source_csv_sha256_match"] = _bool_text(source_sha_matches)
+        if not source_sha_matches:
+            failures.append(f"{manifest_key}.source_csv_sha256 does not match v2 CSV")
+
+    source_file_id = manifest.get("source_file_id")
+    expected_source_file_id = f"sha256:{actual_source_csv_sha256}"
+    if source_file_id is not None and source_file_id != expected_source_file_id:
+        failures.append(f"{manifest_key}.source_file_id does not match v2 CSV SHA-256")
+
+    if not fact_path_text and fact_path is None:
+        return failures, summary
+
+    selected_fact_path = fact_path if fact_path is not None else Path(fact_path_text)
+    summary[f"{summary_prefix}_verified_file"] = selected_fact_path.name
+    if not selected_fact_path.exists():
+        if fact_path is not None:
+            failures.append(f"{summary_prefix} override path does not exist")
+        elif row_count > 0 or manifest_sha:
+            failures.append(f"{manifest_key}.fact_path does not exist despite non-empty manifest stats")
+        return failures, summary
+
+    try:
+        fact_hash = hashlib.sha256(selected_fact_path.read_bytes()).hexdigest()
+    except OSError:
+        failures.append(f"{summary_prefix} could not be read")
+        return failures, summary
+    summary[f"{summary_prefix}_actual_sha256"] = fact_hash
+    sha_matches = bool(manifest_sha and fact_hash == manifest_sha)
+    summary[f"{summary_prefix}_sha256_match"] = _bool_text(sha_matches)
+    if manifest_sha and fact_hash != manifest_sha and fact_path is None:
+        failures.append(f"{manifest_key}.sha256 does not match fact file")
+
+    try:
+        header, rows = read_csv(selected_fact_path)
+    except Exception as exc:  # pragma: no cover - defensive CLI guard
+        failures.append(f"{summary_prefix} CSV read failed: {exc.__class__.__name__}")
+        return failures, summary
+
+    summary[f"{summary_prefix}_actual_row_count"] = str(len(rows))
+    row_count_matches = len(rows) == row_count
+    summary[f"{summary_prefix}_row_count_match"] = _bool_text(row_count_matches)
+    if not row_count_matches and fact_path is None:
+        failures.append(f"{manifest_key}.row_count={row_count}, actual {summary_prefix} rows={len(rows)}")
+
+    missing_columns = [column for column in required_columns if column not in header]
+    if missing_columns:
+        failures.append(f"{summary_prefix} header missing columns: " + ", ".join(missing_columns))
+        return failures, summary
+
+    indices = {column: header.index(column) for column in required_columns}
+    for row_number, row in enumerate(rows, start=2):
+        if len(row) != len(header):
+            failures.append(f"{summary_prefix} row {row_number} has {len(row)} columns, expected {len(header)}")
+            continue
+        if row[indices[schema_field]].strip() != expected_schema_version:
+            failures.append(f"{summary_prefix} row {row_number} {schema_field} must be {expected_schema_version!r}")
+        if row[indices[rule_field]].strip() != expected_rule_version:
+            failures.append(f"{summary_prefix} row {row_number} {rule_field} must be {expected_rule_version!r}")
+        if row[indices["source_file_id"]].strip() != expected_source_file_id:
+            failures.append(f"{summary_prefix} row {row_number} source_file_id does not match v2 CSV SHA-256")
+
+    if rows and not manifest_source_sha:
+        failures.append(f"{manifest_key}.source_csv_sha256 must be populated when fact rows exist")
+    if rows and source_file_id is None:
+        failures.append(f"{manifest_key}.source_file_id must be populated when fact rows exist")
+
+    return failures, summary
+
+
+def validate_changeover_candidate_resolution_fact_manifest(
+    metadata: dict,
+    metadata_path: Path,
+    v2_path: Path,
+    fact_path: Path | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    return validate_process_phase_fact_manifest(
+        metadata,
+        metadata_path,
+        v2_path,
+        manifest_key="changeover_candidate_resolution_fact_manifest",
+        summary_prefix="changeover_candidate_resolution_fact",
+        fact_kind="changeover_candidate_resolution_fact",
+        required_columns=CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+        schema_field="candidate_resolution_schema_version",
+        expected_schema_version=CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION,
+        rule_field="resolution_rule_version",
+        expected_rule_version=CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION,
+        fact_path=fact_path,
+    )
+
+
+def validate_process_phase_event_fact_manifest(
+    metadata: dict,
+    metadata_path: Path,
+    v2_path: Path,
+    fact_path: Path | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    return validate_process_phase_fact_manifest(
+        metadata,
+        metadata_path,
+        v2_path,
+        manifest_key="process_phase_event_fact_manifest",
+        summary_prefix="process_phase_event_fact",
+        fact_kind="process_phase_event_fact",
+        required_columns=PROCESS_PHASE_EVENT_FACT_COLUMNS,
+        schema_field="process_phase_event_schema_version",
+        expected_schema_version=PROCESS_PHASE_EVENT_SCHEMA_VERSION,
+        rule_field="confirmation_rule_version",
+        expected_rule_version=PROCESS_PHASE_EVENT_RULE_VERSION,
+        fact_path=fact_path,
+    )
+
+
 def _parse_non_negative_int(value: object) -> int | None:
     if value is None or isinstance(value, bool):
         return None
@@ -1138,10 +1356,20 @@ def validate(
     spot_observation_fact_path: Path | None = None,
     require_current_server_promotion_profile: bool = False,
     spot_image_fact_path: Path | None = None,
+    changeover_candidate_resolution_fact_path: Path | None = None,
+    process_phase_event_fact_path: Path | None = None,
 ) -> int:
     failures: list[str] = []
     warnings: list[str] = []
     spot_image_fact_summary = _new_spot_image_fact_summary(spot_image_fact_path)
+    changeover_fact_summary = _new_process_phase_fact_summary(
+        "changeover_candidate_resolution_fact",
+        changeover_candidate_resolution_fact_path,
+    )
+    process_phase_fact_summary = _new_process_phase_fact_summary(
+        "process_phase_event_fact",
+        process_phase_event_fact_path,
+    )
 
     v1_header: list[str] = []
     v1_rows: list[list[str]] = []
@@ -1211,6 +1439,22 @@ def validate(
                 spot_image_fact_path=spot_image_fact_path,
             )
             failures.extend(spot_image_fact_failures)
+            changeover_fact_failures, changeover_fact_summary = (
+                validate_changeover_candidate_resolution_fact_manifest(
+                    metadata,
+                    metadata_path,
+                    v2_path,
+                    fact_path=changeover_candidate_resolution_fact_path,
+                )
+            )
+            process_phase_fact_failures, process_phase_fact_summary = validate_process_phase_event_fact_manifest(
+                metadata,
+                metadata_path,
+                v2_path,
+                fact_path=process_phase_event_fact_path,
+            )
+            failures.extend(changeover_fact_failures)
+            failures.extend(process_phase_fact_failures)
 
         shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
         if not isinstance(shadow_metadata, dict):
@@ -1311,6 +1555,25 @@ def validate(
         "spot_image_fact_sha256_match",
     ):
         print(f"{key}={spot_image_fact_summary[key]}")
+    for summary in (changeover_fact_summary, process_phase_fact_summary):
+        for key in (
+            "validation_source",
+            "override_provided",
+            "manifest_fact_file",
+            "override_file",
+            "verified_file",
+            "manifest_row_count",
+            "actual_row_count",
+            "row_count_match",
+            "manifest_sha256",
+            "actual_sha256",
+            "sha256_match",
+            "manifest_source_csv_sha256",
+            "actual_source_csv_sha256",
+            "source_csv_sha256_match",
+        ):
+            matching_key = next(summary_key for summary_key in summary if summary_key.endswith(f"_{key}"))
+            print(f"{matching_key}={summary[matching_key]}")
     print(f"current_server_promotion_profile_required={require_current_server_promotion_profile}")
     print(f"v1_rows={len(v1_rows) if v1_path is not None else 'not checked'}")
     print(f"v2_rows={len(v2_rows)}")
@@ -1425,6 +1688,22 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--changeover-candidate-resolution-fact",
+        type=Path,
+        help=(
+            "Optional portable changeover_candidate_resolution_fact.csv override. The file is validated directly "
+            "and metadata row/hash match is reported without requiring the original manifest path."
+        ),
+    )
+    parser.add_argument(
+        "--process-phase-event-fact",
+        type=Path,
+        help=(
+            "Optional portable process_phase_event_fact.csv override. The file is validated directly "
+            "and metadata row/hash match is reported without requiring the original manifest path."
+        ),
+    )
+    parser.add_argument(
         "--require-current-server-promotion-profile",
         action="store_true",
         help="Also require the known current server SPOT promotion profile values, not only generic schema/range invariants",
@@ -1462,6 +1741,8 @@ def main() -> int:
         args.spot_observation_fact,
         require_current_server_promotion_profile=args.require_current_server_promotion_profile,
         spot_image_fact_path=args.spot_image_fact,
+        changeover_candidate_resolution_fact_path=args.changeover_candidate_resolution_fact,
+        process_phase_event_fact_path=args.process_phase_event_fact,
     )
 
 

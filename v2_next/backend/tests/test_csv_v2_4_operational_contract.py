@@ -9,6 +9,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from backend.FacilityData.changeover_candidate_resolution_fact import (
+    CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+    CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION,
+    CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION,
+    PROCESS_PHASE_EVENT_FACT_COLUMNS,
+    PROCESS_PHASE_EVENT_RULE_VERSION,
+    PROCESS_PHASE_EVENT_SCHEMA_VERSION,
+    build_changeover_candidate_resolution_fact_manifest,
+    build_process_phase_event_fact_manifest,
+)
 from backend.FacilityData.repository import (
     CSVLoggerService,
     V1_CSV_COLUMNS,
@@ -17,6 +27,8 @@ from backend.FacilityData.repository import (
 )
 from backend.FacilityData.schemas import FactoryData
 from scripts.validate_csv_v2_shadow import (
+    validate_changeover_candidate_resolution_fact_manifest,
+    validate_process_phase_event_fact_manifest,
     validate_spot_image_fact_manifest,
     validate_spot_configuration_snapshot,
     validate_spot_invalid_sentinel_invariants,
@@ -86,6 +98,95 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "failure": 0,
                 "last_write_at": 1782896400.0,
             }
+        }
+
+    def write_csv_rows(self, path: Path, header: list[str], rows: list[list[str]]) -> str:
+        with path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            writer.writerows(rows)
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def write_v2_source_fixture(self, path: Path) -> str:
+        return self.write_csv_rows(
+            path,
+            ["schema_version", "sample_seq", "timestamp_utc"],
+            [["2.4.0", "1", "2026-06-25T00:00:00Z"]],
+        )
+
+    def write_resolution_fact_fixture(self, path: Path, source_hash: str) -> str:
+        return self.write_csv_rows(
+            path,
+            CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
+            [
+                [
+                    CHANGEOVER_CANDIDATE_RESOLUTION_SCHEMA_VERSION,
+                    "chg_1",
+                    "confirmed",
+                    "2026-06-25T00:00:00Z",
+                    CHANGEOVER_CANDIDATE_RESOLUTION_RULE_VERSION,
+                    f"sha256:{source_hash}",
+                    "logger-1",
+                    "1",
+                    "1",
+                    "",
+                    "0",
+                    "[]",
+                    "setup_candidate_mapped_posthoc",
+                    "0.650",
+                ]
+            ],
+        )
+
+    def write_event_fact_fixture(self, path: Path, source_hash: str) -> str:
+        return self.write_csv_rows(
+            path,
+            PROCESS_PHASE_EVENT_FACT_COLUMNS,
+            [
+                [
+                    PROCESS_PHASE_EVENT_SCHEMA_VERSION,
+                    "pevt_1",
+                    "chg_1",
+                    f"sha256:{source_hash}",
+                    "logger-1",
+                    "1",
+                    "1",
+                    "2026-06-25T00:00:00Z",
+                    "2026-06-25T00:00:00Z",
+                    "setup",
+                    "expected",
+                    "posthoc_confirmed",
+                    PROCESS_PHASE_EVENT_RULE_VERSION,
+                    "setup_candidate_mapped_posthoc",
+                    "0.650",
+                ]
+            ],
+        )
+
+    def process_phase_fact_metadata(
+        self,
+        *,
+        v2_path: Path,
+        resolution_path: Path,
+        event_path: Path,
+    ) -> dict:
+        return {
+            "schema_metadata": {
+                "posthoc_fact_manifests": [
+                    "changeover_candidate_resolution_fact_manifest",
+                    "process_phase_event_fact_manifest",
+                ]
+            },
+            "changeover_candidate_resolution_fact_manifest": (
+                build_changeover_candidate_resolution_fact_manifest(
+                    fact_path=resolution_path,
+                    source_csv_path=v2_path,
+                )
+            ),
+            "process_phase_event_fact_manifest": build_process_phase_event_fact_manifest(
+                fact_path=event_path,
+                source_csv_path=v2_path,
+            ),
         }
 
     def test_spot_image_fact_manifest_validator_accepts_matching_fact(self) -> None:
@@ -177,6 +278,126 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(summary["spot_image_fact_actual_row_count"], "1")
         self.assertEqual(summary["spot_image_fact_row_count_match"], "true")
         self.assertEqual(summary["spot_image_fact_sha256_match"], "true")
+
+    def test_process_phase_fact_manifest_validators_accept_matching_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260625_000000.csv"
+            source_hash = self.write_v2_source_fixture(v2_path)
+            resolution_path = log_dir / "changeover_candidate_resolution_fact.csv"
+            event_path = log_dir / "process_phase_event_fact.csv"
+            self.write_resolution_fact_fixture(resolution_path, source_hash)
+            self.write_event_fact_fixture(event_path, source_hash)
+            metadata = self.process_phase_fact_metadata(
+                v2_path=v2_path,
+                resolution_path=resolution_path,
+                event_path=event_path,
+            )
+
+            resolution_failures, resolution_summary = validate_changeover_candidate_resolution_fact_manifest(
+                metadata,
+                log_dir / "sample.metadata.json",
+                v2_path,
+            )
+            event_failures, event_summary = validate_process_phase_event_fact_manifest(
+                metadata,
+                log_dir / "sample.metadata.json",
+                v2_path,
+            )
+
+        self.assertEqual(resolution_failures, [])
+        self.assertEqual(event_failures, [])
+        self.assertEqual(resolution_summary["changeover_candidate_resolution_fact_row_count_match"], "true")
+        self.assertEqual(resolution_summary["changeover_candidate_resolution_fact_sha256_match"], "true")
+        self.assertEqual(resolution_summary["changeover_candidate_resolution_fact_source_csv_sha256_match"], "true")
+        self.assertEqual(event_summary["process_phase_event_fact_row_count_match"], "true")
+        self.assertEqual(event_summary["process_phase_event_fact_sha256_match"], "true")
+        self.assertEqual(event_summary["process_phase_event_fact_source_csv_sha256_match"], "true")
+
+    def test_process_phase_fact_manifest_validator_rejects_mismatched_source_and_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260625_000000.csv"
+            source_hash = self.write_v2_source_fixture(v2_path)
+            resolution_path = log_dir / "changeover_candidate_resolution_fact.csv"
+            header = [
+                column
+                for column in CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS
+                if column != "source_file_id"
+            ]
+            self.write_csv_rows(resolution_path, header, [[""] * len(header)])
+            event_path = log_dir / "process_phase_event_fact.csv"
+            self.write_event_fact_fixture(event_path, source_hash)
+            metadata = self.process_phase_fact_metadata(
+                v2_path=v2_path,
+                resolution_path=resolution_path,
+                event_path=event_path,
+            )
+            manifest = metadata["changeover_candidate_resolution_fact_manifest"]
+            manifest["source_csv_sha256"] = "0" * 64
+            manifest["source_file_id"] = "sha256:" + ("0" * 64)
+
+            failures, summary = validate_changeover_candidate_resolution_fact_manifest(
+                metadata,
+                log_dir / "sample.metadata.json",
+                v2_path,
+            )
+
+        self.assertIn("changeover_candidate_resolution_fact_manifest.source_csv_sha256 does not match v2 CSV", failures)
+        self.assertIn("changeover_candidate_resolution_fact header missing columns: source_file_id", failures)
+        self.assertEqual(summary["changeover_candidate_resolution_fact_source_csv_sha256_match"], "false")
+
+    def test_process_phase_fact_manifest_validator_accepts_portable_override_stats_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            bundle_dir = log_dir / "bundle"
+            bundle_dir.mkdir()
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260625_000000.csv"
+            source_hash = self.write_v2_source_fixture(v2_path)
+            metadata = {
+                "schema_metadata": {
+                    "posthoc_fact_manifests": ["changeover_candidate_resolution_fact_manifest"]
+                },
+                "changeover_candidate_resolution_fact_manifest": (
+                    build_changeover_candidate_resolution_fact_manifest(
+                        fact_path=log_dir / "missing_changeover_candidate_resolution_fact.csv",
+                        source_csv_path=v2_path,
+                    )
+                ),
+            }
+            manifest = metadata["changeover_candidate_resolution_fact_manifest"]
+            manifest["row_count"] = 2
+            manifest["sha256"] = "0" * 64
+            override_path = bundle_dir / "changeover_candidate_resolution_fact.csv"
+            self.write_resolution_fact_fixture(override_path, source_hash)
+
+            failures, summary = validate_changeover_candidate_resolution_fact_manifest(
+                metadata,
+                log_dir / "sample.metadata.json",
+                v2_path,
+                fact_path=override_path,
+            )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(summary["changeover_candidate_resolution_fact_validation_source"], "override")
+        self.assertEqual(summary["changeover_candidate_resolution_fact_row_count_match"], "false")
+        self.assertEqual(summary["changeover_candidate_resolution_fact_sha256_match"], "false")
+
+    def test_process_phase_fact_manifest_validator_ignores_legacy_metadata_without_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260625_000000.csv"
+            self.write_v2_source_fixture(v2_path)
+            metadata = {"schema_metadata": {"schema_version": "2.4.0"}}
+
+            failures, summary = validate_changeover_candidate_resolution_fact_manifest(
+                metadata,
+                log_dir / "sample.metadata.json",
+                v2_path,
+            )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(summary["changeover_candidate_resolution_fact_validation_source"], "not_applicable")
 
     def build_v2_row(
         self,
