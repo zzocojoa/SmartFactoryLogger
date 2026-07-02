@@ -100,6 +100,29 @@ capture root, row count, SHA-256, writer counters, and last write time.
 `scripts/validate_csv_v2_shadow.py` validates the manifest shape, fact row count,
 fact SHA-256, safe relative image paths, and link status values.
 
+### Health Counters Versus Fact Rows
+
+Do not compare `/api/spot/config` `image_capture.written_count` directly with
+`spot_image_fact_manifest.row_count`.
+
+- `spot_image_fact_manifest.row_count` is the actual number of data rows present
+  in `spot_image_fact.csv` at metadata or validator time. Use this value, plus
+  the manifest SHA-256 checks, for bundle completeness and audit validation.
+- `image_capture.written_count` is a runtime worker success counter. It increases
+  when the capture worker successfully handles a queued capture event. It is not
+  an append-row counter and it resets with the backend process.
+- Replayed or retried captures with the same generated capture id reuse the
+  existing fact row to prevent duplicate evidence rows. In that path
+  `written_count` may increase while `row_count` does not.
+
+Operational rule: `failure_count == 0` means the writer has not reported a
+runtime write failure. Fact completeness is proven by `row_count`, SHA-256, and
+validator results, not by equality with `written_count`.
+
+If an API consumer later needs an explicit append-row metric, add a new
+backward-compatible field such as `appended_row_count` or `fact_row_count`.
+Keep `written_count` unchanged for existing consumers.
+
 For an on-machine validation against the original log directory, do not pass a
 fact override. The validator reads `spot_image_fact_manifest.fact_path` and
 requires the manifest row count and SHA-256 to match the current fact file.
