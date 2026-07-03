@@ -72,6 +72,17 @@ not an atomic same-cycle guarantee.
   - spot image fact rows with fresh link status: 60056
   - capture reset after smoke: `enabled=false`, `mode=off`
   - capture failure count: 0
+- Row-time freshness closeout evidence, sanitized:
+  - file: `server_smoke_link_positive_20260703-114627_closeout.zip`
+  - result: PASS
+  - CSV rows checked: 11552
+  - SPOT refresh interval: 1.0 seconds
+  - freshness threshold: 3000 ms
+  - effective row age differed from snapshot age on 11511 rows
+  - threshold mismatch count: 0
+  - startup observation key nonblank count: 0
+  - redaction scope: source records, local machine paths, connection details,
+    and binary image payloads are omitted
 
 This smoke evidence proves that positive realtime linkage can occur under live
 server conditions. It also reinforces that realtime linkage is sparse and timing
