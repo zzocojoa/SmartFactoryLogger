@@ -200,12 +200,59 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
             csv_v2_enabled=True,
             csv_v2_operational_fields_enabled=True,
         )
-        data = self._factory_data()
-        timestamp = service._parse_timestamp(data)
-        v1_row = service._build_row(data, timestamp)
-        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+        rows = []
+        row_inputs = [
+            self._factory_data().model_copy(
+                update={
+                    "spot_effective_age_ms_at_row": 100.0,
+                    "spot_snapshot_age_ms": 10.0,
+                    "spot_value_age_ms": 10.0,
+                }
+            ),
+            self._factory_data().model_copy(
+                update={
+                    "Time": "2026-07-02T23:30:26.000",
+                    "spot_effective_age_ms_at_row": 10_000.0,
+                    "spot_snapshot_age_ms": 20.0,
+                    "spot_value_age_ms": 20.0,
+                }
+            ),
+            self._factory_data().model_copy(
+                update={
+                    "Time": "2026-07-02T23:30:27.000",
+                    "spot_poll_status": "not_attempted",
+                    "spot_raw_validity": "not_received",
+                    "spot_source_freshness": "unknown",
+                    "spot_cache_status": "empty",
+                    "temperature_status_shadow": "startup_pending",
+                    "spot_device_status_code": "",
+                    "spot_poll_seq": 0,
+                    "spot_observation_seq": 0,
+                    "spot_snapshot_age_ms": None,
+                    "spot_value_age_ms": None,
+                    "spot_temperature_raw": "",
+                }
+            ),
+        ]
+        for sample_seq, data in enumerate(row_inputs, start=1):
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            rows.append(
+                service._build_v2_row(
+                    data,
+                    timestamp,
+                    timestamp.astimezone(),
+                    sample_seq,
+                    v1_row,
+                )
+            )
+        edge_row = list(rows[0])
+        edge_row[V2_4_CSV_COLUMNS.index("timestamp_utc")] = "2026-07-02T23:30:25.000Z"
+        edge_row[V2_4_CSV_COLUMNS.index("ingest_timestamp")] = "2026-07-02T23:30:26.000+00:00"
+        edge_row[V2_4_CSV_COLUMNS.index("spot_last_poll_completed_at")] = "2026-07-02T23:30:25.500Z"
+        rows[0] = edge_row
         v2_path = bundle / "Factory_Integrated_Log_v2_20260702_233025.csv"
-        self._write_csv(v2_path, V2_4_CSV_COLUMNS, [v2_row])
+        self._write_csv(v2_path, V2_4_CSV_COLUMNS, rows)
 
         image_fact = bundle / "spot_image_fact.csv"
         image_sha = self._write_csv(
@@ -310,6 +357,12 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
         self.assertEqual(closeout["process_facts"]["changeover_candidate_resolution_fact"]["validation_source"], "override")
         self.assertEqual(closeout["process_facts"]["process_phase_event_fact"]["presence"], "present")
         self.assertEqual(closeout["process_facts"]["process_phase_event_fact"]["validation_source"], "override")
+        self.assertTrue(closeout["row_time_required_columns_present"])
+        self.assertEqual(closeout["effective_age_differs_from_snapshot_age_rows"], 2)
+        self.assertEqual(closeout["threshold_mismatch_count"], 0)
+        self.assertEqual(closeout["startup_observation_key_nonblank_count"], 0)
+        self.assertEqual(closeout["timestamp_direction_mismatch_count"], 0)
+        self.assertEqual(closeout["row_time_validation_errors"], [])
         self.assertFalse(any(closeout["redaction"].values()))
         closeout_text = json.dumps(closeout, ensure_ascii=False)
         self.assertNotIn(str(bundle), closeout_text)
@@ -333,6 +386,12 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
         self.assertEqual(closeout["process_facts"]["process_phase_event_fact"]["validation_source"], "metadata_manifest")
         self.assertTrue(closeout["process_facts"]["changeover_candidate_resolution_fact"]["row_count_match"])
         self.assertTrue(closeout["process_facts"]["process_phase_event_fact"]["row_count_match"])
+        self.assertTrue(closeout["row_time_required_columns_present"])
+        self.assertEqual(closeout["effective_age_differs_from_snapshot_age_rows"], 2)
+        self.assertEqual(closeout["threshold_mismatch_count"], 0)
+        self.assertEqual(closeout["startup_observation_key_nonblank_count"], 0)
+        self.assertEqual(closeout["timestamp_direction_mismatch_count"], 0)
+        self.assertEqual(closeout["row_time_validation_errors"], [])
         self.assertFalse(any(closeout["redaction"].values()))
 
     def test_server_smoke_closeout_rejects_missing_capture_enabled(self) -> None:
