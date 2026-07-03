@@ -954,11 +954,21 @@ def _path_display(path: Path | None) -> str:
     return path.name if path is not None else "not provided"
 
 
-def _new_spot_image_fact_summary(spot_image_fact_path: Path | None) -> dict[str, str]:
+def _new_spot_image_fact_summary(
+    spot_image_fact_path: Path | None,
+    spot_image_fact_final_manifest_path: Path | None = None,
+) -> dict[str, str]:
     override_file = spot_image_fact_path.name if spot_image_fact_path is not None else "not provided"
+    final_manifest_file = (
+        spot_image_fact_final_manifest_path.name
+        if spot_image_fact_final_manifest_path is not None
+        else "not provided"
+    )
     return {
         "spot_image_fact_validation_source": "not_applicable",
         "spot_image_fact_override_provided": _bool_text(spot_image_fact_path is not None),
+        "spot_image_fact_final_manifest_provided": _bool_text(spot_image_fact_final_manifest_path is not None),
+        "spot_image_fact_final_manifest_file": final_manifest_file,
         "spot_image_fact_manifest_fact_file": "",
         "spot_image_fact_override_file": override_file,
         "spot_image_fact_verified_file": "not available",
@@ -975,45 +985,65 @@ def validate_spot_image_fact_manifest(
     metadata: dict,
     metadata_path: Path,
     spot_image_fact_path: Path | None = None,
+    spot_image_fact_final_manifest_path: Path | None = None,
 ) -> tuple[list[str], dict[str, str]]:
-    manifest = metadata.get("spot_image_fact_manifest")
-    summary = _new_spot_image_fact_summary(spot_image_fact_path)
-    summary["spot_image_fact_validation_source"] = (
-        "override" if spot_image_fact_path is not None else "metadata_manifest"
-    )
+    summary = _new_spot_image_fact_summary(spot_image_fact_path, spot_image_fact_final_manifest_path)
+    manifest_label = "spot_image_fact_manifest"
+    strict_manifest_stats = spot_image_fact_path is None
+    if spot_image_fact_final_manifest_path is not None:
+        summary["spot_image_fact_validation_source"] = "final_manifest"
+        manifest_label = "spot_image_fact_final_manifest"
+        strict_manifest_stats = True
+        if not spot_image_fact_final_manifest_path.exists():
+            return ["spot_image_fact final manifest path does not exist"], summary
+        try:
+            final_payload = json.loads(spot_image_fact_final_manifest_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            return ["spot_image_fact final manifest JSON could not be read"], summary
+        if isinstance(final_payload, dict) and isinstance(final_payload.get("spot_image_fact_manifest"), dict):
+            manifest = final_payload.get("spot_image_fact_manifest")
+        else:
+            manifest = final_payload
+    else:
+        manifest = metadata.get("spot_image_fact_manifest")
+        summary["spot_image_fact_validation_source"] = (
+            "override" if spot_image_fact_path is not None else "metadata_manifest"
+        )
     if not isinstance(manifest, dict):
+        if spot_image_fact_final_manifest_path is not None:
+            return ["spot_image_fact final manifest must be a JSON object"], summary
         return ["metadata missing spot_image_fact_manifest block"], summary
 
     failures: list[str] = []
     enabled = manifest.get("enabled")
     if not isinstance(enabled, bool):
-        failures.append("spot_image_fact_manifest.enabled must be boolean")
+        failures.append(f"{manifest_label}.enabled must be boolean")
     mode = str(manifest.get("mode") or "")
     if mode not in {"off", "event", "interval", "all"}:
-        failures.append("spot_image_fact_manifest.mode must be off/event/interval/all")
+        failures.append(f"{manifest_label}.mode must be off/event/interval/all")
 
     fact_path_text = str(manifest.get("fact_path") or "").strip()
     capture_root_text = str(manifest.get("capture_root") or "").strip()
     summary["spot_image_fact_manifest_fact_file"] = _path_basename_text(fact_path_text)
     if not fact_path_text:
-        failures.append("spot_image_fact_manifest.fact_path must be populated")
+        failures.append(f"{manifest_label}.fact_path must be populated")
     if not capture_root_text:
-        failures.append("spot_image_fact_manifest.capture_root must be populated")
+        failures.append(f"{manifest_label}.capture_root must be populated")
 
     row_count = _parse_non_negative_int(manifest.get("row_count"))
     if row_count is None:
-        failures.append("spot_image_fact_manifest.row_count must be a non-negative integer")
+        failures.append(f"{manifest_label}.row_count must be a non-negative integer")
         row_count = 0
     summary["spot_image_fact_manifest_row_count"] = str(row_count)
 
     for key in ("written", "dropped", "failure"):
         value = manifest.get(key)
         if value is not None and _parse_non_negative_int(value) is None:
-            failures.append(f"spot_image_fact_manifest.{key} must be null or a non-negative integer")
+            failures.append(f"{manifest_label}.{key} must be null or a non-negative integer")
 
     manifest_sha = manifest.get("sha256")
     if manifest_sha is not None and not _is_sha256_text(str(manifest_sha)):
-        failures.append("spot_image_fact_manifest.sha256 must be null or lowercase SHA-256")
+        failures.append(f"{manifest_label}.sha256 must be null or lowercase SHA-256")
     summary["spot_image_fact_manifest_sha256"] = str(manifest_sha or "")
 
     if not fact_path_text and spot_image_fact_path is None:
@@ -1025,7 +1055,7 @@ def validate_spot_image_fact_manifest(
         if spot_image_fact_path is not None:
             failures.append("spot_image_fact override path does not exist")
         elif row_count > 0 or manifest_sha:
-            failures.append("spot_image_fact_manifest.fact_path does not exist despite non-empty manifest stats")
+            failures.append(f"{manifest_label}.fact_path does not exist despite non-empty manifest stats")
         return failures, summary
 
     try:
@@ -1036,8 +1066,8 @@ def validate_spot_image_fact_manifest(
     summary["spot_image_fact_actual_sha256"] = fact_hash
     sha_matches = bool(manifest_sha and fact_hash == manifest_sha)
     summary["spot_image_fact_sha256_match"] = _bool_text(sha_matches)
-    if manifest_sha and fact_hash != manifest_sha and spot_image_fact_path is None:
-        failures.append("spot_image_fact_manifest.sha256 does not match fact file")
+    if manifest_sha and fact_hash != manifest_sha and strict_manifest_stats:
+        failures.append(f"{manifest_label}.sha256 does not match fact file")
 
     try:
         header, rows = read_csv(fact_path)
@@ -1048,10 +1078,8 @@ def validate_spot_image_fact_manifest(
     summary["spot_image_fact_actual_row_count"] = str(len(rows))
     row_count_matches = len(rows) == row_count
     summary["spot_image_fact_row_count_match"] = _bool_text(row_count_matches)
-    if not row_count_matches and spot_image_fact_path is None:
-        failures.append(
-            f"spot_image_fact_manifest.row_count={row_count}, actual spot_image_fact rows={len(rows)}"
-        )
+    if not row_count_matches and strict_manifest_stats:
+        failures.append(f"{manifest_label}.row_count={row_count}, actual spot_image_fact rows={len(rows)}")
     missing_columns = [column for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS if column not in header]
     if missing_columns and rows:
         failures.append("spot_image_fact header missing columns: " + ", ".join(missing_columns))
@@ -1357,12 +1385,16 @@ def validate(
     spot_observation_fact_path: Path | None = None,
     require_current_server_promotion_profile: bool = False,
     spot_image_fact_path: Path | None = None,
+    spot_image_fact_final_manifest_path: Path | None = None,
     changeover_candidate_resolution_fact_path: Path | None = None,
     process_phase_event_fact_path: Path | None = None,
 ) -> int:
     failures: list[str] = []
     warnings: list[str] = []
-    spot_image_fact_summary = _new_spot_image_fact_summary(spot_image_fact_path)
+    spot_image_fact_summary = _new_spot_image_fact_summary(
+        spot_image_fact_path,
+        spot_image_fact_final_manifest_path,
+    )
     changeover_fact_summary = _new_process_phase_fact_summary(
         "changeover_candidate_resolution_fact",
         changeover_candidate_resolution_fact_path,
@@ -1438,6 +1470,7 @@ def validate(
                 metadata,
                 metadata_path,
                 spot_image_fact_path=spot_image_fact_path,
+                spot_image_fact_final_manifest_path=spot_image_fact_final_manifest_path,
             )
             failures.extend(spot_image_fact_failures)
             changeover_fact_failures, changeover_fact_summary = (
@@ -1545,6 +1578,8 @@ def validate(
     for key in (
         "spot_image_fact_validation_source",
         "spot_image_fact_override_provided",
+        "spot_image_fact_final_manifest_provided",
+        "spot_image_fact_final_manifest_file",
         "spot_image_fact_manifest_fact_file",
         "spot_image_fact_override_file",
         "spot_image_fact_verified_file",
@@ -1689,6 +1724,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--spot-image-fact-final-manifest",
+        type=Path,
+        help=(
+            "Optional spot_image_fact_manifest.final.json. When provided, its row count and SHA-256 "
+            "must strictly match the verified fact file, even with --spot-image-fact."
+        ),
+    )
+    parser.add_argument(
         "--changeover-candidate-resolution-fact",
         type=Path,
         help=(
@@ -1742,6 +1785,7 @@ def main() -> int:
         args.spot_observation_fact,
         require_current_server_promotion_profile=args.require_current_server_promotion_profile,
         spot_image_fact_path=args.spot_image_fact,
+        spot_image_fact_final_manifest_path=args.spot_image_fact_final_manifest,
         changeover_candidate_resolution_fact_path=args.changeover_candidate_resolution_fact,
         process_phase_event_fact_path=args.process_phase_event_fact,
     )

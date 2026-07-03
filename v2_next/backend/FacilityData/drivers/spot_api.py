@@ -139,6 +139,7 @@ class _SpotImageCaptureEvent:
 _SPOT_IMAGE_CAPTURE_QUEUE_MAX = 128
 _SPOT_IMAGE_CAPTURE_QUEUE: queue.Queue[_SpotImageCaptureEvent] = queue.Queue(maxsize=_SPOT_IMAGE_CAPTURE_QUEUE_MAX)
 _SPOT_IMAGE_CAPTURE_STOP = threading.Event()
+_SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED = threading.Event()
 _spot_image_capture_lock = threading.Lock()
 _spot_image_capture_thread: Optional[threading.Thread] = None
 _spot_image_capture_writer: Optional[SpotImageCaptureWriter] = None
@@ -325,10 +326,14 @@ def _get_spot_image_capture_writer() -> SpotImageCaptureWriter:
         return _spot_image_capture_writer
 
 
-def _start_spot_image_capture_worker() -> None:
+def _start_spot_image_capture_worker(*, force: bool = False) -> None:
     global _spot_image_capture_thread
+    if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() and not force:
+        return
     with _spot_image_capture_lock:
         if _spot_image_capture_thread is not None and _spot_image_capture_thread.is_alive():
+            return
+        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set() and not force:
             return
         _SPOT_IMAGE_CAPTURE_STOP.clear()
         _spot_image_capture_thread = threading.Thread(
@@ -390,11 +395,26 @@ def flush_spot_image_capture_queue(timeout_sec: float = 2.0) -> bool:
     return getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) == 0
 
 
-def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> None:
+def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> bool:
     _SPOT_IMAGE_CAPTURE_STOP.set()
     thread = _spot_image_capture_thread
     if thread is not None and thread.is_alive():
         thread.join(timeout=max(0.0, timeout_sec))
+    return getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) == 0 and not (
+        thread is not None and thread.is_alive()
+    )
+
+
+def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
+    global _prefetch_running
+    _prefetch_running = False
+    _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.set()
+    thread = _spot_image_capture_thread
+    if getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) > 0 and (
+        thread is None or not thread.is_alive()
+    ):
+        _start_spot_image_capture_worker(force=True)
+    return stop_spot_image_capture_writer(timeout_sec=timeout_sec)
 
 
 def _reset_spot_image_capture_state_for_tests() -> None:
@@ -424,6 +444,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_last_error_code = None
         _spot_image_capture_last_error_message = None
         _spot_image_capture_last_fact = None
+    _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.clear()
     _SPOT_IMAGE_CAPTURE_STOP.clear()
 
 
@@ -565,6 +586,8 @@ def _maybe_enqueue_spot_image_capture(
     image_age_ms: Optional[float] = None,
 ) -> None:
     global _spot_image_capture_dropped_count, _spot_image_capture_enqueued_count, _spot_image_capture_last_enqueue_at
+    if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
+        return
     mode = _spot_image_capture_mode()
     if mode == "off":
         return
@@ -583,6 +606,8 @@ def _maybe_enqueue_spot_image_capture(
     min_interval_sec = max(0.0, float(getattr(config, "SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC", 1.0) or 0.0))
     now = time.time()
     with _spot_image_capture_lock:
+        if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
+            return
         if min_interval_sec > 0.0 and now - _spot_image_capture_last_enqueue_at < min_interval_sec:
             return
         event = _SpotImageCaptureEvent(

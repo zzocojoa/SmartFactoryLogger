@@ -1,7 +1,10 @@
 import asyncio
 import csv
+import hashlib
+import json
 import os
 import tempfile
+import threading
 import time
 import unittest
 from collections.abc import AsyncIterator
@@ -16,6 +19,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend.FacilityData.drivers import spot_api
+from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.spot_image_fact import SpotImageCaptureWriter
 
 FocusUrlopenTarget = str | UrlRequest
@@ -1909,6 +1913,103 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(health["last_capture_id"], row["spot_image_capture_id"])
             self.assertEqual(health["last_capture_path"], row["spot_image_path"])
             self.assertEqual(health["last_capture_link_status"], "fresh")
+
+    async def test_control_shutdown_drains_image_writer_before_final_manifest(self) -> None:
+        from backend import app as backend_app
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+            self.set_spot_temperature_snapshot(
+                spot_poll_seq=43,
+                _spot_last_poll_completed_at_epoch=time.time(),
+            )
+            image_bytes = b"\xff\xd8control-shutdown-drain\xff\xd9"
+            write_started = threading.Event()
+            release_write = threading.Event()
+            original_write_capture = SpotImageCaptureWriter.write_capture
+
+            def delayed_write_capture(writer: SpotImageCaptureWriter, *args: Any, **kwargs: Any) -> dict[str, str]:
+                write_started.set()
+                release_write.wait(timeout=1.0)
+                return original_write_capture(writer, *args, **kwargs)
+
+            class FinalManifestLogger:
+                final_manifest: dict[str, Any] | None = None
+
+                def stop(self) -> None:
+                    service = CSVLoggerService()
+                    service.fallback_log_dir = log_path
+                    service.apply_config(log_path=log_path, auto_save=True, csv_v2_enabled=True)
+                    final_path = service.write_spot_image_fact_final_manifest(log_path)
+                    self.final_manifest = json.loads(final_path.read_text(encoding="utf-8"))
+
+            final_manifest_logger = FinalManifestLogger()
+
+            with (
+                patch.object(SpotImageCaptureWriter, "write_capture", delayed_write_capture),
+                patch.object(spot_api, "_request_spot_image", AsyncMock(return_value=image_bytes)),
+            ):
+                await spot_api.fetch_live_image_async()
+                self.assertTrue(write_started.wait(timeout=1.0))
+
+                release_thread = threading.Thread(target=lambda: (time.sleep(0.05), release_write.set()))
+                release_thread.start()
+                with (
+                    patch.object(backend_app, "logger_service", final_manifest_logger),
+                    patch.object(backend_app.plc_service, "stop", Mock()),
+                    patch.object(backend_app.comm_metrics_logger_service, "stop", Mock()),
+                    patch.object(backend_app.config_sync_agent, "stop", Mock()),
+                    patch.object(backend_app.config_watch_service, "stop", Mock()),
+                ):
+                    shutdown_status = backend_app._stop_services_for_control_shutdown()
+                release_thread.join(timeout=1.0)
+
+            rows = self.read_spot_image_fact_rows(log_path)
+            fact_path = log_path / "spot_image_fact.csv"
+            fact_sha = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+
+        self.assertTrue(shutdown_status["spot_image_capture_drained"])
+        self.assertEqual(len(rows), 1)
+        self.assertIsNotNone(final_manifest_logger.final_manifest)
+        self.assertEqual(final_manifest_logger.final_manifest["row_count"], 1)
+        self.assertEqual(final_manifest_logger.final_manifest["sha256"], fact_sha)
+
+    async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            event = spot_api._SpotImageCaptureEvent(
+                image_bytes=b"\xff\xd8queued-before-worker\xff\xd9",
+                captured_at=time.time(),
+                source_url="http://spot.local/live.jpg",
+                source="test_shutdown_pending",
+                image_age_ms=0.0,
+                link_checked_at=None,
+                observation_snapshot=None,
+            )
+            spot_api._SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
+            with spot_api._spot_image_capture_lock:
+                spot_api._spot_image_capture_enqueued_count += 1
+
+            drained = spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2.0)
+            rows = self.read_spot_image_fact_rows(log_path)
+            health = spot_api.get_spot_image_capture_health()
+            spot_api._maybe_enqueue_spot_image_capture(
+                image_bytes=b"\xff\xd8after-shutdown\xff\xd9",
+                captured_at=time.time(),
+                image_url="http://spot.local/live.jpg",
+                source="after_shutdown",
+                image_age_ms=0.0,
+            )
+            health_after_enqueue_attempt = spot_api.get_spot_image_capture_health()
+
+        self.assertTrue(drained)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["spot_image_source"], "test_shutdown_pending")
+        self.assertEqual(health["written_count"], 1)
+        self.assertEqual(health_after_enqueue_attempt["enqueued_count"], 1)
 
     async def test_live_image_shared_frame_cache_does_not_duplicate_image_capture(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

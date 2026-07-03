@@ -1,5 +1,6 @@
 import csv
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -217,6 +218,109 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(summary["spot_image_fact_validation_source"], "metadata_manifest")
         self.assertEqual(summary["spot_image_fact_row_count_match"], "true")
         self.assertEqual(summary["spot_image_fact_sha256_match"], "true")
+
+    def test_spot_image_fact_final_manifest_validator_accepts_matching_bundle_fact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            fact_path = log_dir / "spot_image_fact.csv"
+            capture_root = log_dir / "spot_images"
+            fact_hash = self.write_image_fact(
+                fact_path,
+                [
+                    [
+                        "spotimg_20260701T010856283905Z_fe0d2cf21603",
+                        "spot_images/2026/07/01/spotimg_20260701T010856283905Z_fe0d2cf21603.jpg",
+                        "a" * 64,
+                        "9064",
+                        "image/jpeg",
+                        "125.0",
+                        "fresh",
+                        "svc-1:42",
+                    ]
+                ],
+            )
+            metadata = self.image_fact_metadata(
+                log_dir / "missing_live_spot_image_fact.csv",
+                capture_root,
+                row_count=0,
+                sha256=None,
+            )
+            final_manifest = self.image_fact_metadata(
+                log_dir / "live_spot_image_fact.csv",
+                capture_root,
+                row_count=1,
+                sha256=fact_hash,
+            )["spot_image_fact_manifest"]
+            final_manifest_path = log_dir / "spot_image_fact_manifest.final.json"
+            final_manifest_path.write_text(
+                json.dumps(final_manifest, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            failures, summary = validate_spot_image_fact_manifest(
+                metadata,
+                log_dir / "sample.metadata.json",
+                spot_image_fact_path=fact_path,
+                spot_image_fact_final_manifest_path=final_manifest_path,
+            )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(summary["spot_image_fact_validation_source"], "final_manifest")
+        self.assertEqual(summary["spot_image_fact_final_manifest_provided"], "true")
+        self.assertEqual(summary["spot_image_fact_final_manifest_file"], "spot_image_fact_manifest.final.json")
+        self.assertEqual(summary["spot_image_fact_row_count_match"], "true")
+        self.assertEqual(summary["spot_image_fact_sha256_match"], "true")
+
+    def test_spot_image_fact_final_manifest_validator_rejects_mismatch_even_with_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            fact_path = log_dir / "spot_image_fact.csv"
+            capture_root = log_dir / "spot_images"
+            self.write_image_fact(
+                fact_path,
+                [
+                    [
+                        "spotimg_20260701T010856283905Z_fe0d2cf21603",
+                        "spot_images/2026/07/01/spotimg_20260701T010856283905Z_fe0d2cf21603.jpg",
+                        "a" * 64,
+                        "9064",
+                        "image/jpeg",
+                        "125.0",
+                        "fresh",
+                        "svc-1:42",
+                    ]
+                ],
+            )
+            metadata = self.image_fact_metadata(
+                log_dir / "missing_live_spot_image_fact.csv",
+                capture_root,
+                row_count=0,
+                sha256=None,
+            )
+            final_manifest = self.image_fact_metadata(
+                log_dir / "live_spot_image_fact.csv",
+                capture_root,
+                row_count=2,
+                sha256="0" * 64,
+            )["spot_image_fact_manifest"]
+            final_manifest_path = log_dir / "spot_image_fact_manifest.final.json"
+            final_manifest_path.write_text(
+                json.dumps(final_manifest, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            failures, summary = validate_spot_image_fact_manifest(
+                metadata,
+                log_dir / "sample.metadata.json",
+                spot_image_fact_path=fact_path,
+                spot_image_fact_final_manifest_path=final_manifest_path,
+            )
+
+        self.assertIn("spot_image_fact_final_manifest.sha256 does not match fact file", failures)
+        self.assertIn("spot_image_fact_final_manifest.row_count=2, actual spot_image_fact rows=1", failures)
+        self.assertEqual(summary["spot_image_fact_validation_source"], "final_manifest")
+        self.assertEqual(summary["spot_image_fact_row_count_match"], "false")
+        self.assertEqual(summary["spot_image_fact_sha256_match"], "false")
 
     def test_spot_image_fact_manifest_validator_rejects_mismatched_stats_and_link(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1618,6 +1618,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+def _stop_services_for_control_shutdown() -> dict[str, bool]:
+    status: dict[str, bool] = {}
+    try:
+        spot_image_capture_drained = spot_control.stop_spot_image_capture_for_shutdown(timeout_sec=2.0)
+        status["spot_image_capture_drained"] = spot_image_capture_drained
+        if not spot_image_capture_drained:
+            _logger.warning("SPOT image capture queue did not drain before control shutdown")
+    except Exception as exc:
+        status["spot_image_capture_drained"] = False
+        _logger.warning("Failed to stop SPOT image capture before control shutdown: %s", exc)
+    try:
+        plc_service.stop()
+        status["plc_service_stopped"] = True
+    except Exception:
+        status["plc_service_stopped"] = False
+    try:
+        logger_service.stop()
+        status["logger_service_stopped"] = True
+    except Exception:
+        status["logger_service_stopped"] = False
+    try:
+        comm_metrics_logger_service.stop()
+        status["comm_metrics_logger_service_stopped"] = True
+    except Exception:
+        status["comm_metrics_logger_service_stopped"] = False
+    try:
+        config_sync_agent.stop()
+        status["config_sync_agent_stopped"] = True
+    except Exception:
+        status["config_sync_agent_stopped"] = False
+    try:
+        config_watch_service.stop()
+        status["config_watch_service_stopped"] = True
+    except Exception:
+        status["config_watch_service_stopped"] = False
+    return status
+
+
 @app.middleware("http")
 async def record_request_stats(request: Request, call_next):
     trace_id = str(uuid.uuid4())
@@ -3248,26 +3287,7 @@ def shutdown(payload: ShutdownRequest):
             _logger.info("Shutdown requested: reason=%s %s", payload.reason, _lifecycle_log_fields())
         except Exception:
             pass
-        try:
-            plc_service.stop()
-        except Exception:
-            pass
-        try:
-            logger_service.stop()
-        except Exception:
-            pass
-        try:
-            comm_metrics_logger_service.stop()
-        except Exception:
-            pass
-        try:
-            config_sync_agent.stop()
-        except Exception:
-            pass
-        try:
-            config_watch_service.stop()
-        except Exception:
-            pass
+        _stop_services_for_control_shutdown()
         time.sleep(0.2)
         os._exit(0)
 
