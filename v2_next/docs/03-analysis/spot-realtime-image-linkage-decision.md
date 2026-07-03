@@ -7,10 +7,13 @@
 Keep realtime CSV image link fields as best-effort, non-blocking diagnostic
 pointers.
 
-The selected guarantee path is a post-hoc linkage fact or report over settled
-artifacts. Realtime CSV rows may expose a matching image pointer when the latest
-settled capture fact references the same `spot_observation_key`, but those
-fields are not the authoritative completeness guarantee.
+Guaranteed CSV-to-image linkage is operationally needed for promotion bundles,
+server smoke closeout, and offline analysis where every source row must be
+accounted for. Implement that guarantee as a P1 post-hoc linkage fact plus
+sanitized report over settled artifacts. Realtime CSV rows may expose a matching
+image pointer when the latest settled capture fact references the same
+`spot_observation_key`, but those fields are not the authoritative completeness
+guarantee.
 
 Do not add pending queue wait/flush, durable fact-file scans, or delayed row
 emission to the online CSV writer in this scope.
@@ -92,25 +95,140 @@ checks to a phase where the relevant artifacts have settled. That is the right
 place to enforce row counts, hashes, source CSV identity, redaction, and missing
 link summaries.
 
-## Post-Hoc Guarantee Requirements
+## Implementation Decision
 
-The guaranteed linkage follow-up should emit a dedicated fact or sanitized
-report:
+Implement guaranteed linkage as a post-hoc P1 follow-up. Do not implement it in
+the realtime writer.
 
-1. Read settled realtime CSV v2.4 rows.
-2. Read settled `spot_image_fact.csv`.
-3. Join by `spot_observation_key == spot_image_linked_observation_key`.
-4. Emit counts for total rows, eligible observation rows, matched rows, missing
-   rows, and ambiguous rows.
-5. Record source CSV identity and SHA-256 values for every input/output artifact.
-6. Keep raw image bytes, raw camera URLs, secrets, and full internal paths out of
-   the output.
-7. Make the validator fail on missing required columns, row/hash mismatch, unsafe
-   paths, or source CSV mismatch.
+The guarantee means every settled CSV v2.4 row receives a deterministic linkage
+status and reason. It does not mean every row must have an image. Rows without a
+usable `spot_observation_key`, rows with no matching image fact, and rows with
+ambiguous matches remain valid when they are explicitly counted and explained.
 
-First-class post-hoc linkage fact generation and validator enforcement are a
-follow-up implementation. This decision document does not change runtime code,
-CSV schema, SPOT image fact schema, or NSIS/build behavior.
+This decision document does not change runtime code, CSV schema, SPOT image fact
+schema, or NSIS/build behavior. The implementation must be a separate branch and
+PR.
+
+## Post-Hoc Linkage Scope
+
+The implementation should add a generator that reads settled artifacts and emits
+both:
+
+1. `spot_image_linkage_fact.csv`, one row per source CSV v2.4 row.
+2. `spot_image_linkage_report.json`, a sanitized summary and manifest for the
+   generated fact.
+
+The join key is exact:
+
+```text
+CSV.spot_observation_key == spot_image_fact.spot_image_linked_observation_key
+```
+
+If multiple image facts map to the same `spot_observation_key`, the row must be
+classified as `ambiguous` unless the implementation defines and documents a
+deterministic tie-breaker that the validator can reproduce.
+
+## Input Schema
+
+Required settled CSV columns:
+
+| Column | Purpose |
+| --- | --- |
+| `schema_version` | Must identify a v2.4-compatible CSV. |
+| `sample_seq` | Stable row sequence for reporting. |
+| `timestamp_utc` | Row time for offline analysis. |
+| `spot_service_instance_id` | Service identity used in observation keys. |
+| `spot_poll_seq` | Poll sequence used in observation keys. |
+| `spot_observation_key` | Exact join key to image facts. |
+| `spot_image_capture_id_nearest` | Realtime best-effort pointer for comparison only. |
+| `spot_image_path_nearest` | Realtime best-effort pointer for comparison only. |
+| `spot_image_link_status_nearest` | Realtime best-effort pointer for comparison only. |
+| `spot_image_link_age_ms_nearest` | Realtime best-effort pointer for comparison only. |
+
+Required image fact columns are the current `SPOT_IMAGE_FACT_COLUMNS`, including:
+
+| Column | Purpose |
+| --- | --- |
+| `spot_image_capture_id` | Matched capture identity. |
+| `spot_image_path` | Safe relative image path under the log directory. |
+| `spot_image_sha256` | Image content hash already recorded by the writer. |
+| `spot_image_link_status` | Link status, such as `fresh` or `stale`. |
+| `spot_image_link_age_ms` | Age used for analysis and optional tie-breakers. |
+| `spot_image_linked_observation_key` | Exact join key back to the CSV row. |
+
+The generator should also read the CSV sidecar metadata and the final image fact
+manifest when present. Those manifests are inputs for identity and hash checks,
+not sources for raw camera data.
+
+## Output Fact Schema
+
+`spot_image_linkage_fact.csv` should use safe, portable values only:
+
+| Column | Meaning |
+| --- | --- |
+| `source_csv_sha256` | SHA-256 of the source CSV. |
+| `source_csv_row_number` | One-based data row number, excluding header. |
+| `sample_seq` | Copied source row sequence. |
+| `timestamp_utc` | Copied source row timestamp. |
+| `spot_observation_key` | Copied join key. |
+| `linkage_status` | `matched`, `no_observation_key`, `no_image_fact`, `ambiguous`, or `invalid_source_row`. |
+| `unmatched_reason` | Blank for `matched`, otherwise a stable reason code. |
+| `match_count` | Number of image facts found for the observation key. |
+| `matched_spot_image_capture_id` | Capture id for deterministic matched rows. |
+| `matched_spot_image_path` | Safe relative path only. |
+| `matched_spot_image_sha256` | SHA-256 copied from image fact. |
+| `matched_spot_image_link_status` | Link status copied from image fact. |
+| `matched_spot_image_link_age_ms` | Link age copied from image fact. |
+| `image_fact_row_number` | Source image fact row number for matched rows. |
+| `realtime_spot_image_capture_id_nearest` | Original realtime pointer for comparison. |
+| `realtime_pointer_status` | `same_as_posthoc`, `blank`, `different`, or `not_applicable`. |
+
+`spot_image_linkage_report.json` should include:
+
+- generator version and generated timestamp;
+- source CSV file name, row count, and SHA-256;
+- image fact file name, row count, and SHA-256;
+- output fact file name, row count, and SHA-256;
+- total rows, eligible rows, matched rows, unmatched rows by reason, ambiguous
+  rows, and realtime pointer comparison counts;
+- redaction summary with booleans for raw image bytes, raw camera URLs, secrets,
+  and full internal paths.
+
+## Validator Requirements
+
+Extend the validator or add a companion validator so it fails when:
+
+1. any required input or output column is missing;
+2. `spot_image_linkage_fact.csv` row count does not equal the source CSV data row
+   count;
+3. source CSV SHA-256, image fact SHA-256, or output fact SHA-256 does not match
+   the report;
+4. a `matched` row references a capture id not present in `spot_image_fact.csv`;
+5. a `matched` row's `spot_observation_key` differs from the matched image
+   fact's `spot_image_linked_observation_key`;
+6. a matched image path is absolute, escapes the log directory, or contains a raw
+   camera URL;
+7. count summaries in the report do not equal the fact rows;
+8. any output string value contains raw image bytes, `data:image/`, raw camera
+   URLs, secrets, drive-root paths, UNC paths, or full internal paths.
+
+The validator may pass with nonzero `no_image_fact` or `ambiguous` counts only
+when those rows are explicitly represented in the fact and included in report
+counts.
+
+## Redaction Policy
+
+The post-hoc output must not include:
+
+- raw image bytes or base64;
+- raw camera URLs;
+- passwords, tokens, or secrets;
+- absolute Windows paths, UNC paths, or full internal POSIX paths;
+- copied config values that identify private infrastructure beyond sanitized
+  file names and SHA-256 hashes.
+
+Relative image paths already written by `spot_image_fact.csv` are allowed after
+safe-path validation.
 
 ## Test Criteria
 
@@ -129,6 +247,30 @@ Guaranteed linkage is not considered implemented until a dedicated validator or
 report proves settled fact-to-realtime join completeness with source artifact
 hashes and without exposing raw image bytes, raw camera URLs, secrets, or full
 internal paths.
+
+Post-hoc implementation must add tests that cover:
+
+- one-to-one matched rows;
+- rows without `spot_observation_key`;
+- rows with no matching image fact;
+- duplicate image facts for one observation key;
+- unsafe relative paths and absolute paths;
+- source CSV hash mismatch;
+- image fact hash mismatch;
+- redaction rejection for URLs, secrets, full paths, and image-like payloads;
+- realtime pointer comparison where the best-effort pointer is blank, same, and
+  different from the post-hoc match.
+
+Minimum verification commands for the implementation PR:
+
+```powershell
+py -3 -m pytest backend\tests\test_csv_v2_4_operational_contract.py backend\tests\test_spot_api.py -q
+py -3 -m pytest backend\tests\test_spot_image_linkage_fact.py -q
+py -3 -m py_compile scripts\validate_csv_v2_shadow.py scripts\write_server_smoke_closeout.py
+.\backend\.venv\Scripts\python.exe -m ruff check backend scripts
+.\backend\.venv\Scripts\python.exe -m mypy
+git diff --check
+```
 
 ## Non-Goals
 

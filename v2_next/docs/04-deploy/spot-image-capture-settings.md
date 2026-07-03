@@ -455,3 +455,11 @@ the realtime CSV.
 Startup, missing-completion, and non-positive poll sequence snapshots should not
 produce a linked observation key; those rows are intentionally unlinked rather
 than operational evidence.
+
+Do not treat `realtime_image_link_rows` as a row-to-image completeness guarantee.
+It only counts best-effort realtime pointers. Guaranteed CSV-to-image linkage is
+the accepted P1 post-hoc path documented in
+`docs/03-analysis/spot-realtime-image-linkage-decision.md`. Once implemented,
+server closeout should include `spot_image_linkage_fact.csv` and
+`spot_image_linkage_report.json`, and the validator must prove source CSV hash,
+image fact hash, output row counts, unmatched reasons, and redaction checks.
