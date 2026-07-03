@@ -834,6 +834,22 @@ class CSVLoggerService:
                     "spot_service_instance_id and spot_poll_seq/spot_observation_seq are unique "
                     "only in spot_observation_fact, not realtime CSV rows."
                 ),
+                "spot_image_linkage_policy": {
+                    "realtime_columns": [
+                        "spot_image_capture_id_nearest",
+                        "spot_image_path_nearest",
+                        "spot_image_link_status_nearest",
+                        "spot_image_link_age_ms_nearest",
+                    ],
+                    "realtime_semantics": "spot_image_*_nearest columns are best-effort live hints.",
+                    "authoritative_linkage": (
+                        "Authoritative linkage is post-hoc join via spot_image_fact.csv "
+                        "and spot_observation_key."
+                    ),
+                    "authoritative_fact_file": "spot_image_fact.csv",
+                    "authoritative_join_key": "spot_observation_key",
+                    "realtime_csv_completeness": "best_effort_not_guaranteed",
+                },
                 "compatibility_statement": (
                     "Append-compatible for tolerant column-name consumers; strict backward "
                     "compatibility is not guaranteed for exact-column-count consumers."
