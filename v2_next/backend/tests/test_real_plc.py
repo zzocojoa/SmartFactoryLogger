@@ -1716,6 +1716,30 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertIn("position-specific label", metadata["schema_metadata"]["header_policy"])
             self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.3.0")
             self.assertEqual(metadata["schema_metadata"]["operator_metadata_version"], "1.0.0")
+            spot_image_linkage_policy = metadata["schema_metadata"]["spot_image_linkage_policy"]
+            self.assertEqual(
+                spot_image_linkage_policy["realtime_columns"],
+                [
+                    "spot_image_capture_id_nearest",
+                    "spot_image_path_nearest",
+                    "spot_image_link_status_nearest",
+                    "spot_image_link_age_ms_nearest",
+                ],
+            )
+            self.assertEqual(
+                spot_image_linkage_policy["realtime_semantics"],
+                "spot_image_*_nearest columns are best-effort live hints.",
+            )
+            self.assertEqual(
+                spot_image_linkage_policy["authoritative_linkage"],
+                "Authoritative linkage is post-hoc join via spot_image_fact.csv and spot_observation_key.",
+            )
+            self.assertEqual(spot_image_linkage_policy["authoritative_fact_file"], "spot_image_fact.csv")
+            self.assertEqual(spot_image_linkage_policy["authoritative_join_key"], "spot_observation_key")
+            self.assertEqual(
+                spot_image_linkage_policy["realtime_csv_completeness"],
+                "best_effort_not_guaranteed",
+            )
             spot_config = metadata["spot_configuration_snapshot"]
             self.assertEqual(spot_config["spot_ip"], "10.1.10.50")
             self.assertEqual(spot_config["spot_model_info"], "SPOT+ AL")
