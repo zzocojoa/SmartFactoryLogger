@@ -17,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_SCRIPT = REPO_ROOT / "scripts" / "validate_csv_v2_shadow.py"
 CLOSEOUT_FILENAME = "server_smoke_closeout_sanitized.json"
 SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME = "spot_image_fact_manifest.final.json"
+SPOT_IMAGE_LINKAGE_FACT_FILENAME = "spot_image_linkage_fact.csv"
+SPOT_IMAGE_LINKAGE_REPORT_FILENAME = "spot_image_linkage_report.json"
 SPOT_IMAGE_LINK_COLUMNS = (
     "spot_image_capture_id_nearest",
     "spot_image_path_nearest",
@@ -207,6 +209,37 @@ def _fact_summary(prefix: str, parsed: Mapping[str, str], fact_path: Path | None
     }
 
 
+def _image_linkage_summary(
+    parsed: Mapping[str, str],
+    fact_path: Path | None,
+    report_path: Path | None,
+) -> dict[str, Any]:
+    validation_source = parsed.get("spot_image_linkage_fact_validation_source", "not_applicable")
+    if validation_source == "not_applicable":
+        presence = "not_applicable"
+    elif fact_path is not None and report_path is not None and fact_path.exists() and report_path.exists():
+        presence = "present"
+    else:
+        presence = "partial_or_missing"
+    return {
+        "presence": presence,
+        "validation_source": validation_source,
+        "fact_file": fact_path.name if fact_path is not None else "not_present",
+        "report_file": report_path.name if report_path is not None else "not_present",
+        "row_count": _to_int(parsed.get("spot_image_linkage_fact_actual_row_count")),
+        "row_count_match": _to_bool(parsed.get("spot_image_linkage_fact_row_count_match")),
+        "sha256": parsed.get("spot_image_linkage_fact_actual_sha256", ""),
+        "sha256_match": _to_bool(parsed.get("spot_image_linkage_fact_sha256_match")),
+        "source_csv_sha256_match": _to_bool(parsed.get("spot_image_linkage_source_csv_sha256_match")),
+        "spot_image_fact_sha256_match": _to_bool(
+            parsed.get("spot_image_linkage_spot_image_fact_sha256_match")
+        ),
+        "report_redaction_passed": _to_bool(parsed.get("spot_image_linkage_report_redaction_passed")),
+        "matched_rows": _to_int(parsed.get("spot_image_linkage_matched_rows")),
+        "ambiguous_rows": _to_int(parsed.get("spot_image_linkage_ambiguous_rows")),
+    }
+
+
 def _parse_utc_timestamp(value: str | None) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -334,6 +367,8 @@ def _validator_args(
     spot_observation_fact = _optional_file(bundle_path, "spot_observation_fact.csv")
     spot_image_fact = _optional_file(bundle_path, "spot_image_fact.csv")
     spot_image_fact_final_manifest = _optional_file(bundle_path, SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME)
+    spot_image_linkage_fact = _optional_file(bundle_path, SPOT_IMAGE_LINKAGE_FACT_FILENAME)
+    spot_image_linkage_report = _optional_file(bundle_path, SPOT_IMAGE_LINKAGE_REPORT_FILENAME)
     process_fact_paths = {
         prefix: _optional_file(bundle_path, filename)
         for prefix, filename in PROCESS_FACTS
@@ -363,6 +398,23 @@ def _validator_args(
     if mode == "copied" and spot_image_fact is not None:
         args.extend(["--spot-image-fact", str(spot_image_fact)])
         display.extend(["--spot-image-fact", spot_image_fact.name])
+    if mode == "copied" and spot_image_linkage_fact is not None and spot_image_linkage_report is not None:
+        args.extend(
+            [
+                "--spot-image-linkage-fact",
+                str(spot_image_linkage_fact),
+                "--spot-image-linkage-report",
+                str(spot_image_linkage_report),
+            ]
+        )
+        display.extend(
+            [
+                "--spot-image-linkage-fact",
+                spot_image_linkage_fact.name,
+                "--spot-image-linkage-report",
+                spot_image_linkage_report.name,
+            ]
+        )
     for prefix, fact_path in process_fact_paths.items():
         if mode == "copied" and fact_path is not None:
             option = "--changeover-candidate-resolution-fact"
@@ -374,6 +426,8 @@ def _validator_args(
         "spot_observation_fact": spot_observation_fact,
         "spot_image_fact": spot_image_fact,
         "spot_image_fact_final_manifest": spot_image_fact_final_manifest,
+        "spot_image_linkage_fact": spot_image_linkage_fact,
+        "spot_image_linkage_report": spot_image_linkage_report,
     }
     all_paths.update(process_fact_paths)
     return args, display, all_paths
@@ -442,6 +496,16 @@ def build_closeout(
         capture_validation_errors.append("image_capture.mode_must_be_off")
     if capture_failure_count != 0 and capture_failure_count_error is None:
         capture_validation_errors.append("image_capture.failure_count_must_be_zero")
+    linkage_partial = (
+        fact_paths["spot_image_linkage_fact"] is None
+        and fact_paths["spot_image_linkage_report"] is not None
+    ) or (
+        fact_paths["spot_image_linkage_fact"] is not None
+        and fact_paths["spot_image_linkage_report"] is None
+    )
+    linkage_validation_errors: list[str] = []
+    if linkage_partial:
+        linkage_validation_errors.append("spot_image_linkage_fact_and_report_must_be_provided_together")
 
     expected_source = (
         "final_manifest"
@@ -464,6 +528,12 @@ def build_closeout(
         "image_fact_final_manifest_file": fact_paths["spot_image_fact_final_manifest"].name
         if fact_paths["spot_image_fact_final_manifest"] is not None
         else "not_present",
+        "image_linkage_fact_file": fact_paths["spot_image_linkage_fact"].name
+        if fact_paths["spot_image_linkage_fact"] is not None
+        else "not_present",
+        "image_linkage_report_file": fact_paths["spot_image_linkage_report"].name
+        if fact_paths["spot_image_linkage_report"] is not None
+        else "not_present",
         "validation_source": validation_source,
         "validator_command": validator_display,
         "validator_exit_code": validator.returncode,
@@ -483,6 +553,12 @@ def build_closeout(
             prefix: _fact_summary(prefix, parsed, fact_paths[prefix])
             for prefix, _filename in PROCESS_FACTS
         },
+        "image_linkage": _image_linkage_summary(
+            parsed,
+            fact_paths["spot_image_linkage_fact"],
+            fact_paths["spot_image_linkage_report"],
+        ),
+        "image_linkage_validation_errors": linkage_validation_errors,
     }
     closeout["redaction"] = _redaction_flags(closeout)
 
@@ -495,6 +571,9 @@ def build_closeout(
         closeout["validator_verdict"] = "FAIL"
         return closeout, 1
     if row_time_validation_errors:
+        closeout["validator_verdict"] = "FAIL"
+        return closeout, 1
+    if linkage_validation_errors:
         closeout["validator_verdict"] = "FAIL"
         return closeout, 1
     if any(closeout["redaction"].values()):

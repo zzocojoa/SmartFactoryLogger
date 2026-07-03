@@ -479,7 +479,33 @@ than operational evidence.
 Do not treat `realtime_image_link_rows` as a row-to-image completeness guarantee.
 It only counts best-effort realtime pointers. Guaranteed CSV-to-image linkage is
 the accepted P1 post-hoc path documented in
-`docs/03-analysis/spot-realtime-image-linkage-decision.md`. Once implemented,
-server closeout should include `spot_image_linkage_fact.csv` and
-`spot_image_linkage_report.json`, and the validator must prove source CSV hash,
-image fact hash, output row counts, unmatched reasons, and redaction checks.
+`docs/03-analysis/spot-realtime-image-linkage-decision.md`.
+
+Generate the guaranteed linkage artifacts from settled files:
+
+```powershell
+py -3 scripts\infer_spot_image_linkage_for_csv.py `
+  --input Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv `
+  --metadata Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json `
+  --spot-image-fact spot_image_fact.csv `
+  --fact-output spot_image_linkage_fact.csv `
+  --report-output spot_image_linkage_report.json
+```
+
+Validate copied promotion bundles with both post-hoc files:
+
+```powershell
+py -3 scripts\validate_csv_v2_shadow.py `
+  --v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv `
+  --metadata Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json `
+  --spot-image-fact spot_image_fact.csv `
+  --spot-image-linkage-fact spot_image_linkage_fact.csv `
+  --spot-image-linkage-report spot_image_linkage_report.json
+```
+
+`scripts\write_server_smoke_closeout.py --mode copied` auto-detects
+`spot_image_linkage_fact.csv` and `spot_image_linkage_report.json` in the bundle
+and includes a sanitized `image_linkage` summary. The validator proves source CSV
+hash, image fact hash, output row count, unmatched reasons, duplicate ambiguity,
+and report redaction checks. A bundle with only one of the two linkage files is
+treated as invalid.

@@ -122,8 +122,7 @@ PR.
 
 ## Post-Hoc Linkage Scope
 
-The implementation should add a generator that reads settled artifacts and emits
-both:
+P1 implements a generator that reads settled artifacts and emits both:
 
 1. `spot_image_linkage_fact.csv`, one row per source CSV v2.4 row.
 2. `spot_image_linkage_report.json`, a sanitized summary and manifest for the
@@ -177,8 +176,11 @@ not sources for raw camera data.
 
 | Column | Meaning |
 | --- | --- |
+| `spot_image_linkage_schema_version` | Linkage fact schema version. |
+| `linkage_rule_version` | Post-hoc linkage rule version. |
+| `source_file_id` | `sha256:<source_csv_sha256>` identifier used by post-hoc facts. |
 | `source_csv_sha256` | SHA-256 of the source CSV. |
-| `source_csv_row_number` | One-based data row number, excluding header. |
+| `source_csv_row_number` | Physical CSV row number, including header line offset. |
 | `sample_seq` | Copied source row sequence. |
 | `timestamp_utc` | Copied source row timestamp. |
 | `spot_observation_key` | Copied join key. |
@@ -194,20 +196,22 @@ not sources for raw camera data.
 | `realtime_spot_image_capture_id_nearest` | Original realtime pointer for comparison. |
 | `realtime_pointer_status` | `same_as_posthoc`, `blank`, `different`, or `not_applicable`. |
 
-`spot_image_linkage_report.json` should include:
+`spot_image_linkage_report.json` includes:
 
-- generator version and generated timestamp;
+- schema version, rule version, and generated timestamp;
 - source CSV file name, row count, and SHA-256;
 - image fact file name, row count, and SHA-256;
 - output fact file name, row count, and SHA-256;
-- total rows, eligible rows, matched rows, unmatched rows by reason, ambiguous
-  rows, and realtime pointer comparison counts;
+- total rows, matched rows, unmatched rows by reason, ambiguous rows, invalid
+  source rows, and realtime pointer comparison counts;
 - redaction summary with booleans for raw image bytes, raw camera URLs, secrets,
   and full internal paths.
 
 ## Validator Requirements
 
-Extend the validator or add a companion validator so it fails when:
+The validator accepts `--spot-image-linkage-fact` and
+`--spot-image-linkage-report` for copied bundles, and also validates
+`spot_image_linkage_fact_manifest` from metadata when present. It fails when:
 
 1. any required input or output column is missing;
 2. `spot_image_linkage_fact.csv` row count does not equal the source CSV data row
