@@ -236,7 +236,7 @@ Candidate-to-confirmed mapping:
 setup_candidate               -> setup
 setup_alignment_candidate     -> setup_alignment
 possible_pre_changeover_hold -> pre_changeover_hold only with future evidence; otherwise no changeover candidate fact
-pre_changeover_hold_candidate -> pre_changeover_hold only with future evidence; otherwise unknown/posthoc_rejected
+pre_changeover_hold_candidate -> realtime strong lifecycle candidate; pre_changeover_hold only with future evidence, otherwise unknown/posthoc_rejected
 die_change_candidate          -> die_change
 changeover_candidate          -> changeover
 production_stable             -> excluded from changeover facts; use process_segment_id-based segment analysis
@@ -342,7 +342,7 @@ Realtime expectedness is candidate-only.
 
 | Input | `temperature_expectedness_candidate` |
 |---|---|
-| `temperature_output_status=under_range` + `process_phase_candidate` in setup/pre-changeover/die-change/setup-alignment/production-stabilizing candidates, excluding weak `possible_pre_changeover_hold` | `expected_candidate` |
+| `temperature_output_status=under_range` + `process_phase_candidate` in setup/strong `pre_changeover_hold_candidate`/die-change/setup-alignment/production-stabilizing candidates, excluding weak `possible_pre_changeover_hold` | `expected_candidate` |
 | `temperature_output_status=under_range` + weak `possible_pre_changeover_hold` without stronger current evidence | `unknown` |
 | `temperature_output_status=under_range` + `production_stable` | `unexpected_candidate` |
 | `temperature_output_status=over_range` in any phase | `unexpected_candidate` |
@@ -351,6 +351,8 @@ Realtime expectedness is candidate-only.
 | temperature valid | blank |
 
 Blank means no expectedness claim is needed for a valid temperature. `unknown` means a temperature unavailable/error state exists but realtime context is insufficient or non-fresh.
+
+Realtime `derive_process_phase_candidate` emits evidence-free stopped hold rows as weak `possible_pre_changeover_hold`, which keeps under-range expectedness at `unknown`. A directly supplied `pre_changeover_hold_candidate` is treated as a strong lifecycle candidate for realtime expectedness and may emit `expected_candidate`; post-hoc facts still decide whether that lifecycle confirms or rejects `pre_changeover_hold` from future evidence.
 
 Final expected/unexpected/indeterminate is written only to post-hoc fact as `temperature_expectedness_confirmed`.
 
