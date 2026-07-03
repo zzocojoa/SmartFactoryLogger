@@ -726,6 +726,35 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertTrue(rows[4][V2_4_CSV_COLUMNS.index("process_segment_id")].startswith("seg_"))
 
+    def test_direct_pre_changeover_hold_candidate_under_range_is_expected_strong_candidate(self) -> None:
+        cases = [
+            ("possible_pre_changeover_hold", "unknown", "seg_", ""),
+            ("pre_changeover_hold_candidate", "expected_candidate", "", "chg_"),
+        ]
+
+        for phase, expectedness, segment_prefix, changeover_prefix in cases:
+            with self.subTest(phase=phase):
+                candidate_service = CSVLoggerService()
+                candidate_service.apply_config(csv_v2_operational_fields_enabled=True)
+                data = self.create_data().model_copy(update={"process_phase_candidate": phase})
+
+                row = self.build_v2_row(candidate_service, data)
+
+                self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
+                self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], phase)
+                self.assertEqual(row[V2_4_CSV_COLUMNS.index("phase_confirmation_state")], "realtime_candidate")
+                self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], expectedness)
+                process_segment_id = row[V2_4_CSV_COLUMNS.index("process_segment_id")]
+                changeover_candidate_id = row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")]
+                if segment_prefix:
+                    self.assertTrue(process_segment_id.startswith(segment_prefix))
+                else:
+                    self.assertEqual(process_segment_id, "")
+                if changeover_prefix:
+                    self.assertTrue(changeover_candidate_id.startswith(changeover_prefix))
+                else:
+                    self.assertEqual(changeover_candidate_id, "")
+
     def test_build_v2_row_passes_previous_operator_context_for_stopped_change(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
