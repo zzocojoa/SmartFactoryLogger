@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from backend.FacilityData.drivers.csv_replay import CsvReplayDriver
-from backend.FacilityData.repository import CSV_SCHEMA_VERSION, V1_CSV_COLUMNS, V2_CSV_COLUMNS
+from backend.FacilityData.repository import CSV_SCHEMA_VERSION_V2_3, V1_CSV_COLUMNS, V2_CSV_COLUMNS
 
 
 class CsvReplayDriverTests(unittest.TestCase):
@@ -42,7 +42,7 @@ class CsvReplayDriverTests(unittest.TestCase):
         values = {column: "" for column in V2_CSV_COLUMNS}
         values.update(
             {
-                "schema_version": CSV_SCHEMA_VERSION,
+                "schema_version": CSV_SCHEMA_VERSION_V2_3,
                 "sample_seq": str(count),
                 "timestamp_local": "2026-03-09T07:20:25.123+09:00",
                 "timestamp_utc": "2026-03-08T22:20:25.123Z",
