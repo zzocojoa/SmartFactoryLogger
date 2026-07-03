@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -21,6 +23,20 @@ SPOT_IMAGE_LINK_COLUMNS = (
     "spot_image_link_status_nearest",
     "spot_image_link_age_ms_nearest",
 )
+ROW_TIME_FRESHNESS_REQUIRED_COLUMNS = (
+    "timestamp_utc",
+    "ingest_timestamp",
+    "spot_poll_status",
+    "spot_last_poll_completed_at",
+    "spot_snapshot_age_ms",
+    "spot_effective_age_ms_at_row",
+    "spot_effective_freshness_at_row",
+    "spot_row_age_clock_status",
+    "temperature_output_status",
+    "temperature_unavailable_reason",
+    "spot_observation_key",
+)
+FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS = 9000.0
 PROCESS_FACTS = (
     (
         "changeover_candidate_resolution_fact",
@@ -50,6 +66,12 @@ def _read_csv_dicts(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _read_csv_fieldnames(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        return list(reader.fieldnames or [])
+
+
 def _parse_validator_output(stdout: str) -> dict[str, str]:
     parsed: dict[str, str] = {}
     for line in stdout.splitlines():
@@ -73,6 +95,18 @@ def _to_int(value: str | None, default: int = 0) -> int:
         return int(str(value).strip())
     except ValueError:
         return default
+
+
+def _to_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(str(value).strip())
+    except ValueError:
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return parsed
 
 
 def _to_bool(value: str | None) -> bool | None:
@@ -173,6 +207,122 @@ def _fact_summary(prefix: str, parsed: Mapping[str, str], fact_path: Path | None
     }
 
 
+def _parse_utc_timestamp(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _metadata_row_time_threshold_ms(metadata: Mapping[str, Any]) -> float:
+    shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
+    if isinstance(shadow_metadata, Mapping):
+        threshold_sec = _to_float(str(shadow_metadata.get("poll_freshness_threshold_sec", "")))
+        if threshold_sec is not None and threshold_sec >= 0:
+            return threshold_sec * 1000.0
+    return FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS
+
+
+def _freshness_for_age(age_ms: float | None, threshold_ms: float) -> str:
+    if age_ms is None or age_ms < 0:
+        return "unknown"
+    if age_ms > threshold_ms:
+        return "stale"
+    return "fresh"
+
+
+def _row_time_freshness_summary(
+    *,
+    rows: list[dict[str, str]],
+    fieldnames: list[str],
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    required_columns_present = all(
+        column in fieldnames for column in ROW_TIME_FRESHNESS_REQUIRED_COLUMNS
+    )
+    threshold_ms = _metadata_row_time_threshold_ms(metadata)
+    summary: dict[str, Any] = {
+        "row_time_required_columns_present": required_columns_present,
+        "row_time_freshness_threshold_ms": threshold_ms,
+        "effective_age_differs_from_snapshot_age_rows": 0,
+        "threshold_mismatch_count": 0,
+        "startup_observation_key_nonblank_count": 0,
+        "timestamp_direction_mismatch_count": 0,
+    }
+    if not required_columns_present:
+        return summary
+
+    for row in rows:
+        effective_age = _to_float(row.get("spot_effective_age_ms_at_row"))
+        snapshot_age = _to_float(row.get("spot_snapshot_age_ms"))
+        if (
+            effective_age is not None
+            and snapshot_age is not None
+            and abs(effective_age - snapshot_age) > 1e-6
+        ):
+            summary["effective_age_differs_from_snapshot_age_rows"] += 1
+
+        actual_freshness = str(row.get("spot_effective_freshness_at_row") or "unknown").strip()
+        if not actual_freshness:
+            actual_freshness = "unknown"
+        if actual_freshness != _freshness_for_age(effective_age, threshold_ms):
+            summary["threshold_mismatch_count"] += 1
+
+        output_status = str(row.get("temperature_output_status") or "").strip()
+        unavailable_reason = str(row.get("temperature_unavailable_reason") or "").strip()
+        poll_status = str(row.get("spot_poll_status") or "").strip()
+        observation_key = str(row.get("spot_observation_key") or "").strip()
+        startup_row = (
+            output_status == "startup_pending"
+            or unavailable_reason == "startup_pending"
+            or poll_status == "not_attempted"
+        )
+        if startup_row and observation_key:
+            summary["startup_observation_key_nonblank_count"] += 1
+
+        row_reference_timestamp = (
+            _parse_utc_timestamp(row.get("ingest_timestamp"))
+            or _parse_utc_timestamp(row.get("timestamp_utc"))
+        )
+        poll_completed_at = _parse_utc_timestamp(row.get("spot_last_poll_completed_at"))
+        clock_status = str(row.get("spot_row_age_clock_status") or "").strip()
+        direction_mismatch = (
+            clock_status == "clock_anomaly"
+            or (effective_age is not None and effective_age < 0)
+            or (
+                row_reference_timestamp is not None
+                and poll_completed_at is not None
+                and poll_completed_at > row_reference_timestamp
+            )
+        )
+        if direction_mismatch:
+            summary["timestamp_direction_mismatch_count"] += 1
+
+    return summary
+
+
+def _row_time_validation_errors(summary: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if summary.get("row_time_required_columns_present") is not True:
+        errors.append("row_time.required_columns_missing")
+    for key in (
+        "threshold_mismatch_count",
+        "startup_observation_key_nonblank_count",
+        "timestamp_direction_mismatch_count",
+    ):
+        if summary.get(key) != 0:
+            errors.append(f"row_time.{key}_must_be_zero")
+    return errors
+
+
 def _validator_args(
     *,
     python_executable: str,
@@ -259,6 +409,14 @@ def build_closeout(
     validator_output = validator.stdout + validator.stderr
     parsed = _parse_validator_output(validator_output)
     rows = _read_csv_dicts(csv_file)
+    fieldnames = _read_csv_fieldnames(csv_file)
+    metadata = json.loads(metadata_file.read_text(encoding="utf-8-sig"))
+    row_time_freshness = _row_time_freshness_summary(
+        rows=rows,
+        fieldnames=fieldnames,
+        metadata=metadata,
+    )
+    row_time_validation_errors = _row_time_validation_errors(row_time_freshness)
     link_rows = [
         row
         for row in rows
@@ -315,6 +473,8 @@ def build_closeout(
         "v2_rows": _to_int(parsed.get("v2_rows"), len(rows)),
         "realtime_image_link_rows": len(link_rows),
         "realtime_image_link_blank_rows": len(rows) - len(link_rows),
+        **row_time_freshness,
+        "row_time_validation_errors": row_time_validation_errors,
         "capture_enabled": capture_enabled,
         "capture_mode": capture_mode,
         "capture_failure_count": capture_failure_count,
@@ -332,6 +492,9 @@ def build_closeout(
     if closeout["validator_exit_code"] != 0:
         return closeout, 1
     if capture_validation_errors:
+        closeout["validator_verdict"] = "FAIL"
+        return closeout, 1
+    if row_time_validation_errors:
         closeout["validator_verdict"] = "FAIL"
         return closeout, 1
     if any(closeout["redaction"].values()):

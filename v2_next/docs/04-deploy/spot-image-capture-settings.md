@@ -253,6 +253,13 @@ Required fields:
   "v2_rows": 0,
   "realtime_image_link_rows": 0,
   "realtime_image_link_blank_rows": 0,
+  "row_time_required_columns_present": true,
+  "row_time_freshness_threshold_ms": 3000.0,
+  "effective_age_differs_from_snapshot_age_rows": 0,
+  "threshold_mismatch_count": 0,
+  "startup_observation_key_nonblank_count": 0,
+  "timestamp_direction_mismatch_count": 0,
+  "row_time_validation_errors": [],
   "capture_enabled": false,
   "capture_mode": "off",
   "capture_failure_count": 0,
@@ -289,6 +296,19 @@ be `final_manifest`. Copied bundles without a final manifest must use `override`
 Frozen on-machine directories without a final manifest must use `metadata_manifest`.
 Do not record this as a strict metadata-manifest pass. Row/hash match values
 must be copied from the validator output exactly as reported.
+
+The helper must also summarize row-time freshness evidence from the v2 CSV. For
+PASS, `row_time_required_columns_present` must be `true`,
+`threshold_mismatch_count` must be `0`,
+`startup_observation_key_nonblank_count` must be `0`, and
+`timestamp_direction_mismatch_count` must be `0`. A nonzero
+`effective_age_differs_from_snapshot_age_rows` is allowed and expected on live
+server runs because `spot_effective_age_ms_at_row` is computed at row write time,
+while `spot_snapshot_age_ms` comes from the SPOT snapshot.
+For timestamp direction checks, the helper compares
+`spot_last_poll_completed_at` against `ingest_timestamp` first, with
+`timestamp_utc` only as a fallback. This matches the runtime row-time freshness
+calculation, where ingestion/write time is the row reference point.
 
 Run the validator from the repository root, but record only file names in the
 closeout JSON:
