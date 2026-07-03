@@ -14,6 +14,7 @@ from urllib.request import urlopen
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR_SCRIPT = REPO_ROOT / "scripts" / "validate_csv_v2_shadow.py"
 CLOSEOUT_FILENAME = "server_smoke_closeout_sanitized.json"
+SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME = "spot_image_fact_manifest.final.json"
 SPOT_IMAGE_LINK_COLUMNS = (
     "spot_image_capture_id_nearest",
     "spot_image_path_nearest",
@@ -182,6 +183,7 @@ def _validator_args(
 ) -> tuple[list[str], list[str], dict[str, Path | None]]:
     spot_observation_fact = _optional_file(bundle_path, "spot_observation_fact.csv")
     spot_image_fact = _optional_file(bundle_path, "spot_image_fact.csv")
+    spot_image_fact_final_manifest = _optional_file(bundle_path, SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME)
     process_fact_paths = {
         prefix: _optional_file(bundle_path, filename)
         for prefix, filename in PROCESS_FACTS
@@ -205,6 +207,9 @@ def _validator_args(
     if spot_observation_fact is not None:
         args.extend(["--spot-observation-fact", str(spot_observation_fact)])
         display.extend(["--spot-observation-fact", spot_observation_fact.name])
+    if spot_image_fact_final_manifest is not None:
+        args.extend(["--spot-image-fact-final-manifest", str(spot_image_fact_final_manifest)])
+        display.extend(["--spot-image-fact-final-manifest", spot_image_fact_final_manifest.name])
     if mode == "copied" and spot_image_fact is not None:
         args.extend(["--spot-image-fact", str(spot_image_fact)])
         display.extend(["--spot-image-fact", spot_image_fact.name])
@@ -218,6 +223,7 @@ def _validator_args(
     all_paths: dict[str, Path | None] = {
         "spot_observation_fact": spot_observation_fact,
         "spot_image_fact": spot_image_fact,
+        "spot_image_fact_final_manifest": spot_image_fact_final_manifest,
     }
     all_paths.update(process_fact_paths)
     return args, display, all_paths
@@ -279,7 +285,11 @@ def build_closeout(
     if capture_failure_count != 0 and capture_failure_count_error is None:
         capture_validation_errors.append("image_capture.failure_count_must_be_zero")
 
-    expected_source = "override" if mode == "copied" else "metadata_manifest"
+    expected_source = (
+        "final_manifest"
+        if fact_paths["spot_image_fact_final_manifest"] is not None
+        else ("override" if mode == "copied" else "metadata_manifest")
+    )
     validation_source = parsed.get("spot_image_fact_validation_source", "not_applicable")
     closeout: dict[str, Any] = {
         "artifact_kind": "server_smoke_bundle",
@@ -292,6 +302,9 @@ def build_closeout(
         else "not_present",
         "image_fact_file": fact_paths["spot_image_fact"].name
         if fact_paths["spot_image_fact"] is not None
+        else "not_present",
+        "image_fact_final_manifest_file": fact_paths["spot_image_fact_final_manifest"].name
+        if fact_paths["spot_image_fact_final_manifest"] is not None
         else "not_present",
         "validation_source": validation_source,
         "validator_command": validator_display,

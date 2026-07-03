@@ -47,6 +47,8 @@ SPOT_IMAGE_FACT_COLUMNS = [
     "low_signal_threshold_pc",
     "peak_picker_enabled",
 ]
+SPOT_IMAGE_FACT_FILENAME = "spot_image_fact.csv"
+SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME = "spot_image_fact_manifest.final.json"
 
 _MANAGED_IMAGE_EXTENSIONS = {".jpg", ".png", ".gif", ".bmp", ".webp", ".bin"}
 
@@ -56,7 +58,7 @@ class SpotImageCaptureWriter:
     log_path: Path
     capture_root: Path
     retention_days: int = 7
-    fact_filename: str = "spot_image_fact.csv"
+    fact_filename: str = SPOT_IMAGE_FACT_FILENAME
     link_stale_threshold_ms: float = 9000.0
     failure_count: int = 0
     written_count: int = 0
@@ -352,7 +354,7 @@ def build_spot_image_fact_manifest(
     enabled: bool,
     mode: str,
     health: Optional[Mapping[str, Any]] = None,
-    fact_filename: str = "spot_image_fact.csv",
+    fact_filename: str = SPOT_IMAGE_FACT_FILENAME,
 ) -> dict[str, Any]:
     fact_path = log_path / fact_filename
     row_count, sha256 = _fact_file_stats(fact_path)

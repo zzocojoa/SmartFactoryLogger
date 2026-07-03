@@ -29,6 +29,7 @@ from backend.FacilityData.repository import (
     V2_CSV_COLUMNS,
 )
 from backend.FacilityData.schemas import FactoryData, OperatorMetadata, OperatorMetadataUpdate
+from backend.FacilityData.spot_image_fact import SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME
 from scripts.validate_csv_v2_shadow import validate as validate_csv_v2_shadow
 from scripts.validate_csv_v2_shadow import validate_many as validate_csv_v2_shadow_many
 from scripts.validate_csv_v2_shadow import SPOT_IMAGE_FACT_REQUIRED_COLUMNS
@@ -1861,6 +1862,47 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 ["product_no", "operator_mold_no"],
             )
 
+    def test_spot_image_fact_final_manifest_records_closeout_stats_without_mutating_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+            )
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+            contract = service._get_active_v2_contract()
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(contract.columns)
+                writer.writerow(v2_row)
+
+            service._write_v2_sidecar(v2_path, contract)
+            metadata_path = v2_path.with_suffix(".metadata.json")
+            initial_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            self.assertEqual(initial_metadata["spot_image_fact_manifest"]["row_count"], 0)
+            self.assertIsNone(initial_metadata["spot_image_fact_manifest"]["sha256"])
+
+            fact_rows, fact_sha = self._write_spot_image_fact_fixture(log_dir / "spot_image_fact.csv", 2)
+            final_manifest_path = service.write_spot_image_fact_final_manifest(log_dir)
+            final_manifest = json.loads(final_manifest_path.read_text(encoding="utf-8"))
+            sidecar_after_closeout = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(final_manifest_path.name, SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME)
+        self.assertEqual(final_manifest["fact_path"], str(log_dir / "spot_image_fact.csv"))
+        self.assertEqual(final_manifest["row_count"], fact_rows)
+        self.assertEqual(final_manifest["sha256"], fact_sha)
+        self.assertEqual(sidecar_after_closeout["spot_image_fact_manifest"]["row_count"], 0)
+        self.assertIsNone(sidecar_after_closeout["spot_image_fact_manifest"]["sha256"])
+
     def test_shadow_validation_script_accepts_v1_v2_sidecar_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
@@ -2069,6 +2111,69 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertNotIn(str(v2_path), output_text)
         self.assertNotIn(str(metadata_path), output_text)
         self.assertNotIn(str(override_fact_path), output_text)
+
+    def test_shadow_validation_script_accepts_final_spot_image_manifest_with_portable_fact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            bundle_dir = log_dir / "bundle"
+            bundle_dir.mkdir()
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+            )
+            data = self.create_data()
+            timestamp = service._parse_timestamp(data)
+            v1_row = service._build_row(data, timestamp)
+            v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+            contract = service._get_active_v2_contract()
+
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_072025.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(contract.columns)
+                writer.writerow(v2_row)
+
+            service._write_v2_sidecar(v2_path, contract)
+            metadata_path = v2_path.with_suffix(".metadata.json")
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            manifest = metadata["spot_image_fact_manifest"]
+            manifest["fact_path"] = str(log_dir / "missing_spot_image_fact.csv")
+            metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+
+            override_fact_path = bundle_dir / "spot_image_fact.csv"
+            final_rows, final_sha = self._write_spot_image_fact_fixture(override_fact_path, 2)
+            final_manifest = dict(manifest)
+            final_manifest["fact_path"] = str(log_dir / "live_spot_image_fact.csv")
+            final_manifest["row_count"] = final_rows
+            final_manifest["sha256"] = final_sha
+            final_manifest_path = bundle_dir / SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME
+            final_manifest_path.write_text(json.dumps(final_manifest, ensure_ascii=False), encoding="utf-8")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = validate_csv_v2_shadow(
+                    None,
+                    v2_path,
+                    metadata_path,
+                    spot_image_fact_path=override_fact_path,
+                    spot_image_fact_final_manifest_path=final_manifest_path,
+                )
+
+        self.assertEqual(result, 0)
+        output_text = output.getvalue()
+        spot_image_summary_lines = [line for line in output_text.splitlines() if line.startswith("spot_image_fact_")]
+        self.assertIn("spot_image_fact_validation_source=final_manifest", spot_image_summary_lines)
+        self.assertIn("spot_image_fact_final_manifest_file=spot_image_fact_manifest.final.json", spot_image_summary_lines)
+        self.assertIn("spot_image_fact_row_count_match=true", spot_image_summary_lines)
+        self.assertIn("spot_image_fact_sha256_match=true", spot_image_summary_lines)
+        self.assertNotIn(str(v2_path), output_text)
+        self.assertNotIn(str(metadata_path), output_text)
+        self.assertNotIn(str(override_fact_path), output_text)
+        self.assertNotIn(str(final_manifest_path), output_text)
 
     def test_shadow_validation_script_rejects_malformed_spot_image_fact_without_crashing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

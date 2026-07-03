@@ -40,7 +40,10 @@ from backend.FacilityData.spot_observation_fact import (
     build_spot_observation_key,
     parse_spot_diagnostic_evidence_codes,
 )
-from backend.FacilityData.spot_image_fact import build_spot_image_fact_manifest
+from backend.FacilityData.spot_image_fact import (
+    SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME,
+    build_spot_image_fact_manifest,
+)
 from backend.FacilityData.temperature_operational import (
     SPOT_ROW_FRESHNESS_RULE_VERSION,
     TEMPERATURE_OPERATIONAL_RULE_VERSION,
@@ -722,6 +725,25 @@ class CSVLoggerService:
             mode=mode,
             health=health,
         )
+
+    def write_spot_image_fact_final_manifest(self, log_path: Optional[Path] = None) -> Path:
+        target_dir = Path(log_path) if log_path is not None else self._get_log_dir()
+        self._ensure_dir(target_dir)
+        manifest = self._spot_image_fact_manifest(target_dir)
+        final_path = target_dir / SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME
+        temp_path = final_path.with_name(f"{final_path.name}.tmp")
+        temp_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        temp_path.replace(final_path)
+        return final_path
+
+    def _write_spot_image_fact_final_manifest_safely(self, log_path: Optional[Path] = None) -> None:
+        try:
+            self.write_spot_image_fact_final_manifest(log_path)
+        except Exception as exc:
+            self.logger.warning("Failed to write SPOT image fact final manifest: %s", exc)
 
     def _changeover_candidate_resolution_fact_manifest(self, log_path: Path) -> dict[str, Any]:
         return build_changeover_candidate_resolution_fact_manifest(
@@ -2188,6 +2210,8 @@ class CSVLoggerService:
         self._buffer_size = 0
         self._close_file(f_handle)
         self._close_file(v2_handle)
+        if self.csv_v2_enabled and self.csv_v2_sidecar_enabled:
+            self._write_spot_image_fact_final_manifest_safely()
         self.logger.info("CSV logger thread stopped.")
 
 

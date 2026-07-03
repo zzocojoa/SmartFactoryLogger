@@ -100,14 +100,27 @@ capture root, row count, SHA-256, writer counters, and last write time.
 `scripts/validate_csv_v2_shadow.py` validates the manifest shape, fact row count,
 fact SHA-256, safe relative image paths, and link status values.
 
+The sidecar `spot_image_fact_manifest` is an initial open-time snapshot. The CSV
+writer intentionally does not rewrite an existing `Factory_Integrated_Log_v2*.metadata.json`
+sidecar after image capture appends more rows. A server smoke closeout that needs
+final fact-file proof must also include `spot_image_fact_manifest.final.json`.
+That final manifest uses the same manifest shape, but records the closeout-time
+`spot_image_fact.csv` row count, SHA-256, writer counters, and last write time.
+Application shutdown paths must drain SPOT image capture before the CSV logger
+writes this final manifest. This includes both FastAPI lifespan shutdown and
+`/api/control/shutdown`; the control endpoint disables new image capture enqueue,
+waits for the writer queue to drain, and only then stops the CSV logger.
+
 ### Health Counters Versus Fact Rows
 
 Do not compare `/api/spot/config` `image_capture.written_count` directly with
 `spot_image_fact_manifest.row_count`.
 
-- `spot_image_fact_manifest.row_count` is the actual number of data rows present
-  in `spot_image_fact.csv` at metadata or validator time. Use this value, plus
-  the manifest SHA-256 checks, for bundle completeness and audit validation.
+- `spot_image_fact_manifest.row_count` in the sidecar is the number of data rows
+  present when the sidecar was first written.
+- `spot_image_fact_manifest.final.json` records the closeout-time fact row count
+  and SHA-256. Use this value, plus the manifest SHA-256 checks, for final bundle
+  completeness and audit validation.
 - `image_capture.written_count` is a runtime worker success counter. It increases
   when the capture worker successfully handles a queued capture event. It is not
   an append-row counter and it resets with the backend process.
@@ -128,6 +141,16 @@ the current fact-file row count.
 For an on-machine validation against the original log directory, do not pass a
 fact override. The validator reads `spot_image_fact_manifest.fact_path` and
 requires the manifest row count and SHA-256 to match the current fact file.
+When `spot_image_fact_manifest.final.json` is present, pass it explicitly so the
+validator uses final closeout stats instead of the initial sidecar snapshot:
+
+```powershell
+py -3 scripts\validate_csv_v2_shadow.py `
+  --v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv `
+  --metadata Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json `
+  --spot-observation-fact spot_observation_fact.csv `
+  --spot-image-fact-final-manifest spot_image_fact_manifest.final.json
+```
 
 For a portable smoke bundle copied while the logger is still running, include
 the bundled fact file explicitly:
@@ -137,16 +160,19 @@ py -3 scripts\validate_csv_v2_shadow.py `
   --v2 Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv `
   --metadata Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json `
   --spot-observation-fact spot_observation_fact.csv `
-  --spot-image-fact spot_image_fact.csv
+  --spot-image-fact spot_image_fact.csv `
+  --spot-image-fact-final-manifest spot_image_fact_manifest.final.json
 ```
 
 `--spot-image-fact` validates the supplied bundle file directly and reports a
 sanitized `spot_image_fact_*` summary using only file names, row counts, hashes,
-and match booleans. A copied bundle can legitimately report
+and match booleans. Without `--spot-image-fact-final-manifest`, a copied bundle can legitimately report
 `spot_image_fact_row_count_match=false` and `spot_image_fact_sha256_match=false`
 when the sidecar metadata was written before the active fact file finished
 appending. The validator still checks the supplied fact's required columns,
 safe relative image paths, link statuses, and SHA-256 text fields.
+With `--spot-image-fact-final-manifest`, row count and SHA-256 must strictly
+match the verified fact file, even when `--spot-image-fact` is also provided.
 
 ### NSIS Server Smoke Closeout Artifact
 
@@ -166,8 +192,10 @@ py -3 scripts\write_server_smoke_closeout.py `
 ```
 
 Use `--mode copied` for portable bundles copied out of the live log directory.
-The helper passes bundled fact files as explicit overrides and the closeout JSON
-must record `validation_source=override`.
+The helper passes bundled fact files as explicit overrides. If
+`spot_image_fact_manifest.final.json` is present, the helper also passes it and
+the closeout JSON must record `validation_source=final_manifest`. If the final
+manifest is absent, copied mode falls back to `validation_source=override`.
 
 Use `--mode freeze` for an on-machine frozen log directory where the sidecar
 manifest paths still point to the files being validated:
@@ -179,9 +207,11 @@ py -3 scripts\write_server_smoke_closeout.py `
   --api-base <backend-api-base>
 ```
 
-In freeze mode the helper does not pass fact-file overrides. The closeout JSON
-must record `validation_source=metadata_manifest`, with row-count and SHA-256
-matches proving the sidecar manifest matches the current fact files.
+In freeze mode the helper does not pass fact-file overrides. If
+`spot_image_fact_manifest.final.json` is present, the closeout JSON must record
+`validation_source=final_manifest`. Otherwise it must record
+`validation_source=metadata_manifest`, with row-count and SHA-256 matches proving
+the sidecar manifest matches the current fact files.
 
 For offline review or tests, pass `--spot-config-json <spot_config_response.json>`
 instead of `--api-base`. That JSON must be the sanitized response shape from
@@ -201,7 +231,8 @@ Required fields:
   "metadata_file": "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json",
   "observation_fact_file": "spot_observation_fact.csv",
   "image_fact_file": "spot_image_fact.csv",
-  "validation_source": "override",
+  "image_fact_final_manifest_file": "spot_image_fact_manifest.final.json",
+  "validation_source": "final_manifest",
   "validator_command": [
     "py -3 scripts\\validate_csv_v2_shadow.py",
     "--v2",
@@ -210,6 +241,8 @@ Required fields:
     "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json",
     "--spot-observation-fact",
     "spot_observation_fact.csv",
+    "--spot-image-fact-final-manifest",
+    "spot_image_fact_manifest.final.json",
     "--spot-image-fact",
     "spot_image_fact.csv"
   ],
@@ -251,7 +284,9 @@ Required fields:
 }
 ```
 
-For copied server smoke bundles, `validation_source` must be `override`.
+For copied server smoke bundles with a final manifest, `validation_source` must
+be `final_manifest`. Copied bundles without a final manifest must use `override`.
+Frozen on-machine directories without a final manifest must use `metadata_manifest`.
 Do not record this as a strict metadata-manifest pass. Row/hash match values
 must be copied from the validator output exactly as reported.
 
@@ -265,11 +300,13 @@ $csvFile = "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.csv"
 $metadataFile = "Factory_Integrated_Log_v2_YYYYMMDD_HHMMSS.metadata.json"
 $obsFile = "spot_observation_fact.csv"
 $imageFactFile = "spot_image_fact.csv"
+$imageFactFinalManifestFile = "spot_image_fact_manifest.final.json"
 
 $validatorOutput = & py -3 scripts\validate_csv_v2_shadow.py `
   --v2 (Join-Path $bundle $csvFile) `
   --metadata (Join-Path $bundle $metadataFile) `
   --spot-observation-fact (Join-Path $bundle $obsFile) `
+  --spot-image-fact-final-manifest (Join-Path $bundle $imageFactFinalManifestFile) `
   --spot-image-fact (Join-Path $bundle $imageFactFile) 2>&1
 $validatorExitCode = $LASTEXITCODE
 $validatorLines = @($validatorOutput | ForEach-Object { [string]$_ })
@@ -301,12 +338,14 @@ $closeout = [ordered]@{
   metadata_file = $metadataFile
   observation_fact_file = $obsFile
   image_fact_file = $imageFactFile
+  image_fact_final_manifest_file = $imageFactFinalManifestFile
   validation_source = Get-ValidatorValue "spot_image_fact_validation_source"
   validator_command = @(
     "py -3 scripts\validate_csv_v2_shadow.py",
     "--v2", $csvFile,
     "--metadata", $metadataFile,
     "--spot-observation-fact", $obsFile,
+    "--spot-image-fact-final-manifest", $imageFactFinalManifestFile,
     "--spot-image-fact", $imageFactFile
   )
   validator_exit_code = $validatorExitCode
