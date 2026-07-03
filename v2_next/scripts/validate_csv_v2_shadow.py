@@ -606,9 +606,10 @@ def validate_spot_invalid_sentinel_invariants(rows: list[list[str]], header: lis
             if cache_status_index is not None and cache_status_index < len(row)
             else ""
         )
-        expected_temperature_status = (
-            "stale" if source_freshness == "stale" and cache_status == "expired" else "invalid_value"
-        )
+        if source_freshness == "stale":
+            expected_temperature_status = "stale" if cache_status == "expired" else "unknown_missing"
+        else:
+            expected_temperature_status = "invalid_value"
 
         expected_values = {
             "spot_poll_status": "success",

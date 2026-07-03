@@ -838,6 +838,31 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(validate_spot_invalid_sentinel_invariants([row], V2_4_CSV_COLUMNS), [])
         self.assertEqual(validate_v2_4_operational_invariants([row], V2_4_CSV_COLUMNS), [])
 
+    def test_v2_4_validator_accepts_stale_invalid_sentinel_without_cached_value(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "spot_source_freshness": "stale",
+                "spot_cache_status": "empty",
+                "temperature_status_shadow": "unknown_missing",
+                "spot_target_state_observed_shadow": "unknown",
+                "spot_snapshot_age_ms": 4_375.0,
+                "spot_value_age_ms": None,
+            }
+        )
+        timestamp = service._parse_timestamp(data)
+        row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
+        row = list(row)
+        row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")] = "stale"
+        row[V2_4_CSV_COLUMNS.index("temperature_output_status")] = "stale"
+        row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")] = "stale_observation"
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "stale")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "stale")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "stale_observation")
+        self.assertEqual(validate_spot_invalid_sentinel_invariants([row], V2_4_CSV_COLUMNS), [])
+        self.assertEqual(validate_v2_4_operational_invariants([row], V2_4_CSV_COLUMNS), [])
+
     def test_fresh_invalid_sentinel_invariant_remains_strict(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
