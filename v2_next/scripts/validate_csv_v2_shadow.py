@@ -25,6 +25,12 @@ from backend.FacilityData.changeover_candidate_resolution_fact import (
     PROCESS_PHASE_EVENT_RULE_VERSION,
     PROCESS_PHASE_EVENT_SCHEMA_VERSION,
 )
+from backend.FacilityData.spot_image_linkage_fact import (
+    SPOT_IMAGE_LINKAGE_FACT_COLUMNS,
+    SPOT_IMAGE_LINKAGE_RULE_VERSION,
+    SPOT_IMAGE_LINKAGE_SCHEMA_VERSION,
+    validate_spot_image_linkage_outputs,
+)
 
 
 REQUIRED_V1_COLUMNS = [
@@ -1315,6 +1321,185 @@ def validate_process_phase_event_fact_manifest(
     )
 
 
+def _new_spot_image_linkage_summary(
+    linkage_fact_path: Path | None,
+    linkage_report_path: Path | None,
+) -> dict[str, str]:
+    return {
+        "spot_image_linkage_fact_validation_source": "not_applicable",
+        "spot_image_linkage_fact_override_provided": _bool_text(linkage_fact_path is not None),
+        "spot_image_linkage_report_override_provided": _bool_text(linkage_report_path is not None),
+        "spot_image_linkage_fact_manifest_fact_file": "",
+        "spot_image_linkage_fact_manifest_report_file": "",
+        "spot_image_linkage_fact_override_file": linkage_fact_path.name
+        if linkage_fact_path is not None
+        else "not provided",
+        "spot_image_linkage_report_override_file": linkage_report_path.name
+        if linkage_report_path is not None
+        else "not provided",
+        "spot_image_linkage_fact_verified_file": "not available",
+        "spot_image_linkage_report_verified_file": "not available",
+        "spot_image_linkage_fact_manifest_row_count": "unknown",
+        "spot_image_linkage_fact_actual_row_count": "unknown",
+        "spot_image_linkage_fact_row_count_match": "unknown",
+        "spot_image_linkage_fact_manifest_sha256": "unknown",
+        "spot_image_linkage_fact_actual_sha256": "unknown",
+        "spot_image_linkage_fact_sha256_match": "unknown",
+        "spot_image_linkage_manifest_source_csv_sha256": "unknown",
+        "spot_image_linkage_source_csv_sha256_match": "unknown",
+        "spot_image_linkage_manifest_spot_image_fact_sha256": "unknown",
+        "spot_image_linkage_spot_image_fact_sha256_match": "unknown",
+        "spot_image_linkage_report_sha256_match": "unknown",
+        "spot_image_linkage_report_redaction_passed": "unknown",
+        "spot_image_linkage_matched_rows": "unknown",
+        "spot_image_linkage_ambiguous_rows": "unknown",
+    }
+
+
+def validate_spot_image_linkage_fact_manifest(
+    metadata: dict,
+    metadata_path: Path,
+    v2_path: Path,
+    *,
+    spot_image_fact_path: Path | None = None,
+    linkage_fact_path: Path | None = None,
+    linkage_report_path: Path | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    summary = _new_spot_image_linkage_summary(linkage_fact_path, linkage_report_path)
+    manifest_key = "spot_image_linkage_fact_manifest"
+    manifest = metadata.get(manifest_key)
+    override_provided = linkage_fact_path is not None or linkage_report_path is not None
+    if not isinstance(manifest, dict):
+        if _posthoc_fact_manifest_required(metadata, manifest_key) or override_provided:
+            if linkage_fact_path is None or linkage_report_path is None:
+                return ["spot_image_linkage fact/report override must be provided together"], summary
+        else:
+            return [], summary
+    else:
+        summary["spot_image_linkage_fact_validation_source"] = (
+            "override" if override_provided else "metadata_manifest"
+        )
+
+    failures: list[str] = []
+    if isinstance(manifest, dict):
+        if manifest.get("fact_kind") != "spot_image_linkage_fact":
+            failures.append(f"{manifest_key}.fact_kind must be 'spot_image_linkage_fact'")
+        if manifest.get("schema_version") != SPOT_IMAGE_LINKAGE_SCHEMA_VERSION:
+            failures.append(f"{manifest_key}.schema_version must be {SPOT_IMAGE_LINKAGE_SCHEMA_VERSION!r}")
+        if manifest.get("rule_version") != SPOT_IMAGE_LINKAGE_RULE_VERSION:
+            failures.append(f"{manifest_key}.rule_version must be {SPOT_IMAGE_LINKAGE_RULE_VERSION!r}")
+        if manifest.get("required_columns") != list(SPOT_IMAGE_LINKAGE_FACT_COLUMNS):
+            failures.append(f"{manifest_key}.required_columns must match canonical fact columns")
+
+        fact_path_text = str(manifest.get("fact_path") or "").strip()
+        report_path_text = str(manifest.get("report_path") or "").strip()
+        summary["spot_image_linkage_fact_manifest_fact_file"] = _path_basename_text(fact_path_text)
+        summary["spot_image_linkage_fact_manifest_report_file"] = _path_basename_text(report_path_text)
+        if not fact_path_text:
+            failures.append(f"{manifest_key}.fact_path must be populated")
+        if not report_path_text:
+            failures.append(f"{manifest_key}.report_path must be populated")
+
+        row_count = _parse_non_negative_int(manifest.get("row_count"))
+        if row_count is None:
+            failures.append(f"{manifest_key}.row_count must be a non-negative integer")
+            row_count = 0
+        summary["spot_image_linkage_fact_manifest_row_count"] = str(row_count)
+
+        manifest_sha = manifest.get("sha256")
+        if manifest_sha is not None and not _is_sha256_text(str(manifest_sha)):
+            failures.append(f"{manifest_key}.sha256 must be null or lowercase SHA-256")
+        summary["spot_image_linkage_fact_manifest_sha256"] = str(manifest_sha or "")
+
+        source_sha = manifest.get("source_csv_sha256")
+        if source_sha is not None and not _is_sha256_text(str(source_sha)):
+            failures.append(f"{manifest_key}.source_csv_sha256 must be null or lowercase SHA-256")
+        summary["spot_image_linkage_manifest_source_csv_sha256"] = str(source_sha or "")
+
+        image_fact_sha = manifest.get("spot_image_fact_sha256")
+        if image_fact_sha is not None and not _is_sha256_text(str(image_fact_sha)):
+            failures.append(f"{manifest_key}.spot_image_fact_sha256 must be null or lowercase SHA-256")
+        summary["spot_image_linkage_manifest_spot_image_fact_sha256"] = str(image_fact_sha or "")
+
+    if linkage_fact_path is None and isinstance(manifest, dict):
+        linkage_fact_path = Path(str(manifest.get("fact_path") or ""))
+    if linkage_report_path is None and isinstance(manifest, dict):
+        linkage_report_path = Path(str(manifest.get("report_path") or ""))
+
+    if linkage_fact_path is None and linkage_report_path is None:
+        return failures, summary
+    if linkage_fact_path is None or linkage_report_path is None:
+        failures.append("spot_image_linkage fact/report override must be provided together")
+        return failures, summary
+
+    summary["spot_image_linkage_fact_validation_source"] = (
+        "override" if override_provided else "metadata_manifest"
+    )
+    summary["spot_image_linkage_fact_verified_file"] = linkage_fact_path.name
+    summary["spot_image_linkage_report_verified_file"] = linkage_report_path.name
+    if not linkage_fact_path.exists():
+        failures.append("spot_image_linkage_fact path does not exist")
+        return failures, summary
+    if not linkage_report_path.exists():
+        failures.append("spot_image_linkage_report path does not exist")
+        return failures, summary
+
+    selected_spot_image_fact_path = spot_image_fact_path or _spot_image_fact_path_from_metadata(metadata)
+    if selected_spot_image_fact_path is None or not selected_spot_image_fact_path.exists():
+        failures.append("spot_image_linkage requires a readable spot_image_fact.csv")
+        return failures, summary
+
+    output_failures, output_summary = validate_spot_image_linkage_outputs(
+        source_csv_path=v2_path,
+        spot_image_fact_path=selected_spot_image_fact_path,
+        linkage_fact_path=linkage_fact_path,
+        linkage_report_path=linkage_report_path,
+    )
+    summary.update(output_summary)
+    failures.extend(output_failures)
+
+    if isinstance(manifest, dict):
+        manifest_row_count = summary["spot_image_linkage_fact_manifest_row_count"]
+        row_count_matches = manifest_row_count == summary["spot_image_linkage_fact_actual_row_count"]
+        summary["spot_image_linkage_fact_row_count_match"] = _bool_text(row_count_matches)
+        if not row_count_matches and not override_provided:
+            failures.append(
+                f"{manifest_key}.row_count={manifest_row_count}, actual "
+                f"spot_image_linkage_fact rows={summary['spot_image_linkage_fact_actual_row_count']}"
+            )
+
+        manifest_sha = summary["spot_image_linkage_fact_manifest_sha256"]
+        actual_sha = summary["spot_image_linkage_fact_actual_sha256"]
+        sha_matches = bool(manifest_sha and manifest_sha == actual_sha)
+        summary["spot_image_linkage_fact_sha256_match"] = _bool_text(sha_matches)
+        if manifest_sha and not sha_matches and not override_provided:
+            failures.append(f"{manifest_key}.sha256 does not match linkage fact file")
+
+        actual_source_sha = hashlib.sha256(v2_path.read_bytes()).hexdigest()
+        source_sha = summary["spot_image_linkage_manifest_source_csv_sha256"]
+        source_sha_matches = bool(source_sha and source_sha == actual_source_sha)
+        summary["spot_image_linkage_source_csv_sha256_match"] = _bool_text(source_sha_matches)
+        if source_sha and not source_sha_matches:
+            failures.append(f"{manifest_key}.source_csv_sha256 does not match v2 CSV")
+
+        actual_image_fact_sha = hashlib.sha256(selected_spot_image_fact_path.read_bytes()).hexdigest()
+        image_fact_sha = summary["spot_image_linkage_manifest_spot_image_fact_sha256"]
+        image_fact_sha_matches = bool(image_fact_sha and image_fact_sha == actual_image_fact_sha)
+        summary["spot_image_linkage_spot_image_fact_sha256_match"] = _bool_text(image_fact_sha_matches)
+        if image_fact_sha and not image_fact_sha_matches:
+            failures.append(f"{manifest_key}.spot_image_fact_sha256 does not match spot_image_fact")
+
+    return failures, summary
+
+
+def _spot_image_fact_path_from_metadata(metadata: dict) -> Path | None:
+    manifest = metadata.get("spot_image_fact_manifest")
+    if not isinstance(manifest, dict):
+        return None
+    fact_path_text = str(manifest.get("fact_path") or "").strip()
+    return Path(fact_path_text) if fact_path_text else None
+
+
 def _parse_non_negative_int(value: object) -> int | None:
     if value is None or isinstance(value, bool):
         return None
@@ -1332,12 +1517,16 @@ def _is_sha256_text(value: str) -> bool:
 
 
 def _is_unsafe_relative_path(value: str) -> bool:
-    if not value:
+    text = value.strip()
+    if not text:
         return True
-    path = Path(value)
-    if path.is_absolute():
+    normalized = text.replace("\\", "/")
+    first_segment = normalized.split("/", 1)[0]
+    if ":" in first_segment:
         return True
-    return any(part in {"", ".", ".."} for part in path.parts)
+    if normalized.startswith("/"):
+        return True
+    return any(part in {"", ".", ".."} for part in normalized.split("/"))
 
 
 def _is_within_directory(path: Path, directory: Path) -> bool:
@@ -1388,6 +1577,8 @@ def validate(
     spot_image_fact_final_manifest_path: Path | None = None,
     changeover_candidate_resolution_fact_path: Path | None = None,
     process_phase_event_fact_path: Path | None = None,
+    spot_image_linkage_fact_path: Path | None = None,
+    spot_image_linkage_report_path: Path | None = None,
 ) -> int:
     failures: list[str] = []
     warnings: list[str] = []
@@ -1402,6 +1593,10 @@ def validate(
     process_phase_fact_summary = _new_process_phase_fact_summary(
         "process_phase_event_fact",
         process_phase_event_fact_path,
+    )
+    spot_image_linkage_summary = _new_spot_image_linkage_summary(
+        spot_image_linkage_fact_path,
+        spot_image_linkage_report_path,
     )
 
     v1_header: list[str] = []
@@ -1487,8 +1682,19 @@ def validate(
                 v2_path,
                 fact_path=process_phase_event_fact_path,
             )
+            spot_image_linkage_failures, spot_image_linkage_summary = (
+                validate_spot_image_linkage_fact_manifest(
+                    metadata,
+                    metadata_path,
+                    v2_path,
+                    spot_image_fact_path=spot_image_fact_path,
+                    linkage_fact_path=spot_image_linkage_fact_path,
+                    linkage_report_path=spot_image_linkage_report_path,
+                )
+            )
             failures.extend(changeover_fact_failures)
             failures.extend(process_phase_fact_failures)
+            failures.extend(spot_image_linkage_failures)
 
         shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
         if not isinstance(shadow_metadata, dict):
@@ -1610,6 +1816,32 @@ def validate(
         ):
             matching_key = next(summary_key for summary_key in summary if summary_key.endswith(f"_{key}"))
             print(f"{matching_key}={summary[matching_key]}")
+    for key in (
+        "spot_image_linkage_fact_validation_source",
+        "spot_image_linkage_fact_override_provided",
+        "spot_image_linkage_report_override_provided",
+        "spot_image_linkage_fact_manifest_fact_file",
+        "spot_image_linkage_fact_manifest_report_file",
+        "spot_image_linkage_fact_override_file",
+        "spot_image_linkage_report_override_file",
+        "spot_image_linkage_fact_verified_file",
+        "spot_image_linkage_report_verified_file",
+        "spot_image_linkage_fact_manifest_row_count",
+        "spot_image_linkage_fact_actual_row_count",
+        "spot_image_linkage_fact_row_count_match",
+        "spot_image_linkage_fact_manifest_sha256",
+        "spot_image_linkage_fact_actual_sha256",
+        "spot_image_linkage_fact_sha256_match",
+        "spot_image_linkage_manifest_source_csv_sha256",
+        "spot_image_linkage_source_csv_sha256_match",
+        "spot_image_linkage_manifest_spot_image_fact_sha256",
+        "spot_image_linkage_spot_image_fact_sha256_match",
+        "spot_image_linkage_report_sha256_match",
+        "spot_image_linkage_report_redaction_passed",
+        "spot_image_linkage_matched_rows",
+        "spot_image_linkage_ambiguous_rows",
+    ):
+        print(f"{key}={spot_image_linkage_summary[key]}")
     print(f"current_server_promotion_profile_required={require_current_server_promotion_profile}")
     print(f"v1_rows={len(v1_rows) if v1_path is not None else 'not checked'}")
     print(f"v2_rows={len(v2_rows)}")
@@ -1748,6 +1980,22 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--spot-image-linkage-fact",
+        type=Path,
+        help=(
+            "Optional portable spot_image_linkage_fact.csv override. Must be paired with "
+            "--spot-image-linkage-report."
+        ),
+    )
+    parser.add_argument(
+        "--spot-image-linkage-report",
+        type=Path,
+        help=(
+            "Optional portable spot_image_linkage_report.json override. Must be paired with "
+            "--spot-image-linkage-fact."
+        ),
+    )
+    parser.add_argument(
         "--require-current-server-promotion-profile",
         action="store_true",
         help="Also require the known current server SPOT promotion profile values, not only generic schema/range invariants",
@@ -1788,6 +2036,8 @@ def main() -> int:
         spot_image_fact_final_manifest_path=args.spot_image_fact_final_manifest,
         changeover_candidate_resolution_fact_path=args.changeover_candidate_resolution_fact,
         process_phase_event_fact_path=args.process_phase_event_fact,
+        spot_image_linkage_fact_path=args.spot_image_linkage_fact,
+        spot_image_linkage_report_path=args.spot_image_linkage_report,
     )
 
 
