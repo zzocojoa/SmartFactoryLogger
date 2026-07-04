@@ -5,8 +5,20 @@ const kill = require('tree-kill');
 const fs = require('fs');
 const v8 = require('v8');
 
+const startupOriginNs = process.hrtime.bigint();
+const STARTUP_RENDERER_EVENT_NAMES = new Set([
+  'renderer.index-boot',
+  'renderer.index-render',
+  'renderer.dashboard-ready',
+]);
+const STARTUP_PAYLOAD_MAX_KEYS = 16;
+const STARTUP_PAYLOAD_MAX_KEY_LENGTH = 64;
+const STARTUP_PAYLOAD_MAX_STRING_LENGTH = 200;
+const MAX_RENDERER_STARTUP_EVENTS_PER_NAME = 4;
+
 let mainWindow;
 let backendProcess;
+const rendererStartupEventCounts = new Map();
 
 // Robust Logging
 let logPath;
@@ -32,12 +44,78 @@ function log(msg) {
   }
 }
 
+function getStartupElapsedMs() {
+  return Number(process.hrtime.bigint() - startupOriginNs) / 1_000_000;
+}
+
+function sanitizeStartupScalar(value) {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    return value.length > STARTUP_PAYLOAD_MAX_STRING_LENGTH
+      ? `${value.slice(0, STARTUP_PAYLOAD_MAX_STRING_LENGTH)}...`
+      : value;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  return undefined;
+}
+
+function sanitizeStartupPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return {};
+  }
+
+  const sanitized = {};
+  for (const [key, value] of Object.entries(payload).slice(0, STARTUP_PAYLOAD_MAX_KEYS)) {
+    if (!key || key.length > STARTUP_PAYLOAD_MAX_KEY_LENGTH) {
+      continue;
+    }
+
+    const sanitizedValue = sanitizeStartupScalar(value);
+    if (sanitizedValue !== undefined) {
+      sanitized[key] = sanitizedValue;
+    }
+  }
+
+  return sanitized;
+}
+
+function logStartupEvent(eventName, payload) {
+  const entry = {
+    event: eventName,
+    elapsed_ms: Math.round(getStartupElapsedMs() * 10) / 10,
+  };
+  const sanitizedPayload = sanitizeStartupPayload(payload);
+  if (Object.keys(sanitizedPayload).length > 0) {
+    entry.payload = sanitizedPayload;
+  }
+  log(`STARTUP ${JSON.stringify(entry)}`);
+}
+
+function normalizeRejectedStartupEventName(value) {
+  if (typeof value === 'string') {
+    return value.slice(0, STARTUP_PAYLOAD_MAX_STRING_LENGTH);
+  }
+  return typeof value;
+}
+
 // Global Error Handling
 process.on('uncaughtException', (error) => {
   log(`UNCAUGHT EXCEPTION: ${error.message}\n${error.stack}`);
   dialog.showErrorBox('Critical Error', `An error occurred: ${error.message}\nCheck log at: ${logPath}`);
 });
 
+logStartupEvent('electron.process-start', { is_packaged: app.isPackaged });
 log(`--- App Starting (isPackaged: ${app.isPackaged}) ---`);
 log(`Executable Path: ${process.executablePath}`);
 log(`App Path: ${app.getAppPath()}`);
@@ -89,7 +167,33 @@ function registerMemoryIpcHandlers() {
   ipcMain.handle('sfl:get-electron-memory', async () => captureElectronMemory());
 }
 
+function registerStartupIpcHandlers() {
+  ipcMain.handle('sfl:record-startup-event', async (_event, name, payload) => {
+    if (typeof name !== 'string' || !STARTUP_RENDERER_EVENT_NAMES.has(name)) {
+      logStartupEvent('renderer.startup-event-rejected', {
+        reason: 'invalid_event',
+        name: normalizeRejectedStartupEventName(name),
+      });
+      return { ok: false, reason: 'invalid_event' };
+    }
+
+    const nextCount = (rendererStartupEventCounts.get(name) ?? 0) + 1;
+    rendererStartupEventCounts.set(name, nextCount);
+    if (nextCount > MAX_RENDERER_STARTUP_EVENTS_PER_NAME) {
+      logStartupEvent('renderer.startup-event-rejected', {
+        reason: 'event_limit',
+        name,
+      });
+      return { ok: false, reason: 'event_limit' };
+    }
+
+    logStartupEvent(name, payload);
+    return { ok: true };
+  });
+}
+
 function createWindow() {
+  logStartupEvent('electron.window-create-start');
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -101,6 +205,7 @@ function createWindow() {
     title: "창녕 2호기 Smart Factory",
     autoHideMenuBar: true,
   });
+  logStartupEvent('electron.window-created');
 
   let indexPath;
   if (app.isPackaged) {
@@ -111,15 +216,41 @@ function createWindow() {
     indexPath = path.join(__dirname, 'frontend', 'dist', 'index.html');
   }
   
+  const indexExists = fs.existsSync(indexPath);
   log(`Loading index.html from: ${indexPath}`);
-  log(`Frontend index exists: ${fs.existsSync(indexPath)}`);
+  log(`Frontend index exists: ${indexExists}`);
   
-  if (!fs.existsSync(indexPath)) {
+  if (!indexExists) {
     log(`ERROR: index.html not found at: ${indexPath}`);
     dialog.showErrorBox('File Not Found', `index.html was not found at:\n${indexPath}`);
   }
 
+  mainWindow.once('ready-to-show', () => {
+    logStartupEvent('electron.window-ready-to-show');
+  });
+
+  mainWindow.webContents.on('did-start-loading', () => {
+    logStartupEvent('electron.webcontents-did-start-loading');
+  });
+
+  mainWindow.webContents.on('dom-ready', () => {
+    logStartupEvent('electron.webcontents-dom-ready');
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    logStartupEvent('electron.webcontents-did-finish-load');
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    logStartupEvent('electron.webcontents-did-fail-load', {
+      error_code: errorCode,
+      error_description: errorDescription,
+    });
+  });
+
+  logStartupEvent('electron.load-file-start', { index_exists: indexExists });
   mainWindow.loadFile(indexPath, { hash: '/dashboard' }).catch(err => {
+    logStartupEvent('electron.load-file-error', { message: err.message });
     log(`Failed to load index.html: ${err.message}`);
     mainWindow.webContents.openDevTools();
   });
@@ -165,6 +296,7 @@ function startBackend() {
   };
 
   try {
+    logStartupEvent('backend.spawn-start', { is_packaged: isPackaged });
     log(`Spawning backend from: ${backendPath}`);
     log(`Arguments: ${JSON.stringify(args)}`);
     log(`CWD: ${spawnOptions.cwd}`);
@@ -172,6 +304,7 @@ function startBackend() {
     backendProcess = spawn(`"${backendPath}"`, args, spawnOptions);
 
     backendProcess.on('spawn', () => {
+      logStartupEvent('backend.spawned', { pid: backendProcess.pid ?? null });
       log(`Backend process spawned successfully (PID: ${backendProcess.pid})`);
     });
 
@@ -184,22 +317,28 @@ function startBackend() {
     });
 
     backendProcess.on('error', (err) => {
+      logStartupEvent('backend.spawn-error', { message: err.message });
       log(`Failed to start backend process: ${err.message}`);
     });
 
     backendProcess.on('close', (code) => {
+      logStartupEvent('backend.closed', { code });
       log(`Backend process exited with code ${code}`);
     });
   } catch (err) {
+    logStartupEvent('backend.spawn-exception', { message: err.message });
     log(`CRITICAL: Failed to spawn: ${err.message}`);
   }
 }
 
 app.whenReady().then(() => {
+  logStartupEvent('electron.app-ready');
   log("App ready, starting backend and window...");
   registerMemoryIpcHandlers();
+  registerStartupIpcHandlers();
   startBackend();
   createWindow();
+  logStartupEvent('electron.ready-flow-complete');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

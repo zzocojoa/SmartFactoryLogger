@@ -559,8 +559,24 @@ export interface ElectronMemorySnapshot {
   error?: string | null;
 }
 
+export type SmartFactoryStartupEventName =
+  | 'renderer.index-boot'
+  | 'renderer.index-render'
+  | 'renderer.dashboard-ready';
+
+export type SmartFactoryStartupEventPayload = Record<string, string | number | boolean | null | undefined>;
+
+export interface SmartFactoryStartupEventResult {
+  ok: boolean;
+  reason?: string;
+}
+
 export interface SmartFactoryElectronBridge {
   getMemory: () => Promise<ElectronMemorySnapshot>;
+  recordStartupEvent: (
+    name: SmartFactoryStartupEventName,
+    payload?: SmartFactoryStartupEventPayload
+  ) => Promise<SmartFactoryStartupEventResult>;
 }
 
 declare global {

@@ -10,6 +10,7 @@ import {
   resolveDashboardItems,
 } from './DashboardSceneModel';
 import { ProfilerProbe } from '../shared/profiling/reactRenderProfiler';
+import { recordDashboardReadyAfterPaint } from '../shared/startup/startupTelemetry';
 
 const TempsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/TempsWidget').then(m => ({ default: m.TempsComponent })));
 const MoldsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/MoldsWidget').then(m => ({ default: m.MoldsComponent })));
@@ -236,6 +237,13 @@ const NativeDashboardSurfaceComponent = ({
   useEffect(() => {
     layoutRef.current = buildLayoutMapFromItems(items);
   }, [items, layoutRef]);
+
+  useEffect(() => {
+    return recordDashboardReadyAfterPaint('native', {
+      widget_count: items.length,
+      has_layout_snapshot: Boolean(layoutSnapshotLayout),
+    });
+  }, [items.length, layoutSnapshotLayout]);
 
   return (
     <div

@@ -9,6 +9,7 @@ import type { LayoutMap } from '../shared/types';
 import { buildLayoutMap } from '../shared/utils/layoutUtils';
 import { getDashboardScene, type WidgetRegistry } from './DashboardScene';
 import { initScenesRuntime } from './ScenesRuntime';
+import { recordDashboardReadyAfterPaint } from '../shared/startup/startupTelemetry';
 
 const TempsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/TempsWidget').then(m => ({ default: m.TempsComponent })));
 const MoldsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/MoldsWidget').then(m => ({ default: m.MoldsComponent })));
@@ -196,6 +197,13 @@ export const DashboardSceneSurface = ({
   const SceneRenderer = useMemo(() => {
     return <scene.Component model={scene} />;
   }, [scene]);
+
+  useEffect(() => {
+    return recordDashboardReadyAfterPaint('scene', {
+      has_layout_snapshot: Boolean(layoutSnapshotLayout),
+      layout_editing: layoutEditing,
+    });
+  }, [layoutEditing, layoutSnapshotLayout]);
 
   return (
     <CameraWidgetPropsContext.Provider value={cameraWidgetProps}>

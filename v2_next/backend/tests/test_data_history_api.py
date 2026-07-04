@@ -257,12 +257,16 @@ class MemoryApiTests(unittest.TestCase):
 class ElectronPreloadContractTests(unittest.TestCase):
     repo_root = Path(__file__).resolve().parents[2]
 
-    def test_preload_exposes_only_memory_bridge(self) -> None:
+    def test_preload_exposes_only_constrained_electron_bridge(self) -> None:
         preload_text = (self.repo_root / "preload.js").read_text(encoding="utf-8")
 
         self.assertIn("contextBridge.exposeInMainWorld('smartFactoryElectron'", preload_text)
         self.assertIn("getMemory: () => ipcRenderer.invoke('sfl:get-electron-memory')", preload_text)
-        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 1)
+        self.assertIn(
+            "recordStartupEvent: (name, payload) => ipcRenderer.invoke('sfl:record-startup-event', name, payload)",
+            preload_text,
+        )
+        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 2)
         self.assertNotIn("ipcRenderer.send", preload_text)
         self.assertNotIn("ipcRenderer.on", preload_text)
         self.assertNotIn("ipcRenderer.once", preload_text)
@@ -274,6 +278,8 @@ class ElectronPreloadContractTests(unittest.TestCase):
 
         self.assertIn("preload: resolvePreloadPath()", main_text)
         self.assertIn("ipcMain.handle('sfl:get-electron-memory'", main_text)
+        self.assertIn("ipcMain.handle('sfl:record-startup-event'", main_text)
+        self.assertIn("STARTUP_RENDERER_EVENT_NAMES", main_text)
         self.assertIn("preload.js", package_payload["build"]["files"])
 
 

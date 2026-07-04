@@ -108,7 +108,7 @@ describe('readElectronMemorySnapshot', () => {
       v8_heap: { used_heap_size: 1024 * 1024 },
       error: null,
     });
-    window.smartFactoryElectron = { getMemory };
+    window.smartFactoryElectron = { getMemory, recordStartupEvent: vi.fn() };
 
     const snapshot = await readElectronMemorySnapshot();
 
