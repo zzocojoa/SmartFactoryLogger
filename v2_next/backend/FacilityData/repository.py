@@ -241,6 +241,13 @@ _PROCESS_SEGMENT_PHASES = {
     "idle_candidate",
     "unknown",
 }
+
+# Caller-supplied realtime hold candidates are weak until post-hoc evidence confirms them.
+_EXTERNALLY_SUPPLIED_WEAK_PHASES = {
+    "pre_changeover_hold_candidate": "possible_pre_changeover_hold",
+}
+
+
 @dataclass(frozen=True)
 class V2CsvContract:
     schema_version: str
@@ -1110,8 +1117,11 @@ class CSVLoggerService:
     ) -> ProcessPhaseDecision:
         phase_input = self._process_phase_input_for_row(data, timestamp)
         if data.process_phase_candidate:
+            process_phase_candidate = self._normalize_external_process_phase_candidate(
+                data.process_phase_candidate,
+            )
             decision = ProcessPhaseDecision(
-                process_phase_candidate=data.process_phase_candidate,
+                process_phase_candidate=process_phase_candidate,
                 process_phase_rule_version=data.process_phase_rule_version or PROCESS_PHASE_RULE_VERSION,
                 phase_confirmation_state=data.phase_confirmation_state or "realtime_candidate",
             )
@@ -1120,6 +1130,11 @@ class CSVLoggerService:
         decision = self._assign_process_phase_ids(decision, sample_seq)
         self._commit_process_phase_operator_context(data, decision)
         return decision
+
+    @staticmethod
+    def _normalize_external_process_phase_candidate(process_phase_candidate: str) -> str:
+        return _EXTERNALLY_SUPPLIED_WEAK_PHASES.get(process_phase_candidate, process_phase_candidate)
+
     def _process_phase_input_for_row(self, data: FactoryData, timestamp: datetime) -> ProcessPhaseInput:
         state = self._process_phase_runtime_state
         previous_product_no = state.committed_product_no

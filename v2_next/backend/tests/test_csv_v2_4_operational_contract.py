@@ -765,22 +765,22 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertTrue(rows[4][V2_4_CSV_COLUMNS.index("process_segment_id")].startswith("seg_"))
 
-    def test_direct_pre_changeover_hold_candidate_under_range_is_expected_strong_candidate(self) -> None:
+    def test_external_pre_changeover_hold_candidate_under_range_is_not_trusted_as_strong_candidate(self) -> None:
         cases = [
-            ("possible_pre_changeover_hold", "unknown", "seg_", ""),
-            ("pre_changeover_hold_candidate", "expected_candidate", "", "chg_"),
+            ("possible_pre_changeover_hold", "possible_pre_changeover_hold", "unknown", "seg_", ""),
+            ("pre_changeover_hold_candidate", "possible_pre_changeover_hold", "unknown", "seg_", ""),
         ]
 
-        for phase, expectedness, segment_prefix, changeover_prefix in cases:
-            with self.subTest(phase=phase):
+        for supplied_phase, emitted_phase, expectedness, segment_prefix, changeover_prefix in cases:
+            with self.subTest(supplied_phase=supplied_phase):
                 candidate_service = CSVLoggerService()
                 candidate_service.apply_config(csv_v2_operational_fields_enabled=True)
-                data = self.create_data().model_copy(update={"process_phase_candidate": phase})
+                data = self.create_data().model_copy(update={"process_phase_candidate": supplied_phase})
 
                 row = self.build_v2_row(candidate_service, data)
 
                 self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
-                self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], phase)
+                self.assertEqual(row[V2_4_CSV_COLUMNS.index("process_phase_candidate")], emitted_phase)
                 self.assertEqual(row[V2_4_CSV_COLUMNS.index("phase_confirmation_state")], "realtime_candidate")
                 self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_expectedness_candidate")], expectedness)
                 process_segment_id = row[V2_4_CSV_COLUMNS.index("process_segment_id")]
