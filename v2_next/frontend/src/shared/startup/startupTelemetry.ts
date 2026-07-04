@@ -9,6 +9,9 @@ type StartupTelemetryWindow = Window & {
 };
 
 type DashboardReadySurface = 'native' | 'scene';
+type DashboardReadyStrategy = 'raf' | 'timeout-fallback' | 'timeout-no-raf';
+
+const DASHBOARD_READY_FALLBACK_MS = 5000;
 
 const getStartupEventKeys = (): Set<string> => {
   const startupWindow = window as StartupTelemetryWindow;
@@ -63,7 +66,7 @@ export const recordDashboardReadyAfterPaint = (
   let secondFrameId: number | null = null;
   let timeoutId: number | null = null;
 
-  const recordReady = (): void => {
+  const recordReady = (readyStrategy: DashboardReadyStrategy): void => {
     if (cancelled) {
       return;
     }
@@ -72,16 +75,18 @@ export const recordDashboardReadyAfterPaint = (
       surface,
       route: resolveRoute(),
       ready_state: document.readyState,
+      ready_strategy: readyStrategy,
       ...payload,
     });
   };
 
   if (typeof window.requestAnimationFrame === 'function') {
+    timeoutId = window.setTimeout(() => recordReady('timeout-fallback'), DASHBOARD_READY_FALLBACK_MS);
     firstFrameId = window.requestAnimationFrame(() => {
-      secondFrameId = window.requestAnimationFrame(recordReady);
+      secondFrameId = window.requestAnimationFrame(() => recordReady('raf'));
     });
   } else {
-    timeoutId = window.setTimeout(recordReady, 0);
+    timeoutId = window.setTimeout(() => recordReady('timeout-no-raf'), 0);
   }
 
   return () => {

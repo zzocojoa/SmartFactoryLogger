@@ -20,6 +20,7 @@ afterEach(() => {
   resetStartupTelemetryState();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('startupTelemetry', () => {
@@ -58,6 +59,35 @@ describe('startupTelemetry', () => {
     expect(recordStartup).toHaveBeenCalledWith('renderer.index-boot', { route: '/first' });
   });
 
+  it('records dashboard ready with a timeout fallback when animation frames are throttled', () => {
+    vi.useFakeTimers();
+    const recordStartup = vi.fn().mockResolvedValue({ ok: true });
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: recordStartup,
+    };
+    vi.stubGlobal('requestAnimationFrame', vi.fn((): number => 1));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+
+    const cleanup = recordDashboardReadyAfterPaint('native', { widget_count: 3 });
+
+    vi.advanceTimersByTime(4999);
+    expect(recordStartup).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+
+    expect(recordStartup).toHaveBeenCalledTimes(1);
+    expect(recordStartup).toHaveBeenCalledWith(
+      'renderer.dashboard-ready',
+      expect.objectContaining({
+        surface: 'native',
+        ready_strategy: 'timeout-fallback',
+        widget_count: 3,
+      })
+    );
+
+    cleanup();
+  });
+
   it('records dashboard ready after two animation frames and only once', () => {
     const frameCallbacks: FrameRequestCallback[] = [];
     const recordStartup = vi.fn().mockResolvedValue({ ok: true });
@@ -85,6 +115,7 @@ describe('startupTelemetry', () => {
         surface: 'native',
         route: '/',
         ready_state: document.readyState,
+        ready_strategy: 'raf',
         widget_count: 7,
       })
     );

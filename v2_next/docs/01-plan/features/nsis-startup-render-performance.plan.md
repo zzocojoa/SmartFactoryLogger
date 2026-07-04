@@ -34,7 +34,8 @@ evidence.
   window creation, file load, DOM ready, load finish, ready-to-show, and
   renderer dashboard ready.
 - [x] Define "final webpage render" as a renderer event emitted after the
-  dashboard surface mounts and the browser has presented at least one frame.
+  dashboard surface mounts and the browser has presented at least one frame, with
+  a bounded fallback when animation frames are throttled.
 - [x] Keep the renderer bridge constrained to explicit startup telemetry and
   memory APIs only.
 - [x] Add contract tests so the preload bridge cannot drift into arbitrary IPC.
@@ -106,7 +107,7 @@ evidence.
 |------|--------|-------------|------------|
 | IPC bridge overexposure | Security regression | Medium | Expose one typed method and validate event names/payloads in main. |
 | Measurement changes startup cost | False baseline | Medium | Keep logging synchronous path small and data payload bounded. |
-| Renderer event fires too early | Misleading metric | Medium | Emit after dashboard surface mount plus `requestAnimationFrame`. |
+| Renderer event fires too early | Misleading metric | Medium | Emit after dashboard surface mount plus `requestAnimationFrame`; mark timeout fallback samples in payload. |
 | Browser mode breaks on missing Electron bridge | Developer workflow regression | Low | Make frontend telemetry a no-op without the bridge. |
 | Packaged-only issue not caught locally | Release risk | Medium | Require NSIS rebuild and installed-app validation before claiming performance improvement. |
 

@@ -13,8 +13,10 @@ main owns a monotonic startup clock, renderer startup events flow through a
 constrained preload bridge, dashboard-ready is emitted after dashboard surface
 mount plus animation frames, and a PowerShell script can launch an installed exe
 and extract `renderer.dashboard-ready` elapsed time from the Electron log. The
-script now cleans up the launched process tree by default so repeated cold-start
-samples are less likely to be contaminated by a previous run.
+renderer helper now includes a bounded timeout fallback for environments where
+animation frames are throttled, and the script cleans up the launched process
+tree by default so repeated cold-start samples are less likely to be contaminated
+by a previous run.
 
 Operational evidence now exists for a telemetry-enabled installed artifact. The
 older local install first returned `TIMEOUT` with `event_count=0`, which
@@ -37,7 +39,8 @@ a sanitized summary to avoid exposing local paths.
 - [x] Shared TypeScript types cover startup event names, payload, and result.
 - [x] `NativeDashboardSurface` emits dashboard-ready after paint scheduling.
 - [x] `DashboardSceneSurface` emits dashboard-ready for edit-mode scene usage.
-- [x] Frontend helper handles browser fallback and deduplicates events.
+- [x] Frontend helper handles browser fallback, RAF timeout fallback, and
+  deduplicates events.
 - [x] `scripts/measure_nsis_startup_render.ps1` launches an exe, returns
   dashboard-ready elapsed time as JSON, and reports cleanup status.
 

@@ -42,7 +42,7 @@ flowchart LR
 | `main.js` | Owns startup clock, validates startup events, logs milestones. |
 | `preload.js` | Exposes constrained bridge methods under `smartFactoryElectron`. |
 | `frontend/src/shared/types.ts` | Types the Electron bridge contract. |
-| `frontend/src/shared/startup/startupTelemetry.ts` | Handles renderer fallback, dedupe, and after-paint scheduling. |
+| `frontend/src/shared/startup/startupTelemetry.ts` | Handles renderer fallback, dedupe, after-paint scheduling, and a bounded timeout fallback. |
 | `NativeDashboardSurface.tsx` | Emits ready event for normal dashboard mode. |
 | `DashboardSceneSurface.tsx` | Emits ready event for layout-editing scene mode. |
 | `backend/tests/test_data_history_api.py` | Guards preload/main IPC contract. |
@@ -55,7 +55,8 @@ flowchart LR
 2. Electron lifecycle events log elapsed time through a shared
    `logStartupEvent(name, payload)` helper.
 3. React dashboard surfaces call `window.smartFactoryElectron?.recordStartupEvent`
-   after mount and a `requestAnimationFrame` callback.
+   after mount and two `requestAnimationFrame` callbacks. If animation frames are
+   throttled, a bounded timeout fallback records the ready event.
 4. `main.js` validates the event name and payload shape before logging
    `renderer.dashboard-ready`.
 5. Measurement scripts or operators read `debug_electron.log` and compute the
