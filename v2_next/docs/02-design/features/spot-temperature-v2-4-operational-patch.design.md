@@ -177,7 +177,7 @@ Realtime CSV rows may expose the latest matching SPOT image fact only as relativ
 | `changeover_candidate_id` | text/blank | `chg_` + stable hash from `logger_service_instance_id` and `candidate_start_sample_seq` | changeover lifecycle key only |
 | `spot_observation_key` | text/blank | `{spot_service_instance_id}:{spot_poll_seq}` only when `spot_poll_seq > 0`, `spot_last_poll_completed_at` is present, and the row is not startup pending | SPOT snapshot |
 
-ID contract note: `process_segment_id` owns general production/stabilizing/idle/unknown segments and realtime weak `possible_pre_changeover_hold` segments. `changeover_candidate_id` is reserved for strong changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be generated for evidence-free weak hold rows or standalone Count 3 stabilization. A strong lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`, while weak `possible_pre_changeover_hold` can be promoted only by post-hoc future evidence.
+ID contract note: `process_segment_id` owns general production/stabilizing/idle/unknown segments and realtime weak `possible_pre_changeover_hold` segments. `changeover_candidate_id` is reserved for strong changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be generated for evidence-free weak hold rows or standalone Count 3 stabilization. A trusted post-hoc/legacy strong lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`, while weak `possible_pre_changeover_hold` can be promoted only by post-hoc future evidence.
 
 Realtime CSV는 confirmed `changeover_event_id`를 소유하지 않는다.
 
@@ -236,7 +236,7 @@ Candidate-to-confirmed mapping:
 setup_candidate               -> setup
 setup_alignment_candidate     -> setup_alignment
 possible_pre_changeover_hold -> pre_changeover_hold only with future evidence; otherwise no changeover candidate fact
-pre_changeover_hold_candidate -> realtime strong lifecycle candidate; pre_changeover_hold only with future evidence, otherwise unknown/posthoc_rejected
+pre_changeover_hold_candidate -> post-hoc/legacy strong lifecycle candidate; caller-supplied realtime input is normalized to possible_pre_changeover_hold
 die_change_candidate          -> die_change
 changeover_candidate          -> changeover
 production_stable             -> excluded from changeover facts; use process_segment_id-based segment analysis
@@ -342,7 +342,7 @@ Realtime expectedness is candidate-only.
 
 | Input | `temperature_expectedness_candidate` |
 |---|---|
-| `temperature_output_status=under_range` + `process_phase_candidate` in setup/strong `pre_changeover_hold_candidate`/die-change/setup-alignment/production-stabilizing candidates, excluding weak `possible_pre_changeover_hold` | `expected_candidate` |
+| `temperature_output_status=under_range` + trusted setup/die-change/setup-alignment/changeover/production-stabilizing candidates, excluding weak `possible_pre_changeover_hold` and caller-supplied `pre_changeover_hold_candidate` | `expected_candidate` |
 | `temperature_output_status=under_range` + weak `possible_pre_changeover_hold` without stronger current evidence | `unknown` |
 | `temperature_output_status=under_range` + `production_stable` | `unexpected_candidate` |
 | `temperature_output_status=over_range` in any phase | `unexpected_candidate` |
@@ -352,7 +352,7 @@ Realtime expectedness is candidate-only.
 
 Blank means no expectedness claim is needed for a valid temperature. `unknown` means a temperature unavailable/error state exists but realtime context is insufficient or non-fresh.
 
-Realtime `derive_process_phase_candidate` emits evidence-free stopped hold rows as weak `possible_pre_changeover_hold`, which keeps under-range expectedness at `unknown`. A directly supplied `pre_changeover_hold_candidate` is treated as a strong lifecycle candidate for realtime expectedness and may emit `expected_candidate`; post-hoc facts still decide whether that lifecycle confirms or rejects `pre_changeover_hold` from future evidence.
+Realtime `derive_process_phase_candidate` emits evidence-free stopped hold rows as weak `possible_pre_changeover_hold`, which keeps under-range expectedness at `unknown`. `FactoryData.process_phase_candidate` is an input boundary: a caller-supplied `pre_changeover_hold_candidate` is normalized to weak `possible_pre_changeover_hold` before realtime expectedness and ID assignment. Post-hoc facts still decide whether a pre-changeover hold confirms or rejects from future evidence.
 
 Final expected/unexpected/indeterminate is written only to post-hoc fact as `temperature_expectedness_confirmed`.
 
