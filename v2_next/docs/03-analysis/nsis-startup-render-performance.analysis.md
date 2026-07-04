@@ -16,12 +16,13 @@ and extract `renderer.dashboard-ready` elapsed time from the Electron log. The
 script now cleans up the launched process tree by default so repeated cold-start
 samples are less likely to be contaminated by a previous run.
 
-The remaining gap is operational evidence from a telemetry-enabled installed
-artifact. The existing local install was run on 2026-07-04 with
-`scripts/measure_nsis_startup_render.ps1`; it returned `TIMEOUT` with
-`event_count=0` and successful process-tree cleanup. That installed artifact
-predates this branch's telemetry changes, so baseline median/p95 startup render
-time is not yet measured.
+Operational evidence now exists for a telemetry-enabled installed artifact. The
+older local install first returned `TIMEOUT` with `event_count=0`, which
+confirmed that stale installs are not valid baseline sources. After installing
+a fresh CI artifact for this branch, `scripts/measure_nsis_startup_render.ps1`
+returned `PASS` with `dashboard_ready_elapsed_ms=662.7`, `event_count=16`,
+and `cleanup.ok=true`. The raw JSON is kept locally; PR evidence should use
+only a sanitized summary to avoid exposing local paths.
 
 ## Implemented Items
 
@@ -43,8 +44,7 @@ time is not yet measured.
 
 ## Missing Items
 
-- [ ] Fresh telemetry-enabled installed NSIS exe cold-start baseline was not
-  collected in this session.
+- None for measurement readiness. Repeated samples for median/p95 remain follow-up work.
 
 ## Changed Items (Deviations from Design)
 
@@ -66,8 +66,8 @@ time is not yet measured.
 
 ## Recommendations
 
-1. Run the measurement script against a freshly installed NSIS build on the
-   target Windows machine.
+1. Collect repeated fresh installed-app samples before choosing a performance
+   optimization target.
 2. Confirm each sample reports successful cleanup, or intentionally use
    `-KeepRunning` only for manual observation.
 3. Capture at least five cold-start samples before changing startup ordering or
@@ -77,7 +77,7 @@ time is not yet measured.
 
 ## Next Steps
 
-- [ ] Build and install a fresh NSIS artifact that includes this branch, then
+- [x] Build and install a fresh NSIS artifact that includes this branch, then
   collect startup baseline JSON.
 - [ ] Decide the first optimization target from the slowest measured milestone.
-- [ ] Re-run this analysis after baseline collection.
+- [ ] Re-run this analysis after repeated baseline samples or the first optimization pass.

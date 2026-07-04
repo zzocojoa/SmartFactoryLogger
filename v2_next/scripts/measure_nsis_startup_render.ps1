@@ -88,7 +88,7 @@ function Read-StartupEvents {
         if ($events.Count -gt 0) {
             return [pscustomobject]@{
                 log_path = $candidate
-                events = @($events)
+                events = $events.ToArray()
             }
         }
     }
@@ -99,10 +99,10 @@ function Read-StartupEvents {
 function Stop-LaunchedProcessTree {
     param(
         [System.Diagnostics.Process]$Process,
-        [bool]$KeepProcessRunning
+        [switch]$KeepProcessRunning
     )
 
-    if ($KeepProcessRunning) {
+    if ($KeepProcessRunning.IsPresent) {
         return [pscustomobject]@{
             attempted = $false
             method = "keep_running"

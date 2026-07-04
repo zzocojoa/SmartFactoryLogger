@@ -1,6 +1,6 @@
 # NSIS Startup Render Performance Plan
 
-> Version: 1.0.0 | Date: 2026-07-04 | Status: Implemented - baseline pending
+> Version: 1.0.0 | Date: 2026-07-04 | Status: Implemented - baseline collected
 > Level: Dynamic
 
 ---
@@ -82,11 +82,15 @@ evidence.
 - [x] `[AC-06]` A repeatable PowerShell command can launch the installed exe,
   return dashboard-ready elapsed time as JSON, and clean up the launched process
   tree unless `-KeepRunning` is supplied.
-- [ ] `[AC-07]` Installed NSIS cold-start baseline JSON is collected from an
+- [x] `[AC-07]` Installed NSIS cold-start baseline JSON is collected from an
   actual installed exe.
   - 2026-07-04 check: the existing local install was executed with the
     measurement script and returned `TIMEOUT` with `event_count=0`. That install
     predates this branch's telemetry changes, so it is not a valid baseline.
+  - 2026-07-04 fresh CI artifact check: `PASS`,
+    `dashboard_ready_elapsed_ms=662.7`, `event_count=16`,
+    `cleanup.ok=true`. Raw JSON stays local; PR evidence uses a
+    sanitized summary.
 
 ## 5. Schedule
 
@@ -95,8 +99,8 @@ evidence.
 | Plan | 2026-07-04 | Completed |
 | Design | 2026-07-04 | Completed |
 | Implementation | 2026-07-04 | Completed |
-| Review | 2026-07-04 | In Progress |
-| Installed baseline | TBD | Pending fresh telemetry-enabled NSIS install |
+| Review | 2026-07-04 | Completed |
+| Installed baseline | 2026-07-04 | Completed with sanitized PASS summary |
 
 ## 6. Risks & Mitigations
 

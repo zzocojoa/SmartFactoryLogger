@@ -1,6 +1,6 @@
 # NSIS Startup Render Performance Design
 
-> Version: 1.0.0 | Date: 2026-07-04 | Status: Implemented - baseline pending
+> Version: 1.0.0 | Date: 2026-07-04 | Status: Implemented - baseline collected
 > Level: Dynamic | Plan: docs/01-plan/features/nsis-startup-render-performance.plan.md
 
 ---
