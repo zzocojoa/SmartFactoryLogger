@@ -51,22 +51,35 @@ class TemperatureOperationalTests(unittest.TestCase):
         self.assertEqual(decision.temperature_cause_confidence, 0.0)
         self.assertEqual(json.loads(decision.temperature_cause_evidence_codes), ["phase_setup_candidate"])
 
-    def test_under_range_possible_pre_changeover_hold_is_not_expected_without_stronger_evidence(self) -> None:
-        decision = derive_temperature_operational_fields(
-            TemperatureOperationalInput(
-                poll_status="success",
-                raw_validity="invalid_sentinel",
-                source_freshness="fresh",
-                temperature_value_origin="none",
-                spot_device_status_code="temperature_under_range",
-                spot_effective_age_ms_at_row=100.0,
-                process_phase_candidate="possible_pre_changeover_hold",
-            )
-        )
+    def test_trusted_phase_input_distinguishes_strong_pre_changeover_from_weak_possible_hold(self) -> None:
+        cases = [
+            ("pre_changeover_hold_candidate", "expected_candidate"),
+            ("possible_pre_changeover_hold", "unknown"),
+        ]
 
-        self.assertEqual(decision.temperature_output_status, "under_range")
-        self.assertEqual(decision.temperature_expectedness_candidate, "unknown")
-        self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+        for phase, expectedness in cases:
+            with self.subTest(phase=phase):
+                decision = derive_temperature_operational_fields(
+                    TemperatureOperationalInput(
+                        poll_status="success",
+                        raw_validity="invalid_sentinel",
+                        source_freshness="fresh",
+                        temperature_value_origin="none",
+                        spot_device_status_code="temperature_under_range",
+                        spot_effective_age_ms_at_row=100.0,
+                        process_phase_candidate=phase,
+                    )
+                )
+
+                self.assertEqual(decision.temperature_output_status, "under_range")
+                self.assertEqual(decision.temperature_expectedness_candidate, expectedness)
+                self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+
+                evidence_codes = json.loads(decision.temperature_cause_evidence_codes)
+                if phase == "pre_changeover_hold_candidate":
+                    self.assertIn("phase_setup_candidate", evidence_codes)
+                else:
+                    self.assertNotIn("phase_setup_candidate", evidence_codes)
 
     def test_under_range_cause_uses_non_config_diagnostic_evidence(self) -> None:
         cases = [
