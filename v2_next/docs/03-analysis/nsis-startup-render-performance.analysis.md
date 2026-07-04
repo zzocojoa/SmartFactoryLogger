@@ -22,8 +22,77 @@ Operational evidence now exists for a telemetry-enabled installed artifact. The
 older local install first returned `TIMEOUT` with `event_count=0`, which
 confirmed that stale installs are not valid baseline sources. After installing
 a fresh CI artifact for this branch, `scripts/measure_nsis_startup_render.ps1`
-returned `PASS`. The raw JSON is kept locally; PR evidence should use only
-a sanitized summary to avoid exposing local paths.
+returned `PASS`. A repeated installed-app baseline is now recorded below using
+only sanitized fields; local-only runtime details are omitted.
+
+## Repeated Cold-Start Baseline
+
+Measurement date: 2026-07-05 KST
+
+Installed artifact identity:
+
+- Installed executable: `smart-factory.exe`
+- Product version: `1.0.11.0`
+- File version: `1.0.11`
+- SHA256: `B812BC91D14E1E2A8A54990C4A46DA1A7A630C3EA47A9939E7640D34F4C79100`
+
+Sanitized samples from `scripts/measure_nsis_startup_render.ps1` are split into
+separate batches because the independent verification run found a higher
+five-sample p95 than the initial run. Both batches prove measurement readiness,
+but the p95 value is sample-size sensitive and should not be treated as a stable
+regression threshold yet.
+
+### Batch A: Initial Measurement
+
+| Sample | Status | dashboard_ready_elapsed_ms | event_count | cleanup.ok | ready_strategy |
+|--------|--------|----------------------------|-------------|------------|----------------|
+| 1 | PASS | 709.1 | 16 | true | raf |
+| 2 | PASS | 662.5 | 16 | true | raf |
+| 3 | PASS | 677.6 | 16 | true | raf |
+| 4 | PASS | 670.8 | 16 | true | raf |
+| 5 | PASS | 666.2 | 16 | true | raf |
+
+Batch A summary:
+
+- PASS samples: 5/5
+- Cleanup success: 5/5
+- Median `dashboard_ready_elapsed_ms`: 670.8 ms
+- p95 `dashboard_ready_elapsed_ms`: 709.1 ms
+- p95 method: nearest-rank over five samples
+- Range: 662.5 ms to 709.1 ms
+
+### Batch B: Independent Verification
+
+| Sample | Status | dashboard_ready_elapsed_ms | event_count | cleanup.ok | ready_strategy |
+|--------|--------|----------------------------|-------------|------------|----------------|
+| 1 | PASS | 707.7 | 16 | true | raf |
+| 2 | PASS | 1106.5 | 16 | true | raf |
+| 3 | PASS | 598.1 | 16 | true | raf |
+| 4 | PASS | 583.9 | 16 | true | raf |
+| 5 | PASS | 664.1 | 16 | true | raf |
+
+Batch B summary:
+
+- PASS samples: 5/5
+- Cleanup success: 5/5
+- Median `dashboard_ready_elapsed_ms`: 664.1 ms
+- p95 `dashboard_ready_elapsed_ms`: 1106.5 ms
+- p95 method: nearest-rank over five samples
+- Range: 583.9 ms to 1106.5 ms
+
+Baseline interpretation:
+
+- Measurement readiness is PASS across both batches: 10/10 samples passed and
+  cleanup succeeded 10/10 times.
+- Median is consistent across the two batches: 670.8 ms in Batch A and
+  664.1 ms in Batch B.
+- p95 is not stable with five samples. Batch B includes one slower run at
+  1106.5 ms, which becomes p95 under nearest-rank calculation.
+- Use these batches as startup telemetry readiness evidence. Before setting a
+  regression budget or judging an optimization, collect a larger cold-start
+  sample set.
+- Raw JSON and local-only runtime details are intentionally omitted from this
+  document.
 
 ## Implemented Items
 
@@ -46,7 +115,9 @@ a sanitized summary to avoid exposing local paths.
 
 ## Missing Items
 
-- None for measurement readiness. Repeated samples for median/p95 remain follow-up work.
+- None for measurement readiness. Repeated samples are captured in the baseline
+  section above, but p95 remains a sample-size-sensitive value until a larger
+  cold-start sample set is collected.
 
 ## Changed Items (Deviations from Design)
 
@@ -65,21 +136,29 @@ a sanitized summary to avoid exposing local paths.
 - [x] `.\\backend\\.venv\\Scripts\\python.exe -m unittest backend.tests.test_data_history_api.ElectronPreloadContractTests`
 - [x] `npm --prefix frontend run build`
 - [x] `git diff --check`
+- [x] Installed-app repeated baseline Batch A: 5 PASS samples, median 670.8 ms,
+  p95 709.1 ms, cleanup 5/5.
+- [x] Independent verification Batch B: 5 PASS samples, median 664.1 ms, p95
+  1106.5 ms, cleanup 5/5.
 
 ## Recommendations
 
-1. Collect repeated fresh installed-app samples before choosing a performance
-   optimization target.
-2. Confirm each sample reports successful cleanup, or intentionally use
+1. Use the repeated fresh installed-app baseline as readiness evidence before
+   choosing a performance optimization target.
+2. Confirm future samples report successful cleanup, or intentionally use
    `-KeepRunning` only for manual observation.
-3. Capture at least five cold-start samples before changing startup ordering or
-   bundle composition.
-4. Use the measured timeline to decide whether the bottleneck is Electron shell,
+3. Capture a larger cold-start sample set before setting p95-based regression
+   thresholds or claiming p95 improvement.
+4. Re-capture at least five cold-start samples after changing startup ordering
+   or bundle composition.
+5. Use the measured timeline to decide whether the bottleneck is Electron shell,
    backend spawn/readiness, static asset load, or dashboard renderer work.
 
 ## Next Steps
 
 - [x] Build and install a fresh NSIS artifact that includes this branch, then
   collect startup baseline JSON.
+- [x] Capture repeated installed-app samples and calculate median/p95 baseline.
+- [x] Record independent verification batch and p95 volatility note.
 - [ ] Decide the first optimization target from the slowest measured milestone.
-- [ ] Re-run this analysis after repeated baseline samples or the first optimization pass.
+- [ ] Re-run this analysis after the first optimization pass.
