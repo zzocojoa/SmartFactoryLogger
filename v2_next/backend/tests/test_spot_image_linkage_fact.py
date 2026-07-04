@@ -159,6 +159,48 @@ class SpotImageLinkageFactTests(unittest.TestCase):
         self.assertIn("spot_image_linkage_report contains non-sanitized values", failures)
         self.assertEqual(summary["spot_image_linkage_report_redaction_passed"], "false")
 
+    def test_validator_rejects_raw_url_and_full_path_matched_image_paths(self) -> None:
+        unsafe_paths = (
+            "http://10.1.10.50/image.jpg",
+            "https://camera.local/image.jpg",
+            "file:///C:/SmartFactory/image.jpg",
+            "C:/SmartFactory/image.jpg",
+            "//server/share/image.jpg",
+            "/var/smartfactory/image.jpg",
+            "../escape.jpg",
+        )
+        for unsafe_path in unsafe_paths:
+            with self.subTest(unsafe_path=unsafe_path), tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                source_csv, image_fact, metadata_path = self._write_artifact_inputs(
+                    tmp_path,
+                    first_image_path=unsafe_path,
+                )
+                linkage_fact = tmp_path / "spot_image_linkage_fact.csv"
+                linkage_report = tmp_path / "spot_image_linkage_report.json"
+                infer_spot_image_linkage_from_csv(
+                    input_path=source_csv,
+                    spot_image_fact_path=image_fact,
+                    fact_output_path=linkage_fact,
+                    report_output_path=linkage_report,
+                    metadata_path=metadata_path,
+                )
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+
+                failures, _summary = validate_spot_image_linkage_fact_manifest(
+                    metadata,
+                    metadata_path,
+                    source_csv,
+                    spot_image_fact_path=image_fact,
+                    linkage_fact_path=linkage_fact,
+                    linkage_report_path=linkage_report,
+                )
+
+            self.assertIn(
+                "spot_image_linkage_fact row 2 matched_spot_image_path must be a safe relative path",
+                failures,
+            )
+
     def test_validator_rejects_source_csv_hash_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -219,7 +261,12 @@ class SpotImageLinkageFactTests(unittest.TestCase):
         self.assertEqual(paths["spot_image_linkage_fact"].name, "spot_image_linkage_fact.csv")
         self.assertEqual(paths["spot_image_linkage_report"].name, "spot_image_linkage_report.json")
 
-    def _write_artifact_inputs(self, tmp_path: Path) -> tuple[Path, Path, Path]:
+    def _write_artifact_inputs(
+        self,
+        tmp_path: Path,
+        *,
+        first_image_path: str | None = None,
+    ) -> tuple[Path, Path, Path]:
         source_csv = tmp_path / "Factory_Integrated_Log_v2_20260703_000000.csv"
         image_fact = tmp_path / "spot_image_fact.csv"
         metadata_path = source_csv.with_suffix(".metadata.json")
@@ -236,7 +283,7 @@ class SpotImageLinkageFactTests(unittest.TestCase):
             image_fact,
             self.image_fact_header,
             [
-                self._image_fact_row("spotimg_1", "svc-1:1"),
+                self._image_fact_row("spotimg_1", "svc-1:1", path=first_image_path),
                 self._image_fact_row("spotimg_dup_a", "svc-1:dup"),
                 self._image_fact_row("spotimg_dup_b", "svc-1:dup"),
             ],
@@ -250,10 +297,10 @@ class SpotImageLinkageFactTests(unittest.TestCase):
     def _image_fact(self, capture_id: str, observation_key: str) -> dict[str, str]:
         return dict(zip(self.image_fact_header, self._image_fact_row(capture_id, observation_key), strict=True))
 
-    def _image_fact_row(self, capture_id: str, observation_key: str) -> list[str]:
+    def _image_fact_row(self, capture_id: str, observation_key: str, *, path: str | None = None) -> list[str]:
         return [
             capture_id,
-            f"spot_images/2026/07/03/{capture_id}.jpg",
+            path or f"spot_images/2026/07/03/{capture_id}.jpg",
             "b" * 64,
             "fresh",
             "100.000",

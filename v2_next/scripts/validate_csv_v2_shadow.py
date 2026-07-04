@@ -1517,12 +1517,16 @@ def _is_sha256_text(value: str) -> bool:
 
 
 def _is_unsafe_relative_path(value: str) -> bool:
-    if not value:
+    text = value.strip()
+    if not text:
         return True
-    path = Path(value)
-    if path.is_absolute():
+    normalized = text.replace("\\", "/")
+    first_segment = normalized.split("/", 1)[0]
+    if ":" in first_segment:
         return True
-    return any(part in {"", ".", ".."} for part in path.parts)
+    if normalized.startswith("/"):
+        return True
+    return any(part in {"", ".", ".."} for part in normalized.split("/"))
 
 
 def _is_within_directory(path: Path, directory: Path) -> bool:

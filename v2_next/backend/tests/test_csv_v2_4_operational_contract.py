@@ -354,6 +354,45 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(summary["spot_image_fact_row_count_match"], "false")
         self.assertEqual(summary["spot_image_fact_sha256_match"], "false")
 
+    def test_spot_image_fact_manifest_validator_rejects_raw_url_and_full_paths(self) -> None:
+        unsafe_paths = (
+            "http://10.1.10.50/image.jpg",
+            "https://camera.local/image.jpg",
+            "file:///C:/SmartFactory/image.jpg",
+            "C:/SmartFactory/image.jpg",
+            "\\\\server\\share\\image.jpg",
+            "/var/smartfactory/image.jpg",
+            "../escape.jpg",
+        )
+        for unsafe_path in unsafe_paths:
+            with self.subTest(unsafe_path=unsafe_path), tempfile.TemporaryDirectory() as tmp:
+                log_dir = Path(tmp)
+                fact_path = log_dir / "spot_image_fact.csv"
+                capture_root = log_dir / "spot_images"
+                fact_hash = self.write_image_fact(
+                    fact_path,
+                    [
+                        [
+                            "spotimg_20260701T010856283905Z_fe0d2cf21603",
+                            unsafe_path,
+                            "a" * 64,
+                            "9064",
+                            "image/jpeg",
+                            "125.0",
+                            "fresh",
+                            "svc-1:42",
+                        ]
+                    ],
+                )
+                metadata = self.image_fact_metadata(fact_path, capture_root, row_count=1, sha256=fact_hash)
+
+                failures, _summary = validate_spot_image_fact_manifest(
+                    metadata,
+                    log_dir / "sample.metadata.json",
+                )
+
+            self.assertIn("spot_image_fact row 2 spot_image_path must be a safe relative path", failures)
+
     def test_spot_image_fact_manifest_validator_rejects_missing_header_without_crashing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
