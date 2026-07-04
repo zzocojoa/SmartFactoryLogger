@@ -132,6 +132,16 @@ Do not compare `/api/spot/config` `image_capture.written_count` directly with
   `written_count` may increase while `fact_row_count` and manifest `row_count`
   do not.
 
+### Review-Only Nonblock Policy Matrix
+
+These review items are intentionally policy decisions, not runtime changes:
+
+| Item | Current policy | Why keep it now | Future option | Verification criteria |
+| --- | --- | --- | --- | --- |
+| Sidecar final manifest | The CSV v2 sidecar `spot_image_fact_manifest` remains an open-time snapshot. `spot_image_fact_manifest.final.json` carries closeout-time row count and SHA-256. | Rewriting existing sidecars would blur the meaning of the original CSV open-time metadata. The final manifest gives bundle validation a settled fact-file proof without mutating prior metadata. | If consumers require a single metadata file, add a new sidecar revision field rather than overwriting the open-time block. | Validator summary should report `spot_image_fact_validation_source=final_manifest`, `spot_image_fact_row_count_match=true`, and `spot_image_fact_sha256_match=true` when the final manifest is provided. |
+| Same-hash image repeats | The writer dedupes only identical generated `spot_image_capture_id` values. It does not dedupe separate captures just because `spot_image_sha256` is the same. | Identical pixels at different times can still be separate evidence because timestamp, observation key, link age, and operating context differ. Hash-only dedupe would save disk but can erase repeated-state evidence. | Add an explicit operator policy for hash-window compaction only if storage pressure becomes a real issue. It must preserve per-capture fact rows or a lossless repeat-count fact. | Tests should show same `capture_id` reuse keeps one fact row, while same SHA with different capture timestamps remains separate unless a future compaction policy is enabled. |
+| Image-temperature linkage | Image capture and temperature polling are non-atomic. Runtime CSV `*_nearest` fields are best-effort hints; settled linkage is proven post-hoc from CSV and fact files. | Atomic linking would couple realtime row emission to image fetch/write timing and can add latency, queue waits, or timeout ambiguity. The current policy exposes link age/status and validates settled artifacts instead. | If runtime hit rate becomes more important than writer independence, consider an observation-key-indexed in-memory cache with bounded retention and explicit stale handling. | Realtime tests should cover same-observation populated hints and different-observation blanks. Post-hoc validation should prove row count, source CSV SHA-256, image fact SHA-256, unmatched reasons, ambiguity counts, and redaction. |
+
 Operational rule: `failure_count == 0` means the writer has not reported a
 runtime write failure. Fact completeness is proven by `row_count`, SHA-256, and
 validator results, not by equality with `written_count`. Keep `written_count`
