@@ -83,6 +83,35 @@ not an atomic same-cycle guarantee.
   - startup observation key nonblank count: 0
   - redaction scope: source records, local machine paths, connection details,
     and binary image payloads are omitted
+- SPOT image linkage closeout gate evidence, sanitized:
+  - artifact leaf: `server_smoke_linkage_gate_20260704-112742`
+  - source artifacts: settled v2 CSV, sidecar metadata, and `spot_image_fact.csv`
+  - generator: `scripts/infer_spot_image_linkage_for_csv.py`
+  - validator: `scripts/validate_csv_v2_shadow.py`
+  - closeout helper: `scripts/write_server_smoke_closeout.py --mode copied`
+  - `validator_exit_code`: 0
+  - `validator_verdict`: PASS
+  - `validation_source`: `override`
+  - `image_linkage.presence`: `present`
+  - `image_linkage.fact_file`: `spot_image_linkage_fact.csv`
+  - `image_linkage.report_file`: `spot_image_linkage_report.json`
+  - `image_linkage.row_count`: 11552
+  - `image_linkage.row_count_match`: true
+  - `image_linkage.sha256_match`: true
+  - `image_linkage.source_csv_sha256_match`: true
+  - `image_linkage.spot_image_fact_sha256_match`: true
+  - `image_linkage.report_redaction_passed`: true
+  - `image_linkage.matched_rows`: 199
+  - `image_linkage.ambiguous_rows`: 561
+  - `spot_image_linkage_report.counts.no_image_fact`: 10787
+  - `spot_image_linkage_report.counts.no_observation_key`: 5
+  - capture reset after closeout: `capture_enabled=false`, `capture_mode=off`
+  - note: top-level closeout `spot_image_fact_sha256_match=false` belongs to
+    copied artifact versus original sidecar manifest drift. It is not a linkage
+    gate failure. The linkage gate value is
+    `image_linkage.spot_image_fact_sha256_match=true`.
+  - redaction scope: source records, binary payloads, local absolute paths,
+    credentials, and connection locators are omitted
 
 This smoke evidence proves that positive realtime linkage can occur under live
 server conditions. It also reinforces that realtime linkage is sparse and timing
