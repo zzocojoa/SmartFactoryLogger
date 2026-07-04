@@ -87,10 +87,8 @@ evidence.
   - 2026-07-04 check: the existing local install was executed with the
     measurement script and returned `TIMEOUT` with `event_count=0`. That install
     predates this branch's telemetry changes, so it is not a valid baseline.
-  - 2026-07-04 fresh CI artifact check: `PASS`,
-    `dashboard_ready_elapsed_ms=662.7`, `event_count=16`,
-    `cleanup.ok=true`. Raw JSON stays local; PR evidence uses a
-    sanitized summary.
+  - 2026-07-04 fresh CI artifact check: `PASS`. Raw JSON stays local;
+    PR evidence uses a sanitized summary so local paths are not exposed.
 
 ## 5. Schedule
 

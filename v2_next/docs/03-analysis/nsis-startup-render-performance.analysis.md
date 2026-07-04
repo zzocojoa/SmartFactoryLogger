@@ -20,9 +20,8 @@ Operational evidence now exists for a telemetry-enabled installed artifact. The
 older local install first returned `TIMEOUT` with `event_count=0`, which
 confirmed that stale installs are not valid baseline sources. After installing
 a fresh CI artifact for this branch, `scripts/measure_nsis_startup_render.ps1`
-returned `PASS` with `dashboard_ready_elapsed_ms=662.7`, `event_count=16`,
-and `cleanup.ok=true`. The raw JSON is kept locally; PR evidence should use
-only a sanitized summary to avoid exposing local paths.
+returned `PASS`. The raw JSON is kept locally; PR evidence should use only
+a sanitized summary to avoid exposing local paths.
 
 ## Implemented Items
 
