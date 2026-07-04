@@ -16,8 +16,12 @@ and extract `renderer.dashboard-ready` elapsed time from the Electron log. The
 script now cleans up the launched process tree by default so repeated cold-start
 samples are less likely to be contaminated by a previous run.
 
-The remaining gap is operational evidence: no installed NSIS artifact was run in
-this session, so baseline median/p95 startup render time is not yet measured.
+The remaining gap is operational evidence from a telemetry-enabled installed
+artifact. The existing local install was run on 2026-07-04 with
+`scripts/measure_nsis_startup_render.ps1`; it returned `TIMEOUT` with
+`event_count=0` and successful process-tree cleanup. That installed artifact
+predates this branch's telemetry changes, so baseline median/p95 startup render
+time is not yet measured.
 
 ## Implemented Items
 
@@ -39,7 +43,8 @@ this session, so baseline median/p95 startup render time is not yet measured.
 
 ## Missing Items
 
-- [ ] Installed NSIS exe cold-start baseline was not collected in this session.
+- [ ] Fresh telemetry-enabled installed NSIS exe cold-start baseline was not
+  collected in this session.
 
 ## Changed Items (Deviations from Design)
 
@@ -72,6 +77,7 @@ this session, so baseline median/p95 startup render time is not yet measured.
 
 ## Next Steps
 
-- [ ] Collect installed NSIS startup baseline JSON.
+- [ ] Build and install a fresh NSIS artifact that includes this branch, then
+  collect startup baseline JSON.
 - [ ] Decide the first optimization target from the slowest measured milestone.
 - [ ] Re-run this analysis after baseline collection.

@@ -84,6 +84,9 @@ evidence.
   tree unless `-KeepRunning` is supplied.
 - [ ] `[AC-07]` Installed NSIS cold-start baseline JSON is collected from an
   actual installed exe.
+  - 2026-07-04 check: the existing local install was executed with the
+    measurement script and returned `TIMEOUT` with `event_count=0`. That install
+    predates this branch's telemetry changes, so it is not a valid baseline.
 
 ## 5. Schedule
 
@@ -93,7 +96,7 @@ evidence.
 | Design | 2026-07-04 | Completed |
 | Implementation | 2026-07-04 | Completed |
 | Review | 2026-07-04 | In Progress |
-| Installed baseline | TBD | Pending installed exe |
+| Installed baseline | TBD | Pending fresh telemetry-enabled NSIS install |
 
 ## 6. Risks & Mitigations
 
