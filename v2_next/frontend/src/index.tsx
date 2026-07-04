@@ -4,6 +4,7 @@ import './index.css';
 import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import { GlobalModalProvider } from './shared/context/GlobalModalContext';
 import { ThemeProvider } from './shared/context/ThemeContext';
+import { recordStartupEvent } from './shared/startup/startupTelemetry';
 
 const CHUNK_RECOVERY_STORAGE_KEY = 'smartfactory_chunk_recovery_v1';
 const CHUNK_RECOVERY_COOLDOWN_MS = 30000;
@@ -123,6 +124,10 @@ const LoadingFallback = () => (
 );
 
 console.log("Index.tsx: Booting...");
+void recordStartupEvent('renderer.index-boot', {
+  route: window.location.hash || window.location.pathname,
+  protocol: window.location.protocol,
+});
 
 registerChunkRecoveryHandlers();
 
@@ -132,6 +137,10 @@ const root = ReactDOM.createRoot(
 const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
 
 console.log("Index.tsx: Rendering App...");
+void recordStartupEvent('renderer.index-render', {
+  route: window.location.hash || window.location.pathname,
+  protocol: window.location.protocol,
+});
 root.render(
   <React.StrictMode>
     <GlobalModalProvider>

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-01T01:30:00.000Z",
+  "lastUpdated": "2026-07-04T13:30:50.632Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -18,7 +18,8 @@
     "memory-diagnostics-r10-export-v2",
     "memory-diagnostics-r11-tests-ci",
     "spot-image-evidence-capture",
-    "spot-image-capture-settings-ui"
+    "spot-image-capture-settings-ui",
+    "nsis-startup-render-performance"
   ],
   "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
@@ -1562,6 +1563,47 @@
         "lastUpdated": "2026-07-01T01:30:00.000Z"
       },
       "completedAt": "2026-07-01T01:30:00.000Z"
+    },
+    "nsis-startup-render-performance": {
+      "phase": "act",
+      "matchRate": null,
+      "iterationCount": 1,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-04T13:14:08.923Z",
+          "completedAt": "2026-07-04T13:15:07.546Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-04T13:14:08.923Z",
+          "completedAt": "2026-07-04T13:15:58.814Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-07-04T13:14:08.923Z",
+          "completedAt": "2026-07-04T13:29:58.786Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-07-04T13:14:08.923Z",
+          "completedAt": "2026-07-04T13:30:50.632Z"
+        },
+        {
+          "phase": "report",
+          "status": "active",
+          "createdAt": "2026-07-04T13:14:08.923Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-04T13:14:08.924Z",
+        "lastUpdated": "2026-07-04T13:30:50.632Z"
+      }
     }
   },
   "pipeline": {
@@ -1573,7 +1615,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-06-29T15:20:00.000Z"
+    "lastActivity": "2026-07-04T13:30:50.632Z"
   },
   "history": [
     {
@@ -2470,6 +2512,64 @@
       "phase": "report",
       "matchRate": 100,
       "timestamp": "2026-06-29T15:20:00.000Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-07-04T13:15:07.542Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-07-04T13:15:07.544Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-07-04T13:15:15.209Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-07-04T13:15:58.810Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-07-04T13:15:58.812Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-07-04T13:29:58.783Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-07-04T13:29:58.784Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-07-04T13:30:50.628Z"
+    },
+    {
+      "feature": "nsis-startup-render-performance",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-07-04T13:30:50.629Z"
     }
   ],
   "timeline": [
