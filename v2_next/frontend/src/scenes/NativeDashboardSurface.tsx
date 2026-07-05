@@ -10,7 +10,14 @@ import {
   resolveDashboardItems,
 } from './DashboardSceneModel';
 import { ProfilerProbe } from '../shared/profiling/reactRenderProfiler';
-import { recordDashboardReadyAfterPaint } from '../shared/startup/startupTelemetry';
+import {
+  recordDashboardReadyAfterPaint,
+  recordStartupEventOnce,
+} from '../shared/startup/startupTelemetry';
+
+recordStartupEventOnce('renderer.native-surface-module-evaluated', 'renderer.native-surface-module-evaluated', {
+  surface: 'native',
+});
 
 const TempsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/TempsWidget').then(m => ({ default: m.TempsComponent })));
 const MoldsComponent = React.lazy(() => import('../domains/FacilityData/components/widgets/MoldsWidget').then(m => ({ default: m.MoldsComponent })));
@@ -232,11 +239,23 @@ const NativeDashboardSurfaceComponent = ({
   focusBusy,
   onTimeSeriesVisible,
 }: NativeDashboardSurfaceProps): JSX.Element => {
+  recordStartupEventOnce('renderer.native-surface-render-start', 'renderer.native-surface-render-start', {
+    surface: 'native',
+  });
+
   const items = useMemo(() => resolveDashboardItems(layoutSnapshotLayout), [layoutSnapshotLayout]);
 
   useEffect(() => {
     layoutRef.current = buildLayoutMapFromItems(items);
   }, [items, layoutRef]);
+
+  useEffect(() => {
+    recordStartupEventOnce('renderer.native-surface-render-end', 'renderer.native-surface-render-end', {
+      surface: 'native',
+      widget_count: items.length,
+      has_layout_snapshot: Boolean(layoutSnapshotLayout),
+    });
+  }, [items.length, layoutSnapshotLayout]);
 
   useEffect(() => {
     return recordDashboardReadyAfterPaint('native', {

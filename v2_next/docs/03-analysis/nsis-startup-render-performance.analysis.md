@@ -348,14 +348,84 @@ Decision:
 - Do not ship this split without a different implementation and a larger
   installed-app sample set.
 
+### Batch F: Renderer Startup Breakdown Instrumentation
+
+Measurement date: 2026-07-05 KST
+
+Candidate:
+
+- Instrument startup only. Do not apply another optimization yet.
+- Add renderer milestones for App lazy import, App module evaluation, App render,
+  native dashboard surface lazy import, native surface module evaluation, native
+  surface render, and actual metrics polling interval resolution.
+- Extend `scripts/measure_nsis_startup_render.ps1` to return a
+  `startup_intervals` object so repeated installed-app runs can be compared
+  without post-processing raw local paths or process ids.
+
+Fresh NSIS artifact:
+
+- Installer: `smart-factory-logger-v2 Setup 1.0.11.exe`
+- Installer SHA256:
+  `BC42E43A2F56B7ADF4FE950556F526FE002274F8292CF0D45C7A9507980D2165`
+
+Sanitized Batch F samples:
+
+| Run | Status | dashboard ms | `load-file` -> `index-boot` ms | App import ms | App module eval ms | App render ms | Native import ms | Native render ms | Surface paint gap ms | Polling interval ms | Events | Cleanup |
+|-----|--------|--------------|--------------------------------|---------------|--------------------|---------------|------------------|------------------|----------------------|---------------------|--------|---------|
+| 1 | PASS | 659.8 | 343.6 | 44.7 | 41.4 | 49.4 | 9.1 | 27.3 | 48.8 | 500 | 27 | true |
+| 2 | PASS | 681.7 | 341.0 | 44.2 | 41.9 | 49.3 | 8.6 | 31.3 | 49.9 | 500 | 27 | true |
+| 3 | PASS | 650.7 | 322.7 | 42.7 | 41.7 | 53.2 | 6.7 | 32.7 | 50.1 | 500 | 27 | true |
+| 4 | PASS | 711.8 | 347.9 | 44.9 | 41.4 | 52.7 | 8.0 | 36.9 | 52.2 | 500 | 27 | true |
+| 5 | PASS | 692.3 | 354.5 | 42.7 | 41.6 | 48.9 | 8.8 | 24.9 | 51.1 | 500 | 27 | true |
+
+Batch F summary:
+
+- PASS samples: 5/5
+- Cleanup success: 5/5
+- Required renderer breakdown milestones: 5/5 complete
+- Median `dashboard_ready_elapsed_ms`: 681.7 ms
+- p95 `dashboard_ready_elapsed_ms`: 711.8 ms
+- Median `electron.load-file-start` -> `renderer.index-boot`: 343.6 ms
+- p95 `electron.load-file-start` -> `renderer.index-boot`: 354.5 ms
+- Median App import: 44.2 ms
+- Median App import start -> App module evaluated: 41.6 ms
+- Median App module evaluated -> App import end: 2.3 ms
+- Median App render: 49.4 ms
+- Median native surface import: 8.6 ms
+- Median native surface render: 31.3 ms
+- Median native surface render end -> dashboard ready: 50.1 ms
+- Median `renderer.index-render` -> `renderer.dashboard-ready`: 152.2 ms
+- Metrics polling interval recorded by the dashboard controller: 500 ms
+- p95 method: nearest-rank over five samples
+
+Decision:
+
+- Optimization is still on hold. Batch F proves the new milestones work, but it
+  does not identify a single safe optimization candidate with enough measured
+  headroom to claim a 50 ms installed-app improvement.
+- The dominant measured interval remains `electron.load-file-start` ->
+  `renderer.index-boot`: Batch C median 323.5 ms versus Batch F median
+  343.6 ms. Batch F is an instrumentation branch, not an optimization branch,
+  so this should be treated as continued evidence that pre-`index-boot` asset
+  loading / entry bootstrap needs finer measurement, not as an improvement.
+- App import/module evaluation is now visible at about 44.2 ms median, with most
+  of that in App module evaluation. App render is about 49.4 ms median. Native
+  surface import and render are smaller at about 8.6 ms and 31.3 ms median.
+- Do not retry modulepreload or Settings modal entry split from this evidence.
+  The next optimization attempt should wait until either pre-`index-boot`
+  asset/bootstrap work is measured more directly or a candidate can show a
+  larger installed-app median headroom than this Batch F breakdown.
+
 ## Implemented Items
 
 - [x] Electron main logs `STARTUP` JSON lines with `elapsed_ms`.
 - [x] Electron lifecycle events include process start, app ready, backend spawn,
   window creation, load-file start, DOM ready, did-finish-load, and
   ready-to-show.
-- [x] Renderer events are limited to `renderer.index-boot`,
-  `renderer.index-render`, and `renderer.dashboard-ready`.
+- [x] Renderer events include `renderer.index-boot`, `renderer.index-render`,
+  App import/module/render milestones, native dashboard surface
+  import/module/render milestones, metrics polling interval resolution, and
+  `renderer.dashboard-ready`.
 - [x] Main process validates renderer event names and bounds primitive payloads.
 - [x] Preload exposes `recordStartupEvent` without arbitrary IPC forwarding.
 - [x] Existing memory bridge remains present.
@@ -365,7 +435,8 @@ Decision:
 - [x] Frontend helper handles browser fallback, RAF timeout fallback, and
   deduplicates events.
 - [x] `scripts/measure_nsis_startup_render.ps1` launches an exe, returns
-  dashboard-ready elapsed time as JSON, and reports cleanup status.
+  dashboard-ready elapsed time and startup interval breakdowns as JSON, and
+  reports cleanup status.
 
 ## Missing Items
 
@@ -394,6 +465,8 @@ Decision:
   p95 709.1 ms, cleanup 5/5.
 - [x] Independent verification Batch B: 5 PASS samples, median 664.1 ms, p95
   1106.5 ms, cleanup 5/5.
+- [x] Renderer breakdown Batch F: 5 PASS samples, median 681.7 ms, p95
+  711.8 ms, cleanup 5/5, required renderer milestones 5/5 complete.
 
 ## Recommendations
 
@@ -407,9 +480,12 @@ Decision:
    or bundle composition.
 5. Do not ship the default modulepreload experiment or the Settings modal entry
    split. Both failed the installed NSIS measurement gate.
-6. The next candidate should still target static asset load / renderer
-   bootstrap before `renderer.index-boot`, but it needs a different tactic and a
-   larger installed-app sample set before claiming p95 improvement.
+6. Keep optimization on hold until a candidate has clearer installed-app
+   headroom. Batch F shows App import/module evaluation, App render, and native
+   surface render are each modest slices; the largest interval is still before
+   `renderer.index-boot`.
+7. The next measurement pass should split pre-`renderer.index-boot` work more
+   directly before changing bundle composition again.
 
 ## Next Steps
 
@@ -423,3 +499,7 @@ Decision:
   bootstrap segment.
 - [x] Build and measure the Settings modal entry split in a fresh installed
   NSIS artifact.
+- [x] Add renderer startup breakdown milestones and measure a fresh installed
+  NSIS artifact.
+- [ ] Design a lower-level pre-`renderer.index-boot` measurement before choosing
+  another optimization.

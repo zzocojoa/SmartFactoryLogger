@@ -6,6 +6,7 @@ import { useLastValidNumber } from '../../../shared/hooks/useLastValidNumber';
 import { useSustainedFlag } from '../../../shared/hooks/useSustainedFlag';
 import { useMetricsViewModel } from '../hooks/useMetricsViewModel';
 import type { UseMetricsViewModel } from '../hooks/useMetricsViewModel.types';
+import { recordStartupEventOnce } from '../../../shared/startup/startupTelemetry';
 
 interface MetricsDataControllerProps {
   seriesPaused: boolean;
@@ -68,6 +69,15 @@ const MetricsDataControllerComponent = ({
     ALERT_HOLD_MS
   );
   const spotAlertActive = data?.Computed?.spot_warning ?? spotAlertFallback;
+
+  useEffect(() => {
+    recordStartupEventOnce('renderer.polling-interval-resolved', 'renderer.polling-interval-resolved', {
+      polling_interval_ms: pollingIntervalMs,
+      polling_degraded: pollingDegraded,
+      polling_failure_count: pollingFailureCount,
+      source: 'metrics.pollingIntervalMs',
+    });
+  }, [pollingDegraded, pollingFailureCount, pollingIntervalMs]);
 
   useEffect(() => {
     setTimeSeriesState({

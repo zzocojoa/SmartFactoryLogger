@@ -52,11 +52,11 @@ describe('startupTelemetry', () => {
       recordStartupEvent: recordStartup,
     };
 
-    recordStartupEventOnce('same-key', 'renderer.index-boot', { route: '/first' });
-    recordStartupEventOnce('same-key', 'renderer.index-boot', { route: '/second' });
+    recordStartupEventOnce('same-key', 'renderer.app-import-start', { route: '/first' });
+    recordStartupEventOnce('same-key', 'renderer.app-import-start', { route: '/second' });
 
     expect(recordStartup).toHaveBeenCalledTimes(1);
-    expect(recordStartup).toHaveBeenCalledWith('renderer.index-boot', { route: '/first' });
+    expect(recordStartup).toHaveBeenCalledWith('renderer.app-import-start', { route: '/first' });
   });
 
   it('records dashboard ready with a timeout fallback when animation frames are throttled', () => {
