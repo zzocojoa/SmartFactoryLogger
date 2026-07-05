@@ -562,6 +562,17 @@ export interface ElectronMemorySnapshot {
 export type SmartFactoryStartupEventName =
   | 'renderer.index-boot'
   | 'renderer.index-render'
+  | 'renderer.app-import-start'
+  | 'renderer.app-module-evaluated'
+  | 'renderer.app-import-end'
+  | 'renderer.app-render-start'
+  | 'renderer.polling-interval-resolved'
+  | 'renderer.app-render-end'
+  | 'renderer.native-surface-import-start'
+  | 'renderer.native-surface-module-evaluated'
+  | 'renderer.native-surface-import-end'
+  | 'renderer.native-surface-render-start'
+  | 'renderer.native-surface-render-end'
   | 'renderer.dashboard-ready';
 
 export type SmartFactoryStartupEventPayload = Record<string, string | number | boolean | null | undefined>;

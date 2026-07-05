@@ -9,6 +9,17 @@ const startupOriginNs = process.hrtime.bigint();
 const STARTUP_RENDERER_EVENT_NAMES = new Set([
   'renderer.index-boot',
   'renderer.index-render',
+  'renderer.app-import-start',
+  'renderer.app-module-evaluated',
+  'renderer.app-import-end',
+  'renderer.app-render-start',
+  'renderer.polling-interval-resolved',
+  'renderer.app-render-end',
+  'renderer.native-surface-import-start',
+  'renderer.native-surface-module-evaluated',
+  'renderer.native-surface-import-end',
+  'renderer.native-surface-render-start',
+  'renderer.native-surface-render-end',
   'renderer.dashboard-ready',
 ]);
 const STARTUP_PAYLOAD_MAX_KEYS = 16;

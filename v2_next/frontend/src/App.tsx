@@ -40,7 +40,18 @@ import { useTheme } from './shared/hooks/useThemeContext';
 import { SettingsModalContainer } from './domains/Configuration/components/SettingsModal/SettingsModalContainer';
 
 const DashboardSceneSurface = React.lazy(() => import('./scenes/DashboardSceneSurface').then(m => ({ default: m.DashboardSceneSurface })));
-const NativeDashboardSurface = React.lazy(() => import('./scenes/NativeDashboardSurface').then(m => ({ default: m.NativeDashboardSurface })));
+const NativeDashboardSurface = React.lazy(() => {
+  recordStartupEventOnce('renderer.native-surface-import-start', 'renderer.native-surface-import-start', {
+    surface: 'native',
+  });
+
+  return import('./scenes/NativeDashboardSurface').then((module) => {
+    recordStartupEventOnce('renderer.native-surface-import-end', 'renderer.native-surface-import-end', {
+      surface: 'native',
+    });
+    return { default: module.NativeDashboardSurface };
+  });
+});
 
 import { safeGetItem, safeSetItem, safeRemoveItem } from './shared/utils/safeStorage';
 
@@ -138,8 +149,13 @@ import { useSnapshotManager } from './shared/hooks/useSnapshotManager';
 import { useObservabilityHandlers } from './shared/hooks/useObservabilityHandlers';
 import { useLayoutHandlers } from './shared/hooks/useLayoutHandlers';
 import { ProfilerProbe } from './shared/profiling/reactRenderProfiler';
+import { recordStartupEventOnce } from './shared/startup/startupTelemetry';
+
+recordStartupEventOnce('renderer.app-module-evaluated', 'renderer.app-module-evaluated');
 
 function App() {
+  recordStartupEventOnce('renderer.app-render-start', 'renderer.app-render-start');
+
   const { mode, activeCycle, setMode } = useTheme();
   const modal = useModal();
 
@@ -301,6 +317,12 @@ function App() {
   }, [hasTimeSeriesWidget]);
 
   const intervalSec = Number(settingsForm?.intervalSec ?? '0.2') || 0.2;
+  useEffect(() => {
+    recordStartupEventOnce('renderer.app-render-end', 'renderer.app-render-end', {
+      settings_interval_ms: Math.round(intervalSec * 1000),
+    });
+  }, [intervalSec]);
+
   const dashboardLeaderState = useDashboardStore((state) => (
     settingsOpen ? state.dashboardLeaderState : null
   ));

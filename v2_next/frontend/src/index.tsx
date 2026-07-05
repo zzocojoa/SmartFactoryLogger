@@ -4,7 +4,7 @@ import './index.css';
 import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import { GlobalModalProvider } from './shared/context/GlobalModalContext';
 import { ThemeProvider } from './shared/context/ThemeContext';
-import { recordStartupEvent } from './shared/startup/startupTelemetry';
+import { recordStartupEvent, recordStartupEventOnce } from './shared/startup/startupTelemetry';
 
 const CHUNK_RECOVERY_STORAGE_KEY = 'smartfactory_chunk_recovery_v1';
 const CHUNK_RECOVERY_COOLDOWN_MS = 30000;
@@ -108,8 +108,23 @@ const registerChunkRecoveryHandlers = (): void => {
   });
 };
 
+const resolveStartupRoute = (): string => window.location.hash || window.location.pathname;
+
 // Lazy Components
-const App = lazy(() => import('./App'));
+const App = lazy(() => {
+  recordStartupEventOnce('renderer.app-import-start', 'renderer.app-import-start', {
+    route: resolveStartupRoute(),
+    protocol: window.location.protocol,
+  });
+
+  return import('./App').then((module) => {
+    recordStartupEventOnce('renderer.app-import-end', 'renderer.app-import-end', {
+      route: resolveStartupRoute(),
+      protocol: window.location.protocol,
+    });
+    return module;
+  });
+});
 const Home = lazy(() => import('./pages/Home'));
 const CustomDialog = lazy(() => import('./shared/components/CustomDialog').then(module => ({ default: module.CustomDialog })));
 
@@ -125,7 +140,7 @@ const LoadingFallback = () => (
 
 console.log("Index.tsx: Booting...");
 void recordStartupEvent('renderer.index-boot', {
-  route: window.location.hash || window.location.pathname,
+  route: resolveStartupRoute(),
   protocol: window.location.protocol,
 });
 
@@ -138,7 +153,7 @@ const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter
 
 console.log("Index.tsx: Rendering App...");
 void recordStartupEvent('renderer.index-render', {
-  route: window.location.hash || window.location.pathname,
+  route: resolveStartupRoute(),
   protocol: window.location.protocol,
 });
 root.render(
