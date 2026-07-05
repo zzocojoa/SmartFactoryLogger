@@ -416,6 +416,68 @@ Decision:
   asset/bootstrap work is measured more directly or a candidate can show a
   larger installed-app median headroom than this Batch F breakdown.
 
+### Batch G: Independent PR Verification
+
+Measurement date: 2026-07-05 KST
+
+Verification scope:
+
+- Independently rebuild the frontend production bundle and local NSIS installer
+  from commit `d054533be2796ec2c3b737c49352f4914d3248dd`.
+- Fresh-install the generated NSIS artifact and run
+  `scripts/measure_nsis_startup_render.ps1` five times against the installed
+  executable.
+- Verify `status=PASS`, `cleanup.ok=true`, and
+  `startup_intervals.missing_required_milestones=[]` for every sample.
+- Record only sanitized timing summaries here. Raw local paths and process ids
+  remain in uncommitted temporary measurement files.
+
+Fresh NSIS artifact:
+
+- Installer: `smart-factory-logger-v2 Setup 1.0.11.exe`
+- Installer SHA256:
+  `0EC058095B518EADAC10B7FBB138635AD3BB37A9DBDE49A135CCE430427025E7`
+
+Sanitized Batch G samples:
+
+| Run | Status | dashboard ms | `load-file` -> `index-boot` ms | App import ms | App module eval ms | App render ms | Native import ms | Native render ms | Surface paint gap ms | Polling interval ms | Events | Missing milestones | Cleanup |
+|-----|--------|--------------|--------------------------------|---------------|--------------------|---------------|------------------|------------------|----------------------|---------------------|--------|--------------------|---------|
+| 1 | PASS | 1357.2 | 902.5 | 82.4 | 79.1 | 142.5 | 47.8 | 82.1 | 10.2 | 500 | 27 | 0 | true |
+| 2 | PASS | 726.8 | 383.5 | 45.2 | 44.0 | 55.1 | 10.8 | 31.7 | 57.1 | 500 | 27 | 0 | true |
+| 3 | PASS | 669.6 | 350.4 | 41.2 | 39.5 | 43.4 | 8.5 | 24.9 | 45.0 | 500 | 27 | 0 | true |
+| 4 | PASS | 699.1 | 361.5 | 44.2 | 43.0 | 49.2 | 8.3 | 28.0 | 56.5 | 500 | 27 | 0 | true |
+| 5 | PASS | 642.7 | 331.5 | 38.8 | 37.9 | 45.2 | 8.6 | 23.4 | 47.9 | 500 | 27 | 0 | true |
+
+Batch G summary:
+
+- PASS samples: 5/5
+- Cleanup success: 5/5
+- Required renderer breakdown milestones: 5/5 complete
+- `missing_required_milestones=[]`: 5/5
+- Median `dashboard_ready_elapsed_ms`: 699.1 ms
+- p95 `dashboard_ready_elapsed_ms`: 1357.2 ms
+- Median `electron.load-file-start` -> `renderer.index-boot`: 361.5 ms
+- p95 `electron.load-file-start` -> `renderer.index-boot`: 902.5 ms
+- Median App import: 44.2 ms
+- Median App import start -> App module evaluated: 43.0 ms
+- Median App render: 49.2 ms
+- Median native surface import: 8.6 ms
+- Median native surface render: 28.0 ms
+- Median native surface render end -> dashboard ready: 47.9 ms
+- Metrics polling interval recorded by the dashboard controller: 500 ms
+- p95 method: nearest-rank over five samples
+
+Independent verification decision:
+
+- Merge-ready from the installed-app measurement perspective: the current
+  instrumentation branch produced five PASS samples, no missing required
+  renderer milestones, and successful process cleanup in all five runs.
+- The first Batch G run is a cold-start outlier and keeps p95 volatile at this
+  sample size. Treat the Batch G median as the primary readiness signal and keep
+  p95 as a caveat until a larger sample set is collected.
+- This remains an instrumentation change only. It should not be interpreted as
+  a startup performance improvement.
+
 ## Implemented Items
 
 - [x] Electron main logs `STARTUP` JSON lines with `elapsed_ms`.
@@ -467,6 +529,9 @@ Decision:
   1106.5 ms, cleanup 5/5.
 - [x] Renderer breakdown Batch F: 5 PASS samples, median 681.7 ms, p95
   711.8 ms, cleanup 5/5, required renderer milestones 5/5 complete.
+- [x] Independent PR verification Batch G: 5 PASS samples, median 699.1 ms,
+  p95 1357.2 ms, cleanup 5/5,
+  `startup_intervals.missing_required_milestones=[]` 5/5.
 
 ## Recommendations
 
