@@ -615,6 +615,11 @@ Batch H decision:
   763.1 ms, cleanup 5/5,
   `startup_intervals.missing_required_milestones=[]` 5/5, renderer-clock
   preload-to-boot median 229.5 ms.
+- [x] PR gate installed-app spot check: 1 PASS sample, dashboard ready
+  709.4 ms, event count 30, cleanup ok, required milestone misses 0,
+  `load-file` -> `index-boot` 372.5 ms,
+  `preload-bridge-exposed` -> `index-html-inline-script` 203.6 ms,
+  `index-html-inline-script` -> `index-boot` 23.0 ms.
 
 ## Recommendations
 
