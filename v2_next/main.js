@@ -6,6 +6,8 @@ const fs = require('fs');
 const v8 = require('v8');
 
 const startupOriginNs = process.hrtime.bigint();
+// Software compositing avoids GPU channel setup delaying NSIS cold start render.
+app.disableHardwareAcceleration();
 const STARTUP_RENDERER_EVENT_NAMES = new Set([
   'renderer.preload-start',
   'renderer.preload-bridge-exposed',
