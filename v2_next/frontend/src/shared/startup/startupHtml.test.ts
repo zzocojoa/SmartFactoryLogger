@@ -20,6 +20,15 @@ describe('startup HTML telemetry marker', () => {
     expect(markerIndex).toBeLessThan(moduleEntryIndex);
   });
 
+  it('captures navigation timing fields in the inline marker', () => {
+    const indexHtml = readIndexHtml();
+
+    expect(indexHtml).toContain('getEntriesByType("navigation")');
+    expect(indexHtml).toContain('navigation_response_end_to_inline_ms');
+    expect(indexHtml).toContain('navigation_dom_interactive_ms');
+    expect(indexHtml).not.toContain('window.location.href');
+  });
+
   it('omits CRA-era PWA resources from the startup head', () => {
     const indexHtml = readIndexHtml();
 

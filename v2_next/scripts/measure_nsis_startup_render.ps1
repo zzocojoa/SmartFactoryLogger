@@ -165,6 +165,24 @@ function Get-StartupPayloadIntervalMs {
     return [math]::Round(($end - $start), 1)
 }
 
+function Get-StartupPayloadDeltaMs {
+    param(
+        [object[]]$Events,
+        [string]$EventName,
+        [string]$StartPayloadKey,
+        [string]$EndPayloadKey
+    )
+
+    $start = Get-StartupPayloadNumber -Events $Events -EventName $EventName -PayloadKey $StartPayloadKey
+    $end = Get-StartupPayloadNumber -Events $Events -EventName $EventName -PayloadKey $EndPayloadKey
+
+    if ($null -eq $start -or $null -eq $end) {
+        return $null
+    }
+
+    return [math]::Round(($end - $start), 1)
+}
+
 function Get-StartupPayloadValue {
     param(
         [object[]]$Events,
@@ -230,6 +248,11 @@ function Get-StartupIntervals {
 
     return [pscustomobject]@{
         load_file_to_preload_start_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.load-file-start" -EndEvent "renderer.preload-start"
+        load_file_to_did_start_navigation_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.load-file-start" -EndEvent "electron.webcontents-did-start-navigation"
+        did_start_navigation_to_did_start_loading_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.webcontents-did-start-navigation" -EndEvent "electron.webcontents-did-start-loading"
+        did_start_navigation_to_preload_start_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.webcontents-did-start-navigation" -EndEvent "renderer.preload-start"
+        did_start_navigation_to_index_html_inline_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.webcontents-did-start-navigation" -EndEvent "renderer.index-html-inline-script"
+        did_start_loading_to_index_html_inline_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.webcontents-did-start-loading" -EndEvent "renderer.index-html-inline-script"
         preload_start_to_bridge_exposed_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.preload-start" -EndEvent "renderer.preload-bridge-exposed"
         preload_bridge_to_index_html_inline_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.preload-bridge-exposed" -EndEvent "renderer.index-html-inline-script"
         index_html_inline_to_index_boot_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.index-html-inline-script" -EndEvent "renderer.index-boot"
@@ -237,10 +260,17 @@ function Get-StartupIntervals {
         preload_start_to_index_boot_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.preload-start" -EndEvent "renderer.index-boot"
         load_file_to_index_boot_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.load-file-start" -EndEvent "renderer.index-boot"
         index_boot_to_index_render_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.index-boot" -EndEvent "renderer.index-render"
+        main_frame_finish_to_did_finish_load_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.webcontents-did-frame-finish-load" -EndEvent "electron.webcontents-did-finish-load"
+        did_navigate_to_did_finish_load_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.webcontents-did-navigate" -EndEvent "electron.webcontents-did-finish-load"
         renderer_clock_preload_start_to_bridge_exposed_ms = Get-StartupPayloadIntervalMs -Events $Events -StartEvent "renderer.preload-start" -EndEvent "renderer.preload-bridge-exposed" -PayloadKey "renderer_epoch_ms"
         renderer_clock_preload_bridge_to_index_html_inline_ms = Get-StartupPayloadIntervalMs -Events $Events -StartEvent "renderer.preload-bridge-exposed" -EndEvent "renderer.index-html-inline-script" -PayloadKey "renderer_epoch_ms"
         renderer_clock_index_html_inline_to_index_boot_ms = Get-StartupPayloadIntervalMs -Events $Events -StartEvent "renderer.index-html-inline-script" -EndEvent "renderer.index-boot" -PayloadKey "renderer_epoch_ms"
         renderer_clock_preload_start_to_index_boot_ms = Get-StartupPayloadIntervalMs -Events $Events -StartEvent "renderer.preload-start" -EndEvent "renderer.index-boot" -PayloadKey "renderer_epoch_ms"
+        index_html_navigation_start_to_inline_ms = Get-StartupPayloadDeltaMs -Events $Events -EventName "renderer.index-html-inline-script" -StartPayloadKey "navigation_start_ms" -EndPayloadKey "renderer_now_ms"
+        index_html_fetch_start_to_response_end_ms = Get-StartupPayloadDeltaMs -Events $Events -EventName "renderer.index-html-inline-script" -StartPayloadKey "navigation_fetch_start_ms" -EndPayloadKey "navigation_response_end_ms"
+        index_html_response_start_to_response_end_ms = Get-StartupPayloadDeltaMs -Events $Events -EventName "renderer.index-html-inline-script" -StartPayloadKey "navigation_response_start_ms" -EndPayloadKey "navigation_response_end_ms"
+        index_html_response_end_to_inline_ms = Get-StartupPayloadValue -Events $Events -EventName "renderer.index-html-inline-script" -PayloadKey "navigation_response_end_to_inline_ms"
+        index_html_dom_interactive_at_inline_ms = Get-StartupPayloadValue -Events $Events -EventName "renderer.index-html-inline-script" -PayloadKey "navigation_dom_interactive_ms"
         app_import_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.app-import-start" -EndEvent "renderer.app-import-end"
         app_import_to_module_eval_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.app-import-start" -EndEvent "renderer.app-module-evaluated"
         app_module_eval_to_import_end_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.app-module-evaluated" -EndEvent "renderer.app-import-end"
