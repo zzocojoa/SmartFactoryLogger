@@ -122,6 +122,49 @@ function Get-StartupIntervalMs {
     return [math]::Round(([double]$end.elapsed_ms - [double]$start.elapsed_ms), 1)
 }
 
+function Get-StartupPayloadNumber {
+    param(
+        [object[]]$Events,
+        [string]$EventName,
+        [string]$PayloadKey
+    )
+
+    $value = Get-StartupPayloadValue -Events $Events -EventName $EventName -PayloadKey $PayloadKey
+    if ($null -eq $value) {
+        return $null
+    }
+
+    try {
+        $number = [double]$value
+    } catch {
+        return $null
+    }
+
+    if ([double]::IsNaN($number) -or [double]::IsInfinity($number)) {
+        return $null
+    }
+
+    return $number
+}
+
+function Get-StartupPayloadIntervalMs {
+    param(
+        [object[]]$Events,
+        [string]$StartEvent,
+        [string]$EndEvent,
+        [string]$PayloadKey
+    )
+
+    $start = Get-StartupPayloadNumber -Events $Events -EventName $StartEvent -PayloadKey $PayloadKey
+    $end = Get-StartupPayloadNumber -Events $Events -EventName $EndEvent -PayloadKey $PayloadKey
+
+    if ($null -eq $start -or $null -eq $end) {
+        return $null
+    }
+
+    return [math]::Round(($end - $start), 1)
+}
+
 function Get-StartupPayloadValue {
     param(
         [object[]]$Events,
@@ -157,10 +200,13 @@ function Get-MissingStartupMilestones {
     return ,([string[]]$missing)
 }
 
-function Get-StartupIntervals {
-    param([object[]]$Events)
-
-    $requiredMilestones = @(
+function Get-RequiredStartupMilestones {
+    return @(
+        "renderer.preload-start",
+        "renderer.preload-bridge-exposed",
+        "renderer.index-html-inline-script",
+        "renderer.index-boot",
+        "renderer.index-render",
         "renderer.app-import-start",
         "renderer.app-module-evaluated",
         "renderer.app-import-end",
@@ -171,12 +217,30 @@ function Get-StartupIntervals {
         "renderer.native-surface-module-evaluated",
         "renderer.native-surface-import-end",
         "renderer.native-surface-render-start",
-        "renderer.native-surface-render-end"
+        "renderer.native-surface-render-end",
+        "renderer.dashboard-ready"
     )
+}
+
+function Get-StartupIntervals {
+    param([object[]]$Events)
+
+    $requiredMilestones = Get-RequiredStartupMilestones
+    $missingRequiredMilestones = Get-MissingStartupMilestones -Events $Events -Names $requiredMilestones
 
     return [pscustomobject]@{
+        load_file_to_preload_start_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.load-file-start" -EndEvent "renderer.preload-start"
+        preload_start_to_bridge_exposed_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.preload-start" -EndEvent "renderer.preload-bridge-exposed"
+        preload_bridge_to_index_html_inline_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.preload-bridge-exposed" -EndEvent "renderer.index-html-inline-script"
+        index_html_inline_to_index_boot_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.index-html-inline-script" -EndEvent "renderer.index-boot"
+        load_file_to_index_html_inline_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.load-file-start" -EndEvent "renderer.index-html-inline-script"
+        preload_start_to_index_boot_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.preload-start" -EndEvent "renderer.index-boot"
         load_file_to_index_boot_ms = Get-StartupIntervalMs -Events $Events -StartEvent "electron.load-file-start" -EndEvent "renderer.index-boot"
         index_boot_to_index_render_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.index-boot" -EndEvent "renderer.index-render"
+        renderer_clock_preload_start_to_bridge_exposed_ms = Get-StartupPayloadIntervalMs -Events $Events -StartEvent "renderer.preload-start" -EndEvent "renderer.preload-bridge-exposed" -PayloadKey "renderer_epoch_ms"
+        renderer_clock_preload_bridge_to_index_html_inline_ms = Get-StartupPayloadIntervalMs -Events $Events -StartEvent "renderer.preload-bridge-exposed" -EndEvent "renderer.index-html-inline-script" -PayloadKey "renderer_epoch_ms"
+        renderer_clock_index_html_inline_to_index_boot_ms = Get-StartupPayloadIntervalMs -Events $Events -StartEvent "renderer.index-html-inline-script" -EndEvent "renderer.index-boot" -PayloadKey "renderer_epoch_ms"
+        renderer_clock_preload_start_to_index_boot_ms = Get-StartupPayloadIntervalMs -Events $Events -StartEvent "renderer.preload-start" -EndEvent "renderer.index-boot" -PayloadKey "renderer_epoch_ms"
         app_import_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.app-import-start" -EndEvent "renderer.app-import-end"
         app_import_to_module_eval_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.app-import-start" -EndEvent "renderer.app-module-evaluated"
         app_module_eval_to_import_end_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.app-module-evaluated" -EndEvent "renderer.app-import-end"
@@ -188,7 +252,7 @@ function Get-StartupIntervals {
         native_surface_render_end_to_dashboard_ready_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.native-surface-render-end" -EndEvent "renderer.dashboard-ready"
         index_render_to_dashboard_ready_ms = Get-StartupIntervalMs -Events $Events -StartEvent "renderer.index-render" -EndEvent "renderer.dashboard-ready"
         polling_interval_ms = Get-StartupPayloadValue -Events $Events -EventName "renderer.polling-interval-resolved" -PayloadKey "polling_interval_ms"
-        missing_required_milestones = Get-MissingStartupMilestones -Events $Events -Names $requiredMilestones
+        missing_required_milestones = $missingRequiredMilestones
     }
 }
 
@@ -266,19 +330,32 @@ while ((Get-Date) -lt $deadline) {
         $dashboardReady = $logSnapshot.events | Where-Object { $_.event -eq "renderer.dashboard-ready" } | Select-Object -Last 1
         if ($null -ne $dashboardReady) {
             $cleanup = Stop-LaunchedProcessTree -Process $process -KeepProcessRunning:$KeepRunning
+            $startupIntervals = Get-StartupIntervals -Events $logSnapshot.events
+            $missingRequiredMilestones = Get-MissingStartupMilestones -Events $logSnapshot.events -Names (Get-RequiredStartupMilestones)
+            $missingRequiredMilestoneCount = if ($null -eq $missingRequiredMilestones) {
+                0
+            } elseif ($missingRequiredMilestones -is [array]) {
+                $missingRequiredMilestones.Count
+            } else {
+                1
+            }
+            $status = if ($missingRequiredMilestoneCount -eq 0) { "PASS" } else { "MISSING_MILESTONES" }
             [pscustomobject]@{
-                status = "PASS"
+                status = $status
                 exe_path = $resolvedExePath
                 process_id = $process.Id
                 started_at_utc = $startedAtUtc.ToString("o")
                 log_path = $logSnapshot.log_path
                 dashboard_ready_elapsed_ms = $dashboardReady.elapsed_ms
                 event_count = $logSnapshot.events.Count
-                startup_intervals = Get-StartupIntervals -Events $logSnapshot.events
+                startup_intervals = $startupIntervals
                 cleanup = $cleanup
                 events = $logSnapshot.events
             } | ConvertTo-Json -Depth 6
-            exit 0
+            if ($status -eq "PASS") {
+                exit 0
+            }
+            exit 1
         }
     }
 

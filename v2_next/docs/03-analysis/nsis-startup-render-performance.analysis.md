@@ -478,6 +478,79 @@ Independent verification decision:
 - This remains an instrumentation change only. It should not be interpreted as
   a startup performance improvement.
 
+### Batch H: Pre-index-boot Low-level Instrumentation
+
+Measurement date: 2026-07-05 KST
+
+Measurement scope:
+
+- Add renderer-side timing payloads to startup events so main-process receipt
+  timing can be compared with renderer clock timing.
+- Add pre-`renderer.index-boot` milestones:
+  `renderer.preload-start`, `renderer.preload-bridge-exposed`, and
+  `renderer.index-html-inline-script`.
+- Tighten the NSIS measurement gate so a run that reaches
+  `renderer.dashboard-ready` but misses required milestones returns
+  `status=MISSING_MILESTONES` with a non-zero exit code.
+- Record only sanitized timing summaries here. Raw local paths, process ids,
+  and temporary measurement output remain uncommitted.
+
+Fresh NSIS artifact:
+
+- Installer: `smart-factory-logger-v2 Setup 1.0.11.exe`
+- Installer SHA256:
+  `6E92711FFC3726D30A565030939127387866F548C0B6D5C57BB57FB393972709`
+
+Sanitized Batch H samples:
+
+| Run | Status | dashboard ms | `load-file` -> preload ms | preload -> bridge ms | bridge -> HTML inline ms | HTML inline -> `index-boot` ms | renderer clock preload -> boot ms | `load-file` -> `index-boot` ms | Events | Missing milestones | Cleanup |
+|-----|--------|--------------|----------------------------|----------------------|--------------------------|--------------------------------|-----------------------------------|--------------------------------|--------|--------------------|---------|
+| 1 | PASS | 763.1 | 166.3 | 0.9 | 217.1 | 21.0 | 239.1 | 405.3 | 30 | 0 | true |
+| 2 | PASS | 708.5 | 139.7 | 1.5 | 212.7 | 21.0 | 235.2 | 374.9 | 30 | 0 | true |
+| 3 | PASS | 751.6 | 162.5 | 1.0 | 208.3 | 20.1 | 229.5 | 391.9 | 30 | 0 | true |
+| 4 | PASS | 666.7 | 128.1 | 0.9 | 189.1 | 21.1 | 211.1 | 339.2 | 30 | 0 | true |
+| 5 | PASS | 723.4 | 141.9 | 0.8 | 202.6 | 20.1 | 223.5 | 365.4 | 30 | 0 | true |
+
+Batch H summary:
+
+- PASS samples: 5/5
+- Cleanup success: 5/5
+- Required pre-index and renderer breakdown milestones: 5/5 complete
+- `missing_required_milestones=[]`: 5/5
+- Median `dashboard_ready_elapsed_ms`: 723.4 ms
+- p95 `dashboard_ready_elapsed_ms`: 763.1 ms
+- Median `electron.load-file-start` -> `renderer.preload-start`: 141.9 ms
+- Median `renderer.preload-start` -> `renderer.preload-bridge-exposed`:
+  0.9 ms
+- Median `renderer.preload-bridge-exposed` ->
+  `renderer.index-html-inline-script`: 208.3 ms
+- Median `renderer.index-html-inline-script` -> `renderer.index-boot`:
+  21.0 ms
+- Median renderer-clock `renderer.preload-start` ->
+  `renderer.index-boot`: 229.5 ms
+- Median `electron.load-file-start` -> `renderer.index-boot`: 374.9 ms
+- p95 `electron.load-file-start` -> `renderer.index-boot`: 405.3 ms
+- p95 method: nearest-rank over five samples
+
+Batch H decision:
+
+- Measurement gate passed: five installed-app samples reached dashboard ready,
+  reported no missing required milestones, and cleaned up successfully.
+- The dominant newly measured pre-index segment is
+  `renderer.preload-bridge-exposed` -> `renderer.index-html-inline-script`
+  at 208.3 ms median. This likely includes file URL HTML/resource parsing
+  before the module script body starts, but this remains a measurement result,
+  not a confirmed optimization target.
+- `renderer.index-html-inline-script` -> `renderer.index-boot` is only
+  21.0 ms median, so the previous pre-`index-boot` gap is not mostly module
+  body work after the inline script.
+- Renderer-clock `renderer.preload-start` -> `renderer.index-boot` is
+  229.5 ms median, which helps separate renderer-side timeline from
+  main-process IPC receipt timing.
+- Do not restart modulepreload or Settings split work from this evidence. The
+  next investigation should target lower-level HTML/resource parse or file URL
+  resource loading visibility before another optimization attempt.
+
 ## Implemented Items
 
 - [x] Electron main logs `STARTUP` JSON lines with `elapsed_ms`.
@@ -488,6 +561,10 @@ Independent verification decision:
   App import/module/render milestones, native dashboard surface
   import/module/render milestones, metrics polling interval resolution, and
   `renderer.dashboard-ready`.
+- [x] Pre-index renderer events include preload start, preload bridge exposure,
+  and the inline HTML script before the module entry body starts.
+- [x] Renderer startup event payloads include renderer clock timing fields for
+  same-clock interval analysis.
 - [x] Main process validates renderer event names and bounds primitive payloads.
 - [x] Preload exposes `recordStartupEvent` without arbitrary IPC forwarding.
 - [x] Existing memory bridge remains present.
@@ -499,6 +576,8 @@ Independent verification decision:
 - [x] `scripts/measure_nsis_startup_render.ps1` launches an exe, returns
   dashboard-ready elapsed time and startup interval breakdowns as JSON, and
   reports cleanup status.
+- [x] The NSIS measurement script fails with `MISSING_MILESTONES` when
+  dashboard-ready is observed without the required startup milestone set.
 
 ## Missing Items
 
@@ -532,6 +611,10 @@ Independent verification decision:
 - [x] Independent PR verification Batch G: 5 PASS samples, median 699.1 ms,
   p95 1357.2 ms, cleanup 5/5,
   `startup_intervals.missing_required_milestones=[]` 5/5.
+- [x] Pre-index-boot Batch H: 5 PASS samples, median 723.4 ms, p95
+  763.1 ms, cleanup 5/5,
+  `startup_intervals.missing_required_milestones=[]` 5/5, renderer-clock
+  preload-to-boot median 229.5 ms.
 
 ## Recommendations
 
@@ -546,11 +629,10 @@ Independent verification decision:
 5. Do not ship the default modulepreload experiment or the Settings modal entry
    split. Both failed the installed NSIS measurement gate.
 6. Keep optimization on hold until a candidate has clearer installed-app
-   headroom. Batch F shows App import/module evaluation, App render, and native
-   surface render are each modest slices; the largest interval is still before
-   `renderer.index-boot`.
-7. The next measurement pass should split pre-`renderer.index-boot` work more
-   directly before changing bundle composition again.
+   headroom. Batch H shows the largest newly measured pre-index segment is
+   before the inline HTML script reaches the module entry body.
+7. Investigate lower-level HTML/resource parse or file URL resource loading
+   visibility before changing bundle composition again.
 
 ## Next Steps
 
@@ -566,5 +648,7 @@ Independent verification decision:
   NSIS artifact.
 - [x] Add renderer startup breakdown milestones and measure a fresh installed
   NSIS artifact.
-- [ ] Design a lower-level pre-`renderer.index-boot` measurement before choosing
-  another optimization.
+- [x] Design and run a lower-level pre-`renderer.index-boot` measurement before
+  choosing another optimization.
+- [ ] Investigate HTML/resource parse and file URL resource loading visibility
+  before the inline HTML script runs.

@@ -26,6 +26,33 @@ const resolveRoute = (): string => {
   return hash || window.location.pathname || '/';
 };
 
+const createRendererTimingPayload = (
+  payload: SmartFactoryStartupEventPayload = {}
+): SmartFactoryStartupEventPayload => {
+  if (
+    typeof payload.renderer_time_origin_ms === 'number' &&
+    typeof payload.renderer_now_ms === 'number' &&
+    typeof payload.renderer_epoch_ms === 'number'
+  ) {
+    return payload;
+  }
+
+  if (
+    typeof window.performance?.now !== 'function' ||
+    typeof window.performance.timeOrigin !== 'number'
+  ) {
+    return payload;
+  }
+
+  const rendererNowMs = window.performance.now();
+  return {
+    ...payload,
+    renderer_time_origin_ms: Math.round(window.performance.timeOrigin * 10) / 10,
+    renderer_now_ms: Math.round(rendererNowMs * 10) / 10,
+    renderer_epoch_ms: Math.round((window.performance.timeOrigin + rendererNowMs) * 10) / 10,
+  };
+};
+
 export const recordStartupEvent = async (
   name: SmartFactoryStartupEventName,
   payload?: SmartFactoryStartupEventPayload
@@ -36,7 +63,7 @@ export const recordStartupEvent = async (
   }
 
   try {
-    return await bridge.recordStartupEvent(name, payload);
+    return await bridge.recordStartupEvent(name, createRendererTimingPayload(payload));
   } catch (error) {
     console.warn('Startup telemetry event failed', error);
     return { ok: false, reason: 'invoke_failed' };

@@ -41,7 +41,15 @@ describe('startupTelemetry', () => {
 
     const result = await recordStartupEvent('renderer.index-render', { protocol: 'file:' });
 
-    expect(recordStartup).toHaveBeenCalledWith('renderer.index-render', { protocol: 'file:' });
+    expect(recordStartup).toHaveBeenCalledWith(
+      'renderer.index-render',
+      expect.objectContaining({
+        protocol: 'file:',
+        renderer_time_origin_ms: expect.any(Number),
+        renderer_now_ms: expect.any(Number),
+        renderer_epoch_ms: expect.any(Number),
+      })
+    );
     expect(result).toEqual({ ok: true });
   });
 
@@ -56,7 +64,15 @@ describe('startupTelemetry', () => {
     recordStartupEventOnce('same-key', 'renderer.app-import-start', { route: '/second' });
 
     expect(recordStartup).toHaveBeenCalledTimes(1);
-    expect(recordStartup).toHaveBeenCalledWith('renderer.app-import-start', { route: '/first' });
+    expect(recordStartup).toHaveBeenCalledWith(
+      'renderer.app-import-start',
+      expect.objectContaining({
+        route: '/first',
+        renderer_time_origin_ms: expect.any(Number),
+        renderer_now_ms: expect.any(Number),
+        renderer_epoch_ms: expect.any(Number),
+      })
+    );
   });
 
   it('records dashboard ready with a timeout fallback when animation frames are throttled', () => {
