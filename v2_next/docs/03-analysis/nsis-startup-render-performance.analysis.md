@@ -884,3 +884,85 @@ Operational notes:
 - After the smoke run, the installed app was restored from the baseline NSIS
   installer backup; installed `resources/frontend/dist/index.html` no longer had
   the visibility payload and `app.asar` was 20052 bytes.
+
+## 2026-07-06 PR #144 GPU-Off Success
+
+PR #144 merged the first accepted startup optimization:
+`app.disableHardwareAcceleration()` is called before Electron app readiness.
+The change is intentionally scoped to Electron process startup and does not
+change renderer code, preload IPC, backend startup ordering, packaging layout,
+or NSIS installer behavior.
+
+Accepted candidate:
+
+- Commit: `8fa63625f401cc1cace01d8653132b5772542ffc`
+- PR: `#144`
+- Variant: disable Electron hardware acceleration before app readiness.
+- Rationale: Chromium GPU channel setup was identified in startup trace
+  evidence as part of the renderer/preload startup delay. Software compositing
+  avoids that setup path during the NSIS installed-app cold start.
+
+Clean baseline versus final candidate:
+
+| Metric | Clean baseline median / p95 | Final candidate median / p95 | Decision |
+| --- | ---: | ---: | --- |
+| `load_file_to_index_html_inline_ms` | 315.2 / 336.8 ms | 164.8 / 200.6 ms | PASS: median improved 150.4 ms, about 47.7%, and p95 improved. |
+| `preload_bridge_to_index_html_inline_ms` | 188.7 / 204.8 ms | 31.6 / 45.9 ms | PASS: largest guard interval improved. |
+| `dashboard_ready_elapsed_ms` | 674.4 / 709.0 ms | 510.6 / 566.5 ms | PASS: dashboard-ready median and p95 improved. |
+| `load_file_to_preload_start_ms` | 129.6 / 141.7 ms | 130.5 / 169.9 ms | WATCH: median is effectively flat; p95 rose but did not block the primary or dashboard gates. |
+
+Measurement gate:
+
+- Clean baseline: installed NSIS app, 20 samples, PASS 20/20, cleanup 20/20,
+  missing required milestones 0.
+- Final candidate: rebuilt and reinstalled from current source, 20 samples,
+  PASS 20/20, cleanup 20/20, missing required milestones 0.
+- Final candidate event count was stable at 34 startup events per sample.
+- The generated verification installer SHA256 was
+  `11A453F7FC5345BF9A527A0A82636D93B7DCC85B3D2A15BBF1EF91892BA8F5CB`.
+
+Equivalent installed-app spot check:
+
+- Date: 2026-07-06 KST.
+- Environment: local Windows desktop using the generated NSIS installer as an
+  equivalent installed deployment artifact, not a production deployment.
+- Silent install exit code: 0.
+- Installed layout: `smart-factory.exe` exists, `resources/frontend/dist`
+  exists, `resources/app.asar` remains small at 21502 bytes, and there is no
+  unpacked `resources/app` directory.
+- Startup script with `-KeepRunning` returned PASS, reported dashboard-ready,
+  and had missing required milestones 0.
+- Visual spot check result: PASS. The dashboard window rendered the header,
+  status pills, KPI cards, SPOT temperature gauge, Mold Zone cards, environment
+  cards, SPOT camera panel, Operator Check panel, and floating chat control.
+  No blank white renderer, layout collapse, unreadable text, or obvious
+  GPU-off rendering artifact was observed.
+- After the spot check, all `smart-factory` and `SmartFactoryBackend`
+  processes were stopped; residual process count was 0.
+
+Operational trade-off:
+
+- Disabling hardware acceleration can change rendering behavior on specific
+  GPUs or drivers, especially for WebGL, canvas-heavy views, video/camera
+  panels, or driver-specific text compositing.
+- The current dashboard spot check did not show a visible regression, but this
+  remains the main operational risk to confirm on the target server display.
+
+Rollback:
+
+- Source rollback before release: revert commit
+  `8fa63625f401cc1cace01d8653132b5772542ffc` or revert PR #144.
+- Installed rollback: reinstall the previous accepted NSIS installer after the
+  source rollback build, or reinstall the known previous installer artifact.
+- No database migration, production data change, or config migration is tied to
+  this optimization.
+
+Operational guidance:
+
+- Treat PR #144 as the accepted startup optimization for the current primary
+  metric.
+- Do not remove `app.disableHardwareAcceleration()` without re-running the
+  installed-app 20-sample startup gate.
+- Before production rollout, perform one final server-PC spot check against the
+  actual monitor/GPU path, focusing on dashboard cards, charts/gauges, SPOT
+  camera display, modal/menu rendering, and text clarity.
