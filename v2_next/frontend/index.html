@@ -2,43 +2,6 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="/favicon.ico" />
-    <link rel="icon" type="image/png" href="/logo192.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
-    <meta
-      name="description"
-      content="Web site created using create-react-app"
-    />
-    <link rel="apple-touch-icon" href="/logo192.png" />
-    <link rel="manifest" href="/manifest.json" />
-    <script>
-      window.grafanaBootData = {
-        settings: {
-          timezone: "browser",
-          buildInfo: {
-            version: "1.0.0"
-          },
-          featureToggles: {}
-        },
-        user: {
-          id: 1,
-          isSignedIn: true,
-          orgId: 1,
-          orgName: "Main Org",
-          locale: "en-US",
-          isGrafanaAdmin: true,
-          theme: "dark",
-          localeFormatPreference: "browser"
-        },
-        navTree: []
-      };
-    </script>
-    <title>창녕 2호기 Smart Factory</title>
-  </head>
-  <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
     <script>
       (function () {
         var bridge = window.smartFactoryElectron;
@@ -66,6 +29,40 @@
         }
       })();
     </script>
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="Web site created using create-react-app"
+    />
+    <script>
+      window.grafanaBootData = {
+        settings: {
+          timezone: "browser",
+          buildInfo: {
+            version: "1.0.0"
+          },
+          featureToggles: {}
+        },
+        user: {
+          id: 1,
+          isSignedIn: true,
+          orgId: 1,
+          orgName: "Main Org",
+          locale: "en-US",
+          isGrafanaAdmin: true,
+          theme: "dark",
+          localeFormatPreference: "browser"
+        },
+        navTree: []
+      };
+    </script>
+    <title>창녕 2호기 Smart Factory</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
     <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>
