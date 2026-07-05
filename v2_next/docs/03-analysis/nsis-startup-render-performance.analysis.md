@@ -657,3 +657,54 @@ Batch H decision:
   choosing another optimization.
 - [ ] Investigate HTML/resource parse and file URL resource loading visibility
   before the inline HTML script runs.
+
+## 2026-07-05 Negative Experiment Results
+
+These results document rejected startup experiments so they are not repeated as
+candidate fixes for the current primary metric:
+`load_file_to_index_html_inline_ms`. All rows use installed NSIS app samples,
+20 runs per baseline and variant, with `PASS 20/20`, cleanup `20/20`, and no
+missing required startup milestones.
+Provenance: comparison batches were captured with the local installed-app
+startup measurement harness immediately after each experiment; raw local paths
+and logs are intentionally omitted.
+
+| Experiment | Variant summary | Baseline `load_file_to_index_html_inline_ms` median / p95 | Variant `load_file_to_index_html_inline_ms` median / p95 | Baseline `dashboard_ready_elapsed_ms` median / p95 | Variant `dashboard_ready_elapsed_ms` median / p95 | Result | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
+| backend deferral | Delayed backend spawn until `renderer.index-html-inline-script`, with a 1500 ms fallback. | 351.4 / 406.5 ms | 352.5 / 401.4 ms | 720.0 / 811.3 ms | 689.8 / 783.5 ms | FAIL | Primary median regressed by 1.1 ms. Dashboard median improved, but the experiment did not improve the selected primary metric. |
+| loadURL | Replaced `BrowserWindow.loadFile()` with `loadURL(pathToFileURL(indexPath).toString())` while preserving the dashboard hash route. | 347.0 / 436.3 ms | 379.0 / 431.0 ms | 717.3 / 856.6 ms | 765.6 / 838.8 ms | FAIL | Primary median regressed by 32.0 ms and dashboard median regressed by 48.3 ms. |
+| asar | Moved `frontend/dist` from `extraResources` into `app.asar` and loaded the packaged index from the app archive. | 380.8 / 437.4 ms | 392.8 / 507.2 ms | 762.8 / 854.5 ms | 787.3 / 936.7 ms | FAIL | Primary median regressed by 12.0 ms and primary p95 regressed by 69.8 ms. |
+
+Rollback state:
+
+- backend deferral source changes were discarded with `git restore -- main.js`.
+- loadURL source changes were discarded with `git restore -- main.js`, then the
+  clean installed app layout was restored by reinstalling the baseline NSIS
+  artifact.
+- asar source changes were discarded with
+  `git restore -- main.js package.json`, then the clean installed app layout was
+  restored by rebuilding and reinstalling the baseline NSIS artifact.
+
+Sanitized asar layout evidence:
+
+- Baseline installed layout kept `resources/frontend/dist/index.html` outside
+  `app.asar`; `app.asar` was approximately 20 KB.
+- Variant layout placed `frontend/dist/index.html` inside `app.asar`; the
+  archive grew to approximately 3.37 MB and runtime logs confirmed loading from
+  `app.asar/frontend/dist/index.html`.
+- After rollback, the installed layout again had
+  `resources/frontend/dist/index.html` outside the archive and a small
+  baseline-sized `app.asar`.
+
+Operational guidance:
+
+- Do not repeat backend deferral, loadURL, or asar packaging as PR candidates
+  for improving `load_file_to_index_html_inline_ms`.
+- If `dashboard_ready_elapsed_ms` becomes the explicit primary metric in a
+  future task, backend deferral may be reconsidered separately because it
+  improved dashboard median in this sample while still failing the current
+  primary metric.
+- The next investigation should target measurement visibility around Electron
+  navigation, Chromium renderer startup, file URL HTML/resource parsing, and the
+  `renderer.preload-bridge-exposed` to `renderer.index-html-inline-script`
+  interval before attempting another startup-ordering or bundle-layout change.
