@@ -7,6 +7,9 @@ const v8 = require('v8');
 
 const startupOriginNs = process.hrtime.bigint();
 const STARTUP_RENDERER_EVENT_NAMES = new Set([
+  'renderer.preload-start',
+  'renderer.preload-bridge-exposed',
+  'renderer.index-html-inline-script',
   'renderer.index-boot',
   'renderer.index-render',
   'renderer.app-import-start',

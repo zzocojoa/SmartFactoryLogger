@@ -560,6 +560,9 @@ export interface ElectronMemorySnapshot {
 }
 
 export type SmartFactoryStartupEventName =
+  | 'renderer.preload-start'
+  | 'renderer.preload-bridge-exposed'
+  | 'renderer.index-html-inline-script'
   | 'renderer.index-boot'
   | 'renderer.index-render'
   | 'renderer.app-import-start'

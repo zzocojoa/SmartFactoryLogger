@@ -39,6 +39,33 @@
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
+    <script>
+      (function () {
+        var bridge = window.smartFactoryElectron;
+        if (!bridge || typeof bridge.recordStartupEvent !== "function") {
+          return;
+        }
+        var payload = {
+          document_ready_state: document.readyState,
+          route: window.location.hash || window.location.pathname || "/",
+          protocol: window.location.protocol
+        };
+        if (
+          window.performance &&
+          typeof window.performance.now === "function" &&
+          typeof window.performance.timeOrigin === "number"
+        ) {
+          var rendererNowMs = window.performance.now();
+          payload.renderer_time_origin_ms = Math.round(window.performance.timeOrigin * 10) / 10;
+          payload.renderer_now_ms = Math.round(rendererNowMs * 10) / 10;
+          payload.renderer_epoch_ms = Math.round((window.performance.timeOrigin + rendererNowMs) * 10) / 10;
+        }
+        var result = bridge.recordStartupEvent("renderer.index-html-inline-script", payload);
+        if (result && typeof result.catch === "function") {
+          result.catch(function () {});
+        }
+      })();
+    </script>
     <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>
