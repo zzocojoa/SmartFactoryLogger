@@ -211,6 +211,56 @@ npm --prefix frontend run build
 git diff --check
 ```
 
+### Batch D: modulePreload Experiment Result
+
+Measurement date: 2026-07-05 KST
+
+Experiment:
+
+- Temporarily removed `build.modulePreload: false` from `frontend/vite.config.ts`
+  and kept the existing manual chunks.
+- `npm --prefix frontend run build` generated three
+  `rel="modulepreload"` links in `index.html`.
+- A fresh NSIS installer was built and installed. Installer SHA256:
+  `D36EB43BE978D012CA7B687BA7BFF3499FFB24C02859B2CF67FB91E7F83D185F`.
+- The installed frontend `index.html` contained three modulepreload links.
+  Installed frontend `index.html` SHA256:
+  `B741517E51F9A85F078D9A9AE942EB01F7840A9008D127F92651DBB180BEFB92`.
+- The installed Electron launcher exe SHA256 stayed
+  `B812BC91D14E1E2A8A54990C4A46DA1A7A630C3EA47A9939E7640D34F4C79100`;
+  this is expected because this experiment changes packaged frontend
+  resources, not the launcher binary.
+
+| Sample | Status | dashboard_ready_elapsed_ms | `load-file-start` -> `index-boot` ms | `ready-to-show` -> `dashboard-ready` ms | cleanup.ok | ready_strategy | surface |
+|--------|--------|----------------------------|--------------------------------------|-----------------------------------------|------------|----------------|---------|
+| 1 | PASS | 859.5 | 470.6 | 189.8 | true | raf | native |
+| 2 | PASS | 618.0 | 317.7 | 130.3 | true | raf | native |
+| 3 | PASS | 645.7 | 354.3 | 122.9 | true | raf | native |
+| 4 | PASS | 620.1 | 311.0 | 99.8 | true | raf | native |
+| 5 | PASS | 638.6 | 336.5 | 127.6 | true | raf | native |
+
+Batch D summary:
+
+- PASS samples: 5/5
+- Cleanup success: 5/5
+- Median `dashboard_ready_elapsed_ms`: 638.6 ms
+- p95 `dashboard_ready_elapsed_ms`: 859.5 ms
+- Median `electron.load-file-start` -> `renderer.index-boot`: 336.5 ms
+- p95 `electron.load-file-start` -> `renderer.index-boot`: 470.6 ms
+- Chunk recovery / chunk-load / `did-fail-load` matches during the batch: 0
+
+Decision:
+
+- Rejected. Batch C median for the dominant segment was 323.5 ms. Batch D was
+  336.5 ms, a 13.0 ms regression instead of the required 50 ms improvement.
+- The code experiment was rolled back by restoring `modulePreload: false`.
+- After rejection, the restored baseline frontend was rebuilt, repackaged, and
+  reinstalled. The restored installed frontend `index.html` had 0 modulepreload
+  links and SHA256
+  `50CC9675ACD76E0C19D7D3594E8A1F16DFB4C9E7F45700B591490974E92AE026`.
+- Do not ship the modulepreload change without stronger evidence from a
+  different implementation or a larger sample set.
+
 ## Implemented Items
 
 - [x] Electron main logs `STARTUP` JSON lines with `elapsed_ms`.
@@ -268,8 +318,10 @@ git diff --check
    thresholds or claiming p95 improvement.
 4. Re-capture at least five cold-start samples after changing startup ordering
    or bundle composition.
-5. Start with a small module preload experiment because the measured bottleneck
-   is static asset load / renderer bootstrap before `renderer.index-boot`.
+5. Do not ship the default modulepreload experiment. The next optimization
+   should still target static asset load / renderer bootstrap before
+   `renderer.index-boot`, but with a different tactic and the same installed
+   NSIS measurement gate.
 
 ## Next Steps
 
@@ -278,4 +330,6 @@ git diff --check
 - [x] Capture repeated installed-app samples and calculate median/p95 baseline.
 - [x] Record independent verification batch and p95 volatility note.
 - [x] Decide the first optimization target from the slowest measured milestone.
-- [ ] Re-run this analysis after the first optimization pass.
+- [x] Run the first modulepreload optimization pass and document rejection.
+- [ ] Select a new optimization candidate for the static asset load / renderer
+  bootstrap segment.
