@@ -13,15 +13,42 @@
           route: window.location.hash || window.location.pathname || "/",
           protocol: window.location.protocol
         };
+        var rendererNowMs = null;
+        function addTimingValue(key, value) {
+          if (typeof value === "number" && isFinite(value)) {
+            payload[key] = Math.round(value * 10) / 10;
+          }
+        }
         if (
           window.performance &&
           typeof window.performance.now === "function" &&
           typeof window.performance.timeOrigin === "number"
         ) {
-          var rendererNowMs = window.performance.now();
+          rendererNowMs = window.performance.now();
           payload.renderer_time_origin_ms = Math.round(window.performance.timeOrigin * 10) / 10;
           payload.renderer_now_ms = Math.round(rendererNowMs * 10) / 10;
           payload.renderer_epoch_ms = Math.round((window.performance.timeOrigin + rendererNowMs) * 10) / 10;
+        }
+        if (
+          window.performance &&
+          typeof window.performance.getEntriesByType === "function"
+        ) {
+          var navigationEntries = window.performance.getEntriesByType("navigation");
+          var navigationEntry = navigationEntries && navigationEntries[0];
+          if (navigationEntry) {
+            payload.navigation_type = navigationEntry.type || null;
+            addTimingValue("navigation_start_ms", navigationEntry.startTime);
+            addTimingValue("navigation_fetch_start_ms", navigationEntry.fetchStart);
+            addTimingValue("navigation_response_start_ms", navigationEntry.responseStart);
+            addTimingValue("navigation_response_end_ms", navigationEntry.responseEnd);
+            addTimingValue("navigation_dom_interactive_ms", navigationEntry.domInteractive);
+            if (rendererNowMs !== null && typeof navigationEntry.responseEnd === "number") {
+              addTimingValue(
+                "navigation_response_end_to_inline_ms",
+                rendererNowMs - navigationEntry.responseEnd
+              );
+            }
+          }
         }
         var result = bridge.recordStartupEvent("renderer.index-html-inline-script", payload);
         if (result && typeof result.catch === "function") {

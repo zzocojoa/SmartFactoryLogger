@@ -655,8 +655,14 @@ Batch H decision:
   NSIS artifact.
 - [x] Design and run a lower-level pre-`renderer.index-boot` measurement before
   choosing another optimization.
-- [ ] Investigate HTML/resource parse and file URL resource loading visibility
-  before the inline HTML script runs.
+- [x] Run the spellcheck, V8 cache, and background networking startup candidate
+  loop against a fresh installed NSIS baseline and document rejection.
+- [x] Add HTML/resource parse and file URL resource loading visibility before
+  the inline HTML script runs.
+- [x] Capture a repeated installed-app sample set with the new optional
+  navigation timing intervals before selecting the next optimization candidate.
+- [x] Select a lower-level Chromium renderer/preload startup profiling approach
+  before running another optimization candidate.
 
 ## 2026-07-05 Negative Experiment Results
 
@@ -674,6 +680,25 @@ and logs are intentionally omitted.
 | backend deferral | Delayed backend spawn until `renderer.index-html-inline-script`, with a 1500 ms fallback. | 351.4 / 406.5 ms | 352.5 / 401.4 ms | 720.0 / 811.3 ms | 689.8 / 783.5 ms | FAIL | Primary median regressed by 1.1 ms. Dashboard median improved, but the experiment did not improve the selected primary metric. |
 | loadURL | Replaced `BrowserWindow.loadFile()` with `loadURL(pathToFileURL(indexPath).toString())` while preserving the dashboard hash route. | 347.0 / 436.3 ms | 379.0 / 431.0 ms | 717.3 / 856.6 ms | 765.6 / 838.8 ms | FAIL | Primary median regressed by 32.0 ms and dashboard median regressed by 48.3 ms. |
 | asar | Moved `frontend/dist` from `extraResources` into `app.asar` and loaded the packaged index from the app archive. | 380.8 / 437.4 ms | 392.8 / 507.2 ms | 762.8 / 854.5 ms | 787.3 / 936.7 ms | FAIL | Primary median regressed by 12.0 ms and primary p95 regressed by 69.8 ms. |
+| spellcheck disabled | Set `BrowserWindow.webPreferences.spellcheck` to `false`. | 343.9 / 390.5 ms | 351.7 / 381.5 ms | 719.7 / 785.7 ms | 737.4 / 778.8 ms | FAIL | Primary median regressed by 7.8 ms. Primary p95 improved, but the selected median target failed. |
+| V8 cache disabled | Set `BrowserWindow.webPreferences.v8CacheOptions` to `none`. | 343.9 / 390.5 ms | 355.6 / 399.3 ms | 719.7 / 785.7 ms | 752.5 / 814.7 ms | FAIL | Primary median regressed by 11.7 ms and primary p95 regressed by 8.8 ms. Dashboard median and p95 also regressed. |
+| background networking disabled | Appended Electron command-line switch `disable-background-networking` before app readiness. | 343.9 / 390.5 ms | 365.4 / 394.5 ms | 719.7 / 785.7 ms | 744.8 / 786.2 ms | FAIL | Primary median regressed by 21.5 ms and primary p95 regressed by 4.0 ms. |
+| startup IPC send | Replaced startup telemetry `ipcRenderer.invoke` / `ipcMain.handle` with fire-and-forget `ipcRenderer.send` / `ipcMain.on`, preserving the Promise-shaped renderer bridge response. | 343.9 / 390.5 ms | 378.6 / 427.5 ms | 719.7 / 785.7 ms | 785.1 / 854.7 ms | FAIL | Primary median regressed by 34.7 ms and primary p95 regressed by 37.0 ms. Dashboard median and p95 also regressed. |
+| show on ready | Set `BrowserWindow` `show: false` and called `show()` from the existing `ready-to-show` handler. | 343.9 / 390.5 ms | 383.6 / 457.2 ms | 719.7 / 785.7 ms | 792.6 / 896.3 ms | FAIL | Primary median regressed by 39.7 ms and primary p95 regressed by 66.7 ms. Dashboard median and p95 also regressed. |
+| WebGL disabled | Set `BrowserWindow.webPreferences.webgl` to `false`. | 343.9 / 390.5 ms | 405.8 / 457.1 ms | 719.7 / 785.7 ms | 798.4 / 898.0 ms | FAIL | Primary median regressed by 61.9 ms and primary p95 regressed by 66.6 ms. Dashboard median and p95 also regressed. |
+
+Additional loop baseline:
+
+- Source baseline was clean `master` at `758eb3545891d1d136802bf4fe21566c5d65e365`.
+- Installed baseline was rebuilt with `npm --prefix frontend run build`,
+  `npm run dist`, and silent NSIS install before the loop.
+- Primary acceptance threshold was median improvement of at least 30 ms or 10%
+  against 343.9 ms, with no p95 regression against 390.5 ms.
+- Each listed 2026-07-05 candidate was measured from a fresh installed NSIS
+  artifact with 20 samples, `PASS 20/20`, cleanup `20/20`, and zero missing
+  required milestones.
+- All listed 2026-07-05 candidates failed the primary metric, so no startup
+  optimization source change remains applied from these loops.
 
 Rollback state:
 
@@ -684,6 +709,24 @@ Rollback state:
 - asar source changes were discarded with
   `git restore -- main.js package.json`, then the clean installed app layout was
   restored by rebuilding and reinstalling the baseline NSIS artifact.
+- spellcheck disabled source changes were discarded with `git restore -- main.js`,
+  then the clean installed app layout was restored by rebuilding and
+  reinstalling the baseline NSIS artifact.
+- V8 cache disabled source changes were discarded with `git restore -- main.js`,
+  then the clean installed app layout was restored by rebuilding and
+  reinstalling the baseline NSIS artifact.
+- background networking disabled source changes were discarded with
+  `git restore -- main.js`, then the clean installed app layout was restored by
+  rebuilding and reinstalling the baseline NSIS artifact.
+- startup IPC send source changes were discarded with
+  `git restore -- main.js preload.js`, then the clean installed app layout was
+  restored by rebuilding and reinstalling the baseline NSIS artifact.
+- show on ready source changes were discarded with `git restore -- main.js`,
+  then the clean installed app layout was restored by rebuilding and
+  reinstalling the baseline NSIS artifact.
+- WebGL disabled source changes were discarded with `git restore -- main.js`,
+  then the clean installed app layout was restored by rebuilding and
+  reinstalling the baseline NSIS artifact.
 
 Sanitized asar layout evidence:
 
@@ -695,11 +738,20 @@ Sanitized asar layout evidence:
 - After rollback, the installed layout again had
   `resources/frontend/dist/index.html` outside the archive and a small
   baseline-sized `app.asar`.
+- After the additional loop rollback, the installed layout again had
+  `resources/frontend/dist/index.html` outside the archive and `app.asar` was
+  20052 bytes.
 
 Operational guidance:
 
 - Do not repeat backend deferral, loadURL, or asar packaging as PR candidates
   for improving `load_file_to_index_html_inline_ms`.
+- Do not repeat spellcheck disabling, `v8CacheOptions: 'none'`, or
+  `disable-background-networking` as PR candidates for improving
+  `load_file_to_index_html_inline_ms`.
+- Do not repeat startup IPC send, `show: false` / ready-to-show display, or
+  `webgl: false` as PR candidates for improving
+  `load_file_to_index_html_inline_ms`.
 - If `dashboard_ready_elapsed_ms` becomes the explicit primary metric in a
   future task, backend deferral may be reconsidered separately because it
   improved dashboard median in this sample while still failing the current
@@ -708,3 +760,127 @@ Operational guidance:
   navigation, Chromium renderer startup, file URL HTML/resource parsing, and the
   `renderer.preload-bridge-exposed` to `renderer.index-html-inline-script`
   interval before attempting another startup-ordering or bundle-layout change.
+
+## 2026-07-05 Cause Visibility Instrumentation
+
+This patch is instrumentation-only and is not accepted as a startup performance
+improvement. It keeps the existing required startup milestones and primary
+metric intact, then adds optional fields so the pre-inline-script path can be
+split more accurately on installed NSIS builds.
+
+Added main-process navigation events:
+
+- `electron.webcontents-did-start-navigation`
+- `electron.webcontents-did-frame-finish-load`
+- `electron.webcontents-did-navigate`
+
+Added renderer inline-script payload fields:
+
+- `navigation_start_ms`
+- `navigation_fetch_start_ms`
+- `navigation_response_start_ms`
+- `navigation_response_end_ms`
+- `navigation_dom_interactive_ms`
+- `navigation_response_end_to_inline_ms`
+
+Added optional `startup_intervals` fields:
+
+- `load_file_to_did_start_navigation_ms`
+- `did_start_navigation_to_did_start_loading_ms`
+- `did_start_navigation_to_preload_start_ms`
+- `did_start_navigation_to_index_html_inline_ms`
+- `did_start_loading_to_index_html_inline_ms`
+- `index_html_navigation_start_to_inline_ms`
+- `index_html_fetch_start_to_response_end_ms`
+- `index_html_response_start_to_response_end_ms`
+- `index_html_response_end_to_inline_ms`
+- `index_html_dom_interactive_at_inline_ms`
+
+Sanitized installed-app smoke sample:
+
+| Status | Events | Cleanup | Missing milestones | Primary ms | `load-file` -> navigation ms | Navigation -> preload ms | Navigation -> inline ms | Navigation start -> inline ms | Response end -> inline ms |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| PASS | 34 | true | 0 | 518.7 | 25.2 | 156.5 | 493.5 | 517.0 | 470.8 |
+
+Sanitized repeated visibility sample:
+
+| Metric | Median ms | p95 ms | Min ms | Max ms |
+| --- | ---: | ---: | ---: | ---: |
+| `load_file_to_index_html_inline_ms` | 373.0 | 412.9 | 332.6 | 415.9 |
+| `preload_bridge_to_index_html_inline_ms` | 218.5 | 247.3 | 184.9 | 248.4 |
+| `load_file_to_preload_start_ms` | 149.8 | 172.5 | 132.8 | 175.7 |
+| `load_file_to_did_start_navigation_ms` | 21.9 | 24.0 | 18.6 | 25.8 |
+| `did_start_navigation_to_preload_start_ms` | 127.2 | 148.5 | 111.1 | 151.9 |
+| `preload_start_to_bridge_exposed_ms` | 1.0 | 1.7 | 0.8 | 2.3 |
+| `did_start_navigation_to_index_html_inline_ms` | 351.8 | 389.5 | 310.5 | 393.2 |
+| `index_html_navigation_start_to_inline_ms` | 371.2 | 410.5 | 331.1 | 414.3 |
+| `index_html_response_end_to_inline_ms` | 329.0 | 367.0 | 286.7 | 368.7 |
+| `dashboard_ready_elapsed_ms` | 764.6 | 817.9 | 706.1 | 839.1 |
+
+Repeated sample status:
+
+- PASS samples: 20/20
+- Cleanup success: 20/20
+- Missing required milestones: 0
+- Event count: 34 per sample
+
+Interpretation:
+
+- The optional events are present in an installed NSIS artifact and do not break
+  the required milestone set.
+- These samples are visibility evidence only. They are not a performance
+  improvement comparison because the patch adds instrumentation overhead and is
+  not the clean baseline artifact.
+- The current evidence points away from pre-navigation delay:
+  `load_file_to_did_start_navigation_ms` is small and stable at about 22 ms.
+- The larger visible spans are navigation start to preload start and navigation
+  start to inline HTML. The next candidate should focus on explaining or
+  reducing Chromium renderer/preload startup and the gap between preload bridge
+  exposure and the inline HTML marker.
+- Optimization candidates should stay paused until the next investigation can
+  provide stronger visibility inside Chromium renderer/preload startup than the
+  current Electron and Navigation Timing markers.
+
+## 2026-07-05 Chromium Trace Profiling Approach
+
+The next lower-level profiling approach is Chromium startup tracing via
+`--trace-startup`, not Electron `contentTracing`.
+
+Rejected approach:
+
+- Environment-gated Electron `contentTracing.startRecording()` was tested in an
+  installed NSIS build.
+- The app logged trace start and dashboard-ready, but `stopRecording()` did not
+  complete within 120 seconds and no trace file was produced.
+- The collector cleanup fallback stopped residual `smart-factory` /
+  `SmartFactoryBackend` processes, then the installed app was restored to the
+  baseline layout.
+- Do not use app-code `contentTracing` as the next profiling path unless the
+  stop/flush behavior is isolated separately.
+
+Accepted profiling approach:
+
+- Use `scripts/collect_nsis_startup_trace.ps1` to launch the installed exe with
+  Chromium startup trace switches:
+  `--trace-startup`, `--trace-startup-file`, `--trace-startup-duration`,
+  `--trace-startup-record-mode`, and `--trace-startup-categories`.
+- The script also waits for the existing startup log to observe
+  `renderer.dashboard-ready`, then stops the launched process tree and any
+  residual app/backend processes.
+- Default categories are
+  `electron,blink,loading,toplevel,v8,devtools.timeline,disabled-by-default-v8.compile`.
+
+Sanitized smoke result:
+
+| Status | Trace bytes | Duration sec | Dashboard-ready seen | Startup events | Cleanup | Residual cleanup |
+| --- | ---: | ---: | --- | ---: | --- | --- |
+| PASS | 9907706 | 5 | true | 34 | true | true |
+
+Operational notes:
+
+- The trace file can contain local runtime details and must not be pasted into
+  PR descriptions or analysis docs raw.
+- This is profiling evidence only. It does not prove a startup improvement.
+- After the smoke run, the installed app was restored from the baseline NSIS
+  installer backup; installed `resources/frontend/dist/index.html` no longer had
+  the visibility payload and `app.asar` was 20052 bytes.

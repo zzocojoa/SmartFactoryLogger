@@ -123,6 +123,29 @@ function normalizeRejectedStartupEventName(value) {
   return typeof value;
 }
 
+function getStartupUrlProtocol(url) {
+  if (typeof url !== 'string' || url.length === 0) {
+    return null;
+  }
+
+  try {
+    return new URL(url).protocol;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function createNavigationStartupPayload(details, extra = {}) {
+  const protocol = getStartupUrlProtocol(details?.url);
+  return {
+    ...extra,
+    protocol,
+    is_file_url: protocol === 'file:',
+    is_main_frame: Boolean(details?.isMainFrame),
+    is_same_document: Boolean(details?.isSameDocument),
+  };
+}
+
 // Global Error Handling
 process.on('uncaughtException', (error) => {
   log(`UNCAUGHT EXCEPTION: ${error.message}\n${error.stack}`);
@@ -247,12 +270,37 @@ function createWindow() {
     logStartupEvent('electron.webcontents-did-start-loading');
   });
 
+  mainWindow.webContents.on('did-start-navigation', (details) => {
+    if (details?.isMainFrame) {
+      logStartupEvent(
+        'electron.webcontents-did-start-navigation',
+        createNavigationStartupPayload(details)
+      );
+    }
+  });
+
   mainWindow.webContents.on('dom-ready', () => {
     logStartupEvent('electron.webcontents-dom-ready');
   });
 
+  mainWindow.webContents.on('did-frame-finish-load', (_event, isMainFrame) => {
+    if (isMainFrame) {
+      logStartupEvent('electron.webcontents-did-frame-finish-load', {
+        is_main_frame: true,
+      });
+    }
+  });
+
   mainWindow.webContents.on('did-finish-load', () => {
     logStartupEvent('electron.webcontents-did-finish-load');
+  });
+
+  mainWindow.webContents.on('did-navigate', (_event, url, httpResponseCode) => {
+    logStartupEvent('electron.webcontents-did-navigate', {
+      protocol: getStartupUrlProtocol(url),
+      is_file_url: getStartupUrlProtocol(url) === 'file:',
+      http_response_code: httpResponseCode,
+    });
   });
 
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
