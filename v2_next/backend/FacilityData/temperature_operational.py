@@ -51,7 +51,7 @@ class TemperatureOperationalInput:
     spot_effective_value_age_ms_at_row: Optional[float] = None
     spot_row_freshness_threshold_ms: Optional[float] = None
     # Trusted phase input. Realtime callers must normalize externally supplied
-    # pre_changeover_hold_candidate to possible_pre_changeover_hold before calling.
+    # pre_changeover_hold_candidate to stopped_after_production_candidate before calling.
     process_phase_candidate: str = "unknown"
     evidence_codes: Iterable[str] = ()
     state_decision: Optional[TemperatureStateDecision] = None

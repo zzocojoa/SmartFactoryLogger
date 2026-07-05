@@ -124,6 +124,7 @@ _CANDIDATE_TO_CONFIRMED = {
     "setup_candidate": "setup",
     "setup_alignment_candidate": "setup_alignment",
     "pre_changeover_hold_candidate": "pre_changeover_hold",
+    "stopped_after_production_candidate": "pre_changeover_hold",
     "possible_pre_changeover_hold": "pre_changeover_hold",
     "die_change_candidate": "die_change",
     "changeover_candidate": "changeover",
@@ -135,6 +136,7 @@ _CHANGEOVER_LIFECYCLE_CANDIDATE_PHASES = {
     "setup_candidate",
     "setup_alignment_candidate",
     "pre_changeover_hold_candidate",
+    "stopped_after_production_candidate",
     "possible_pre_changeover_hold",
     "die_change_candidate",
     "changeover_candidate",
@@ -148,10 +150,14 @@ _PHASE_CONFIRMATION_PRECEDENCE = (
     "changeover_candidate",
     "setup_candidate",
     "pre_changeover_hold_candidate",
+    "stopped_after_production_candidate",
     "possible_pre_changeover_hold",
 )
 
-_WEAK_PRE_CHANGEOVER_PHASE = "possible_pre_changeover_hold"
+_WEAK_PRE_CHANGEOVER_PHASES = {
+    "stopped_after_production_candidate",
+    "possible_pre_changeover_hold",
+}
 
 
 @dataclass(frozen=True)
@@ -273,7 +279,7 @@ def _confirmed_weak_pre_changeover_segments(
     for row in rows:
         if _text(row, "changeover_candidate_id"):
             continue
-        if _text(row, "process_phase_candidate") != _WEAK_PRE_CHANGEOVER_PHASE:
+        if _text(row, "process_phase_candidate") not in _WEAK_PRE_CHANGEOVER_PHASES:
             continue
         segment_id = _text(row, "process_segment_id")
         if not segment_id:
@@ -314,20 +320,25 @@ def _confirm_candidate_phase(
 ) -> _PhaseConfirmation:
     representative_phase = _representative_candidate_phase(phase_candidate, candidate_rows)
     confirmed_phase = _CANDIDATE_TO_CONFIRMED.get(representative_phase, "unknown")
-    if representative_phase not in {"pre_changeover_hold_candidate", _WEAK_PRE_CHANGEOVER_PHASE}:
+    if representative_phase not in {"pre_changeover_hold_candidate", *_WEAK_PRE_CHANGEOVER_PHASES}:
         return _PhaseConfirmation(
             confirmed_phase=confirmed_phase,
             reason=f"{representative_phase}_mapped_posthoc",
         )
     evidence = _pre_changeover_future_evidence(candidate_rows, all_rows)
+    reason_prefix = (
+        "stopped_after_production_candidate"
+        if representative_phase in _WEAK_PRE_CHANGEOVER_PHASES
+        else "pre_changeover_hold_candidate"
+    )
     if evidence:
         return _PhaseConfirmation(
             confirmed_phase=confirmed_phase,
-            reason=f"pre_changeover_hold_candidate_confirmed_by_{evidence}",
+            reason=f"{reason_prefix}_confirmed_by_{evidence}",
         )
     return _PhaseConfirmation(
         confirmed_phase="unknown",
-        reason="pre_changeover_hold_candidate_without_future_evidence",
+        reason=f"{reason_prefix}_without_future_evidence",
     )
 
 

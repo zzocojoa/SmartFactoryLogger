@@ -48,7 +48,7 @@ class ProcessPhaseCandidateTests(unittest.TestCase):
         self.assertEqual(decision.process_phase_candidate, "production_stable")
         self.assertEqual(decision.changeover_candidate_id, "")
 
-    def test_recent_production_stop_maps_to_possible_pre_changeover_hold(self) -> None:
+    def test_recent_production_stop_maps_to_stopped_after_production_candidate(self) -> None:
         decision = derive_process_phase_candidate(
             ProcessPhaseInput(
                 speed=0.0,
@@ -60,7 +60,7 @@ class ProcessPhaseCandidateTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(decision.process_phase_candidate, "possible_pre_changeover_hold")
+        self.assertEqual(decision.process_phase_candidate, "stopped_after_production_candidate")
         self.assertEqual(decision.changeover_candidate_id, "")
 
     def test_changeover_candidate_does_not_require_spot_status(self) -> None:

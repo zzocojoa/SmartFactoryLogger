@@ -237,6 +237,7 @@ _CHANGEOVER_TERMINAL_EVIDENCE_PHASES = {
 _PROCESS_SEGMENT_PHASES = {
     "production_stable",
     "production_stabilizing",
+    "stopped_after_production_candidate",
     "possible_pre_changeover_hold",
     "idle_candidate",
     "unknown",
@@ -244,7 +245,8 @@ _PROCESS_SEGMENT_PHASES = {
 
 # Caller-supplied realtime hold candidates are weak until post-hoc evidence confirms them.
 _EXTERNALLY_SUPPLIED_WEAK_PHASES = {
-    "pre_changeover_hold_candidate": "possible_pre_changeover_hold",
+    "pre_changeover_hold_candidate": "stopped_after_production_candidate",
+    "possible_pre_changeover_hold": "stopped_after_production_candidate",
 }
 
 

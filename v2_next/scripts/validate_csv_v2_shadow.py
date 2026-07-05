@@ -676,6 +676,7 @@ V2_4_OPERATIONAL_ENUM_VALUES = {
         "production_stable",
         "setup_candidate",
         "pre_changeover_hold_candidate",
+        "stopped_after_production_candidate",
         "possible_pre_changeover_hold",
         "die_change_candidate",
         "setup_alignment_candidate",

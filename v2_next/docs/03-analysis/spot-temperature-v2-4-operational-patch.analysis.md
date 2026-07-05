@@ -25,7 +25,7 @@ Blocking gaps were not found in the implemented P0/P1 contract:
 - Count 0..2 production motion is gated as `setup_alignment_candidate`; Count 3 production motion is gated as `production_stabilizing`; general and weak pre-changeover rows use `process_segment_id`, and eligible strong changeover lifecycles keep one `changeover_candidate_id` through `production_stabilizing`.
 - candidate resolution and confirmed process phase event facts are separate from realtime rows.
 - Count 3 policy replay used an operator-provided server CSV copy rather than live server `%APPDATA%` path access because development and verification run on a different computer from the onsite server PC.
-- Realtime stop-hold rows without current change evidence now emit weak `possible_pre_changeover_hold` with only `process_segment_id`. Post-hoc confirmation requires future evidence before synthesizing a `changeover_candidate_id`; false general-stop weak segments are excluded from changeover facts.
+- Realtime stop-hold rows without current change evidence now emit weak `stopped_after_production_candidate` with only `process_segment_id`. Legacy `possible_pre_changeover_hold` rows remain accepted as input aliases for existing CSVs. Post-hoc confirmation requires future evidence before synthesizing a `changeover_candidate_id`; false general-stop weak segments are excluded from changeover facts.
 - `spot_observation_fact.py` emits idempotent per-poll facts and isolates writer failure with failure count plus local JSONL retry spool.
 - `scripts/infer_process_phase_events_for_csv.py` emits fact outputs without mutating source CSV only when `PROCESS_PHASE_EVENT_FACT_ENABLED=true`.
 - `scripts/validate_csv_v2_shadow.py` validates v2.4 operational fields while preserving v2.3 checks.
