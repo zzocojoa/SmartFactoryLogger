@@ -261,6 +261,93 @@ Decision:
 - Do not ship the modulepreload change without stronger evidence from a
   different implementation or a larger sample set.
 
+### Batch E Candidate: Settings Modal Entry Split
+
+Implementation date: 2026-07-05 KST
+
+Candidate:
+
+- Keep `frontend/vite.config.ts` `modulePreload: false`.
+- Split `SettingsModalContainer` out of the initial `App` module graph with
+  `React.lazy`.
+- Load the settings modal chunk only after `settingsOpen=true`.
+
+Why this candidate:
+
+- Batch C and D both point to `electron.load-file-start` ->
+  `renderer.index-boot` as the first optimization target.
+- Settings is not part of the initial dashboard surface, but the closed modal
+  container imported the large settings form graph into the initial `App`
+  module.
+- This is a smaller compatibility risk than changing preload behavior because
+  it preserves existing manual chunking and only defers a user-opened modal.
+
+Build-only evidence:
+
+- Baseline frontend build before the split produced `App-CgQn970h.js` at
+  317.58 kB.
+- Post-change frontend build produced `SettingsModalContainer-h2XaJKXG.js` at
+  128.52 kB and reduced the initial `App` chunk to `App-CYxoG87f.js` at
+  189.00 kB.
+- This is build-only evidence. Installed-app startup improvement is not proven
+  until a fresh NSIS artifact is measured.
+
+Acceptance gate before merge:
+
+- `npm --prefix frontend run typecheck`
+- `npm --prefix frontend run lint`
+- `npm --prefix frontend run test -- App.localStorage startupTelemetry useMemoryViewModel`
+- `npm --prefix frontend run build`
+- Fresh NSIS build/install and at least five startup samples using
+  `scripts/measure_nsis_startup_render.ps1`
+- Accept only if installed-app median for `electron.load-file-start` ->
+  `renderer.index-boot` improves versus Batch C without chunk-load failures,
+  settings modal regressions, or cleanup failures.
+
+Batch E installed-app measurement:
+
+- Measurement date: 2026-07-05 KST
+- Fresh NSIS installer: `smart-factory-logger-v2 Setup 1.0.11.exe`
+- Installer SHA256:
+  `A9317B5C98F20B9814267BDB1F22F4B74A2E3F93A2CA5246FE361393FD9FA6CB`
+- Build-only split evidence before measurement:
+  `SettingsModalContainer-h2XaJKXG.js` 128.52 kB and `App-CYxoG87f.js`
+  189.00 kB.
+
+Sanitized Batch E samples:
+
+| Run | Status | `dashboard_ready_elapsed_ms` | `electron.load-file-start` -> `renderer.index-boot` ms | Event count | Cleanup |
+|-----|--------|------------------------------|--------------------------------------------------------|-------------|---------|
+| 1 | PASS | 1645.5 | 1134.5 | 16 | true |
+| 2 | PASS | 637.0 | 330.3 | 16 | true |
+| 3 | PASS | 625.5 | 325.8 | 16 | true |
+| 4 | PASS | 660.0 | 358.2 | 16 | true |
+| 5 | PASS | 685.2 | 367.9 | 16 | true |
+
+Batch E summary:
+
+- PASS samples: 5/5
+- Cleanup success: 5/5
+- Median `dashboard_ready_elapsed_ms`: 660.0 ms
+- p95 `dashboard_ready_elapsed_ms`: 1645.5 ms
+- Median `electron.load-file-start` -> `renderer.index-boot`: 358.2 ms
+- p95 `electron.load-file-start` -> `renderer.index-boot`: 1134.5 ms
+- p95 method: nearest-rank over five samples
+- Chunk recovery / chunk-load / `did-fail-load` matches during the current
+  batch: 0
+
+Decision:
+
+- Rejected. Batch C median for the dominant segment was 323.5 ms. Batch E was
+  358.2 ms, a 34.7 ms regression instead of the required 50 ms improvement.
+- Batch E p95 for the same segment was 1134.5 ms versus Batch C p95 365.1 ms.
+  The first fresh-install run dominated that tail, but it still fails the
+  acceptance gate.
+- The Settings modal entry split code was rolled back. Keep this as a
+  docs-only failed experiment record.
+- Do not ship this split without a different implementation and a larger
+  installed-app sample set.
+
 ## Implemented Items
 
 - [x] Electron main logs `STARTUP` JSON lines with `elapsed_ms`.
@@ -318,10 +405,11 @@ Decision:
    thresholds or claiming p95 improvement.
 4. Re-capture at least five cold-start samples after changing startup ordering
    or bundle composition.
-5. Do not ship the default modulepreload experiment. The next optimization
-   should still target static asset load / renderer bootstrap before
-   `renderer.index-boot`, but with a different tactic and the same installed
-   NSIS measurement gate.
+5. Do not ship the default modulepreload experiment or the Settings modal entry
+   split. Both failed the installed NSIS measurement gate.
+6. The next candidate should still target static asset load / renderer
+   bootstrap before `renderer.index-boot`, but it needs a different tactic and a
+   larger installed-app sample set before claiming p95 improvement.
 
 ## Next Steps
 
@@ -331,5 +419,7 @@ Decision:
 - [x] Record independent verification batch and p95 volatility note.
 - [x] Decide the first optimization target from the slowest measured milestone.
 - [x] Run the first modulepreload optimization pass and document rejection.
-- [ ] Select a new optimization candidate for the static asset load / renderer
+- [x] Select a new optimization candidate for the static asset load / renderer
   bootstrap segment.
+- [x] Build and measure the Settings modal entry split in a fresh installed
+  NSIS artifact.
