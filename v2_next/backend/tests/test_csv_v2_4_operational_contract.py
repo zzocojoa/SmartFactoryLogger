@@ -744,7 +744,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
         self.assertTrue(segment_id.startswith("seg_"))
         self.assertEqual(rows[0][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
-        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "possible_pre_changeover_hold")
+        self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "stopped_after_production_candidate")
         self.assertTrue(weak_segment_id.startswith("seg_"))
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
@@ -754,11 +754,11 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             "unknown",
         )
         self.assertEqual(rows[1][V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.0")
-        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "possible_pre_changeover_hold")
+        self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "stopped_after_production_candidate")
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("process_segment_id")], weak_segment_id)
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertEqual(rows[2][V2_4_CSV_COLUMNS.index("temperature_output_status")], "source_error")
-        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "possible_pre_changeover_hold")
+        self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "stopped_after_production_candidate")
         self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("process_segment_id")], weak_segment_id)
         self.assertEqual(rows[3][V2_4_CSV_COLUMNS.index("changeover_candidate_id")], "")
         self.assertEqual(rows[4][V2_4_CSV_COLUMNS.index("process_phase_candidate")], "production_stable")
@@ -767,8 +767,8 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
     def test_external_pre_changeover_hold_candidate_under_range_is_not_trusted_as_strong_candidate(self) -> None:
         cases = [
-            ("possible_pre_changeover_hold", "possible_pre_changeover_hold", "unknown", "seg_", ""),
-            ("pre_changeover_hold_candidate", "possible_pre_changeover_hold", "unknown", "seg_", ""),
+            ("possible_pre_changeover_hold", "stopped_after_production_candidate", "unknown", "seg_", ""),
+            ("pre_changeover_hold_candidate", "stopped_after_production_candidate", "unknown", "seg_", ""),
         ]
 
         for supplied_phase, emitted_phase, expectedness, segment_prefix, changeover_prefix in cases:

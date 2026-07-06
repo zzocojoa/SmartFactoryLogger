@@ -51,9 +51,10 @@ class TemperatureOperationalTests(unittest.TestCase):
         self.assertEqual(decision.temperature_cause_confidence, 0.0)
         self.assertEqual(json.loads(decision.temperature_cause_evidence_codes), ["phase_setup_candidate"])
 
-    def test_trusted_phase_input_distinguishes_strong_pre_changeover_from_weak_possible_hold(self) -> None:
+    def test_trusted_phase_input_distinguishes_strong_pre_changeover_from_weak_stopped_hold(self) -> None:
         cases = [
             ("pre_changeover_hold_candidate", "expected_candidate"),
+            ("stopped_after_production_candidate", "unknown"),
             ("possible_pre_changeover_hold", "unknown"),
         ]
 

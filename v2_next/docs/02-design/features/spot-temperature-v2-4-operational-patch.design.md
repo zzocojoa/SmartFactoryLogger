@@ -170,14 +170,14 @@ Realtime CSV rows may expose the latest matching SPOT image fact only as relativ
 | `spot_effective_freshness_at_row` | enum | `fresh`, `stale`, `unknown` | row freshness classifier |
 | `spot_effective_value_age_ms_at_row` | float/blank | finite non-negative | monotonic value age |
 | `spot_row_age_clock_status` | enum | `ok`, `clock_anomaly`, `unknown` | row clock classifier |
-| `process_phase_candidate` | enum | `production_stable`, `setup_candidate`, `possible_pre_changeover_hold`, `pre_changeover_hold_candidate`, `die_change_candidate`, `setup_alignment_candidate`, `changeover_candidate`, `production_stabilizing`, `idle_candidate`, `unknown` | process candidate classifier |
+| `process_phase_candidate` | enum | `production_stable`, `setup_candidate`, `stopped_after_production_candidate`, `pre_changeover_hold_candidate`, `possible_pre_changeover_hold`, `die_change_candidate`, `setup_alignment_candidate`, `changeover_candidate`, `production_stabilizing`, `idle_candidate`, `unknown` | process candidate classifier; `possible_pre_changeover_hold` is a legacy input alias |
 | `process_phase_rule_version` | text | deterministic version | process candidate classifier |
 | `phase_confirmation_state` | enum | `realtime_candidate`, `unknown`, blank | realtime row only |
 | `process_segment_id` | text/blank | `seg_` + stable hash | general process segment key for production/weak-pre-changeover/idle/unknown rows |
 | `changeover_candidate_id` | text/blank | `chg_` + stable hash from `logger_service_instance_id` and `candidate_start_sample_seq` | changeover lifecycle key only |
 | `spot_observation_key` | text/blank | `{spot_service_instance_id}:{spot_poll_seq}` only when `spot_poll_seq > 0`, `spot_last_poll_completed_at` is present, and the row is not startup pending | SPOT snapshot |
 
-ID contract note: `process_segment_id` owns general production/stabilizing/idle/unknown segments and realtime weak `possible_pre_changeover_hold` segments. `changeover_candidate_id` is reserved for strong changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be generated for evidence-free weak hold rows or standalone Count 3 stabilization. A trusted post-hoc/legacy strong lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`, while weak `possible_pre_changeover_hold` can be promoted only by post-hoc future evidence.
+ID contract note: `process_segment_id` owns general production/stabilizing/idle/unknown segments and realtime weak `stopped_after_production_candidate` segments. `changeover_candidate_id` is reserved for strong changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be generated for evidence-free weak hold rows or standalone Count 3 stabilization. A trusted post-hoc/legacy strong lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`, while weak `stopped_after_production_candidate` can be promoted only by post-hoc future evidence. Legacy `possible_pre_changeover_hold` rows are accepted as aliases for existing CSVs.
 
 Realtime CSV는 confirmed `changeover_event_id`를 소유하지 않는다.
 
@@ -208,7 +208,7 @@ count(changeover_candidate_resolution_fact where changeover_candidate_id = X) ==
 confirmation_outcome in confirmed/rejected/merged/split
 ```
 
-A lifecycle ID may contain non-contiguous realtime candidate rows; post-hoc grouping keeps one candidate-resolution row and one terminal `process_phase_event_fact` row for that `changeover_candidate_id`. Legacy or polluted IDs whose rows only contain general `idle_candidate`, `production_stable`, or `unknown` phases are excluded from changeover facts. Weak `possible_pre_changeover_hold` rows use `process_segment_id`; post-hoc may synthesize a changeover candidate only when later Count reset, operator context change, or die-change marker evidence exists.
+A lifecycle ID may contain non-contiguous realtime candidate rows; post-hoc grouping keeps one candidate-resolution row and one terminal `process_phase_event_fact` row for that `changeover_candidate_id`. Legacy or polluted IDs whose rows only contain general `idle_candidate`, `production_stable`, or `unknown` phases are excluded from changeover facts. Weak `stopped_after_production_candidate` rows use `process_segment_id`; post-hoc may synthesize a changeover candidate only when later Count reset, operator context change, or die-change marker evidence exists.
 
 ### 3.4 Post-Hoc Process Phase Event Fact
 
@@ -235,8 +235,9 @@ Candidate-to-confirmed mapping:
 ```text
 setup_candidate               -> setup
 setup_alignment_candidate     -> setup_alignment
-possible_pre_changeover_hold -> pre_changeover_hold only with future evidence; otherwise no changeover candidate fact
-pre_changeover_hold_candidate -> post-hoc/legacy strong lifecycle candidate; caller-supplied realtime input is normalized to possible_pre_changeover_hold
+stopped_after_production_candidate -> pre_changeover_hold only with future evidence; otherwise no changeover candidate fact
+possible_pre_changeover_hold -> legacy alias for stopped_after_production_candidate
+pre_changeover_hold_candidate -> post-hoc/legacy strong lifecycle candidate; caller-supplied realtime input is normalized to stopped_after_production_candidate
 die_change_candidate          -> die_change
 changeover_candidate          -> changeover
 production_stable             -> excluded from changeover facts; use process_segment_id-based segment analysis
@@ -342,8 +343,8 @@ Realtime expectedness is candidate-only.
 
 | Input | `temperature_expectedness_candidate` |
 |---|---|
-| `temperature_output_status=under_range` + trusted setup/die-change/setup-alignment/changeover/production-stabilizing candidates, excluding weak `possible_pre_changeover_hold` and caller-supplied `pre_changeover_hold_candidate` | `expected_candidate` |
-| `temperature_output_status=under_range` + weak `possible_pre_changeover_hold` without stronger current evidence | `unknown` |
+| `temperature_output_status=under_range` + trusted setup/die-change/setup-alignment/changeover/production-stabilizing candidates, excluding weak `stopped_after_production_candidate` and caller-supplied `pre_changeover_hold_candidate` | `expected_candidate` |
+| `temperature_output_status=under_range` + weak `stopped_after_production_candidate` without stronger current evidence | `unknown` |
 | `temperature_output_status=under_range` + `production_stable` | `unexpected_candidate` |
 | `temperature_output_status=over_range` in any phase | `unexpected_candidate` |
 | `temperature_output_status` in `stale`, `source_error`, `startup_pending`, `unknown` | `unknown` |
@@ -352,7 +353,7 @@ Realtime expectedness is candidate-only.
 
 Blank means no expectedness claim is needed for a valid temperature. `unknown` means a temperature unavailable/error state exists but realtime context is insufficient or non-fresh.
 
-Realtime `derive_process_phase_candidate` emits evidence-free stopped hold rows as weak `possible_pre_changeover_hold`, which keeps under-range expectedness at `unknown`. `FactoryData.process_phase_candidate` is an input boundary: a caller-supplied `pre_changeover_hold_candidate` is normalized to weak `possible_pre_changeover_hold` before realtime expectedness and ID assignment. Post-hoc facts still decide whether a pre-changeover hold confirms or rejects from future evidence.
+Realtime `derive_process_phase_candidate` emits evidence-free stopped hold rows as weak `stopped_after_production_candidate`, which keeps under-range expectedness at `unknown`. `FactoryData.process_phase_candidate` is an input boundary: caller-supplied `pre_changeover_hold_candidate` and legacy `possible_pre_changeover_hold` are normalized to weak `stopped_after_production_candidate` before realtime expectedness and ID assignment. Post-hoc facts still decide whether a pre-changeover hold confirms or rejects from future evidence.
 
 Final expected/unexpected/indeterminate is written only to post-hoc fact as `temperature_expectedness_confirmed`.
 
@@ -434,7 +435,7 @@ Realtime phase is candidate-only and cannot use SPOT status as an input. Rules m
 | Count in 0..2 and low speed/press | `setup_candidate` |
 | Count in 0..2 and production motion or online extruding before Count 3 is observed | `setup_alignment_candidate` |
 | Count 3 and production motion or online extruding | `production_stabilizing` |
-| Count > 3, recent production motion exists, currently stopped, Speed/MainPress/BilletLength are stopped, and Count is held for the configured duration, but no current-row die/change evidence exists | `possible_pre_changeover_hold` |
+| Count > 3, recent production motion exists, currently stopped, Speed/MainPress/BilletLength are stopped, and Count is held for the configured duration, but no current-row die/change evidence exists | `stopped_after_production_candidate` |
 | current row has operator-entered die/mold change marker or mold id differs from the last committed operator context while stopped | `die_change_candidate` |
 | product or mold context transition is already observed at or before the current row while stopped | `changeover_candidate` |
 | actuator scan/alignment evidence while stopped | `setup_alignment_candidate` |
@@ -442,7 +443,7 @@ Realtime phase is candidate-only and cannot use SPOT status as an input. Rules m
 | idle low speed/press without setup evidence | `idle_candidate` |
 | insufficient context | `unknown` |
 
-Realtime `possible_pre_changeover_hold` must not look ahead to a later Count reset or future product/mold change and must keep `changeover_candidate_id` blank. Later Count reset, product/mold change, or die-change marker may only be used by post-hoc facts to synthesize a candidate and confirm `pre_changeover_hold` within the evidence window. Without that future evidence, no changeover candidate fact is generated for the weak segment.
+Realtime `stopped_after_production_candidate` must not look ahead to a later Count reset or future product/mold change and must keep `changeover_candidate_id` blank. Later Count reset, product/mold change, or die-change marker may only be used by post-hoc facts to synthesize a candidate and confirm `pre_changeover_hold` within the evidence window. Without that future evidence, no changeover candidate fact is generated for the weak segment.
 
 The Count 0..3 stable promotion gate is intentionally process-only. It does not use SPOT status. Count 0..2 stays in setup alignment when production motion exists; Count 3 is treated as `production_stabilizing`; Count >= 4 or unknown Count may become `production_stable`.
 
@@ -629,7 +630,7 @@ Match rate alone is not sufficient for report or operational promotion.
 | Process fact manifest integrity | sidecar contains `changeover_candidate_resolution_fact_manifest` and `process_phase_event_fact_manifest`, and validator confirms required columns, row count, fact SHA-256, and source CSV SHA-256 |
 | Failure isolation | fact writer failure does not stop SPOT polling |
 | Future-context isolation | realtime candidate logic does not use later Count reset or product/mold changes |
-| Compatibility | v2.3 and v2.4 validator pass, and downstream consumers either accept `possible_pre_changeover_hold` / `production_stabilizing` or have an explicit compatibility mapping / documented absence |
+| Compatibility | v2.3 and v2.4 validator pass, and downstream consumers either accept `stopped_after_production_candidate` / `production_stabilizing` plus legacy `possible_pre_changeover_hold`, or have an explicit compatibility mapping / documented absence |
 | Controlled tests | all status/reason branches and cache/value-origin invariants pass |
 
 ## 10. Security and Failure Modes## 10. Security and Failure Modes

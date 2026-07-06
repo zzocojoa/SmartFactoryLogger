@@ -74,7 +74,7 @@ PR #68 is merge-ready for the default-off v2.4 implementation scope at report ti
 - [x] `spot_observation_fact.py` emits idempotent per-poll facts and isolates writer failure through failure count plus JSONL retry spool.
 - [x] `changeover_candidate_resolution_fact.py` emits candidate resolution and process phase event facts.
 - [x] post-hoc changeover facts ignore legacy/polluted idle-only IDs; general idle/production intervals belong to `process_segment_id` segment analysis.
-- [x] Realtime evidence-free stop-hold rows use weak `possible_pre_changeover_hold` and keep `changeover_candidate_id` blank. Post-hoc only synthesizes a candidate when later Count reset, operator context change, or die-change marker evidence exists.
+- [x] Realtime evidence-free stop-hold rows use weak `stopped_after_production_candidate` and keep `changeover_candidate_id` blank. Legacy `possible_pre_changeover_hold` rows remain accepted as aliases for existing CSVs. Post-hoc only synthesizes a candidate when later Count reset, operator context change, or die-change marker evidence exists.
 - [x] repeated lifecycle candidate IDs can span non-contiguous realtime rows and still produce one terminal lifecycle fact; unrelated general segments use `process_segment_id` instead.
 - [x] `scripts/infer_process_phase_events_for_csv.py` is gated by `PROCESS_PHASE_EVENT_FACT_ENABLED` and never mutates the source CSV.
 - [x] `scripts/validate_csv_v2_shadow.py` supports `2.4.0` while preserving `2.1.0` through `2.3.0` checks.
@@ -237,13 +237,13 @@ Verdict: PASS for independent fact-copy validation. This proves the provided ser
 
 ### 7.1 Downstream Consumer Replay Gate
 
-This gate is mandatory after merge and before broader operational promotion because v2.4 now appends `process_segment_id` and includes `possible_pre_changeover_hold` plus `production_stabilizing` in `process_phase_candidate`.
+This gate is mandatory after merge and before broader operational promotion because v2.4 now appends `process_segment_id` and includes `stopped_after_production_candidate` plus `production_stabilizing` in `process_phase_candidate`.
 
 PR body note for this change:
 
-- `process_phase_candidate` now includes the new enum value `possible_pre_changeover_hold`.
-- Any downstream CSV reader that uses an enum whitelist must either accept `possible_pre_changeover_hold` or explicitly map it before operational promotion.
-- The server-PC smoke evidence must record whether repo-out CSV consumers exist. If none exist, record `repo-out downstream consumers: none currently`; if any exist, dry-run each consumer against a v2.4 CSV or synthetic fixture containing `possible_pre_changeover_hold`.
+- `process_phase_candidate` now includes the new enum value `stopped_after_production_candidate`; legacy `possible_pre_changeover_hold` remains accepted for existing CSVs.
+- Any downstream CSV reader that uses an enum whitelist must either accept `stopped_after_production_candidate` or explicitly map it before operational promotion.
+- The server-PC smoke evidence must record whether repo-out CSV consumers exist. If none exist, record `repo-out downstream consumers: none currently`; if any exist, dry-run each consumer against a v2.4 CSV or synthetic fixture containing `stopped_after_production_candidate`.
 
 Required server-PC evidence:
 
@@ -251,8 +251,8 @@ Required server-PC evidence:
 2. Enable the full promotion bundle together: `CSV_V2_OPERATIONAL_FIELDS_ENABLED=true`, `SPOT_OBSERVATION_FACT_ENABLED=true`, and `PROCESS_PHASE_EVENT_FACT_ENABLED=true`.
 3. Run the server-PC full-bundle smoke again and capture `/health`, `/stats`, latest v2.4 CSV header, `process_phase_candidate` distribution, sidecar metadata parse, and fact-file presence.
 4. Run each downstream CSV consumer against the latest server-PC v2.4 CSV and matching `.metadata.json` sidecar.
-5. If the latest server CSV does not naturally contain `process_phase_candidate=possible_pre_changeover_hold`, run at least one synthetic or replay fixture that contains that enum through every enum-whitelist consumer.
-6. Record the consumer name/version, input CSV path, input row count, rejected row count, exit status, and whether the consumer accepted `process_segment_id`, `possible_pre_changeover_hold`, and `production_stabilizing`. If there are no repo-out consumers, record that explicitly.
+5. If the latest server CSV does not naturally contain `process_phase_candidate=stopped_after_production_candidate`, run at least one synthetic or replay fixture that contains that enum through every enum-whitelist consumer.
+6. Record the consumer name/version, input CSV path, input row count, rejected row count, exit status, and whether the consumer accepted `process_segment_id`, `stopped_after_production_candidate`, and `production_stabilizing`. If there are no repo-out consumers, record that explicitly.
 
 PowerShell evidence collection scaffold:
 
@@ -295,10 +295,10 @@ Replay PASS criteria:
 - latest server-PC CSV is `schema_version=2.4.0` and contains `process_segment_id`.
 - sidecar metadata parses as JSON and records all three promotion flags as `true`.
 - downstream consumer exits successfully with zero rejected rows caused by exact column count or unknown enum values.
-- at least one replay sample or synthetic fixture proves the consumer does not fail on `process_phase_candidate=possible_pre_changeover_hold` and `process_phase_candidate=production_stabilizing`.
+- at least one replay sample or synthetic fixture proves the consumer does not fail on `process_phase_candidate=stopped_after_production_candidate` and `process_phase_candidate=production_stabilizing`.
 - if any consumer fails, rollback is to disable the full v2.4 promotion bundle and roll over to v2.3-compatible output before production use.
 
-Current PR local evidence: generated v2.4 consumer replay with `process_segment_id`, `changeover_candidate_id`, `process_phase_candidate`, `possible_pre_changeover_hold`, and `production_stabilizing` passed `scripts.validate_csv_v2_shadow.validate`. This local validator replay is not a substitute for server-PC downstream consumer replay.
+Current PR local evidence: generated v2.4 consumer replay with `process_segment_id`, `changeover_candidate_id`, `process_phase_candidate`, `stopped_after_production_candidate`, and `production_stabilizing` passed `scripts.validate_csv_v2_shadow.validate`. This local validator replay is not a substitute for server-PC downstream consumer replay.
 
 Current branch local evidence update, 2026-06-27:
 

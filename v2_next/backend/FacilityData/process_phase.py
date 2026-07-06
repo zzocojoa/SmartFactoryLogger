@@ -6,12 +6,13 @@ from typing import Optional
 from backend import constants
 
 
-PROCESS_PHASE_RULE_VERSION = "process-phase-candidate-v2"
+PROCESS_PHASE_RULE_VERSION = "process-phase-candidate-v3"
 
 PROCESS_PHASE_CANDIDATES = {
     "production_stable",
     "setup_candidate",
     "pre_changeover_hold_candidate",
+    "stopped_after_production_candidate",
     "possible_pre_changeover_hold",
     "die_change_candidate",
     "setup_alignment_candidate",
@@ -90,7 +91,7 @@ def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPha
         and low_press
         and (input_state.count_held_sec or 0.0) >= _COUNT_HELD_FOR_CHANGEOVER_SEC
     ):
-        phase = "possible_pre_changeover_hold"
+        phase = "stopped_after_production_candidate"
     elif online_state == "idle_candidate" or (low_speed and low_press):
         phase = "idle_candidate"
 
