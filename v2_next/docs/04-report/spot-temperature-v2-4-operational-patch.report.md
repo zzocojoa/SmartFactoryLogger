@@ -211,6 +211,58 @@ Evidence level: `[independent verifier B direct parse of operator-provided serve
 
 Verdict: PASS for independent fact-copy validation. This proves the provided server fact artifact conforms to the current 1.2.0 fact schema and repository invariant validator. It does not prove live-path filesystem access by verifier B.
 
+### 5.6 PR #146 Positive Process Phase Evidence
+
+Evidence level: `[independent verifier B direct parse of operator-provided server copies]`. The verifier inspected the copied full-day CSV artifact set after PR #146 was merged. This section records only sanitized aggregate values. It intentionally excludes raw CSV rows, full internal paths, secrets, camera URLs, and row-level operational identifiers.
+
+Artifact scope:
+
+- Realtime CSV basename: `Factory_Integrated_Log_v2_20260706_094610.csv`.
+- Matching sidecar basename: `Factory_Integrated_Log_v2_20260706_094610.metadata.json`.
+- Fact basenames: `spot_observation_fact.csv`, `spot_image_fact.csv`.
+- Realtime CSV rows: `225,826`.
+- Realtime CSV columns: `108`.
+- Realtime CSV schema version: `2.4.0`.
+- Active schema version in metadata: `2.4.0`.
+- Process phase rule version: `process-phase-candidate-v3`.
+- Post-hoc fact rules: `changeover-candidate-resolution-v1`, `process-phase-event-v1`.
+- Promotion bundle flags: `CSV_V2_OPERATIONAL_FIELDS_ENABLED=true`, `SPOT_OBSERVATION_FACT_ENABLED=true`, `PROCESS_PHASE_EVENT_FACT_ENABLED=true`.
+
+Process phase distribution:
+
+| process_phase_candidate | rows |
+|---|---:|
+| `production_stable` | 145,117 |
+| `setup_candidate` | 44,324 |
+| `idle_candidate` | 17,583 |
+| `unknown` | 10,020 |
+| `setup_alignment_candidate` | 6,438 |
+| `production_stabilizing` | 2,143 |
+| `stopped_after_production_candidate` | 201 |
+| `possible_pre_changeover_hold` | 0 |
+
+Realtime stopped-candidate invariants:
+
+- `stopped_after_production_candidate` rows: `201`.
+- Rows with non-empty realtime `changeover_candidate_id`: `0`.
+- Rows with blank `process_segment_id`: `0`.
+
+Post-hoc process phase facts:
+
+- `changeover_candidate_resolution_fact` rows: `6`.
+- `process_phase_event_fact` rows: `6`.
+- Confirmed outcomes: `confirmed=6`.
+- Confirmed process phases: `pre_changeover_hold=3`, `production_stabilizing=3`.
+- Confirmation reasons: `stopped_after_production_candidate_confirmed_by_future_count_reset_to_0=3`, `production_stabilizing_mapped_posthoc=3`.
+- Sidecar metadata records both post-hoc fact manifests with source CSV SHA linkage verified by the validator.
+
+Validator result:
+
+- `scripts/validate_csv_v2_shadow.py`: PASS with the matching metadata sidecar, SPOT observation fact, SPOT image fact override, changeover candidate resolution fact, and process phase event fact supplied.
+- `git diff --check`: PASS at documentation closeout time.
+
+Verdict: PASS. This confirms the PR #146 intent on the inspected full-day artifact: realtime stop-after-production candidates remain weak realtime segments with no premature `changeover_candidate_id`, and only later evidence promotes eligible cases into post-hoc `pre_changeover_hold` facts.
+
 ---
 
 ## 6. Learnings
