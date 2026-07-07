@@ -73,16 +73,23 @@ not an atomic same-cycle guarantee.
   - capture reset after smoke: `enabled=false`, `mode=off`
   - capture failure count: 0
 - Row-time freshness closeout evidence, sanitized:
-  - file: `server_smoke_link_positive_20260703-114627_closeout.zip`
+  - file: `row_time_freshness_closeout_20260707-235635.zip`
+  - zip SHA-256: `405c7d89bafecf998385a15d84566aac535589b86f6af34e80233953bb759df1`
   - result: PASS
-  - CSV rows checked: 11552
-  - SPOT refresh interval: 1.0 seconds
-  - freshness threshold: 3000 ms
-  - effective row age differed from snapshot age on 11511 rows
+  - validator: `scripts/validate_csv_v2_shadow.py`
+  - validator exit code: 0
+  - CSV rows checked: 6716
+  - SPOT image fact rows: 190293
+  - SPOT image fact row count match: true
+  - SPOT image fact SHA-256 match: true
+  - effective row age differed from snapshot age on 6696 rows
   - threshold mismatch count: 0
   - startup observation key nonblank count: 0
-  - redaction scope: source records, local machine paths, connection details,
-    and binary image payloads are omitted
+  - freshness counts: `fresh=6689`, `stale=22`, `unknown=5`
+  - temperature output status counts: `valid=6689`, `stale=22`, `startup_pending=5`
+  - capture reset after closeout: `capture_enabled=false`, `capture_mode=off`, `dropped_count=0`, `failure_count=0`
+  - redaction scope: source records, local absolute paths, camera connection details,
+    operator access material, and binary image payloads are omitted
 - SPOT image linkage closeout gate evidence, sanitized:
   - artifact leaf: `server_smoke_linkage_gate_20260704-112742`
   - source artifacts: settled v2 CSV, sidecar metadata, and `spot_image_fact.csv`
