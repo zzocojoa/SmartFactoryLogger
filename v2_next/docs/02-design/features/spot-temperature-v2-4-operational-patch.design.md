@@ -412,7 +412,9 @@ spot_effective_age_ms_at_row = row_created_monotonic - poll_completed_monotonic
 ```
 
 Implementation note: realtime CSV row generation must compute `spot_effective_age_ms_at_row`
-at row write time from `spot_last_poll_completed_at` when explicit row-age input is absent.
+at row write time from monotonic poll completion time, or from `spot_last_poll_completed_at`
+when monotonic time is unavailable. It must not trust snapshot-provided
+`spot_effective_age_ms_at_row` as the row-time freshness value.
 The stale threshold is `SPOT_REFRESH_INTERVAL * 3 * 1000` milliseconds.
 
 Rules:
