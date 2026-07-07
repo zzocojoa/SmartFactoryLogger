@@ -204,6 +204,8 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
         row_inputs = [
             self._factory_data().model_copy(
                 update={
+                    "Time": "2026-07-02T23:30:25.000+00:00",
+                    "spot_last_poll_completed_at": "2026-07-02T23:30:24.900Z",
                     "spot_effective_age_ms_at_row": 100.0,
                     "spot_snapshot_age_ms": 10.0,
                     "spot_value_age_ms": 10.0,
@@ -211,7 +213,8 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
             ),
             self._factory_data().model_copy(
                 update={
-                    "Time": "2026-07-02T23:30:26.000",
+                    "Time": "2026-07-02T23:30:26.000+00:00",
+                    "spot_last_poll_completed_at": "2026-07-02T23:30:16.000Z",
                     "spot_effective_age_ms_at_row": 10_000.0,
                     "spot_snapshot_age_ms": 20.0,
                     "spot_value_age_ms": 20.0,

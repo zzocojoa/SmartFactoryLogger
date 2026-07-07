@@ -1151,6 +1151,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         data = self.create_data().model_copy(
             update={
                 "Spot": 557.9,
+                "Time": "2026-03-09T07:20:25.123+00:00",
                 "temperature_status_shadow": "ok",
                 "temperature_value_origin": "current_observation",
                 "spot_poll_status": "success",
@@ -1158,6 +1159,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 "spot_cache_status": "fresh",
                 "spot_source_freshness": "fresh",
                 "spot_temperature_observed_c": 557.9,
+                "spot_last_poll_completed_at": "2026-03-09T07:20:15.123Z",
                 "spot_last_valid_value_at": "2026-03-09T07:20:24.012Z",
                 "spot_effective_age_ms_at_row": 10_000.0,
             }

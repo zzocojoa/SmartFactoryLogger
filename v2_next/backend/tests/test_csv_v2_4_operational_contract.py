@@ -956,6 +956,33 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "stale")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "stale_observation")
 
+    def test_v2_4_row_recomputes_effective_age_when_explicit_snapshot_age_is_present(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        poll_completed_at = datetime(2026, 6, 25, 8, 0, 0, tzinfo=timezone.utc)
+        ingest_timestamp = poll_completed_at + timedelta(seconds=4)
+        data = self.create_data().model_copy(
+            update={
+                "Time": poll_completed_at.isoformat(),
+                "spot_last_poll_completed_at": poll_completed_at.isoformat().replace("+00:00", "Z"),
+                "spot_effective_age_ms_at_row": 10.0,
+                "spot_snapshot_age_ms": 10.0,
+                "spot_value_age_ms": 10.0,
+            }
+        )
+        with patch("backend.FacilityData.repository.config.SPOT_REFRESH_INTERVAL", 1.0):
+            row = service._build_v2_row(
+                data,
+                poll_completed_at,
+                ingest_timestamp,
+                1,
+                service._build_row(data, poll_completed_at),
+            )
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_snapshot_age_ms")], "10.0")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_age_ms_at_row")], "4000.0")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "stale")
+
     def test_v2_4_row_prefers_monotonic_effective_age_over_wall_clock_age(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)

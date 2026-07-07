@@ -1432,10 +1432,12 @@ class CSVLoggerService:
                 temperature_value_origin=data.temperature_value_origin or "none",
                 spot_device_status_code=data.spot_device_status_code,
                 spot_error_code=data.spot_error_code,
+                # Recompute row freshness at CSV write time. Snapshot-provided
+                # row age can be stale by the time this row is emitted.
                 spot_effective_age_ms_at_row=self._effective_age_ms_at_row(
                     row_timestamp=row_timestamp,
                     row_created_monotonic=row_created_monotonic,
-                    explicit_age_ms=data.spot_effective_age_ms_at_row,
+                    explicit_age_ms=None,
                     source_completed_monotonic=data.spot_last_poll_completed_monotonic,
                     source_timestamp=data.spot_last_poll_completed_at,
                     fallback_age_ms=data.spot_snapshot_age_ms,
