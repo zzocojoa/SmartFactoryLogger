@@ -335,16 +335,20 @@ class CSVLoggerService:
         self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
         self.thread.start()
 
-    def stop(self) -> None:
-        if not self.running:
-            return
-        self.running = False
-        try:
-            self.queue.put_nowait(None)
-        except queue.Full:
-            pass
+    def stop(self, *, timeout_sec: Optional[float] = 2.0) -> bool:
+        if self.running:
+            self.running = False
+            try:
+                self.queue.put_nowait(None)
+            except queue.Full:
+                pass
         if self.thread:
-            self.thread.join(timeout=2.0)
+            self.thread.join(timeout=timeout_sec)
+            stopped = not self.thread.is_alive()
+            if not stopped:
+                self.logger.warning("CSV logger thread did not stop within %.1f seconds.", timeout_sec)
+            return stopped
+        return True
 
     def enqueue(self, data: FactoryData) -> None:
         if not self.running:

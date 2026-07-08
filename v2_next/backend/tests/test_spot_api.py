@@ -1938,12 +1938,13 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             class FinalManifestLogger:
                 final_manifest: dict[str, Any] | None = None
 
-                def stop(self) -> None:
+                def stop(self, *, timeout_sec: float | None = None) -> bool:
                     service = CSVLoggerService()
                     service.fallback_log_dir = log_path
                     service.apply_config(log_path=log_path, auto_save=True, csv_v2_enabled=True)
                     final_path = service.write_spot_image_fact_final_manifest(log_path)
                     self.final_manifest = json.loads(final_path.read_text(encoding="utf-8"))
+                    return True
 
             final_manifest_logger = FinalManifestLogger()
 
