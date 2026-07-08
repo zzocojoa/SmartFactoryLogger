@@ -612,6 +612,51 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertTrue(row[V2_4_CSV_COLUMNS.index("changeover_candidate_id")].startswith("chg_"))
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_observation_key")], "spot-service-1:14")
 
+    def test_v2_4_row_ignores_explicit_observation_key_when_builder_disallows_key(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        timestamp = datetime(2026, 6, 25, 8, 0, 0, tzinfo=timezone.utc)
+        index = V2_4_CSV_COLUMNS.index("spot_observation_key")
+        cases = [
+            {"spot_poll_seq": 0},
+            {"spot_poll_seq": -1},
+            {"spot_poll_status": "not_attempted"},
+            {"spot_last_poll_completed_at": ""},
+            {"temperature_output_status": "startup_pending"},
+            {"temperature_status_shadow": "startup_pending"},
+        ]
+
+        for update in cases:
+            with self.subTest(update=update):
+                data = self.create_data().model_copy(
+                    update={
+                        "Time": timestamp.isoformat(),
+                        "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
+                        "spot_observation_key": "manual-service:999",
+                        **update,
+                    }
+                )
+
+                row = service._build_v2_row(data, timestamp, timestamp, 1, service._build_row(data, timestamp))
+
+                self.assertEqual(row[index], "")
+
+    def test_v2_4_row_uses_canonical_observation_key_over_explicit_key(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        timestamp = datetime(2026, 6, 25, 8, 0, 0, tzinfo=timezone.utc)
+        data = self.create_data().model_copy(
+            update={
+                "Time": timestamp.isoformat(),
+                "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
+                "spot_observation_key": "manual-service:999",
+            }
+        )
+
+        row = service._build_v2_row(data, timestamp, timestamp, 1, service._build_row(data, timestamp))
+
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_observation_key")], "spot-service-1:14")
+
     def test_v2_4_row_uses_signalpc_config_for_under_range_low_signal_cause(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
@@ -1261,6 +1306,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         row[header.index("temperature_output_status")] = "startup_pending"
         row[header.index("temperature_unavailable_reason")] = "startup_pending"
         row[header.index("temperature_value_origin")] = "none"
+        row[header.index("spot_observation_key")] = ""
 
         self.assertEqual(
             validate_v2_4_operational_invariants(
@@ -1270,6 +1316,70 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_v2_4_validator_rejects_nonblank_observation_key_for_startup_keyless_rows(self) -> None:
+        header = V2_4_CSV_COLUMNS
+        row = self.build_valid_temperature_v2_4_row()
+        row[header.index("Temperature")] = ""
+        row[header.index("spot_poll_status")] = "not_attempted"
+        row[header.index("spot_poll_seq")] = "0"
+        row[header.index("spot_raw_validity")] = "not_received"
+        row[header.index("spot_source_freshness")] = "unknown"
+        row[header.index("spot_device_status_code")] = ""
+        row[header.index("spot_last_poll_completed_at")] = ""
+        row[header.index("spot_effective_freshness_at_row")] = "unknown"
+        row[header.index("spot_row_age_clock_status")] = "unknown"
+        row[header.index("temperature_output_status")] = "startup_pending"
+        row[header.index("temperature_unavailable_reason")] = "startup_pending"
+        row[header.index("temperature_value_origin")] = "none"
+        row[header.index("spot_observation_key")] = "spot-service-1:0"
+
+        failures = validate_v2_4_operational_invariants(
+            [row],
+            header,
+            row_time_freshness_threshold_ms=3000.0,
+        )
+
+        self.assertIn("row 2 nonblank spot_observation_key requires positive spot_poll_seq", failures)
+        self.assertIn("row 2 not_attempted poll requires blank spot_observation_key", failures)
+        self.assertIn("row 2 missing spot_last_poll_completed_at requires blank spot_observation_key", failures)
+        self.assertIn("row 2 startup_pending row requires blank spot_observation_key", failures)
+
+    def test_full_validator_rejects_startup_row_with_nonblank_observation_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+            )
+            row = self.build_valid_temperature_v2_4_row()
+            row[V2_4_CSV_COLUMNS.index("Temperature")] = ""
+            row[V2_4_CSV_COLUMNS.index("spot_poll_status")] = "not_attempted"
+            row[V2_4_CSV_COLUMNS.index("spot_poll_seq")] = "0"
+            row[V2_4_CSV_COLUMNS.index("spot_raw_validity")] = "not_received"
+            row[V2_4_CSV_COLUMNS.index("spot_source_freshness")] = "unknown"
+            row[V2_4_CSV_COLUMNS.index("spot_device_status_code")] = ""
+            row[V2_4_CSV_COLUMNS.index("spot_last_poll_completed_at")] = ""
+            row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")] = "unknown"
+            row[V2_4_CSV_COLUMNS.index("spot_row_age_clock_status")] = "unknown"
+            row[V2_4_CSV_COLUMNS.index("temperature_output_status")] = "startup_pending"
+            row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")] = "startup_pending"
+            row[V2_4_CSV_COLUMNS.index("temperature_value_origin")] = "none"
+            row[V2_4_CSV_COLUMNS.index("spot_observation_key")] = "spot-service-1:0"
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260625_080000.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_4_CSV_COLUMNS)
+                writer.writerow(row)
+            service._write_v2_sidecar(v2_path, service._get_active_v2_contract())
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 1)
 
     def test_v2_4_validator_rejects_missing_row_timestamp(self) -> None:
         header = V2_4_CSV_COLUMNS

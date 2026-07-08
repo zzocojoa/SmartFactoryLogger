@@ -177,6 +177,8 @@ Realtime CSV rows may expose the latest matching SPOT image fact only as relativ
 | `changeover_candidate_id` | text/blank | `chg_` + stable hash from `logger_service_instance_id` and `candidate_start_sample_seq` | changeover lifecycle key only |
 | `spot_observation_key` | text/blank | `{spot_service_instance_id}:{spot_poll_seq}` only when `spot_poll_seq > 0`, `spot_last_poll_completed_at` is present, and the row is not startup pending | SPOT snapshot |
 
+Runtime must treat the built `spot_observation_key` contract as canonical. Any explicit upstream key is ignored unless the row still satisfies the same builder checks: positive `spot_poll_seq`, populated `spot_last_poll_completed_at`, non-`not_attempted` poll status, and non-startup temperature state. Startup, no-completion, and non-positive poll sequence rows must keep the CSV key blank.
+
 ID contract note: `process_segment_id` owns general production/stabilizing/idle/unknown segments and realtime weak `stopped_after_production_candidate` segments. `changeover_candidate_id` is reserved for strong changeover lifecycle rows only and is created once from `logger_service_instance_id + candidate_start_sample_seq`; it must not be generated for evidence-free weak hold rows or standalone Count 3 stabilization. A trusted post-hoc/legacy strong lifecycle can span `pre_changeover_hold_candidate -> die_change_candidate -> setup_alignment_candidate -> production_stabilizing -> terminal confirmation`, while weak `stopped_after_production_candidate` can be promoted only by post-hoc future evidence. Legacy `possible_pre_changeover_hold` rows are accepted as aliases for existing CSVs.
 
 Realtime CSV는 confirmed `changeover_event_id`를 소유하지 않는다.
