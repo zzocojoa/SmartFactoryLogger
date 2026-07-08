@@ -1345,6 +1345,19 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertIn("row 2 missing spot_last_poll_completed_at requires blank spot_observation_key", failures)
         self.assertIn("row 2 startup_pending row requires blank spot_observation_key", failures)
 
+    def test_v2_4_validator_rejects_nonblank_observation_key_for_startup_shadow_status(self) -> None:
+        header = V2_4_CSV_COLUMNS
+        row = self.build_valid_temperature_v2_4_row()
+        row[header.index("temperature_status_shadow")] = "startup_pending"
+
+        failures = validate_v2_4_operational_invariants(
+            [row],
+            header,
+            row_time_freshness_threshold_ms=3000.0,
+        )
+
+        self.assertIn("row 2 startup_pending shadow status requires blank spot_observation_key", failures)
+
     def test_full_validator_rejects_startup_row_with_nonblank_observation_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)

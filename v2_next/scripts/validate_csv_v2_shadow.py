@@ -733,6 +733,7 @@ def validate_v2_4_operational_invariants(
         "spot_last_poll_completed_at",
         "spot_effective_freshness_at_row",
         "spot_row_age_clock_status",
+        "temperature_status_shadow",
         "temperature_output_status",
         "temperature_unavailable_reason",
         "temperature_under_range_cause_candidate",
@@ -778,6 +779,7 @@ def validate_v2_4_operational_invariants(
         poll_completed_at = row[indices["spot_last_poll_completed_at"]].strip()
         row_freshness = row[indices["spot_effective_freshness_at_row"]].strip()
         clock_status = row[indices["spot_row_age_clock_status"]].strip()
+        shadow_status = row[indices["temperature_status_shadow"]].strip()
         output_status = row[indices["temperature_output_status"]].strip()
         unavailable_reason = row[indices["temperature_unavailable_reason"]].strip()
         cause = row[indices["temperature_under_range_cause_candidate"]].strip()
@@ -812,6 +814,10 @@ def validate_v2_4_operational_invariants(
                 failures.append(f"row {row_number} missing spot_last_poll_completed_at requires blank spot_observation_key")
             if output_status == "startup_pending":
                 failures.append(f"row {row_number} startup_pending row requires blank spot_observation_key")
+            if shadow_status == "startup_pending":
+                failures.append(
+                    f"row {row_number} startup_pending shadow status requires blank spot_observation_key"
+                )
         if row_timestamp is not None and poll_timestamp is not None:
             actual_age_ms = (row_timestamp - poll_timestamp).total_seconds() * 1000.0
             if actual_age_ms < 0:
