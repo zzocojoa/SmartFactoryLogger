@@ -1399,18 +1399,22 @@ class CSVLoggerService:
         source_completed_monotonic: Optional[float],
         source_timestamp: Optional[str],
         fallback_age_ms: Optional[float],
+        row_freshness_threshold_ms: Optional[float] = None,
     ) -> Optional[float]:
         monotonic_age = self._monotonic_age_ms_at_row(
             row_created_monotonic=row_created_monotonic,
             source_completed_monotonic=source_completed_monotonic,
         )
+        timestamp_age = self._timestamp_age_ms_at_row(row_timestamp, source_timestamp)
+        if timestamp_age is not None and row_freshness_threshold_ms is not None:
+            if timestamp_age < 0 or timestamp_age > row_freshness_threshold_ms:
+                return timestamp_age
         if monotonic_age is not None:
             return monotonic_age
         if explicit_age_ms is not None:
             return explicit_age_ms
-        row_age = self._timestamp_age_ms_at_row(row_timestamp, source_timestamp)
-        if row_age is not None:
-            return row_age
+        if timestamp_age is not None:
+            return timestamp_age
         return fallback_age_ms
 
     def _derive_temperature_operational_decision(
@@ -1420,6 +1424,7 @@ class CSVLoggerService:
         row_timestamp: datetime,
         row_created_monotonic: Optional[float],
     ):
+        row_freshness_threshold_ms = self._spot_row_freshness_threshold_ms()
         return derive_temperature_operational_fields(
             TemperatureOperationalInput(
                 poll_status=data.spot_poll_status or "not_attempted",
@@ -1441,6 +1446,7 @@ class CSVLoggerService:
                     source_completed_monotonic=data.spot_last_poll_completed_monotonic,
                     source_timestamp=data.spot_last_poll_completed_at,
                     fallback_age_ms=data.spot_snapshot_age_ms,
+                    row_freshness_threshold_ms=row_freshness_threshold_ms,
                 ),
                 spot_effective_value_age_ms_at_row=self._effective_age_ms_at_row(
                     row_timestamp=row_timestamp,
@@ -1450,7 +1456,7 @@ class CSVLoggerService:
                     source_timestamp=data.spot_last_valid_value_at,
                     fallback_age_ms=data.spot_value_age_ms,
                 ),
-                spot_row_freshness_threshold_ms=self._spot_row_freshness_threshold_ms(),
+                spot_row_freshness_threshold_ms=row_freshness_threshold_ms,
                 process_phase_candidate=process_phase_candidate,
                 evidence_codes=parse_spot_diagnostic_evidence_codes(data.spot_diagnostic_evidence_codes),
                 alarmstatus=self._optional_alarmstatus(data.alarmstatus),
@@ -1617,7 +1623,7 @@ class CSVLoggerService:
         operational_decision = self._derive_temperature_operational_decision(
             data,
             process_phase_decision.process_phase_candidate,
-            ingest_timestamp,
+            utc_timestamp,
             row_created_monotonic,
         )
         v1_values = list(v1_row)

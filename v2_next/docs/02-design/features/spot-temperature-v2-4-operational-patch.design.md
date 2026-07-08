@@ -414,7 +414,12 @@ spot_effective_age_ms_at_row = row_created_monotonic - poll_completed_monotonic
 Implementation note: realtime CSV row generation must compute `spot_effective_age_ms_at_row`
 at row write time from monotonic poll completion time, or from `spot_last_poll_completed_at`
 when monotonic time is unavailable. It must not trust snapshot-provided
-`spot_effective_age_ms_at_row` as the row-time freshness value.
+`spot_effective_age_ms_at_row` as the row-time freshness value. Because the
+promotion validator cross-checks exported rows using the CSV `timestamp_utc`,
+runtime generation must also let `timestamp_utc - spot_last_poll_completed_at`
+force a stale/unknown decision when that wall-clock age crosses the stale
+threshold or goes negative; monotonic timing must not leave a threshold-breaching
+CSV row as `fresh`/`valid`.
 The stale threshold is `SPOT_REFRESH_INTERVAL * 3 * 1000` milliseconds.
 
 Rules:
@@ -426,7 +431,9 @@ negative age                  -> unknown + clock_anomaly
 poll completion missing       -> unknown
 ```
 
-CSV stores the computed result and relevant UTC timestamps; the freshness decision itself must not depend on wall-clock deltas when monotonic timing is available.
+CSV stores the computed result and relevant UTC timestamps. Monotonic timing is
+the preferred same-process age source, but the stored CSV row must still satisfy
+the exported timestamp cross-check.
 
 The validator also performs a wall-clock cross-check for exported CSV artifacts:
 `actual_age_ms = timestamp_utc - spot_last_poll_completed_at`. When both
