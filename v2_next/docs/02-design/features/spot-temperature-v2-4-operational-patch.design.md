@@ -403,7 +403,7 @@ When only `phase_setup_candidate` is present, emit `temperature_under_range_caus
 
 `temperature_cause_confidence` must be deterministic from evidence strength and bounded to `0.0..1.0`; no candidate may exceed `0.9` without at least one direct equipment diagnostic code.
 
-### 4.4 Row Freshness and Clock Rules### 4.4 Row Freshness and Clock Rules
+### 4.4 Row Freshness and Clock Rules
 
 Row-time freshness uses same-process monotonic time.
 
@@ -427,6 +427,16 @@ poll completion missing       -> unknown
 ```
 
 CSV stores the computed result and relevant UTC timestamps; the freshness decision itself must not depend on wall-clock deltas when monotonic timing is available.
+
+The validator also performs a wall-clock cross-check for exported CSV artifacts:
+`actual_age_ms = timestamp_utc - spot_last_poll_completed_at`. When both
+timestamps are parseable and `actual_age_ms` exceeds the row freshness threshold,
+`spot_effective_freshness_at_row` and `temperature_output_status` must both be
+`stale`. Missing `spot_last_poll_completed_at` leaves this auxiliary check
+unevaluated, while a negative wall-clock age must be represented as
+`spot_row_age_clock_status=clock_anomaly`,
+`spot_effective_freshness_at_row=unknown`, and
+`temperature_output_status=unknown`.
 
 ### 4.5 Process Phase Candidate Rules
 

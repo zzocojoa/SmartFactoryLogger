@@ -39,6 +39,7 @@ ROW_TIME_FRESHNESS_REQUIRED_COLUMNS = (
     "spot_observation_key",
 )
 FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS = 9000.0
+DEFAULT_VALIDATOR_TIMEOUT_SEC = 300.0
 PROCESS_FACTS = (
     (
         "changeover_candidate_resolution_fact",
@@ -287,6 +288,10 @@ def _row_time_freshness_summary(
         "row_time_freshness_threshold_ms": threshold_ms,
         "effective_age_differs_from_snapshot_age_rows": 0,
         "threshold_mismatch_count": 0,
+        "timestamp_age_threshold_breach_count": 0,
+        "timestamp_age_freshness_mismatch_count": 0,
+        "timestamp_age_status_mismatch_count": 0,
+        "timestamp_age_clock_anomaly_mismatch_count": 0,
         "startup_observation_key_nonblank_count": 0,
         "timestamp_direction_mismatch_count": 0,
     }
@@ -321,6 +326,25 @@ def _row_time_freshness_summary(
         if startup_row and observation_key:
             summary["startup_observation_key_nonblank_count"] += 1
 
+        timestamp_utc = _parse_utc_timestamp(row.get("timestamp_utc"))
+        poll_completed_at = _parse_utc_timestamp(row.get("spot_last_poll_completed_at"))
+        if timestamp_utc is not None and poll_completed_at is not None:
+            timestamp_age_ms = (timestamp_utc - poll_completed_at).total_seconds() * 1000.0
+            if timestamp_age_ms < 0:
+                if (
+                    str(row.get("spot_row_age_clock_status") or "").strip() != "clock_anomaly"
+                    or actual_freshness != "unknown"
+                    or output_status != "unknown"
+                    or unavailable_reason != "unknown_freshness"
+                ):
+                    summary["timestamp_age_clock_anomaly_mismatch_count"] += 1
+            elif timestamp_age_ms > threshold_ms:
+                summary["timestamp_age_threshold_breach_count"] += 1
+                if actual_freshness != "stale":
+                    summary["timestamp_age_freshness_mismatch_count"] += 1
+                if output_status != "stale":
+                    summary["timestamp_age_status_mismatch_count"] += 1
+
         row_reference_timestamp = (
             _parse_utc_timestamp(row.get("ingest_timestamp"))
             or _parse_utc_timestamp(row.get("timestamp_utc"))
@@ -348,6 +372,9 @@ def _row_time_validation_errors(summary: Mapping[str, Any]) -> list[str]:
         errors.append("row_time.required_columns_missing")
     for key in (
         "threshold_mismatch_count",
+        "timestamp_age_freshness_mismatch_count",
+        "timestamp_age_status_mismatch_count",
+        "timestamp_age_clock_anomaly_mismatch_count",
         "startup_observation_key_nonblank_count",
         "timestamp_direction_mismatch_count",
     ):
@@ -440,6 +467,7 @@ def build_closeout(
     api_base: str | None,
     spot_config_json: Path | None,
     python_executable: str,
+    validator_timeout_sec: float = DEFAULT_VALIDATOR_TIMEOUT_SEC,
 ) -> tuple[dict[str, Any], int]:
     csv_file = _single_file(bundle_path, "Factory_Integrated_Log_v2*.csv")
     metadata_file = csv_file.with_suffix(".metadata.json")
@@ -458,7 +486,7 @@ def build_closeout(
         cwd=REPO_ROOT,
         text=True,
         capture_output=True,
-        timeout=60,
+        timeout=validator_timeout_sec,
     )
     validator_output = validator.stdout + validator.stderr
     parsed = _parse_validator_output(validator_output)
@@ -590,10 +618,18 @@ def main() -> int:
     parser.add_argument("--spot-config-json", type=Path, help="Offline /api/spot/config JSON response")
     parser.add_argument("--output", type=Path, help=f"Output JSON path, default {CLOSEOUT_FILENAME} in bundle")
     parser.add_argument("--python-executable", default=sys.executable)
+    parser.add_argument(
+        "--validator-timeout-sec",
+        type=float,
+        default=DEFAULT_VALIDATOR_TIMEOUT_SEC,
+        help=f"Validator subprocess timeout in seconds, default {DEFAULT_VALIDATOR_TIMEOUT_SEC:g}",
+    )
     args = parser.parse_args()
 
     if bool(args.api_base) == bool(args.spot_config_json):
         parser.error("provide exactly one of --api-base or --spot-config-json")
+    if args.validator_timeout_sec <= 0:
+        parser.error("--validator-timeout-sec must be greater than 0")
     bundle_path = args.bundle.resolve()
     output_path = args.output or (bundle_path / CLOSEOUT_FILENAME)
     closeout, exit_code = build_closeout(
@@ -602,6 +638,7 @@ def main() -> int:
         api_base=args.api_base,
         spot_config_json=args.spot_config_json,
         python_executable=args.python_executable,
+        validator_timeout_sec=args.validator_timeout_sec,
     )
     output_path.write_text(json.dumps(closeout, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"closeout_json={output_path.name}")

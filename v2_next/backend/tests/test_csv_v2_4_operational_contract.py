@@ -28,6 +28,7 @@ from backend.FacilityData.repository import (
 )
 from backend.FacilityData.schemas import FactoryData
 from scripts.validate_csv_v2_shadow import (
+    validate as validate_csv_v2_shadow,
     validate_changeover_candidate_resolution_fact_manifest,
     validate_process_phase_event_fact_manifest,
     validate_spot_image_fact_manifest,
@@ -113,6 +114,39 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             path,
             ["schema_version", "sample_seq", "timestamp_utc"],
             [["2.4.0", "1", "2026-06-25T00:00:00Z"]],
+        )
+
+    def build_valid_temperature_v2_4_row(
+        self,
+        *,
+        timestamp_utc: datetime | None = None,
+        poll_completed_at: datetime | None = None,
+    ) -> list[str]:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        poll_completed_at = poll_completed_at or datetime(2026, 6, 25, 8, 0, 0, tzinfo=timezone.utc)
+        timestamp_utc = timestamp_utc or poll_completed_at
+        data = self.create_data().model_copy(
+            update={
+                "Time": timestamp_utc.isoformat(),
+                "Spot": 560.7,
+                "spot_temperature_observed_c": 560.7,
+                "spot_temperature_raw": "560.7",
+                "spot_raw_validity": "valid_temperature",
+                "spot_device_status_code": None,
+                "temperature_status_shadow": "ok",
+                "temperature_value_origin": "current_observation",
+                "spot_last_poll_completed_at": poll_completed_at.isoformat().replace("+00:00", "Z"),
+                "spot_snapshot_age_ms": 10.0,
+                "spot_value_age_ms": 10.0,
+            }
+        )
+        return service._build_v2_row(
+            data,
+            timestamp_utc,
+            timestamp_utc,
+            1,
+            service._build_row(data, timestamp_utc),
         )
 
     def write_resolution_fact_fixture(self, path: Path, source_hash: str) -> str:
@@ -1156,13 +1190,111 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
     def test_v2_4_validator_accepts_operational_row(self) -> None:
         header = V2_4_CSV_COLUMNS
-        service = CSVLoggerService()
-        service.apply_config(csv_v2_operational_fields_enabled=True)
-        data = self.create_data()
-        timestamp = service._parse_timestamp(data)
-        row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
+        row = self.build_valid_temperature_v2_4_row()
 
         self.assertEqual(validate_v2_4_operational_invariants([row], header), [])
+
+    def test_v2_4_validator_rejects_timestamp_stale_row_left_fresh_valid(self) -> None:
+        header = V2_4_CSV_COLUMNS
+        row = self.build_valid_temperature_v2_4_row()
+        row[header.index("timestamp_utc")] = "2026-06-25T08:00:04Z"
+
+        failures = validate_v2_4_operational_invariants(
+            [row],
+            header,
+            row_time_freshness_threshold_ms=3000.0,
+        )
+
+        self.assertTrue(
+            any("spot_effective_freshness_at_row='fresh'" in failure for failure in failures),
+            failures,
+        )
+        self.assertTrue(
+            any("temperature_output_status='valid'" in failure for failure in failures),
+            failures,
+        )
+
+    def test_v2_4_validator_startup_row_allows_missing_poll_completed_timestamp(self) -> None:
+        header = V2_4_CSV_COLUMNS
+        row = self.build_valid_temperature_v2_4_row()
+        row[header.index("Temperature")] = ""
+        row[header.index("spot_poll_status")] = "not_attempted"
+        row[header.index("spot_raw_validity")] = "not_received"
+        row[header.index("spot_source_freshness")] = "unknown"
+        row[header.index("spot_device_status_code")] = ""
+        row[header.index("spot_last_poll_completed_at")] = ""
+        row[header.index("spot_effective_freshness_at_row")] = "unknown"
+        row[header.index("spot_row_age_clock_status")] = "unknown"
+        row[header.index("temperature_output_status")] = "startup_pending"
+        row[header.index("temperature_unavailable_reason")] = "startup_pending"
+        row[header.index("temperature_value_origin")] = "none"
+
+        self.assertEqual(
+            validate_v2_4_operational_invariants(
+                [row],
+                header,
+                row_time_freshness_threshold_ms=3000.0,
+            ),
+            [],
+        )
+
+    def test_v2_4_validator_rejects_missing_row_timestamp(self) -> None:
+        header = V2_4_CSV_COLUMNS
+        row = self.build_valid_temperature_v2_4_row()
+        row[header.index("timestamp_utc")] = ""
+
+        failures = validate_v2_4_operational_invariants(
+            [row],
+            header,
+            row_time_freshness_threshold_ms=3000.0,
+        )
+
+        self.assertIn("row 2 timestamp_utc must be a parseable UTC timestamp", failures)
+
+    def test_v2_4_validator_accepts_timestamp_clock_anomaly_policy(self) -> None:
+        header = V2_4_CSV_COLUMNS
+        row = self.build_valid_temperature_v2_4_row()
+        row[header.index("timestamp_utc")] = "2026-06-25T07:59:59Z"
+        row[header.index("Temperature")] = ""
+        row[header.index("spot_effective_freshness_at_row")] = "unknown"
+        row[header.index("spot_row_age_clock_status")] = "clock_anomaly"
+        row[header.index("temperature_output_status")] = "unknown"
+        row[header.index("temperature_unavailable_reason")] = "unknown_freshness"
+        row[header.index("temperature_value_origin")] = "none"
+
+        self.assertEqual(
+            validate_v2_4_operational_invariants(
+                [row],
+                header,
+                row_time_freshness_threshold_ms=3000.0,
+            ),
+            [],
+        )
+
+    def test_full_validator_rejects_timestamp_stale_row_left_fresh_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+            )
+            row = self.build_valid_temperature_v2_4_row()
+            row[V2_4_CSV_COLUMNS.index("timestamp_utc")] = "2026-06-25T08:00:04Z"
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260625_080004.csv"
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_4_CSV_COLUMNS)
+                writer.writerow(row)
+            with patch("backend.FacilityData.repository.config.SPOT_REFRESH_INTERVAL", 1.0):
+                service._write_v2_sidecar(v2_path, service._get_active_v2_contract())
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 1)
 
     def test_v2_4_row_links_latest_spot_image_fact_for_same_observation(self) -> None:
         header = V2_4_CSV_COLUMNS
