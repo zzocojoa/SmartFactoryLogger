@@ -652,6 +652,26 @@ Match rate alone is not sufficient for report or operational promotion.
 | Compatibility | v2.3 and v2.4 validator pass, and downstream consumers either accept `stopped_after_production_candidate` / `production_stabilizing` plus legacy `possible_pre_changeover_hold`, or have an explicit compatibility mapping / documented absence |
 | Controlled tests | all status/reason branches and cache/value-origin invariants pass |
 
+### 9.1 Sanitized Server Closeout Evidence
+
+Latest master server closeout evidence for row-time freshness alignment:
+
+| Field | Value |
+|---|---|
+| Artifact | `row_time_freshness_closeout_master_20260708-133717.zip` |
+| ZIP SHA-256 | `C907234C636D6253753C1A03523A31EA045D16816572331C65DE76EB8B47A811` |
+| Source commit | `85e868d04d19b2a53ef9f9ccd5ab4dc0f0ce8059` |
+| Validator verdict | `PASS` (`validator_exit_code=0`, `validation_source=final_manifest`) |
+| Rows checked | `1640` |
+| Row freshness threshold | `3000 ms` |
+| Timestamp-age threshold breaches | `10` |
+| Freshness mismatch count | `0` |
+| Output-status mismatch count | `0` |
+| Clock-anomaly mismatch count | `0` |
+| Row-time validation errors | `0` |
+| SPOT capture reset state | `enabled=false`, `mode=off`, `failure_count=0` |
+| Redaction check | PASS. This evidence block excludes raw CSV rows, credential values, camera endpoint values, absolute local paths, and image payloads. |
+
 ## 10. Security and Failure Modes## 10. Security and Failure Modes
 
 - No credentials or tokens are added.
