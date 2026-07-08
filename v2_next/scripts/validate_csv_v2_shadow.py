@@ -8,6 +8,7 @@ import json
 import math
 import re
 import sys
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from statistics import mean
@@ -103,6 +104,7 @@ EXPECTED_SPOT_SENTINEL_PROVENANCE = {
     "page_numbers": [7],
     "verification_method": "local_pdf_text_extraction_pypdf",
 }
+FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS = 9000.0
 CURRENT_SERVER_PROMOTION_SPOT_CONFIGURATION_PROFILE = {
     "spot_model_info": "SPOT+ AL",
     "spot_app_mode": "App1: AL E",
@@ -422,6 +424,30 @@ def _parse_finite_float(value: object) -> float | None:
     return parsed
 
 
+def _parse_utc_timestamp(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _metadata_row_time_freshness_threshold_ms(metadata: dict) -> float:
+    shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
+    if isinstance(shadow_metadata, dict):
+        threshold_sec = _parse_finite_float(shadow_metadata.get("poll_freshness_threshold_sec"))
+        if threshold_sec is not None and threshold_sec >= 0:
+            return threshold_sec * 1000.0
+    return FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS
+
+
 def _parse_json_string_list(value: str) -> list[str]:
     if not value:
         return []
@@ -690,13 +716,21 @@ V2_4_OPERATIONAL_ENUM_VALUES = {
 }
 
 
-def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str]) -> list[str]:
+def validate_v2_4_operational_invariants(
+    rows: list[list[str]],
+    header: list[str],
+    *,
+    row_time_freshness_threshold_ms: float = FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS,
+) -> list[str]:
     required_columns = [
+        "timestamp_utc",
         "Temperature",
         "spot_raw_validity",
         "spot_source_freshness",
         "spot_device_status_code",
+        "spot_last_poll_completed_at",
         "spot_effective_freshness_at_row",
+        "spot_row_age_clock_status",
         "temperature_output_status",
         "temperature_unavailable_reason",
         "temperature_under_range_cause_candidate",
@@ -733,10 +767,13 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
             failures.append(f"row {row_number} shorter than v2.4 operational columns")
             continue
         temperature = row[indices["Temperature"]].strip()
+        timestamp_utc = row[indices["timestamp_utc"]].strip()
         raw_validity = row[indices["spot_raw_validity"]].strip()
         source_freshness = row[indices["spot_source_freshness"]].strip()
         device_status = row[indices["spot_device_status_code"]].strip()
+        poll_completed_at = row[indices["spot_last_poll_completed_at"]].strip()
         row_freshness = row[indices["spot_effective_freshness_at_row"]].strip()
+        clock_status = row[indices["spot_row_age_clock_status"]].strip()
         output_status = row[indices["temperature_output_status"]].strip()
         unavailable_reason = row[indices["temperature_unavailable_reason"]].strip()
         cause = row[indices["temperature_under_range_cause_candidate"]].strip()
@@ -750,6 +787,40 @@ def validate_v2_4_operational_invariants(rows: list[list[str]], header: list[str
 
         if output_status and output_status != "valid" and temperature:
             failures.append(f"row {row_number} non-valid temperature_output_status requires blank Temperature")
+        row_timestamp = _parse_utc_timestamp(timestamp_utc)
+        poll_timestamp = _parse_utc_timestamp(poll_completed_at)
+        if not timestamp_utc or row_timestamp is None:
+            failures.append(f"row {row_number} timestamp_utc must be a parseable UTC timestamp")
+        if poll_completed_at and poll_timestamp is None:
+            failures.append(f"row {row_number} spot_last_poll_completed_at must be a parseable UTC timestamp when populated")
+        if row_timestamp is not None and poll_timestamp is not None:
+            actual_age_ms = (row_timestamp - poll_timestamp).total_seconds() * 1000.0
+            if actual_age_ms < 0:
+                if clock_status != "clock_anomaly":
+                    failures.append(
+                        f"row {row_number} negative timestamp row age requires spot_row_age_clock_status=clock_anomaly"
+                    )
+                if row_freshness != "unknown":
+                    failures.append(
+                        f"row {row_number} negative timestamp row age requires spot_effective_freshness_at_row=unknown"
+                    )
+                if output_status != "unknown" or unavailable_reason != "unknown_freshness":
+                    failures.append(
+                        f"row {row_number} negative timestamp row age requires "
+                        "temperature_output_status=unknown and temperature_unavailable_reason=unknown_freshness"
+                    )
+            elif actual_age_ms > row_time_freshness_threshold_ms:
+                if row_freshness != "stale":
+                    failures.append(
+                        f"row {row_number} timestamp row age {actual_age_ms:.3f}ms exceeds "
+                        f"{row_time_freshness_threshold_ms:.3f}ms but "
+                        f"spot_effective_freshness_at_row={row_freshness!r}"
+                    )
+                if output_status != "stale":
+                    failures.append(
+                        f"row {row_number} timestamp row age {actual_age_ms:.3f}ms exceeds "
+                        f"{row_time_freshness_threshold_ms:.3f}ms but temperature_output_status={output_status!r}"
+                    )
         if row_freshness == "stale" or source_freshness == "stale":
             if output_status != "stale":
                 failures.append(f"row {row_number} stale freshness requires temperature_output_status=stale")
@@ -1653,7 +1724,13 @@ def validate(
         failures.extend(validate_temperature_value_origin_invariants(v2_rows, v2_header))
         failures.extend(validate_spot_invalid_sentinel_invariants(v2_rows, v2_header))
         if v2_schema == CSV_SCHEMA_VERSION_V2_4:
-            failures.extend(validate_v2_4_operational_invariants(v2_rows, v2_header))
+            failures.extend(
+                validate_v2_4_operational_invariants(
+                    v2_rows,
+                    v2_header,
+                    row_time_freshness_threshold_ms=_metadata_row_time_freshness_threshold_ms(metadata),
+                )
+            )
             failures.extend(
                 validate_spot_configuration_snapshot(
                     metadata,
