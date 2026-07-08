@@ -415,6 +415,18 @@ Startup SPOT observation key guard closeout, 2026-07-08:
 - Validator PASS: `scripts/validate_csv_v2_shadow.py` succeeded with the copied v2 CSV, metadata, `spot_observation_fact.csv`, `spot_image_fact.csv`, and `spot_image_fact_manifest.final.json`; verified `spot_image_fact` row count was `190,293` and SHA-256 matched the final manifest.
 - Redaction check PASS: this evidence block excludes raw CSV rows, credential values, camera endpoint values, absolute local paths, and image payloads.
 
+Latest master startup SPOT observation key guard closeout, 2026-07-08:
+
+- Evidence level: independent verifier direct parse of an operator-provided copied server closeout bundle, not direct live server filesystem access.
+- Source build baseline: latest `master` after PR #154, merge commit `454030976ad20b3b68f832d7affe0e129f6c3767`.
+- Artifact: `startup_key_guard_closeout_master_20260708-215552.zip`, SHA-256 `1391F397B5694DC205B4177CC08639A9D4087393B1C76EC8D351F9642B6E4AB0`.
+- Selected CSV: `Factory_Integrated_Log_v2_20260708_214947.csv`, `1,663` rows, copied bundle scope `test_data`.
+- Startup/keyless guard replay PASS: `startup_keyless_candidates=6`, `startup_key_violations=0`, and all startup/keyless candidate rows kept blank realtime `spot_observation_key`.
+- Normal polling key retention PASS: total nonblank realtime `spot_observation_key` rows were `1,657`, proving valid polling rows still keep observation linkage while startup/keyless rows remain blank.
+- SPOT capture reset PASS: `capture_enabled=false`, `capture_mode=off`, and `capture_failure_count=0`.
+- Validator PASS: `scripts/validate_csv_v2_shadow.py` succeeded with the copied v2 CSV, metadata, `spot_observation_fact.csv`, `spot_image_fact.csv`, and `spot_image_fact_manifest.final.json`; verified `spot_image_fact` row count was `190,293` and SHA-256 matched the final manifest.
+- Redaction check PASS: this evidence block excludes raw CSV rows, credential values, camera endpoint values, absolute local paths, and image payloads.
+
 ---
 
 ## 8. Related Documents
