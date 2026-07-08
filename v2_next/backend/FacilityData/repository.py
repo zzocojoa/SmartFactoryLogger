@@ -1482,9 +1482,7 @@ class CSVLoggerService:
         )
 
     def _spot_observation_key_for_data(self, data: FactoryData) -> str:
-        if data.spot_observation_key:
-            return data.spot_observation_key
-        return build_spot_observation_key(
+        built_key = build_spot_observation_key(
             {
                 "spot_service_instance_id": data.spot_service_instance_id,
                 "spot_poll_seq": data.spot_poll_seq,
@@ -1494,6 +1492,9 @@ class CSVLoggerService:
                 "temperature_status_shadow": data.temperature_status_shadow,
             }
         )
+        if not built_key:
+            return ""
+        return built_key
 
     def _spot_image_link_for_row(self, data: FactoryData, spot_observation_key: str) -> dict[str, str]:
         explicit = {

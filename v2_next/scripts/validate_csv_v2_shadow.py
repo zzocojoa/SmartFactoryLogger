@@ -725,12 +725,15 @@ def validate_v2_4_operational_invariants(
     required_columns = [
         "timestamp_utc",
         "Temperature",
+        "spot_poll_status",
+        "spot_poll_seq",
         "spot_raw_validity",
         "spot_source_freshness",
         "spot_device_status_code",
         "spot_last_poll_completed_at",
         "spot_effective_freshness_at_row",
         "spot_row_age_clock_status",
+        "temperature_status_shadow",
         "temperature_output_status",
         "temperature_unavailable_reason",
         "temperature_under_range_cause_candidate",
@@ -768,12 +771,15 @@ def validate_v2_4_operational_invariants(
             continue
         temperature = row[indices["Temperature"]].strip()
         timestamp_utc = row[indices["timestamp_utc"]].strip()
+        poll_status = row[indices["spot_poll_status"]].strip()
+        raw_poll_seq = row[indices["spot_poll_seq"]].strip()
         raw_validity = row[indices["spot_raw_validity"]].strip()
         source_freshness = row[indices["spot_source_freshness"]].strip()
         device_status = row[indices["spot_device_status_code"]].strip()
         poll_completed_at = row[indices["spot_last_poll_completed_at"]].strip()
         row_freshness = row[indices["spot_effective_freshness_at_row"]].strip()
         clock_status = row[indices["spot_row_age_clock_status"]].strip()
+        shadow_status = row[indices["temperature_status_shadow"]].strip()
         output_status = row[indices["temperature_output_status"]].strip()
         unavailable_reason = row[indices["temperature_unavailable_reason"]].strip()
         cause = row[indices["temperature_under_range_cause_candidate"]].strip()
@@ -793,6 +799,25 @@ def validate_v2_4_operational_invariants(
             failures.append(f"row {row_number} timestamp_utc must be a parseable UTC timestamp")
         if poll_completed_at and poll_timestamp is None:
             failures.append(f"row {row_number} spot_last_poll_completed_at must be a parseable UTC timestamp when populated")
+        poll_seq: int | None = None
+        if raw_poll_seq:
+            try:
+                poll_seq = int(raw_poll_seq)
+            except ValueError:
+                failures.append(f"row {row_number} spot_poll_seq must be an integer when populated")
+        if spot_observation_key:
+            if poll_seq is None or poll_seq <= 0:
+                failures.append(f"row {row_number} nonblank spot_observation_key requires positive spot_poll_seq")
+            if poll_status == "not_attempted":
+                failures.append(f"row {row_number} not_attempted poll requires blank spot_observation_key")
+            if not poll_completed_at:
+                failures.append(f"row {row_number} missing spot_last_poll_completed_at requires blank spot_observation_key")
+            if output_status == "startup_pending":
+                failures.append(f"row {row_number} startup_pending row requires blank spot_observation_key")
+            if shadow_status == "startup_pending":
+                failures.append(
+                    f"row {row_number} startup_pending shadow status requires blank spot_observation_key"
+                )
         if row_timestamp is not None and poll_timestamp is not None:
             actual_age_ms = (row_timestamp - poll_timestamp).total_seconds() * 1000.0
             if actual_age_ms < 0:
