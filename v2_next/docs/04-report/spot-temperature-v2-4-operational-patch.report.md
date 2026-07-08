@@ -402,6 +402,19 @@ Post-merge local evidence update, 2026-06-26:
 - CSV write/watch suspicious-row scan PASS: the operator-provided suspicious-row query returned no rows, covering the checked failure modes `csv_length=0`, `import_csv_ok=False`, `row_count=0`, and blank `last_row_sample_seq` while `/health` was reporting rows.
 - Downstream consumer gate CLOSED for the current operation scope: repo-internal downstream replay is PASS on the actual server CSV, and the operator confirmed there are currently no repo-out CSV consumers such as Excel macros, MES/ETL jobs, or external analysis programs. If a repo-out consumer is introduced later, it must be dry-run with the v2.4 CSV before relying on it operationally.
 
+Startup SPOT observation key guard closeout, 2026-07-08:
+
+- Evidence level: independent verifier direct parse of an operator-provided copied server closeout bundle, not direct live server filesystem access.
+- Source build baseline: latest `master` after PR #153, merge commit `193da98ba06f61025ed40ab4bb5917ec15a56e7a`.
+- Artifact: `startup_key_guard_closeout_20260708-174558.zip`, SHA-256 `5786E643FEF8D2760EC6DF8B0F15D7ACD01068C7DCC9387EF263657AAA83B3C7`.
+- Selected CSV: `Factory_Integrated_Log_v2_20260708_173606.csv`, `2,716` rows, copied bundle scope `test_data`.
+- Startup/keyless guard replay PASS: `startup_or_keyless_candidate_rows=9`, `blank_key_candidate_rows=9`, `startup_key_violation_rows=0`, and `startup_key_guard_passed=true`.
+- Normal polling key retention PASS: total nonblank realtime `spot_observation_key` rows were `2,707`, matching the `spot_poll_status=success` count; startup/keyless rows remained blank.
+- Status distribution from the verifier replay: `temperature_output_status` was `startup_pending=9`, `stale=13`, `valid=2,694`; `temperature_status_shadow` was `startup_pending=9`, `ok=2,707`; `spot_poll_status` was `not_attempted=9`, `success=2,707`.
+- Metadata PASS: sidecar `schema_metadata.schema_version=2.4.0`, `active_schema_version=2.4.0`, `runtime_kind=frozen`, and post-hoc manifest keys included `changeover_candidate_resolution_fact_manifest` and `process_phase_event_fact_manifest`.
+- Validator PASS: `scripts/validate_csv_v2_shadow.py` succeeded with the copied v2 CSV, metadata, `spot_observation_fact.csv`, `spot_image_fact.csv`, and `spot_image_fact_manifest.final.json`; verified `spot_image_fact` row count was `190,293` and SHA-256 matched the final manifest.
+- Redaction check PASS: this evidence block excludes raw CSV rows, credential values, camera endpoint values, absolute local paths, and image payloads.
+
 ---
 
 ## 8. Related Documents
