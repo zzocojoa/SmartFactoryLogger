@@ -198,7 +198,7 @@ def _fact_summary(prefix: str, parsed: Mapping[str, str], fact_path: Path | None
         presence = "present"
     else:
         presence = "not_present"
-    return {
+    summary = {
         "presence": presence,
         "validation_source": validation_source,
         "fact_file": fact_path.name if fact_path is not None else "not_present",
@@ -208,6 +208,35 @@ def _fact_summary(prefix: str, parsed: Mapping[str, str], fact_path: Path | None
         "sha256_match": _to_bool(parsed.get(f"{prefix}_sha256_match")),
         "source_csv_sha256_match": _to_bool(parsed.get(f"{prefix}_source_csv_sha256_match")),
     }
+    if prefix == "spot_observation_fact":
+        summary.update(
+            {
+                "distinct_observation_key_count": _to_int(
+                    parsed.get("spot_observation_fact_actual_distinct_observation_key_count")
+                ),
+                "distinct_observation_key_count_match": _to_bool(
+                    parsed.get("spot_observation_fact_distinct_observation_key_count_match")
+                ),
+                "first_poll_seq": _to_int(parsed.get("spot_observation_fact_actual_first_poll_seq")),
+                "first_poll_seq_match": _to_bool(parsed.get("spot_observation_fact_first_poll_seq_match")),
+                "last_poll_seq": _to_int(parsed.get("spot_observation_fact_actual_last_poll_seq")),
+                "last_poll_seq_match": _to_bool(parsed.get("spot_observation_fact_last_poll_seq_match")),
+                "poll_seq_gap_count": _to_int(parsed.get("spot_observation_fact_actual_poll_seq_gap_count")),
+                "poll_seq_gap_count_match": _to_bool(parsed.get("spot_observation_fact_poll_seq_gap_count_match")),
+                "write_failure_count": _to_int(parsed.get("spot_observation_fact_write_failure_count")),
+                "spool_pending_count": _to_int(parsed.get("spot_observation_fact_spool_pending_count")),
+                "realtime_rows_with_observation_key": _to_int(
+                    parsed.get("spot_observation_fact_realtime_rows_with_observation_key")
+                ),
+                "linked_rows": _to_int(parsed.get("spot_observation_fact_linked_rows")),
+                "missing_fact_key_rows": _to_int(parsed.get("spot_observation_fact_missing_fact_key_rows")),
+                "link_coverage_pct": _to_float(parsed.get("spot_observation_fact_link_coverage_pct")),
+                "diagnostic_source_mismatch_count": _to_int(
+                    parsed.get("spot_observation_fact_diagnostic_source_mismatch_count")
+                ),
+            }
+        )
+    return summary
 
 
 def _image_linkage_summary(
@@ -577,6 +606,11 @@ def build_closeout(
         "capture_mode": capture_mode,
         "capture_failure_count": capture_failure_count,
         "capture_validation_errors": capture_validation_errors,
+        "observation_fact": _fact_summary(
+            "spot_observation_fact",
+            parsed,
+            fact_paths["spot_observation_fact"],
+        ),
         "process_facts": {
             prefix: _fact_summary(prefix, parsed, fact_paths[prefix])
             for prefix, _filename in PROCESS_FACTS

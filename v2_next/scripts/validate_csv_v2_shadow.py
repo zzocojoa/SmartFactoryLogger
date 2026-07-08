@@ -32,6 +32,12 @@ from backend.FacilityData.spot_image_linkage_fact import (
     SPOT_IMAGE_LINKAGE_SCHEMA_VERSION,
     validate_spot_image_linkage_outputs,
 )
+from backend.FacilityData.spot_observation_fact import (
+    SPOT_OBSERVATION_FACT_COLUMNS,
+    SPOT_OBSERVATION_FACT_FILENAME,
+    SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+    build_spot_observation_fact_manifest,
+)
 
 
 REQUIRED_V1_COLUMNS = [
@@ -1042,6 +1048,251 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
     return failures
 
 
+def _new_spot_observation_fact_summary(spot_observation_fact_path: Path | None) -> dict[str, str]:
+    override_file = spot_observation_fact_path.name if spot_observation_fact_path is not None else "not provided"
+    return {
+        "spot_observation_fact_validation_source": "not_applicable",
+        "spot_observation_fact_override_provided": _bool_text(spot_observation_fact_path is not None),
+        "spot_observation_fact_manifest_fact_file": "",
+        "spot_observation_fact_override_file": override_file,
+        "spot_observation_fact_verified_file": "not available",
+        "spot_observation_fact_manifest_row_count": "unknown",
+        "spot_observation_fact_actual_row_count": "unknown",
+        "spot_observation_fact_row_count_match": "unknown",
+        "spot_observation_fact_manifest_distinct_observation_key_count": "unknown",
+        "spot_observation_fact_actual_distinct_observation_key_count": "unknown",
+        "spot_observation_fact_distinct_observation_key_count_match": "unknown",
+        "spot_observation_fact_manifest_first_poll_seq": "unknown",
+        "spot_observation_fact_actual_first_poll_seq": "unknown",
+        "spot_observation_fact_first_poll_seq_match": "unknown",
+        "spot_observation_fact_manifest_last_poll_seq": "unknown",
+        "spot_observation_fact_actual_last_poll_seq": "unknown",
+        "spot_observation_fact_last_poll_seq_match": "unknown",
+        "spot_observation_fact_manifest_poll_seq_gap_count": "unknown",
+        "spot_observation_fact_actual_poll_seq_gap_count": "unknown",
+        "spot_observation_fact_poll_seq_gap_count_match": "unknown",
+        "spot_observation_fact_manifest_sha256": "unknown",
+        "spot_observation_fact_actual_sha256": "unknown",
+        "spot_observation_fact_sha256_match": "unknown",
+        "spot_observation_fact_write_failure_count": "unknown",
+        "spot_observation_fact_spool_pending_count": "unknown",
+        "spot_observation_fact_realtime_rows_with_observation_key": "unknown",
+        "spot_observation_fact_linked_rows": "unknown",
+        "spot_observation_fact_missing_fact_key_rows": "unknown",
+        "spot_observation_fact_link_coverage_pct": "unknown",
+        "spot_observation_fact_diagnostic_source_mismatch_count": "unknown",
+    }
+
+
+def validate_spot_observation_fact_manifest(
+    metadata: dict,
+    metadata_path: Path,
+    v2_header: Sequence[str],
+    v2_rows: Sequence[Sequence[str]],
+    spot_observation_fact_path: Path | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    summary = _new_spot_observation_fact_summary(spot_observation_fact_path)
+    summary["spot_observation_fact_validation_source"] = (
+        "override" if spot_observation_fact_path is not None else "metadata_manifest"
+    )
+    manifest = metadata.get("spot_observation_fact_manifest")
+    if not isinstance(manifest, dict):
+        return ["metadata missing spot_observation_fact_manifest block"], summary
+
+    failures: list[str] = []
+    if manifest.get("enabled") is not True:
+        failures.append("spot_observation_fact_manifest.enabled must be true")
+    if manifest.get("schema_version") != SPOT_OBSERVATION_FACT_SCHEMA_VERSION:
+        failures.append(
+            f"spot_observation_fact_manifest.schema_version must be {SPOT_OBSERVATION_FACT_SCHEMA_VERSION}"
+        )
+
+    fact_path_text = str(
+        manifest.get("path")
+        or manifest.get("fact_path")
+        or SPOT_OBSERVATION_FACT_FILENAME
+    ).strip()
+    summary["spot_observation_fact_manifest_fact_file"] = _path_basename_text(fact_path_text)
+    if not fact_path_text:
+        failures.append("spot_observation_fact_manifest.path must be populated")
+    if fact_path_text and _is_unsafe_relative_path(fact_path_text):
+        failures.append("spot_observation_fact_manifest.path must be a safe relative path")
+    fact_path = (
+        spot_observation_fact_path
+        if spot_observation_fact_path is not None
+        else (metadata_path.parent / fact_path_text)
+    )
+    summary["spot_observation_fact_verified_file"] = fact_path.name
+    if not fact_path.exists():
+        failures.append("spot_observation_fact.csv is required but was not found")
+        return failures, summary
+
+    required_columns = manifest.get("required_columns")
+    if required_columns is not None and list(required_columns) != SPOT_OBSERVATION_FACT_COLUMNS:
+        failures.append("spot_observation_fact_manifest.required_columns does not match contract")
+
+    realtime_row_dicts = _row_dicts(v2_header, v2_rows)
+    actual_manifest = build_spot_observation_fact_manifest(
+        fact_path=fact_path,
+        enabled=True,
+        write_failure_count=0,
+        spool_pending_count=0,
+        realtime_rows=realtime_row_dicts,
+        path=SPOT_OBSERVATION_FACT_FILENAME,
+    )
+
+    scalar_checks = [
+        ("row_count", "row_count", True),
+        ("distinct_observation_key_count", "distinct_observation_key_count", True),
+        ("first_poll_seq", "first_poll_seq", False),
+        ("last_poll_seq", "last_poll_seq", False),
+        ("poll_seq_gap_count", "poll_seq_gap_count", False),
+        ("sha256", "sha256", True),
+    ]
+    for manifest_key, summary_suffix, required in scalar_checks:
+        manifest_value = manifest.get(manifest_key)
+        actual_value = actual_manifest.get(manifest_key)
+        summary[f"spot_observation_fact_manifest_{summary_suffix}"] = _summary_value(manifest_value)
+        summary[f"spot_observation_fact_actual_{summary_suffix}"] = _summary_value(actual_value)
+        match_key = f"spot_observation_fact_{summary_suffix}_match"
+        value_matches = manifest_value == actual_value
+        summary[match_key] = _bool_text(value_matches)
+        if required and manifest_value in (None, ""):
+            failures.append(f"spot_observation_fact_manifest.{manifest_key} must be populated")
+        if manifest_value != actual_value:
+            failures.append(
+                f"spot_observation_fact_manifest.{manifest_key}={manifest_value!r}, actual={actual_value!r}"
+            )
+
+    row_count = _parse_non_negative_int(manifest.get("row_count"))
+    if row_count is None or row_count <= 0:
+        failures.append("spot_observation_fact_manifest.row_count must be greater than 0")
+    if not _is_sha256_text(str(manifest.get("sha256") or "")):
+        failures.append("spot_observation_fact_manifest.sha256 must be populated with lowercase SHA-256")
+
+    write_failure_count = _parse_non_negative_int(manifest.get("write_failure_count"))
+    spool_pending_count = _parse_non_negative_int(manifest.get("spool_pending_count"))
+    summary["spot_observation_fact_write_failure_count"] = _summary_value(manifest.get("write_failure_count"))
+    summary["spot_observation_fact_spool_pending_count"] = _summary_value(manifest.get("spool_pending_count"))
+    if write_failure_count != 0:
+        failures.append("spot_observation_fact_manifest.write_failure_count must be 0")
+    if spool_pending_count != 0:
+        failures.append("spot_observation_fact_manifest.spool_pending_count must be 0")
+
+    failures.extend(_compare_nested_counts(manifest, actual_manifest, "link_coverage", summary))
+    failures.extend(_compare_nested_counts(manifest, actual_manifest, "diagnostic_field_coverage", summary))
+    actual_link_coverage = actual_manifest.get("link_coverage", {})
+    if actual_link_coverage.get("missing_fact_key_rows") != 0:
+        failures.append("spot_observation_fact_manifest.link_coverage.missing_fact_key_rows must be 0")
+    if actual_link_coverage.get("coverage_pct") != 100.0:
+        failures.append("spot_observation_fact_manifest.link_coverage.coverage_pct must be 100.0")
+
+    try:
+        fact_header, fact_rows = read_csv(fact_path)
+    except Exception as exc:  # pragma: no cover - defensive CLI guard
+        return [*failures, f"spot_observation_fact CSV read failed: {exc.__class__.__name__}"], summary
+
+    missing_columns = [column for column in SPOT_OBSERVATION_FACT_COLUMNS if column not in fact_header]
+    if missing_columns:
+        return [*failures, "spot_observation_fact header missing columns: " + ", ".join(missing_columns)], summary
+    failures.extend(validate_spot_observation_fact_invariants(fact_path))
+
+    fact_row_dicts = _row_dicts(fact_header, fact_rows)
+    fact_by_key: dict[str, dict[str, str]] = {}
+    duplicate_key_count = 0
+    for fact in fact_row_dicts:
+        key = fact.get("spot_observation_key", "").strip()
+        if not key:
+            continue
+        if key in fact_by_key:
+            duplicate_key_count += 1
+            continue
+        fact_by_key[key] = fact
+    if duplicate_key_count:
+        failures.append(f"spot_observation_fact has duplicate spot_observation_key rows: {duplicate_key_count}")
+
+    source_mismatch_count = 0
+    for row_number, row in enumerate(realtime_row_dicts, start=2):
+        key = row.get("spot_observation_key", "").strip()
+        if not key:
+            continue
+        fact = fact_by_key.get(key)
+        if fact is None:
+            failures.append(f"row {row_number} spot_observation_key has no matching spot_observation_fact row")
+            continue
+        evidence_codes = _parse_json_string_list(row.get("temperature_cause_evidence_codes", "").strip())
+        missing_sources = _missing_diagnostic_sources_for_evidence(evidence_codes, fact)
+        if missing_sources:
+            source_mismatch_count += 1
+            failures.append(
+                f"row {row_number} evidence requires spot_observation_fact fields: {', '.join(missing_sources)}"
+            )
+    summary["spot_observation_fact_diagnostic_source_mismatch_count"] = str(source_mismatch_count)
+    return failures, summary
+
+
+def _row_dicts(header: Sequence[str], rows: Sequence[Sequence[str]]) -> list[dict[str, str]]:
+    row_dicts: list[dict[str, str]] = []
+    for row in rows:
+        row_dicts.append({column: row[index] if index < len(row) else "" for index, column in enumerate(header)})
+    return row_dicts
+
+
+def _summary_value(value: object) -> str:
+    if value is None:
+        return "null"
+    return str(value)
+
+
+def _compare_nested_counts(
+    manifest: dict,
+    actual_manifest: dict,
+    key: str,
+    summary: dict[str, str],
+) -> list[str]:
+    failures: list[str] = []
+    manifest_section = manifest.get(key)
+    actual_section = actual_manifest.get(key)
+    if not isinstance(manifest_section, dict) or not isinstance(actual_section, dict):
+        failures.append(f"spot_observation_fact_manifest.{key} must be an object")
+        return failures
+    for nested_key, actual_value in actual_section.items():
+        manifest_value = manifest_section.get(nested_key)
+        summary_key = f"spot_observation_fact_{nested_key}"
+        if key == "link_coverage" and nested_key == "coverage_pct":
+            summary_key = "spot_observation_fact_link_coverage_pct"
+        if key == "diagnostic_field_coverage":
+            summary_key = f"spot_observation_fact_diagnostic_{nested_key}"
+        summary[summary_key] = _summary_value(actual_value)
+        if manifest_value != actual_value:
+            failures.append(
+                f"spot_observation_fact_manifest.{key}.{nested_key}={manifest_value!r}, actual={actual_value!r}"
+            )
+    return failures
+
+
+def _missing_diagnostic_sources_for_evidence(evidence_codes: Sequence[str], fact: dict[str, str]) -> list[str]:
+    required: list[str] = []
+    code_set = set(evidence_codes)
+    if "alarm_low_signal" in code_set:
+        required.append("alarmstatus")
+    if code_set.intersection(
+        {
+            "signal_below_threshold",
+            "signal_below_configured_threshold_alarm_disabled",
+            "signal_at_or_above_configured_threshold",
+        }
+    ):
+        required.extend(["signalpc", "low_signal_threshold_pc", "low_signal_comparator"])
+    if "peak_picker_off_mode_reset_configured" in code_set:
+        required.extend(["peak_picker_enabled", "peak_picker_off_mode"])
+    missing = [field for field in required if not fact.get(field, "").strip()]
+    if code_set.intersection({"actuator_scanning", "actuator_position_changed"}):
+        if not fact.get("actuator_scan_state", "").strip() and not fact.get("actuator_position", "").strip():
+            missing.append("actuator_scan_state or actuator_position")
+    return missing
+
+
 def _bool_text(value: bool) -> str:
     return "true" if value else "false"
 
@@ -1679,6 +1930,7 @@ def validate(
 ) -> int:
     failures: list[str] = []
     warnings: list[str] = []
+    spot_observation_fact_summary = _new_spot_observation_fact_summary(spot_observation_fact_path)
     spot_image_fact_summary = _new_spot_image_fact_summary(
         spot_image_fact_path,
         spot_image_fact_final_manifest_path,
@@ -1764,12 +2016,22 @@ def validate(
                     require_current_server_promotion_profile=require_current_server_promotion_profile,
                 )
             )
+            spot_observation_fact_failures, spot_observation_fact_summary = (
+                validate_spot_observation_fact_manifest(
+                    metadata,
+                    metadata_path,
+                    v2_header,
+                    v2_rows,
+                    spot_observation_fact_path=spot_observation_fact_path,
+                )
+            )
             spot_image_fact_failures, spot_image_fact_summary = validate_spot_image_fact_manifest(
                 metadata,
                 metadata_path,
                 spot_image_fact_path=spot_image_fact_path,
                 spot_image_fact_final_manifest_path=spot_image_fact_final_manifest_path,
             )
+            failures.extend(spot_observation_fact_failures)
             failures.extend(spot_image_fact_failures)
             changeover_fact_failures, changeover_fact_summary = (
                 validate_changeover_candidate_resolution_fact_manifest(
@@ -1871,9 +2133,6 @@ def validate(
                 f"metadata {field_name}.mapping_status={actual_status!r}, expected {expected_status!r}"
             )
 
-    if spot_observation_fact_path is not None:
-        failures.extend(validate_spot_observation_fact_invariants(spot_observation_fact_path))
-
     for column in ("MainRamPosition_D0010", "ContainerPosition_D0012"):
         values = parse_float_values(v2_rows, v2_header, column)
         if not values:
@@ -1884,6 +2143,39 @@ def validate(
     print(f"v2_file={_path_display(v2_path)}")
     print(f"metadata_file={_path_display(metadata_path)}")
     print(f"spot_observation_fact_file={_path_display(spot_observation_fact_path)}")
+    for key in (
+        "spot_observation_fact_validation_source",
+        "spot_observation_fact_override_provided",
+        "spot_observation_fact_manifest_fact_file",
+        "spot_observation_fact_override_file",
+        "spot_observation_fact_verified_file",
+        "spot_observation_fact_manifest_row_count",
+        "spot_observation_fact_actual_row_count",
+        "spot_observation_fact_row_count_match",
+        "spot_observation_fact_manifest_distinct_observation_key_count",
+        "spot_observation_fact_actual_distinct_observation_key_count",
+        "spot_observation_fact_distinct_observation_key_count_match",
+        "spot_observation_fact_manifest_first_poll_seq",
+        "spot_observation_fact_actual_first_poll_seq",
+        "spot_observation_fact_first_poll_seq_match",
+        "spot_observation_fact_manifest_last_poll_seq",
+        "spot_observation_fact_actual_last_poll_seq",
+        "spot_observation_fact_last_poll_seq_match",
+        "spot_observation_fact_manifest_poll_seq_gap_count",
+        "spot_observation_fact_actual_poll_seq_gap_count",
+        "spot_observation_fact_poll_seq_gap_count_match",
+        "spot_observation_fact_manifest_sha256",
+        "spot_observation_fact_actual_sha256",
+        "spot_observation_fact_sha256_match",
+        "spot_observation_fact_write_failure_count",
+        "spot_observation_fact_spool_pending_count",
+        "spot_observation_fact_realtime_rows_with_observation_key",
+        "spot_observation_fact_linked_rows",
+        "spot_observation_fact_missing_fact_key_rows",
+        "spot_observation_fact_link_coverage_pct",
+        "spot_observation_fact_diagnostic_source_mismatch_count",
+    ):
+        print(f"{key}={spot_observation_fact_summary.get(key, 'unknown')}")
     for key in (
         "spot_image_fact_validation_source",
         "spot_image_fact_override_provided",

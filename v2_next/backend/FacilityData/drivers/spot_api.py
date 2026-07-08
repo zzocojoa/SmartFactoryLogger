@@ -28,6 +28,7 @@ from backend.FacilityData.spot_observation import (
     derive_spot_target_observed_shadow,
 )
 from backend.FacilityData.spot_observation_fact import (
+    SPOT_OBSERVATION_FACT_FILENAME,
     SpotObservationFactWriter,
     encode_spot_diagnostic_evidence_codes,
 )
@@ -1388,7 +1389,7 @@ def _classification_for_temperature_error(exc: SpotTemperatureFetchError) -> Spo
 
 
 def _spot_observation_fact_path() -> Path:
-    return Path(config.LOG_PATH) / "spot_observation_fact.csv"
+    return Path(config.LOG_PATH) / SPOT_OBSERVATION_FACT_FILENAME
 
 
 def _get_spot_observation_fact_writer() -> SpotObservationFactWriter:
@@ -1420,6 +1421,7 @@ def get_spot_observation_fact_health() -> Dict[str, Any]:
     return {
         "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
         "write_failure_count": int(writer.failure_count) if writer is not None else 0,
+        "spool_pending_count": int(writer.spool_pending_count()) if writer is not None else 0,
         "diagnostics_capture_status": diagnostics_status,
         "diagnostics_last_error_code": _spot_diagnostics_last_error_code,
         "diagnostics_last_error_message": _spot_diagnostics_last_error_message,

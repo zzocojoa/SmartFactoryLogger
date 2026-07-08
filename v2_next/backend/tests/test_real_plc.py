@@ -30,6 +30,7 @@ from backend.FacilityData.repository import (
 )
 from backend.FacilityData.schemas import FactoryData, OperatorMetadata, OperatorMetadataUpdate
 from backend.FacilityData.spot_image_fact import SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME
+from backend.FacilityData.spot_observation_fact import SPOT_OBSERVATION_FACT_COLUMNS
 from scripts.validate_csv_v2_shadow import validate as validate_csv_v2_shadow
 from scripts.validate_csv_v2_shadow import validate_many as validate_csv_v2_shadow_many
 from scripts.validate_csv_v2_shadow import SPOT_IMAGE_FACT_REQUIRED_COLUMNS
@@ -970,6 +971,50 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 )
         return rows, hashlib.sha256(path.read_bytes()).hexdigest()
 
+    def _write_spot_observation_fact_fixture(self, path: Path) -> tuple[int, str]:
+        values = {
+            "spot_observation_fact_schema_version": "1.2.1",
+            "spot_observation_key": "spot-service-1:1",
+            "spot_service_instance_id": "spot-service-1",
+            "spot_poll_seq": "1",
+            "spot_observation_seq": "1",
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_temperature_raw": "100.0",
+            "spot_raw_payload_hash": "payload-hash",
+            "spot_last_poll_started_at": "2026-03-09T07:20:24Z",
+            "spot_last_poll_completed_at": "2026-03-09T07:20:25.123Z",
+            "spot_poll_duration_ms": "50.0",
+            "diagnostics_captured_at": "2026-03-09T07:20:25.123Z",
+            "diagnostics_capture_status": "same_response",
+            "diagnostics_age_ms": "0.0",
+            "spot_diagnostic_evidence_codes": "[]",
+            "alarmstatus": "0",
+            "signalpc": "20.0",
+            "d1temperature": "35.0",
+            "d2temperature": "35.1",
+            "e1out": "1.0",
+            "e2out": "1.1",
+            "peak_picker_enabled": "false",
+            "peak_picker_off_mode": "reset",
+            "actuator_position": "12.0",
+            "actuator_scan_state": "holding",
+            "low_signal_alarm_enabled": "true",
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+        }
+        with path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(SPOT_OBSERVATION_FACT_COLUMNS)
+            writer.writerow([values.get(column, "") for column in SPOT_OBSERVATION_FACT_COLUMNS])
+        return 1, hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _refresh_observation_fact_manifest_fixture(self, service: CSVLoggerService, v2_path: Path) -> None:
+        self._write_spot_observation_fact_fixture(v2_path.parent / "spot_observation_fact.csv")
+        with patch("backend.config.SPOT_OBSERVATION_FACT_ENABLED", True):
+            refreshed = service.refresh_spot_observation_fact_manifest_for_csv(v2_path)
+        self.assertIsNotNone(refreshed)
+
     def _list_v1_files(self, log_dir: Path) -> list[Path]:
         return sorted(
             path for path in log_dir.glob("Factory_Integrated_Log_*.csv") if "_v2_" not in path.name
@@ -1159,6 +1204,9 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 "spot_cache_status": "fresh",
                 "spot_source_freshness": "fresh",
                 "spot_temperature_observed_c": 557.9,
+                "spot_service_instance_id": "spot-service-1",
+                "spot_poll_seq": 1,
+                "spot_observation_seq": 1,
                 "spot_last_poll_completed_at": "2026-03-09T07:20:15.123Z",
                 "spot_last_valid_value_at": "2026-03-09T07:20:24.012Z",
                 "spot_effective_age_ms_at_row": 10_000.0,
@@ -1185,6 +1233,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 writer.writerow(columns)
                 writer.writerow(v2_row)
             service._write_v2_sidecar(v2_path, service._get_active_v2_contract())
+            self._refresh_observation_fact_manifest_fixture(service, v2_path)
 
             result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
 
@@ -1899,7 +1948,16 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 csv_v2_enabled=True,
                 csv_v2_operational_fields_enabled=True,
             )
-            data = self.create_data()
+            data = self.create_data().model_copy(
+                update={
+                    "spot_service_instance_id": "spot-service-1",
+                    "spot_poll_seq": 1,
+                    "spot_observation_seq": 1,
+                    "spot_poll_status": "success",
+                    "spot_raw_validity": "valid_temperature",
+                    "spot_last_poll_completed_at": "2026-03-09T07:20:25.123Z",
+                }
+            )
             timestamp = service._parse_timestamp(data)
             v1_row = service._build_row(data, timestamp)
             v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
@@ -1935,7 +1993,16 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             service = CSVLoggerService()
             service.fallback_log_dir = log_dir
             service.apply_config(log_path=log_dir, auto_save=True, csv_v2_enabled=True)
-            data = self.create_data()
+            data = self.create_data().model_copy(
+                update={
+                    "spot_service_instance_id": "spot-service-1",
+                    "spot_poll_seq": 1,
+                    "spot_observation_seq": 1,
+                    "spot_poll_status": "success",
+                    "spot_raw_validity": "valid_temperature",
+                    "spot_last_poll_completed_at": "2026-03-09T07:20:25.123Z",
+                }
+            )
             timestamp = service._parse_timestamp(data)
             v1_row = service._build_row(data, timestamp)
             v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
@@ -2089,7 +2156,16 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 csv_v2_enabled=True,
                 csv_v2_operational_fields_enabled=True,
             )
-            data = self.create_data()
+            data = self.create_data().model_copy(
+                update={
+                    "spot_service_instance_id": "spot-service-1",
+                    "spot_poll_seq": 1,
+                    "spot_observation_seq": 1,
+                    "spot_poll_status": "success",
+                    "spot_raw_validity": "valid_temperature",
+                    "spot_last_poll_completed_at": "2026-03-09T07:20:25.123Z",
+                }
+            )
             timestamp = service._parse_timestamp(data)
             v1_row = service._build_row(data, timestamp)
             v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
@@ -2104,6 +2180,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
 
             stale_count, stale_sha = self._write_spot_image_fact_fixture(log_dir / "spot_image_fact.csv", 1)
             service._write_v2_sidecar(v2_path, contract)
+            self._refresh_observation_fact_manifest_fixture(service, v2_path)
 
             metadata_path = v2_path.with_suffix(".metadata.json")
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -2151,7 +2228,16 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 csv_v2_enabled=True,
                 csv_v2_operational_fields_enabled=True,
             )
-            data = self.create_data()
+            data = self.create_data().model_copy(
+                update={
+                    "spot_service_instance_id": "spot-service-1",
+                    "spot_poll_seq": 1,
+                    "spot_observation_seq": 1,
+                    "spot_poll_status": "success",
+                    "spot_raw_validity": "valid_temperature",
+                    "spot_last_poll_completed_at": "2026-03-09T07:20:25.123Z",
+                }
+            )
             timestamp = service._parse_timestamp(data)
             v1_row = service._build_row(data, timestamp)
             v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
@@ -2164,6 +2250,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 writer.writerow(v2_row)
 
             service._write_v2_sidecar(v2_path, contract)
+            self._refresh_observation_fact_manifest_fixture(service, v2_path)
             metadata_path = v2_path.with_suffix(".metadata.json")
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             manifest = metadata["spot_image_fact_manifest"]

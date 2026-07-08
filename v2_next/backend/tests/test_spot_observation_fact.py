@@ -8,6 +8,7 @@ from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_COLUMNS,
     SpotObservationFactWriter,
     build_spot_observation_fact,
+    build_spot_observation_fact_manifest,
     build_spot_observation_key,
     derive_spot_diagnostic_evidence_codes,
     encode_spot_diagnostic_evidence_codes,
@@ -61,6 +62,73 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertIsNone(second)
             rows = output_path.read_text(encoding="utf-8-sig").splitlines()
             self.assertEqual(len(rows), 2)
+
+    def test_writer_loads_existing_key_index_after_restart(self) -> None:
+        snapshot = {
+            "spot_service_instance_id": "svc-1",
+            "spot_poll_seq": 42,
+            "spot_observation_seq": 42,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "450.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            first_writer = SpotObservationFactWriter(output_path)
+            self.assertIsNotNone(first_writer.write_fact(snapshot))
+
+            restarted_writer = SpotObservationFactWriter(output_path)
+            self.assertIsNone(restarted_writer.write_fact(snapshot))
+
+            rows = output_path.read_text(encoding="utf-8-sig").splitlines()
+            self.assertEqual(len(rows), 2)
+
+    def test_fact_manifest_summarizes_file_and_realtime_link_coverage(self) -> None:
+        base_snapshot = {
+            "spot_service_instance_id": "svc-1",
+            "spot_observation_seq": 1,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "450.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
+            "alarmstatus": "0",
+            "signalpc": "3.2",
+            "d1temperature": "31.0",
+            "d2temperature": "31.1",
+            "e1out": "1.0",
+            "e2out": "1.1",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            writer = SpotObservationFactWriter(output_path)
+            self.assertIsNotNone(writer.write_fact({**base_snapshot, "spot_poll_seq": 1}))
+            self.assertIsNotNone(writer.write_fact({**base_snapshot, "spot_poll_seq": 3}))
+
+            manifest = build_spot_observation_fact_manifest(
+                fact_path=output_path,
+                enabled=True,
+                write_failure_count=0,
+                spool_pending_count=0,
+                realtime_rows=[
+                    {"spot_observation_key": "svc-1:1"},
+                    {"spot_observation_key": "svc-1:3"},
+                    {"spot_observation_key": "svc-1:99"},
+                ],
+            )
+
+        self.assertTrue(manifest["enabled"])
+        self.assertEqual(manifest["schema_version"], "1.2.1")
+        self.assertEqual(manifest["row_count"], 2)
+        self.assertEqual(manifest["distinct_observation_key_count"], 2)
+        self.assertEqual(manifest["first_poll_seq"], 1)
+        self.assertEqual(manifest["last_poll_seq"], 3)
+        self.assertEqual(manifest["poll_seq_gap_count"], 1)
+        self.assertRegex(manifest["sha256"], r"^[a-f0-9]{64}$")
+        self.assertEqual(manifest["link_coverage"]["realtime_rows_with_observation_key"], 3)
+        self.assertEqual(manifest["link_coverage"]["linked_rows"], 2)
+        self.assertEqual(manifest["link_coverage"]["missing_fact_key_rows"], 1)
+        self.assertEqual(manifest["diagnostic_field_coverage"]["signalpc_nonblank_count"], 2)
 
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
