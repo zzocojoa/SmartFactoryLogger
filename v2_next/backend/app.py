@@ -1595,7 +1595,11 @@ async def lifespan(app: FastAPI):
         print("[Main] Stopping Config Watcher...")
         config_watch_service.stop()
         print("[Main] Stopping CSV Logger...")
-        logger_service.stop()
+        if not logger_service.stop(timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC):
+            _logger.warning(
+                "CSV logger did not stop within %.1f seconds during lifespan shutdown",
+                config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+            )
         release_single_instance_lock()
 
 # --- App Definition ---
@@ -1635,8 +1639,13 @@ def _stop_services_for_control_shutdown() -> dict[str, bool]:
     except Exception:
         status["plc_service_stopped"] = False
     try:
-        logger_service.stop()
-        status["logger_service_stopped"] = True
+        logger_service_stopped = logger_service.stop(timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC)
+        status["logger_service_stopped"] = logger_service_stopped
+        if not logger_service_stopped:
+            _logger.warning(
+                "CSV logger did not stop within %.1f seconds before control shutdown",
+                config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+            )
     except Exception:
         status["logger_service_stopped"] = False
     try:

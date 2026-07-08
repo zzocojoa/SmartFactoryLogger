@@ -2,8 +2,10 @@ import csv
 from datetime import datetime
 import io
 import queue
+import threading
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 from backend import app as backend_app
 from backend.FacilityData.repository import CSVLoggerService
@@ -133,6 +135,46 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         self.assertIn("queue=1/10", item["note"])
         self.assertIn("drop=0", item["note"])
         self.assertIn("lag=n/a", item["note"])
+
+    def test_stop_reports_timeout_when_logger_thread_is_still_alive(self) -> None:
+        service = CSVLoggerService()
+        release = threading.Event()
+
+        def wait_until_released() -> None:
+            release.wait(timeout=1.0)
+
+        service.running = True
+        service.thread = threading.Thread(target=wait_until_released)
+        service.thread.start()
+        try:
+            self.assertFalse(service.stop(timeout_sec=0.01))
+        finally:
+            release.set()
+            service.thread.join(timeout=1.0)
+
+    def test_control_shutdown_waits_for_csv_logger_stop_timeout(self) -> None:
+        class LoggerStub:
+            timeout_sec: float | None = None
+
+            def stop(self, *, timeout_sec: float | None = None) -> bool:
+                self.timeout_sec = timeout_sec
+                return True
+
+        logger_stub = LoggerStub()
+
+        with (
+            patch.object(backend_app, "logger_service", logger_stub),
+            patch.object(backend_app.config, "CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC", 123.0),
+            patch.object(backend_app.spot_control, "stop_spot_image_capture_for_shutdown", Mock(return_value=True)),
+            patch.object(backend_app.plc_service, "stop", Mock()),
+            patch.object(backend_app.comm_metrics_logger_service, "stop", Mock()),
+            patch.object(backend_app.config_sync_agent, "stop", Mock()),
+            patch.object(backend_app.config_watch_service, "stop", Mock()),
+        ):
+            status = backend_app._stop_services_for_control_shutdown()
+
+        self.assertTrue(status["logger_service_stopped"])
+        self.assertEqual(logger_stub.timeout_sec, 123.0)
 
 
 if __name__ == "__main__":
