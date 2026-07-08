@@ -625,7 +625,23 @@ PROCESS_PHASE_EVENT_FACT_ENABLED=true
 
 The only allowed runtime states are all three promotion flags disabled or all three enabled together. Partial promotion flag combinations are rejected during backend config import, including fact-only experiments such as `SPOT_OBSERVATION_FACT_ENABLED=true` without the other two flags. CLI/fact smoke tests that exercise v2.4 facts must set the full bundle in a controlled environment.
 
-Promotion bundle validation must verify `spot_image_fact_manifest`, `changeover_candidate_resolution_fact_manifest`, and `process_phase_event_fact_manifest`. For process phase post-hoc facts, the validator checks canonical required columns, manifest row count, fact SHA-256, source CSV SHA-256, and each fact row `source_file_id`. Portable copied bundles may pass explicit fact-file overrides; in that mode row/hash match against the original manifest path is reported for observability, while the override file content and source CSV linkage are still validated.
+Promotion bundle validation must verify `spot_observation_fact_manifest`, `spot_image_fact_manifest`, `changeover_candidate_resolution_fact_manifest`, and `process_phase_event_fact_manifest`. For process phase post-hoc facts, the validator checks canonical required columns, manifest row count, fact SHA-256, source CSV SHA-256, and each fact row `source_file_id`. Portable copied bundles may pass explicit fact-file overrides; in that mode row/hash match against the original manifest path is reported for observability, while the override file content and source CSV linkage are still validated.
+
+AMETEK diagnostic source values remain observation-grain data. Realtime CSV must not add raw diagnostic columns such as `alarmstatus`, `signalpc`, detector temperatures, emissivity outputs, Low Signal settings, Peak Picker state, or actuator state. Realtime CSV keeps `spot_observation_key` and derived operational outputs only. The authoritative source for raw AMETEK diagnostics is `spot_observation_fact.csv`.
+
+`spot_observation_fact_manifest` is mandatory in v2.4 promotion artifacts. It records `schema_version`, portable `path`, row count, distinct observation key count, first/last poll sequence, poll sequence gap count, fact SHA-256, writer failure count, spool pending count, realtime-to-fact link coverage, and diagnostic field coverage. Diagnostic field coverage uses explicit manifest keys: `alarmstatus_nonblank_count`, `signalpc_nonblank_count`, `d1temperature_nonblank_count`, `d2temperature_nonblank_count`, `e1out_nonblank_count`, and `e2out_nonblank_count`. The CSV logger writes an initial manifest when a v2.4 file opens and refreshes it when the file is closed or rolled over so the sidecar is not left at an open-time snapshot.
+
+Validator promotion rules:
+
+- `spot_observation_fact_manifest.enabled=true`
+- `spot_observation_fact_manifest.row_count > 0`
+- `spot_observation_fact_manifest.write_failure_count=0`
+- `spot_observation_fact_manifest.spool_pending_count=0`
+- `spot_observation_fact_manifest.sha256` is non-empty and matches `spot_observation_fact.csv`
+- every nonblank realtime `spot_observation_key` exists in `spot_observation_fact.csv`
+- startup, missing-completion, and non-positive poll sequence rows keep `spot_observation_key` blank
+- `link_coverage.missing_fact_key_rows=0` and `link_coverage.coverage_pct=100.0`
+- evidence codes that depend on raw diagnostics require matching nonblank fact fields: `alarm_low_signal` requires `alarmstatus`; signal threshold evidence requires `signalpc`, `low_signal_threshold_pc`, and `low_signal_comparator`; Peak Picker evidence requires `peak_picker_enabled` and `peak_picker_off_mode`; actuator evidence requires `actuator_scan_state` or `actuator_position`.
 
 Rollback:
 

@@ -37,6 +37,8 @@ from backend.FacilityData.process_phase import (
     derive_process_phase_candidate,
 )
 from backend.FacilityData.spot_observation_fact import (
+    SPOT_OBSERVATION_FACT_FILENAME,
+    build_spot_observation_fact_manifest,
     build_spot_observation_key,
     parse_spot_diagnostic_evidence_codes,
 )
@@ -324,6 +326,7 @@ class CSVLoggerService:
         self._v2_4_observation_fact_link_failure_count = 0
         self._v2_4_last_sample_seq: Optional[int] = None
         self._v2_4_last_updated_at: Optional[str] = None
+        self._current_v2_csv_path: Optional[Path] = None
 
     def start(self) -> None:
         if self.running:
@@ -595,6 +598,7 @@ class CSVLoggerService:
                 writer.writerow(list(contract.columns))
                 handle.flush()
             self._write_v2_sidecar(full_path, contract)
+            self._current_v2_csv_path = full_path
             self.logger.info("CSV v2 log file opened: %s", full_path)
             return handle, writer
         except Exception as exc:
@@ -764,6 +768,62 @@ class CSVLoggerService:
             fact_path=log_path / PROCESS_PHASE_EVENT_FACT_FILENAME,
         )
 
+    def _spot_observation_fact_manifest(self, log_path: Path) -> dict[str, Any]:
+        try:
+            from backend.FacilityData.drivers import spot_api
+
+            health = spot_api.get_spot_observation_fact_health()
+        except Exception:
+            health = {}
+        return build_spot_observation_fact_manifest(
+            fact_path=log_path / SPOT_OBSERVATION_FACT_FILENAME,
+            enabled=bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False))),
+            write_failure_count=int(health.get("write_failure_count", 0) or 0),
+            spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
+            path=SPOT_OBSERVATION_FACT_FILENAME,
+        )
+
+    def refresh_spot_observation_fact_manifest_for_csv(self, csv_path: Path) -> Optional[Path]:
+        metadata_path = csv_path.with_suffix(".metadata.json")
+        if not metadata_path.exists():
+            return None
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.warning("Failed to read CSV v2 sidecar for observation fact refresh: %s", exc)
+            return None
+        try:
+            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                realtime_rows = list(csv.DictReader(handle))
+        except Exception as exc:
+            self.logger.warning("Failed to read CSV v2 rows for observation fact manifest refresh: %s", exc)
+            return None
+        try:
+            from backend.FacilityData.drivers import spot_api
+
+            health = spot_api.get_spot_observation_fact_health()
+        except Exception:
+            health = {}
+        payload["spot_observation_fact_manifest"] = build_spot_observation_fact_manifest(
+            fact_path=csv_path.parent / SPOT_OBSERVATION_FACT_FILENAME,
+            enabled=bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False))),
+            write_failure_count=int(health.get("write_failure_count", 0) or 0),
+            spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
+            realtime_rows=realtime_rows,
+            path=SPOT_OBSERVATION_FACT_FILENAME,
+        )
+        temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
+        try:
+            temp_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            temp_path.replace(metadata_path)
+        except OSError as exc:
+            self.logger.warning("Failed to write refreshed CSV v2 observation fact manifest: %s", exc)
+            return None
+        return metadata_path
+
 
     def _resolve_clean_git_commit(self) -> Optional[str]:
         repo_root = Path(__file__).resolve().parents[2]
@@ -813,6 +873,9 @@ class CSVLoggerService:
                 "posthoc_fact_manifests": [
                     "changeover_candidate_resolution_fact_manifest",
                     "process_phase_event_fact_manifest",
+                ],
+                "authoritative_fact_manifests": [
+                    "spot_observation_fact_manifest",
                 ],
                 "promotion_bundle_required_flags": {
                     "CSV_V2_OPERATIONAL_FIELDS_ENABLED": True,
@@ -866,6 +929,7 @@ class CSVLoggerService:
             },
             "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(active_contract),
             "spot_configuration_snapshot": self._spot_configuration_snapshot(),
+            "spot_observation_fact_manifest": self._spot_observation_fact_manifest(sidecar_path.parent),
             "spot_image_fact_manifest": self._spot_image_fact_manifest(sidecar_path.parent),
             "changeover_candidate_resolution_fact_manifest": (
                 self._changeover_candidate_resolution_fact_manifest(sidecar_path.parent)
@@ -1927,6 +1991,18 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to close CSV log file handle: %s", exc)
 
+    def _close_v2_file(self, handle: Optional[object]) -> None:
+        csv_path = self._current_v2_csv_path
+        if handle is not None:
+            try:
+                handle.flush()
+            except Exception as exc:
+                self.logger.warning("Failed to flush CSV v2 log file before close: %s", exc)
+        if csv_path is not None and self.csv_v2_sidecar_enabled:
+            self.refresh_spot_observation_fact_manifest_for_csv(csv_path)
+        self._close_file(handle)
+        self._current_v2_csv_path = None
+
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
             auto_save = self.auto_save
@@ -2023,7 +2099,7 @@ class CSVLoggerService:
                                 self.logger.warning("CSV v2 buffer dropped during config change.")
                             v2_buffer.clear()
                     self._close_file(f_handle)
-                    self._close_file(v2_handle)
+                    self._close_v2_file(v2_handle)
                     f_handle = None
                     writer = None
                     v2_handle = None
@@ -2079,7 +2155,7 @@ class CSVLoggerService:
                                 )
                         if rollover_ready:
                             self._close_file(f_handle)
-                            self._close_file(v2_handle)
+                            self._close_v2_file(v2_handle)
                             f_handle = None
                             writer = None
                             v2_handle = None
@@ -2170,7 +2246,7 @@ class CSVLoggerService:
                             "Current row deferred to preserve daily file boundary."
                         )
                 self._close_file(f_handle)
-                self._close_file(v2_handle)
+                self._close_v2_file(v2_handle)
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
                 self._buffer_size = len(buffer)
@@ -2215,7 +2291,7 @@ class CSVLoggerService:
                 )
             elif self.auto_save:
                 self._close_file(f_handle)
-                self._close_file(v2_handle)
+                self._close_v2_file(v2_handle)
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
                 try:
@@ -2251,7 +2327,7 @@ class CSVLoggerService:
                     self.logger.warning("CSV deferred shutdown row write failed: %s", exc)
         self._buffer_size = 0
         self._close_file(f_handle)
-        self._close_file(v2_handle)
+        self._close_v2_file(v2_handle)
         if self.csv_v2_enabled and self.csv_v2_sidecar_enabled:
             self._write_spot_image_fact_final_manifest_safely()
         self.logger.info("CSV logger thread stopped.")
