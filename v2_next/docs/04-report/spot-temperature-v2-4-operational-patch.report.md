@@ -427,6 +427,20 @@ Latest master startup SPOT observation key guard closeout, 2026-07-08:
 - Validator PASS: `scripts/validate_csv_v2_shadow.py` succeeded with the copied v2 CSV, metadata, `spot_observation_fact.csv`, `spot_image_fact.csv`, and `spot_image_fact_manifest.final.json`; verified `spot_image_fact` row count was `190,293` and SHA-256 matched the final manifest.
 - Redaction check PASS: this evidence block excludes raw CSV rows, credential values, camera endpoint values, absolute local paths, and image payloads.
 
+AMETEK diagnostics B-direction closeout, 2026-07-09:
+
+- Evidence level: independent verifier direct parse of an operator-provided copied server closeout bundle, not direct live server filesystem access.
+- Source build baseline: latest `master` after PR #157, merge commit `c742409c0ba20c0038993715ba6d8a3fc4074e82`.
+- Artifact: `ametek_diagnostics_closeout_master_20260709-083522.zip`, SHA-256 `9A452007669CCB40D87005B5717D8807554FD671A350D68593027A49E406B37A`.
+- Selected CSV: `Factory_Integrated_Log_v2_20260709_082753.csv`, `1,770` rows, copied bundle scope `test_data`.
+- Realtime CSV raw AMETEK diagnostic field check PASS: `alarmstatus`, `d1temperature`, `d2temperature`, `e1out`, `e2out`, and `signalpc` were absent from the realtime CSV header. The realtime CSV kept derived cause columns only.
+- Observation fact manifest PASS: `enabled=true`, `row_count=805,872`, SHA-256 `a6cc7e1a428cd06792d9c1147e56c66fc3574ffedb66818e8c4527600e1f937a` matched the copied `spot_observation_fact.csv`, `write_failure_count=0`, and `spool_pending_count=0`.
+- Realtime-to-fact link coverage PASS: `realtime_rows_with_observation_key=1,757`, `linked_rows=1,757`, `missing_fact_key_rows=0`, and `coverage_pct=100.0`.
+- Diagnostic source consistency PASS: `diagnostic_source_mismatch_count=0`. Manifest diagnostic coverage used only explicit `*_nonblank_count` keys for `alarmstatus`, `d1temperature`, `d2temperature`, `e1out`, `e2out`, and `signalpc`.
+- Validator PASS: `scripts/validate_csv_v2_shadow.py` exited `0`; `scripts/write_server_smoke_closeout.py --mode copied` reported `validator_verdict=PASS`, `validation_source=final_manifest`, and `redaction_passed=true`.
+- SPOT capture reset PASS: `capture_enabled=false`, `capture_mode=off`, and `capture_failure_count=0`.
+- Redaction check PASS: this evidence block excludes raw CSV rows, credential values, camera endpoint values, absolute local paths, and image payloads.
+
 ---
 
 ## 8. Related Documents
