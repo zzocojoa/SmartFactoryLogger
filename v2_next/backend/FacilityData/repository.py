@@ -6,7 +6,6 @@ import json
 import logging
 import math
 import queue
-import subprocess
 import threading
 import time
 from datetime import date, datetime, timezone
@@ -29,7 +28,7 @@ from backend.FacilityData.spot_observation import (
     SPOT_TEMPERATURE_MAX_C,
     SPOT_TEMPERATURE_MIN_C,
 )
-from backend.version import get_runtime_info
+from backend.version import get_runtime_info, resolve_runtime_git_commit, validate_git_commit
 from backend.FacilityData.process_phase import (
     PROCESS_PHASE_RULE_VERSION,
     ProcessPhaseDecision,
@@ -830,32 +829,7 @@ class CSVLoggerService:
 
 
     def _resolve_clean_git_commit(self) -> Optional[str]:
-        repo_root = Path(__file__).resolve().parents[2]
-        try:
-            status = subprocess.run(
-                ["git", "status", "--porcelain"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                timeout=2.0,
-                check=False,
-            )
-            if status.returncode != 0 or status.stdout.strip():
-                return None
-            head = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                timeout=2.0,
-                check=False,
-            )
-        except Exception:
-            return None
-        if head.returncode != 0:
-            return None
-        commit = head.stdout.strip()
-        return commit or None
+        return resolve_runtime_git_commit()
     def _write_v2_sidecar(self, csv_path: Path, contract: Optional[V2CsvContract] = None) -> None:
         if not self.csv_v2_sidecar_enabled:
             return
@@ -889,7 +863,7 @@ class CSVLoggerService:
                 "operator_metadata_version": OPERATOR_METADATA_VERSION,
                 "logger_service_instance_id": self.logger_service_instance_id,
                 "logger_service_started_at": self.logger_service_started_at,
-                "git_commit": self._resolve_clean_git_commit(),
+                "git_commit": validate_git_commit(self._resolve_clean_git_commit()),
                 "runtime_info": get_runtime_info(),
                 "v1_compatibility": True,
                 "v1_csv_enabled": self.csv_v1_enabled,
