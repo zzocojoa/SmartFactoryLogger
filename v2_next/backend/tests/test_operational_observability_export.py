@@ -24,6 +24,7 @@ from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
     build_spot_observation_fact_manifest,
 )
+from backend.FacilityData.spot_diagnostics import SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 from scripts.validate_csv_v2_shadow import SPOT_IMAGE_FACT_REQUIRED_COLUMNS
 
 
@@ -265,6 +266,9 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
 
         observation_fact = bundle / "spot_observation_fact.csv"
         source_observation = realtime_rows[0]
+        diagnostics_field_status = {
+            field: "not_requested" for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS
+        }
         observation_values = {
             "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
             "spot_observation_key": source_observation["spot_observation_key"],
@@ -276,9 +280,15 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
             "spot_device_status_code": source_observation["spot_device_status_code"],
             "spot_temperature_raw": source_observation["spot_temperature_raw"],
             "spot_last_poll_completed_at": source_observation["spot_last_poll_completed_at"],
-            "diagnostics_capture_status": "not_requested",
+            "diagnostics_capture_status": "missing",
+            "diagnostics_binding_status": "missing",
+            "diagnostics_missing_fields": json.dumps(SPOT_DIAGNOSTIC_OUTPUT_FIELDS),
+            "diagnostics_field_status_json": json.dumps(
+                diagnostics_field_status,
+                sort_keys=True,
+            ),
+            "diagnostics_source": "async_fact_only",
             "spot_diagnostic_evidence_codes": "[]",
-            "alarmstatus": "0",
             "peak_picker_enabled": "false",
             "low_signal_alarm_enabled": "false",
             "low_signal_comparator": "unknown",

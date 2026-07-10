@@ -6,6 +6,9 @@ from pathlib import Path
 
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_COLUMNS,
+    SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+    SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS,
+    SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION,
     SpotObservationFactWriter,
     build_spot_observation_fact,
     build_spot_observation_fact_manifest,
@@ -13,10 +16,63 @@ from backend.FacilityData.spot_observation_fact import (
     derive_spot_diagnostic_evidence_codes,
     encode_spot_diagnostic_evidence_codes,
 )
+from backend.FacilityData.spot_diagnostics import SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 from scripts.validate_csv_v2_shadow import validate_spot_observation_fact_invariants
 
 
 class SpotObservationFactTests(unittest.TestCase):
+    def diagnostics_metadata(
+        self,
+        poll_seq: int,
+        *,
+        success_fields: tuple[str, ...] = SPOT_DIAGNOSTIC_OUTPUT_FIELDS,
+        collection_mode: str = "async_same_poll",
+    ) -> dict[str, object]:
+        success = set(success_fields)
+        field_status = {
+            field: "success" if field in success else "missing"
+            for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS
+        }
+        missing_fields = [
+            field for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS if field not in success
+        ]
+        return {
+            "diagnostics_snapshot_id": f"svc-1:diag:{poll_seq}",
+            "diagnostics_source_poll_seq": poll_seq,
+            "diagnostics_captured_at": "2026-06-26T00:00:00Z",
+            "diagnostics_capture_status": (
+                "async_complete" if not missing_fields else "async_partial"
+            ),
+            "diagnostics_collection_mode": collection_mode,
+            "diagnostics_source": "spot_output_parameter_get",
+            "diagnostics_binding_status": "same_poll",
+            "diagnostics_age_ms": 10.0,
+            "diagnostics_max_age_ms": 6000.0,
+            "diagnostics_field_status": field_status,
+            "diagnostics_missing_fields": missing_fields,
+        }
+
+    def current_fact_row(self, poll_seq: int = 9, **overrides: object) -> dict[str, object]:
+        snapshot: dict[str, object] = {
+            "spot_service_instance_id": "svc-1",
+            "spot_poll_seq": poll_seq,
+            "spot_observation_seq": poll_seq,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "450.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
+            "alarmstatus": "0",
+            "signalpc": "6.0",
+            "low_signal_alarm_enabled": False,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": False,
+            "peak_picker_enabled": False,
+            **self.diagnostics_metadata(poll_seq),
+        }
+        snapshot.update(overrides)
+        return build_spot_observation_fact(snapshot)
+
     def test_observation_key_is_service_instance_and_poll_seq(self) -> None:
         snapshot = {
             "spot_service_instance_id": "svc-1",
@@ -102,8 +158,32 @@ class SpotObservationFactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "spot_observation_fact.csv"
             writer = SpotObservationFactWriter(output_path)
-            self.assertIsNotNone(writer.write_fact({**base_snapshot, "spot_poll_seq": 1}))
-            self.assertIsNotNone(writer.write_fact({**base_snapshot, "spot_poll_seq": 3}))
+            success_fields = (
+                "alarmstatus",
+                "signalpc",
+                "d1temperature",
+                "d2temperature",
+                "e1out",
+                "e2out",
+            )
+            self.assertIsNotNone(
+                writer.write_fact(
+                    {
+                        **base_snapshot,
+                        "spot_poll_seq": 1,
+                        **self.diagnostics_metadata(1, success_fields=success_fields),
+                    }
+                )
+            )
+            self.assertIsNotNone(
+                writer.write_fact(
+                    {
+                        **base_snapshot,
+                        "spot_poll_seq": 3,
+                        **self.diagnostics_metadata(3, success_fields=success_fields),
+                    }
+                )
+            )
 
             manifest = build_spot_observation_fact_manifest(
                 fact_path=output_path,
@@ -118,7 +198,7 @@ class SpotObservationFactTests(unittest.TestCase):
             )
 
         self.assertTrue(manifest["enabled"])
-        self.assertEqual(manifest["schema_version"], "1.2.1")
+        self.assertEqual(manifest["schema_version"], "1.3.0")
         self.assertEqual(manifest["row_count"], 2)
         self.assertEqual(manifest["distinct_observation_key_count"], 2)
         self.assertEqual(manifest["first_poll_seq"], 1)
@@ -129,6 +209,8 @@ class SpotObservationFactTests(unittest.TestCase):
         self.assertEqual(manifest["link_coverage"]["linked_rows"], 2)
         self.assertEqual(manifest["link_coverage"]["missing_fact_key_rows"], 1)
         self.assertEqual(manifest["diagnostic_field_coverage"]["signalpc_nonblank_count"], 2)
+        self.assertEqual(manifest["diagnostics_capture_status_counts"], {"async_partial": 2})
+        self.assertEqual(manifest["diagnostics_binding_status_counts"], {"same_poll": 2})
 
     def test_failed_write_spools_and_next_success_flushes_pending_fact(self) -> None:
         failed_snapshot = {
@@ -184,8 +266,7 @@ class SpotObservationFactTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "spot_observation_fact.csv"
-            old_columns = SPOT_OBSERVATION_FACT_COLUMNS[:40]
-            self.assertEqual(len(old_columns), 40)
+            old_columns = SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS
             with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(old_columns)
@@ -231,7 +312,7 @@ class SpotObservationFactTests(unittest.TestCase):
             tmp_path = Path(tmp)
             output_path = tmp_path / "spot_observation_fact.csv"
             spool_path = tmp_path / "spot_observation_fact.failed.jsonl"
-            old_columns = SPOT_OBSERVATION_FACT_COLUMNS[:40]
+            old_columns = SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS
             with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(old_columns)
@@ -255,6 +336,45 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertTrue(all(len(row) == len(SPOT_OBSERVATION_FACT_COLUMNS) for row in rows[1:]))
             self.assertIn("svc-spooled:11", rows[1])
             self.assertIn("svc-current:12", rows[2])
+
+    def test_spool_flush_archives_legacy_schema_without_rewriting_it_as_current(self) -> None:
+        success_snapshot = {
+            "spot_service_instance_id": "svc-current",
+            "spot_poll_seq": 12,
+            "spot_observation_seq": 12,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "456.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:01Z",
+        }
+        legacy_fact = {column: "" for column in SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS}
+        legacy_fact.update(
+            {
+                "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION,
+                "spot_observation_key": "svc-legacy:11",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            output_path = tmp_path / "spot_observation_fact.csv"
+            spool_path = tmp_path / "spot_observation_fact.failed.jsonl"
+            spool_path.write_text(json.dumps(legacy_fact) + "\n", encoding="utf-8")
+
+            writer = SpotObservationFactWriter(output_path, spool_path=spool_path)
+            fact = writer.write_fact(success_snapshot)
+
+            self.assertIsNotNone(fact)
+            self.assertFalse(spool_path.exists())
+            archives = list(
+                tmp_path.glob("spot_observation_fact.failed.*.schema-mismatch.jsonl")
+            )
+            self.assertEqual(len(archives), 1)
+            self.assertIn("svc-legacy:11", archives[0].read_text(encoding="utf-8"))
+            with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.reader(handle))
+            self.assertEqual(rows[0], SPOT_OBSERVATION_FACT_COLUMNS)
+            self.assertEqual(len(rows), 2)
+            self.assertIn("svc-current:12", rows[1])
 
     def test_build_fact_uses_missing_diagnostics_status(self) -> None:
         fact = build_spot_observation_fact(
@@ -283,13 +403,20 @@ class SpotObservationFactTests(unittest.TestCase):
             "peak_picker_off_mode": "reset",
             "actuator_scan_state": "scanning",
             "spot_diagnostic_evidence_codes": '["target_absent_verified"]',
+            **self.diagnostics_metadata(
+                2,
+                success_fields=("alarmstatus", "signalpc"),
+            ),
         }
 
         fact = build_spot_observation_fact(snapshot)
         evidence_codes = derive_spot_diagnostic_evidence_codes(snapshot)
 
-        self.assertEqual(fact["diagnostics_capture_status"], "same_response")
-        self.assertEqual(fact["diagnostics_age_ms"], "0.0")
+        self.assertEqual(fact["diagnostics_capture_status"], "async_partial")
+        self.assertEqual(fact["diagnostics_binding_status"], "same_poll")
+        self.assertEqual(fact["diagnostics_age_ms"], "10.0")
+        self.assertEqual(fact["diagnostics_source"], "async_same_poll")
+        self.assertTrue(json.loads(fact["evidence_provenance_json"]))
         self.assertIn("alarm_low_signal", fact["spot_diagnostic_evidence_codes"])
         self.assertEqual(fact["alarmstatus"], "LOW SIGNAL")
         self.assertEqual(fact["signalpc"], "3.2")
@@ -443,6 +570,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "low_signal_comparator": "lt",
             "low_signal_comparator_verified": False,
             "peak_picker_enabled": False,
+            **self.diagnostics_metadata(9),
         }
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "spot_observation_fact.csv"
@@ -458,16 +586,13 @@ class SpotObservationFactTests(unittest.TestCase):
     def test_validator_rejects_numeric_evidence_when_comparator_is_unverified(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "spot_observation_fact.csv"
-            row = {column: "" for column in SPOT_OBSERVATION_FACT_COLUMNS}
+            row = self.current_fact_row(
+                signalpc="1.5",
+                low_signal_alarm_enabled=True,
+            )
             row.update(
                 {
-                    "signalpc": "1.5",
                     "spot_diagnostic_evidence_codes": '["signal_below_threshold"]',
-                    "low_signal_alarm_enabled": "true",
-                    "low_signal_threshold_pc": "2.0",
-                    "low_signal_comparator": "lt",
-                    "low_signal_comparator_verified": "false",
-                    "peak_picker_enabled": "false",
                 }
             )
             with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -494,15 +619,10 @@ class SpotObservationFactTests(unittest.TestCase):
     def test_spot_observation_fact_validator_rejects_alarmstatus_bit4_without_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_path = Path(tmp) / "spot_observation_fact.csv"
-            row = {column: "" for column in SPOT_OBSERVATION_FACT_COLUMNS}
+            row = self.current_fact_row(alarmstatus="16")
             row.update(
                 {
-                    "alarmstatus": "16",
                     "spot_diagnostic_evidence_codes": "[]",
-                    "low_signal_alarm_enabled": "false",
-                    "low_signal_threshold_pc": "2.0",
-                    "low_signal_comparator": "lt",
-                    "peak_picker_enabled": "false",
                 }
             )
             with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -513,6 +633,34 @@ class SpotObservationFactTests(unittest.TestCase):
             failures = validate_spot_observation_fact_invariants(output_path)
 
         self.assertTrue(any("alarmstatus bit4 requires alarm_low_signal" in failure for failure in failures))
+
+    def test_historical_v1_2_1_fact_schema_remains_valid(self) -> None:
+        row = {column: "" for column in SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS}
+        row.update(
+            {
+                "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION,
+                "spot_poll_seq": "9",
+                "diagnostics_capture_status": "async_enriched",
+                "diagnostics_age_ms": "10.0",
+                "spot_diagnostic_evidence_codes": "[]",
+                "low_signal_alarm_enabled": "false",
+                "low_signal_comparator_verified": "false",
+                "peak_picker_enabled": "false",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact-v1.2.1.csv"
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS,
+                )
+                writer.writeheader()
+                writer.writerow(row)
+
+            failures = validate_spot_observation_fact_invariants(output_path)
+
+        self.assertEqual(failures, [])
 
 
 if __name__ == "__main__":

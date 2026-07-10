@@ -123,6 +123,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_diagnostics_snapshot = None
             spot_api._spot_diagnostics_last_error_code = None
             spot_api._spot_diagnostics_last_error_message = None
+            spot_api._spot_diagnostics_seq = 0
         spot_api._spot_diagnostics_prefetch_task = None
         with spot_api._spot_temperature_snapshot_lock:
             spot_api._spot_service_instance_id = "test-spot-service-instance"
@@ -313,7 +314,10 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
         fact = spot_api.get_spot_temperature_poll_snapshot()
 
-        self.assertEqual(diagnostics["diagnostics_capture_status"], "async_enriched")
+        self.assertEqual(diagnostics["diagnostics_capture_status"], "async_complete")
+        self.assertEqual(diagnostics["diagnostics_binding_status"], "unbound")
+        self.assertEqual(diagnostics["diagnostics_collection_mode"], "async_fact_only")
+        self.assertIsNone(diagnostics["diagnostics_source_poll_seq"])
         self.assertEqual(diagnostics["alarmstatus"], "LOW SIGNAL")
         self.assertEqual(diagnostics["signalpc"], "3.2")
         self.assertEqual(
@@ -333,7 +337,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["spot_app_mode"], "App1: AL E")
         self.assertIsNotNone(fact)
         assert fact is not None
-        self.assertEqual(fact["diagnostics_capture_status"], "async_enriched")
+        self.assertEqual(fact["diagnostics_capture_status"], "async_complete")
+        self.assertEqual(fact["diagnostics_binding_status"], "unbound")
         self.assertEqual(fact["itemperature"], "41.2")
         self.assertIn("http://spot.local/output?p=alarmstatus", requests)
         self.assertIn("http://spot.local/output?p=signalpc", requests)
@@ -343,6 +348,137 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("http://spot.local/output?p=e2out", requests)
         self.assertIn("http://spot.local/output?p=itemperature", requests)
         self.assertIn("http://spot.local/output?p=appnumber", requests)
+
+    async def test_scheduled_diagnostics_share_poll_identity_when_completed_before_publish(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+        diagnostics_completed = asyncio.Event()
+        original_refresh = spot_api._refresh_spot_diagnostics_safely
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url).endswith("p=temperature"):
+                await asyncio.wait_for(diagnostics_completed.wait(), timeout=1.0)
+                return httpx.Response(200, text="450.0", request=request)
+            return httpx.Response(200, text="0", request=request)
+
+        async def refresh_and_signal(*args: Any, **kwargs: Any) -> None:
+            await original_refresh(*args, **kwargs)
+            diagnostics_completed.set()
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            with patch.object(
+                spot_api,
+                "_refresh_spot_diagnostics_safely",
+                side_effect=refresh_and_signal,
+            ):
+                await spot_api._refresh_spot_temperature(client, schedule_diagnostics=True)
+                task = spot_api._spot_diagnostics_prefetch_task
+                if task is not None:
+                    await task
+
+        snapshot = spot_api.get_spot_temperature_poll_snapshot()
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot["diagnostics_capture_status"], "async_complete")
+        self.assertEqual(snapshot["diagnostics_binding_status"], "same_poll")
+        self.assertEqual(snapshot["diagnostics_source_poll_seq"], snapshot["spot_poll_seq"])
+        self.assertRegex(snapshot["diagnostics_snapshot_id"], r":diag:[1-9][0-9]*$")
+        self.assertGreaterEqual(float(snapshot["diagnostics_age_ms"]), 0.0)
+        captured_monotonic = float(snapshot["_diagnostics_captured_monotonic"])
+        with patch.object(spot_api.time, "monotonic", return_value=captured_monotonic + 7.0):
+            refreshed = spot_api._build_spot_temperature_snapshot_diagnostics(time.time())
+        self.assertEqual(refreshed["diagnostics_age_ms"], "7000.000")
+
+    async def test_late_diagnostics_do_not_block_temperature_or_bind_to_next_poll(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+        diagnostics_started = asyncio.Event()
+        diagnostics_release = asyncio.Event()
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url).endswith("p=temperature"):
+                return httpx.Response(200, text="450.0", request=request)
+            diagnostics_started.set()
+            await diagnostics_release.wait()
+            return httpx.Response(200, text="0", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            started = time.perf_counter()
+            await spot_api._refresh_spot_temperature(client, schedule_diagnostics=True)
+            elapsed = time.perf_counter() - started
+            first_snapshot = spot_api.get_spot_temperature_poll_snapshot()
+            await asyncio.wait_for(diagnostics_started.wait(), timeout=1.0)
+            diagnostics_release.set()
+            task = spot_api._spot_diagnostics_prefetch_task
+            assert task is not None
+            await task
+            await spot_api._refresh_spot_temperature(client)
+
+        self.assertLess(elapsed, 0.1)
+        self.assertIsNotNone(first_snapshot)
+        assert first_snapshot is not None
+        self.assertEqual(first_snapshot["diagnostics_capture_status"], "missing")
+        second_snapshot = spot_api.get_spot_temperature_poll_snapshot()
+        self.assertIsNotNone(second_snapshot)
+        assert second_snapshot is not None
+        self.assertEqual(second_snapshot["diagnostics_binding_status"], "previous_poll")
+        self.assertEqual(second_snapshot["diagnostics_source_poll_seq"], 1)
+        self.assertEqual(second_snapshot["spot_poll_seq"], 2)
+
+    async def test_partial_diagnostics_record_per_field_status(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url).endswith("p=d1temperature"):
+                return httpx.Response(503, text="busy", request=request)
+            return httpx.Response(200, text="0", request=request)
+
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=4,
+            started_at_epoch=time.time(),
+            started_monotonic=time.monotonic(),
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await spot_api._refresh_spot_diagnostics(
+                client,
+                context,
+                collection_mode="async_same_poll",
+            )
+
+        with spot_api._spot_diagnostics_lock:
+            snapshot = dict(spot_api._spot_diagnostics_snapshot or {})
+        self.assertEqual(snapshot["diagnostics_capture_status"], "async_partial")
+        self.assertEqual(snapshot["diagnostics_source_poll_seq"], 4)
+        self.assertEqual(snapshot["diagnostics_field_status"]["d1temperature"], "http_error")
+        self.assertIn("d1temperature", snapshot["diagnostics_missing_fields"])
+
+    async def test_diagnostics_failure_does_not_change_temperature_poll_status(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url).endswith("p=temperature"):
+                await asyncio.sleep(0.02)
+                return httpx.Response(200, text="450.0", request=request)
+            raise httpx.ConnectError("diagnostics unavailable", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await spot_api._refresh_spot_temperature(client, schedule_diagnostics=True)
+            task = spot_api._spot_diagnostics_prefetch_task
+            if task is not None:
+                await task
+
+        snapshot = spot_api.get_spot_temperature_poll_snapshot()
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot["spot_poll_status"], "success")
+        self.assertEqual(snapshot["spot_raw_validity"], "valid_temperature")
+        self.assertEqual(snapshot["diagnostics_capture_status"], "error")
+        self.assertEqual(snapshot["diagnostics_binding_status"], "same_poll")
+        self.assertTrue(
+            all(
+                status == "http_error"
+                for status in snapshot["diagnostics_field_status"].values()
+            )
+        )
 
     async def test_ametek_over_range_sentinel_uses_invalid_sentinel_error(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

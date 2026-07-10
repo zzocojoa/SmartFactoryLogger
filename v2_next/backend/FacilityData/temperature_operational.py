@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable, Optional, cast
 
@@ -13,6 +14,7 @@ from backend.FacilityData.spot_observation import (
     SpotSourceFreshness,
 )
 from backend.FacilityData.spot_low_signal import derive_low_signal_evidence
+from backend.FacilityData.spot_diagnostics import evaluate_diagnostics_eligibility
 from backend.FacilityData.temperature_state import (
     SpotCacheStatus,
     TemperatureStateDecision,
@@ -23,7 +25,7 @@ from backend.FacilityData.temperature_state import (
 )
 
 
-TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v2"
+TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v3"
 SPOT_ROW_FRESHNESS_RULE_VERSION = "spot-row-freshness-v1"
 
 
@@ -63,6 +65,17 @@ class TemperatureOperationalInput:
     low_signal_threshold_pc: float | None = None
     low_signal_comparator: str | None = None
     low_signal_comparator_verified: bool = False
+    diagnostics_current_poll_seq: int | None = None
+    diagnostics_current_service_instance_id: str | None = None
+    diagnostics_snapshot_id: str | None = None
+    diagnostics_source_poll_seq: int | None = None
+    diagnostics_capture_status: str = "missing"
+    diagnostics_collection_mode: str = "async_fact_only"
+    diagnostics_binding_status: str = "missing"
+    diagnostics_age_ms: float | None = None
+    diagnostics_max_age_ms: float | None = None
+    diagnostics_missing_fields: tuple[str, ...] = ()
+    diagnostics_field_status: Mapping[str, str] = field(default_factory=dict)
     peak_picker_enabled: bool = False
     peak_picker_off_mode: Optional[str] = None
 
@@ -83,6 +96,8 @@ class TemperatureOperationalDecision:
     origin_decision_mismatch: bool
     cached_fallback_accepted: bool
     cached_fallback_rejected_reason: str
+    diagnostics_cause_suppressed: bool
+    diagnostics_cause_suppressed_reason: str
 
 
 def derive_temperature_operational_fields(
@@ -132,7 +147,9 @@ def derive_temperature_operational_fields(
         origin_decision_mismatch,
     )
     expectedness = _derive_expectedness(status, input_state.process_phase_candidate)
-    cause, confidence, evidence_json = _derive_under_range_cause(status, input_state)
+    cause, confidence, evidence_json, diagnostics_suppressed, diagnostics_suppressed_reason = (
+        _derive_under_range_cause(status, input_state)
+    )
     return TemperatureOperationalDecision(
         temperature_output_status=status,
         temperature_unavailable_reason=reason,
@@ -148,6 +165,8 @@ def derive_temperature_operational_fields(
         origin_decision_mismatch=origin_decision_mismatch,
         cached_fallback_accepted=cached_fallback_accepted,
         cached_fallback_rejected_reason=cached_fallback_rejected_reason,
+        diagnostics_cause_suppressed=diagnostics_suppressed,
+        diagnostics_cause_suppressed_reason=diagnostics_suppressed_reason,
     )
 
 
@@ -354,21 +373,85 @@ def derive_under_range_cause_candidate(
     }
 
 
+_LOW_SIGNAL_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
+    {
+        "alarm_low_signal",
+        "signal_below_threshold",
+        "signal_below_configured_threshold_alarm_disabled",
+        "signal_at_or_above_configured_threshold",
+        "signalpc_present_comparator_unverified",
+        "signalpc_present_threshold_unknown",
+    }
+)
+
+
+def _eligible_low_signal_inputs(
+    input_state: TemperatureOperationalInput,
+    raw_evidence: set[str],
+) -> tuple[int | None, float | None, bool, str]:
+    values_present = {
+        "alarmstatus": input_state.alarmstatus is not None,
+        "signalpc": input_state.signalpc is not None,
+    }
+    alarm_decision = evaluate_diagnostics_eligibility(
+        collection_mode=input_state.diagnostics_collection_mode,
+        capture_status=input_state.diagnostics_capture_status,
+        binding_status=input_state.diagnostics_binding_status,
+        diagnostics_age_ms=input_state.diagnostics_age_ms,
+        diagnostics_max_age_ms=input_state.diagnostics_max_age_ms,
+        field_status=input_state.diagnostics_field_status,
+        values_present=values_present,
+        required_fields=("alarmstatus",),
+        snapshot_id=input_state.diagnostics_snapshot_id,
+        source_poll_seq=input_state.diagnostics_source_poll_seq,
+        current_poll_seq=input_state.diagnostics_current_poll_seq,
+        current_service_instance_id=input_state.diagnostics_current_service_instance_id,
+    )
+    signal_decision = evaluate_diagnostics_eligibility(
+        collection_mode=input_state.diagnostics_collection_mode,
+        capture_status=input_state.diagnostics_capture_status,
+        binding_status=input_state.diagnostics_binding_status,
+        diagnostics_age_ms=input_state.diagnostics_age_ms,
+        diagnostics_max_age_ms=input_state.diagnostics_max_age_ms,
+        field_status=input_state.diagnostics_field_status,
+        values_present=values_present,
+        required_fields=("signalpc",),
+        snapshot_id=input_state.diagnostics_snapshot_id,
+        source_poll_seq=input_state.diagnostics_source_poll_seq,
+        current_poll_seq=input_state.diagnostics_current_poll_seq,
+        current_service_instance_id=input_state.diagnostics_current_service_instance_id,
+    )
+    alarm_material = input_state.alarmstatus is not None or "alarm_low_signal" in raw_evidence
+    signal_material = input_state.signalpc is not None or bool(
+        raw_evidence.intersection(_LOW_SIGNAL_DIAGNOSTIC_EVIDENCE_CODES - {"alarm_low_signal"})
+    )
+    suppression_reasons: list[str] = []
+    if alarm_material and not alarm_decision.eligible:
+        suppression_reasons.append(alarm_decision.reason)
+    if signal_material and not signal_decision.eligible:
+        suppression_reasons.append(signal_decision.reason)
+    suppressed = bool(suppression_reasons)
+    return (
+        input_state.alarmstatus if alarm_decision.eligible else None,
+        input_state.signalpc if signal_decision.eligible else None,
+        suppressed,
+        suppression_reasons[0] if suppression_reasons else "",
+    )
+
+
 def _derive_under_range_cause(
     status: str,
     input_state: TemperatureOperationalInput,
-) -> tuple[str, Optional[float], str]:
+) -> tuple[str, Optional[float], str, bool, str]:
     if status != TemperatureOutputStatus.UNDER_RANGE.value:
-        return "", None, ""
+        return "", None, "", False, ""
     evidence = set(str(code) for code in input_state.evidence_codes if str(code))
-    evidence.difference_update(
-        {
-            "signal_below_threshold",
-            "signal_below_configured_threshold_alarm_disabled",
-            "signal_at_or_above_configured_threshold",
-            "signalpc_present_comparator_unverified",
-        }
+    eligible_alarmstatus, eligible_signalpc, diagnostics_suppressed, diagnostics_reason = (
+        _eligible_low_signal_inputs(input_state, evidence)
     )
+    evidence.difference_update(_LOW_SIGNAL_DIAGNOSTIC_EVIDENCE_CODES)
+    if diagnostics_suppressed:
+        evidence.add("diagnostics_missing_or_stale")
     phase_evidence: list[str] = []
     if input_state.process_phase_candidate in {
         "setup_candidate",
@@ -381,8 +464,8 @@ def _derive_under_range_cause(
         evidence.add("phase_setup_candidate")
 
     config_aware = derive_under_range_cause_candidate(
-        alarmstatus=input_state.alarmstatus,
-        signalpc=input_state.signalpc,
+        alarmstatus=eligible_alarmstatus,
+        signalpc=eligible_signalpc,
         low_signal_alarm_enabled=input_state.low_signal_alarm_enabled,
         low_signal_threshold_pc=input_state.low_signal_threshold_pc,
         low_signal_comparator=input_state.low_signal_comparator,
@@ -400,19 +483,45 @@ def _derive_under_range_cause(
             config_aware_cause,
             config_aware_confidence,
             _json_list(sorted(evidence)),
+            diagnostics_suppressed,
+            diagnostics_reason,
         )
 
     sorted_evidence = sorted(evidence)
     if "target_absent_verified" in evidence or "target_out_of_fov_evidence" in evidence:
-        return "target_out_of_fov_candidate", 0.6, _json_list(sorted_evidence)
+        return (
+            "target_out_of_fov_candidate",
+            0.6,
+            _json_list(sorted_evidence),
+            diagnostics_suppressed,
+            diagnostics_reason,
+        )
     if "actuator_scanning" in evidence or "actuator_position_changed" in evidence:
-        return "alignment_change_candidate", 0.55, _json_list(sorted_evidence)
+        return (
+            "alignment_change_candidate",
+            0.55,
+            _json_list(sorted_evidence),
+            diagnostics_suppressed,
+            diagnostics_reason,
+        )
     if {
         "measurement_range_configured",
         "detector_below_measurement_range",
     }.issubset(evidence):
-        return "below_measurement_range_candidate", 0.65, _json_list(sorted_evidence)
-    return "unknown", 0.0, _json_list(sorted_evidence)
+        return (
+            "below_measurement_range_candidate",
+            0.65,
+            _json_list(sorted_evidence),
+            diagnostics_suppressed,
+            diagnostics_reason,
+        )
+    return (
+        "unknown",
+        0.0,
+        _json_list(sorted_evidence),
+        diagnostics_suppressed,
+        diagnostics_reason,
+    )
 
 
 def _is_peak_picker_reset_mode(value: Optional[str]) -> bool:

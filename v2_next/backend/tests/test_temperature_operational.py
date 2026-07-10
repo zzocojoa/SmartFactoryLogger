@@ -11,6 +11,25 @@ from backend.FacilityData.temperature_operational import (
 
 
 class TemperatureOperationalTests(unittest.TestCase):
+    def eligible_diagnostics(self, **overrides: object) -> dict[str, object]:
+        values: dict[str, object] = {
+            "diagnostics_current_poll_seq": 7,
+            "diagnostics_current_service_instance_id": "svc-1",
+            "diagnostics_snapshot_id": "svc-1:diag:3",
+            "diagnostics_source_poll_seq": 7,
+            "diagnostics_capture_status": "async_complete",
+            "diagnostics_collection_mode": "async_same_poll",
+            "diagnostics_binding_status": "same_poll",
+            "diagnostics_age_ms": 25.0,
+            "diagnostics_max_age_ms": 6000.0,
+            "diagnostics_field_status": {
+                "alarmstatus": "success",
+                "signalpc": "success",
+            },
+        }
+        values.update(overrides)
+        return values
+
     def test_fresh_under_range_sentinel_maps_to_operational_under_range(self) -> None:
         decision = derive_temperature_operational_fields(
             TemperatureOperationalInput(
@@ -142,8 +161,9 @@ class TemperatureOperationalTests(unittest.TestCase):
                 self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
                 self.assertEqual(decision.temperature_cause_confidence, 0.0)
                 output_evidence = json.loads(decision.temperature_cause_evidence_codes)
-                if evidence_code == "signal_below_threshold":
+                if evidence_code in {"alarm_low_signal", "signal_below_threshold"}:
                     self.assertNotIn(evidence_code, output_evidence)
+                    self.assertIn("diagnostics_missing_or_stale", output_evidence)
                 else:
                     self.assertIn(evidence_code, output_evidence)
 
@@ -158,6 +178,7 @@ class TemperatureOperationalTests(unittest.TestCase):
                 spot_effective_age_ms_at_row=100.0,
                 process_phase_candidate="setup_candidate",
                 alarmstatus=0x10,
+                **self.eligible_diagnostics(),
             )
         )
 
@@ -167,6 +188,27 @@ class TemperatureOperationalTests(unittest.TestCase):
             json.loads(decision.temperature_cause_evidence_codes),
             ["alarm_low_signal", "phase_setup_candidate"],
         )
+
+    def test_same_response_diagnostics_are_causal_when_identity_and_age_are_valid(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                alarmstatus=0x10,
+                **self.eligible_diagnostics(
+                    diagnostics_capture_status="same_response",
+                    diagnostics_collection_mode="atomic_output_json",
+                    diagnostics_age_ms=0.0,
+                ),
+            )
+        )
+
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "low_signal_candidate")
+        self.assertFalse(decision.diagnostics_cause_suppressed)
 
     def test_under_range_signalpc_threshold_config_promotes_low_signal_candidate(self) -> None:
         evidence_codes = derive_spot_diagnostic_evidence_codes(
@@ -195,6 +237,7 @@ class TemperatureOperationalTests(unittest.TestCase):
                 low_signal_threshold_pc=5.0,
                 low_signal_comparator="lte",
                 low_signal_comparator_verified=True,
+                **self.eligible_diagnostics(),
             )
         )
 
@@ -205,6 +248,130 @@ class TemperatureOperationalTests(unittest.TestCase):
             json.loads(decision.temperature_cause_evidence_codes),
             ["phase_setup_candidate", "signal_below_threshold"],
         )
+
+    def test_fact_only_diagnostics_are_preserved_but_not_causal(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                alarmstatus=0x10,
+                **self.eligible_diagnostics(diagnostics_collection_mode="async_fact_only"),
+            )
+        )
+
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+        self.assertTrue(decision.diagnostics_cause_suppressed)
+        self.assertEqual(decision.diagnostics_cause_suppressed_reason, "fact_only")
+        self.assertEqual(
+            json.loads(decision.temperature_cause_evidence_codes),
+            ["diagnostics_missing_or_stale"],
+        )
+
+    def test_legacy_async_enriched_diagnostics_without_identity_are_not_causal(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                alarmstatus=0x10,
+                diagnostics_capture_status="async_enriched",
+                diagnostics_collection_mode="async_same_poll",
+                diagnostics_binding_status="same_poll",
+                diagnostics_age_ms=10.0,
+                diagnostics_max_age_ms=6000.0,
+                diagnostics_field_status={"alarmstatus": "success"},
+            )
+        )
+
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+        self.assertEqual(decision.diagnostics_cause_suppressed_reason, "capture_error")
+
+    def test_partial_diagnostics_allow_successful_required_field(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                alarmstatus=0x10,
+                **self.eligible_diagnostics(
+                    diagnostics_capture_status="async_partial",
+                    diagnostics_missing_fields=("d1temperature",),
+                    diagnostics_field_status={
+                        "alarmstatus": "success",
+                        "signalpc": "success",
+                        "d1temperature": "timeout",
+                    },
+                ),
+            )
+        )
+
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "low_signal_candidate")
+        self.assertFalse(decision.diagnostics_cause_suppressed)
+
+    def test_partial_diagnostics_reject_failed_required_field(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="invalid_sentinel",
+                source_freshness="fresh",
+                temperature_value_origin="none",
+                spot_device_status_code="temperature_under_range",
+                spot_effective_age_ms_at_row=100.0,
+                alarmstatus=0x10,
+                **self.eligible_diagnostics(
+                    diagnostics_capture_status="async_partial",
+                    diagnostics_missing_fields=("alarmstatus",),
+                    diagnostics_field_status={
+                        "alarmstatus": "timeout",
+                        "signalpc": "success",
+                    },
+                ),
+            )
+        )
+
+        self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+        self.assertEqual(decision.diagnostics_cause_suppressed_reason, "required_field_failed")
+
+    def test_previous_poll_and_stale_diagnostics_are_not_causal(self) -> None:
+        cases = [
+            (
+                {
+                    "diagnostics_source_poll_seq": 6,
+                    "diagnostics_binding_status": "previous_poll",
+                },
+                "previous_poll",
+            ),
+            ({"diagnostics_age_ms": 7000.0}, "stale"),
+            ({"diagnostics_age_ms": -1.0, "diagnostics_binding_status": "future_clock"}, "future_clock"),
+            ({"diagnostics_snapshot_id": "other-svc:diag:3"}, "snapshot_identity_missing"),
+        ]
+        for overrides, expected_reason in cases:
+            with self.subTest(expected_reason=expected_reason):
+                decision = derive_temperature_operational_fields(
+                    TemperatureOperationalInput(
+                        poll_status="success",
+                        raw_validity="invalid_sentinel",
+                        source_freshness="fresh",
+                        temperature_value_origin="none",
+                        spot_device_status_code="temperature_under_range",
+                        spot_effective_age_ms_at_row=100.0,
+                        alarmstatus=0x10,
+                        **self.eligible_diagnostics(**overrides),
+                    )
+                )
+
+                self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+                self.assertEqual(decision.diagnostics_cause_suppressed_reason, expected_reason)
 
     def test_unverified_comparator_suppresses_numeric_low_signal_cause(self) -> None:
         result = derive_under_range_cause_candidate(

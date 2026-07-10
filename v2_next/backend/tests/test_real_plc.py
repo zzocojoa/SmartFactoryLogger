@@ -30,7 +30,11 @@ from backend.FacilityData.repository import (
 )
 from backend.FacilityData.schemas import FactoryData, OperatorMetadata, OperatorMetadataUpdate
 from backend.FacilityData.spot_image_fact import SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME
-from backend.FacilityData.spot_observation_fact import SPOT_OBSERVATION_FACT_COLUMNS
+from backend.FacilityData.spot_observation_fact import (
+    SPOT_OBSERVATION_FACT_COLUMNS,
+    SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+)
+from backend.FacilityData.spot_diagnostics import SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 from scripts.validate_csv_v2_shadow import validate as validate_csv_v2_shadow
 from scripts.validate_csv_v2_shadow import validate_many as validate_csv_v2_shadow_many
 from scripts.validate_csv_v2_shadow import SPOT_IMAGE_FACT_REQUIRED_COLUMNS
@@ -974,8 +978,9 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         return rows, hashlib.sha256(path.read_bytes()).hexdigest()
 
     def _write_spot_observation_fact_fixture(self, path: Path) -> tuple[int, str]:
+        field_status = {field: "success" for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS}
         values = {
-            "spot_observation_fact_schema_version": "1.2.1",
+            "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
             "spot_observation_key": "spot-service-1:1",
             "spot_service_instance_id": "spot-service-1",
             "spot_poll_seq": "1",
@@ -988,8 +993,15 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             "spot_last_poll_completed_at": "2026-03-09T07:20:25.123Z",
             "spot_poll_duration_ms": "50.0",
             "diagnostics_captured_at": "2026-03-09T07:20:25.123Z",
-            "diagnostics_capture_status": "same_response",
-            "diagnostics_age_ms": "0.0",
+            "diagnostics_capture_status": "async_complete",
+            "diagnostics_age_ms": "10.0",
+            "diagnostics_snapshot_id": "spot-service-1:diag:1",
+            "diagnostics_source_poll_seq": "1",
+            "diagnostics_binding_status": "same_poll",
+            "diagnostics_missing_fields": "[]",
+            "diagnostics_field_status_json": json.dumps(field_status, sort_keys=True),
+            "diagnostics_source": "async_same_poll",
+            "evidence_provenance_json": "{}",
             "spot_diagnostic_evidence_codes": "[]",
             "alarmstatus": "0",
             "signalpc": "20.0",
@@ -1004,6 +1016,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             "low_signal_alarm_enabled": "true",
             "low_signal_threshold_pc": "2.0",
             "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": "true",
         }
         with path.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
@@ -1276,6 +1289,19 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
                 "low_signal_threshold_pc": 2.0,
                 "low_signal_comparator": "lt",
                 "low_signal_comparator_verified": False,
+                "diagnostics_snapshot_id": "spot-service-1:diag:1",
+                "diagnostics_source_poll_seq": 1,
+                "diagnostics_captured_at": "2026-03-09T07:20:25.000Z",
+                "diagnostics_capture_status": "async_complete",
+                "diagnostics_collection_mode": "async_same_poll",
+                "diagnostics_source": "spot_output_parameter_get",
+                "diagnostics_binding_status": "same_poll",
+                "diagnostics_age_ms": 10.0,
+                "diagnostics_max_age_ms": 6000.0,
+                "diagnostics_missing_fields": [],
+                "diagnostics_field_status": {
+                    field: "success" for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS
+                },
             }
         )
         timestamp = service._parse_timestamp(data)

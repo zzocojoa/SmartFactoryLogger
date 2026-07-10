@@ -27,6 +27,12 @@ from backend.FacilityData.spot_observation import (
     classify_spot_raw_response,
     derive_spot_target_observed_shadow,
 )
+from backend.FacilityData.spot_diagnostics import (
+    DiagnosticSnapshot,
+    SPOT_DIAGNOSTIC_OUTPUT_FIELDS,
+    SpotPollContext,
+    configured_diagnostics_max_age_ms,
+)
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_FILENAME,
     SpotObservationFactWriter,
@@ -64,18 +70,9 @@ _SPOT_FOCUS_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
-_SPOT_DIAGNOSTIC_OUTPUT_PARAMS = (
-    "alarmstatus",
-    "signalpc",
-    "d1temperature",
-    "d2temperature",
-    "e1out",
-    "e2out",
-    "itemperature",
-    "appnumber",
-)
+_SPOT_DIAGNOSTIC_OUTPUT_PARAMS = SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 _SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
-_SPOT_DIAGNOSTIC_MAX_AGE_FLOOR_SEC = 3.0
+_SPOT_DIAGNOSTICS_COLLECTION_MODE = "async_fact_only"
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 _img_fetch_lock = asyncio.Lock()
 _live_img_fetch_lock = asyncio.Lock()
@@ -109,6 +106,7 @@ _spot_diagnostics_lock = threading.Lock()
 _spot_diagnostics_snapshot: Optional[Dict[str, Any]] = None
 _spot_diagnostics_last_error_code: Optional[str] = None
 _spot_diagnostics_last_error_message: Optional[str] = None
+_spot_diagnostics_seq = 0
 _spot_temperature_snapshot_lock = threading.Lock()
 _spot_service_instance_id = str(uuid4())
 _spot_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -800,11 +798,7 @@ def _resolve_spot_output_url(param: str) -> str:
 
 
 def _spot_diagnostics_max_age_sec() -> float:
-    try:
-        refresh_interval = float(config.SPOT_REFRESH_INTERVAL or 1.0)
-    except (TypeError, ValueError):
-        refresh_interval = 1.0
-    return max(_SPOT_DIAGNOSTIC_MAX_AGE_FLOOR_SEC, refresh_interval * 2.0)
+    return configured_diagnostics_max_age_ms(config.SPOT_REFRESH_INTERVAL) / 1000.0
 
 
 def _spot_configuration_snapshot() -> Dict[str, Any]:
@@ -837,7 +831,52 @@ async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str)
     return param, response.text.strip()[:_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS]
 
 
-async def _refresh_spot_diagnostics(client: httpx.AsyncClient) -> None:
+def _diagnostic_exception_field_status(exc: BaseException) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.HTTPError):
+        return "http_error"
+    return "parse_error"
+
+
+def _diagnostic_value_field_status(param: str, value: str) -> str:
+    text = value.strip()
+    if not text:
+        return "missing"
+    if param == "appnumber":
+        return "success"
+    if param == "alarmstatus":
+        try:
+            parsed = int(text, 0)
+        except ValueError:
+            normalized = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+            return "success" if normalized in {"low_signal", "lowsignal"} else "parse_error"
+        return "success" if 0 <= parsed <= 255 else "parse_error"
+    try:
+        parsed_float = float(text.rstrip("%").strip())
+    except ValueError:
+        return "parse_error"
+    if not math.isfinite(parsed_float):
+        return "parse_error"
+    if param == "signalpc" and not 0.0 <= parsed_float <= 100.0:
+        return "parse_error"
+    return "success"
+
+
+def _next_spot_diagnostics_snapshot_id() -> str:
+    global _spot_diagnostics_seq
+
+    with _spot_diagnostics_lock:
+        _spot_diagnostics_seq += 1
+        return f"{_spot_service_instance_id}:diag:{_spot_diagnostics_seq}"
+
+
+async def _refresh_spot_diagnostics(
+    client: httpx.AsyncClient,
+    poll_context: SpotPollContext | None = None,
+    *,
+    collection_mode: str = _SPOT_DIAGNOSTICS_COLLECTION_MODE,
+) -> None:
     global _spot_diagnostics_last_error_code
     global _spot_diagnostics_last_error_message
     global _spot_diagnostics_snapshot
@@ -848,41 +887,81 @@ async def _refresh_spot_diagnostics(client: httpx.AsyncClient) -> None:
     )
     payload: Dict[str, Any] = {}
     errors: list[str] = []
-    for result in results:
+    field_status: dict[str, str] = {}
+    for param, result in zip(_SPOT_DIAGNOSTIC_OUTPUT_PARAMS, results, strict=True):
         if isinstance(result, BaseException):
+            field_status[param] = _diagnostic_exception_field_status(result)
             errors.append(f"{result.__class__.__name__}: {_format_exception_message(result)}")
             continue
         key, value = result
-        payload[key] = value
+        status = _diagnostic_value_field_status(key, value)
+        field_status[key] = status
+        if status == "success":
+            payload[key] = value
+        else:
+            errors.append(f"{key}:{status}")
 
     captured_at = time.time()
-    status = "async_enriched" if payload else "error"
-    snapshot: Dict[str, Any] = {
-        "diagnostics_captured_at": _epoch_to_utc_iso(captured_at),
-        "_diagnostics_captured_at_epoch": captured_at,
-        "diagnostics_capture_status": status,
-        **payload,
-    }
+    captured_monotonic = time.monotonic()
+    missing_fields = tuple(
+        field for field in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS if field_status.get(field) != "success"
+    )
+    if not payload:
+        capture_status = "error"
+    elif missing_fields:
+        capture_status = "async_partial"
+    else:
+        capture_status = "async_complete"
+    snapshot = DiagnosticSnapshot(
+        snapshot_id=_next_spot_diagnostics_snapshot_id(),
+        source_poll_seq=poll_context.poll_seq if poll_context is not None else None,
+        captured_at=_epoch_to_utc_iso(captured_at) or "",
+        captured_at_epoch=captured_at,
+        captured_monotonic=captured_monotonic,
+        capture_status=capture_status,
+        collection_mode=collection_mode,
+        source="spot_output_parameter_get",
+        values=payload,
+        field_status=field_status,
+        missing_fields=missing_fields,
+    ).as_payload(diagnostics_max_age_ms=_spot_diagnostics_max_age_sec() * 1000.0)
     with _spot_diagnostics_lock:
         _spot_diagnostics_snapshot = snapshot
         _spot_diagnostics_last_error_code = "spot-diagnostics-fetch-error" if errors else None
         _spot_diagnostics_last_error_message = "; ".join(errors)[:512] if errors else None
 
 
-async def _refresh_spot_diagnostics_safely(client: httpx.AsyncClient, logger: Any) -> None:
+async def _refresh_spot_diagnostics_safely(
+    client: httpx.AsyncClient,
+    logger: Any,
+    poll_context: SpotPollContext | None = None,
+    *,
+    collection_mode: str = _SPOT_DIAGNOSTICS_COLLECTION_MODE,
+) -> None:
     try:
-        await _refresh_spot_diagnostics(client)
+        await _refresh_spot_diagnostics(client, poll_context, collection_mode=collection_mode)
     except Exception as exc:
         global _spot_diagnostics_last_error_code
         global _spot_diagnostics_last_error_message
         global _spot_diagnostics_snapshot
         captured_at = time.time()
+        captured_monotonic = time.monotonic()
+        failed_status = _diagnostic_exception_field_status(exc)
+        snapshot = DiagnosticSnapshot(
+            snapshot_id=_next_spot_diagnostics_snapshot_id(),
+            source_poll_seq=poll_context.poll_seq if poll_context is not None else None,
+            captured_at=_epoch_to_utc_iso(captured_at) or "",
+            captured_at_epoch=captured_at,
+            captured_monotonic=captured_monotonic,
+            capture_status="error",
+            collection_mode=collection_mode,
+            source="spot_output_parameter_get",
+            values={},
+            field_status={field: failed_status for field in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS},
+            missing_fields=tuple(_SPOT_DIAGNOSTIC_OUTPUT_PARAMS),
+        ).as_payload(diagnostics_max_age_ms=_spot_diagnostics_max_age_sec() * 1000.0)
         with _spot_diagnostics_lock:
-            _spot_diagnostics_snapshot = {
-                "diagnostics_captured_at": _epoch_to_utc_iso(captured_at),
-                "_diagnostics_captured_at_epoch": captured_at,
-                "diagnostics_capture_status": "error",
-            }
+            _spot_diagnostics_snapshot = snapshot
             _spot_diagnostics_last_error_code = "spot-diagnostics-fetch-error"
             _spot_diagnostics_last_error_message = _format_exception_message(exc)[:512]
         logger.warning(
@@ -1352,14 +1431,20 @@ def _spot_poll_freshness_threshold_sec() -> float:
     return max(1.0, refresh_interval * 3.0)
 
 
-def _begin_spot_temperature_poll() -> tuple[int, float]:
+def _begin_spot_temperature_poll() -> SpotPollContext:
     global _spot_poll_seq
 
     started_at = time.time()
+    started_monotonic = time.monotonic()
     with _spot_temperature_snapshot_lock:
         _spot_poll_seq += 1
         poll_seq = _spot_poll_seq
-    return poll_seq, started_at
+    return SpotPollContext(
+        service_instance_id=_spot_service_instance_id,
+        poll_seq=poll_seq,
+        started_at_epoch=started_at,
+        started_monotonic=started_monotonic,
+    )
 
 
 def _completed_poll_clocks() -> tuple[float, float]:
@@ -1418,32 +1503,76 @@ def get_spot_observation_fact_health() -> Dict[str, Any]:
             if _spot_diagnostics_snapshot is not None
             else "missing"
         )
+    with _spot_temperature_snapshot_lock:
+        diagnostics_binding_status = (
+            str(_spot_temperature_snapshot.get("diagnostics_binding_status"))
+            if _spot_temperature_snapshot is not None
+            else "missing"
+        )
     return {
         "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
         "write_failure_count": int(writer.failure_count) if writer is not None else 0,
         "spool_pending_count": int(writer.spool_pending_count()) if writer is not None else 0,
         "diagnostics_capture_status": diagnostics_status,
+        "diagnostics_binding_status": diagnostics_binding_status,
         "diagnostics_last_error_code": _spot_diagnostics_last_error_code,
         "diagnostics_last_error_message": _spot_diagnostics_last_error_message,
     }
 
 
-def _latest_spot_diagnostics_for_poll(poll_completed_at: float) -> Dict[str, Any]:
+def _missing_spot_diagnostics_payload() -> Dict[str, Any]:
+    return {
+        "diagnostics_capture_status": "missing",
+        "diagnostics_collection_mode": _SPOT_DIAGNOSTICS_COLLECTION_MODE,
+        "diagnostics_source": "spot_output_parameter_get",
+        "diagnostics_binding_status": "missing",
+        "diagnostics_age_ms": "",
+        "diagnostics_max_age_ms": _spot_diagnostics_max_age_sec() * 1000.0,
+        "diagnostics_field_status": {
+            field: "not_requested" for field in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS
+        },
+        "diagnostics_missing_fields": list(_SPOT_DIAGNOSTIC_OUTPUT_PARAMS),
+    }
+
+
+def _latest_spot_diagnostics_for_poll(
+    *,
+    poll_seq: int,
+    poll_completed_at: float,
+    poll_completed_monotonic: float,
+) -> Dict[str, Any]:
     with _spot_diagnostics_lock:
         snapshot = dict(_spot_diagnostics_snapshot) if _spot_diagnostics_snapshot is not None else None
     if snapshot is None:
-        return {"diagnostics_capture_status": "missing", "diagnostics_age_ms": ""}
+        return _missing_spot_diagnostics_payload()
 
     captured_epoch = snapshot.get("_diagnostics_captured_at_epoch")
-    if not isinstance(captured_epoch, (float, int)) or captured_epoch <= 0:
-        return {"diagnostics_capture_status": "missing", "diagnostics_age_ms": ""}
+    captured_monotonic = snapshot.get("_diagnostics_captured_monotonic")
+    age_sec: float | None = None
+    if isinstance(captured_monotonic, (float, int)):
+        age_sec = poll_completed_monotonic - float(captured_monotonic)
+    elif isinstance(captured_epoch, (float, int)) and captured_epoch > 0:
+        age_sec = poll_completed_at - float(captured_epoch)
 
-    age_sec = poll_completed_at - float(captured_epoch)
-    if age_sec < 0 or age_sec > _spot_diagnostics_max_age_sec():
-        return {"diagnostics_capture_status": "missing", "diagnostics_age_ms": ""}
+    source_poll_seq = snapshot.get("diagnostics_source_poll_seq")
+    if not isinstance(source_poll_seq, int) or source_poll_seq <= 0:
+        binding_status = "unbound"
+    elif source_poll_seq < poll_seq:
+        binding_status = "previous_poll"
+    elif source_poll_seq > poll_seq:
+        binding_status = "future_clock"
+    else:
+        binding_status = "same_poll"
+    if age_sec is not None and age_sec < 0:
+        binding_status = "future_clock"
 
     payload = {key: value for key, value in snapshot.items() if not key.startswith("_")}
-    payload["diagnostics_age_ms"] = f"{max(0.0, age_sec * 1000.0):.3f}"
+    payload["_diagnostics_captured_at_epoch"] = captured_epoch
+    payload["_diagnostics_captured_monotonic"] = captured_monotonic
+    payload["diagnostics_binding_status"] = binding_status
+    payload["diagnostics_age_ms"] = (
+        f"{age_sec * 1000.0:.3f}" if age_sec is not None and age_sec >= 0 else ""
+    )
     return payload
 
 
@@ -1468,12 +1597,16 @@ def _publish_spot_temperature_snapshot(
     raw_value_text = classification.raw_value_text
     if classification.raw_validity == SpotRawValidity.NOT_EVALUATED:
         raw_value_text = None
-    diagnostics_payload = _latest_spot_diagnostics_for_poll(poll_completed_at)
     configuration_payload = _spot_configuration_snapshot()
     internal_temperature = _cached_internal_temperature(poll_completed_at)
     effective_completed_monotonic = poll_completed_monotonic
     if effective_completed_monotonic is None:
         effective_completed_monotonic = time.monotonic()
+    diagnostics_payload = _latest_spot_diagnostics_for_poll(
+        poll_seq=poll_seq,
+        poll_completed_at=poll_completed_at,
+        poll_completed_monotonic=effective_completed_monotonic,
+    )
 
     with _spot_temperature_snapshot_lock:
         _spot_observation_seq += 1
@@ -1663,6 +1796,23 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
         value_age_ms = max(0.0, (now - float(last_valid_value_at)) * 1000.0)
 
     payload = {k: v for k, v in snapshot.items() if not k.startswith("_")}
+    diagnostics_captured_monotonic = _positive_float_or_none(
+        snapshot.get("_diagnostics_captured_monotonic")
+    )
+    diagnostics_captured_epoch = _positive_float_or_none(
+        snapshot.get("_diagnostics_captured_at_epoch")
+    )
+    diagnostics_age_sec: float | None = None
+    if diagnostics_captured_monotonic is not None:
+        diagnostics_age_sec = now_monotonic - diagnostics_captured_monotonic
+    elif diagnostics_captured_epoch is not None:
+        diagnostics_age_sec = now - diagnostics_captured_epoch
+    if diagnostics_age_sec is not None:
+        if diagnostics_age_sec < 0:
+            payload["diagnostics_binding_status"] = "future_clock"
+            payload["diagnostics_age_ms"] = ""
+        else:
+            payload["diagnostics_age_ms"] = f"{diagnostics_age_sec * 1000.0:.3f}"
     payload.update(
         {
             "spot_source_freshness": source_freshness.value,
@@ -1682,8 +1832,34 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
     )
     return payload
 
-async def _refresh_spot_temperature(client: httpx.AsyncClient) -> None:
-    poll_seq, poll_started_at = _begin_spot_temperature_poll()
+def _schedule_spot_diagnostics_for_poll(
+    client: httpx.AsyncClient,
+    poll_context: SpotPollContext,
+) -> None:
+    global _spot_diagnostics_prefetch_task
+
+    if _spot_diagnostics_prefetch_task is not None and not _spot_diagnostics_prefetch_task.done():
+        return
+    _spot_diagnostics_prefetch_task = asyncio.create_task(
+        _refresh_spot_diagnostics_safely(
+            client,
+            _logger,
+            poll_context,
+            collection_mode=_SPOT_DIAGNOSTICS_COLLECTION_MODE,
+        )
+    )
+
+
+async def _refresh_spot_temperature(
+    client: httpx.AsyncClient,
+    *,
+    schedule_diagnostics: bool = False,
+) -> None:
+    poll_context = _begin_spot_temperature_poll()
+    poll_seq = poll_context.poll_seq
+    poll_started_at = poll_context.started_at_epoch
+    if schedule_diagnostics:
+        _schedule_spot_diagnostics_for_poll(client, poll_context)
     try:
         temp_url = _resolve_spot_temperature_url()
     except SpotTemperatureConfigError as exc:
@@ -2328,7 +2504,7 @@ async def _prefetch_loop():
 
             if config.SPOT_URL:
                 try:
-                    await _refresh_spot_temperature(client)
+                    await _refresh_spot_temperature(client, schedule_diagnostics=True)
                 except SpotTemperatureConfigError as exc:
                     _record_temperature_error("temperature-config-missing", str(exc), exc.temp_url, None)
                     _logger.warning(
@@ -2350,11 +2526,6 @@ async def _prefetch_loop():
                             "error": str(exc),
                         },
                     )
-
-            if config.SPOT_URL and (
-                _spot_diagnostics_prefetch_task is None or _spot_diagnostics_prefetch_task.done()
-            ):
-                _spot_diagnostics_prefetch_task = asyncio.create_task(_refresh_spot_diagnostics_safely(client, _logger))
 
             if config.SPOT_INTERNAL_TEMPERATURE_URL and (
                 _internal_temp_prefetch_task is None or _internal_temp_prefetch_task.done()

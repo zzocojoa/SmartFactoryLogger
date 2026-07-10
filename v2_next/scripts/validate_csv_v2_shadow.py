@@ -36,7 +36,17 @@ from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_COLUMNS,
     SPOT_OBSERVATION_FACT_FILENAME,
     SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+    SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS,
+    SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION,
     build_spot_observation_fact_manifest,
+)
+from backend.FacilityData.spot_diagnostics import (
+    DIAGNOSTICS_BINDING_STATUSES,
+    DIAGNOSTICS_CAUSAL_COLLECTION_MODES,
+    DIAGNOSTICS_CAPTURE_STATUSES,
+    DIAGNOSTICS_COLLECTION_MODES,
+    DIAGNOSTICS_FIELD_STATUSES,
+    SPOT_DIAGNOSTIC_OUTPUT_FIELDS,
 )
 
 
@@ -464,6 +474,26 @@ def _parse_json_string_list(value: str) -> list[str]:
     if not isinstance(parsed, list):
         return []
     return [str(item) for item in parsed if str(item)]
+
+
+def _parse_json_string_list_strict(value: str) -> list[str] | None:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
+        return None
+    return parsed
+
+
+def _parse_json_object_strict(value: str) -> dict[str, object] | None:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return {str(key): item for key, item in parsed.items()}
 
 
 def validate_temperature_value_origin_invariants(rows: list[list[str]], header: list[str]) -> list[str]:
@@ -999,7 +1029,16 @@ def _parse_alarmstatus_byte(value: str) -> int | None:
 
 def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
     header, rows = read_csv(fact_path)
+    is_current_schema = header == SPOT_OBSERVATION_FACT_COLUMNS
+    is_historical_schema = header == SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS
+    if not is_current_schema and not is_historical_schema:
+        return ["spot_observation_fact header does not match schema 1.3.0 or historical 1.2.1"]
     required_columns = [
+        "spot_observation_fact_schema_version",
+        "spot_service_instance_id",
+        "spot_poll_seq",
+        "diagnostics_capture_status",
+        "diagnostics_age_ms",
         "alarmstatus",
         "signalpc",
         "spot_diagnostic_evidence_codes",
@@ -1009,6 +1048,18 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
         "low_signal_comparator_verified",
         "peak_picker_enabled",
     ]
+    if is_current_schema:
+        required_columns.extend(
+            [
+                "diagnostics_snapshot_id",
+                "diagnostics_source_poll_seq",
+                "diagnostics_binding_status",
+                "diagnostics_missing_fields",
+                "diagnostics_field_status_json",
+                "diagnostics_source",
+                "evidence_provenance_json",
+            ]
+        )
     missing_columns = [column for column in required_columns if column not in header]
     if missing_columns:
         return ["spot_observation_fact header missing columns: " + ", ".join(missing_columns)]
@@ -1021,6 +1072,15 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
                 f"spot_observation_fact row {row_number} has {len(row)} columns, expected {len(header)}"
             )
             continue
+        expected_schema_version = (
+            SPOT_OBSERVATION_FACT_SCHEMA_VERSION
+            if is_current_schema
+            else SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION
+        )
+        if row[indices["spot_observation_fact_schema_version"]].strip() != expected_schema_version:
+            failures.append(
+                f"spot_observation_fact row {row_number} schema version must be {expected_schema_version}"
+            )
         evidence_codes = _parse_json_string_list(row[indices["spot_diagnostic_evidence_codes"]].strip())
         alarmstatus = _parse_alarmstatus_byte(row[indices["alarmstatus"]])
         if alarmstatus is not None and (alarmstatus & 0x10) and "alarm_low_signal" not in evidence_codes:
@@ -1053,7 +1113,7 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
             "signal_below_configured_threshold_alarm_disabled",
             "signal_at_or_above_configured_threshold",
         }
-        if comparator_verified is False and numeric_comparator_evidence.intersection(evidence_codes):
+        if comparator_verified is not True and numeric_comparator_evidence.intersection(evidence_codes):
             failures.append(
                 f"spot_observation_fact row {row_number} numeric low-signal evidence is forbidden when comparator is unverified"
             )
@@ -1077,7 +1137,153 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
             failures.append(
                 f"spot_observation_fact row {row_number} peak_picker evidence is forbidden when Peak Picker is disabled"
             )
+        if is_current_schema:
+            failures.extend(
+                _validate_spot_observation_fact_v1_3_diagnostics(
+                    row=row,
+                    indices=indices,
+                    row_number=row_number,
+                    evidence_codes=evidence_codes,
+                )
+            )
     return failures
+
+
+def _validate_spot_observation_fact_v1_3_diagnostics(
+    *,
+    row: Sequence[str],
+    indices: dict[str, int],
+    row_number: int,
+    evidence_codes: Sequence[str],
+) -> list[str]:
+    failures: list[str] = []
+    capture_status = row[indices["diagnostics_capture_status"]].strip()
+    binding_status = row[indices["diagnostics_binding_status"]].strip()
+    collection_mode = row[indices["diagnostics_source"]].strip()
+    snapshot_id = row[indices["diagnostics_snapshot_id"]].strip()
+    service_instance_id = row[indices["spot_service_instance_id"]].strip()
+    source_poll_seq_text = row[indices["diagnostics_source_poll_seq"]].strip()
+    spot_poll_seq_text = row[indices["spot_poll_seq"]].strip()
+    age_text = row[indices["diagnostics_age_ms"]].strip()
+
+    if capture_status not in DIAGNOSTICS_CAPTURE_STATUSES:
+        failures.append(
+            f"spot_observation_fact row {row_number} diagnostics_capture_status is invalid"
+        )
+    if binding_status not in DIAGNOSTICS_BINDING_STATUSES:
+        failures.append(
+            f"spot_observation_fact row {row_number} diagnostics_binding_status is invalid"
+        )
+    if collection_mode not in DIAGNOSTICS_COLLECTION_MODES:
+        failures.append(f"spot_observation_fact row {row_number} diagnostics_source is invalid")
+
+    source_poll_seq = _parse_positive_int_text(source_poll_seq_text)
+    spot_poll_seq = _parse_positive_int_text(spot_poll_seq_text)
+    if source_poll_seq_text and source_poll_seq is None:
+        failures.append(
+            f"spot_observation_fact row {row_number} diagnostics_source_poll_seq must be positive"
+        )
+    if snapshot_id and (
+        not service_instance_id
+        or not re.fullmatch(
+            rf"{re.escape(service_instance_id)}:diag:[1-9][0-9]*",
+            snapshot_id,
+        )
+    ):
+        failures.append(
+            f"spot_observation_fact row {row_number} diagnostics_snapshot_id is invalid"
+        )
+    if binding_status == "same_poll":
+        if not snapshot_id or source_poll_seq is None or spot_poll_seq != source_poll_seq:
+            failures.append(
+                f"spot_observation_fact row {row_number} same_poll diagnostics require matching identity"
+            )
+        if not age_text:
+            failures.append(
+                f"spot_observation_fact row {row_number} same_poll diagnostics require age"
+            )
+    if binding_status == "future_clock" and age_text:
+        failures.append(
+            f"spot_observation_fact row {row_number} future_clock diagnostics age must be blank"
+        )
+    if age_text:
+        age_ms = _parse_finite_float(age_text)
+        if age_ms is None or age_ms < 0:
+            failures.append(
+                f"spot_observation_fact row {row_number} diagnostics_age_ms must be finite non-negative"
+            )
+
+    missing_fields = _parse_json_string_list_strict(
+        row[indices["diagnostics_missing_fields"]].strip()
+    )
+    if missing_fields is None or any(
+        field not in SPOT_DIAGNOSTIC_OUTPUT_FIELDS for field in (missing_fields or [])
+    ):
+        failures.append(
+            f"spot_observation_fact row {row_number} diagnostics_missing_fields must be a known string list"
+        )
+        missing_fields = []
+    field_status = _parse_json_object_strict(
+        row[indices["diagnostics_field_status_json"]].strip()
+    )
+    if field_status is None:
+        failures.append(
+            f"spot_observation_fact row {row_number} diagnostics_field_status_json must be an object"
+        )
+        field_status = {}
+    if set(field_status) != set(SPOT_DIAGNOSTIC_OUTPUT_FIELDS) or any(
+        str(status) not in DIAGNOSTICS_FIELD_STATUSES for status in field_status.values()
+    ):
+        failures.append(
+            f"spot_observation_fact row {row_number} diagnostics_field_status_json is incomplete or invalid"
+        )
+    expected_missing = {
+        field for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS if field_status.get(field) != "success"
+    }
+    if set(missing_fields) != expected_missing:
+        failures.append(
+            f"spot_observation_fact row {row_number} diagnostics_missing_fields contradicts field status"
+        )
+    success_count = sum(
+        1 for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS if field_status.get(field) == "success"
+    )
+    if capture_status == "async_complete" and success_count != len(SPOT_DIAGNOSTIC_OUTPUT_FIELDS):
+        failures.append(
+            f"spot_observation_fact row {row_number} async_complete requires all fields successful"
+        )
+    if capture_status == "async_partial" and not 0 < success_count < len(SPOT_DIAGNOSTIC_OUTPUT_FIELDS):
+        failures.append(
+            f"spot_observation_fact row {row_number} async_partial requires mixed field status"
+        )
+
+    provenance = _parse_json_object_strict(row[indices["evidence_provenance_json"]].strip())
+    if evidence_codes and provenance is None:
+        failures.append(
+            f"spot_observation_fact row {row_number} evidence requires provenance object"
+        )
+        provenance = {}
+    if provenance is not None:
+        missing_provenance = sorted(set(evidence_codes) - set(provenance))
+        if missing_provenance:
+            failures.append(
+                f"spot_observation_fact row {row_number} evidence provenance missing: {', '.join(missing_provenance)}"
+            )
+        for code in set(evidence_codes).intersection(provenance):
+            if not isinstance(provenance.get(code), dict):
+                failures.append(
+                    f"spot_observation_fact row {row_number} provenance for {code} must be an object"
+                )
+    return failures
+
+
+def _parse_positive_int_text(value: str) -> int | None:
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _new_spot_observation_fact_summary(spot_observation_fact_path: Path | None) -> dict[str, str]:
@@ -1134,10 +1340,6 @@ def validate_spot_observation_fact_manifest(
     failures: list[str] = []
     if manifest.get("enabled") is not True:
         failures.append("spot_observation_fact_manifest.enabled must be true")
-    if manifest.get("schema_version") != SPOT_OBSERVATION_FACT_SCHEMA_VERSION:
-        failures.append(
-            f"spot_observation_fact_manifest.schema_version must be {SPOT_OBSERVATION_FACT_SCHEMA_VERSION}"
-        )
 
     fact_path_text = str(
         manifest.get("path")
@@ -1159,8 +1361,31 @@ def validate_spot_observation_fact_manifest(
         failures.append("spot_observation_fact.csv is required but was not found")
         return failures, summary
 
+    try:
+        fact_header, fact_rows = read_csv(fact_path)
+    except Exception as exc:  # pragma: no cover - defensive CLI guard
+        return [*failures, f"spot_observation_fact CSV read failed: {exc.__class__.__name__}"], summary
+    if fact_header == SPOT_OBSERVATION_FACT_COLUMNS:
+        expected_schema_version = SPOT_OBSERVATION_FACT_SCHEMA_VERSION
+        expected_columns = SPOT_OBSERVATION_FACT_COLUMNS
+        is_historical_schema = False
+    elif fact_header == SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS:
+        expected_schema_version = SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION
+        expected_columns = SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS
+        is_historical_schema = True
+    else:
+        failures.append(
+            "spot_observation_fact header does not match schema 1.3.0 or historical 1.2.1"
+        )
+        return failures, summary
+    if manifest.get("schema_version") != expected_schema_version:
+        failures.append(
+            "spot_observation_fact_manifest.schema_version "
+            f"must be {expected_schema_version} for the fact header"
+        )
+
     required_columns = manifest.get("required_columns")
-    if required_columns is not None and list(required_columns) != SPOT_OBSERVATION_FACT_COLUMNS:
+    if required_columns is not None and list(required_columns) != expected_columns:
         failures.append("spot_observation_fact_manifest.required_columns does not match contract")
 
     realtime_row_dicts = _row_dicts(v2_header, v2_rows)
@@ -1213,20 +1438,25 @@ def validate_spot_observation_fact_manifest(
 
     failures.extend(_compare_nested_counts(manifest, actual_manifest, "link_coverage", summary))
     failures.extend(_compare_nested_counts(manifest, actual_manifest, "diagnostic_field_coverage", summary))
+    if not is_historical_schema:
+        failures.extend(
+            _compare_nested_counts(manifest, actual_manifest, "diagnostics_capture_status_counts", summary)
+        )
+        failures.extend(
+            _compare_nested_counts(manifest, actual_manifest, "diagnostics_binding_status_counts", summary)
+        )
+        failures.extend(
+            _compare_nested_counts(manifest, actual_manifest, "diagnostics_missing_field_counts", summary)
+        )
+        failures.extend(
+            _compare_nested_counts(manifest, actual_manifest, "evidence_provenance_coverage", summary)
+        )
     actual_link_coverage = actual_manifest.get("link_coverage", {})
     if actual_link_coverage.get("missing_fact_key_rows") != 0:
         failures.append("spot_observation_fact_manifest.link_coverage.missing_fact_key_rows must be 0")
     if actual_link_coverage.get("coverage_pct") != 100.0:
         failures.append("spot_observation_fact_manifest.link_coverage.coverage_pct must be 100.0")
 
-    try:
-        fact_header, fact_rows = read_csv(fact_path)
-    except Exception as exc:  # pragma: no cover - defensive CLI guard
-        return [*failures, f"spot_observation_fact CSV read failed: {exc.__class__.__name__}"], summary
-
-    missing_columns = [column for column in SPOT_OBSERVATION_FACT_COLUMNS if column not in fact_header]
-    if missing_columns:
-        return [*failures, "spot_observation_fact header missing columns: " + ", ".join(missing_columns)], summary
     failures.extend(validate_spot_observation_fact_invariants(fact_path))
 
     fact_row_dicts = _row_dicts(fact_header, fact_rows)
@@ -1325,6 +1555,42 @@ def _missing_diagnostic_sources_for_evidence(evidence_codes: Sequence[str], fact
     if code_set.intersection({"actuator_scanning", "actuator_position_changed"}):
         if not fact.get("actuator_scan_state", "").strip() and not fact.get("actuator_position", "").strip():
             missing.append("actuator_scan_state or actuator_position")
+    causal_diagnostic_codes = code_set.intersection(
+        {
+            "alarm_low_signal",
+            "signal_below_threshold",
+            "signal_below_configured_threshold_alarm_disabled",
+            "signal_at_or_above_configured_threshold",
+        }
+    )
+    if causal_diagnostic_codes:
+        collection_mode = fact.get("diagnostics_source", "").strip()
+        if collection_mode not in DIAGNOSTICS_CAUSAL_COLLECTION_MODES:
+            missing.append("eligible diagnostics collection mode")
+        if fact.get("diagnostics_binding_status", "").strip() != "same_poll":
+            missing.append("same_poll diagnostics binding")
+        if fact.get("diagnostics_source_poll_seq", "").strip() != fact.get("spot_poll_seq", "").strip():
+            missing.append("matching diagnostics_source_poll_seq")
+        if not fact.get("diagnostics_snapshot_id", "").strip():
+            missing.append("diagnostics_snapshot_id")
+        provenance = _parse_json_object_strict(fact.get("evidence_provenance_json", "").strip()) or {}
+        for code in sorted(causal_diagnostic_codes):
+            entry = provenance.get(code)
+            if not isinstance(entry, dict):
+                missing.append(f"{code} provenance")
+                continue
+            age_ms = _parse_finite_float(entry.get("age_ms"))
+            max_age_ms = _parse_finite_float(entry.get("max_age_ms"))
+            if (
+                age_ms is None
+                or max_age_ms is None
+                or age_ms < 0
+                or max_age_ms < 0
+                or age_ms > max_age_ms
+            ):
+                missing.append(f"{code} bounded age")
+            if entry.get("field_status") != "success":
+                missing.append(f"{code} successful field status")
     return missing
 
 

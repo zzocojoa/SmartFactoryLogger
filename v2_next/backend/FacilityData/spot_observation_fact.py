@@ -6,6 +6,7 @@ import json
 import math
 from datetime import datetime, timezone
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,9 +17,15 @@ from backend.FacilityData.spot_low_signal import (
     LOW_SIGNAL_COMPARATORS,
     derive_low_signal_evidence,
 )
+from backend.FacilityData.spot_diagnostics import (
+    SPOT_DIAGNOSTIC_OUTPUT_FIELDS,
+    parse_diagnostics_field_status,
+    parse_diagnostics_missing_fields,
+)
 
 
-SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.2.1"
+SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.3.0"
+SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION = "1.2.1"
 SPOT_OBSERVATION_FACT_FILENAME = "spot_observation_fact.csv"
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
@@ -56,7 +63,7 @@ SPOT_DIAGNOSTIC_FACT_FIELDS = (
     "actuator_scan_state",
     "actuator_peak_found",
 )
-SPOT_OBSERVATION_FACT_COLUMNS = [
+SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS = [
     "spot_observation_fact_schema_version",
     "spot_observation_key",
     "spot_service_instance_id",
@@ -105,6 +112,21 @@ SPOT_OBSERVATION_FACT_COLUMNS = [
     "window_obscuration_pc",
     "focus_mm",
 ]
+_SPOT_OBSERVATION_FACT_EVIDENCE_INDEX = SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS.index(
+    "spot_diagnostic_evidence_codes"
+)
+SPOT_OBSERVATION_FACT_COLUMNS = [
+    *SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS[:_SPOT_OBSERVATION_FACT_EVIDENCE_INDEX],
+    "diagnostics_snapshot_id",
+    "diagnostics_source_poll_seq",
+    "diagnostics_binding_status",
+    "diagnostics_missing_fields",
+    "diagnostics_field_status_json",
+    "diagnostics_source",
+    SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS[_SPOT_OBSERVATION_FACT_EVIDENCE_INDEX],
+    "evidence_provenance_json",
+    *SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS[_SPOT_OBSERVATION_FACT_EVIDENCE_INDEX + 1 :],
+]
 SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS = {
     "alarmstatus": "alarmstatus_nonblank_count",
     "signalpc": "signalpc_nonblank_count",
@@ -112,6 +134,21 @@ SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS = {
     "d2temperature": "d2temperature_nonblank_count",
     "e1out": "e1out_nonblank_count",
     "e2out": "e2out_nonblank_count",
+}
+SPOT_DIAGNOSTIC_EVIDENCE_FIELDS = {
+    "alarm_low_signal": "alarmstatus",
+    "signal_at_or_above_configured_threshold": "signalpc",
+    "signal_below_configured_threshold_alarm_disabled": "signalpc",
+    "signal_below_threshold": "signalpc",
+    "signalpc_present_comparator_unverified": "signalpc",
+    "signalpc_present_threshold_unknown": "signalpc",
+    "peak_picker_off_mode_reset_configured": "peak_picker_off_mode",
+    "actuator_position_changed": "actuator_position",
+    "actuator_scanning": "actuator_scan_state",
+    "target_absent_verified": "target_absent_verified",
+    "target_out_of_fov_evidence": "target_out_of_fov_evidence",
+    "measurement_range_configured": "spot_range_min_c",
+    "detector_below_measurement_range": "spot_device_status_code",
 }
 
 
@@ -166,19 +203,19 @@ class SpotObservationFactWriter:
         return existing_header == SPOT_OBSERVATION_FACT_COLUMNS
 
     def _archive_mismatched_output_file(self) -> None:
-        archive_path = self._next_schema_mismatch_archive_path()
+        archive_path = self._next_schema_mismatch_archive_path(self.output_path)
         self.output_path.rename(archive_path)
 
-    def _next_schema_mismatch_archive_path(self) -> Path:
+    def _next_schema_mismatch_archive_path(self, source_path: Path) -> Path:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        suffix = self.output_path.suffix or ".csv"
-        archive_stem = f"{self.output_path.stem}.{timestamp}.schema-mismatch"
-        candidate = self.output_path.with_name(f"{archive_stem}{suffix}")
+        suffix = source_path.suffix or ".csv"
+        archive_stem = f"{source_path.stem}.{timestamp}.schema-mismatch"
+        candidate = source_path.with_name(f"{archive_stem}{suffix}")
         for index in range(1, 1000):
             if not candidate.exists():
                 return candidate
-            candidate = self.output_path.with_name(f"{archive_stem}.{index}{suffix}")
-        raise FileExistsError(f"Could not allocate archive path for {self.output_path}")
+            candidate = source_path.with_name(f"{archive_stem}.{index}{suffix}")
+        raise FileExistsError(f"Could not allocate archive path for {source_path}")
 
     def _flush_spool(self) -> None:
         spool_path = self._effective_spool_path()
@@ -186,16 +223,22 @@ class SpotObservationFactWriter:
             return
         pending: list[dict[str, str]] = []
         with spool_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    raw = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(raw, dict):
-                    pending.append({column: _text(raw.get(column)) for column in SPOT_OBSERVATION_FACT_COLUMNS})
+            spool_lines = list(handle)
+        for line in spool_lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                raw = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(raw, dict):
+                if raw.get("spot_observation_fact_schema_version") != SPOT_OBSERVATION_FACT_SCHEMA_VERSION or not set(
+                    SPOT_OBSERVATION_FACT_COLUMNS
+                ).issubset(raw):
+                    spool_path.rename(self._next_schema_mismatch_archive_path(spool_path))
+                    return
+                pending.append({column: _text(raw.get(column)) for column in SPOT_OBSERVATION_FACT_COLUMNS})
         for fact in pending:
             key = fact["spot_observation_key"]
             if key and key not in self._seen_keys:
@@ -276,6 +319,10 @@ def build_spot_observation_fact_manifest(
         "required_columns": list(SPOT_OBSERVATION_FACT_COLUMNS),
         "link_coverage": summary["link_coverage"],
         "diagnostic_field_coverage": summary["diagnostic_field_coverage"],
+        "diagnostics_capture_status_counts": summary["diagnostics_capture_status_counts"],
+        "diagnostics_binding_status_counts": summary["diagnostics_binding_status_counts"],
+        "diagnostics_missing_field_counts": summary["diagnostics_missing_field_counts"],
+        "evidence_provenance_coverage": summary["evidence_provenance_coverage"],
     }
 
 
@@ -300,6 +347,25 @@ def summarize_spot_observation_fact(
     poll_seq_gap_count = 0
     if first_poll_seq is not None and last_poll_seq is not None:
         poll_seq_gap_count = (last_poll_seq - first_poll_seq + 1) - len(set(poll_sequences))
+    capture_status_counts = Counter(
+        _text(row.get("diagnostics_capture_status")).strip() or "missing" for row in rows
+    )
+    binding_status_counts = Counter(
+        _text(row.get("diagnostics_binding_status")).strip() or "missing" for row in rows
+    )
+    missing_field_counts: Counter[str] = Counter()
+    evidence_code_count = 0
+    provenance_code_count = 0
+    for row in rows:
+        missing_field_counts.update(parse_diagnostics_missing_fields(row.get("diagnostics_missing_fields")))
+        evidence_codes = set(parse_spot_diagnostic_evidence_codes(row.get("spot_diagnostic_evidence_codes")))
+        provenance = _json_object(row.get("evidence_provenance_json"))
+        evidence_code_count += len(evidence_codes)
+        provenance_code_count += len(evidence_codes.intersection(provenance))
+    missing_provenance_count = max(0, evidence_code_count - provenance_code_count)
+    provenance_coverage_pct = (
+        provenance_code_count / evidence_code_count * 100.0 if evidence_code_count else 100.0
+    )
     return {
         "header": header,
         "row_count": len(rows),
@@ -312,6 +378,15 @@ def summarize_spot_observation_fact(
         "diagnostic_field_coverage": {
             manifest_key: sum(1 for row in rows if _text(row.get(fact_column)).strip())
             for fact_column, manifest_key in SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS.items()
+        },
+        "diagnostics_capture_status_counts": dict(sorted(capture_status_counts.items())),
+        "diagnostics_binding_status_counts": dict(sorted(binding_status_counts.items())),
+        "diagnostics_missing_field_counts": dict(sorted(missing_field_counts.items())),
+        "evidence_provenance_coverage": {
+            "evidence_code_count": evidence_code_count,
+            "provenance_code_count": provenance_code_count,
+            "missing_provenance_count": missing_provenance_count,
+            "coverage_pct": round(provenance_coverage_pct, 6),
         },
     }
 
@@ -413,17 +488,80 @@ def _is_startup_pending_snapshot(snapshot: Mapping[str, Any]) -> bool:
     )
 
 
+def _diagnostics_field_status_for_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
+    parsed = parse_diagnostics_field_status(snapshot.get("diagnostics_field_status"))
+    if parsed:
+        return {
+            field: parsed.get(field, "missing") for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS
+        }
+    return {
+        field: "success" if _diagnostic_value_present(snapshot.get(field)) else "missing"
+        for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS
+    }
+
+
+def _build_evidence_provenance_json(
+    snapshot: Mapping[str, Any],
+    evidence_codes: Iterable[str],
+    field_status: Mapping[str, str],
+) -> str:
+    captured_at = _text(snapshot.get("diagnostics_captured_at"))
+    age_ms = _finite_non_negative_float_or_none(snapshot.get("diagnostics_age_ms"))
+    max_age_ms = _finite_non_negative_float_or_none(snapshot.get("diagnostics_max_age_ms"))
+    source = _text(snapshot.get("diagnostics_source")) or "unknown"
+    collection_mode = _text(snapshot.get("diagnostics_collection_mode")) or "async_fact_only"
+    snapshot_id = _text(snapshot.get("diagnostics_snapshot_id"))
+    source_poll_seq = _positive_int_or_none(snapshot.get("diagnostics_source_poll_seq"))
+    binding_status = _text(snapshot.get("diagnostics_binding_status")) or "missing"
+    provenance: dict[str, dict[str, Any]] = {}
+    for code in evidence_codes:
+        field_name = SPOT_DIAGNOSTIC_EVIDENCE_FIELDS.get(code)
+        if not field_name:
+            continue
+        provenance[code] = {
+            "captured_at": captured_at,
+            "age_ms": age_ms,
+            "max_age_ms": max_age_ms,
+            "source": source,
+            "collection_mode": collection_mode,
+            "field": field_name,
+            "field_status": field_status.get(
+                field_name,
+                "success" if _diagnostic_value_present(snapshot.get(field_name)) else "missing",
+            ),
+            "snapshot_id": snapshot_id,
+            "source_poll_seq": source_poll_seq,
+            "binding_status": binding_status,
+        }
+    if not provenance:
+        return ""
+    return json.dumps(provenance, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
 def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
     completed_at = _text(snapshot.get("spot_last_poll_completed_at"))
     diagnostics_present = _has_diagnostic_payload(snapshot)
     diagnostics_capture_status = _text(snapshot.get("diagnostics_capture_status"))
     if not diagnostics_capture_status:
-        diagnostics_capture_status = "same_response" if diagnostics_present else "missing"
+        diagnostics_capture_status = "async_partial" if diagnostics_present else "missing"
     diagnostics_captured_at = _text(snapshot.get("diagnostics_captured_at")) or completed_at
     diagnostics_age_ms = _text(snapshot.get("diagnostics_age_ms"))
-    if diagnostics_present and not diagnostics_age_ms:
-        diagnostics_age_ms = "0.0"
+    diagnostics_binding_status = _text(snapshot.get("diagnostics_binding_status"))
+    if not diagnostics_binding_status:
+        diagnostics_binding_status = "unbound" if diagnostics_present else "missing"
+    diagnostics_collection_mode = (
+        _text(snapshot.get("diagnostics_collection_mode")) or "async_fact_only"
+    )
+    diagnostics_field_status = _diagnostics_field_status_for_fact(snapshot)
+    diagnostics_missing_fields = parse_diagnostics_missing_fields(
+        snapshot.get("diagnostics_missing_fields")
+    )
+    if not diagnostics_missing_fields:
+        diagnostics_missing_fields = tuple(
+            field for field, status in diagnostics_field_status.items() if status != "success"
+        )
     evidence_codes = encode_spot_diagnostic_evidence_codes(snapshot)
+    parsed_evidence_codes = parse_spot_diagnostic_evidence_codes(evidence_codes)
     return {
         "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
         "spot_observation_key": build_spot_observation_key(snapshot),
@@ -446,7 +584,22 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
         "diagnostics_captured_at": diagnostics_captured_at,
         "diagnostics_capture_status": diagnostics_capture_status,
         "diagnostics_age_ms": diagnostics_age_ms,
+        "diagnostics_snapshot_id": _text(snapshot.get("diagnostics_snapshot_id")),
+        "diagnostics_source_poll_seq": _text(snapshot.get("diagnostics_source_poll_seq")),
+        "diagnostics_binding_status": diagnostics_binding_status,
+        "diagnostics_missing_fields": json.dumps(
+            list(diagnostics_missing_fields), ensure_ascii=False, separators=(",", ":")
+        ),
+        "diagnostics_field_status_json": json.dumps(
+            diagnostics_field_status, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ),
+        "diagnostics_source": diagnostics_collection_mode,
         "spot_diagnostic_evidence_codes": evidence_codes,
+        "evidence_provenance_json": _build_evidence_provenance_json(
+            snapshot,
+            parsed_evidence_codes,
+            diagnostics_field_status,
+        ),
         "alarmstatus": _text(snapshot.get("alarmstatus")),
         "signalpc": _text(snapshot.get("signalpc")),
         "d1temperature": _text(snapshot.get("d1temperature")),
@@ -644,6 +797,30 @@ def _alarmstatus_byte_or_none(value: Any) -> Optional[int]:
     if parsed < 0 or parsed > 255:
         return None
     return parsed
+
+
+def _finite_non_negative_float_or_none(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed < 0:
+        return None
+    return parsed
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    raw: object = value
+    if isinstance(value, str):
+        try:
+            raw = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(raw, Mapping):
+        return {}
+    return {str(key): item for key, item in raw.items()}
 
 
 def _normalize_token(value: Any) -> str:
