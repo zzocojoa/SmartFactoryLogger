@@ -441,6 +441,20 @@ AMETEK diagnostics B-direction closeout, 2026-07-09:
 - SPOT capture reset PASS: `capture_enabled=false`, `capture_mode=off`, and `capture_failure_count=0`.
 - Redaction check PASS: this evidence block excludes raw CSV rows, credential values, camera endpoint values, absolute local paths, and image payloads.
 
+Stopped-after-production positive closeout, 2026-07-10:
+
+- Evidence level: independent verifier direct parse of an operator-provided copied server closeout bundle, not direct live server filesystem access.
+- Source build baseline: latest `master`, merge commit `76e81fca8587722014ee1ced98d5b81192cabb5a`.
+- Artifact: `stopped_after_production_closeout_20260710-080252.zip`, SHA-256 `45311641E22B8044E4B7E7BED16FF6135FFEC529BDA923EDF059080CC4FEFEB4`.
+- Selected CSV: `Factory_Integrated_Log_v2_20260710_000000.csv`, `135,390` rows, copied bundle scope `test_data`.
+- Realtime stopped candidate PASS: `stopped_after_production_candidate=1,608`.
+- Realtime weak-candidate ID contract PASS: `stopped_rows_with_realtime_changeover_candidate_id=0`.
+- Under-range expectedness guard PASS: `stopped_under_range_rows=0` and `stopped_under_range_expected_candidate_rows=0`.
+- Copied bundle post-hoc fact state PASS: `changeover_candidate_resolution_fact.csv` and `process_phase_event_fact.csv` were absent from the copied ZIP; metadata recorded `changeover_candidate_resolution_fact_manifest.row_count=0` and `process_phase_event_fact_manifest.row_count=0`.
+- Validator PASS: `scripts/validate_csv_v2_shadow.py` exited `0` with the copied v2 CSV, metadata, `spot_observation_fact.csv`, `spot_image_fact.csv`, and `spot_image_fact_manifest.final.json`. The validator reported `v2_rows=135390`, SPOT observation fact row/hash match, SPOT image fact row/hash match, and process fact manifests at `row_count=0` from metadata.
+- Targeted tests PASS: `py -3 -m pytest backend\tests\test_process_phase.py backend\tests\test_temperature_operational.py backend\tests\test_changeover_candidate_resolution_fact.py backend\tests\test_csv_v2_4_operational_contract.py -q` returned `96 passed, 29 subtests passed`.
+- Redaction check PASS: this evidence block records only aggregate values; it includes no row-level data, credential values, camera endpoint values, absolute local paths, or binary image data.
+
 ---
 
 ## 8. Related Documents
