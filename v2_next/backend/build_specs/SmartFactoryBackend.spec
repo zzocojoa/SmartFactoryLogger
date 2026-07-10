@@ -1,6 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
+import atexit
 import os
+from pathlib import Path
+import shutil
 import sys
+import tempfile
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -11,7 +15,24 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SPEC_DIR, "..", ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from backend.version import (
+    BUILD_PROVENANCE_FILENAME,
+    verify_build_source_commit,
+    write_build_provenance_file,
+)
+
+
+BUILD_PROVENANCE_DIR = tempfile.mkdtemp(prefix='smartfactory-build-provenance-')
+atexit.register(shutil.rmtree, BUILD_PROVENANCE_DIR, ignore_errors=True)
+BUILD_PROVENANCE_PATH = os.path.join(BUILD_PROVENANCE_DIR, BUILD_PROVENANCE_FILENAME)
+BUILD_GIT_COMMIT = write_build_provenance_file(
+    project_root=Path(PROJECT_ROOT),
+    destination=Path(BUILD_PROVENANCE_PATH),
+)
+print(f'Build provenance git commit: {BUILD_GIT_COMMIT}')
+
 datas = [
+    (BUILD_PROVENANCE_PATH, 'backend'),
     (os.path.join(PROJECT_ROOT, 'frontend', 'dist'), 'frontend/dist'),
     (os.path.join(PROJECT_ROOT, 'backend', 'assets'), 'backend/assets'),
     (os.path.join(PROJECT_ROOT, 'scripts'), 'backend/scripts'),
@@ -66,3 +87,6 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+verify_build_source_commit(Path(PROJECT_ROOT), BUILD_GIT_COMMIT)
+print(f'Build provenance verified after packaging: {BUILD_GIT_COMMIT}')

@@ -19,6 +19,11 @@ from backend.FacilityData.changeover_candidate_resolution_fact import (
 )
 from backend.FacilityData.repository import CSVLoggerService, V2_4_CSV_COLUMNS
 from backend.FacilityData.schemas import FactoryData
+from backend.FacilityData.spot_observation_fact import (
+    SPOT_OBSERVATION_FACT_COLUMNS,
+    SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+    build_spot_observation_fact_manifest,
+)
 from scripts.validate_csv_v2_shadow import SPOT_IMAGE_FACT_REQUIRED_COLUMNS
 
 
@@ -252,10 +257,37 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
         edge_row = list(rows[0])
         edge_row[V2_4_CSV_COLUMNS.index("timestamp_utc")] = "2026-07-02T23:30:25.000Z"
         edge_row[V2_4_CSV_COLUMNS.index("ingest_timestamp")] = "2026-07-02T23:30:26.000+00:00"
-        edge_row[V2_4_CSV_COLUMNS.index("spot_last_poll_completed_at")] = "2026-07-02T23:30:25.500Z"
+        edge_row[V2_4_CSV_COLUMNS.index("spot_last_poll_completed_at")] = "2026-07-02T23:30:24.900Z"
         rows[0] = edge_row
         v2_path = bundle / "Factory_Integrated_Log_v2_20260702_233025.csv"
         self._write_csv(v2_path, V2_4_CSV_COLUMNS, rows)
+        realtime_rows = [dict(zip(V2_4_CSV_COLUMNS, row)) for row in rows]
+
+        observation_fact = bundle / "spot_observation_fact.csv"
+        source_observation = realtime_rows[0]
+        observation_values = {
+            "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+            "spot_observation_key": source_observation["spot_observation_key"],
+            "spot_service_instance_id": source_observation["spot_service_instance_id"],
+            "spot_poll_seq": source_observation["spot_poll_seq"],
+            "spot_observation_seq": source_observation["spot_observation_seq"],
+            "spot_poll_status": source_observation["spot_poll_status"],
+            "spot_raw_validity": source_observation["spot_raw_validity"],
+            "spot_device_status_code": source_observation["spot_device_status_code"],
+            "spot_temperature_raw": source_observation["spot_temperature_raw"],
+            "spot_last_poll_completed_at": source_observation["spot_last_poll_completed_at"],
+            "diagnostics_capture_status": "not_requested",
+            "spot_diagnostic_evidence_codes": "[]",
+            "alarmstatus": "0",
+            "peak_picker_enabled": "false",
+            "low_signal_alarm_enabled": "false",
+            "low_signal_comparator": "unknown",
+        }
+        self._write_csv(
+            observation_fact,
+            SPOT_OBSERVATION_FACT_COLUMNS,
+            [[observation_values.get(column, "") for column in SPOT_OBSERVATION_FACT_COLUMNS]],
+        )
 
         image_fact = bundle / "spot_image_fact.csv"
         image_sha = self._write_csv(
@@ -282,6 +314,13 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
         service._write_v2_sidecar(v2_path, service._get_active_v2_contract())
         metadata_path = v2_path.with_suffix(".metadata.json")
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["spot_observation_fact_manifest"] = build_spot_observation_fact_manifest(
+            fact_path=observation_fact,
+            enabled=True,
+            write_failure_count=0,
+            spool_pending_count=0,
+            realtime_rows=realtime_rows,
+        )
         metadata["spot_image_fact_manifest"].update(
             {
                 "enabled": True,

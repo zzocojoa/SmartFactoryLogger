@@ -49,6 +49,14 @@ unittest를 한 번에 실행합니다.
 npm run health
 ```
 
+## Build commit provenance
+
+PyInstaller backend package는 clean Git HEAD만 build provenance로 포함하며, frozen
+runtime은 Git 없이 해당 SHA를 CSV v2 metadata에 기록합니다. Dirty/invalid/no-Git
+build 실패 정책과 rollback은
+[Packaged Build Commit Provenance](docs/V2/05_운영_배포/build_commit_provenance.md)를
+참조하세요.
+
 ## React 렌더 계측
 
 대시보드 렌더 commit count와 duration을 비교할 때는 mock 백엔드와 React Profiler
