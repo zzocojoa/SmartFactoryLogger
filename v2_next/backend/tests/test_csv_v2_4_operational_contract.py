@@ -2014,6 +2014,51 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
         self.assertEqual(validate_spot_configuration_snapshot(metadata, [], []), [])
 
+    def test_spot_configuration_validator_requires_current_fingerprint_for_matched_readback(self) -> None:
+        base_snapshot = {
+            "low_signal_alarm_enabled": True,
+            "low_signal_threshold_pc": 2.0,
+            "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": True,
+            "spot_range_min_c": 200.0,
+            "spot_range_max_c": 900.0,
+            "window_obscuration_pc": 12.0,
+            **self.config_provenance_fields(verified=True),
+            "device_config_readback_status": "matched",
+        }
+
+        for device_fingerprint in ("", "c" * 64):
+            with self.subTest(device_fingerprint=device_fingerprint or "blank"):
+                snapshot = {
+                    **base_snapshot,
+                    "device_config_fingerprint_sha256": device_fingerprint,
+                }
+                failures = validate_spot_configuration_snapshot(
+                    {"spot_configuration_snapshot": snapshot},
+                    [],
+                    [],
+                )
+                self.assertIn(
+                    "spot_configuration_snapshot.device_config_readback_status=matched "
+                    "requires current device fingerprint",
+                    failures,
+                )
+
+        valid_snapshot = {
+            **base_snapshot,
+            "device_config_fingerprint_sha256": base_snapshot[
+                "spot_config_fingerprint_sha256"
+            ],
+        }
+        self.assertEqual(
+            validate_spot_configuration_snapshot(
+                {"spot_configuration_snapshot": valid_snapshot},
+                [],
+                [],
+            ),
+            [],
+        )
+
     def test_v2_4_runtime_summary_counts_operational_rows(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_enabled=True, csv_v2_operational_fields_enabled=True)

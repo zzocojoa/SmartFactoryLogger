@@ -46,14 +46,15 @@
 - attestation 항목은 canonical settings hash에서 제외했다. 그렇지 않으면 승인 fingerprint를 config 파일에 쓰는 행위가 fingerprint 자체를 변경해 고정점이 존재하지 않는다.
 - unsupported enum과 fact evidence는 호환성·감사를 위해 유지하고 causal promotion만 차단했다.
 - 원인 판정 rule을 `temperature-operational-v4`로 올렸으며 v3 sidecar/row는 legacy 호환 경로로 검증한다.
+- GitHub review P2에 따라 `device_config_readback_status=matched`는 nonblank current device fingerprint가 일치할 때만 validator가 허용한다.
 - 전체 feature 자동 gap analysis는 Stage 4~5 완료 전 PDCA를 `Check`로 이동시키므로 실행하지 않았다. 현재 분석은 Stage 3 scoped audit다.
 
 ## Validation
 
-- Targeted Stage 3 pytest: `283 passed, 50 subtests passed`
+- Targeted Stage 3 pytest: `284 passed, 52 subtests passed`
 - Full repository health: PASS
   - Frontend: typecheck/lint, `27 files / 202 tests`
-  - Backend: ruff/mypy, `480 tests OK`
+  - Backend: ruff/mypy, `481 tests OK`
 - Python compile: PASS
 - `git diff --check`: PASS
 - Windows packaged artifact: PR CI merge gate에서 확인 예정

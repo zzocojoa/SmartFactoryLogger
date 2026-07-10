@@ -988,6 +988,12 @@ def validate_spot_config_provenance_snapshot(snapshot: dict) -> list[str]:
         failures.append(
             "spot_configuration_snapshot.device_config_fingerprint_sha256 must be blank or lowercase SHA-256"
         )
+    if readback_status == "matched" and (
+        not device_fingerprint or device_fingerprint != fingerprint
+    ):
+        failures.append(
+            "spot_configuration_snapshot.device_config_readback_status=matched requires current device fingerprint"
+        )
     if attestation_status not in CONFIG_ATTESTATION_STATUSES:
         failures.append(
             "spot_configuration_snapshot.config_attestation_status must be a supported status"

@@ -92,11 +92,11 @@ Stage 4~5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 
 ## 5. Validation
 
-- Stage 3 targeted pytest: `283 passed, 50 subtests passed`
+- Stage 3 targeted pytest: `284 passed, 52 subtests passed`
 - Frontend typecheck/lint: PASS
 - Frontend tests: `27 files, 202 tests` PASS
 - Backend ruff/mypy: PASS
-- Backend unittest: `480 tests OK`
+- Backend unittest: `481 tests OK`
 - Python compile: PASS
 - `git diff --check`: PASS
 - Local PyInstaller build: 미실행, PR의 Windows Release Artifact check를 merge gate로 사용
