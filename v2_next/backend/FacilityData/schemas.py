@@ -288,6 +288,17 @@ class FactoryData(BaseModel):
     spot_image_path_nearest: Optional[str] = None
     spot_image_link_status_nearest: Optional[str] = None
     spot_image_link_age_ms_nearest: Optional[float] = None
+    diagnostics_snapshot_id: Optional[str] = None
+    diagnostics_source_poll_seq: Optional[int] = None
+    diagnostics_captured_at: Optional[str] = None
+    diagnostics_capture_status: Optional[str] = None
+    diagnostics_collection_mode: Optional[str] = None
+    diagnostics_source: Optional[str] = None
+    diagnostics_binding_status: Optional[str] = None
+    diagnostics_age_ms: Optional[float] = None
+    diagnostics_max_age_ms: Optional[float] = None
+    diagnostics_missing_fields: Optional[list[str]] = None
+    diagnostics_field_status: Optional[Dict[str, str]] = None
     spot_diagnostic_evidence_codes: Optional[str] = None
     alarmstatus: Optional[str] = None
     signalpc: Optional[float] = None

@@ -29,8 +29,12 @@ from backend.FacilityData.repository import (
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_COLUMNS,
+    SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+    SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS,
+    SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION,
     build_spot_observation_fact_manifest,
 )
+from backend.FacilityData.spot_diagnostics import SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 from scripts.validate_csv_v2_shadow import (
     validate as validate_csv_v2_shadow,
     validate_changeover_candidate_resolution_fact_manifest,
@@ -84,6 +88,23 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             spot_temperature_raw="6553.4",
         )
 
+    def eligible_diagnostics(self, poll_seq: int = 14) -> dict[str, object]:
+        return {
+            "diagnostics_snapshot_id": f"spot-service-1:diag:{poll_seq}",
+            "diagnostics_source_poll_seq": poll_seq,
+            "diagnostics_captured_at": "2026-06-25T08:00:00Z",
+            "diagnostics_capture_status": "async_complete",
+            "diagnostics_collection_mode": "async_same_poll",
+            "diagnostics_source": "spot_output_parameter_get",
+            "diagnostics_binding_status": "same_poll",
+            "diagnostics_age_ms": 10.0,
+            "diagnostics_max_age_ms": 6000.0,
+            "diagnostics_missing_fields": [],
+            "diagnostics_field_status": {
+                field: "success" for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS
+            },
+        }
+
     def write_image_fact(self, fact_path: Path, rows: list[list[str]]) -> str:
         with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
@@ -115,8 +136,10 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
     def observation_fact_row(self, **updates: str) -> list[str]:
+        field_status = {field: "success" for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS}
+        evidence_code = "signal_at_or_above_configured_threshold"
         values = {
-            "spot_observation_fact_schema_version": "1.2.1",
+            "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
             "spot_observation_key": "spot-service-1:14",
             "spot_service_instance_id": "spot-service-1",
             "spot_poll_seq": "14",
@@ -129,9 +152,26 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
             "spot_poll_duration_ms": "50.0",
             "diagnostics_captured_at": "2026-06-25T08:00:00Z",
-            "diagnostics_capture_status": "same_response",
-            "diagnostics_age_ms": "0.0",
-            "spot_diagnostic_evidence_codes": "[]",
+            "diagnostics_capture_status": "async_complete",
+            "diagnostics_age_ms": "10.0",
+            "diagnostics_snapshot_id": "spot-service-1:diag:14",
+            "diagnostics_source_poll_seq": "14",
+            "diagnostics_binding_status": "same_poll",
+            "diagnostics_missing_fields": "[]",
+            "diagnostics_field_status_json": json.dumps(field_status, sort_keys=True),
+            "diagnostics_source": "async_same_poll",
+            "evidence_provenance_json": json.dumps(
+                {
+                    evidence_code: {
+                        "source_field": "signalpc",
+                        "field_status": "success",
+                        "age_ms": 10.0,
+                        "max_age_ms": 6000.0,
+                    }
+                },
+                sort_keys=True,
+            ),
+            "spot_diagnostic_evidence_codes": json.dumps([evidence_code]),
             "alarmstatus": "0",
             "signalpc": "22.5",
             "d1temperature": "35.0",
@@ -145,6 +185,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             "low_signal_alarm_enabled": "true",
             "low_signal_threshold_pc": "2.0",
             "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": "true",
         }
         values.update(updates)
         return [values.get(column, "") for column in SPOT_OBSERVATION_FACT_COLUMNS]
@@ -711,6 +752,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "low_signal_threshold_pc": 5.0,
                 "low_signal_comparator": "lte",
                 "low_signal_comparator_verified": True,
+                **self.eligible_diagnostics(),
             }
         )
 
@@ -737,13 +779,15 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.0")
         self.assertEqual(
             row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
-            '["phase_setup_candidate"]',
+            '["diagnostics_missing_or_stale","phase_setup_candidate"]',
         )
 
     def test_v2_4_row_uses_alarmstatus_bit4_for_under_range_low_signal_cause(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
-        data = self.create_data().model_copy(update={"alarmstatus": "0x10"})
+        data = self.create_data().model_copy(
+            update={"alarmstatus": "0x10", **self.eligible_diagnostics()}
+        )
 
         row = self.build_v2_row(service, data)
 
@@ -752,6 +796,58 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(
             row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
             '["alarm_low_signal","phase_setup_candidate"]',
+        )
+
+    def test_v2_4_summary_counts_previous_poll_diagnostics_suppression(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "alarmstatus": "0x10",
+                **self.eligible_diagnostics(),
+                "diagnostics_source_poll_seq": 13,
+                "diagnostics_binding_status": "previous_poll",
+            }
+        )
+
+        row = self.build_v2_row(service, data)
+        summary = service.get_v2_4_operational_summary()
+
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
+            "unknown",
+        )
+        self.assertEqual(summary["diagnostics_capture_status_counts"], {"async_complete": 1})
+        self.assertEqual(summary["diagnostics_binding_status_counts"], {"previous_poll": 1})
+        self.assertEqual(summary["diagnostics_cause_suppressed_count"], 1)
+        self.assertEqual(
+            summary["diagnostics_cause_suppressed_reason_counts"],
+            {"previous_poll": 1},
+        )
+
+    def test_v2_4_row_uses_local_max_age_instead_of_snapshot_override(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "alarmstatus": "0x10",
+                **self.eligible_diagnostics(),
+                "diagnostics_age_ms": 7000.0,
+                "diagnostics_max_age_ms": 999999.0,
+            }
+        )
+
+        with patch("backend.FacilityData.repository.config.SPOT_REFRESH_INTERVAL", 3.0):
+            row = self.build_v2_row(service, data)
+        summary = service.get_v2_4_operational_summary()
+
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
+            "unknown",
+        )
+        self.assertEqual(
+            summary["diagnostics_cause_suppressed_reason_counts"],
+            {"stale": 1},
         )
 
     def test_low_count_high_motion_under_range_does_not_promote_to_production_stable(self) -> None:
@@ -1534,6 +1630,71 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(summary["spot_observation_fact_link_coverage_pct"], "100.0")
         self.assertEqual(summary["spot_observation_fact_diagnostic_signalpc_nonblank_count"], "1")
 
+    def test_spot_observation_fact_manifest_accepts_historical_v1_2_1_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            row = self.build_valid_temperature_v2_4_row()
+            realtime_rows = [dict(zip(V2_4_CSV_COLUMNS, row))]
+            historical_values = {
+                "spot_observation_fact_schema_version": SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION,
+                "spot_observation_key": "spot-service-1:14",
+                "spot_service_instance_id": "spot-service-1",
+                "spot_poll_seq": "14",
+                "spot_observation_seq": "14",
+                "spot_poll_status": "success",
+                "spot_raw_validity": "valid_temperature",
+                "spot_temperature_raw": "560.7",
+                "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
+                "diagnostics_capture_status": "async_enriched",
+                "diagnostics_age_ms": "10.0",
+                "spot_diagnostic_evidence_codes": "[]",
+                "alarmstatus": "0",
+                "low_signal_alarm_enabled": "false",
+                "low_signal_comparator_verified": "false",
+                "peak_picker_enabled": "false",
+            }
+            fact_path = log_dir / "spot_observation_fact.csv"
+            self.write_csv_rows(
+                fact_path,
+                list(SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS),
+                [
+                    [
+                        historical_values.get(column, "")
+                        for column in SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS
+                    ]
+                ],
+            )
+            manifest = build_spot_observation_fact_manifest(
+                fact_path=fact_path,
+                enabled=True,
+                write_failure_count=0,
+                spool_pending_count=0,
+                realtime_rows=realtime_rows,
+            )
+            manifest["schema_version"] = SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION
+            manifest["required_columns"] = list(SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS)
+            for key in (
+                "diagnostics_capture_status_counts",
+                "diagnostics_binding_status_counts",
+                "diagnostics_missing_field_counts",
+                "evidence_provenance_coverage",
+            ):
+                manifest.pop(key)
+            metadata = {"spot_observation_fact_manifest": manifest}
+            metadata_path = log_dir / "Factory_Integrated_Log_v2_20260625_080000.metadata.json"
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+            failures, summary = validate_spot_observation_fact_manifest(
+                metadata,
+                metadata_path,
+                list(V2_4_CSV_COLUMNS),
+                [row],
+                spot_observation_fact_path=fact_path,
+            )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(summary["spot_observation_fact_link_coverage_pct"], "100.0")
+
     def test_spot_observation_fact_manifest_rejects_missing_evidence_source_field(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
@@ -1565,6 +1726,45 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
         self.assertEqual(summary["spot_observation_fact_diagnostic_source_mismatch_count"], "1")
         self.assertTrue(any("signalpc" in failure for failure in failures))
+
+    def test_spot_observation_fact_manifest_rejects_previous_poll_causal_link(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            row = self.build_valid_temperature_v2_4_row()
+            row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")] = json.dumps(
+                ["signal_at_or_above_configured_threshold"]
+            )
+            fact_path = log_dir / "spot_observation_fact.csv"
+            self.write_observation_fact(
+                fact_path,
+                [
+                    self.observation_fact_row(
+                        diagnostics_source_poll_seq="13",
+                        diagnostics_binding_status="previous_poll",
+                    )
+                ],
+            )
+            metadata = {
+                "spot_observation_fact_manifest": build_spot_observation_fact_manifest(
+                    fact_path=fact_path,
+                    enabled=True,
+                    write_failure_count=0,
+                    spool_pending_count=0,
+                    realtime_rows=[dict(zip(V2_4_CSV_COLUMNS, row))],
+                )
+            }
+            metadata_path = log_dir / "Factory_Integrated_Log_v2_20260625_080000.metadata.json"
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+            failures, _summary = validate_spot_observation_fact_manifest(
+                metadata,
+                metadata_path,
+                list(V2_4_CSV_COLUMNS),
+                [row],
+                spot_observation_fact_path=fact_path,
+            )
+
+        self.assertTrue(any("same_poll diagnostics binding" in failure for failure in failures))
 
     def test_repository_refreshes_sidecar_observation_fact_manifest_with_link_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

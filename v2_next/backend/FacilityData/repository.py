@@ -28,6 +28,14 @@ from backend.FacilityData.spot_observation import (
     SPOT_TEMPERATURE_MAX_C,
     SPOT_TEMPERATURE_MIN_C,
 )
+from backend.FacilityData.spot_diagnostics import (
+    DIAGNOSTICS_BINDING_STATUSES,
+    DIAGNOSTICS_CAPTURE_STATUSES,
+    DIAGNOSTICS_SUPPRESSION_REASONS,
+    configured_diagnostics_max_age_ms,
+    parse_diagnostics_field_status,
+    parse_diagnostics_missing_fields,
+)
 from backend.version import get_runtime_info, resolve_runtime_git_commit, validate_git_commit
 from backend.FacilityData.process_phase import (
     PROCESS_PHASE_RULE_VERSION,
@@ -328,6 +336,10 @@ class CSVLoggerService:
         self._v2_4_cached_fallback_rejected_reason_counts: Counter[str] = Counter()
         self._v2_4_origin_decision_mismatch_count = 0
         self._v2_4_comparator_unverified_count = 0
+        self._v2_4_diagnostics_capture_status_counts: Counter[str] = Counter()
+        self._v2_4_diagnostics_binding_status_counts: Counter[str] = Counter()
+        self._v2_4_diagnostics_cause_suppressed_count = 0
+        self._v2_4_diagnostics_cause_suppressed_reason_counts: Counter[str] = Counter()
         self._v2_4_last_sample_seq: Optional[int] = None
         self._v2_4_last_updated_at: Optional[str] = None
         self._current_v2_csv_path: Optional[Path] = None
@@ -1524,6 +1536,19 @@ class CSVLoggerService:
                     data.low_signal_comparator_verified,
                     bool(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED", False)),
                 ),
+                diagnostics_current_poll_seq=self._optional_int(data.spot_poll_seq),
+                diagnostics_current_service_instance_id=data.spot_service_instance_id,
+                diagnostics_snapshot_id=data.diagnostics_snapshot_id,
+                diagnostics_source_poll_seq=self._optional_int(data.diagnostics_source_poll_seq),
+                diagnostics_capture_status=data.diagnostics_capture_status or "missing",
+                diagnostics_collection_mode=data.diagnostics_collection_mode or "async_fact_only",
+                diagnostics_binding_status=data.diagnostics_binding_status or "missing",
+                diagnostics_age_ms=self._optional_float(data.diagnostics_age_ms),
+                diagnostics_max_age_ms=configured_diagnostics_max_age_ms(
+                    getattr(config, "SPOT_REFRESH_INTERVAL", 1.0)
+                ),
+                diagnostics_missing_fields=parse_diagnostics_missing_fields(data.diagnostics_missing_fields),
+                diagnostics_field_status=parse_diagnostics_field_status(data.diagnostics_field_status),
                 peak_picker_enabled=self._optional_bool(
                     data.peak_picker_enabled,
                     bool(getattr(config, "SPOT_PEAK_PICKER_ENABLED", False)),
@@ -1636,6 +1661,19 @@ class CSVLoggerService:
                 operational_decision.temperature_cause_evidence_codes
             ):
                 self._v2_4_comparator_unverified_count += 1
+            capture_status = str(data.diagnostics_capture_status or "missing")
+            if capture_status not in DIAGNOSTICS_CAPTURE_STATUSES:
+                capture_status = "error"
+            binding_status = str(data.diagnostics_binding_status or "missing")
+            if binding_status not in DIAGNOSTICS_BINDING_STATUSES:
+                binding_status = "unbound"
+            self._v2_4_diagnostics_capture_status_counts[capture_status] += 1
+            self._v2_4_diagnostics_binding_status_counts[binding_status] += 1
+            if operational_decision.diagnostics_cause_suppressed:
+                self._v2_4_diagnostics_cause_suppressed_count += 1
+                suppression_reason = operational_decision.diagnostics_cause_suppressed_reason
+                if suppression_reason in DIAGNOSTICS_SUPPRESSION_REASONS:
+                    self._v2_4_diagnostics_cause_suppressed_reason_counts[suppression_reason] += 1
             self._v2_4_last_sample_seq = sample_seq
             self._v2_4_last_updated_at = updated_at
 
@@ -1664,6 +1702,16 @@ class CSVLoggerService:
                 ),
                 "origin_decision_mismatch_count": self._v2_4_origin_decision_mismatch_count,
                 "comparator_unverified_count": self._v2_4_comparator_unverified_count,
+                "diagnostics_capture_status_counts": dict(
+                    self._v2_4_diagnostics_capture_status_counts
+                ),
+                "diagnostics_binding_status_counts": dict(
+                    self._v2_4_diagnostics_binding_status_counts
+                ),
+                "diagnostics_cause_suppressed_count": self._v2_4_diagnostics_cause_suppressed_count,
+                "diagnostics_cause_suppressed_reason_counts": dict(
+                    self._v2_4_diagnostics_cause_suppressed_reason_counts
+                ),
                 "process_phase_candidate_counts": dict(self._v2_4_process_phase_candidate_counts),
                 "last_sample_seq": self._v2_4_last_sample_seq,
                 "last_updated_at": self._v2_4_last_updated_at,
