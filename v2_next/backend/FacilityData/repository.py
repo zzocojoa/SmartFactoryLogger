@@ -323,6 +323,11 @@ class CSVLoggerService:
         self._v2_4_process_phase_candidate_counts: Counter[str] = Counter()
         self._v2_4_stale_threshold_breach_count = 0
         self._v2_4_observation_fact_link_failure_count = 0
+        self._v2_4_cached_fallback_accepted_count = 0
+        self._v2_4_cached_fallback_rejected_count = 0
+        self._v2_4_cached_fallback_rejected_reason_counts: Counter[str] = Counter()
+        self._v2_4_origin_decision_mismatch_count = 0
+        self._v2_4_comparator_unverified_count = 0
         self._v2_4_last_sample_seq: Optional[int] = None
         self._v2_4_last_updated_at: Optional[str] = None
         self._current_v2_csv_path: Optional[Path] = None
@@ -1473,7 +1478,7 @@ class CSVLoggerService:
                 raw_validity=data.spot_raw_validity or "not_received",
                 source_freshness=data.spot_source_freshness or "unknown",
                 cache_fallback_allowed=bool(data.cache_fallback_allowed),
-                has_ttl_valid_cache=data.spot_cache_status in {"fresh", "reused"},
+                has_ttl_valid_cache=data.spot_cache_status in {"fresh", "reused", "available_not_used"},
                 has_previous_valid_value=bool(data.spot_last_valid_value_at),
                 first_poll_completed=bool(data.spot_poll_status and data.spot_poll_status != "not_attempted"),
                 temperature_value_origin=data.temperature_value_origin or "none",
@@ -1514,6 +1519,10 @@ class CSVLoggerService:
                     data.low_signal_comparator
                     if data.low_signal_comparator is not None
                     else getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR", "")
+                ),
+                low_signal_comparator_verified=self._optional_bool(
+                    data.low_signal_comparator_verified,
+                    bool(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED", False)),
                 ),
                 peak_picker_enabled=self._optional_bool(
                     data.peak_picker_enabled,
@@ -1614,6 +1623,19 @@ class CSVLoggerService:
                 self._v2_4_stale_threshold_breach_count += 1
             if fact_link_expected and not spot_observation_key:
                 self._v2_4_observation_fact_link_failure_count += 1
+            if operational_decision.cached_fallback_accepted:
+                self._v2_4_cached_fallback_accepted_count += 1
+            if operational_decision.cached_fallback_rejected_reason:
+                self._v2_4_cached_fallback_rejected_count += 1
+                self._v2_4_cached_fallback_rejected_reason_counts[
+                    operational_decision.cached_fallback_rejected_reason
+                ] += 1
+            if operational_decision.origin_decision_mismatch:
+                self._v2_4_origin_decision_mismatch_count += 1
+            if "signalpc_present_comparator_unverified" in parse_spot_diagnostic_evidence_codes(
+                operational_decision.temperature_cause_evidence_codes
+            ):
+                self._v2_4_comparator_unverified_count += 1
             self._v2_4_last_sample_seq = sample_seq
             self._v2_4_last_updated_at = updated_at
 
@@ -1635,6 +1657,13 @@ class CSVLoggerService:
                 ),
                 "stale_threshold_breach_count": self._v2_4_stale_threshold_breach_count,
                 "observation_fact_link_failure_count": self._v2_4_observation_fact_link_failure_count,
+                "cached_fallback_accepted_count": self._v2_4_cached_fallback_accepted_count,
+                "cached_fallback_rejected_count": self._v2_4_cached_fallback_rejected_count,
+                "cached_fallback_rejected_reason_counts": dict(
+                    self._v2_4_cached_fallback_rejected_reason_counts
+                ),
+                "origin_decision_mismatch_count": self._v2_4_origin_decision_mismatch_count,
+                "comparator_unverified_count": self._v2_4_comparator_unverified_count,
                 "process_phase_candidate_counts": dict(self._v2_4_process_phase_candidate_counts),
                 "last_sample_seq": self._v2_4_last_sample_seq,
                 "last_updated_at": self._v2_4_last_updated_at,
@@ -1671,12 +1700,10 @@ class CSVLoggerService:
         )
         v1_values = list(v1_row)
         temperature_value_origin = data.temperature_value_origin or ""
-        if (
-            contract.operational_fields_enabled
-            and operational_decision.temperature_output_status != "valid"
-        ):
-            v1_values[V1_CSV_COLUMNS.index("Temperature")] = ""
-            temperature_value_origin = "none"
+        if contract.operational_fields_enabled:
+            temperature_value_origin = operational_decision.temperature_value_origin
+            if operational_decision.temperature_output_status != "valid":
+                v1_values[V1_CSV_COLUMNS.index("Temperature")] = ""
         base_row = [
             contract.schema_version,
             sample_seq,

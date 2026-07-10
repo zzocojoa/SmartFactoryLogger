@@ -318,7 +318,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["signalpc"], "3.2")
         self.assertEqual(
             diagnostics["spot_diagnostic_evidence_codes"],
-            '["alarm_low_signal","signal_at_or_above_configured_threshold"]',
+            '["alarm_low_signal","signalpc_present_comparator_unverified"]',
         )
         self.assertEqual(diagnostics["d1temperature"], "345.7")
         self.assertEqual(diagnostics["d2temperature"], "319.1")
@@ -329,6 +329,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["low_signal_alarm_enabled"], False)
         self.assertEqual(diagnostics["low_signal_threshold_pc"], 2.0)
         self.assertEqual(diagnostics["low_signal_comparator"], "lt")
+        self.assertEqual(diagnostics["low_signal_comparator_verified"], False)
         self.assertEqual(diagnostics["spot_app_mode"], "App1: AL E")
         self.assertIsNotNone(fact)
         assert fact is not None

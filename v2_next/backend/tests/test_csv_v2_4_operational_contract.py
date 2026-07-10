@@ -710,6 +710,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "low_signal_alarm_enabled": True,
                 "low_signal_threshold_pc": 5.0,
                 "low_signal_comparator": "lte",
+                "low_signal_comparator_verified": True,
             }
         )
 
@@ -736,7 +737,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.0")
         self.assertEqual(
             row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
-            '["phase_setup_candidate","signal_below_threshold"]',
+            '["phase_setup_candidate"]',
         )
 
     def test_v2_4_row_uses_alarmstatus_bit4_for_under_range_low_signal_cause(self) -> None:

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-04T13:30:50.632Z",
+  "lastUpdated": "2026-07-10T12:59:49.772Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -19,7 +19,8 @@
     "memory-diagnostics-r11-tests-ci",
     "spot-image-evidence-capture",
     "spot-image-capture-settings-ui",
-    "nsis-startup-render-performance"
+    "nsis-startup-render-performance",
+    "spot-temperature-v2-4-operational-hardening"
   ],
   "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
@@ -1604,6 +1605,45 @@
         "started": "2026-07-04T13:14:08.924Z",
         "lastUpdated": "2026-07-04T13:30:50.632Z"
       }
+    },
+    "spot-temperature-v2-4-operational-hardening": {
+      "phase": "do",
+      "matchRate": null,
+      "iterationCount": 0,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-10T12:46:37.593Z",
+          "completedAt": "2026-07-10T12:49:03.339Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-10T12:46:37.593Z",
+          "completedAt": "2026-07-10T12:59:49.772Z"
+        },
+        {
+          "phase": "do",
+          "status": "active",
+          "createdAt": "2026-07-10T12:46:37.593Z"
+        },
+        {
+          "phase": "check",
+          "status": "pending",
+          "createdAt": "2026-07-10T12:46:37.593Z"
+        },
+        {
+          "phase": "report",
+          "status": "pending",
+          "createdAt": "2026-07-10T12:46:37.593Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-10T12:46:37.594Z",
+        "lastUpdated": "2026-07-10T12:59:49.772Z"
+      }
     }
   },
   "pipeline": {
@@ -1615,7 +1655,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-04T13:30:50.632Z"
+    "lastActivity": "2026-07-10T12:59:49.772Z"
   },
   "history": [
     {
@@ -2570,6 +2610,38 @@
       "phase": "check",
       "nextPhase": "act",
       "timestamp": "2026-07-04T13:30:50.629Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-hardening",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-07-10T12:49:03.334Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-hardening",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-07-10T12:49:03.335Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-hardening",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-07-10T12:50:33.450Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-hardening",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-07-10T12:59:49.767Z"
+    },
+    {
+      "feature": "spot-temperature-v2-4-operational-hardening",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-07-10T12:59:49.769Z"
     }
   ],
   "timeline": [

@@ -327,6 +327,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lte",
+            "low_signal_comparator_verified": True,
         }
 
         self.assertEqual(derive_spot_diagnostic_evidence_codes(snapshot), ("signal_below_threshold",))
@@ -338,6 +339,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "low_signal_alarm_enabled": False,
             "low_signal_threshold_pc": "2.0",
             "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": True,
         }
 
         self.assertEqual(
@@ -351,12 +353,14 @@ class SpotObservationFactTests(unittest.TestCase):
             "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lte",
+            "low_signal_comparator_verified": True,
         }
         lt_snapshot = {
             "signalpc": "5.0",
             "low_signal_alarm_enabled": True,
             "low_signal_threshold_pc": "5.0",
             "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": True,
         }
 
         self.assertEqual(derive_spot_diagnostic_evidence_codes(lte_snapshot), ("signal_below_threshold",))
@@ -377,11 +381,27 @@ class SpotObservationFactTests(unittest.TestCase):
             "low_signal_alarm_enabled": False,
             "low_signal_threshold_pc": "2.0",
             "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": True,
         }
 
         self.assertEqual(
             derive_spot_diagnostic_evidence_codes(snapshot),
             ("signal_at_or_above_configured_threshold",),
+        )
+
+    def test_signalpc_with_unverified_comparator_records_non_causal_evidence(self) -> None:
+        snapshot = {
+            "signalpc": "1.5",
+            "low_signal_alarm_enabled": True,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": False,
+            "spot_diagnostic_evidence_codes": '["signal_below_threshold"]',
+        }
+
+        self.assertEqual(
+            derive_spot_diagnostic_evidence_codes(snapshot),
+            ("signalpc_present_comparator_unverified",),
         )
 
     def test_invalid_signalpc_value_does_not_set_low(self) -> None:
@@ -421,6 +441,7 @@ class SpotObservationFactTests(unittest.TestCase):
             "low_signal_alarm_enabled": False,
             "low_signal_threshold_pc": "2.0",
             "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": False,
             "peak_picker_enabled": False,
         }
         with tempfile.TemporaryDirectory() as tmp:
@@ -433,6 +454,30 @@ class SpotObservationFactTests(unittest.TestCase):
             self.assertIn("spot_diagnostic_evidence_codes", fact)
             self.assertIn("alarm_low_signal", fact["spot_diagnostic_evidence_codes"])
             self.assertEqual(validate_spot_observation_fact_invariants(output_path), [])
+
+    def test_validator_rejects_numeric_evidence_when_comparator_is_unverified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            row = {column: "" for column in SPOT_OBSERVATION_FACT_COLUMNS}
+            row.update(
+                {
+                    "signalpc": "1.5",
+                    "spot_diagnostic_evidence_codes": '["signal_below_threshold"]',
+                    "low_signal_alarm_enabled": "true",
+                    "low_signal_threshold_pc": "2.0",
+                    "low_signal_comparator": "lt",
+                    "low_signal_comparator_verified": "false",
+                    "peak_picker_enabled": "false",
+                }
+            )
+            with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
+                writer.writeheader()
+                writer.writerow(row)
+
+            failures = validate_spot_observation_fact_invariants(output_path)
+
+        self.assertTrue(any("numeric low-signal evidence is forbidden" in failure for failure in failures))
 
     def test_spot_observation_fact_validator_rejects_row_length_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

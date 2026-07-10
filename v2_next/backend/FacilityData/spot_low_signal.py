@@ -20,6 +20,7 @@ def derive_low_signal_evidence(
     low_signal_alarm_enabled: bool,
     low_signal_threshold_pc: float | None,
     low_signal_comparator: str | None,
+    low_signal_comparator_verified: bool = False,
 ) -> LowSignalEvidence:
     evidence_codes: list[str] = []
 
@@ -33,17 +34,20 @@ def derive_low_signal_evidence(
         and low_signal_threshold_pc is not None
         and low_signal_comparator in LOW_SIGNAL_COMPARATORS
     ):
-        if low_signal_comparator == "lt":
+        if not low_signal_comparator_verified:
+            evidence_codes.append("signalpc_present_comparator_unverified")
+        elif low_signal_comparator == "lt":
             numeric_low_signal = signalpc < low_signal_threshold_pc
         else:
             numeric_low_signal = signalpc <= low_signal_threshold_pc
 
-        if numeric_low_signal and low_signal_alarm_enabled:
-            evidence_codes.append("signal_below_threshold")
-        elif numeric_low_signal and not low_signal_alarm_enabled:
-            evidence_codes.append("signal_below_configured_threshold_alarm_disabled")
-        else:
-            evidence_codes.append("signal_at_or_above_configured_threshold")
+        if low_signal_comparator_verified:
+            if numeric_low_signal and low_signal_alarm_enabled:
+                evidence_codes.append("signal_below_threshold")
+            elif numeric_low_signal and not low_signal_alarm_enabled:
+                evidence_codes.append("signal_below_configured_threshold_alarm_disabled")
+            else:
+                evidence_codes.append("signal_at_or_above_configured_threshold")
     elif signalpc is not None:
         evidence_codes.append("signalpc_present_threshold_unknown")
 

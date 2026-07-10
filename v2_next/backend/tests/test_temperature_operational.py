@@ -141,7 +141,11 @@ class TemperatureOperationalTests(unittest.TestCase):
 
                 self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
                 self.assertEqual(decision.temperature_cause_confidence, 0.0)
-                self.assertIn(evidence_code, json.loads(decision.temperature_cause_evidence_codes))
+                output_evidence = json.loads(decision.temperature_cause_evidence_codes)
+                if evidence_code == "signal_below_threshold":
+                    self.assertNotIn(evidence_code, output_evidence)
+                else:
+                    self.assertIn(evidence_code, output_evidence)
 
     def test_under_range_alarmstatus_bit4_promotes_low_signal_candidate(self) -> None:
         decision = derive_temperature_operational_fields(
@@ -171,6 +175,7 @@ class TemperatureOperationalTests(unittest.TestCase):
                 "low_signal_alarm_enabled": True,
                 "low_signal_threshold_pc": "5.0",
                 "low_signal_comparator": "lte",
+                "low_signal_comparator_verified": True,
             }
         )
 
@@ -189,6 +194,7 @@ class TemperatureOperationalTests(unittest.TestCase):
                 low_signal_alarm_enabled=True,
                 low_signal_threshold_pc=5.0,
                 low_signal_comparator="lte",
+                low_signal_comparator_verified=True,
             )
         )
 
@@ -200,6 +206,38 @@ class TemperatureOperationalTests(unittest.TestCase):
             ["phase_setup_candidate", "signal_below_threshold"],
         )
 
+    def test_unverified_comparator_suppresses_numeric_low_signal_cause(self) -> None:
+        result = derive_under_range_cause_candidate(
+            alarmstatus=0,
+            signalpc=1.5,
+            low_signal_alarm_enabled=True,
+            low_signal_threshold_pc=2.0,
+            low_signal_comparator="lt",
+            low_signal_comparator_verified=False,
+        )
+
+        self.assertEqual(result["temperature_under_range_cause_candidate"], "unknown")
+        self.assertEqual(result["temperature_cause_confidence"], 0.0)
+        self.assertIn(
+            "signalpc_present_comparator_unverified",
+            result["temperature_cause_evidence_codes"],
+        )
+        self.assertNotIn("signal_below_threshold", result["temperature_cause_evidence_codes"])
+
+    def test_alarmstatus_bit4_remains_authoritative_when_comparator_is_unverified(self) -> None:
+        result = derive_under_range_cause_candidate(
+            alarmstatus=0x10,
+            signalpc=1.5,
+            low_signal_alarm_enabled=True,
+            low_signal_threshold_pc=2.0,
+            low_signal_comparator="lt",
+            low_signal_comparator_verified=False,
+        )
+
+        self.assertEqual(result["temperature_under_range_cause_candidate"], "low_signal_candidate")
+        self.assertEqual(result["temperature_cause_confidence"], 0.85)
+        self.assertIn("alarm_low_signal", result["temperature_cause_evidence_codes"])
+
     def test_signalpc_6_threshold_2_alarm_disabled_is_not_low_signal(self) -> None:
         result = derive_low_signal_evidence(
             alarmstatus=0,
@@ -207,6 +245,7 @@ class TemperatureOperationalTests(unittest.TestCase):
             low_signal_alarm_enabled=False,
             low_signal_threshold_pc=2.0,
             low_signal_comparator="lt",
+            low_signal_comparator_verified=True,
         )
 
         self.assertFalse(result["low_signal_alarm_active"])
@@ -221,6 +260,7 @@ class TemperatureOperationalTests(unittest.TestCase):
             low_signal_alarm_enabled=False,
             low_signal_threshold_pc=2.0,
             low_signal_comparator="lt",
+            low_signal_comparator_verified=True,
             phase_evidence_codes=[],
         )
 
@@ -235,6 +275,7 @@ class TemperatureOperationalTests(unittest.TestCase):
             low_signal_alarm_enabled=False,
             low_signal_threshold_pc=2.0,
             low_signal_comparator="lt",
+            low_signal_comparator_verified=True,
             phase_evidence_codes=[],
         )
 
@@ -250,6 +291,7 @@ class TemperatureOperationalTests(unittest.TestCase):
             low_signal_alarm_enabled=True,
             low_signal_threshold_pc=2.0,
             low_signal_comparator="lt",
+            low_signal_comparator_verified=True,
             phase_evidence_codes=[],
         )
 
@@ -263,6 +305,7 @@ class TemperatureOperationalTests(unittest.TestCase):
             low_signal_alarm_enabled=True,
             low_signal_threshold_pc=2.0,
             low_signal_comparator="lt",
+            low_signal_comparator_verified=True,
         )
 
         self.assertFalse(result["numeric_low_signal"])
@@ -274,6 +317,7 @@ class TemperatureOperationalTests(unittest.TestCase):
             low_signal_alarm_enabled=True,
             low_signal_threshold_pc=2.0,
             low_signal_comparator="lte",
+            low_signal_comparator_verified=True,
         )
 
         self.assertTrue(result["numeric_low_signal"])
@@ -353,6 +397,99 @@ class TemperatureOperationalTests(unittest.TestCase):
 
         self.assertEqual(decision.temperature_output_status, "source_error")
         self.assertEqual(decision.temperature_unavailable_reason, "timeout")
+
+    def test_transport_failure_with_ttl_cache_is_valid_cached_observation(self) -> None:
+        for poll_status in ("timeout", "connection_error", "http_error"):
+            with self.subTest(poll_status=poll_status):
+                decision = derive_temperature_operational_fields(
+                    TemperatureOperationalInput(
+                        poll_status=poll_status,
+                        raw_validity="not_received",
+                        source_freshness="fresh",
+                        cache_fallback_allowed=True,
+                        has_ttl_valid_cache=True,
+                        has_previous_valid_value=True,
+                        temperature_value_origin="cached_observation",
+                        spot_effective_age_ms_at_row=10.0,
+                    )
+                )
+
+                self.assertEqual(decision.temperature_output_status, "valid")
+                self.assertEqual(decision.temperature_unavailable_reason, "")
+                self.assertEqual(decision.temperature_value_origin, "cached_observation")
+                self.assertTrue(decision.cached_fallback_accepted)
+                self.assertEqual(decision.cached_fallback_rejected_reason, "")
+
+    def test_transport_failure_with_suppressed_cache_is_rejected(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="timeout",
+                raw_validity="not_received",
+                source_freshness="fresh",
+                cache_fallback_allowed=False,
+                has_ttl_valid_cache=True,
+                has_previous_valid_value=True,
+                temperature_value_origin="none",
+                spot_effective_age_ms_at_row=10.0,
+            )
+        )
+
+        self.assertEqual(decision.temperature_output_status, "source_error")
+        self.assertEqual(decision.temperature_value_origin, "none")
+        self.assertFalse(decision.cached_fallback_accepted)
+        self.assertEqual(decision.cached_fallback_rejected_reason, "fallback_disallowed")
+
+    def test_cached_fallback_stays_stale_when_row_is_stale(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="timeout",
+                raw_validity="not_received",
+                source_freshness="stale",
+                cache_fallback_allowed=True,
+                has_ttl_valid_cache=True,
+                has_previous_valid_value=True,
+                temperature_value_origin="cached_observation",
+                spot_effective_age_ms_at_row=10_000.0,
+            )
+        )
+
+        self.assertEqual(decision.temperature_output_status, "stale")
+        self.assertFalse(decision.cached_fallback_accepted)
+        self.assertEqual(decision.cached_fallback_rejected_reason, "stale_observation")
+        self.assertEqual(decision.temperature_value_origin, "none")
+
+    def test_cached_fallback_clock_anomaly_fails_closed(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="timeout",
+                raw_validity="not_received",
+                source_freshness="fresh",
+                cache_fallback_allowed=True,
+                has_ttl_valid_cache=True,
+                has_previous_valid_value=True,
+                temperature_value_origin="cached_observation",
+                spot_effective_age_ms_at_row=-1.0,
+            )
+        )
+
+        self.assertEqual(decision.temperature_output_status, "unknown")
+        self.assertFalse(decision.cached_fallback_accepted)
+        self.assertEqual(decision.cached_fallback_rejected_reason, "clock_anomaly")
+
+    def test_origin_mismatch_fails_closed(self) -> None:
+        decision = derive_temperature_operational_fields(
+            TemperatureOperationalInput(
+                poll_status="success",
+                raw_validity="valid_temperature",
+                source_freshness="fresh",
+                temperature_value_origin="cached_observation",
+                spot_effective_age_ms_at_row=10.0,
+            )
+        )
+
+        self.assertEqual(decision.temperature_output_status, "unknown")
+        self.assertEqual(decision.temperature_value_origin, "none")
+        self.assertTrue(decision.origin_decision_mismatch)
 
 
 if __name__ == "__main__":

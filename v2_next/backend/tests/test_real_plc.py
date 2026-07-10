@@ -155,6 +155,7 @@ class SpotSnapshotTests(unittest.TestCase):
                 "spot_last_valid_value_at": "2026-03-09T07:20:24.012Z",
                 "spot_snapshot_age_ms": 188.0,
                 "spot_value_age_ms": 188.0,
+                "low_signal_comparator_verified": False,
             },
         )
 
@@ -179,6 +180,7 @@ class SpotSnapshotTests(unittest.TestCase):
         self.assertEqual(data.spot_raw_payload_encoding, "utf-8-replace")
         self.assertEqual(data.spot_last_response_at, "2026-03-09T07:20:24.012Z")
         self.assertEqual(data.spot_last_poll_completed_monotonic, 12345.5)
+        self.assertFalse(data.low_signal_comparator_verified)
         self.assertNotIn("spot_last_poll_completed_monotonic", data.model_dump())
 
 
@@ -1189,6 +1191,106 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Temperature_quality")], "missing")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("Temperature_missing_reason")], "source_missing")
         self.assertEqual(v2_row[V2_CSV_COLUMNS.index("temperature_value_origin")], "none")
+
+    def test_v2_operational_row_preserves_allowed_cached_fallback(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "Spot": 557.9,
+                "Time": "2026-03-09T07:20:25.123+00:00",
+                "temperature_status_shadow": "ok",
+                "temperature_value_origin": "cached_observation",
+                "spot_poll_status": "timeout",
+                "spot_raw_validity": "not_received",
+                "spot_cache_status": "reused",
+                "spot_source_freshness": "fresh",
+                "cache_fallback_allowed": True,
+                "spot_service_instance_id": "spot-service-1",
+                "spot_poll_seq": 2,
+                "spot_observation_seq": 2,
+                "spot_last_poll_completed_at": "2026-03-09T07:20:25.000Z",
+                "spot_last_valid_value_at": "2026-03-09T07:20:24.000Z",
+            }
+        )
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+        columns = list(service._get_active_v2_contract().columns)
+        summary = service.get_v2_4_operational_summary()
+
+        self.assertEqual(v2_row[columns.index("Temperature")], "557.9")
+        self.assertEqual(v2_row[columns.index("temperature_output_status")], "valid")
+        self.assertEqual(v2_row[columns.index("temperature_unavailable_reason")], "")
+        self.assertEqual(v2_row[columns.index("temperature_value_origin")], "cached_observation")
+        self.assertEqual(summary["cached_fallback_accepted_count"], 1)
+        self.assertEqual(summary["cached_fallback_rejected_count"], 0)
+
+    def test_v2_operational_row_fails_closed_on_origin_decision_mismatch(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "Spot": 557.9,
+                "Time": "2026-03-09T07:20:25.123+00:00",
+                "temperature_status_shadow": "ok",
+                "temperature_value_origin": "cached_observation",
+                "spot_poll_status": "success",
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "spot_source_freshness": "fresh",
+                "spot_last_poll_completed_at": "2026-03-09T07:20:25.000Z",
+            }
+        )
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+        columns = list(service._get_active_v2_contract().columns)
+        summary = service.get_v2_4_operational_summary()
+
+        self.assertEqual(v2_row[columns.index("Temperature")], "")
+        self.assertEqual(v2_row[columns.index("temperature_output_status")], "unknown")
+        self.assertEqual(v2_row[columns.index("temperature_value_origin")], "none")
+        self.assertEqual(summary["origin_decision_mismatch_count"], 1)
+
+    def test_v2_under_range_suppresses_unverified_numeric_low_signal(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "Spot": None,
+                "Time": "2026-03-09T07:20:25.123+00:00",
+                "temperature_status_shadow": "invalid_value",
+                "temperature_value_origin": "none",
+                "spot_poll_status": "success",
+                "spot_raw_validity": "invalid_sentinel",
+                "spot_cache_status": "available_not_used",
+                "spot_source_freshness": "fresh",
+                "spot_device_status_code": "temperature_under_range",
+                "spot_last_poll_completed_at": "2026-03-09T07:20:25.000Z",
+                "alarmstatus": "0",
+                "signalpc": 1.5,
+                "low_signal_alarm_enabled": True,
+                "low_signal_threshold_pc": 2.0,
+                "low_signal_comparator": "lt",
+                "low_signal_comparator_verified": False,
+            }
+        )
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+
+        v2_row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+        columns = list(service._get_active_v2_contract().columns)
+        evidence_codes = json.loads(v2_row[columns.index("temperature_cause_evidence_codes")])
+        summary = service.get_v2_4_operational_summary()
+
+        self.assertEqual(v2_row[columns.index("temperature_output_status")], "under_range")
+        self.assertEqual(v2_row[columns.index("temperature_under_range_cause_candidate")], "unknown")
+        self.assertIn("signalpc_present_comparator_unverified", evidence_codes)
+        self.assertNotIn("signal_below_threshold", evidence_codes)
+        self.assertEqual(summary["comparator_unverified_count"], 1)
 
     def test_v2_row_sets_origin_none_when_current_observation_is_row_stale(self) -> None:
         service = CSVLoggerService()

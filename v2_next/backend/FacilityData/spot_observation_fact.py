@@ -32,6 +32,7 @@ SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
         "signal_at_or_above_configured_threshold",
         "signal_below_configured_threshold_alarm_disabled",
         "signal_below_threshold",
+        "signalpc_present_comparator_unverified",
         "signalpc_present_threshold_unknown",
         "target_absent_verified",
         "target_out_of_fov_evidence",
@@ -483,6 +484,14 @@ def encode_spot_diagnostic_evidence_codes(snapshot: Mapping[str, Any]) -> str:
 
 def derive_spot_diagnostic_evidence_codes(snapshot: Mapping[str, Any]) -> tuple[str, ...]:
     evidence = set(parse_spot_diagnostic_evidence_codes(snapshot.get("spot_diagnostic_evidence_codes")))
+    evidence.difference_update(
+        {
+            "signal_below_threshold",
+            "signal_below_configured_threshold_alarm_disabled",
+            "signal_at_or_above_configured_threshold",
+            "signalpc_present_comparator_unverified",
+        }
+    )
     if _truthy(snapshot.get("target_absent_verified")):
         evidence.add("target_absent_verified")
     if _truthy(snapshot.get("target_out_of_fov_evidence")):
@@ -503,6 +512,7 @@ def derive_spot_diagnostic_evidence_codes(snapshot: Mapping[str, Any]) -> tuple[
         low_signal_alarm_enabled=_truthy(snapshot.get("low_signal_alarm_enabled")),
         low_signal_threshold_pc=_signal_percent_or_none(snapshot.get("low_signal_threshold_pc")),
         low_signal_comparator=_low_signal_comparator_or_none(snapshot.get("low_signal_comparator")),
+        low_signal_comparator_verified=_truthy(snapshot.get("low_signal_comparator_verified")),
     )
     evidence.update(str(code) for code in low_signal["evidence_codes"])
 

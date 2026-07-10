@@ -294,6 +294,7 @@ class FactoryData(BaseModel):
     low_signal_alarm_enabled: Optional[bool] = None
     low_signal_threshold_pc: Optional[float] = None
     low_signal_comparator: Optional[str] = None
+    low_signal_comparator_verified: Optional[bool] = None
     peak_picker_enabled: Optional[bool] = None
     peak_picker_off_mode: Optional[str] = None
     # Molds

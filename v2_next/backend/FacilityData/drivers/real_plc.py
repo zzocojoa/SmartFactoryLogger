@@ -468,6 +468,7 @@ class RealPLCDriver(BasePLCDriver):
             "low_signal_alarm_enabled",
             "low_signal_threshold_pc",
             "low_signal_comparator",
+            "low_signal_comparator_verified",
             "peak_picker_enabled",
             "peak_picker_off_mode",
         )
