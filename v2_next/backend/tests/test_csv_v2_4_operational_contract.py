@@ -105,6 +105,25 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             },
         }
 
+    def config_provenance_fields(self, *, verified: bool) -> dict[str, object]:
+        fingerprint = "a" * 64
+        return {
+            "spot_config_revision": "spot-config-provenance-v1",
+            "spot_config_fingerprint_sha256": fingerprint,
+            "spot_config_verified_fingerprint_sha256": fingerprint if verified else "",
+            "spot_config_verified_at": "2026-07-11T01:02:03Z" if verified else "",
+            "spot_config_verified_by": "operator-01" if verified else "",
+            "config_operator_verified_requested": verified,
+            "config_operator_verified": verified,
+            "config_attestation_status": "verified" if verified else "not_requested",
+            "config_drift_detected": False,
+            "config_drift_fields": [],
+            "device_config_readback_status": "not_supported",
+            "device_config_fingerprint_sha256": "",
+            "settings_file_sha256": "",
+            "build_git_commit": "b" * 40 if verified else "",
+        }
+
     def write_image_fact(self, fact_path: Path, rows: list[list[str]]) -> str:
         with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
@@ -781,6 +800,37 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
             '["diagnostics_missing_or_stale","phase_setup_candidate"]',
         )
+
+    def test_v2_4_row_suppresses_collectorless_cause_and_counts_it(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={"spot_diagnostic_evidence_codes": '["target_out_of_fov_evidence"]'}
+        )
+
+        row = self.build_v2_row(service, data)
+        summary = service.get_v2_4_operational_summary()
+
+        self.assertEqual(
+            row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")],
+            "unknown",
+        )
+        self.assertIn(
+            "target_out_of_fov_evidence",
+            json.loads(row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")]),
+        )
+        self.assertEqual(summary["unsupported_evidence_suppressed_count"], 1)
+
+        invalid_row = list(row)
+        invalid_row[V2_4_CSV_COLUMNS.index("temperature_under_range_cause_candidate")] = (
+            "target_out_of_fov_candidate"
+        )
+        failures = validate_v2_4_operational_invariants(
+            [invalid_row],
+            V2_4_CSV_COLUMNS,
+            forbid_unsupported_causes=True,
+        )
+        self.assertTrue(any("provenance-capable collector" in failure for failure in failures))
 
     def test_v2_4_row_uses_alarmstatus_bit4_for_under_range_low_signal_cause(self) -> None:
         service = CSVLoggerService()
@@ -1879,6 +1929,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "window_obscuration_pc": 25.0,
                 "focus_mm": 5000,
                 "config_operator_verified": True,
+                **self.config_provenance_fields(verified=True),
             }
         }
 
@@ -1905,6 +1956,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "window_obscuration_pc": 25.0,
                 "focus_mm": 5000,
                 "config_operator_verified": True,
+                **self.config_provenance_fields(verified=True),
             }
         }
 
@@ -1933,6 +1985,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "spot_range_min_c": 900.0,
                 "spot_range_max_c": 200.0,
                 "window_obscuration_pc": -1.0,
+                **self.config_provenance_fields(verified=False),
             }
         }
 
@@ -1942,6 +1995,24 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertIn("spot_configuration_snapshot.low_signal_comparator must be lt/lte/unknown", failures)
         self.assertIn("spot_configuration_snapshot.spot_range_min_c must be <= spot_range_max_c", failures)
         self.assertIn("spot_configuration_snapshot.window_obscuration_pc must be 0.0..100.0", failures)
+
+    def test_spot_configuration_validator_accepts_legacy_v3_snapshot_without_provenance(self) -> None:
+        metadata = {
+            "schema_metadata": {
+                "temperature_operational_rule_version": "temperature-operational-v3"
+            },
+            "spot_configuration_snapshot": {
+                "low_signal_alarm_enabled": False,
+                "low_signal_threshold_pc": 2.0,
+                "low_signal_comparator": "lt",
+                "low_signal_comparator_verified": False,
+                "spot_range_min_c": 200.0,
+                "spot_range_max_c": 900.0,
+                "window_obscuration_pc": 12.0,
+            },
+        }
+
+        self.assertEqual(validate_spot_configuration_snapshot(metadata, [], []), [])
 
     def test_v2_4_runtime_summary_counts_operational_rows(self) -> None:
         service = CSVLoggerService()
@@ -2100,6 +2171,30 @@ class ConfigPromotionBundleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertEqual(result.stdout.strip().splitlines()[-1], "True")
 
+    def test_spot_config_operator_verified_defaults_false_without_attestation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = os.environ.copy()
+            repo_root = Path(__file__).resolve().parents[2]
+            env["PYTHONPATH"] = str(repo_root) + os.pathsep + env.get("PYTHONPATH", "")
+            env["SFL_CONFIG_PATH"] = str(Path(temp_dir) / "missing-config.ini")
+            env.pop("SPOT_CONFIG_OPERATOR_VERIFIED", None)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import backend.config as config; print(config.SPOT_CONFIG_OPERATOR_VERIFIED)",
+                ],
+                cwd=repo_root,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=20,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(result.stdout.strip().splitlines()[-1], "False")
+
 
 class V24HealthCounterTests(unittest.TestCase):
     def test_spot_temperature_health_exposes_v2_4_operational_counters(self) -> None:
@@ -2114,6 +2209,7 @@ class V24HealthCounterTests(unittest.TestCase):
             "sentinel_counts_by_spot_device_status_code": {"temperature_under_range": 3},
             "stale_threshold_breach_count": 1,
             "observation_fact_link_failure_count": 0,
+            "unsupported_evidence_suppressed_count": 4,
             "process_phase_candidate_counts": {"setup_candidate": 3},
             "last_sample_seq": 3,
             "last_updated_at": "2026-06-25T00:00:00Z",
@@ -2126,7 +2222,11 @@ class V24HealthCounterTests(unittest.TestCase):
             ),
             patch(
                 "backend.FacilityData.drivers.spot_api.get_spot_observation_fact_health",
-                return_value={"enabled": True, "write_failure_count": 2},
+                return_value={
+                    "enabled": True,
+                    "write_failure_count": 2,
+                    "config_drift_detected_count": 1,
+                },
             ),
         ):
             payload = facility_service.plc_service._spot_temperature_health()
@@ -2135,6 +2235,8 @@ class V24HealthCounterTests(unittest.TestCase):
         self.assertEqual(payload["v2_4_operational"]["rows_total"], 3)
         self.assertEqual(payload["v2_4_operational"]["observation_fact_write_failure_count"], 2)
         self.assertTrue(payload["v2_4_operational"]["observation_fact_enabled"])
+        self.assertEqual(payload["v2_4_operational"]["config_drift_detected_count"], 1)
+        self.assertEqual(payload["v2_4_operational"]["unsupported_evidence_suppressed_count"], 4)
 
 
 if __name__ == "__main__":

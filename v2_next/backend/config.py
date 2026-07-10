@@ -52,7 +52,11 @@ DEFAULT_SPOT_LOW_SIGNAL_THRESHOLD_PC = 2.0
 DEFAULT_SPOT_LOW_SIGNAL_COMPARATOR = "lt"
 DEFAULT_SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED = False
 DEFAULT_SPOT_LOW_SIGNAL_CONFIG_SOURCE = "spot_web_server_alarms_screen"
-DEFAULT_SPOT_CONFIG_OPERATOR_VERIFIED = True
+DEFAULT_SPOT_CONFIG_OPERATOR_VERIFIED = False
+DEFAULT_SPOT_CONFIG_VERIFIED_AT = ""
+DEFAULT_SPOT_CONFIG_VERIFIED_BY = ""
+DEFAULT_SPOT_CONFIG_VERIFIED_FINGERPRINT_SHA256 = ""
+DEFAULT_SPOT_DIAGNOSTICS_COLLECTION_MODE = "async_fact_only"
 DEFAULT_SPOT_MODEL_INFO = "SPOT+ AL"
 DEFAULT_SPOT_APP_MODE = "App1: AL E"
 DEFAULT_SPOT_RANGE_MIN_C = 200.0
@@ -400,6 +404,11 @@ if _safe_is_file(CONFIG_PATH):
     _spot_ip_default = os.getenv("SPOT_IP", _get(CONFIG, "SPOT", "ip", DEFAULT_SPOT_IP) or DEFAULT_SPOT_IP)
     _spot_defaults = {
         "actuatorstep": str(DEFAULT_SPOT_ACTUATOR_STEP),
+        "config_operator_verified": str(DEFAULT_SPOT_CONFIG_OPERATOR_VERIFIED).lower(),
+        "config_verified_at": DEFAULT_SPOT_CONFIG_VERIFIED_AT,
+        "config_verified_by": DEFAULT_SPOT_CONFIG_VERIFIED_BY,
+        "config_verified_fingerprint_sha256": DEFAULT_SPOT_CONFIG_VERIFIED_FINGERPRINT_SHA256,
+        "diagnostics_collection_mode": DEFAULT_SPOT_DIAGNOSTICS_COLLECTION_MODE,
         "imagecaptureenabled": str(DEFAULT_SPOT_IMAGE_CAPTURE_ENABLED).lower(),
         "imagecapturemode": DEFAULT_SPOT_IMAGE_CAPTURE_MODE,
         "imagecapturepath": DEFAULT_SPOT_IMAGE_CAPTURE_PATH,
@@ -561,6 +570,39 @@ SPOT_LOW_SIGNAL_CONFIG_SOURCE = os.getenv(
 SPOT_CONFIG_OPERATOR_VERIFIED = _env_bool(
     "SPOT_CONFIG_OPERATOR_VERIFIED",
     _get_bool(CONFIG, "SPOT", "config_operator_verified", DEFAULT_SPOT_CONFIG_OPERATOR_VERIFIED),
+)
+SPOT_CONFIG_VERIFIED_AT = os.getenv(
+    "SPOT_CONFIG_VERIFIED_AT",
+    _get(CONFIG, "SPOT", "config_verified_at", DEFAULT_SPOT_CONFIG_VERIFIED_AT)
+    or DEFAULT_SPOT_CONFIG_VERIFIED_AT,
+)
+SPOT_CONFIG_VERIFIED_BY = os.getenv(
+    "SPOT_CONFIG_VERIFIED_BY",
+    _get(CONFIG, "SPOT", "config_verified_by", DEFAULT_SPOT_CONFIG_VERIFIED_BY)
+    or DEFAULT_SPOT_CONFIG_VERIFIED_BY,
+)
+SPOT_CONFIG_VERIFIED_FINGERPRINT_SHA256 = os.getenv(
+    "SPOT_CONFIG_VERIFIED_FINGERPRINT_SHA256",
+    _get(
+        CONFIG,
+        "SPOT",
+        "config_verified_fingerprint_sha256",
+        DEFAULT_SPOT_CONFIG_VERIFIED_FINGERPRINT_SHA256,
+    )
+    or DEFAULT_SPOT_CONFIG_VERIFIED_FINGERPRINT_SHA256,
+)
+SPOT_DIAGNOSTICS_COLLECTION_MODE = _normalized_choice(
+    os.getenv(
+        "SPOT_DIAGNOSTICS_COLLECTION_MODE",
+        _get(
+            CONFIG,
+            "SPOT",
+            "diagnostics_collection_mode",
+            DEFAULT_SPOT_DIAGNOSTICS_COLLECTION_MODE,
+        ),
+    ),
+    {"async_fact_only"},
+    DEFAULT_SPOT_DIAGNOSTICS_COLLECTION_MODE,
 )
 SPOT_MODEL_INFO = os.getenv(
     "SPOT_MODEL_INFO",

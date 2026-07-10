@@ -1,109 +1,122 @@
 # SPOT Temperature v2.4 Operational Hardening - Do Tracking
 
-> Version: 1.1.0 | Date: 2026-07-10 | Status: In Progress
-> Stage 2 baseline: `master@218b57b5ea96588b742f7a25560c8188df07cc65`
-> Completed scope: Stage 1 - Cache and Comparator, Stage 2 - Diagnostics Integrity
+> Version: 1.2.0 | Date: 2026-07-11 | Status: In Progress
+> Stage 3 baseline: `master@e42d75f66a3eacdd6f6f58fafc68a6b46a2b38f9`
+> Completed scope: Stage 1 - Cache and Comparator, Stage 2 - Diagnostics Integrity, Stage 3 - Config and Evidence
 
 ## 1. Stage Status
 
 | Stage | Status | Scope |
 |---|---|---|
 | Stage 0 - Contract Freeze | Completed | Plan/Design 승인 |
-| Stage 1 - Cache and Comparator | Completed | Cache fallback와 comparator verification |
+| Stage 1 - Cache and Comparator | Completed | Cache fallback와 comparator 검증 |
 | Stage 2 - Diagnostics Integrity | Completed | Same-poll binding, completeness, age, fact provenance |
-| Stage 3 - Config and Evidence | Pending | Config attestation, drift, unsupported evidence |
+| Stage 3 - Config and Evidence | Completed | Config attestation, drift, unsupported evidence 차단 |
 | Stage 4 - Quality and Value Age | Pending | v2.5 quality/value-age 계약 |
 | Stage 5 - Controlled Verification | Pending | 전체 feature 완료 게이트 |
 
-Stage 3~5가 남아 있으므로 PDCA Do phase는 active 상태를 유지한다.
+Stage 4~5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 
-## 2. Implemented Behavior
+## 2. Stage 3 구현
 
-### 2.1 Stage 1 - Cache and Comparator
+### 2.1 Config attestation
 
-- TTL-valid transport cache fallback을 operational `valid/cached_observation` 계약과 일치시켰다.
-- Stale, clock anomaly, sentinel, origin mismatch는 fail-closed 한다.
-- Numeric Low Signal은 `low_signal_comparator_verified=true`일 때만 causal evidence로 사용한다.
-- `alarmstatus` bit 4는 comparator와 무관한 authoritative evidence로 유지한다.
+- `DEFAULT_SPOT_CONFIG_OPERATOR_VERIFIED=false`로 변경했다.
+- `spot_config_provenance.py`에 canonical fingerprint builder를 추가했다.
+- fingerprint 입력은 valid build commit, sanitized canonical settings hash, SPOT IP/model/app mode, range, analog mapping, Low Signal, Peak Picker, limiter, averager, modemaster, ratio, obscuration, focus, diagnostics mode다.
+- fingerprint는 정렬된 compact JSON의 lowercase SHA-256이다.
+- `config.ini`의 attestation 항목은 settings hash에서 제외해 승인 fingerprint를 설정할 때 발생하는 순환 변경을 방지한다. Password/token/credential 계열 키도 hash 입력에서 제외해 저엔트로피 비밀값의 offline 추측 위험을 피한다.
+- 다음 조건을 모두 만족할 때만 `config_operator_verified=true`가 된다.
+  - `SPOT_CONFIG_OPERATOR_VERIFIED=true`
+  - 유효한 UTC `SPOT_CONFIG_VERIFIED_AT`
+  - 제한된 형식의 비식별 `SPOT_CONFIG_VERIFIED_BY`
+  - lowercase SHA-256 `SPOT_CONFIG_VERIFIED_FINGERPRINT_SHA256`
+  - valid lowercase 40-hex build commit
+  - 승인 fingerprint와 현재 fingerprint의 constant-time 일치
+  - device readback 상태가 blocking 상태가 아님
+- `low_signal_comparator_verified`는 configured comparator verification과 effective operator verification이 모두 참일 때만 참이다.
+- 실제 readback collector가 아직 없으므로 runtime 상태는 `not_supported`이며 `matched`를 위조하지 않는다.
 
-### 2.2 Stage 2 - Diagnostics Integrity
+### 2.2 Drift 감지
 
-- `SpotPollContext`와 immutable `DiagnosticSnapshot`을 추가했다.
-- 8개 비동기 output 요청에 source poll sequence, snapshot identity, capture status, per-field status와 missing fields를 기록한다.
-- Temperature 요청은 diagnostics 완료를 기다리지 않는다.
-- 완료된 snapshot은 `same_poll`, `previous_poll`, `future_clock`, `unbound`, `missing`으로 결합 상태를 계산한다.
-- Cause 승격은 causal collection mode, same-poll identity, bounded non-negative age, required field success/value 존재를 모두 요구한다.
-- `async_partial`은 원인에 필요한 필드가 성공한 경우만 허용하며, 관련 필드 실패는 차단한다.
-- 검증되지 않은 parameter GET 기본 mode는 `async_fact_only`로 고정해 raw fact만 보존하고 cause 승격은 금지한다.
-- Legacy `async_enriched`, late completion, previous poll, stale/future-clock snapshot은 causal use를 차단한다.
-- `TEMPERATURE_OPERATIONAL_RULE_VERSION`은 `temperature-operational-v3`이다.
+- build commit, settings, SPOT IP, app mode, threshold, comparator, Peak Picker 등 fingerprint 입력이 변경되면 기존 attestation은 자동 해제된다.
+- 누락·손상 attestation, fingerprint mismatch, readback mismatch/partial/not-attempted/error는 fail-closed다.
+- sidecar `spot_configuration_snapshot`에 revision, current/verified fingerprint, verified at/by, readback status, drift flag/fields를 기록한다.
+- health에는 값이나 IP를 label로 노출하지 않고 `config_drift_detected_count`와 bounded status만 노출한다.
 
-## 3. Observation Fact and Validator
+### 2.3 미수집 evidence 차단
 
-- Observation fact schema를 `1.3.0`으로 갱신했다.
-- Snapshot ID, source poll, binding, missing fields, field status, source mode, evidence provenance를 추가했다.
-- Manifest에 capture/binding/missing-field counts와 provenance coverage를 추가했다.
-- Validator는 current `1.3.0`을 strict 검증하고 historical `1.2.1` exact header를 계속 읽는다.
-- Realtime causal evidence는 fact의 same-poll identity, causal mode, bounded age, successful field provenance와 일치해야 한다.
-- Realtime CSV `2.4.0` header와 column list는 변경하지 않았다.
+- 다음 candidate enum/schema는 호환성을 위해 유지한다.
+  - `peak_picker_reset_candidate`
+  - `alignment_change_candidate`
+  - `target_out_of_fov_candidate`
+  - `below_measurement_range_candidate`
+- 현재 provenance-capable collector가 없는 Peak Picker/Actuator/FOV/Range evidence는 raw fact와 evidence code에 보존한다.
+- 해당 evidence만으로 realtime 또는 image fact cause candidate를 승격하지 않고 `unknown`으로 강등한다.
+- Low Signal은 Stage 2의 same-poll, age, field completeness, comparator attestation gate를 계속 만족할 때만 승격한다.
+- validator는 unsupported cause candidate를 현재 계약에서 거부한다.
+- `unsupported_evidence_suppressed_count`로 차단 행 수를 집계한다.
+- 원인 판정 변경을 식별하도록 rule version을 `temperature-operational-v4`로 올리고, v3 artifact는 legacy validation 경로로 계속 읽는다.
 
-## 4. Observability
+## 3. 운영 절차
 
-`get_v2_4_operational_summary()`에 다음 bounded aggregate를 추가했다.
+1. 새 build를 `SPOT_CONFIG_OPERATOR_VERIFIED=false`로 기동한다.
+2. sidecar의 `spot_config_fingerprint_sha256`와 장비 설정을 확인한다.
+3. 검증 후 승인 시각, 운영자 식별자, 확인한 fingerprint를 설정한다.
+4. `SPOT_CONFIG_OPERATOR_VERIFIED=true`로 재기동한다.
+5. sidecar에서 `config_attestation_status=verified`, `config_operator_verified=true`를 확인한다.
 
-- `diagnostics_capture_status_counts`
-- `diagnostics_binding_status_counts`
-- `diagnostics_cause_suppressed_count`
-- `diagnostics_cause_suppressed_reason_counts`
+설정 또는 build가 바뀌면 1~5를 다시 수행한다. 승인 metadata 자체는 canonical settings hash에서 제외된다.
 
-URL, IP, raw diagnostic value와 unbounded identifier는 health aggregate label로 노출하지 않는다.
-
-## 5. Stage 2 Files Changed
+## 4. Files Changed
 
 ### Production
 
-- `backend/FacilityData/spot_diagnostics.py`
+- `.gitignore`
+- `backend/config.py`
+- `backend/FacilityData/spot_config_provenance.py`
 - `backend/FacilityData/drivers/spot_api.py`
-- `backend/FacilityData/drivers/real_plc.py`
-- `backend/FacilityData/schemas.py`
-- `backend/FacilityData/temperature_operational.py`
 - `backend/FacilityData/repository.py`
-- `backend/FacilityData/spot_observation_fact.py`
+- `backend/FacilityData/service.py`
+- `backend/FacilityData/temperature_operational.py`
+- `backend/FacilityData/spot_image_fact.py`
 - `scripts/validate_csv_v2_shadow.py`
 
 ### Tests
 
+- `backend/tests/test_spot_config_provenance.py`
 - `backend/tests/test_temperature_operational.py`
 - `backend/tests/test_spot_api.py`
-- `backend/tests/test_spot_observation_fact.py`
-- `backend/tests/test_csv_v2_4_operational_contract.py`
 - `backend/tests/test_real_plc.py`
+- `backend/tests/test_csv_v2_4_operational_contract.py`
 
-## 6. Validation
+## 5. Validation
 
-- Stage 2 related six-file pytest suite: `301 passed, 45 subtests passed`
-- D-01~D-10 diagnostics scenarios: PASS
-- Historical fact `1.2.1` read compatibility: PASS
-- Realtime `2.4.0` header unchanged: covered by contract tests
-- Backend ruff/mypy: PASS
-- Backend unittest: `466 tests OK`
+- Stage 3 targeted pytest: `283 passed, 50 subtests passed`
 - Frontend typecheck/lint: PASS
 - Frontend tests: `27 files, 202 tests` PASS
+- Backend ruff/mypy: PASS
+- Backend unittest: `480 tests OK`
 - Python compile: PASS
-- Final diff review: Critical 0 / Major 0 / Minor 0 / Approve
+- `git diff --check`: PASS
+- Local PyInstaller build: 미실행, PR의 Windows Release Artifact check를 merge gate로 사용
 
-## 7. Compatibility and Failure Modes
+## 6. Compatibility and Failure Modes
 
-- Realtime CSV schema/migration: 없음.
-- Observation fact writer는 header mismatch 시 기존 `1.2.1` 파일을 archive하고 새 `1.3.0` 파일을 연다.
-- Diagnostics 실패·지연은 Temperature poll status와 latency path를 차단하지 않는다.
-- Missing, malformed, partial-required, stale, previous-poll diagnostics는 raw fact를 보존하되 cause를 `unknown`으로 유지한다.
-- Atomic `/output` mode는 capability evidence가 없어 활성화하지 않았다.
+- Realtime CSV header와 schema version은 변경하지 않았다.
+- Database migration과 배포 migration은 없다.
+- 누락·손상·불일치 provenance는 `config_operator_verified=false`와 numeric comparator cause 차단으로 귀결된다.
+- 미수집 evidence는 삭제하지 않고 fact에 남기므로 사후 조사 가능성은 유지된다.
+- Future collector를 활성화하려면 typed field, source, captured-at, age, binding, completeness, validator test를 함께 추가해야 한다.
 
-## 8. Rollback
+## 7. Rollback
 
-Stage 2 rollback은 diagnostics promotion을 전부 disable하고 `async_fact_only` raw fact 수집만 유지한다. Poll context, operational gate, fact `1.3.0`, validator 변경은 함께 revert해야 writer와 validator schema가 어긋나지 않는다. 생성된 `1.3.0` fact artifact는 삭제하거나 `1.2.1`로 재작성하지 않는다.
+- `spot_config_provenance.py`, config attestation 설정, driver/repository snapshot 통합을 함께 revert한다.
+- unsupported cause gate와 validator 규칙을 함께 revert해야 producer/validator 계약이 어긋나지 않는다.
+- 안전한 운영 rollback은 `SPOT_CONFIG_OPERATOR_VERIFIED=false`를 유지하는 것이다. 이 경우 numeric comparator cause는 비활성화되고 원인은 `unknown`으로 강등된다.
+- CSV migration은 필요하지 않다.
 
-## 9. Remaining Work
+## 8. Remaining Work
 
-다음 단계는 Stage 3이다. Config attestation과 drift detection을 구현하고, 실제 collector가 없는 cause evidence promotion을 차단한다. Stage 4의 legacy quality/value-age 변경은 realtime schema `2.5.0`에서 별도로 처리한다.
+- Stage 4: legacy Temperature quality 정합화, monotonic value age, clock status, CSV v2.5 계약
+- Stage 5: 전체 feature gap analysis, controlled verification, final report

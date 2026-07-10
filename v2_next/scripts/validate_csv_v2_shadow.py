@@ -48,6 +48,15 @@ from backend.FacilityData.spot_diagnostics import (
     DIAGNOSTICS_FIELD_STATUSES,
     SPOT_DIAGNOSTIC_OUTPUT_FIELDS,
 )
+from backend.FacilityData.spot_config_provenance import (
+    CONFIG_ATTESTATION_STATUSES,
+    CONFIG_DRIFT_FIELDS,
+    DEVICE_CONFIG_READBACK_STATUSES,
+)
+from backend.FacilityData.temperature_operational import (
+    TEMPERATURE_OPERATIONAL_RULE_VERSION,
+    UNSUPPORTED_CAUSE_CANDIDATES,
+)
 
 
 REQUIRED_V1_COLUMNS = [
@@ -103,6 +112,7 @@ SPOT_IMAGE_LINK_STATUSES = {
     "clock_anomaly",
 }
 HEX_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+HEX_GIT_COMMIT_RE = re.compile(r"^[a-f0-9]{40}$")
 EXPECTED_SPOT_INVALID_SENTINEL_VALUES = {"6553.4", "6553.5"}
 EXPECTED_SPOT_INVALID_SENTINEL_MEANINGS = {
     "6553.4": "under_range",
@@ -757,6 +767,7 @@ def validate_v2_4_operational_invariants(
     header: list[str],
     *,
     row_time_freshness_threshold_ms: float = FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS,
+    forbid_unsupported_causes: bool = False,
 ) -> list[str]:
     required_columns = [
         "timestamp_utc",
@@ -898,6 +909,10 @@ def validate_v2_4_operational_invariants(
                 failures.append(f"row {row_number} invalid_sentinel output status {output_status!r}, expected {expected_status!r}")
         if cause == "low_signal_candidate" and not ({"alarm_low_signal", "signal_below_threshold"} & set(evidence_codes)):
             failures.append(f"row {row_number} low_signal_candidate requires alarm_low_signal or signal_below_threshold evidence")
+        if forbid_unsupported_causes and cause in UNSUPPORTED_CAUSE_CANDIDATES:
+            failures.append(
+                f"row {row_number} {cause} is forbidden until a provenance-capable collector is enabled"
+            )
         if cause == "peak_picker_reset_candidate" and "peak_picker_off_mode_reset_configured" not in evidence_codes:
             failures.append(f"row {row_number} peak_picker_reset_candidate requires peak_picker_off_mode_reset_configured evidence")
         if cause == "below_measurement_range_candidate" and not {
@@ -938,6 +953,94 @@ def validate_current_server_promotion_profile(snapshot: dict) -> list[str]:
     return failures
 
 
+def validate_spot_config_provenance_snapshot(snapshot: dict) -> list[str]:
+    failures: list[str] = []
+    fingerprint = str(snapshot.get("spot_config_fingerprint_sha256") or "")
+    verified_fingerprint = str(snapshot.get("spot_config_verified_fingerprint_sha256") or "")
+    settings_hash = str(snapshot.get("settings_file_sha256") or "")
+    build_git_commit = str(snapshot.get("build_git_commit") or "")
+    verified_at = str(snapshot.get("spot_config_verified_at") or "")
+    verified_by = str(snapshot.get("spot_config_verified_by") or "")
+    readback_status = str(snapshot.get("device_config_readback_status") or "")
+    device_fingerprint = str(snapshot.get("device_config_fingerprint_sha256") or "")
+    attestation_status = str(snapshot.get("config_attestation_status") or "")
+    drift_fields = snapshot.get("config_drift_fields")
+    operator_verified = snapshot.get("config_operator_verified")
+    operator_verified_requested = snapshot.get("config_operator_verified_requested")
+
+    if not str(snapshot.get("spot_config_revision") or ""):
+        failures.append("spot_configuration_snapshot.spot_config_revision must be nonblank")
+    if not _is_sha256_text(fingerprint):
+        failures.append("spot_configuration_snapshot.spot_config_fingerprint_sha256 must be lowercase SHA-256")
+    if verified_fingerprint and not _is_sha256_text(verified_fingerprint):
+        failures.append(
+            "spot_configuration_snapshot.spot_config_verified_fingerprint_sha256 must be blank or lowercase SHA-256"
+        )
+    if settings_hash and not _is_sha256_text(settings_hash):
+        failures.append("spot_configuration_snapshot.settings_file_sha256 must be blank or lowercase SHA-256")
+    if build_git_commit and HEX_GIT_COMMIT_RE.fullmatch(build_git_commit) is None:
+        failures.append("spot_configuration_snapshot.build_git_commit must be blank or lowercase 40-hex")
+    if readback_status not in DEVICE_CONFIG_READBACK_STATUSES:
+        failures.append(
+            "spot_configuration_snapshot.device_config_readback_status must be a supported status"
+        )
+    if device_fingerprint and not _is_sha256_text(device_fingerprint):
+        failures.append(
+            "spot_configuration_snapshot.device_config_fingerprint_sha256 must be blank or lowercase SHA-256"
+        )
+    if attestation_status not in CONFIG_ATTESTATION_STATUSES:
+        failures.append(
+            "spot_configuration_snapshot.config_attestation_status must be a supported status"
+        )
+    if not isinstance(drift_fields, list) or not all(
+        isinstance(value, str) and value in CONFIG_DRIFT_FIELDS for value in drift_fields
+    ):
+        failures.append("spot_configuration_snapshot.config_drift_fields must be a bounded string list")
+        drift_fields = []
+    if not isinstance(snapshot.get("config_drift_detected"), bool):
+        failures.append("spot_configuration_snapshot.config_drift_detected must be boolean")
+    elif snapshot.get("config_drift_detected") != bool(drift_fields):
+        failures.append(
+            "spot_configuration_snapshot.config_drift_detected must match config_drift_fields"
+        )
+    if not isinstance(operator_verified_requested, bool):
+        failures.append(
+            "spot_configuration_snapshot.config_operator_verified_requested must be boolean"
+        )
+    if not isinstance(operator_verified, bool):
+        failures.append("spot_configuration_snapshot.config_operator_verified must be boolean")
+    if operator_verified is True:
+        if operator_verified_requested is not True:
+            failures.append(
+                "spot_configuration_snapshot.config_operator_verified requires requested verification"
+            )
+        if not verified_fingerprint or verified_fingerprint != fingerprint:
+            failures.append(
+                "spot_configuration_snapshot.config_operator_verified requires matching fingerprints"
+            )
+        if HEX_GIT_COMMIT_RE.fullmatch(build_git_commit) is None:
+            failures.append(
+                "spot_configuration_snapshot.config_operator_verified requires valid build_git_commit"
+            )
+        if _parse_utc_timestamp(verified_at) is None:
+            failures.append(
+                "spot_configuration_snapshot.config_operator_verified requires valid UTC spot_config_verified_at"
+            )
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", verified_by):
+            failures.append(
+                "spot_configuration_snapshot.config_operator_verified requires auditable spot_config_verified_by"
+            )
+        if readback_status in {"mismatch", "partial", "not_attempted", "error"}:
+            failures.append(
+                "spot_configuration_snapshot.config_operator_verified is forbidden by device readback status"
+            )
+    if snapshot.get("low_signal_comparator_verified") is True and operator_verified is not True:
+        failures.append(
+            "spot_configuration_snapshot.low_signal_comparator_verified requires effective operator verification"
+        )
+    return failures
+
+
 def validate_spot_configuration_snapshot(
     metadata: dict,
     rows: list[list[str]],
@@ -949,6 +1052,15 @@ def validate_spot_configuration_snapshot(
     snapshot = metadata.get("spot_configuration_snapshot")
     if not isinstance(snapshot, dict):
         return ["metadata missing spot_configuration_snapshot block"]
+
+    schema_metadata = metadata.get("schema_metadata")
+    rule_version = (
+        str(schema_metadata.get("temperature_operational_rule_version") or "")
+        if isinstance(schema_metadata, dict)
+        else ""
+    )
+    if snapshot.get("spot_config_revision") or rule_version == TEMPERATURE_OPERATIONAL_RULE_VERSION:
+        failures.extend(validate_spot_config_provenance_snapshot(snapshot))
 
     threshold = _parse_finite_float(snapshot.get("low_signal_threshold_pc"))
     if threshold is None or not 0.0 <= threshold <= 100.0:
@@ -2307,6 +2419,15 @@ def validate(
                     v2_rows,
                     v2_header,
                     row_time_freshness_threshold_ms=_metadata_row_time_freshness_threshold_ms(metadata),
+                    forbid_unsupported_causes=(
+                        str(
+                            metadata.get("schema_metadata", {}).get(
+                                "temperature_operational_rule_version"
+                            )
+                            or ""
+                        )
+                        == TEMPERATURE_OPERATIONAL_RULE_VERSION
+                    ),
                 )
             )
             failures.extend(

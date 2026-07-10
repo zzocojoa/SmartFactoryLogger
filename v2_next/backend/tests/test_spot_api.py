@@ -20,7 +20,10 @@ from fastapi.testclient import TestClient
 
 from backend.FacilityData.drivers import spot_api
 from backend.FacilityData.repository import CSVLoggerService
-from backend.FacilityData.spot_image_fact import SpotImageCaptureWriter
+from backend.FacilityData.spot_image_fact import (
+    SpotImageCaptureWriter,
+    _under_range_cause_candidate,
+)
 
 FocusUrlopenTarget = str | UrlRequest
 
@@ -133,6 +136,10 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_temperature_snapshot = None
             spot_api._spot_last_valid_value_at = None
             spot_api._spot_temperature_cache_suppressed_until_valid = False
+        with spot_api._spot_config_provenance_lock:
+            spot_api._spot_config_drift_detected_count = 0
+            spot_api._spot_config_active_drift_signature = None
+            spot_api._spot_last_configuration_snapshot = None
         spot_api._reset_spot_image_capture_state_for_tests()
 
     def configure_image_capture(self, log_path: Path, *, mode: str = "all", max_bytes: int = 2_000_000) -> None:
@@ -172,6 +179,52 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         snapshot.update(overrides)
         with spot_api._spot_temperature_snapshot_lock:
             spot_api._spot_temperature_snapshot = snapshot
+
+    def test_image_fact_cause_requires_explicit_operational_gate_result(self) -> None:
+        raw_low_signal = {
+            "spot_raw_validity": "invalid_sentinel",
+            "spot_device_status_code": "temperature_under_range",
+            "spot_diagnostic_evidence_codes": '["alarm_low_signal"]',
+        }
+
+        self.assertEqual(_under_range_cause_candidate(raw_low_signal), "unknown")
+        self.assertEqual(
+            _under_range_cause_candidate(
+                {
+                    **raw_low_signal,
+                    "temperature_under_range_cause_candidate": "low_signal_candidate",
+                }
+            ),
+            "low_signal_candidate",
+        )
+        self.assertEqual(
+            _under_range_cause_candidate(
+                {
+                    **raw_low_signal,
+                    "temperature_under_range_cause_candidate": "target_out_of_fov_candidate",
+                }
+            ),
+            "unknown",
+        )
+
+    def test_config_drift_health_counts_transitions_not_poll_repetitions(self) -> None:
+        with patch.object(spot_api.config, "SPOT_CONFIG_OPERATOR_VERIFIED", True):
+            spot_api._spot_configuration_snapshot()
+            spot_api._spot_configuration_snapshot()
+            self.assertEqual(
+                spot_api.get_spot_observation_fact_health()["config_drift_detected_count"],
+                1,
+            )
+
+        with patch.object(spot_api.config, "SPOT_CONFIG_OPERATOR_VERIFIED", False):
+            spot_api._spot_configuration_snapshot()
+        with patch.object(spot_api.config, "SPOT_CONFIG_OPERATOR_VERIFIED", True):
+            spot_api._spot_configuration_snapshot()
+
+        self.assertEqual(
+            spot_api.get_spot_observation_fact_health()["config_drift_detected_count"],
+            2,
+        )
 
     def test_spot_temperature_diagnostics_before_first_poll_are_startup_pending(self) -> None:
         diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
@@ -335,6 +388,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["low_signal_comparator"], "lt")
         self.assertEqual(diagnostics["low_signal_comparator_verified"], False)
         self.assertEqual(diagnostics["spot_app_mode"], "App1: AL E")
+        self.assertFalse(diagnostics["config_operator_verified"])
+        self.assertEqual(len(diagnostics["spot_config_fingerprint_sha256"]), 64)
+        self.assertEqual(diagnostics["device_config_readback_status"], "not_supported")
         self.assertIsNotNone(fact)
         assert fact is not None
         self.assertEqual(fact["diagnostics_capture_status"], "async_complete")
@@ -2038,7 +2094,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row["spot_image_link_status"], "fresh")
             self.assertGreaterEqual(float(row["spot_image_link_age_ms"]), 0.0)
             self.assertEqual(row["temperature_output_status_nearest"], "under_range")
-            self.assertEqual(row["temperature_under_range_cause_candidate_nearest"], "target_out_of_fov_candidate")
+            self.assertEqual(row["temperature_under_range_cause_candidate_nearest"], "unknown")
             self.assertEqual(len(row["spot_image_source_url_hash"]), 64)
             self.assertTrue((log_path / row["spot_image_path"]).exists())
             self.assertNotIn("http://spot.local", ",".join(row.values()))

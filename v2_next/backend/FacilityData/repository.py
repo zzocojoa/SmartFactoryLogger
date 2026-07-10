@@ -49,6 +49,7 @@ from backend.FacilityData.spot_observation_fact import (
     build_spot_observation_key,
     parse_spot_diagnostic_evidence_codes,
 )
+from backend.FacilityData.spot_config_provenance import build_spot_configuration_snapshot
 from backend.FacilityData.spot_image_fact import (
     SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME,
     build_spot_image_fact_manifest,
@@ -340,6 +341,7 @@ class CSVLoggerService:
         self._v2_4_diagnostics_binding_status_counts: Counter[str] = Counter()
         self._v2_4_diagnostics_cause_suppressed_count = 0
         self._v2_4_diagnostics_cause_suppressed_reason_counts: Counter[str] = Counter()
+        self._v2_4_unsupported_evidence_suppressed_count = 0
         self._v2_4_last_sample_seq: Optional[int] = None
         self._v2_4_last_updated_at: Optional[str] = None
         self._current_v2_csv_path: Optional[Path] = None
@@ -711,32 +713,12 @@ class CSVLoggerService:
             "v2_3_policy": "instrumentation_shadow_only; operational truth requires v2.4.0+ operational fields",
         }
 
-    def _spot_configuration_snapshot(self) -> dict[str, Any]:
-        return {
-            "spot_ip": str(getattr(config, "SPOT_IP", "") or ""),
-            "spot_model_info": str(getattr(config, "SPOT_MODEL_INFO", "") or ""),
-            "spot_app_mode": str(getattr(config, "SPOT_APP_MODE", "") or ""),
-            "spot_range_min_c": float(getattr(config, "SPOT_RANGE_MIN_C", 0.0)),
-            "spot_range_max_c": float(getattr(config, "SPOT_RANGE_MAX_C", 0.0)),
-            "spot_analog_4ma_c": float(getattr(config, "SPOT_ANALOG_4MA_C", 0.0)),
-            "spot_analog_20ma_c": float(getattr(config, "SPOT_ANALOG_20MA_C", 0.0)),
-            "low_signal_alarm_enabled": bool(getattr(config, "SPOT_LOW_SIGNAL_ALARM_ENABLED", False)),
-            "low_signal_threshold_pc": float(getattr(config, "SPOT_LOW_SIGNAL_THRESHOLD_PC", 0.0)),
-            "low_signal_comparator": str(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR", "") or ""),
-            "low_signal_comparator_verified": bool(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED", False)),
-            "low_signal_config_source": str(getattr(config, "SPOT_LOW_SIGNAL_CONFIG_SOURCE", "") or ""),
-            "peak_picker_enabled": bool(getattr(config, "SPOT_PEAK_PICKER_ENABLED", False)),
-            "limiter_enabled": bool(getattr(config, "SPOT_LIMITER_ENABLED", False)),
-            "averager_enabled": bool(getattr(config, "SPOT_AVERAGER_ENABLED", False)),
-            "modemaster_enabled": bool(getattr(config, "SPOT_MODEMASTER_ENABLED", False)),
-            "ratio_raw_enabled": bool(getattr(config, "SPOT_RATIO_RAW_ENABLED", False)),
-            "spot_ratio_raw_enabled": bool(getattr(config, "SPOT_RATIO_RAW_ENABLED", False)),
-            "window_obscuration_pc": float(getattr(config, "SPOT_WINDOW_OBSCURATION_PC", 0.0)),
-            "focus_mm": int(getattr(config, "SPOT_FOCUS_MM", 0)),
-            "config_source": "spot_web_server_screenshot",
-            "config_captured_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "config_operator_verified": bool(getattr(config, "SPOT_CONFIG_OPERATOR_VERIFIED", False)),
-        }
+    def _spot_configuration_snapshot(self, runtime_git_commit: str | None) -> dict[str, Any]:
+        return build_spot_configuration_snapshot(
+            config,
+            runtime_git_commit=runtime_git_commit,
+            device_readback_status="not_supported",
+        )
 
     def _spot_image_fact_manifest(self, log_path: Path) -> dict[str, Any]:
         raw_capture_path = str(getattr(config, "SPOT_IMAGE_CAPTURE_PATH", "spot_images") or "spot_images").strip()
@@ -847,6 +829,7 @@ class CSVLoggerService:
 
     def _resolve_clean_git_commit(self) -> Optional[str]:
         return resolve_runtime_git_commit()
+
     def _write_v2_sidecar(self, csv_path: Path, contract: Optional[V2CsvContract] = None) -> None:
         if not self.csv_v2_sidecar_enabled:
             return
@@ -856,6 +839,7 @@ class CSVLoggerService:
         if sidecar_key in self._sidecar_paths_written or sidecar_path.exists():
             self._sidecar_paths_written.add(sidecar_key)
             return
+        runtime_git_commit = self._resolve_clean_git_commit()
         payload = {
             "schema_metadata": {
                 "schema_version": active_contract.schema_version,
@@ -880,7 +864,7 @@ class CSVLoggerService:
                 "operator_metadata_version": OPERATOR_METADATA_VERSION,
                 "logger_service_instance_id": self.logger_service_instance_id,
                 "logger_service_started_at": self.logger_service_started_at,
-                "git_commit": validate_git_commit(self._resolve_clean_git_commit()),
+                "git_commit": validate_git_commit(runtime_git_commit),
                 "runtime_info": get_runtime_info(),
                 "v1_compatibility": True,
                 "v1_csv_enabled": self.csv_v1_enabled,
@@ -923,7 +907,7 @@ class CSVLoggerService:
                 ),
             },
             "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(active_contract),
-            "spot_configuration_snapshot": self._spot_configuration_snapshot(),
+            "spot_configuration_snapshot": self._spot_configuration_snapshot(runtime_git_commit),
             "spot_observation_fact_manifest": self._spot_observation_fact_manifest(sidecar_path.parent),
             "spot_image_fact_manifest": self._spot_image_fact_manifest(sidecar_path.parent),
             "changeover_candidate_resolution_fact_manifest": (
@@ -1534,7 +1518,7 @@ class CSVLoggerService:
                 ),
                 low_signal_comparator_verified=self._optional_bool(
                     data.low_signal_comparator_verified,
-                    bool(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED", False)),
+                    False,
                 ),
                 diagnostics_current_poll_seq=self._optional_int(data.spot_poll_seq),
                 diagnostics_current_service_instance_id=data.spot_service_instance_id,
@@ -1674,6 +1658,8 @@ class CSVLoggerService:
                 suppression_reason = operational_decision.diagnostics_cause_suppressed_reason
                 if suppression_reason in DIAGNOSTICS_SUPPRESSION_REASONS:
                     self._v2_4_diagnostics_cause_suppressed_reason_counts[suppression_reason] += 1
+            if operational_decision.unsupported_evidence_suppressed:
+                self._v2_4_unsupported_evidence_suppressed_count += 1
             self._v2_4_last_sample_seq = sample_seq
             self._v2_4_last_updated_at = updated_at
 
@@ -1711,6 +1697,9 @@ class CSVLoggerService:
                 "diagnostics_cause_suppressed_count": self._v2_4_diagnostics_cause_suppressed_count,
                 "diagnostics_cause_suppressed_reason_counts": dict(
                     self._v2_4_diagnostics_cause_suppressed_reason_counts
+                ),
+                "unsupported_evidence_suppressed_count": (
+                    self._v2_4_unsupported_evidence_suppressed_count
                 ),
                 "process_phase_candidate_counts": dict(self._v2_4_process_phase_candidate_counts),
                 "last_sample_seq": self._v2_4_last_sample_seq,

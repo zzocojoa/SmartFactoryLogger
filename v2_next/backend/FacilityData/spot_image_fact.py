@@ -560,40 +560,10 @@ def _temperature_unavailable_reason(snapshot: Mapping[str, Any]) -> str:
 def _under_range_cause_candidate(snapshot: Mapping[str, Any]) -> str:
     explicit = _text(snapshot.get("temperature_under_range_cause_candidate"))
     if explicit:
-        return explicit
-    evidence = set(_parse_evidence_codes(snapshot.get("spot_diagnostic_evidence_codes")))
-    if "target_out_of_fov_evidence" in evidence:
-        return "target_out_of_fov_candidate"
-    if "actuator_scanning" in evidence or "actuator_position_changed" in evidence:
-        return "alignment_change_candidate"
-    if "signal_below_threshold" in evidence or "alarm_low_signal" in evidence:
-        return "low_signal_candidate"
-    if "detector_below_measurement_range" in evidence:
-        return "below_measurement_range_candidate"
+        return explicit if explicit in {"low_signal_candidate", "unknown"} else "unknown"
     if _temperature_output_status(snapshot) == "under_range":
         return "unknown"
     return ""
-
-
-def _parse_evidence_codes(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return ()
-        if stripped.startswith("["):
-            try:
-                parsed = json.loads(stripped)
-            except json.JSONDecodeError:
-                return ()
-            if isinstance(parsed, list):
-                return tuple(str(item) for item in parsed)
-        return tuple(part for part in stripped.replace(";", ",").split(",") if part)
-    if isinstance(value, (list, tuple, set)):
-        return tuple(str(item) for item in value)
-    return ()
-
 
 def _format_optional_float(value: Optional[float]) -> str:
     if value is None:
