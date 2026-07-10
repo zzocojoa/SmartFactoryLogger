@@ -14,14 +14,16 @@ from backend.FacilityData.spot_observation import (
 )
 from backend.FacilityData.spot_low_signal import derive_low_signal_evidence
 from backend.FacilityData.temperature_state import (
+    SpotCacheStatus,
     TemperatureStateDecision,
     TemperatureStateInput,
+    TemperatureStatusShadow,
     TemperatureValueOrigin,
     derive_temperature_state,
 )
 
 
-TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v1"
+TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v2"
 SPOT_ROW_FRESHNESS_RULE_VERSION = "spot-row-freshness-v1"
 
 
@@ -44,7 +46,7 @@ class TemperatureOperationalInput:
     has_ttl_valid_cache: bool = False
     has_previous_valid_value: bool = False
     first_poll_completed: bool = True
-    temperature_value_origin: str = "none"
+    temperature_value_origin: str = ""
     spot_device_status_code: Optional[str] = None
     spot_error_code: Optional[str] = None
     spot_effective_age_ms_at_row: Optional[float] = None
@@ -60,6 +62,7 @@ class TemperatureOperationalInput:
     low_signal_alarm_enabled: bool = False
     low_signal_threshold_pc: float | None = None
     low_signal_comparator: str | None = None
+    low_signal_comparator_verified: bool = False
     peak_picker_enabled: bool = False
     peak_picker_off_mode: Optional[str] = None
 
@@ -76,6 +79,10 @@ class TemperatureOperationalDecision:
     spot_effective_freshness_at_row: str
     spot_effective_value_age_ms_at_row: Optional[float]
     spot_row_age_clock_status: str
+    temperature_value_origin: str
+    origin_decision_mismatch: bool
+    cached_fallback_accepted: bool
+    cached_fallback_rejected_reason: str
 
 
 def derive_temperature_operational_fields(
@@ -97,7 +104,33 @@ def derive_temperature_operational_fields(
         )
     )
 
-    status, reason = _derive_status_and_reason(input_state, state_decision, row_freshness, clock_status)
+    effective_origin, origin_decision_mismatch = _effective_temperature_origin(input_state, state_decision)
+    cached_fallback_accepted = _is_accepted_cached_fallback(
+        input_state,
+        state_decision,
+        row_freshness,
+        origin_decision_mismatch,
+    )
+    status, reason = _derive_status_and_reason(
+        input_state,
+        row_freshness,
+        clock_status,
+        effective_origin,
+        cached_fallback_accepted,
+    )
+    output_origin = (
+        effective_origin
+        if status == TemperatureOutputStatus.VALID.value
+        else TemperatureValueOrigin.NONE.value
+    )
+    cached_fallback_rejected_reason = _cached_fallback_rejected_reason(
+        input_state,
+        state_decision,
+        row_freshness,
+        clock_status,
+        cached_fallback_accepted,
+        origin_decision_mismatch,
+    )
     expectedness = _derive_expectedness(status, input_state.process_phase_candidate)
     cause, confidence, evidence_json = _derive_under_range_cause(status, input_state)
     return TemperatureOperationalDecision(
@@ -111,6 +144,10 @@ def derive_temperature_operational_fields(
         spot_effective_freshness_at_row=row_freshness,
         spot_effective_value_age_ms_at_row=input_state.spot_effective_value_age_ms_at_row,
         spot_row_age_clock_status=clock_status,
+        temperature_value_origin=output_origin,
+        origin_decision_mismatch=origin_decision_mismatch,
+        cached_fallback_accepted=cached_fallback_accepted,
+        cached_fallback_rejected_reason=cached_fallback_rejected_reason,
     )
 
 
@@ -130,13 +167,13 @@ def derive_spot_row_freshness(age_ms: Optional[float], *, threshold_ms: float = 
 
 def _derive_status_and_reason(
     input_state: TemperatureOperationalInput,
-    state_decision: TemperatureStateDecision,
     row_freshness: str,
     clock_status: str,
+    effective_origin: str,
+    cached_fallback_accepted: bool,
 ) -> tuple[str, str]:
     poll_status = _coerce_poll_status(input_state.poll_status)
     raw_validity = _coerce_raw_validity(input_state.raw_validity)
-    origin = input_state.temperature_value_origin or state_decision.temperature_value_origin.value
     if not input_state.first_poll_completed or poll_status == SpotPollStatus.NOT_ATTEMPTED:
         return TemperatureOutputStatus.STARTUP_PENDING.value, "startup_pending"
     if clock_status == "clock_anomaly":
@@ -147,6 +184,8 @@ def _derive_status_and_reason(
         return TemperatureOutputStatus.UNDER_RANGE.value, "under_range"
     if input_state.spot_device_status_code == SPOT_OVER_RANGE_DEVICE_STATUS_CODE:
         return TemperatureOutputStatus.OVER_RANGE.value, "over_range"
+    if cached_fallback_accepted:
+        return TemperatureOutputStatus.VALID.value, ""
     if poll_status == SpotPollStatus.TIMEOUT:
         return TemperatureOutputStatus.SOURCE_ERROR.value, "timeout"
     if poll_status == SpotPollStatus.CONNECTION_ERROR:
@@ -161,16 +200,82 @@ def _derive_status_and_reason(
         return TemperatureOutputStatus.SOURCE_ERROR.value, "empty_body"
     if raw_validity == SpotRawValidity.OUT_OF_RANGE:
         return TemperatureOutputStatus.SOURCE_ERROR.value, "numeric_out_of_range"
-    if origin in {
-        TemperatureValueOrigin.CURRENT_OBSERVATION.value,
-        TemperatureValueOrigin.CACHED_OBSERVATION.value,
-    }:
+    if effective_origin == TemperatureValueOrigin.CURRENT_OBSERVATION.value:
         return TemperatureOutputStatus.VALID.value, ""
     if raw_validity == SpotRawValidity.NOT_RECEIVED:
         return TemperatureOutputStatus.UNKNOWN.value, "not_attempted"
     if row_freshness == "unknown":
         return TemperatureOutputStatus.UNKNOWN.value, "unknown_freshness"
     return TemperatureOutputStatus.UNKNOWN.value, "unknown"
+
+
+def _effective_temperature_origin(
+    input_state: TemperatureOperationalInput,
+    state_decision: TemperatureStateDecision,
+) -> tuple[str, bool]:
+    state_origin = state_decision.temperature_value_origin.value
+    input_origin = str(input_state.temperature_value_origin or "").strip()
+    mismatch = bool(input_origin and input_origin != state_origin)
+    if mismatch:
+        return TemperatureValueOrigin.NONE.value, True
+    return state_origin, False
+
+
+def _is_accepted_cached_fallback(
+    input_state: TemperatureOperationalInput,
+    state_decision: TemperatureStateDecision,
+    row_freshness: str,
+    origin_decision_mismatch: bool,
+) -> bool:
+    poll_status = _coerce_poll_status(input_state.poll_status)
+    return (
+        not origin_decision_mismatch
+        and poll_status in {
+            SpotPollStatus.TIMEOUT,
+            SpotPollStatus.CONNECTION_ERROR,
+            SpotPollStatus.HTTP_ERROR,
+        }
+        and input_state.source_freshness == SpotSourceFreshness.FRESH.value
+        and state_decision.temperature_status_shadow == TemperatureStatusShadow.OK
+        and state_decision.spot_cache_status == SpotCacheStatus.REUSED
+        and state_decision.temperature_value_origin == TemperatureValueOrigin.CACHED_OBSERVATION
+        and input_state.cache_fallback_allowed is True
+        and input_state.has_ttl_valid_cache is True
+        and row_freshness == "fresh"
+    )
+
+
+def _cached_fallback_rejected_reason(
+    input_state: TemperatureOperationalInput,
+    state_decision: TemperatureStateDecision,
+    row_freshness: str,
+    clock_status: str,
+    accepted: bool,
+    origin_decision_mismatch: bool,
+) -> str:
+    if accepted:
+        return ""
+    poll_status = _coerce_poll_status(input_state.poll_status)
+    is_transport_failure = poll_status in {
+        SpotPollStatus.TIMEOUT,
+        SpotPollStatus.CONNECTION_ERROR,
+        SpotPollStatus.HTTP_ERROR,
+    }
+    if state_decision.spot_cache_status == SpotCacheStatus.REUSED and origin_decision_mismatch:
+        return "origin_decision_mismatch"
+    if state_decision.spot_cache_status == SpotCacheStatus.REUSED and clock_status == "clock_anomaly":
+        return "clock_anomaly"
+    if state_decision.spot_cache_status == SpotCacheStatus.REUSED and (
+        row_freshness == "stale" or input_state.source_freshness == SpotSourceFreshness.STALE.value
+    ):
+        return "stale_observation"
+    if is_transport_failure and state_decision.spot_cache_status == SpotCacheStatus.AVAILABLE_NOT_USED:
+        return "fallback_disallowed"
+    if is_transport_failure and state_decision.spot_cache_status == SpotCacheStatus.EXPIRED:
+        return "cache_expired"
+    if state_decision.spot_cache_status == SpotCacheStatus.REUSED:
+        return "state_contract_mismatch"
+    return ""
 
 
 def _derive_expectedness(status: str, phase: str) -> str:
@@ -207,6 +312,7 @@ def derive_under_range_cause_candidate(
     low_signal_alarm_enabled: bool,
     low_signal_threshold_pc: float | None,
     low_signal_comparator: str | None,
+    low_signal_comparator_verified: bool = False,
     phase_evidence_codes: Iterable[str] = (),
     peak_picker_enabled: bool = False,
     peak_picker_off_mode: Optional[str] = None,
@@ -217,6 +323,7 @@ def derive_under_range_cause_candidate(
         low_signal_alarm_enabled=low_signal_alarm_enabled,
         low_signal_threshold_pc=low_signal_threshold_pc,
         low_signal_comparator=low_signal_comparator,
+        low_signal_comparator_verified=low_signal_comparator_verified,
     )
     evidence = [str(code) for code in low_signal["evidence_codes"]]
     evidence.extend(str(code) for code in phase_evidence_codes if str(code))
@@ -254,6 +361,14 @@ def _derive_under_range_cause(
     if status != TemperatureOutputStatus.UNDER_RANGE.value:
         return "", None, ""
     evidence = set(str(code) for code in input_state.evidence_codes if str(code))
+    evidence.difference_update(
+        {
+            "signal_below_threshold",
+            "signal_below_configured_threshold_alarm_disabled",
+            "signal_at_or_above_configured_threshold",
+            "signalpc_present_comparator_unverified",
+        }
+    )
     phase_evidence: list[str] = []
     if input_state.process_phase_candidate in {
         "setup_candidate",
@@ -271,6 +386,7 @@ def _derive_under_range_cause(
         low_signal_alarm_enabled=input_state.low_signal_alarm_enabled,
         low_signal_threshold_pc=input_state.low_signal_threshold_pc,
         low_signal_comparator=input_state.low_signal_comparator,
+        low_signal_comparator_verified=input_state.low_signal_comparator_verified,
         phase_evidence_codes=phase_evidence,
         peak_picker_enabled=input_state.peak_picker_enabled,
         peak_picker_off_mode=input_state.peak_picker_off_mode,

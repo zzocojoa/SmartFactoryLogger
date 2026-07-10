@@ -1001,10 +1001,12 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
     header, rows = read_csv(fact_path)
     required_columns = [
         "alarmstatus",
+        "signalpc",
         "spot_diagnostic_evidence_codes",
         "low_signal_alarm_enabled",
         "low_signal_threshold_pc",
         "low_signal_comparator",
+        "low_signal_comparator_verified",
         "peak_picker_enabled",
     ]
     missing_columns = [column for column in required_columns if column not in header]
@@ -1033,12 +1035,42 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
         comparator = row[indices["low_signal_comparator"]].strip().lower()
         if comparator and comparator not in {"lt", "lte", "unknown"}:
             failures.append(f"spot_observation_fact row {row_number} low_signal_comparator must be lt/lte/unknown")
+        comparator_verified_text = row[indices["low_signal_comparator_verified"]].strip()
+        comparator_verified = _parse_bool_text(comparator_verified_text)
+        if comparator_verified_text and comparator_verified is None:
+            failures.append(
+                f"spot_observation_fact row {row_number} low_signal_comparator_verified must be true/false"
+            )
         low_signal_alarm_enabled = _parse_bool_text(row[indices["low_signal_alarm_enabled"]])
         if row[indices["low_signal_alarm_enabled"]].strip() and low_signal_alarm_enabled is None:
             failures.append(f"spot_observation_fact row {row_number} low_signal_alarm_enabled must be true/false")
         if low_signal_alarm_enabled is False and "signal_below_threshold" in evidence_codes:
             failures.append(
                 f"spot_observation_fact row {row_number} signal_below_threshold is forbidden when low signal alarm is disabled"
+            )
+        numeric_comparator_evidence = {
+            "signal_below_threshold",
+            "signal_below_configured_threshold_alarm_disabled",
+            "signal_at_or_above_configured_threshold",
+        }
+        if comparator_verified is False and numeric_comparator_evidence.intersection(evidence_codes):
+            failures.append(
+                f"spot_observation_fact row {row_number} numeric low-signal evidence is forbidden when comparator is unverified"
+            )
+        if comparator_verified is not False and "signalpc_present_comparator_unverified" in evidence_codes:
+            failures.append(
+                f"spot_observation_fact row {row_number} comparator-unverified evidence requires verified=false"
+            )
+        signalpc_text = row[indices["signalpc"]].strip() if "signalpc" in indices else ""
+        if (
+            comparator_verified is False
+            and signalpc_text
+            and threshold
+            and comparator in {"lt", "lte"}
+            and "signalpc_present_comparator_unverified" not in evidence_codes
+        ):
+            failures.append(
+                f"spot_observation_fact row {row_number} unverified comparator inputs require signalpc_present_comparator_unverified evidence"
             )
         peak_picker_enabled = _parse_bool_text(row[indices["peak_picker_enabled"]])
         if peak_picker_enabled is False and "peak_picker_off_mode_reset_configured" in evidence_codes:
@@ -1281,9 +1313,12 @@ def _missing_diagnostic_sources_for_evidence(evidence_codes: Sequence[str], fact
             "signal_below_threshold",
             "signal_below_configured_threshold_alarm_disabled",
             "signal_at_or_above_configured_threshold",
+            "signalpc_present_comparator_unverified",
         }
     ):
         required.extend(["signalpc", "low_signal_threshold_pc", "low_signal_comparator"])
+    if "signalpc_present_comparator_unverified" in code_set:
+        required.append("low_signal_comparator_verified")
     if "peak_picker_off_mode_reset_configured" in code_set:
         required.extend(["peak_picker_enabled", "peak_picker_off_mode"])
     missing = [field for field in required if not fact.get(field, "").strip()]
