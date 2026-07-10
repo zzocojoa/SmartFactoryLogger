@@ -263,7 +263,11 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("contextBridge.exposeInMainWorld('smartFactoryElectron'", preload_text)
         self.assertIn("getMemory: () => ipcRenderer.invoke('sfl:get-electron-memory')", preload_text)
         self.assertIn(
-            "recordStartupEvent: (name, payload) => ipcRenderer.invoke('sfl:record-startup-event', name, payload)",
+            "return ipcRenderer.invoke('sfl:record-startup-event', name, createRendererTimingPayload(payload))",
+            preload_text,
+        )
+        self.assertIn(
+            "recordStartupEvent: (name, payload) => recordPreloadStartupEvent(name, payload)",
             preload_text,
         )
         self.assertEqual(preload_text.count("ipcRenderer.invoke"), 2)
