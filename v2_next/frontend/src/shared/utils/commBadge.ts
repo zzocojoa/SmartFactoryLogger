@@ -13,26 +13,17 @@ export type CommBadge = {
 };
 
 type CameraStatus = {
-  type: 'error' | 'loading' | 'danger' | 'warn';
+  type: 'error' | 'loading';
   title: string;
   detail: string;
-};
-
-const isImageAgeDiagnosticTitle = (title: string): boolean => {
-  return title === '오래된 이미지 제공 중' || title === '이미지 상태 지연';
 };
 
 const parseCameraStatusMessage = (message: string): CameraStatus => {
   const [title, ...detailParts] = message.split('\n');
   const normalizedTitle = title.trim();
   const detail = detailParts.join(' ').trim();
-  const type = normalizedTitle === '오래된 이미지 제공 중' ||
-    normalizedTitle === '이미지 상태 지연' ||
-    normalizedTitle === '이미지 요청 대기'
-    ? 'warn'
-    : 'error';
   return {
-    type,
+    type: 'error',
     title: normalizedTitle || message,
     detail,
   };
@@ -144,73 +135,18 @@ export const getCameraStatus = (params: {
   spotLastSuccessAt: number | null;
   spotImageMetadata?: SpotImageResponseMetadata | null;
 }): CameraStatus | null => {
-  const { spotConfig, spotImageUrl, spotImageLoading, spotImageError, spotLastSuccessAt, spotImageMetadata } = params;
+  const { spotConfig, spotImageUrl, spotImageLoading, spotImageError, spotLastSuccessAt } = params;
   if (!spotConfig) {
     return null;
   }
 
-  const refreshMs = Math.max(500, Math.round(spotConfig.refresh_interval * 1000));
-  const now = Date.now();
-  const responseDelayMs = spotLastSuccessAt ? now - spotLastSuccessAt : null;
-  const imageAgeMs = resolveSpotImageAgeMs(spotImageMetadata ?? null, now);
   const parsedErrorStatus = spotImageError ? parseCameraStatusMessage(spotImageError) : null;
 
-  if (parsedErrorStatus && !isImageAgeDiagnosticTitle(parsedErrorStatus.title)) {
+  if (parsedErrorStatus) {
     return parsedErrorStatus;
   }
   if (!spotImageUrl || spotImageLoading || spotLastSuccessAt === null) {
     return { type: 'loading' as const, title: '카메라 연결 중', detail: '' };
-  }
-  if (imageAgeMs !== null && imageAgeMs > refreshMs * 5) {
-    return {
-      type: 'danger' as const,
-      title: '오래된 이미지 제공 중',
-      detail: `이미지 나이 ${Math.round(imageAgeMs / 1000)}초`,
-    };
-  }
-  if (imageAgeMs !== null && imageAgeMs > refreshMs * 4) {
-    return {
-      type: 'warn' as const,
-      title: '이미지 오래됨',
-      detail: `이미지 나이 ${Math.round(imageAgeMs / 1000)}초`,
-    };
-  }
-  if (parsedErrorStatus) {
-    return parsedErrorStatus;
-  }
-  if (imageAgeMs !== null) {
-    return null;
-  }
-  if (responseDelayMs !== null && responseDelayMs > refreshMs * 5) {
-    return {
-      type: 'danger' as const,
-      title: '카메라 응답 지연',
-      detail: `응답 지연 ${Math.round(responseDelayMs / 1000)}초`,
-    };
-  }
-  if (responseDelayMs !== null && responseDelayMs > refreshMs * 4) {
-    return {
-      type: 'warn' as const,
-      title: '이미지 수신 지연',
-      detail: `응답 지연 ${Math.round(responseDelayMs / 1000)}초`,
-    };
-  }
-  return null;
-};
-
-const resolveSpotImageAgeMs = (
-  metadata: SpotImageResponseMetadata | null,
-  nowMs: number
-): number | null => {
-  if (!metadata) {
-    return null;
-  }
-  const elapsedSinceReceiveMs = Math.max(0, nowMs - metadata.received_at);
-  if (metadata.age_sec !== null && Number.isFinite(metadata.age_sec)) {
-    return Math.max(0, metadata.age_sec * 1000) + elapsedSinceReceiveMs;
-  }
-  if (metadata.captured_at !== null && Number.isFinite(metadata.captured_at)) {
-    return Math.max(0, nowMs - metadata.captured_at);
   }
   return null;
 };

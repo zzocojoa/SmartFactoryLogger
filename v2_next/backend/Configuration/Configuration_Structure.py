@@ -20,8 +20,6 @@ class SpotImageCaptureConfig(BaseModel):
 class SpotConfig(BaseModel):
     ip: Optional[str] = None
     url: Optional[str] = None
-    image_url: Optional[str] = None
-    live_image_url: Optional[str] = None
     internal_temperature_url: Optional[str] = None
     refresh_interval: Optional[float] = None
     timeout: Optional[float] = None

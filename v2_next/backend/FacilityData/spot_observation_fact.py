@@ -517,6 +517,16 @@ def _diagnostics_field_status_for_fact(snapshot: Mapping[str, Any]) -> dict[str,
     }
 
 
+def _diagnostic_value_for_fact(snapshot: Mapping[str, Any], field: str) -> str:
+    validated_value = _text(snapshot.get(field))
+    if validated_value:
+        return validated_value
+    raw_values = snapshot.get("diagnostics_raw_values")
+    if not isinstance(raw_values, Mapping):
+        return ""
+    return _text(raw_values.get(field))
+
+
 def _build_evidence_provenance_json(
     snapshot: Mapping[str, Any],
     evidence_codes: Iterable[str],
@@ -617,14 +627,14 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
             parsed_evidence_codes,
             diagnostics_field_status,
         ),
-        "alarmstatus": _text(snapshot.get("alarmstatus")),
-        "signalpc": _text(snapshot.get("signalpc")),
-        "d1temperature": _text(snapshot.get("d1temperature")),
-        "d2temperature": _text(snapshot.get("d2temperature")),
-        "e1out": _text(snapshot.get("e1out")),
-        "e2out": _text(snapshot.get("e2out")),
-        "itemperature": _text(snapshot.get("itemperature")),
-        "appnumber": _text(snapshot.get("appnumber")),
+        "alarmstatus": _diagnostic_value_for_fact(snapshot, "alarmstatus"),
+        "signalpc": _diagnostic_value_for_fact(snapshot, "signalpc"),
+        "d1temperature": _diagnostic_value_for_fact(snapshot, "d1temperature"),
+        "d2temperature": _diagnostic_value_for_fact(snapshot, "d2temperature"),
+        "e1out": _diagnostic_value_for_fact(snapshot, "e1out"),
+        "e2out": _diagnostic_value_for_fact(snapshot, "e2out"),
+        "itemperature": _diagnostic_value_for_fact(snapshot, "itemperature"),
+        "appnumber": _diagnostic_value_for_fact(snapshot, "appnumber"),
         "instrument_info": _text(snapshot.get("instrument_info")),
         "peak_picker_enabled": _text(snapshot.get("peak_picker_enabled")),
         "peak_picker_threshold": _text(snapshot.get("peak_picker_threshold")),

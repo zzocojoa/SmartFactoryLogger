@@ -92,7 +92,7 @@ class SpotSnapshotTests(unittest.TestCase):
             "spot_cache_status": "invalidated",
             "spot_source_freshness": "fresh",
         }
-        with patch("backend.FacilityData.drivers.real_plc.get_image_proxy_diagnostics", return_value=diagnostics):
+        with patch("backend.FacilityData.drivers.real_plc.get_spot_diagnostics", return_value=diagnostics):
             with patch("backend.FacilityData.drivers.real_plc.get_cached_spot_temp", return_value=0.0):
                 spot_value = driver._read_spot()
 
@@ -114,7 +114,7 @@ class SpotSnapshotTests(unittest.TestCase):
             "spot_source_freshness": "stale",
         }
 
-        with patch("backend.FacilityData.drivers.real_plc.get_image_proxy_diagnostics", return_value=diagnostics):
+        with patch("backend.FacilityData.drivers.real_plc.get_spot_diagnostics", return_value=diagnostics):
             with patch("backend.FacilityData.drivers.real_plc.get_cached_spot_temp", return_value=999.0):
                 spot_value = driver._read_spot()
 
@@ -323,7 +323,7 @@ class PLCServiceHealthTests(unittest.TestCase):
         }
 
         with patch(
-            "backend.FacilityData.drivers.spot_api.get_image_proxy_diagnostics",
+            "backend.FacilityData.drivers.spot_api.get_spot_diagnostics",
             return_value=diagnostics,
         ):
             health = service.get_health()

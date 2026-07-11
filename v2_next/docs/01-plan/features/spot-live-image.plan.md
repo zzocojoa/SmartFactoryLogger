@@ -1,5 +1,7 @@
 # spot-live-image - Plan Document
 
+> **SUPERSEDED (2026-07-11):** 이 문서는 과거 구현 이력 보존용입니다. 현재 운영 계약은 `docs/02-design/features/spot-camera-rest-api-conformance.design.md`이며, 장비 `GET /image.jpg`와 앱 `GET /api/spot/image.jpg`만 사용합니다.
+
 > Version: 1.0.0 | Date: 2026-06-11 | Status: Draft
 > Level: Dynamic
 

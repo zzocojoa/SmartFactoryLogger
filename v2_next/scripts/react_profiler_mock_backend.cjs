@@ -5,7 +5,7 @@ let tick = 0;
 let startedAt = Date.now();
 
 const spotImageBody = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGN4+fIFAAQjApwOFy5VAAAAAElFTkSuQmCC',
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD8qqKKKAP/2Q==',
   'base64',
 );
 
@@ -111,7 +111,7 @@ const buildStats = () => ({
 });
 
 const buildSpotConfig = () => ({
-  image_url: '/api/spot/proxy_image',
+  image_url: '/api/spot/image.jpg',
   refresh_interval: 5,
   crosshair_x: 50,
   crosshair_y: 50,
@@ -169,17 +169,15 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (url.pathname === '/api/spot/proxy_image') {
+  if (url.pathname === '/api/spot/image.jpg') {
     res.writeHead(200, {
-      'content-type': 'image/png',
+      'content-type': 'image/jpeg',
       'content-length': String(spotImageBody.length),
       'cache-control': 'no-store',
       'access-control-allow-origin': '*',
-      'access-control-expose-headers': 'X-Spot-Image-Status,X-Spot-Cache-Status,X-Spot-Proxy-State,X-Spot-Image-Age',
-      'x-spot-image-status': 'ok',
-      'x-spot-cache-status': 'mock',
-      'x-spot-proxy-state': 'mock',
-      'x-spot-image-age': '0',
+      'access-control-expose-headers': 'X-Spot-Image-Source,X-Spot-Image-At',
+      'x-spot-image-source': 'upstream',
+      'x-spot-image-at': String(Date.now()),
     });
     res.end(spotImageBody);
     return;

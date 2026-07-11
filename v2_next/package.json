@@ -63,8 +63,8 @@
         "to": "frontend/dist"
       },
       {
-        "from": "scripts/qa_spot_live_server.ps1",
-        "to": "qa/qa_spot_live_server.ps1"
+        "from": "scripts/qa_spot_image_server.ps1",
+        "to": "qa/qa_spot_image_server.ps1"
       }
     ]
   }

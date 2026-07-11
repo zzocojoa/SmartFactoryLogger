@@ -49,8 +49,7 @@ class UrlopenResponse:
 class SpotApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.original_spot_url: str = str(spot_api.config.SPOT_URL)
-        self.original_spot_image_url: str = str(spot_api.config.SPOT_IMAGE_URL)
-        self.original_spot_live_image_url: str = str(spot_api.config.SPOT_LIVE_IMAGE_URL)
+        self.original_spot_ip: str = str(spot_api.config.SPOT_IP)
         self.original_spot_refresh_interval: float = float(spot_api.config.SPOT_REFRESH_INTERVAL)
         self.original_spot_internal_temperature_url: str = str(spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL)
         self.original_spot_focus_url: str = str(spot_api.config.SPOT_FOCUS_URL)
@@ -75,8 +74,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self) -> None:
         spot_api.config.SPOT_URL = self.original_spot_url
-        spot_api.config.SPOT_IMAGE_URL = self.original_spot_image_url
-        spot_api.config.SPOT_LIVE_IMAGE_URL = self.original_spot_live_image_url
+        spot_api.config.SPOT_IP = self.original_spot_ip
         spot_api.config.SPOT_REFRESH_INTERVAL = self.original_spot_refresh_interval
         spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = self.original_spot_internal_temperature_url
         spot_api.config.SPOT_FOCUS_URL = self.original_spot_focus_url
@@ -94,22 +92,14 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.reset_spot_state()
 
     def reset_spot_state(self) -> None:
-        spot_api._img_cache = {"data": None, "time": 0.0, "temp": 0.0, "temp_time": 0.0}
+        spot_api._spot_device_request_lock = asyncio.Lock()
+        spot_api._temperature_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._internal_temp_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._img_last_error = 0.0
         spot_api._img_failure_count = 0
-        spot_api._img_cache_state = "empty"
-        spot_api._img_last_cache_log_at = 0.0
         spot_api._img_last_error_code = None
         spot_api._img_last_error_message = None
-        spot_api._img_next_retry_at = None
-        spot_api._live_img_cache = {"data": None, "time": 0.0, "url": None}
-        spot_api._live_img_last_error = 0.0
-        spot_api._live_img_failure_count = 0
-        spot_api._live_img_last_error_code = None
-        spot_api._live_img_last_error_message = None
-        spot_api._live_img_last_url = None
-        spot_api._live_img_next_retry_at = None
+        spot_api._img_last_success_at = 0.0
         spot_api._temp_last_error = 0.0
         spot_api._temp_last_error_code = None
         spot_api._temp_last_error_message = None
@@ -127,7 +117,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_diagnostics_last_error_code = None
             spot_api._spot_diagnostics_last_error_message = None
             spot_api._spot_diagnostics_seq = 0
-        spot_api._spot_diagnostics_prefetch_task = None
+        spot_api._spot_diagnostics_task = None
         with spot_api._spot_temperature_snapshot_lock:
             spot_api._spot_service_instance_id = "test-spot-service-instance"
             spot_api._spot_service_started_at = "2026-06-22T00:00:00Z"
@@ -228,7 +218,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_spot_temperature_diagnostics_before_first_poll_are_startup_pending(self) -> None:
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
 
         self.assertEqual(diagnostics["spot_service_instance_id"], "test-spot-service-instance")
         self.assertEqual(diagnostics["spot_poll_seq"], 0)
@@ -250,8 +240,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(spot_api.time, "monotonic", return_value=12345.5):
             async with httpx.AsyncClient(transport=transport) as client:
                 await spot_api._refresh_spot_temperature(client)
-            diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
-        snapshot = spot_api.get_spot_temperature_poll_snapshot()
+            diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
+            snapshot = spot_api.get_spot_temperature_poll_snapshot()
 
         self.assertIsNotNone(snapshot)
         self.assertEqual(snapshot["_spot_last_poll_completed_monotonic"], 12345.5)
@@ -289,7 +279,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(spot_api.SpotTemperatureFetchError):
                     await spot_api._refresh_spot_temperature(client)
 
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
 
         self.assertEqual(diagnostics["spot_poll_seq"], 2)
         self.assertEqual(diagnostics["spot_observation_seq"], 2)
@@ -303,7 +293,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(diagnostics["spot_temperature_effective_c"])
         self.assertIsNone(diagnostics["spot_last_valid_value_at"])
         self.assertIsNone(diagnostics["spot_last_valid_value_monotonic"])
-        self.assertEqual(spot_api._img_cache["temp_time"], 0.0)
+        self.assertEqual(spot_api._temperature_cache["temp_time"], 0.0)
 
 
     async def test_ametek_under_range_sentinel_publishes_invalid_value_snapshot(self) -> None:
@@ -317,7 +307,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 await spot_api._refresh_spot_temperature(client)
 
         error = raised.exception
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
 
         self.assertEqual(error.code, "temperature-invalid-sentinel")
         self.assertEqual(error.upstream_status, 200)
@@ -356,8 +346,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, text="53", request=request)
             if url == "http://spot.local/output?p=itemperature":
                 return httpx.Response(200, text="41.2", request=request)
-            if url == "http://spot.local/output?p=appnumber":
-                return httpx.Response(200, text="App1", request=request)
+            if url == "http://spot.local/control?p=appnumber":
+                return httpx.Response(200, text="7", request=request)
             if url == "http://spot.local/output?p=temperature":
                 return httpx.Response(200, text="6553.4", request=request)
             return httpx.Response(404, text="not found", request=request)
@@ -367,7 +357,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(spot_api.SpotTemperatureFetchError):
                 await spot_api._refresh_spot_temperature(client)
 
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
         fact = spot_api.get_spot_temperature_poll_snapshot()
 
         self.assertEqual(diagnostics["diagnostics_capture_status"], "async_complete")
@@ -385,7 +375,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["e1out"], "57")
         self.assertEqual(diagnostics["e2out"], "53")
         self.assertEqual(diagnostics["itemperature"], "41.2")
-        self.assertEqual(diagnostics["appnumber"], "App1")
+        self.assertEqual(diagnostics["appnumber"], "7")
         self.assertEqual(diagnostics["low_signal_alarm_enabled"], False)
         self.assertEqual(diagnostics["low_signal_threshold_pc"], 2.0)
         self.assertEqual(diagnostics["low_signal_comparator"], "lt")
@@ -406,40 +396,35 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("http://spot.local/output?p=e1out", requests)
         self.assertIn("http://spot.local/output?p=e2out", requests)
         self.assertIn("http://spot.local/output?p=itemperature", requests)
-        self.assertIn("http://spot.local/output?p=appnumber", requests)
+        self.assertIn("http://spot.local/control?p=appnumber", requests)
+        self.assertNotIn("http://spot.local/output?p=appnumber", requests)
 
-    async def test_scheduled_diagnostics_share_poll_identity_when_completed_before_publish(self) -> None:
+    async def test_serialized_scheduled_diagnostics_bind_to_next_poll(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
-        diagnostics_completed = asyncio.Event()
-        original_refresh = spot_api._refresh_spot_diagnostics_safely
 
         async def handler(request: httpx.Request) -> httpx.Response:
             if str(request.url).endswith("p=temperature"):
-                await asyncio.wait_for(diagnostics_completed.wait(), timeout=1.0)
                 return httpx.Response(200, text="450.0", request=request)
             return httpx.Response(200, text="0", request=request)
 
-        async def refresh_and_signal(*args: Any, **kwargs: Any) -> None:
-            await original_refresh(*args, **kwargs)
-            diagnostics_completed.set()
-
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            with patch.object(
-                spot_api,
-                "_refresh_spot_diagnostics_safely",
-                side_effect=refresh_and_signal,
-            ):
-                await spot_api._refresh_spot_temperature(client, schedule_diagnostics=True)
-                task = spot_api._spot_diagnostics_prefetch_task
-                if task is not None:
-                    await task
+            await spot_api._refresh_spot_temperature(client, schedule_diagnostics=True)
+            first_snapshot = spot_api.get_spot_temperature_poll_snapshot()
+            task = spot_api._spot_diagnostics_task
+            if task is not None:
+                await task
+            await spot_api._refresh_spot_temperature(client)
 
         snapshot = spot_api.get_spot_temperature_poll_snapshot()
+        self.assertIsNotNone(first_snapshot)
+        assert first_snapshot is not None
+        self.assertEqual(first_snapshot["diagnostics_capture_status"], "missing")
         self.assertIsNotNone(snapshot)
         assert snapshot is not None
         self.assertEqual(snapshot["diagnostics_capture_status"], "async_complete")
-        self.assertEqual(snapshot["diagnostics_binding_status"], "same_poll")
-        self.assertEqual(snapshot["diagnostics_source_poll_seq"], snapshot["spot_poll_seq"])
+        self.assertEqual(snapshot["diagnostics_binding_status"], "previous_poll")
+        self.assertEqual(snapshot["diagnostics_source_poll_seq"], 1)
+        self.assertEqual(snapshot["spot_poll_seq"], 2)
         self.assertRegex(snapshot["diagnostics_snapshot_id"], r":diag:[1-9][0-9]*$")
         self.assertGreaterEqual(float(snapshot["diagnostics_age_ms"]), 0.0)
         captured_monotonic = float(snapshot["_diagnostics_captured_monotonic"])
@@ -466,7 +451,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             first_snapshot = spot_api.get_spot_temperature_poll_snapshot()
             await asyncio.wait_for(diagnostics_started.wait(), timeout=1.0)
             diagnostics_release.set()
-            task = spot_api._spot_diagnostics_prefetch_task
+            task = spot_api._spot_diagnostics_task
             assert task is not None
             await task
             await spot_api._refresh_spot_temperature(client)
@@ -510,7 +495,36 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["diagnostics_field_status"]["d1temperature"], "http_error")
         self.assertIn("d1temperature", snapshot["diagnostics_missing_fields"])
 
-    async def test_diagnostics_failure_does_not_change_temperature_poll_status(self) -> None:
+    async def test_parse_failure_preserves_bounded_raw_value_outside_operational_payload(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.params.get("p") == "signalpc":
+                return httpx.Response(200, text="6553.4", request=request)
+            if request.url.params.get("p") == "appnumber":
+                self.assertEqual(request.url.path, "/control")
+                return httpx.Response(200, text="7", request=request)
+            return httpx.Response(200, text="0", request=request)
+
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=5,
+            started_at_epoch=time.time(),
+            started_monotonic=time.monotonic(),
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await spot_api._refresh_spot_diagnostics(client, context)
+
+        with spot_api._spot_diagnostics_lock:
+            snapshot = dict(spot_api._spot_diagnostics_snapshot or {})
+        self.assertEqual(snapshot["diagnostics_capture_status"], "async_partial")
+        self.assertEqual(snapshot["diagnostics_field_status"]["signalpc"], "parse_error")
+        self.assertIn("signalpc", snapshot["diagnostics_missing_fields"])
+        self.assertNotIn("signalpc", snapshot)
+        self.assertEqual(snapshot["diagnostics_raw_values"]["signalpc"], "6553.4")
+        self.assertEqual(snapshot["appnumber"], "7")
+
+    async def test_serialized_diagnostics_failure_does_not_change_temperature_poll_status(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
 
         async def handler(request: httpx.Request) -> httpx.Response:
@@ -521,7 +535,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             await spot_api._refresh_spot_temperature(client, schedule_diagnostics=True)
-            task = spot_api._spot_diagnostics_prefetch_task
+            task = spot_api._spot_diagnostics_task
             if task is not None:
                 await task
 
@@ -530,12 +544,16 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         assert snapshot is not None
         self.assertEqual(snapshot["spot_poll_status"], "success")
         self.assertEqual(snapshot["spot_raw_validity"], "valid_temperature")
-        self.assertEqual(snapshot["diagnostics_capture_status"], "error")
-        self.assertEqual(snapshot["diagnostics_binding_status"], "same_poll")
+        self.assertEqual(snapshot["diagnostics_capture_status"], "missing")
+        self.assertEqual(snapshot["diagnostics_binding_status"], "missing")
+        with spot_api._spot_diagnostics_lock:
+            diagnostics = dict(spot_api._spot_diagnostics_snapshot or {})
+        self.assertEqual(diagnostics["diagnostics_capture_status"], "error")
+        self.assertEqual(diagnostics["diagnostics_source_poll_seq"], snapshot["spot_poll_seq"])
         self.assertTrue(
             all(
                 status == "http_error"
-                for status in snapshot["diagnostics_field_status"].values()
+                for status in diagnostics["diagnostics_field_status"].values()
             )
         )
 
@@ -565,7 +583,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(spot_api.SpotTemperatureFetchError):
                 await spot_api._refresh_spot_temperature(client)
 
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
 
         self.assertEqual(diagnostics["spot_poll_seq"], 1)
         self.assertEqual(diagnostics["spot_observation_seq"], 1)
@@ -594,14 +612,14 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         stale_epoch = time.time() - 2.0
         stale_monotonic = time.monotonic() - 2.0
-        spot_api._img_cache["temp_time"] = stale_epoch
+        spot_api._temperature_cache["temp_time"] = stale_epoch
         with spot_api._spot_temperature_snapshot_lock:
             assert spot_api._spot_temperature_snapshot is not None
             spot_api._spot_temperature_snapshot["_spot_last_poll_completed_at_epoch"] = stale_epoch
             spot_api._spot_temperature_snapshot["_spot_last_poll_completed_monotonic"] = stale_monotonic
             spot_api._spot_last_valid_value_at = stale_epoch
 
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
 
         self.assertEqual(diagnostics["spot_source_freshness"], "stale")
         self.assertEqual(diagnostics["temperature_status_shadow"], "unknown_missing")
@@ -630,13 +648,13 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         stale_epoch = time.time() - 2.0
         stale_monotonic = time.monotonic() - 2.0
-        spot_api._img_cache["temp_time"] = stale_epoch
+        spot_api._temperature_cache["temp_time"] = stale_epoch
         with spot_api._spot_temperature_snapshot_lock:
             assert spot_api._spot_temperature_snapshot is not None
             spot_api._spot_temperature_snapshot["_spot_last_poll_completed_at_epoch"] = stale_epoch
             spot_api._spot_temperature_snapshot["_spot_last_poll_completed_monotonic"] = stale_monotonic
 
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
 
         self.assertEqual(diagnostics["spot_source_freshness"], "stale")
         self.assertEqual(diagnostics["spot_poll_status"], "timeout")
@@ -671,7 +689,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(spot_api.SpotTemperatureFetchError):
                 await spot_api._refresh_spot_temperature(client)
 
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
 
         self.assertEqual(diagnostics["spot_poll_status"], "timeout")
         self.assertEqual(diagnostics["spot_raw_validity"], "not_received")
@@ -687,7 +705,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(spot_api.SpotTemperatureFetchError):
                 await spot_api._refresh_spot_temperature(client)
 
-        diagnostics = spot_api.get_image_proxy_diagnostics()
+        diagnostics = spot_api.get_spot_diagnostics()
 
         self.assertEqual(diagnostics["spot_poll_status"], "timeout")
         self.assertTrue(diagnostics["cache_fallback_allowed"])
@@ -708,7 +726,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         error = raised.exception
         spot_api._record_temperature_error(error.code, str(error), error.temp_url, error.upstream_status)
 
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
+        diagnostics: dict[str, Any] = spot_api.get_spot_diagnostics()
 
         self.assertEqual(error.code, "temperature-upstream-timeout")
         self.assertIn("ReadTimeout", str(error))
@@ -823,100 +841,6 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.upstream_status, 200)
         self.assertIn("content_type=text/html", str(error))
         self.assertIn("not an image", str(error))
-
-    def test_live_image_url_falls_back_to_spot_image_url(self) -> None:
-        spot_api.config.SPOT_LIVE_IMAGE_URL = ""
-        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
-
-        self.assertEqual(spot_api._resolve_spot_live_image_url(), "http://spot.local/image.jpg")
-
-    async def test_live_image_fetch_does_not_update_snapshot_cache(self) -> None:
-        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/newjpeg.jpg"
-        image_bytes = b"\xff\xd8live-image\xff\xd9"
-        request_mock: AsyncMock = AsyncMock(return_value=image_bytes)
-
-        with patch.object(spot_api, "_request_spot_image", request_mock):
-            data, meta = await spot_api.fetch_live_image_async()
-
-        self.assertEqual(data, image_bytes)
-        self.assertEqual(meta["source"], "upstream")
-        self.assertEqual(meta["image_url"], "http://spot.local/newjpeg.jpg")
-        self.assertIsNone(spot_api._img_cache["data"])
-        self.assertEqual(spot_api._live_img_cache["data"], image_bytes)
-        request_mock.assert_awaited_once()
-
-    async def test_live_image_html_payload_is_rejected_and_backed_off(self) -> None:
-        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/image.ssi"
-        html_body = b"<!doctype html><html><body><img src='/newjpeg.jpg'></body></html>"
-
-        async def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(
-                200,
-                content=html_body,
-                headers={"Content-Type": "text/html"},
-                request=request,
-            )
-
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(transport=transport) as client:
-            with patch.object(spot_api, "_get_http_client", Mock(return_value=client)):
-                with self.assertRaises(spot_api.SpotImageFetchError) as raised:
-                    await spot_api.fetch_live_image_async()
-
-        error = raised.exception
-        diagnostics = spot_api.get_live_image_diagnostics()
-
-        self.assertEqual(error.code, "invalid-image-html")
-        self.assertEqual(error.upstream_status, 200)
-        self.assertIsNone(spot_api._img_cache["data"])
-        self.assertEqual(diagnostics["live_failure_count"], 1)
-        self.assertEqual(diagnostics["live_last_error_code"], "invalid-image-html")
-        self.assertGreater(float(diagnostics["live_retry_after_sec"]), 0.0)
-
-    async def test_image_missing_extension_fallbacks_to_jpg(self) -> None:
-        image_bytes = b"\xff\xd8image-data\xff\xd9"
-        requests: list[str] = []
-
-        async def handler(request: httpx.Request) -> httpx.Response:
-            requests.append(str(request.url))
-            if str(request.url).endswith("/image.jpg"):
-                return httpx.Response(
-                    200,
-                    content=image_bytes,
-                    headers={"Content-Type": "image/jpeg"},
-                    request=request,
-                )
-            return httpx.Response(404, text="not found", request=request)
-
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(transport=transport) as client:
-            data = await spot_api._request_spot_image(client, "http://spot.local/image")
-
-        self.assertEqual(data, image_bytes)
-        self.assertEqual(requests, ["http://spot.local/image", "http://spot.local/image.jpg"])
-
-    async def test_image_jpg_path_fallbacks_to_image(self) -> None:
-        image_bytes = b"\xff\xd8alt-image\xff\xd9"
-        requests: list[str] = []
-
-        async def handler(request: httpx.Request) -> httpx.Response:
-            requests.append(str(request.url))
-            if str(request.url).endswith("/image"):
-                return httpx.Response(
-                    200,
-                    content=image_bytes,
-                    headers={"Content-Type": "image/jpeg"},
-                    request=request,
-                )
-            return httpx.Response(404, text="not found", request=request)
-
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(transport=transport) as client:
-            data = await spot_api._request_spot_image(client, "http://spot.local/image.jpg")
-
-        self.assertEqual(data, image_bytes)
-        self.assertEqual(requests, ["http://spot.local/image.jpg", "http://spot.local/image"])
-
     async def test_image_http_401_is_rejected_with_http_error(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(401, text="auth required", request=request)
@@ -946,658 +870,6 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.code, "upstream-http-error")
         self.assertEqual(error.upstream_status, 403)
         self.assertIn("HTTP 403", str(error))
-
-    async def test_image_query_string_is_preserved_in_fallback(self) -> None:
-        image_bytes = b"\xff\xd8query-image\xff\xd9"
-        requests: list[str] = []
-        query = "stream=1&quality=high"
-
-        async def handler(request: httpx.Request) -> httpx.Response:
-            request_url = str(request.url)
-            requests.append(request_url)
-            if request_url == f"http://spot.local/image?{query}":
-                return httpx.Response(404, text="not found", request=request)
-            if request_url == f"http://spot.local/image.jpg?{query}":
-                return httpx.Response(
-                    200,
-                    content=image_bytes,
-                    headers={"Content-Type": "image/jpeg"},
-                    request=request,
-                )
-            return httpx.Response(
-                500,
-                text=f"unexpected path: {request_url}",
-                request=request,
-            )
-
-        transport = httpx.MockTransport(handler)
-        async with httpx.AsyncClient(transport=transport) as client:
-            data = await spot_api._request_spot_image(client, f"http://spot.local/image?{query}")
-
-        self.assertEqual(data, image_bytes)
-        self.assertEqual(
-            requests,
-            [f"http://spot.local/image?{query}", f"http://spot.local/image.jpg?{query}"],
-        )
-
-    def test_image_backoff_diagnostics_include_retry_timing(self) -> None:
-        spot_api._img_failure_count = 3
-        spot_api._record_image_error("upstream-timeout", "timeout")
-        spot_api._record_image_backoff(2.0)
-
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
-
-        self.assertEqual(diagnostics["failure_count"], 3)
-        self.assertEqual(diagnostics["current_backoff_sec"], 2.0)
-        self.assertIsNotNone(diagnostics["next_retry_at"])
-        self.assertIsNotNone(diagnostics["retry_after_sec"])
-        self.assertGreater(float(diagnostics["retry_after_sec"]), 0.0)
-        self.assertLessEqual(float(diagnostics["retry_after_sec"]), 2.0)
-
-    def test_image_cache_memory_summary_splits_static_and_live_bytes_without_url(self) -> None:
-        now = 1_777_660_900.0
-        raw_live_url = "http://spot.local/live.jpg?token=secret-token"
-        spot_api._img_cache["data"] = b"static-cache"
-        spot_api._img_cache["time"] = now - 3.0
-        spot_api._img_failure_count = 2
-        spot_api._img_next_retry_at = now + 2.0
-        spot_api._live_img_cache = {"data": b"live-frame", "time": now - 0.02, "url": raw_live_url}
-        spot_api._live_img_last_url = raw_live_url
-        spot_api._live_img_failure_count = 1
-        spot_api._live_img_next_retry_at = now + 1.0
-
-        with patch.object(spot_api.time, "time", return_value=now):
-            summary: dict[str, Any] = spot_api.get_image_cache_memory_summary()
-
-        self.assertEqual(summary["image_bytes"], len(b"static-cache"))
-        self.assertEqual(summary["live_image_bytes"], len(b"live-frame"))
-        self.assertEqual(summary["total_bytes"], len(b"static-cache") + len(b"live-frame"))
-        self.assertEqual(summary["image_age_sec"], 3.0)
-        self.assertAlmostEqual(float(summary["live_image_age_sec"]), 0.02)
-        self.assertEqual(summary["image_cache_state"], "cache")
-        self.assertEqual(summary["live_image_cache_state"], "fresh")
-        self.assertEqual(summary["image_failure_count"], 2)
-        self.assertEqual(summary["live_image_failure_count"], 1)
-        self.assertEqual(summary["image_next_retry_at"], now + 2.0)
-        self.assertEqual(summary["live_image_next_retry_at"], now + 1.0)
-        self.assertTrue(summary["live_image_url_present"])
-        self.assertNotIn(raw_live_url, str(summary))
-        self.assertNotIn("secret-token", str(summary))
-
-    def test_spot_live_cache_collector_reports_live_bytes(self) -> None:
-        from backend import app as backend_app
-
-        raw_live_url = "http://spot.local/live.jpg?token=secret-token"
-        summary: dict[str, Any] = {
-            "image_bytes": 12,
-            "image_age_sec": 3.0,
-            "image_cache_state": "cache",
-            "image_failure_count": 2,
-            "image_next_retry_at": 1_777_660_902.0,
-            "live_image_bytes": 9,
-            "live_image_age_sec": 0.02,
-            "live_image_cache_state": "fresh",
-            "live_image_url_present": True,
-            "live_image_failure_count": 1,
-            "live_image_next_retry_at": 1_777_660_901.0,
-            "total_bytes": 21,
-        }
-
-        with patch.object(
-            backend_app.spot_control,
-            "get_image_cache_memory_summary",
-            Mock(return_value=summary),
-        ):
-            image_cache = backend_app._collect_spot_image_cache()
-            live_cache = backend_app._collect_spot_live_cache()
-            compatibility_alias = backend_app._collect_spot_cache()
-
-        self.assertIn("spot.image_cache", backend_app.memory_service._collectors)
-        self.assertIn("spot.live_cache", backend_app.memory_service._collectors)
-        self.assertIn("spot.cache", backend_app.memory_service._collectors)
-        self.assertEqual(image_cache["name"], "spot.image_cache")
-        self.assertEqual(image_cache["bytes"], 12)
-        self.assertEqual(image_cache["exactness"], "exact")
-        self.assertIn("fail=2", str(image_cache["note"]))
-        self.assertEqual(live_cache["name"], "spot.live_cache")
-        self.assertEqual(live_cache["bytes"], 9)
-        self.assertEqual(live_cache["exactness"], "exact")
-        self.assertIn("url_present=True", str(live_cache["note"]))
-        self.assertEqual(compatibility_alias["name"], "spot.cache")
-        self.assertEqual(compatibility_alias["bytes"], 21)
-        self.assertEqual(compatibility_alias["exactness"], "exact")
-        self.assertIn("split=spot.image_cache,spot.live_cache", str(compatibility_alias["note"]))
-        self.assertNotIn(raw_live_url, str([image_cache, live_cache, compatibility_alias]))
-        self.assertNotIn("secret-token", str([image_cache, live_cache, compatibility_alias]))
-
-    async def test_cold_cache_backoff_fast_fails_without_upstream_call(self) -> None:
-        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
-        spot_api._img_failure_count = 1
-        spot_api._record_image_error("upstream-timeout", "timeout")
-        spot_api._record_image_backoff(2.0)
-        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
-
-        with patch.object(spot_api, "_request_spot_image", request_mock):
-            with self.assertRaises(spot_api.SpotImageBackoffError) as raised:
-                await spot_api.fetch_image_async()
-
-        error = raised.exception
-
-        self.assertEqual(error.code, "retry-backoff-active")
-        self.assertEqual(error.image_url, "http://spot.local/image.jpg")
-        self.assertIsNone(error.upstream_status)
-        self.assertGreater(error.retry_after_sec, 0.0)
-        request_mock.assert_not_awaited()
-
-    async def test_cold_cache_fetch_failure_sets_backoff_for_next_request(self) -> None:
-        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
-        image_error = spot_api.SpotImageFetchError(
-            "upstream-timeout",
-            "SPOT image upstream timed out; url=http://spot.local/image.jpg",
-            image_url="http://spot.local/image.jpg",
-            upstream_status=None,
-        )
-        request_mock: AsyncMock = AsyncMock(side_effect=[image_error, b"unexpected"])
-
-        with patch.object(spot_api, "_request_spot_image", request_mock):
-            with self.assertRaises(spot_api.SpotImageFetchError):
-                await spot_api.fetch_image_async()
-
-            diagnostics = spot_api.get_image_proxy_diagnostics()
-
-            with self.assertRaises(spot_api.SpotImageBackoffError):
-                await spot_api.fetch_image_async()
-
-        self.assertEqual(diagnostics["failure_count"], 1)
-        self.assertEqual(diagnostics["cache_status"], "empty")
-        self.assertEqual(diagnostics["proxy_state"], "backoff")
-        self.assertGreater(float(diagnostics["retry_after_sec"]), 0.0)
-        self.assertEqual(request_mock.await_count, 1)
-
-    async def test_cached_image_backoff_still_returns_cache_without_upstream_call(self) -> None:
-        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
-        spot_api._img_cache["data"] = b"cached-image"
-        spot_api._img_cache["time"] = time.time()
-        spot_api._img_failure_count = 2
-        spot_api._record_image_error("upstream-timeout", "timeout")
-        spot_api._record_image_backoff(2.0)
-        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
-
-        with patch.object(spot_api, "_request_spot_image", request_mock):
-            data, meta = await spot_api.fetch_image_async()
-
-        self.assertEqual(data, b"cached-image")
-        self.assertEqual(meta["status"], "ok")
-        self.assertEqual(meta["source"], "cache")
-        self.assertEqual(meta["cache_status"], "fresh")
-        self.assertEqual(meta["proxy_state"], "backoff")
-        self.assertGreater(float(meta["retry_after_sec"]), 0.0)
-        request_mock.assert_not_awaited()
-
-    async def test_stale_cached_image_backoff_still_returns_cache_without_upstream_call(self) -> None:
-        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
-        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
-        spot_api._img_cache["data"] = b"stale-image"
-        spot_api._img_cache["time"] = time.time() - 20.0
-        spot_api._img_failure_count = 2
-        spot_api._record_image_error("upstream-timeout", "timeout")
-        spot_api._record_image_backoff(2.0)
-        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
-
-        with patch.object(spot_api, "_request_spot_image", request_mock):
-            data, meta = await spot_api.fetch_image_async()
-
-        self.assertEqual(data, b"stale-image")
-        self.assertEqual(meta["status"], "stale")
-        self.assertEqual(meta["source"], "stale")
-        self.assertEqual(meta["cache_status"], "stale")
-        self.assertEqual(meta["proxy_state"], "backoff")
-        self.assertGreater(float(meta["retry_after_sec"]), 0.0)
-        request_mock.assert_not_awaited()
-
-    async def test_cold_cache_backoff_rechecked_after_lock_wait(self) -> None:
-        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
-        lock_entered = asyncio.Event()
-        release_lock = asyncio.Event()
-        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
-
-        @asynccontextmanager
-        async def delayed_fetch_lock() -> AsyncIterator[None]:
-            lock_entered.set()
-            await release_lock.wait()
-            yield
-
-        with (
-            patch.object(spot_api, "_img_fetch_lock", delayed_fetch_lock()),
-            patch.object(spot_api, "_request_spot_image", request_mock),
-        ):
-            fetch_task = asyncio.create_task(spot_api.fetch_image_async())
-            await lock_entered.wait()
-            spot_api._img_failure_count = 1
-            spot_api._record_image_error("upstream-timeout", "timeout")
-            spot_api._record_image_backoff(2.0)
-            release_lock.set()
-
-            with self.assertRaises(spot_api.SpotImageBackoffError):
-                await fetch_task
-
-        request_mock.assert_not_awaited()
-
-    async def test_prefetch_payload_rejection_uses_loop_pacing_without_backoff(self) -> None:
-        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
-        spot_api.config.SPOT_URL = ""
-        spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = ""
-        spot_api.config.SPOT_REFRESH_INTERVAL = 1.25
-        image_error = spot_api.SpotImageFetchError(
-            "invalid-image-html",
-            "SPOT image upstream returned HTML instead of image bytes; url=http://spot.local/image.jpg",
-            image_url="http://spot.local/image.jpg",
-            upstream_status=200,
-        )
-        request_mock: AsyncMock = AsyncMock(side_effect=image_error)
-        sleep_delays: list[float] = []
-
-        async def sleep_once(delay: float) -> None:
-            sleep_delays.append(delay)
-            spot_api._prefetch_running = False
-
-        with (
-            patch.object(spot_api, "_get_http_client", Mock(return_value=object())),
-            patch.object(spot_api, "_request_spot_image", request_mock),
-            patch.object(spot_api.asyncio, "sleep", AsyncMock(side_effect=sleep_once)),
-        ):
-            await spot_api._prefetch_loop()
-
-        self.assertEqual(request_mock.await_count, 1)
-        self.assertEqual(sleep_delays, [1.25])
-        self.assertEqual(spot_api._img_failure_count, 0)
-        self.assertIsNone(spot_api._img_last_error_code)
-        self.assertIsNone(spot_api._img_next_retry_at)
-
-    async def test_prefetch_fetch_error_sleeps_backoff_without_extra_interval(self) -> None:
-        spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
-        spot_api.config.SPOT_URL = ""
-        spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = ""
-        spot_api.config.SPOT_REFRESH_INTERVAL = 1.25
-        image_error = spot_api.SpotImageFetchError(
-            "upstream-timeout",
-            "SPOT image upstream timed out; url=http://spot.local/image.jpg",
-            image_url="http://spot.local/image.jpg",
-            upstream_status=None,
-        )
-        request_mock: AsyncMock = AsyncMock(side_effect=image_error)
-        sleep_delays: list[float] = []
-
-        async def sleep_once(delay: float) -> None:
-            sleep_delays.append(delay)
-            spot_api._prefetch_running = False
-
-        with (
-            patch.object(spot_api, "_get_http_client", Mock(return_value=object())),
-            patch.object(spot_api, "_request_spot_image", request_mock),
-            patch.object(spot_api.asyncio, "sleep", AsyncMock(side_effect=sleep_once)),
-        ):
-            await spot_api._prefetch_loop()
-
-        self.assertEqual(request_mock.await_count, 1)
-        self.assertEqual(spot_api._img_failure_count, 1)
-        self.assertEqual(sleep_delays, [spot_api._current_backoff_sec()])
-        self.assertEqual(spot_api._img_last_error_code, "upstream-timeout")
-        self.assertIsNotNone(spot_api._img_next_retry_at)
-
-    async def test_stale_cache_diagnostics_include_policy_threshold(self) -> None:
-        spot_api.config.SPOT_REFRESH_INTERVAL = 3.0
-        spot_api._img_cache["data"] = b"image-data"
-        spot_api._img_cache["time"] = time.time() - 20.0
-
-        data, meta = await spot_api.fetch_image_async()
-        diagnostics: dict[str, Any] = spot_api.get_image_proxy_diagnostics()
-
-        self.assertEqual(data, b"image-data")
-        self.assertEqual(meta["status"], "stale")
-        self.assertEqual(meta["source"], "stale")
-        self.assertTrue(diagnostics["has_cached_image"])
-        self.assertGreaterEqual(float(diagnostics["cache_age_sec"]), float(diagnostics["max_stale_age_sec"]))
-        self.assertEqual(diagnostics["max_stale_age_sec"], 15.0)
-
-    async def test_proxy_image_response_includes_cache_metadata_headers(self) -> None:
-        from backend import app as backend_app
-
-        fetch_mock: AsyncMock = AsyncMock(
-            return_value=(
-                b"image-data",
-                {
-                    "status": "ok",
-                    "source": "cache",
-                    "captured_at": 1_714_567_890.123,
-                    "age_sec": 0.333,
-                    "cache_status": "fresh",
-                    "proxy_state": "backoff",
-                    "failure_count": 2,
-                    "last_error_code": "upstream-timeout",
-                    "max_stale_age_sec": 15.0,
-                    "retry_after_sec": 1.2345,
-                },
-            )
-        )
-        record_mock: Mock = Mock()
-
-        with (
-            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
-            patch.object(backend_app.observability_service, "record_spot_proxy_result", record_mock),
-        ):
-            response = await backend_app.proxy_spot_image()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.body, b"image-data")
-        self.assertEqual(response.headers["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
-        self.assertEqual(response.headers["X-Spot-Image-At"], "1714567890123")
-        self.assertEqual(response.headers["X-Spot-Image-Age"], "0.333")
-        self.assertEqual(response.headers["X-Spot-Image-Status"], "ok")
-        self.assertEqual(response.headers["X-Spot-Cache-Status"], "fresh")
-        self.assertEqual(response.headers["X-Spot-Proxy-State"], "backoff")
-        self.assertEqual(response.headers["X-Spot-Image-Source"], "cache")
-        self.assertEqual(response.headers["X-Spot-Failure-Count"], "2")
-        self.assertEqual(response.headers["X-Spot-Last-Error-Code"], "upstream-timeout")
-        self.assertEqual(response.headers["X-Spot-Max-Stale-Age"], "15.000")
-        self.assertEqual(response.headers["Retry-After"], "2")
-        self.assertEqual(response.headers["X-Spot-Retry-After-Ms"], "1235")
-        record_mock.assert_called_once_with(200, 0.333, False)
-
-    async def test_proxy_image_response_includes_internal_temperature_headers_from_cache(self) -> None:
-        from backend import app as backend_app
-
-        measured_at = time.time()
-        spot_api._internal_temp_cache = {"temp": 41.25, "temp_time": measured_at}
-        fetch_mock: AsyncMock = AsyncMock(
-            return_value=(
-                b"image-data",
-                {
-                    "status": "ok",
-                    "source": "cache",
-                    "captured_at": measured_at,
-                    "age_sec": 0.333,
-                    "cache_status": "fresh",
-                    "proxy_state": "ok",
-                    "failure_count": 0,
-                    "last_error_code": None,
-                    "max_stale_age_sec": 15.0,
-                    "retry_after_sec": None,
-                },
-            )
-        )
-        record_mock: Mock = Mock()
-
-        with (
-            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
-            patch.object(backend_app.observability_service, "record_spot_proxy_result", record_mock),
-        ):
-            response = await backend_app.proxy_spot_image()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["X-Spot-Internal-Temperature"], "41.250")
-        self.assertEqual(response.headers["X-Spot-Internal-Temperature-At"], str(int(measured_at * 1000)))
-        self.assertEqual(response.headers["X-Spot-Internal-Temperature-Status"], "ok")
-
-    async def test_proxy_image_response_records_stale_metadata(self) -> None:
-        from backend import app as backend_app
-
-        fetch_mock: AsyncMock = AsyncMock(
-            return_value=(
-                b"stale-image-data",
-                {
-                    "status": "stale",
-                    "source": "stale",
-                    "captured_at": 1_714_567_000.0,
-                    "age_sec": 15.5,
-                    "cache_status": "stale",
-                    "proxy_state": "ok",
-                    "failure_count": 0,
-                    "last_error_code": None,
-                    "max_stale_age_sec": 15.0,
-                    "retry_after_sec": None,
-                },
-            )
-        )
-        record_mock: Mock = Mock()
-
-        with (
-            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
-            patch.object(backend_app.observability_service, "record_spot_proxy_result", record_mock),
-        ):
-            response = await backend_app.proxy_spot_image()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["X-Spot-Image-Age"], "15.500")
-        self.assertEqual(response.headers["X-Spot-Image-Status"], "stale")
-        self.assertEqual(response.headers["X-Spot-Cache-Status"], "stale")
-        self.assertEqual(response.headers["X-Spot-Proxy-State"], "ok")
-        self.assertEqual(response.headers["X-Spot-Image-Source"], "stale")
-        self.assertEqual(response.headers["X-Spot-Failure-Count"], "0")
-        self.assertEqual(response.headers["X-Spot-Max-Stale-Age"], "15.000")
-        self.assertNotIn("X-Spot-Retry-After-Ms", response.headers)
-        record_mock.assert_called_once_with(200, 15.5, True)
-
-    async def test_proxy_image_response_ignores_boolean_retry_after_metadata(self) -> None:
-        from backend import app as backend_app
-
-        fetch_mock: AsyncMock = AsyncMock(
-            return_value=(
-                b"image-data",
-                {
-                    "status": "ok",
-                    "source": "cache",
-                    "captured_at": 1_714_567_890.123,
-                    "age_sec": 0.333,
-                    "cache_status": "fresh",
-                    "proxy_state": "ok",
-                    "failure_count": 0,
-                    "last_error_code": None,
-                    "max_stale_age_sec": 15.0,
-                    "retry_after_sec": True,
-                },
-            )
-        )
-
-        with patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock):
-            response = await backend_app.proxy_spot_image()
-
-        self.assertNotIn("Retry-After", response.headers)
-        self.assertNotIn("X-Spot-Retry-After-Ms", response.headers)
-
-    async def test_proxy_image_response_ignores_non_finite_retry_after_metadata(self) -> None:
-        from backend import app as backend_app
-
-        for retry_after_sec in [float("nan"), float("inf")]:
-            fetch_mock: AsyncMock = AsyncMock(
-                return_value=(
-                    b"image-data",
-                    {
-                        "status": "ok",
-                        "source": "cache",
-                        "captured_at": 1_714_567_890.123,
-                        "age_sec": 0.333,
-                        "cache_status": "fresh",
-                        "proxy_state": "ok",
-                        "failure_count": 0,
-                        "last_error_code": None,
-                        "max_stale_age_sec": 15.0,
-                        "retry_after_sec": retry_after_sec,
-                    },
-                )
-            )
-
-            with self.subTest(retry_after_sec=retry_after_sec):
-                with patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock):
-                    response = await backend_app.proxy_spot_image()
-
-                self.assertNotIn("Retry-After", response.headers)
-                self.assertNotIn("X-Spot-Retry-After-Ms", response.headers)
-
-    async def test_proxy_image_fetch_error_includes_diagnostics_payload(self) -> None:
-        from backend import app as backend_app
-
-        image_error = spot_api.SpotImageFetchError(
-            "upstream-timeout",
-            "SPOT image upstream timed out; url=http://spot.local/image.jpg; error_type=ReadTimeout; error=ReadTimeout",
-            image_url="http://spot.local/image.jpg",
-            upstream_status=None,
-        )
-        diagnostics: dict[str, Any] = {
-            "cache_state": "empty",
-            "cache_status": "empty",
-            "proxy_state": "backoff",
-            "failure_count": 1,
-            "last_error_code": "upstream-timeout",
-            "retry_after_sec": 2.001,
-        }
-        fetch_mock: AsyncMock = AsyncMock(side_effect=image_error)
-        diagnostics_mock: Mock = Mock(return_value=diagnostics)
-        record_mock: Mock = Mock()
-
-        with (
-            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
-            patch.object(backend_app.spot_control, "get_image_proxy_diagnostics", diagnostics_mock),
-            patch.object(backend_app.observability_service, "record_error", record_mock),
-        ):
-            with self.assertRaises(HTTPException) as raised:
-                await backend_app.proxy_spot_image()
-
-        exception = raised.exception
-        detail: dict[str, Any] = exception.detail
-
-        self.assertEqual(exception.status_code, 502)
-        self.assertEqual(detail["code"], "upstream-timeout")
-        self.assertEqual(detail["upstream_status"], None)
-        self.assertEqual(detail["image_url"], "http://spot.local/image.jpg")
-        self.assertEqual(detail["diagnostics"], diagnostics)
-        self.assertEqual(exception.headers, {"Retry-After": "3", "X-Spot-Retry-After-Ms": "2001"})
-        record_mock.assert_called_once()
-        _, record_kwargs = record_mock.call_args
-        self.assertEqual(record_kwargs["path"], "/api/spot/proxy_image")
-        self.assertEqual(record_kwargs["status_code"], 502)
-        self.assertEqual(record_kwargs["error_type"], "upstream-timeout")
-        self.assertNotIn("spot.local", record_kwargs["detail"])
-        self.assertNotIn("diagnostics", record_kwargs["detail"])
-
-    async def test_proxy_image_backoff_error_returns_503_with_retry_headers(self) -> None:
-        from backend import app as backend_app
-
-        image_error = spot_api.SpotImageBackoffError("http://spot.local/image.jpg", 2.001)
-        diagnostics: dict[str, Any] = {
-            "cache_state": "empty",
-            "cache_status": "empty",
-            "proxy_state": "backoff",
-            "failure_count": 1,
-            "last_error_code": "upstream-timeout",
-            "retry_after_sec": 1.0,
-        }
-        fetch_mock: AsyncMock = AsyncMock(side_effect=image_error)
-        diagnostics_mock: Mock = Mock(return_value=diagnostics)
-
-        with (
-            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
-            patch.object(backend_app.spot_control, "get_image_proxy_diagnostics", diagnostics_mock),
-            patch.object(backend_app.observability_service, "record_error", Mock()) as record_mock,
-        ):
-            with self.assertRaises(HTTPException) as raised:
-                await backend_app.proxy_spot_image()
-
-        exception = raised.exception
-        detail: dict[str, Any] = exception.detail
-
-        self.assertEqual(exception.status_code, 503)
-        self.assertEqual(detail["code"], "retry-backoff-active")
-        self.assertIsNone(detail["upstream_status"])
-        self.assertEqual(detail["image_url"], "http://spot.local/image.jpg")
-        self.assertEqual(detail["diagnostics"]["cache_status"], "empty")
-        self.assertEqual(detail["diagnostics"]["proxy_state"], "backoff")
-        self.assertEqual(detail["diagnostics"]["retry_after_sec"], 2.001)
-        self.assertEqual(exception.headers, {"Retry-After": "3", "X-Spot-Retry-After-Ms": "2001"})
-        record_mock.assert_called_once()
-        _, record_kwargs = record_mock.call_args
-        self.assertEqual(record_kwargs["path"], "/api/spot/proxy_image")
-        self.assertEqual(record_kwargs["status_code"], 503)
-        self.assertEqual(record_kwargs["error_type"], "retry-backoff-active")
-        self.assertNotIn("spot.local", record_kwargs["detail"])
-        self.assertNotIn("diagnostics", record_kwargs["detail"])
-
-    async def test_proxy_image_payload_rejection_response_includes_payload_rejection_header(self) -> None:
-        from backend import app as backend_app
-
-        image_error = spot_api.SpotImageFetchError(
-            "invalid-image-html",
-            "SPOT image upstream returned HTML instead of image bytes; url=http://spot.local/image.jpg; status_code=200; content_type=text/html; body=<!doctype html><html><body>not an image</body></html>",
-            image_url="http://spot.local/image.jpg",
-            upstream_status=200,
-        )
-        diagnostics: dict[str, Any] = {
-            "cache_state": "empty",
-            "cache_status": "empty",
-            "proxy_state": "error",
-            "failure_count": 1,
-            "last_error_code": "invalid-image-html",
-            "retry_after_sec": 2.001,
-        }
-        fetch_mock: AsyncMock = AsyncMock(side_effect=image_error)
-        diagnostics_mock: Mock = Mock(return_value=diagnostics)
-        record_mock: Mock = Mock()
-
-        with (
-            patch.object(backend_app.spot_control, "fetch_image_async", fetch_mock),
-            patch.object(backend_app.spot_control, "get_image_proxy_diagnostics", diagnostics_mock),
-            patch.object(backend_app.observability_service, "record_error", record_mock),
-        ):
-            with self.assertRaises(HTTPException) as raised:
-                await backend_app.proxy_spot_image()
-
-        exception = raised.exception
-        detail: dict[str, Any] = exception.detail
-
-        self.assertEqual(exception.status_code, 502)
-        self.assertEqual(detail["code"], "invalid-image-html")
-        self.assertEqual(exception.headers.get("X-Spot-Payload-Rejection"), "1")
-        self.assertEqual(exception.headers.get("Retry-After"), "3")
-        self.assertEqual(exception.headers.get("X-Spot-Retry-After-Ms"), "2001")
-        record_mock.assert_not_called()
-
-    def test_proxy_image_payload_rejection_not_counted_as_request_error(self) -> None:
-        from backend import app as backend_app
-
-        image_error = spot_api.SpotImageFetchError(
-            "invalid-image-payload",
-            "SPOT image upstream returned invalid payload; url=http://spot.local/image.jpg; status_code=200; content_type=application/octet-stream",
-            image_url="http://spot.local/image.jpg",
-            upstream_status=200,
-        )
-        diagnostics: dict[str, Any] = {
-            "cache_state": "empty",
-            "cache_status": "empty",
-            "proxy_state": "error",
-            "failure_count": 1,
-            "last_error_code": "invalid-image-payload",
-            "retry_after_sec": 2.001,
-        }
-
-        original_total_requests = backend_app._stats_total_requests
-        original_error_count = backend_app._stats_error_count
-
-        with (
-            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(side_effect=image_error)),
-            patch.object(backend_app.spot_control, "get_image_proxy_diagnostics", Mock(return_value=diagnostics)),
-            patch.object(backend_app.observability_service, "record_error", Mock()),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
-            try:
-                response = client.get("/api/spot/proxy_image")
-            finally:
-                client.close()
-
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.headers.get("X-Spot-Payload-Rejection"), "1")
-        self.assertEqual(backend_app._stats_total_requests, original_total_requests + 1)
-        self.assertEqual(backend_app._stats_error_count, original_error_count)
-        self.assertEqual(backend_app._stats_last_status, 502)
 
     async def test_request_stats_call_next_exception_keeps_original_error_and_counts_500(self) -> None:
         from backend import app as backend_app
@@ -1662,57 +934,6 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             error_type="http_5xx",
         )
 
-    async def test_proxy_image_forbidden_and_unauthorized_are_counted_as_request_errors(self) -> None:
-        from backend import app as backend_app
-
-        for status in [401, 403]:
-            with self.subTest(status=status):
-                image_error = spot_api.SpotImageFetchError(
-                    "upstream-http-error",
-                    f"SPOT image upstream returned HTTP {status}; url=http://spot.local/image.jpg; body=denied",
-                    image_url="http://spot.local/image.jpg",
-                    upstream_status=status,
-                )
-                diagnostics: dict[str, Any] = {
-                    "cache_state": "error",
-                    "cache_status": "empty",
-                    "proxy_state": "error",
-                    "failure_count": 1,
-                    "last_error_code": "upstream-http-error",
-                    "retry_after_sec": 1.001,
-                }
-
-                original_total_requests = backend_app._stats_total_requests
-                original_error_count = backend_app._stats_error_count
-
-                with (
-                    patch.object(
-                        backend_app.spot_control,
-                        "fetch_image_async",
-                        AsyncMock(side_effect=image_error),
-                    ),
-                    patch.object(
-                        backend_app.spot_control,
-                        "get_image_proxy_diagnostics",
-                        Mock(return_value=diagnostics),
-                    ),
-                    patch.object(backend_app.observability_service, "record_error", Mock()),
-                ):
-                    client = TestClient(backend_app.app, raise_server_exceptions=False)
-                    try:
-                        response = client.get("/api/spot/proxy_image")
-                    finally:
-                        client.close()
-
-                self.assertEqual(response.status_code, 502)
-                detail: dict[str, Any] = response.json()["detail"]
-                self.assertEqual(detail["code"], "upstream-http-error")
-                self.assertEqual(detail["upstream_status"], status)
-                self.assertIsNone(response.headers.get("X-Spot-Payload-Rejection"))
-                self.assertEqual(backend_app._stats_total_requests, original_total_requests + 1)
-                self.assertEqual(backend_app._stats_error_count, original_error_count + 1)
-                self.assertEqual(backend_app._stats_last_status, 502)
-
     def test_stats_response_includes_performance_contract_version_and_thresholds(self) -> None:
         from backend import app as backend_app
 
@@ -1733,55 +954,35 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("error_count", payload)
         self.assertIn("polling", payload)
 
-    def test_spot_live_image_stats_include_success_failure_stale_and_age(self) -> None:
-        from backend.Observability.service import ObservabilityService
-
-        service = ObservabilityService(window_sec=60.0, max_requests=100, max_errors=20)
-
-        service.record_request("/api/spot/live_image", 200, 5.0, "client-a")
-        service.record_spot_live_image_result(200, 0.25, False)
-        service.record_request("/api/spot/live_image", 200, 7.0, "client-b")
-        service.record_spot_live_image_result(200, 0.75, True)
-        service.record_request("/api/spot/live_image", 503, 9.0, "client-b")
-
-        live_stats = service.get_stats()["polling"]["paths"]["/api/spot/live_image"]
-
-        self.assertEqual(live_stats["count"], 3)
-        self.assertEqual(live_stats["success_count"], 2)
-        self.assertEqual(live_stats["failure_count"], 1)
-        self.assertEqual(live_stats["http_5xx_count"], 1)
-        self.assertEqual(live_stats["stale_count"], 1)
-        self.assertEqual(live_stats["avg_age_sec"], 0.5)
-
     def test_error_summary_groups_source_type_status_path_and_repeat(self) -> None:
         from backend.Observability.service import ObservabilityService
 
         service = ObservabilityService(window_sec=60.0, max_requests=100, max_errors=20)
 
         service.record_error(
-            "spot_live_image",
-            "SPOT live image retry backoff active",
-            path="/api/spot/live_image",
-            status_code=503,
-            error_type="live-backoff-active",
+            "spot_image",
+            "SPOT image upstream failure",
+            path="/api/spot/image.jpg",
+            status_code=502,
+            error_type="upstream-timeout",
         )
         service.record_error(
-            "spot_live_image",
-            "SPOT live image retry backoff active",
-            path="/api/spot/live_image",
-            status_code=503,
-            error_type="live-backoff-active",
+            "spot_image",
+            "SPOT image upstream failure",
+            path="/api/spot/image.jpg",
+            status_code=502,
+            error_type="upstream-timeout",
         )
 
         summary = service.get_error_summary()
 
         self.assertEqual(summary["queue_size"], 1)
         self.assertEqual(summary["repeat_total"], 2)
-        self.assertEqual(summary["source_repeat_counts"]["spot_live_image"], 2)
-        self.assertEqual(summary["type_counts"]["live-backoff-active"], 2)
-        self.assertEqual(summary["status_counts"]["503"], 2)
-        self.assertEqual(summary["path_counts"]["/api/spot/live_image"], 2)
-        self.assertEqual(summary["route_status_counts"]["/api/spot/live_image 503"], 2)
+        self.assertEqual(summary["source_repeat_counts"]["spot_image"], 2)
+        self.assertEqual(summary["type_counts"]["upstream-timeout"], 2)
+        self.assertEqual(summary["status_counts"]["502"], 2)
+        self.assertEqual(summary["path_counts"]["/api/spot/image.jpg"], 2)
+        self.assertEqual(summary["route_status_counts"]["/api/spot/image.jpg 502"], 2)
 
     def test_error_log_message_includes_sanitized_route_status_and_type(self) -> None:
         from backend.Observability.service import ObservabilityService
@@ -1802,323 +1003,13 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             "\n".join(captured.output),
         )
 
-    async def test_live_image_endpoint_returns_jpeg_with_no_store_headers(self) -> None:
-        from backend import app as backend_app
-
-        image_bytes = b"\xff\xd8live-endpoint\xff\xd9"
-        meta: dict[str, Any] = {
-            "status": "ok",
-            "source": "upstream",
-            "captured_at": 1_777_660_800.123,
-            "age_sec": 0.0,
-            "image_url": "http://spot.local/image.jpg",
-            "retry_after_sec": None,
-        }
-
-        record_mock: Mock = Mock()
-
-        with (
-            patch.object(
-                backend_app.spot_control,
-                "fetch_live_image_async",
-                AsyncMock(return_value=(image_bytes, meta)),
-            ),
-            patch.object(backend_app.observability_service, "record_spot_live_image_result", record_mock),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
-            try:
-                response = client.get("/api/spot/live_image?t=123")
-            finally:
-                client.close()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, image_bytes)
-        self.assertIn("image/jpeg", response.headers.get("content-type", ""))
-        self.assertIn("no-store", response.headers.get("cache-control", ""))
-        self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "upstream")
-        self.assertEqual(response.headers.get("X-Spot-Live-Image-Age"), "0.000")
-        record_mock.assert_called_once_with(200, 0.0, False)
-
-    def test_live_image_backoff_with_stale_cache_returns_200_stale_response(self) -> None:
-        from backend import app as backend_app
-
-        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
-        stale_bytes = b"\xff\xd8stale-live-frame\xff\xd9"
-        spot_api._live_img_cache = {
-            "data": stale_bytes,
-            "time": time.time() - 2.0,
-            "url": "http://spot.local/live.jpg",
-        }
-        spot_api._live_img_failure_count = 1
-        spot_api._record_live_image_error("upstream-timeout", "timeout", "http://spot.local/live.jpg")
-        spot_api._record_live_image_backoff(1.25)
-        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
-        record_error_mock: Mock = Mock()
-        record_result_mock: Mock = Mock()
-
-        with (
-            patch.object(spot_api, "_request_spot_image", request_mock),
-            patch.object(backend_app.observability_service, "record_error", record_error_mock),
-            patch.object(backend_app.observability_service, "record_spot_live_image_result", record_result_mock),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
-            try:
-                response = client.get("/api/spot/live_image")
-            finally:
-                client.close()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, stale_bytes)
-        self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "stale-cache")
-        self.assertEqual(response.headers.get("X-SFL-Image-Source"), "stale-cache")
-        self.assertEqual(response.headers.get("X-SFL-Image-Stale"), "true")
-        self.assertEqual(response.headers.get("X-SFL-Image-Fallback-Code"), "live-backoff-active")
-        request_mock.assert_not_awaited()
-        record_error_mock.assert_called_once()
-        _, record_kwargs = record_error_mock.call_args
-        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
-        self.assertEqual(record_kwargs["status_code"], 200)
-        self.assertEqual(record_kwargs["error_type"], "live-backoff-active")
-        self.assertEqual(record_kwargs["level"], "warning")
-        record_result_mock.assert_called_once()
-        _, _, is_stale = record_result_mock.call_args.args
-        self.assertTrue(is_stale)
-
-    def test_live_image_upstream_timeout_with_stale_cache_returns_200_stale_response(self) -> None:
-        from backend import app as backend_app
-
-        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
-        stale_bytes = b"\xff\xd8stale-live-frame\xff\xd9"
-        spot_api._live_img_cache = {
-            "data": stale_bytes,
-            "time": time.time() - 2.0,
-            "url": "http://spot.local/live.jpg",
-        }
-        image_error = spot_api.SpotImageFetchError(
-            "upstream-timeout",
-            "SPOT image upstream timed out",
-            image_url="http://spot.local/live.jpg",
-            upstream_status=None,
-        )
-        request_mock: AsyncMock = AsyncMock(side_effect=image_error)
-        record_error_mock: Mock = Mock()
-        record_result_mock: Mock = Mock()
-
-        with (
-            patch.object(spot_api, "_request_spot_image", request_mock),
-            patch.object(backend_app.observability_service, "record_error", record_error_mock),
-            patch.object(backend_app.observability_service, "record_spot_live_image_result", record_result_mock),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
-            try:
-                response = client.get("/api/spot/live_image")
-            finally:
-                client.close()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, stale_bytes)
-        self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "stale-cache")
-        self.assertEqual(response.headers.get("X-SFL-Image-Source"), "stale-cache")
-        self.assertEqual(response.headers.get("X-SFL-Image-Stale"), "true")
-        self.assertEqual(response.headers.get("X-SFL-Image-Fallback-Code"), "upstream-timeout")
-        request_mock.assert_awaited_once()
-        record_error_mock.assert_called_once()
-        _, record_kwargs = record_error_mock.call_args
-        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
-        self.assertEqual(record_kwargs["status_code"], 200)
-        self.assertEqual(record_kwargs["error_type"], "upstream-timeout")
-        self.assertEqual(record_kwargs["level"], "warning")
-        record_result_mock.assert_called_once()
-        _, _, is_stale = record_result_mock.call_args.args
-        self.assertTrue(is_stale)
-
-    def test_live_image_upstream_timeout_without_cache_keeps_502_response(self) -> None:
-        from backend import app as backend_app
-
-        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-        image_error = spot_api.SpotImageFetchError(
-            "upstream-timeout",
-            "SPOT image upstream timed out",
-            image_url="http://spot.local/live.jpg",
-            upstream_status=None,
-        )
-        record_error_mock: Mock = Mock()
-
-        with (
-            patch.object(spot_api, "_request_spot_image", AsyncMock(side_effect=image_error)),
-            patch.object(backend_app.observability_service, "record_error", record_error_mock),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
-            try:
-                response = client.get("/api/spot/live_image")
-            finally:
-                client.close()
-
-        self.assertEqual(response.status_code, 502)
-        self.assertNotEqual(response.headers.get("X-SFL-Image-Stale"), "true")
-        record_error_mock.assert_called_once()
-        _, record_kwargs = record_error_mock.call_args
-        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
-        self.assertEqual(record_kwargs["status_code"], 502)
-        self.assertEqual(record_kwargs["error_type"], "upstream-timeout")
-
-    def test_live_image_backoff_with_over_age_stale_cache_keeps_503_response(self) -> None:
-        from backend import app as backend_app
-
-        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
-        spot_api._live_img_cache = {
-            "data": b"\xff\xd8too-old-live-frame\xff\xd9",
-            "time": time.time() - 10.0,
-            "url": "http://spot.local/live.jpg",
-        }
-        spot_api._live_img_failure_count = 1
-        spot_api._record_live_image_error("upstream-timeout", "timeout", "http://spot.local/live.jpg")
-        spot_api._record_live_image_backoff(1.25)
-        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
-        record_error_mock: Mock = Mock()
-
-        with (
-            patch.object(spot_api, "_request_spot_image", request_mock),
-            patch.object(backend_app.observability_service, "record_error", record_error_mock),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
-            try:
-                response = client.get("/api/spot/live_image")
-            finally:
-                client.close()
-
-        self.assertEqual(response.status_code, 503)
-        self.assertNotEqual(response.headers.get("X-SFL-Image-Stale"), "true")
-        request_mock.assert_not_awaited()
-        record_error_mock.assert_called_once()
-        _, record_kwargs = record_error_mock.call_args
-        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
-        self.assertEqual(record_kwargs["status_code"], 503)
-        self.assertEqual(record_kwargs["error_type"], "live-backoff-active")
-
-    def test_live_image_upstream_timeout_with_over_age_stale_cache_keeps_502_response(self) -> None:
-        from backend import app as backend_app
-
-        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
-        spot_api._live_img_cache = {
-            "data": b"\xff\xd8too-old-live-frame\xff\xd9",
-            "time": time.time() - 10.0,
-            "url": "http://spot.local/live.jpg",
-        }
-        image_error = spot_api.SpotImageFetchError(
-            "upstream-timeout",
-            "SPOT image upstream timed out",
-            image_url="http://spot.local/live.jpg",
-            upstream_status=None,
-        )
-        record_error_mock: Mock = Mock()
-
-        with (
-            patch.object(spot_api, "_request_spot_image", AsyncMock(side_effect=image_error)),
-            patch.object(backend_app.observability_service, "record_error", record_error_mock),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
-            try:
-                response = client.get("/api/spot/live_image")
-            finally:
-                client.close()
-
-        self.assertEqual(response.status_code, 502)
-        self.assertNotEqual(response.headers.get("X-SFL-Image-Stale"), "true")
-        record_error_mock.assert_called_once()
-        _, record_kwargs = record_error_mock.call_args
-        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
-        self.assertEqual(record_kwargs["status_code"], 502)
-        self.assertEqual(record_kwargs["error_type"], "upstream-timeout")
-
-    def test_live_image_fresh_shared_frame_cache_still_returns_200_response(self) -> None:
-        from backend import app as backend_app
-
-        spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-        image_bytes = b"\xff\xd8fresh-live-frame\xff\xd9"
-        spot_api._live_img_cache = {
-            "data": image_bytes,
-            "time": time.time(),
-            "url": "http://spot.local/live.jpg",
-        }
-        request_mock: AsyncMock = AsyncMock(return_value=b"unexpected")
-        record_result_mock: Mock = Mock()
-
-        with (
-            patch.object(spot_api, "_request_spot_image", request_mock),
-            patch.object(backend_app.observability_service, "record_spot_live_image_result", record_result_mock),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
-            try:
-                response = client.get("/api/spot/live_image")
-            finally:
-                client.close()
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, image_bytes)
-        self.assertEqual(response.headers.get("X-Spot-Live-Image-Source"), "shared-frame")
-        self.assertNotEqual(response.headers.get("X-SFL-Image-Stale"), "true")
-        request_mock.assert_not_awaited()
-        record_result_mock.assert_called_once()
-        _, _, is_stale = record_result_mock.call_args.args
-        self.assertFalse(is_stale)
-
-    async def test_live_image_upstream_capture_writes_image_fact_when_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            log_path = Path(temp_dir)
-            self.configure_image_capture(log_path, mode="all")
-            spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-            self.set_spot_temperature_snapshot(
-                spot_poll_seq=42,
-                spot_raw_validity="invalid_sentinel",
-                spot_device_status_code="temperature_under_range",
-                spot_diagnostic_evidence_codes='["target_out_of_fov_evidence"]',
-                signalpc="1.5",
-                _spot_last_poll_completed_at_epoch=time.time(),
-            )
-            image_bytes = b"\xff\xd8live-capture\xff\xd9"
-
-            with patch.object(spot_api, "_request_spot_image", AsyncMock(return_value=image_bytes)):
-                data, meta = await spot_api.fetch_live_image_async()
-
-            self.assertEqual(data, image_bytes)
-            self.assertEqual(meta["source"], "upstream")
-            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
-            rows = self.read_spot_image_fact_rows(log_path)
-
-            self.assertEqual(len(rows), 1)
-            row = rows[0]
-            self.assertEqual(row["spot_image_size_bytes"], str(len(image_bytes)))
-            self.assertEqual(row["spot_image_mime"], "image/jpeg")
-            self.assertEqual(row["spot_image_source"], "live_upstream")
-            self.assertEqual(row["spot_image_linked_observation_key"], "test-spot-service-instance:42")
-            self.assertEqual(row["spot_image_link_status"], "fresh")
-            self.assertGreaterEqual(float(row["spot_image_link_age_ms"]), 0.0)
-            self.assertEqual(row["temperature_output_status_nearest"], "under_range")
-            self.assertEqual(row["temperature_under_range_cause_candidate_nearest"], "unknown")
-            self.assertEqual(len(row["spot_image_source_url_hash"]), 64)
-            self.assertTrue((log_path / row["spot_image_path"]).exists())
-            self.assertNotIn("http://spot.local", ",".join(row.values()))
-            latest = spot_api.get_latest_spot_image_capture_fact()
-            health = spot_api.get_spot_image_capture_health()
-            self.assertEqual(latest["spot_image_capture_id"], row["spot_image_capture_id"])
-            self.assertEqual(latest["spot_image_path"], row["spot_image_path"])
-            self.assertEqual(latest["spot_image_link_status"], "fresh")
-            self.assertEqual(health["last_capture_id"], row["spot_image_capture_id"])
-            self.assertEqual(health["last_capture_path"], row["spot_image_path"])
-            self.assertEqual(health["last_capture_link_status"], "fresh")
-
     async def test_control_shutdown_drains_image_writer_before_final_manifest(self) -> None:
         from backend import app as backend_app
 
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
             self.configure_image_capture(log_path, mode="all")
-            spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
+            spot_api.config.SPOT_IP = "spot.local"
             self.set_spot_temperature_snapshot(
                 spot_poll_seq=43,
                 _spot_last_poll_completed_at_epoch=time.time(),
@@ -2150,7 +1041,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(SpotImageCaptureWriter, "write_capture", delayed_write_capture),
                 patch.object(spot_api, "_request_spot_image", AsyncMock(return_value=image_bytes)),
             ):
-                await spot_api.fetch_live_image_async()
+                await spot_api.fetch_image_async()
                 self.assertTrue(write_started.wait(timeout=1.0))
 
                 release_thread = threading.Thread(target=lambda: (time.sleep(0.05), release_write.set()))
@@ -2210,26 +1101,6 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health["written_count"], 1)
         self.assertEqual(health_after_enqueue_attempt["enqueued_count"], 1)
 
-    async def test_live_image_shared_frame_cache_does_not_duplicate_image_capture(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            log_path = Path(temp_dir)
-            self.configure_image_capture(log_path, mode="all")
-            spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-            image_bytes = b"\xff\xd8shared-frame-capture\xff\xd9"
-            request_mock = AsyncMock(return_value=image_bytes)
-
-            with patch.object(spot_api, "_request_spot_image", request_mock):
-                first_data, first_meta = await spot_api.fetch_live_image_async()
-                second_data, second_meta = await spot_api.fetch_live_image_async()
-
-            self.assertEqual(first_data, image_bytes)
-            self.assertEqual(second_data, image_bytes)
-            self.assertEqual(first_meta["source"], "upstream")
-            self.assertEqual(second_meta["source"], "shared-frame")
-            self.assertEqual(request_mock.await_count, 1)
-            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
-            self.assertEqual(len(self.read_spot_image_fact_rows(log_path)), 1)
-
     def test_image_capture_health_separates_worker_writes_from_fact_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
@@ -2242,7 +1113,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     image_bytes=image_bytes,
                     captured_at=captured_at,
                     image_url="http://spot.local/image.jpg",
-                    source="prefetch_upstream",
+                    source="official_image_jpg",
                     image_age_ms=0.0,
                 )
                 self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
@@ -2301,7 +1172,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
             self.configure_image_capture(log_path, mode="event")
-            spot_api.config.SPOT_IMAGE_URL = "http://spot.local/image.jpg"
+            spot_api.config.SPOT_IP = "spot.local"
             image_bytes = b"\xff\xd8event-capture\xff\xd9"
 
             self.set_spot_temperature_snapshot(spot_poll_seq=1, spot_raw_validity="valid_temperature")
@@ -2309,7 +1180,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 image_bytes=image_bytes,
                 captured_at=time.time(),
                 image_url="http://spot.local/image.jpg",
-                source="prefetch_upstream",
+                source="official_image_jpg",
                 image_age_ms=0.0,
             )
             self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=1.0))
@@ -2325,7 +1196,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 image_bytes=image_bytes,
                 captured_at=time.time(),
                 image_url="http://spot.local/image.jpg",
-                source="prefetch_upstream",
+                source="official_image_jpg",
                 image_age_ms=0.0,
             )
             self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
@@ -2344,7 +1215,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 image_bytes=b"12345",
                 captured_at=time.time(),
                 image_url="http://spot.local/image.jpg",
-                source="prefetch_upstream",
+                source="official_image_jpg",
                 image_age_ms=0.0,
             )
 
@@ -2363,7 +1234,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 image_bytes=image_bytes,
                 captured_at=time.time(),
                 image_url="http://spot.local/image.jpg",
-                source="prefetch_upstream",
+                source="official_image_jpg",
                 image_age_ms=0.0,
             )
             self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
@@ -2373,7 +1244,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 image_bytes=image_bytes,
                 captured_at=time.time(),
                 image_url="http://spot.local/image.jpg",
-                source="prefetch_upstream",
+                source="official_image_jpg",
                 image_age_ms=0.0,
             )
             self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
@@ -2422,84 +1293,261 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stale_lookalike_outside_date_tree.exists())
             self.assertTrue(fresh_managed.exists())
 
-    async def test_image_capture_writer_failure_does_not_break_live_image_fetch(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            log_path = Path(temp_dir)
-            self.configure_image_capture(log_path, mode="all")
-            blocker = log_path / "capture-blocker"
-            blocker.write_text("not a directory", encoding="utf-8")
-            spot_api.config.SPOT_IMAGE_CAPTURE_PATH = "capture-blocker"
-            spot_api.config.SPOT_LIVE_IMAGE_URL = "http://spot.local/live.jpg"
-            image_bytes = b"\xff\xd8writer-failure-isolated\xff\xd9"
+    async def test_official_image_resource_is_requested_without_cache_or_alternate_path(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        image_bytes = b"\xff\xd8official-image\xff\xd9"
+        request_mock = AsyncMock(return_value=image_bytes)
 
-            with patch.object(spot_api, "_request_spot_image", AsyncMock(return_value=image_bytes)):
-                data, meta = await spot_api.fetch_live_image_async()
+        with patch.object(spot_api, "_request_spot_image", request_mock):
+            first_data, first_meta = await spot_api.fetch_image_async()
+            second_data, second_meta = await spot_api.fetch_image_async()
 
-            self.assertEqual(data, image_bytes)
-            self.assertEqual(meta["source"], "upstream")
-            self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=2.0))
-            health = spot_api.get_spot_image_capture_health()
-            self.assertEqual(health["enqueued_count"], 1)
-            self.assertEqual(health["failure_count"], 1)
-            self.assertEqual(self.read_spot_image_fact_rows(log_path), [])
+        self.assertEqual(first_data, image_bytes)
+        self.assertEqual(second_data, image_bytes)
+        self.assertEqual(request_mock.await_count, 2)
+        self.assertEqual(request_mock.await_args_list[0].args[1], "http://spot.local/image.jpg")
+        self.assertEqual(request_mock.await_args_list[1].args[1], "http://spot.local/image.jpg")
+        self.assertEqual(first_meta["image_path"], "/image.jpg")
+        self.assertEqual(second_meta["source"], "upstream")
 
-    async def test_live_image_backoff_records_route_status_and_error_type(self) -> None:
-        from backend import app as backend_app
+    async def test_official_image_requests_are_single_flight(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        image_bytes = b"\xff\xd8single-flight\xff\xd9"
+        active_requests = 0
+        maximum_active_requests = 0
 
-        image_error = spot_api.SpotLiveImageBackoffError("http://spot.local/live.jpg", 1.25)
-        record_mock: Mock = Mock()
+        async def request_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+            nonlocal active_requests, maximum_active_requests
+            self.assertEqual(image_url, "http://spot.local/image.jpg")
+            active_requests += 1
+            maximum_active_requests = max(maximum_active_requests, active_requests)
+            await asyncio.sleep(0.01)
+            active_requests -= 1
+            return image_bytes
 
-        with (
-            patch.object(
-                backend_app.spot_control,
-                "fetch_live_image_async",
-                AsyncMock(side_effect=image_error),
-            ),
-            patch.object(backend_app.spot_control, "get_live_image_diagnostics", Mock(return_value={})),
-            patch.object(backend_app.observability_service, "record_error", record_mock),
-        ):
-            with self.assertRaises(HTTPException) as raised:
-                await backend_app.live_spot_image()
+        with patch.object(spot_api, "_request_spot_image", side_effect=request_image) as request_mock:
+            first, second = await asyncio.gather(
+                spot_api.fetch_image_async(),
+                spot_api.fetch_image_async(),
+            )
 
-        exception = raised.exception
+        self.assertEqual(first[0], image_bytes)
+        self.assertEqual(second[0], image_bytes)
+        self.assertEqual(request_mock.await_count, 2)
+        self.assertEqual(maximum_active_requests, 1)
 
-        self.assertEqual(exception.status_code, 503)
-        self.assertEqual(exception.headers.get("Retry-After"), "2")
-        self.assertEqual(exception.headers.get("X-Spot-Retry-After-Ms"), "1250")
-        self.assertIn("no-store", exception.headers.get("Cache-Control", ""))
-        record_mock.assert_called_once()
-        record_args, record_kwargs = record_mock.call_args
-        self.assertEqual(record_args[:2], ("spot_live_image", "SPOT live image retry backoff active"))
-        self.assertEqual(record_kwargs["path"], "/api/spot/live_image")
-        self.assertEqual(record_kwargs["status_code"], 503)
-        self.assertEqual(record_kwargs["error_type"], "live-backoff-active")
+    async def test_all_spot_device_http_requests_are_serialized(self) -> None:
+        active_requests = 0
+        maximum_active_requests = 0
+        image_bytes = b"\xff\xd8serialized-device-image\xff\xd9"
 
-    def test_live_image_backoff_records_single_handler_error_via_middleware(self) -> None:
-        from backend import app as backend_app
-
-        image_error = spot_api.SpotLiveImageBackoffError("http://spot.local/live.jpg", 1.25)
-        record_mock: Mock = Mock()
-
-        with (
-            patch.object(
-                backend_app.spot_control,
-                "fetch_live_image_async",
-                AsyncMock(side_effect=image_error),
-            ),
-            patch.object(backend_app.spot_control, "get_live_image_diagnostics", Mock(return_value={})),
-            patch.object(backend_app.observability_service, "record_error", record_mock),
-        ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
+        async def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal active_requests, maximum_active_requests
+            active_requests += 1
+            maximum_active_requests = max(maximum_active_requests, active_requests)
             try:
-                response = client.get("/api/spot/live_image")
+                await asyncio.sleep(0.005)
+                if request.url.path == "/image.jpg":
+                    return httpx.Response(
+                        200,
+                        content=image_bytes,
+                        headers={"Content-Type": "image/jpeg"},
+                        request=request,
+                    )
+                if request.url.params.get("p") == "temperature":
+                    return httpx.Response(200, text="450.0", request=request)
+                return httpx.Response(200, text="0", request=request)
             finally:
-                client.close()
+                active_requests -= 1
 
-        self.assertEqual(response.status_code, 503)
-        record_mock.assert_called_once()
-        record_args, record_kwargs = record_mock.call_args
-        self.assertEqual(record_args[:2], ("spot_live_image", "SPOT live image retry backoff active"))
-        self.assertEqual(record_kwargs["status_code"], 503)
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=9,
+            started_at_epoch=time.time(),
+            started_monotonic=time.monotonic(),
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            image, temperature, _diagnostics = await asyncio.gather(
+                spot_api._request_spot_image(client, "http://spot.local/image.jpg"),
+                spot_api._request_spot_temperature(client, "http://spot.local/output?p=temperature"),
+                spot_api._refresh_spot_diagnostics(client, context),
+            )
+
+        self.assertEqual(image, image_bytes)
+        self.assertEqual(temperature, 450.0)
+        self.assertEqual(maximum_active_requests, 1)
+        with spot_api._spot_diagnostics_lock:
+            diagnostics = dict(spot_api._spot_diagnostics_snapshot or {})
+        self.assertEqual(diagnostics["diagnostics_capture_status"], "async_complete")
+        self.assertEqual(diagnostics["diagnostics_source_poll_seq"], 9)
+
+    async def test_cancelled_focus_keeps_device_gate_until_worker_finishes(self) -> None:
+        focus_started = threading.Event()
+        release_focus = threading.Event()
+        image_started = asyncio.Event()
+        image_bytes = b"\xff\xd8post-focus-image\xff\xd9"
+
+        def slow_focus(steps: int) -> dict[str, Any]:
+            self.assertEqual(steps, 1)
+            focus_started.set()
+            if not release_focus.wait(timeout=1.0):
+                self.fail("Timed out waiting to release focus operation")
+            return {"status": "ok"}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            image_started.set()
+            return httpx.Response(
+                200,
+                content=image_bytes,
+                headers={"Content-Type": "image/jpeg"},
+                request=request,
+            )
+
+        with patch.object(spot_api, "move_focus", side_effect=slow_focus):
+            focus_task = asyncio.create_task(spot_api.move_focus_serialized(1))
+            self.assertTrue(await asyncio.to_thread(focus_started.wait, 1.0))
+            focus_task.cancel()
+
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                image_task = asyncio.create_task(
+                    spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+                )
+                await asyncio.sleep(0.01)
+                self.assertFalse(image_started.is_set())
+                release_focus.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await focus_task
+                self.assertEqual(await image_task, image_bytes)
+
+    def test_only_official_image_bridge_route_is_registered(self) -> None:
+        from backend import app as backend_app
+
+        image_bytes = b"\xff\xd8bridge-image\xff\xd9"
+        meta = {
+            "status": "ok",
+            "source": "upstream",
+            "captured_at": time.time(),
+            "latency_ms": 12.5,
+            "image_path": "/image.jpg",
+        }
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(return_value=(image_bytes, meta))),
+            patch.object(backend_app.observability_service, "record_spot_image_result"),
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+            config_response = client.get("/api/spot/config")
+            removed_live = client.get("/api/spot/live_image")
+            removed_proxy = client.get("/api/spot/proxy_image")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, image_bytes)
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+        self.assertEqual(response.headers["cache-control"], "no-store, no-cache, must-revalidate, max-age=0")
+        self.assertEqual(config_response.status_code, 200)
+        self.assertEqual(config_response.json()["image_url"], "/api/spot/image.jpg")
+        self.assertNotIn("live_image_url", config_response.json())
+        self.assertNotIn("proxy", config_response.json())
+        self.assertNotIn("live", config_response.json())
+        self.assertEqual(removed_live.status_code, 404)
+        self.assertEqual(removed_proxy.status_code, 404)
+
+    def test_official_image_bridge_reports_missing_configuration(self) -> None:
+        from backend import app as backend_app
+
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "fetch_image_async",
+                AsyncMock(side_effect=spot_api.SpotImageConfigError("")),
+            ),
+            patch.object(backend_app.spot_control, "get_spot_diagnostics", return_value={"image_status": "idle"}),
+            patch.object(backend_app.observability_service, "record_spot_image_result") as result_mock,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"]["code"], "config-missing")
+        self.assertEqual(response.json()["detail"]["diagnostics"], {"image_status": "idle"})
+        result_mock.assert_called_once_with(404)
+
+    def test_official_image_bridge_marks_payload_rejection(self) -> None:
+        from backend import app as backend_app
+
+        error = spot_api.SpotImageFetchError(
+            "invalid-image-html",
+            "SPOT image upstream returned HTML",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=200,
+        )
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(side_effect=error)),
+            patch.object(backend_app.spot_control, "get_spot_diagnostics", return_value={"image_status": "error"}),
+            patch.object(backend_app.observability_service, "record_error") as error_mock,
+            patch.object(backend_app.observability_service, "record_spot_image_result") as result_mock,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.headers["x-spot-payload-rejection"], "1")
+        self.assertEqual(response.json()["detail"]["code"], "invalid-image-html")
+        self.assertEqual(response.json()["detail"]["upstream_status"], 200)
+        error_mock.assert_called_once()
+        self.assertEqual(error_mock.call_args.kwargs["error_type"], "invalid-image-html")
+        self.assertEqual(error_mock.call_args.kwargs["level"], "warning")
+        result_mock.assert_called_once_with(502)
+
+    def test_official_image_bridge_reports_upstream_failure_without_rejection_header(self) -> None:
+        from backend import app as backend_app
+
+        error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "SPOT image upstream timed out",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=None,
+        )
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(side_effect=error)),
+            patch.object(backend_app.spot_control, "get_spot_diagnostics", return_value={"image_status": "error"}),
+            patch.object(backend_app.observability_service, "record_error") as error_mock,
+            patch.object(backend_app.observability_service, "record_spot_image_result") as result_mock,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn("x-spot-payload-rejection", response.headers)
+        self.assertEqual(response.json()["detail"]["code"], "upstream-timeout")
+        self.assertIsNone(response.json()["detail"]["upstream_status"])
+        error_mock.assert_called_once()
+        self.assertEqual(error_mock.call_args.kwargs["error_type"], "upstream-timeout")
+        self.assertEqual(error_mock.call_args.kwargs["level"], "error")
+        result_mock.assert_called_once_with(502)
+
+    def test_official_image_bridge_reports_unexpected_failure(self) -> None:
+        from backend import app as backend_app
+
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "fetch_image_async",
+                AsyncMock(side_effect=RuntimeError("simulated bridge failure")),
+            ),
+            patch.object(backend_app.spot_control, "get_spot_diagnostics", return_value={"image_status": "error"}),
+            patch.object(backend_app.observability_service, "record_error") as error_mock,
+            patch.object(backend_app.observability_service, "record_spot_image_result") as result_mock,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"]["code"], "unknown")
+        self.assertEqual(response.json()["detail"]["message"], "Unexpected SPOT image bridge error.")
+        error_mock.assert_called_once()
+        self.assertEqual(error_mock.call_args.kwargs["error_type"], "RuntimeError")
+        result_mock.assert_called_once_with(502)
 
     def test_move_focus_uses_ametek_focus_control_endpoint(self) -> None:
         spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
@@ -2813,7 +1861,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch.object(backend_app.spot_control, "move_focus", Mock(side_effect=focus_error)),
+            patch.object(
+                backend_app.spot_control,
+                "move_focus_serialized",
+                AsyncMock(side_effect=focus_error),
+            ),
         ):
             client = TestClient(backend_app.app, raise_server_exceptions=False)
             try:
@@ -2830,8 +1882,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(
                 backend_app.spot_control,
-                "move_focus",
-                Mock(side_effect=RuntimeError("SPOT_FOCUS_URL is not configured")),
+                "move_focus_serialized",
+                AsyncMock(side_effect=RuntimeError("SPOT_FOCUS_URL is not configured")),
             ),
         ):
             client = TestClient(backend_app.app, raise_server_exceptions=False)
@@ -2853,7 +1905,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch.object(backend_app.spot_control, "move_focus", Mock(side_effect=focus_error)),
+            patch.object(
+                backend_app.spot_control,
+                "move_focus_serialized",
+                AsyncMock(side_effect=focus_error),
+            ),
         ):
             client = TestClient(backend_app.app, raise_server_exceptions=False)
             try:
@@ -2863,6 +1919,33 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertIn("HTTP 403", response.json()["detail"])
+
+    def test_spot_actuator_route_uses_serialized_operation(self) -> None:
+        from backend import app as backend_app
+
+        result = {
+            "status": "ok",
+            "current": 500,
+            "new": 550,
+            "verified": 550,
+            "request_steps": 1,
+            "actuator_step": 50,
+        }
+        actuator_mock = AsyncMock(return_value=result)
+        with patch.object(
+            backend_app.spot_control,
+            "move_actuator_serialized",
+            actuator_mock,
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.post("/api/spot/actuator", json={"step": 1})
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), result)
+        actuator_mock.assert_awaited_once_with(1)
 
 
 if __name__ == "__main__":

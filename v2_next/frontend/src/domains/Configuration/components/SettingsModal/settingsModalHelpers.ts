@@ -471,7 +471,7 @@ export const buildObservabilitySummary = ({
       evidence: httpEvidence,
       action: httpSeverity === 'error'
         ? (http5xxRouteEvidence
-            ? '5xx 발생 route를 기준으로 SPOT live/proxy 또는 해당 API handler를 확인.'
+            ? '5xx 발생 route를 기준으로 SPOT image 또는 해당 API handler를 확인.'
             : '대시보드 응답 지연. 서버 부하 또는 이미지 요청 확인.')
         : httpSeverity === 'warn'
           ? '응답 지표가 기준을 넘었습니다. Top path와 4xx/5xx 상세 확인.'

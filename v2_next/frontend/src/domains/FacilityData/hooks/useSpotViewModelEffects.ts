@@ -7,7 +7,6 @@ import {
   readOrCreateDashboardTabId,
   writeDashboardLeaderLock,
 } from '../../../shared/utils/dashboardPollingLeader';
-import { resolveSpotRefreshMs } from './useSpotViewModel.selectors';
 
 const SPOT_CONFIG_TAB_ID_KEY = 'spot_config_tab_id_v1';
 const SPOT_CONFIG_LEADER_KEY = 'spot_config_leader_v1';
@@ -24,13 +23,10 @@ interface SpotConfigBroadcastPayload {
 
 interface UseSpotViewModelEffectsParams {
   config: SpotConfig | null;
-  fetchScheduledImage: () => Promise<void>;
-  fetchVisibleImage: () => Promise<void>;
+  fetchInitialImage: () => Promise<void>;
   loadConfig: () => Promise<SpotConfig | null>;
   applySpotConfig: (config: SpotConfig) => void;
   prevUrlRef: MutableRefObject<string | null>;
-  setNextFetchScheduledAt: (nextFetchScheduledAt: number | null) => void;
-  shouldFetchOnVisibility: () => boolean;
 }
 
 const readStoredSpotConfig = (): SpotConfigBroadcastPayload | null => {
@@ -50,56 +46,18 @@ const readStoredSpotConfig = (): SpotConfigBroadcastPayload | null => {
 
 export const useSpotViewModelEffects = ({
   config,
-  fetchScheduledImage,
-  fetchVisibleImage,
+  fetchInitialImage,
   loadConfig,
   applySpotConfig,
   prevUrlRef,
-  setNextFetchScheduledAt,
-  shouldFetchOnVisibility,
 }: UseSpotViewModelEffectsParams) => {
   useEffect(() => {
     if (!config || !config.image_url) {
-      setNextFetchScheduledAt(null);
       return;
     }
-
-    let active = true;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
-    const refreshMs = resolveSpotRefreshMs(config.refresh_interval);
-
-    const scheduleNext = (targetAt: number) => {
-      if (!active) {
-        return;
-      }
-      setNextFetchScheduledAt(targetAt);
-      timerId = setTimeout(loop, Math.max(0, targetAt - Date.now()));
-    };
-
-    const loop = async () => {
-      if (!active) {
-        return;
-      }
-
-      const startedAt = Date.now();
-      const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-      if (!hidden) {
-        await fetchScheduledImage();
-      }
-
-      if (active) {
-        scheduleNext(startedAt + refreshMs);
-      }
-    };
-
-    void loop();
+    void fetchInitialImage();
 
     return () => {
-      active = false;
-      if (timerId) {
-        clearTimeout(timerId);
-      }
-      setNextFetchScheduledAt(null);
       if (prevUrlRef.current) {
         URL.revokeObjectURL(prevUrlRef.current);
         prevUrlRef.current = null;
@@ -107,28 +65,9 @@ export const useSpotViewModelEffects = ({
     };
   }, [
     config?.image_url,
-    config?.refresh_interval,
-    fetchScheduledImage,
+    fetchInitialImage,
     prevUrlRef,
-    setNextFetchScheduledAt,
   ]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && shouldFetchOnVisibility()) {
-        void fetchVisibleImage();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [fetchVisibleImage, shouldFetchOnVisibility]);
 
   useEffect(() => {
     let disposed = false;

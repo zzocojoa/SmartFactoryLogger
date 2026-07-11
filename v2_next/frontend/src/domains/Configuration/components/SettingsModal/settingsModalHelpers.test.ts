@@ -275,7 +275,7 @@ describe('buildObservabilitySummary', () => {
         avg_latency_ms: 900,
         error_count: 4,
         total_http_5xx_count: 1,
-        last: { latency_ms: 900, path: '/api/spot/proxy_image', status: 500, timestamp: 1 },
+        last: { latency_ms: 900, path: '/api/spot/image.jpg', status: 500, timestamp: 1 },
         window: {
           window_sec: 60,
           request_count: 20,
@@ -319,7 +319,7 @@ describe('buildObservabilitySummary', () => {
         avg_latency_ms: 12,
         error_count: 3,
         total_http_5xx_count: 3,
-        last: { latency_ms: 10, path: '/api/spot/live_image', status: 503, timestamp: 1 },
+        last: { latency_ms: 10, path: '/api/spot/image.jpg', status: 502, timestamp: 1 },
         window: {
           window_sec: 60,
           request_count: 24,
@@ -333,7 +333,7 @@ describe('buildObservabilitySummary', () => {
         polling: {
           window_sec: 60,
           paths: {
-            '/api/spot/live_image': {
+            '/api/spot/image.jpg': {
               count: 20,
               requests_per_sec: 0.333,
               avg_latency_ms: 9,
@@ -356,8 +356,8 @@ describe('buildObservabilitySummary', () => {
 
     const httpCard = summary.cards.find((card) => card.key === 'http');
 
-    expect(httpCard?.evidence).toContain('route /api/spot/live_image 3건');
-    expect(httpCard?.action).toBe('5xx 발생 route를 기준으로 SPOT live/proxy 또는 해당 API handler를 확인.');
+    expect(httpCard?.evidence).toContain('route /api/spot/image.jpg 3건');
+    expect(httpCard?.action).toBe('5xx 발생 route를 기준으로 SPOT image 또는 해당 API handler를 확인.');
   });
 
   it('parses CSV collector queue drop and lag evidence', () => {

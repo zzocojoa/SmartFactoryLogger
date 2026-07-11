@@ -88,7 +88,7 @@ const data = await response.json();
   "avg_latency_ms": 12.5,
   "polling": {
     "paths": {
-      "/api/spot/live_image": {
+      "/api/spot/image.jpg": {
         "count": 30,
         "success_count": 29,
         "failure_count": 1,
@@ -843,7 +843,7 @@ SPOT 카메라 위젯 설정을 가져옵니다.
 
 ```json
 {
-    "image_url": "http://192.168.1.102/image.jpg",
+    "image_url": "/api/spot/image.jpg",
     "refresh_interval": 1000,
     "crosshair_x": 50,
     "crosshair_y": 50,
@@ -882,20 +882,22 @@ POST /api/spot/focus?steps=10
 }
 ```
 
-### GET `/api/spot/proxy_image`
+### GET `/api/spot/image.jpg`
 
-원격 클라이언트를 위해 SPOT 카메라 이미지를 프록시합니다 (CORS 이슈 방지).
+Electron `file:` UI가 SPOT Web Server의 공식 `GET /image.jpg` 리소스를 사용할 수 있도록
+동일한 JPEG 응답을 한 번씩 전달합니다. 서버 캐시, 대체 이미지 경로, 자동 backoff는 사용하지 않습니다.
 
 **응답:**
 
 - **Content-Type:** `image/jpeg`
-- **Body:** 바이너리 이미지 데이터
+- **Cache-Control:** `no-store, no-cache, must-revalidate, max-age=0`
+- **Body:** 바이너리 JPEG 데이터
 
 **에러 응답 (404):**
 
 ```json
 {
-    "detail": "SPOT URL이 설정되지 않음"
+    "detail": {"code": "config-missing", "message": "SPOT IP is not configured."}
 }
 ```
 
@@ -903,34 +905,9 @@ POST /api/spot/focus?steps=10
 
 ```json
 {
-    "detail": "업스트림 이미지 가져오기 실패: 타임아웃"
+    "detail": {"code": "upstream-timeout", "message": "SPOT image upstream request failed."}
 }
 ```
-
-### GET `/api/spot/live_image`
-
-SPOT live view image endpoint for direct browser `<img>` rendering. This path is separate from `/api/spot/proxy_image` and does not update snapshot cache or delayed alert metadata.
-
-**Configuration priority:**
-
-1. `SPOT_LIVE_IMAGE_URL`
-2. `[SPOT] liveimageurl`
-3. `SPOT_IMAGE_URL`
-4. `http://{SPOT_IP}/image.jpg`
-
-Use `/image.jpg` by default. Operators may configure `/newjpeg.jpg` for smoother live display. Do not configure `/image.ssi`; it is an HTML page and will be rejected as `invalid-image-html`.
-
-**Response:**
-
-- **Content-Type:** `image/jpeg`
-- **Cache-Control:** `no-store, no-cache, must-revalidate, max-age=0`
-- **Body:** image bytes
-
-**Error responses:**
-
-- `404 live-config-missing`
-- `503 live-backoff-active`
-- `502 invalid-image-html`, `invalid-image-payload`, `empty-body`, or upstream request failures
 
 ---
 

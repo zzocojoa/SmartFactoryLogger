@@ -232,6 +232,7 @@ function App() {
     metadata: spotImageMetadata,
     diagnostics: spotDiagnostics,
     focusBusy,
+    refreshImage: retrySpotImage,
     handleImageLoad: handleSpotImageLoaded,
     handleImageError: handleSpotImageError,
     controlActuator: requestFocusActuator
@@ -814,6 +815,9 @@ function App() {
         spotConfig={spotConfig}
         spotImageUrl={spotImageUrl}
         spotImageLoading={spotImageLoading}
+        handleSpotImageLoaded={handleSpotImageLoaded}
+        handleSpotImageError={handleSpotImageError}
+        handleSpotImageRetry={retrySpotImage}
         spotLastSuccessAt={spotLastSuccessAt}
         spotImageMetadata={spotImageMetadata}
         spotDiagnostics={spotDiagnostics}
@@ -849,6 +853,7 @@ function App() {
                       layoutRef={layoutRef}
                       onSpotImageLoaded={handleSpotImageLoaded}
                       onSpotImageError={handleSpotImageError}
+                      onSpotImageRetry={retrySpotImage}
                       requestFocus={requestFocusActuator}
                       focusBusy={focusBusy}
                     />
@@ -860,6 +865,7 @@ function App() {
                       layoutRef={layoutRef}
                       onSpotImageLoaded={handleSpotImageLoaded}
                       onSpotImageError={handleSpotImageError}
+                      onSpotImageRetry={retrySpotImage}
                       requestFocus={requestFocusActuator}
                       focusBusy={focusBusy}
                       onTimeSeriesVisible={handleTimeSeriesVisible}

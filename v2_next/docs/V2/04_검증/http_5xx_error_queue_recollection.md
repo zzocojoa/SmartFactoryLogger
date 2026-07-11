@@ -10,8 +10,7 @@ Date: 2026-06-29 KST
 
 - `/stats`
   - `window.http_5xx_count`: 최근 window의 전체 5xx 수
-  - `polling.paths["/api/spot/live_image"].http_5xx_count`: SPOT live image route 5xx
-  - `polling.paths["/api/spot/proxy_image"].http_5xx_count`: SPOT proxy image route 5xx
+  - `polling.paths["/api/spot/image.jpg"].http_5xx_count`: SPOT image route 5xx
   - 각 polling path에는 `http_4xx_count`, `http_5xx_count`, `failure_count`, `success_count`, `stale_count`가 같이 들어간다.
 - `/api/observability/errors`
   - 각 item은 `source`, `message`, `path`, `status_code`, `error_type`, `repeat`를 제공한다.
@@ -20,8 +19,7 @@ Date: 2026-06-29 KST
   - plain stderr/log formatter에서도 `Observability error recorded source=<source> status=<status> type=<type> path=<route>`를 남긴다.
   - 민감 detail은 log message에 포함하지 않고 structured `extra` field에만 유지한다.
 - SPOT handler source 매핑
-  - `/api/spot/live_image` 502/503: `source=spot_live_image`
-  - `/api/spot/proxy_image` 502/503: `source=spot_proxy`
+  - `/api/spot/image.jpg` 502: `source=spot_image`
   - middleware fallback 5xx: `source=api`, `message=HTTP <status>`, `path=<route>`
 
 ## 재수집 명령
@@ -104,7 +102,7 @@ $bad = @(
 
 운영 zip 주변의 같은 시간대 Desktop 로그 후보도 확인했다. `barrier.log`, `barrier.log.1`에서는 `HTTP 502`, `HTTP 503`, `/api/...` route 후보가 발견되지 않았다.
 
-프로젝트 임시 backend stdout에는 SPOT image route의 502/503 access log가 존재한다. 재확인 시 route/status 후보는 `/api/spot/live_image 503`, `/api/spot/proxy_image 503`, `/api/spot/live_image 502`, `/api/spot/proxy_image 502` 순으로 집계됐다. 하지만 해당 파일은 timestamp가 없는 누적 stdout이고, exact status 파싱 기준 5xx access log 수가 기존 운영 zip의 `total_http_5xx_count=302`와 맞지 않는다. 따라서 이 파일은 SPOT image route가 5xx를 만들 수 있다는 참고 정황일 뿐, 기존 운영 zip의 route 확정 증거로 사용하지 않는다.
+과거 임시 backend stdout에는 폐기된 SPOT live/proxy route의 502/503 access log가 존재했다. 이 기록은 과거 구현의 참고 정황이며, 현재 단일 `/api/spot/image.jpg` 계약의 운영 증거로 사용하지 않는다.
 
 프로젝트 임시 backend stderr에는 기존 zip window와 겹치는 `Observability error recorded` 로그가 있으나, 기존 plain log formatter가 `source`, `path`, `status`, `type`를 메시지에 넣지 않아 route 복원이 불가능했다. 같은 window 기준 timestamp가 있는 observability event 수도 기존 운영 zip의 repeat 합계 302와 맞지 않아, stderr 역시 route 확정 증거로 사용하지 않는다.
 
