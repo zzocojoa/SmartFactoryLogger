@@ -70,6 +70,8 @@
 ### 7. NSIS Packaging
 
 - [ ] Run `npm run dist`.
+- [ ] Confirm the only makensis warning is the known `IsPowerShellAvailable`
+  warning 6000.
 - [ ] Verify `smart-factory-logger-v2 Setup 1.0.12.exe`.
 - [ ] Inspect unpacked/ASAR contents.
 - [ ] Run packaged startup smoke when possible.

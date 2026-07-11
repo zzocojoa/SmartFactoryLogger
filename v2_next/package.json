@@ -50,7 +50,8 @@
       "executableName": "smart-factory"
     },
     "nsis": {
-      "artifactName": "smart-factory-logger-v2 Setup ${version}.${ext}"
+      "artifactName": "smart-factory-logger-v2 Setup ${version}.${ext}",
+      "warningsAsErrors": false
     },
     "asar": true,
     "extraResources": [

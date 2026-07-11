@@ -17,6 +17,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 - Bumped desktop and frontend release metadata to 1.0.12 for an independently
   identifiable PyInstaller, portable, and NSIS build.
+- Allowed NSIS warnings during compilation to accommodate electron-builder 26's
+  known `IsPowerShellAvailable` template warning; release validation still
+  requires reviewing the complete makensis warning output.
 
 ## [1.0.11] - 2026-06-01
 

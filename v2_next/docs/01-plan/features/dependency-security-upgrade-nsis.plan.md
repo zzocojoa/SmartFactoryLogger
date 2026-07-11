@@ -102,6 +102,8 @@ security-sensitive packages in this change must also become explicit build input
   Grafana Scenes internal alias contract.
 - [ ] `[AC-06]` PyInstaller and portable package verification succeed.
 - [ ] `[AC-07]` electron-builder creates the versioned NSIS installer.
+- [ ] `[AC-07A]` makensis emits no warning other than electron-builder 26's known
+  `IsPowerShellAvailable` forward-declaration warning.
 - [ ] `[AC-08]` artifact existence, version, size, and SHA-256 are recorded.
 - [ ] `[AC-09]` final Git diff contains only planned manifests, lockfiles, release
   metadata, and PDCA documents.
@@ -124,6 +126,7 @@ security-sensitive packages in this change must also become explicit build input
 |------|--------|-------------|------------|
 | Electron 33 to 41 Chromium/Node behavior change | Desktop startup or renderer regression | Medium | Keep main/preload APIs unchanged; run full tests, production build, ASAR inspection, and packaged startup smoke where possible. |
 | electron-builder dependency collection change | Missing packaged resources | Medium | Verify ASAR entries, `extraResources`, backend EXE, frontend sidecar, NSIS build, and installer contents. |
+| electron-builder 26 NSIS forward-declaration warning | Default warnings-as-errors blocks installer creation | High | Use the documented `warningsAsErrors: false` option and fail manual review if any warning other than `IsPowerShellAvailable` appears. |
 | Python parser behavior tightening | Form parsing regression | Low | Repository has no active Form/File endpoint; run all backend tests and import/startup checks. |
 | Pillow decoder hardening | Tray/splash image failure | Low | Rebuild PyInstaller executable and smoke-test packaged startup/assets. |
 | Grafana transitive advisories remain | Residual security findings | High | Do not force incompatible overrides; document residual findings for a dedicated Grafana migration. |
