@@ -495,6 +495,35 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["diagnostics_field_status"]["d1temperature"], "http_error")
         self.assertIn("d1temperature", snapshot["diagnostics_missing_fields"])
 
+    async def test_parse_failure_preserves_bounded_raw_value_outside_operational_payload(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.params.get("p") == "signalpc":
+                return httpx.Response(200, text="6553.4", request=request)
+            if request.url.params.get("p") == "appnumber":
+                self.assertEqual(request.url.path, "/control")
+                return httpx.Response(200, text="7", request=request)
+            return httpx.Response(200, text="0", request=request)
+
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=5,
+            started_at_epoch=time.time(),
+            started_monotonic=time.monotonic(),
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await spot_api._refresh_spot_diagnostics(client, context)
+
+        with spot_api._spot_diagnostics_lock:
+            snapshot = dict(spot_api._spot_diagnostics_snapshot or {})
+        self.assertEqual(snapshot["diagnostics_capture_status"], "async_partial")
+        self.assertEqual(snapshot["diagnostics_field_status"]["signalpc"], "parse_error")
+        self.assertIn("signalpc", snapshot["diagnostics_missing_fields"])
+        self.assertNotIn("signalpc", snapshot)
+        self.assertEqual(snapshot["diagnostics_raw_values"]["signalpc"], "6553.4")
+        self.assertEqual(snapshot["appnumber"], "7")
+
     async def test_serialized_diagnostics_failure_does_not_change_temperature_poll_status(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
 

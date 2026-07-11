@@ -145,6 +145,20 @@ The diagnostics collector routes `appnumber` to `/control` while all measured
 output diagnostics remain on `/output`. Both paths use the same device-wide
 request lock.
 
+### 2.7 Parse-Failure Raw Evidence
+
+Every successful diagnostic HTTP response is bounded before it enters the
+collector snapshot. The bounded body is retained in a separate
+`diagnostics_raw_values` map for audit only. A value that fails parsing or range
+validation remains absent from the operational payload, so it cannot influence
+Temperature output status or cause classification.
+
+The observation fact reuses its existing diagnostic value column. It writes the
+validated value first and falls back to the bounded raw value only when the
+validated value is absent. `diagnostics_field_status_json` remains authoritative
+for whether the stored fact value was valid, missing, or a parse failure. This
+adds no fact schema column and requires no migration.
+
 ## 3. State Model
 
 ### 3.1 Image Lifecycle

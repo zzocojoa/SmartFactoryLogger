@@ -449,6 +449,46 @@ class SpotObservationFactTests(unittest.TestCase):
             '["actuator_scanning","alarm_low_signal","peak_picker_off_mode_reset_configured","signalpc_present_threshold_unknown","target_absent_verified"]',
         )
 
+    def test_build_fact_preserves_parse_failure_raw_value_without_using_it_as_evidence(self) -> None:
+        metadata = self.diagnostics_metadata(
+            3,
+            success_fields=tuple(
+                field for field in SPOT_DIAGNOSTIC_OUTPUT_FIELDS if field != "signalpc"
+            ),
+        )
+        field_status = dict(metadata["diagnostics_field_status"])
+        field_status["signalpc"] = "parse_error"
+        metadata["diagnostics_field_status"] = field_status
+        snapshot = {
+            "spot_service_instance_id": "svc-1",
+            "spot_poll_seq": 3,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:00Z",
+            "diagnostics_raw_values": {"signalpc": "6553.4"},
+            "low_signal_alarm_enabled": False,
+            "low_signal_threshold_pc": "2.0",
+            "low_signal_comparator": "lt",
+            "low_signal_comparator_verified": False,
+            **metadata,
+        }
+
+        fact = build_spot_observation_fact(snapshot)
+
+        self.assertNotIn("signalpc", snapshot)
+        self.assertEqual(fact["signalpc"], "6553.4")
+        self.assertEqual(
+            json.loads(fact["diagnostics_field_status_json"])["signalpc"],
+            "parse_error",
+        )
+        self.assertEqual(fact["spot_diagnostic_evidence_codes"], "")
+        self.assertEqual(fact["evidence_provenance_json"], "")
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            writer = SpotObservationFactWriter(output_path)
+            self.assertIsNotNone(writer.write_fact(snapshot))
+            self.assertEqual(validate_spot_observation_fact_invariants(output_path), [])
+
     def test_numeric_alarmstatus_bit_four_derives_alarm_low_signal(self) -> None:
         self.assertEqual(
             derive_spot_diagnostic_evidence_codes({"alarmstatus": "16"}),

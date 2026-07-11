@@ -1334,8 +1334,17 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
                 f"spot_observation_fact row {row_number} comparator-unverified evidence requires verified=false"
             )
         signalpc_text = row[indices["signalpc"]].strip() if "signalpc" in indices else ""
+        signalpc_field_success = True
+        if is_current_schema:
+            field_status = _parse_json_object_strict(
+                row[indices["diagnostics_field_status_json"]].strip()
+            )
+            signalpc_field_success = bool(
+                field_status and field_status.get("signalpc") == "success"
+            )
         if (
             comparator_verified is False
+            and signalpc_field_success
             and signalpc_text
             and threshold
             and comparator in {"lt", "lte"}

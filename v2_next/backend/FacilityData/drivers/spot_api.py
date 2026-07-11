@@ -804,6 +804,7 @@ async def _refresh_spot_diagnostics(
         except Exception as exc:
             results.append(exc)
     payload: Dict[str, Any] = {}
+    raw_values: dict[str, str] = {}
     errors: list[str] = []
     field_status: dict[str, str] = {}
     for param, result in zip(_SPOT_DIAGNOSTIC_OUTPUT_PARAMS, results, strict=True):
@@ -812,6 +813,7 @@ async def _refresh_spot_diagnostics(
             errors.append(f"{result.__class__.__name__}: {_format_exception_message(result)}")
             continue
         key, value = result
+        raw_values[key] = value
         status = _diagnostic_value_field_status(key, value)
         field_status[key] = status
         if status == "success":
@@ -843,6 +845,10 @@ async def _refresh_spot_diagnostics(
         field_status=field_status,
         missing_fields=missing_fields,
     ).as_payload(diagnostics_max_age_ms=_spot_diagnostics_max_age_sec() * 1000.0)
+    # Preserve the already bounded HTTP-200 body for audit only. Invalid raw
+    # values remain absent from the operational payload and cannot affect cause
+    # classification.
+    snapshot["diagnostics_raw_values"] = raw_values
     with _spot_diagnostics_lock:
         _spot_diagnostics_snapshot = snapshot
         _spot_diagnostics_last_error_code = "spot-diagnostics-fetch-error" if errors else None

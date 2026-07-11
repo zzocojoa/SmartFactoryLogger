@@ -83,11 +83,22 @@ HTTP 200과 값 `7`을 반환함을 확인했다. 해당 PDF 불일치를 수정
 - Observation fact root cause: 897/897 `appnumber=http_error`
 - Direct SPOT verification: `/output?p=appnumber` HTTP 400;
   `/control?p=info` HTTP 200 `SPOT+ AL`; `/control?p=appnumber` HTTP 200 `7`
-- Focused backend SPOT tests: 60 tests PASS
+- Second server package observation: 15 minutes, CSV +2,569, image errors 0,
+  Temperature poll failures 0, diagnostics `async_complete` +1,902 and
+  `async_partial` +667
+- Observation fact sampling: 242/242 partial facts reported
+  `signalpc=parse_error`; all other diagnostic fields were successful
+- Direct device isolation: `signalpc` 493/493 numeric in range; full official
+  request sequence 309/309 numeric in range with no route failures
+- Evidence gap found: invalid diagnostic bodies were discarded before fact
+  emission, preventing root-cause analysis of the app-only intermittent state
+- Bounded parse-failure raw evidence patch: implemented locally; new clean
+  package and server revalidation pending
+- Focused backend SPOT/fact tests: 89 tests PASS
 - Device concurrency test: image + temperature + 8 diagnostics, max active upstream = 1
 - `npm run health`: PASS
   - frontend typecheck, ESLint, 27 files / 180 tests
-  - backend ruff, mypy, 465 tests
+  - backend ruff, mypy, 467 tests
 - 새 PyInstaller/NSIS package 및 packaged smoke: pending
 - Server real-device 15-minute validation: pending
 
