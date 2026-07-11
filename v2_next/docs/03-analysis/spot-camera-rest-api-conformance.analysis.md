@@ -21,6 +21,13 @@
 남은 항목은 새 clean package를 서버 컴퓨터에 설치한 뒤 최소 15분 동안 실장비로 검증하는
 운영 AC 하나다. 이 검증 전에는 PDCA를 완료 처리하지 않는다.
 
+첫 15분 서버 검증에서 image 오류 0건, Temperature poll 실패 0건, CSV 3,086행
+추가를 확인했지만 모든 신규 행이 `async_partial`이었다. Observation fact 897건을
+분석한 결과 유일한 실패는 `appnumber=http_error`였으며, 장비 직접 검증으로 현재
+`/output?p=appnumber` 구현이 HTTP 400을 반환하고 공식 `/control?p=appnumber`는
+HTTP 200과 값 `7`을 반환함을 확인했다. 해당 PDF 불일치를 수정했으며 새 package와
+서버 재검증은 아직 남아 있다.
+
 ## Implemented Items
 
 - [x] SPOT image upstream URL을 `http://{SPOT_IP}/image.jpg`로 고정했다.
@@ -47,6 +54,8 @@
 - [x] 테스트에서 image, temperature, diagnostics의 실제 upstream 최대 동시성이 1임을 검증했다.
 - [x] API focus/actuator가 serialized wrapper를 호출하는지 검증했다.
 - [x] 기존 temperature/diagnostics snapshot 계약을 직렬 실행 의미에 맞게 회귀 검증했다.
+- [x] Application Pyrometer `appnumber`를 공식 `/control?p=appnumber`로 요청한다.
+- [x] `/output?p=appnumber`가 요청되지 않음을 회귀 테스트로 검증했다.
 
 ## Missing Items
 
@@ -69,6 +78,11 @@
 - Server direct SPOT `/image.jpg`: 60초, 2,014 requests, 2,014 successes, 0 failures,
   0 requests over 1,000ms
 - Previous app-only observation: 68.8초, `502 upstream-timeout` 1건
+- First serialized server observation: 15분, image errors 0, Temperature poll failures 0,
+  CSV +3,086, diagnostics `async_partial` +3,086
+- Observation fact root cause: 897/897 `appnumber=http_error`
+- Direct SPOT verification: `/output?p=appnumber` HTTP 400;
+  `/control?p=info` HTTP 200 `SPOT+ AL`; `/control?p=appnumber` HTTP 200 `7`
 - Focused backend SPOT tests: 60 tests PASS
 - Device concurrency test: image + temperature + 8 diagnostics, max active upstream = 1
 - `npm run health`: PASS

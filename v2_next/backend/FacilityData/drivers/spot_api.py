@@ -695,6 +695,17 @@ def _resolve_spot_output_url(param: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path or "/output", urlencode(query), ""))
 
 
+def _resolve_spot_diagnostic_url(param: str) -> str:
+    if param != "appnumber":
+        return _resolve_spot_output_url(param)
+
+    base_url = str(config.SPOT_URL or "").strip() or f"http://{config.SPOT_IP}/output?p=temperature"
+    parts = urlsplit(base_url)
+    if not parts.scheme or not parts.netloc:
+        raise SpotTemperatureConfigError(base_url)
+    return urlunsplit((parts.scheme, parts.netloc, "/control", urlencode({"p": param}), ""))
+
+
 def _spot_diagnostics_max_age_sec() -> float:
     return configured_diagnostics_max_age_ms(config.SPOT_REFRESH_INTERVAL) / 1000.0
 
@@ -729,7 +740,7 @@ def _spot_configuration_snapshot() -> Dict[str, Any]:
 
 
 async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str) -> tuple[str, str]:
-    url = _resolve_spot_output_url(param)
+    url = _resolve_spot_diagnostic_url(param)
     async with _spot_device_request_lock:
         response = await client.get(url)
         response.raise_for_status()

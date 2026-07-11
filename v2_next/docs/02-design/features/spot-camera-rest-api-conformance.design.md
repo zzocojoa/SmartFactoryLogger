@@ -131,6 +131,20 @@ lock remains held, including cancellation cleanup.
 This backend arbitration does not add a camera frame timer or alter the PDF
 completion-driven UI state machine.
 
+### 2.6 Application Pyrometer App Number
+
+The AMETEK LAND REST API defines `appnumber` as an Application Pyrometer-only
+control parameter. It must be read with `GET /control?p=appnumber`; it is not an
+`/output` parameter. The SPOT+ AL server device confirmed this contract:
+
+- `GET /output?p=appnumber` returned HTTP 400;
+- `GET /control?p=info` returned `SPOT+ AL`;
+- `GET /control?p=appnumber` returned HTTP 200 with value `7`.
+
+The diagnostics collector routes `appnumber` to `/control` while all measured
+output diagnostics remain on `/output`. Both paths use the same device-wide
+request lock.
+
 ## 3. State Model
 
 ### 3.1 Image Lifecycle
@@ -255,6 +269,8 @@ Failure:
   failure status;
 - cancellation of a threaded control request does not release the device lock
   before the underlying request finishes;
+- Application Pyrometer `appnumber` uses `/control?p=appnumber` and never
+  `/output?p=appnumber`;
 - successful official bytes still reach evidence capture when enabled;
 - removed routes return `404`.
 

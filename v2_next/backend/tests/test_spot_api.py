@@ -346,8 +346,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, text="53", request=request)
             if url == "http://spot.local/output?p=itemperature":
                 return httpx.Response(200, text="41.2", request=request)
-            if url == "http://spot.local/output?p=appnumber":
-                return httpx.Response(200, text="App1", request=request)
+            if url == "http://spot.local/control?p=appnumber":
+                return httpx.Response(200, text="7", request=request)
             if url == "http://spot.local/output?p=temperature":
                 return httpx.Response(200, text="6553.4", request=request)
             return httpx.Response(404, text="not found", request=request)
@@ -375,7 +375,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["e1out"], "57")
         self.assertEqual(diagnostics["e2out"], "53")
         self.assertEqual(diagnostics["itemperature"], "41.2")
-        self.assertEqual(diagnostics["appnumber"], "App1")
+        self.assertEqual(diagnostics["appnumber"], "7")
         self.assertEqual(diagnostics["low_signal_alarm_enabled"], False)
         self.assertEqual(diagnostics["low_signal_threshold_pc"], 2.0)
         self.assertEqual(diagnostics["low_signal_comparator"], "lt")
@@ -396,7 +396,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("http://spot.local/output?p=e1out", requests)
         self.assertIn("http://spot.local/output?p=e2out", requests)
         self.assertIn("http://spot.local/output?p=itemperature", requests)
-        self.assertIn("http://spot.local/output?p=appnumber", requests)
+        self.assertIn("http://spot.local/control?p=appnumber", requests)
+        self.assertNotIn("http://spot.local/output?p=appnumber", requests)
 
     async def test_serialized_scheduled_diagnostics_bind_to_next_poll(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
