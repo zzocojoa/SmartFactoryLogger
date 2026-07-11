@@ -58,3 +58,32 @@ The parse-failure raw-evidence path did not activate because `signalpc` had no
 parse failure during this observation. Its behavior remains covered by the
 focused regression tests. No additional installer rebuild or 15-minute rerun
 is required for this validation.
+
+## PLC and Live-Image Recovery Monitor
+
+- Result: `PASS`
+- Observation window: `2026-07-11T23:55:29.7559934+09:00` to
+  `2026-07-12T00:10:30.6016455+09:00`
+- Preserved artifact:
+  [plc-live-image-monitor-20260712-001030.json](evidence/plc-live-image-monitor-20260712-001030.json)
+- Artifact size: `103,190` bytes
+- Artifact SHA-256:
+  `415704244b1388ef95629e908141a31d724c55ff03f11a220edb13f90d9b5064`
+- Health samples: `174`
+- Health probe failures: `0`
+- Disconnected samples: `0`
+- Stale snapshot samples: `0`
+- Thread failure samples: `0`
+- SPOT poll failure samples: `0`
+- Extruder failure delta: `0`
+- LS PLC failure delta: `0`
+- Observability error total: `0`
+- PLC error total: `0`
+- Live-image error total: `0`
+- Final official image probe: `PASS`
+
+The monitor cleared the in-memory observability queue only after recovery
+preflight completed, so the zero-error result covers new errors during the
+full observation window. The artifact intentionally stores summarized health
+and sanitized error fields only; it contains no absolute path, URL,
+credential-pattern value, or private device address.
