@@ -87,6 +87,7 @@ DEFAULT_CSV_V1_ENABLED = True
 DEFAULT_CSV_V2_ENABLED = False
 DEFAULT_CSV_V2_SIDECAR_ENABLED = True
 DEFAULT_CSV_V2_OPERATIONAL_FIELDS_ENABLED = False
+DEFAULT_CSV_V2_TEMPERATURE_HARDENING_ENABLED = False
 DEFAULT_CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC = 300.0
 DEFAULT_SPOT_OBSERVATION_FACT_ENABLED = False
 DEFAULT_PROCESS_PHASE_EVENT_FACT_ENABLED = False
@@ -754,6 +755,15 @@ CSV_V2_OPERATIONAL_FIELDS_ENABLED = _env_bool(
         DEFAULT_CSV_V2_OPERATIONAL_FIELDS_ENABLED,
     ),
 )
+CSV_V2_TEMPERATURE_HARDENING_ENABLED = _env_bool(
+    "CSV_V2_TEMPERATURE_HARDENING_ENABLED",
+    _get_bool(
+        CONFIG,
+        "LOGGING",
+        "csv_v2_temperature_hardening_enabled",
+        DEFAULT_CSV_V2_TEMPERATURE_HARDENING_ENABLED,
+    ),
+)
 CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC = max(
     2.0,
     _env_float(
@@ -782,6 +792,17 @@ V2_4_PROMOTION_BUNDLE_FLAGS = (
 )
 
 
+def _validate_v2_temperature_hardening_flags() -> None:
+    if not CSV_V2_TEMPERATURE_HARDENING_ENABLED or CSV_V2_OPERATIONAL_FIELDS_ENABLED:
+        return
+    message = (
+        "CSV v2 temperature hardening requires CSV_V2_OPERATIONAL_FIELDS_ENABLED=true. "
+        "Disable CSV_V2_TEMPERATURE_HARDENING_ENABLED or enable the full v2.4 promotion bundle."
+    )
+    _config_log("ERROR", message)
+    raise RuntimeError(message)
+
+
 def _validate_v2_4_promotion_bundle_flags() -> None:
     flag_values = {
         "CSV_V2_OPERATIONAL_FIELDS_ENABLED": CSV_V2_OPERATIONAL_FIELDS_ENABLED,
@@ -801,6 +822,7 @@ def _validate_v2_4_promotion_bundle_flags() -> None:
     raise RuntimeError(message)
 
 
+_validate_v2_temperature_hardening_flags()
 _validate_v2_4_promotion_bundle_flags()
 
 SNAPSHOT_PATH = resolve_storage_path(

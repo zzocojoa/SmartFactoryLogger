@@ -65,6 +65,7 @@ from backend.FacilityData.temperature_operational import (
 
 CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
 CSV_SCHEMA_VERSION_V2_4 = "2.4.0"
+CSV_SCHEMA_VERSION_V2_5 = "2.5.0"
 DERIVATION_VERSION = "cycle-heuristic-v1"
 PROCESS_STATE_ONLINE_RULE_VERSION = "process-state-online-v1"
 OPERATOR_METADATA_VERSION = "1.0.0"
@@ -74,6 +75,7 @@ SPOT_SENTINEL_MAP_VERSION = "spot-sentinel-ametek-rest-v1"
 SPOT_VERIFIED_NO_TARGET_VALUES: tuple[str, ...] = ()
 SPOT_CACHE_EXPIRY_THRESHOLD_SEC = 15.0
 SPOT_TEMPERATURE_RAW_MAX_LENGTH = 256
+TEMPERATURE_QUALITY_MAPPING_VERSION = "temperature-quality-operational-v1"
 
 SPOT_TEMPERATURE_SHADOW_COLUMNS = [
     "logger_service_instance_id",
@@ -226,6 +228,15 @@ V2_4_CSV_COLUMNS = [
     *V2_4_OPERATIONAL_COLUMNS,
 ]
 
+V2_5_OPERATIONAL_HARDENING_COLUMNS = [
+    "spot_value_age_clock_status",
+]
+
+V2_5_CSV_COLUMNS = [
+    *V2_4_CSV_COLUMNS,
+    *V2_5_OPERATIONAL_HARDENING_COLUMNS,
+]
+
 V2_CSV_COLUMNS = V2_3_CSV_COLUMNS
 
 CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
@@ -265,6 +276,7 @@ class V2CsvContract:
     schema_version: str
     columns: tuple[str, ...]
     operational_fields_enabled: bool
+    temperature_hardening_enabled: bool
     column_hash: str
 
 
@@ -307,6 +319,13 @@ class CSVLoggerService:
         self.csv_v2_operational_fields_enabled = bool(
             getattr(config, "CSV_V2_OPERATIONAL_FIELDS_ENABLED", False)
         )
+        self.csv_v2_temperature_hardening_enabled = bool(
+            getattr(config, "CSV_V2_TEMPERATURE_HARDENING_ENABLED", False)
+        )
+        self._validate_temperature_hardening_contract(
+            operational_fields_enabled=self.csv_v2_operational_fields_enabled,
+            temperature_hardening_enabled=self.csv_v2_temperature_hardening_enabled,
+        )
         self._active_v2_contract: Optional[V2CsvContract] = None
         self._ensure_csv_writer_enabled()
         self.csv_header = self._parse_header(config.CSV_HEADER)
@@ -342,6 +361,7 @@ class CSVLoggerService:
         self._v2_4_diagnostics_cause_suppressed_count = 0
         self._v2_4_diagnostics_cause_suppressed_reason_counts: Counter[str] = Counter()
         self._v2_4_unsupported_evidence_suppressed_count = 0
+        self._v2_4_value_age_clock_anomaly_count = 0
         self._v2_4_last_sample_seq: Optional[int] = None
         self._v2_4_last_updated_at: Optional[str] = None
         self._current_v2_csv_path: Optional[Path] = None
@@ -403,9 +423,24 @@ class CSVLoggerService:
         csv_v2_enabled: Optional[bool] = None,
         csv_v2_sidecar_enabled: Optional[bool] = None,
         csv_v2_operational_fields_enabled: Optional[bool] = None,
+        csv_v2_temperature_hardening_enabled: Optional[bool] = None,
     ) -> bool:
         changed = False
         with self._config_lock:
+            next_operational_enabled = (
+                self.csv_v2_operational_fields_enabled
+                if csv_v2_operational_fields_enabled is None
+                else bool(csv_v2_operational_fields_enabled)
+            )
+            next_hardening_enabled = (
+                self.csv_v2_temperature_hardening_enabled
+                if csv_v2_temperature_hardening_enabled is None
+                else bool(csv_v2_temperature_hardening_enabled)
+            )
+            self._validate_temperature_hardening_contract(
+                operational_fields_enabled=next_operational_enabled,
+                temperature_hardening_enabled=next_hardening_enabled,
+            )
             if log_path is not None:
                 self.active_log_dir = Path(log_path)
                 changed = True
@@ -421,12 +456,14 @@ class CSVLoggerService:
             if csv_v2_enabled is not None:
                 self.csv_v2_enabled = bool(csv_v2_enabled)
                 changed = True
-            if csv_v2_operational_fields_enabled is not None:
-                next_enabled = bool(csv_v2_operational_fields_enabled)
-                if next_enabled != self.csv_v2_operational_fields_enabled:
-                    self.csv_v2_operational_fields_enabled = next_enabled
-                    self._active_v2_contract = None
-                    changed = True
+            if (
+                next_operational_enabled != self.csv_v2_operational_fields_enabled
+                or next_hardening_enabled != self.csv_v2_temperature_hardening_enabled
+            ):
+                self.csv_v2_operational_fields_enabled = next_operational_enabled
+                self.csv_v2_temperature_hardening_enabled = next_hardening_enabled
+                self._active_v2_contract = None
+                changed = True
             if csv_v2_sidecar_enabled is not None:
                 self.csv_v2_sidecar_enabled = bool(csv_v2_sidecar_enabled)
                 changed = True
@@ -435,6 +472,18 @@ class CSVLoggerService:
             if changed:
                 self._config_version += 1
         return changed
+
+    @staticmethod
+    def _validate_temperature_hardening_contract(
+        *,
+        operational_fields_enabled: bool,
+        temperature_hardening_enabled: bool,
+    ) -> None:
+        if temperature_hardening_enabled and not operational_fields_enabled:
+            raise ValueError(
+                "csv_v2_temperature_hardening_enabled requires "
+                "csv_v2_operational_fields_enabled=true"
+            )
 
     def _ensure_csv_writer_enabled(self) -> None:
         if not self.auto_save:
@@ -559,13 +608,22 @@ class CSVLoggerService:
         return None, None
 
     def _resolve_v2_contract(self) -> V2CsvContract:
-        enabled = bool(self.csv_v2_operational_fields_enabled)
-        columns = tuple(V2_4_CSV_COLUMNS if enabled else V2_3_CSV_COLUMNS)
-        schema_version = CSV_SCHEMA_VERSION_V2_4 if enabled else CSV_SCHEMA_VERSION_V2_3
+        operational_enabled = bool(self.csv_v2_operational_fields_enabled)
+        hardening_enabled = bool(self.csv_v2_temperature_hardening_enabled)
+        if hardening_enabled:
+            columns = tuple(V2_5_CSV_COLUMNS)
+            schema_version = CSV_SCHEMA_VERSION_V2_5
+        elif operational_enabled:
+            columns = tuple(V2_4_CSV_COLUMNS)
+            schema_version = CSV_SCHEMA_VERSION_V2_4
+        else:
+            columns = tuple(V2_3_CSV_COLUMNS)
+            schema_version = CSV_SCHEMA_VERSION_V2_3
         return V2CsvContract(
             schema_version=schema_version,
             columns=columns,
-            operational_fields_enabled=enabled,
+            operational_fields_enabled=operational_enabled,
+            temperature_hardening_enabled=hardening_enabled,
             column_hash=_v2_column_hash(columns),
         )
 
@@ -636,7 +694,7 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to read CSV v2 header for schema rollover check: %s", exc)
             return False
-        if header in (V2_3_CSV_COLUMNS, V2_4_CSV_COLUMNS):
+        if header in (V2_3_CSV_COLUMNS, V2_4_CSV_COLUMNS, V2_5_CSV_COLUMNS):
             return True
         if not header:
             return False
@@ -846,7 +904,9 @@ class CSVLoggerService:
                 "active_schema_version": active_contract.schema_version,
                 "active_column_hash": active_contract.column_hash,
                 "csv_v2_operational_fields_enabled": active_contract.operational_fields_enabled,
+                "csv_v2_temperature_hardening_enabled": active_contract.temperature_hardening_enabled,
                 "temperature_operational_rule_version": TEMPERATURE_OPERATIONAL_RULE_VERSION,
+                "temperature_quality_mapping_version": TEMPERATURE_QUALITY_MAPPING_VERSION,
                 "spot_row_freshness_rule_version": SPOT_ROW_FRESHNESS_RULE_VERSION,
                 "process_phase_rule_version": PROCESS_PHASE_RULE_VERSION,
                 "posthoc_fact_manifests": [
@@ -1460,14 +1520,66 @@ class CSVLoggerService:
             return timestamp_age
         return fallback_age_ms
 
+    def _effective_value_age_ms_at_row(
+        self,
+        *,
+        row_timestamp: datetime,
+        row_created_monotonic: Optional[float],
+        source_completed_monotonic: Optional[float],
+        source_timestamp: Optional[str],
+    ) -> tuple[Optional[float], str]:
+        if source_completed_monotonic is not None:
+            if (
+                row_created_monotonic is None
+                or isinstance(row_created_monotonic, bool)
+                or isinstance(source_completed_monotonic, bool)
+            ):
+                return None, "clock_anomaly"
+            try:
+                row_clock = float(row_created_monotonic)
+                source_clock = float(source_completed_monotonic)
+            except (TypeError, ValueError):
+                return None, "clock_anomaly"
+            if not math.isfinite(row_clock) or not math.isfinite(source_clock):
+                return None, "clock_anomaly"
+            age_ms = (row_clock - source_clock) * 1000.0
+            if not math.isfinite(age_ms) or age_ms < 0:
+                return None, "clock_anomaly"
+            return age_ms, "ok"
+
+        timestamp_age = self._timestamp_age_ms_at_row(row_timestamp, source_timestamp)
+        if timestamp_age is None:
+            return None, "unknown"
+        if not math.isfinite(timestamp_age) or timestamp_age < 0:
+            return None, "clock_anomaly"
+        return timestamp_age, "ok"
+
     def _derive_temperature_operational_decision(
         self,
         data: FactoryData,
         process_phase_candidate: str,
         row_timestamp: datetime,
         row_created_monotonic: Optional[float],
+        temperature_hardening_enabled: bool,
     ):
         row_freshness_threshold_ms = self._spot_row_freshness_threshold_ms()
+        if temperature_hardening_enabled:
+            effective_value_age_ms, value_age_clock_status = self._effective_value_age_ms_at_row(
+                row_timestamp=row_timestamp,
+                row_created_monotonic=row_created_monotonic,
+                source_completed_monotonic=data.spot_last_valid_value_monotonic,
+                source_timestamp=data.spot_last_valid_value_at,
+            )
+        else:
+            effective_value_age_ms = self._effective_age_ms_at_row(
+                row_timestamp=row_timestamp,
+                row_created_monotonic=None,
+                explicit_age_ms=data.spot_effective_value_age_ms_at_row,
+                source_completed_monotonic=None,
+                source_timestamp=data.spot_last_valid_value_at,
+                fallback_age_ms=data.spot_value_age_ms,
+            )
+            value_age_clock_status = "unknown"
         return derive_temperature_operational_fields(
             TemperatureOperationalInput(
                 poll_status=data.spot_poll_status or "not_attempted",
@@ -1491,14 +1603,8 @@ class CSVLoggerService:
                     fallback_age_ms=data.spot_snapshot_age_ms,
                     row_freshness_threshold_ms=row_freshness_threshold_ms,
                 ),
-                spot_effective_value_age_ms_at_row=self._effective_age_ms_at_row(
-                    row_timestamp=row_timestamp,
-                    row_created_monotonic=None,
-                    explicit_age_ms=data.spot_effective_value_age_ms_at_row,
-                    source_completed_monotonic=None,
-                    source_timestamp=data.spot_last_valid_value_at,
-                    fallback_age_ms=data.spot_value_age_ms,
-                ),
+                spot_effective_value_age_ms_at_row=effective_value_age_ms,
+                spot_value_age_clock_status=value_age_clock_status,
                 spot_row_freshness_threshold_ms=row_freshness_threshold_ms,
                 process_phase_candidate=process_phase_candidate,
                 evidence_codes=parse_spot_diagnostic_evidence_codes(data.spot_diagnostic_evidence_codes),
@@ -1660,17 +1766,25 @@ class CSVLoggerService:
                     self._v2_4_diagnostics_cause_suppressed_reason_counts[suppression_reason] += 1
             if operational_decision.unsupported_evidence_suppressed:
                 self._v2_4_unsupported_evidence_suppressed_count += 1
+            if operational_decision.spot_value_age_clock_status == "clock_anomaly":
+                self._v2_4_value_age_clock_anomaly_count += 1
             self._v2_4_last_sample_seq = sample_seq
             self._v2_4_last_updated_at = updated_at
 
     def get_v2_4_operational_summary(self) -> dict[str, Any]:
         with self._config_lock:
             operational_fields_enabled = self.csv_v2_operational_fields_enabled
+            temperature_hardening_enabled = self.csv_v2_temperature_hardening_enabled
             csv_v2_enabled = self.csv_v2_enabled
         with self._v2_4_operational_lock:
             return {
                 "enabled": bool(csv_v2_enabled and operational_fields_enabled),
-                "schema_version": CSV_SCHEMA_VERSION_V2_4,
+                "schema_version": (
+                    CSV_SCHEMA_VERSION_V2_5
+                    if temperature_hardening_enabled
+                    else CSV_SCHEMA_VERSION_V2_4
+                ),
+                "temperature_hardening_enabled": temperature_hardening_enabled,
                 "rows_total": self._v2_4_operational_rows_total,
                 "rows_by_temperature_output_status": dict(self._v2_4_temperature_output_status_counts),
                 "rows_by_temperature_unavailable_reason": dict(
@@ -1701,6 +1815,7 @@ class CSVLoggerService:
                 "unsupported_evidence_suppressed_count": (
                     self._v2_4_unsupported_evidence_suppressed_count
                 ),
+                "value_age_clock_anomaly_count": self._v2_4_value_age_clock_anomaly_count,
                 "process_phase_candidate_counts": dict(self._v2_4_process_phase_candidate_counts),
                 "last_sample_seq": self._v2_4_last_sample_seq,
                 "last_updated_at": self._v2_4_last_updated_at,
@@ -1716,6 +1831,7 @@ class CSVLoggerService:
     ) -> list:
         local_timestamp = self._to_local_timestamp(timestamp)
         utc_timestamp = local_timestamp.astimezone(timezone.utc)
+        contract = self._get_active_v2_contract()
         mainpress_quality, mainpress_reason = self._quality_for_mainpress(data)
         temperature_quality, temperature_reason = self._quality_for_temperature(data)
         speed_quality, speed_reason = self._quality_for_speed(data)
@@ -1726,7 +1842,6 @@ class CSVLoggerService:
             data.spot_temperature_raw,
             SPOT_TEMPERATURE_RAW_MAX_LENGTH,
         )
-        contract = self._get_active_v2_contract()
         process_phase_decision = self._derive_process_phase_decision(data, timestamp, sample_seq)
         row_created_monotonic = time.monotonic()
         operational_decision = self._derive_temperature_operational_decision(
@@ -1734,7 +1849,12 @@ class CSVLoggerService:
             process_phase_decision.process_phase_candidate,
             utc_timestamp,
             row_created_monotonic,
+            contract.temperature_hardening_enabled,
         )
+        if contract.temperature_hardening_enabled:
+            temperature_quality, temperature_reason = self._quality_for_temperature_operational_status(
+                operational_decision.temperature_output_status
+            )
         v1_values = list(v1_row)
         temperature_value_origin = data.temperature_value_origin or ""
         if contract.operational_fields_enabled:
@@ -1826,7 +1946,7 @@ class CSVLoggerService:
             sample_seq=sample_seq,
             spot_observation_key=spot_observation_key,
         )
-        return [
+        operational_row = [
             *base_row,
             self._escape_csv_text(operational_decision.temperature_output_status),
             self._escape_csv_text(operational_decision.temperature_unavailable_reason),
@@ -1849,6 +1969,11 @@ class CSVLoggerService:
             spot_image_link["spot_image_link_status_nearest"],
             spot_image_link["spot_image_link_age_ms_nearest"],
         ]
+        if contract.temperature_hardening_enabled:
+            operational_row.append(
+                self._escape_csv_text(operational_decision.spot_value_age_clock_status)
+            )
+        return operational_row
 
     def _parse_timestamp(self, data: FactoryData) -> datetime:
         timestamp_text = data.Time or ""
@@ -1941,6 +2066,17 @@ class CSVLoggerService:
         if data.Spot <= 0:
             return "missing", "source_missing"
         return "ok", "not_missing"
+
+    def _quality_for_temperature_operational_status(self, output_status: str) -> tuple[str, str]:
+        return {
+            "valid": ("ok", "not_missing"),
+            "under_range": ("invalid", "invalid_value"),
+            "over_range": ("invalid", "invalid_value"),
+            "stale": ("stale", "stale_snapshot"),
+            "source_error": ("missing", "source_error"),
+            "startup_pending": ("missing", "source_missing"),
+            "unknown": ("unknown", "source_missing"),
+        }.get(str(output_status or "unknown"), ("unknown", "source_missing"))
 
     def _quality_for_speed(self, data: FactoryData) -> tuple[str, str]:
         if data.Speed is None:
@@ -2052,6 +2188,7 @@ class CSVLoggerService:
             log_path = str(self.active_log_dir)
             csv_v2_enabled = self.csv_v2_enabled
             csv_v2_operational_fields_enabled = self.csv_v2_operational_fields_enabled
+            csv_v2_temperature_hardening_enabled = self.csv_v2_temperature_hardening_enabled
         queue_size = self.queue.qsize()
         queue_maxsize = self.queue.maxsize
         with self._runtime_lock:
@@ -2082,6 +2219,7 @@ class CSVLoggerService:
             "csv_v1_enabled": csv_v1_enabled,
             "csv_v2_enabled": csv_v2_enabled,
             "csv_v2_operational_fields_enabled": csv_v2_operational_fields_enabled,
+            "csv_v2_temperature_hardening_enabled": csv_v2_temperature_hardening_enabled,
             "log_path": log_path,
             "v2_4_operational": self.get_v2_4_operational_summary(),
         }

@@ -21,10 +21,13 @@ from backend.FacilityData.changeover_candidate_resolution_fact import (
     build_process_phase_event_fact_manifest,
 )
 from backend.FacilityData.repository import (
+    CSV_SCHEMA_VERSION_V2_4,
+    CSV_SCHEMA_VERSION_V2_5,
     CSVLoggerService,
     V1_CSV_COLUMNS,
     V2_3_CSV_COLUMNS,
     V2_4_CSV_COLUMNS,
+    V2_5_CSV_COLUMNS,
 )
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.spot_observation_fact import (
@@ -45,6 +48,7 @@ from scripts.validate_csv_v2_shadow import (
     validate_spot_invalid_sentinel_invariants,
     validate_temperature_value_origin_invariants,
     validate_v2_4_operational_invariants,
+    validate_v2_5_temperature_hardening_invariants,
 )
 
 
@@ -87,6 +91,26 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             spot_value_age_ms=10.0,
             spot_temperature_raw="6553.4",
         )
+
+    def build_v2_5_row(
+        self,
+        data: FactoryData,
+        *,
+        row_created_monotonic: float = 100.0,
+    ) -> tuple[CSVLoggerService, list[str]]:
+        service = CSVLoggerService()
+        service.apply_config(
+            csv_v2_operational_fields_enabled=True,
+            csv_v2_temperature_hardening_enabled=True,
+        )
+        timestamp = service._parse_timestamp(data)
+        v1_row = service._build_row(data, timestamp)
+        with patch(
+            "backend.FacilityData.repository.time.monotonic",
+            return_value=row_created_monotonic,
+        ):
+            row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, v1_row)
+        return service, row
 
     def eligible_diagnostics(self, poll_seq: int = 14) -> dict[str, object]:
         return {
@@ -2149,12 +2173,306 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             with rollover_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(next(csv.reader(handle)), V2_4_CSV_COLUMNS)
 
+    def test_v2_5_quality_mapping_covers_all_operational_statuses(self) -> None:
+        valid = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:00+00:00",
+                "Spot": 560.7,
+                "spot_poll_status": "success",
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "temperature_value_origin": "current_observation",
+                "spot_device_status_code": None,
+                "spot_temperature_observed_c": 560.7,
+                "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
+                "spot_last_valid_value_at": "2026-06-25T07:59:59Z",
+                "spot_last_valid_value_monotonic": 99.0,
+            }
+        )
+        cached = valid.model_copy(
+            update={
+                "Spot": 559.1,
+                "spot_poll_status": "timeout",
+                "spot_raw_validity": "not_received",
+                "spot_cache_status": "reused",
+                "temperature_value_origin": "cached_observation",
+                "spot_temperature_observed_c": None,
+                "cache_fallback_allowed": True,
+            }
+        )
+        cases = {
+            "valid-current": (valid, "valid", "ok", "not_missing", True),
+            "valid-cached": (cached, "valid", "ok", "not_missing", True),
+            "under-range": (
+                self.create_data(),
+                "under_range",
+                "invalid",
+                "invalid_value",
+                False,
+            ),
+            "over-range": (
+                self.create_data().model_copy(
+                    update={"spot_device_status_code": "temperature_over_range"}
+                ),
+                "over_range",
+                "invalid",
+                "invalid_value",
+                False,
+            ),
+            "stale": (
+                self.create_data().model_copy(update={"spot_source_freshness": "stale"}),
+                "stale",
+                "stale",
+                "stale_snapshot",
+                False,
+            ),
+            "source-error": (
+                self.create_data().model_copy(
+                    update={
+                        "spot_poll_status": "timeout",
+                        "spot_raw_validity": "not_received",
+                        "spot_cache_status": "empty",
+                        "spot_device_status_code": None,
+                    }
+                ),
+                "source_error",
+                "missing",
+                "source_error",
+                False,
+            ),
+            "startup": (
+                self.create_data().model_copy(
+                    update={
+                        "spot_poll_status": "not_attempted",
+                        "spot_raw_validity": "not_received",
+                        "spot_device_status_code": None,
+                    }
+                ),
+                "startup_pending",
+                "missing",
+                "source_missing",
+                False,
+            ),
+            "unknown": (
+                self.create_data().model_copy(
+                    update={
+                        "spot_raw_validity": "not_received",
+                        "spot_device_status_code": None,
+                    }
+                ),
+                "unknown",
+                "unknown",
+                "source_missing",
+                False,
+            ),
+        }
+
+        for name, (data, status, quality, reason, has_temperature) in cases.items():
+            with self.subTest(name=name):
+                _, row = self.build_v2_5_row(data)
+                self.assertEqual(row[V2_5_CSV_COLUMNS.index("schema_version")], CSV_SCHEMA_VERSION_V2_5)
+                self.assertEqual(row[V2_5_CSV_COLUMNS.index("temperature_output_status")], status)
+                self.assertEqual(row[V2_5_CSV_COLUMNS.index("Temperature_quality")], quality)
+                self.assertEqual(row[V2_5_CSV_COLUMNS.index("Temperature_missing_reason")], reason)
+                self.assertEqual(bool(row[V2_5_CSV_COLUMNS.index("Temperature")]), has_temperature)
+                self.assertEqual(
+                    validate_v2_5_temperature_hardening_invariants([row], V2_5_CSV_COLUMNS),
+                    [],
+                )
+
+    def test_v2_5_value_age_prefers_monotonic_and_ignores_snapshot_age(self) -> None:
+        data = self.create_data().model_copy(
+            update={
+                "spot_last_valid_value_at": "2026-06-25T00:00:00Z",
+                "spot_last_valid_value_monotonic": 99.25,
+                "spot_effective_value_age_ms_at_row": 1.0,
+                "spot_value_age_ms": 2.0,
+            }
+        )
+
+        _, row = self.build_v2_5_row(data, row_created_monotonic=100.0)
+
+        self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_effective_value_age_ms_at_row")], "750.0")
+        self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_value_age_clock_status")], "ok")
+
+    def test_v2_5_value_age_uses_utc_fallback_only_without_monotonic(self) -> None:
+        data = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:00+00:00",
+                "spot_last_valid_value_at": "2026-06-25T07:59:59Z",
+                "spot_last_valid_value_monotonic": None,
+            }
+        )
+
+        _, row = self.build_v2_5_row(data)
+
+        self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_effective_value_age_ms_at_row")], "1000.0")
+        self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_value_age_clock_status")], "ok")
+
+    def test_v2_5_value_age_clock_anomalies_are_blank_and_counted(self) -> None:
+        monotonic_data = self.create_data().model_copy(
+            update={"spot_last_valid_value_monotonic": 101.0}
+        )
+        wall_clock_data = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:00+00:00",
+                "spot_last_valid_value_at": "2026-06-25T08:00:01Z",
+            }
+        )
+
+        for name, data in (("monotonic", monotonic_data), ("wall-clock", wall_clock_data)):
+            with self.subTest(name=name):
+                service, row = self.build_v2_5_row(data, row_created_monotonic=100.0)
+                self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_effective_value_age_ms_at_row")], "")
+                self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_value_age_clock_status")], "clock_anomaly")
+                self.assertEqual(service.get_v2_4_operational_summary()["value_age_clock_anomaly_count"], 1)
+
+    def test_v2_5_value_age_is_unknown_when_both_sources_are_missing(self) -> None:
+        _, row = self.build_v2_5_row(self.create_data())
+
+        self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_effective_value_age_ms_at_row")], "")
+        self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_value_age_clock_status")], "unknown")
+
+    def test_v2_4_contract_preserves_legacy_quality_and_value_age_semantics(self) -> None:
+        service = CSVLoggerService()
+        service.apply_config(csv_v2_operational_fields_enabled=True)
+        data = self.create_data().model_copy(
+            update={
+                "Spot": 560.7,
+                "captured_at_spot": 1_782_374_400.0,
+                "spot_source_freshness": "stale",
+                "spot_device_status_code": None,
+                "spot_effective_value_age_ms_at_row": 321.0,
+            }
+        )
+        timestamp = service._parse_timestamp(data)
+        row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
+
+        self.assertEqual(service._get_active_v2_contract().schema_version, CSV_SCHEMA_VERSION_V2_4)
+        self.assertEqual(list(service._get_active_v2_contract().columns), V2_4_CSV_COLUMNS)
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("Temperature_quality")], "ok")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("Temperature_missing_reason")], "not_missing")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_value_age_ms_at_row")], "321.0")
+        self.assertNotIn("spot_value_age_clock_status", V2_4_CSV_COLUMNS)
+
+    def test_v2_5_validator_rejects_quality_and_clock_status_contradictions(self) -> None:
+        data = self.create_data().model_copy(
+            update={
+                "Spot": 560.7,
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "temperature_value_origin": "current_observation",
+                "spot_device_status_code": None,
+                "spot_temperature_observed_c": 560.7,
+                "spot_last_valid_value_monotonic": 99.0,
+            }
+        )
+        _, row = self.build_v2_5_row(data)
+
+        blank_temperature = list(row)
+        blank_temperature[V2_5_CSV_COLUMNS.index("Temperature")] = ""
+        clock_conflict = list(row)
+        clock_conflict[V2_5_CSV_COLUMNS.index("spot_value_age_clock_status")] = "clock_anomaly"
+
+        quality_failures = validate_v2_5_temperature_hardening_invariants(
+            [blank_temperature], V2_5_CSV_COLUMNS
+        )
+        clock_failures = validate_v2_5_temperature_hardening_invariants(
+            [clock_conflict], V2_5_CSV_COLUMNS
+        )
+        self.assertTrue(any("blank Temperature cannot use ok/not_missing" in item for item in quality_failures))
+        self.assertTrue(any("requires blank value age" in item for item in clock_failures))
+
+    def test_full_validator_accepts_v2_5_temperature_hardening_contract(self) -> None:
+        data = self.create_data().model_copy(
+            update={
+                "Time": "2026-06-25T08:00:00+00:00",
+                "Spot": 560.7,
+                "spot_raw_validity": "valid_temperature",
+                "spot_cache_status": "fresh",
+                "temperature_value_origin": "current_observation",
+                "spot_device_status_code": None,
+                "spot_temperature_observed_c": 560.7,
+                "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
+                "spot_last_valid_value_at": "2026-06-25T07:59:59Z",
+                "spot_last_valid_value_monotonic": 99.0,
+            }
+        )
+        service, row = self.build_v2_5_row(data)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            v2_path = Path(tmp) / "Factory_Integrated_Log_v2_20260625_080000_2_5_0.csv"
+            self.write_observation_fact(
+                Path(tmp) / "spot_observation_fact.csv",
+                [self.observation_fact_row()],
+            )
+            with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(V2_5_CSV_COLUMNS)
+                writer.writerow(row)
+            with patch("backend.FacilityData.repository.config.SPOT_OBSERVATION_FACT_ENABLED", True):
+                service._write_v2_sidecar(v2_path, service._get_active_v2_contract())
+                service.refresh_spot_observation_fact_manifest_for_csv(v2_path)
+
+            result = validate_csv_v2_shadow(None, v2_path, v2_path.with_suffix(".metadata.json"))
+
+        self.assertEqual(result, 0)
+
+    def test_v2_4_to_v2_5_contract_change_rolls_over_with_separate_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+            )
+            handle, _ = service._open_v2_log_file("20260711_120000", "Factory_Integrated_Log_v2")
+            service._close_v2_file(handle)
+
+            service.apply_config(csv_v2_temperature_hardening_enabled=True)
+            handle, _ = service._open_v2_log_file("20260711_120000", "Factory_Integrated_Log_v2")
+            service._close_v2_file(handle)
+
+            csv_files = sorted(log_dir.glob("Factory_Integrated_Log_v2_20260711_120000*.csv"))
+            metadata_files = sorted(log_dir.glob("Factory_Integrated_Log_v2_20260711_120000*.metadata.json"))
+            self.assertEqual(len(csv_files), 2)
+            self.assertEqual(len(metadata_files), 2)
+            headers = []
+            for path in csv_files:
+                with path.open("r", encoding="utf-8-sig", newline="") as csv_handle:
+                    headers.append(next(csv.reader(csv_handle)))
+            self.assertIn(V2_4_CSV_COLUMNS, headers)
+            self.assertIn(V2_5_CSV_COLUMNS, headers)
+            schemas = {
+                json.loads(path.read_text(encoding="utf-8"))["schema_metadata"]["schema_version"]
+                for path in metadata_files
+            }
+            self.assertEqual(schemas, {CSV_SCHEMA_VERSION_V2_4, CSV_SCHEMA_VERSION_V2_5})
+
+    def test_temperature_hardening_runtime_flag_combination_is_fail_closed(self) -> None:
+        service = CSVLoggerService()
+        original_log_dir = service.active_log_dir
+
+        with self.assertRaisesRegex(ValueError, "requires csv_v2_operational_fields_enabled=true"):
+            service.apply_config(
+                log_path=Path("must-not-apply"),
+                csv_v2_temperature_hardening_enabled=True,
+            )
+
+        self.assertFalse(service.csv_v2_temperature_hardening_enabled)
+        self.assertFalse(service.csv_v2_operational_fields_enabled)
+        self.assertEqual(service.active_log_dir, original_log_dir)
+
     def test_v1_temperature_index_remains_stable(self) -> None:
         self.assertEqual(V1_CSV_COLUMNS.index("Temperature"), 2)
 
 
 PROMOTION_FLAGS = (
     "CSV_V2_OPERATIONAL_FIELDS_ENABLED",
+    "CSV_V2_TEMPERATURE_HARDENING_ENABLED",
     "SPOT_OBSERVATION_FACT_ENABLED",
     "PROCESS_PHASE_EVENT_FACT_ENABLED",
 )
@@ -2187,6 +2505,26 @@ class ConfigPromotionBundleTests(unittest.TestCase):
     def test_full_v2_4_promotion_bundle_is_allowed_on_import(self) -> None:
         result = self.import_config(
             CSV_V2_OPERATIONAL_FIELDS_ENABLED="true",
+            SPOT_OBSERVATION_FACT_ENABLED="true",
+            PROCESS_PHASE_EVENT_FACT_ENABLED="true",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("config-import-ok", result.stdout)
+
+    def test_v2_5_hardening_without_operational_fields_is_rejected_on_import(self) -> None:
+        result = self.import_config(CSV_V2_TEMPERATURE_HARDENING_ENABLED="true")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "CSV v2 temperature hardening requires CSV_V2_OPERATIONAL_FIELDS_ENABLED=true",
+            result.stderr + result.stdout,
+        )
+
+    def test_full_v2_5_flag_bundle_is_allowed_on_import(self) -> None:
+        result = self.import_config(
+            CSV_V2_OPERATIONAL_FIELDS_ENABLED="true",
+            CSV_V2_TEMPERATURE_HARDENING_ENABLED="true",
             SPOT_OBSERVATION_FACT_ENABLED="true",
             PROCESS_PHASE_EVENT_FACT_ENABLED="true",
         )

@@ -9,7 +9,7 @@ from backend.FacilityData.schemas import FactoryData
 from .base import BasePLCDriver
 
 
-CSV_TS_RE = re.compile(r"Factory_Integrated_Log(?:_v2)?_(\d{8}_\d{6})\.csv$")
+CSV_TS_RE = re.compile(r"Factory_Integrated_Log(?:_v2)?_(\d{8}_\d{6})(?:_2_[345]_0)?\.csv$")
 
 
 def _csv_sort_key(path: Path) -> tuple[str, str]:
@@ -135,6 +135,10 @@ class CsvReplayDriver(BasePLCDriver):
             "spot_last_valid_value_at": self._optional_text(row.get("spot_last_valid_value_at")),
             "spot_snapshot_age_ms": self._optional_float(row.get("spot_snapshot_age_ms")),
             "spot_value_age_ms": self._optional_float(row.get("spot_value_age_ms")),
+            "spot_effective_value_age_ms_at_row": self._optional_float(
+                row.get("spot_effective_value_age_ms_at_row")
+            ),
+            "spot_value_age_clock_status": self._optional_text(row.get("spot_value_age_clock_status")),
             "spot_image_capture_id_nearest": self._optional_text(row.get("spot_image_capture_id_nearest")),
             "spot_image_path_nearest": self._optional_text(row.get("spot_image_path_nearest")),
             "spot_image_link_status_nearest": self._optional_text(row.get("spot_image_link_status_nearest")),

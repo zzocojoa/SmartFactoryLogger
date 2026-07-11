@@ -264,6 +264,7 @@ class FactoryData(BaseModel):
     spot_last_poll_completed_monotonic: Optional[float] = Field(default=None, exclude=True)
     spot_last_response_at: Optional[str] = None
     spot_last_valid_value_at: Optional[str] = None
+    spot_last_valid_value_monotonic: Optional[float] = Field(default=None, exclude=True)
     spot_snapshot_age_ms: Optional[float] = None
     spot_value_age_ms: Optional[float] = None
 
@@ -278,6 +279,7 @@ class FactoryData(BaseModel):
     spot_effective_freshness_at_row: Optional[str] = None
     spot_effective_value_age_ms_at_row: Optional[float] = None
     spot_row_age_clock_status: Optional[str] = None
+    spot_value_age_clock_status: Optional[str] = None
     process_phase_candidate: Optional[str] = None
     process_phase_rule_version: Optional[str] = None
     phase_confirmation_state: Optional[str] = None

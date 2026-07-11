@@ -5,7 +5,13 @@ import unittest
 from pathlib import Path
 
 from backend.FacilityData.drivers.csv_replay import CsvReplayDriver
-from backend.FacilityData.repository import CSV_SCHEMA_VERSION_V2_3, V1_CSV_COLUMNS, V2_CSV_COLUMNS
+from backend.FacilityData.repository import (
+    CSV_SCHEMA_VERSION_V2_3,
+    CSV_SCHEMA_VERSION_V2_5,
+    V1_CSV_COLUMNS,
+    V2_5_CSV_COLUMNS,
+    V2_CSV_COLUMNS,
+)
 
 
 class CsvReplayDriverTests(unittest.TestCase):
@@ -38,11 +44,20 @@ class CsvReplayDriverTests(unittest.TestCase):
             writer.writerow(V1_CSV_COLUMNS)
             writer.writerow(row)
 
-    def _write_v2_csv(self, path: Path, count: int, temperature: str = "450.0") -> None:
-        values = {column: "" for column in V2_CSV_COLUMNS}
+    def _write_v2_csv(
+        self,
+        path: Path,
+        count: int,
+        temperature: str = "450.0",
+        *,
+        columns: list[str] | None = None,
+        schema_version: str = CSV_SCHEMA_VERSION_V2_3,
+    ) -> None:
+        columns = columns or V2_CSV_COLUMNS
+        values = {column: "" for column in columns}
         values.update(
             {
-                "schema_version": CSV_SCHEMA_VERSION_V2_3,
+                "schema_version": schema_version,
                 "sample_seq": str(count),
                 "timestamp_local": "2026-03-09T07:20:25.123+09:00",
                 "timestamp_utc": "2026-03-08T22:20:25.123Z",
@@ -123,12 +138,14 @@ class CsvReplayDriverTests(unittest.TestCase):
                 "spot_last_valid_value_at": "2026-03-09T07:20:24.012Z" if temperature else "",
                 "spot_snapshot_age_ms": "188.0",
                 "spot_value_age_ms": "188.0" if temperature else "",
+                "spot_effective_value_age_ms_at_row": "188.0" if temperature else "",
+                "spot_value_age_clock_status": "ok" if temperature else "unknown",
             }
         )
         with path.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
-            writer.writerow(V2_CSV_COLUMNS)
-            writer.writerow([values[column] for column in V2_CSV_COLUMNS])
+            writer.writerow(columns)
+            writer.writerow([values[column] for column in columns])
 
     def test_replay_loads_directory_daily_v1_files_in_timestamp_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -192,6 +209,30 @@ class CsvReplayDriverTests(unittest.TestCase):
             self.assertFalse(data.spot_temperature_raw_truncated)
             self.assertEqual(data.spot_raw_payload_hash, "hash-1")
             self.assertEqual(data.spot_http_status_code, 200)
+
+    def test_replay_accepts_v2_5_rollover_and_maps_value_age_clock_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260309_235959_2_5_0.csv"
+            self._write_v2_csv(
+                v2_path,
+                1,
+                columns=V2_5_CSV_COLUMNS,
+                schema_version=CSV_SCHEMA_VERSION_V2_5,
+            )
+
+            cwd = Path.cwd()
+            os.chdir(log_dir)
+            try:
+                driver = CsvReplayDriver(str(v2_path))
+            finally:
+                os.chdir(cwd)
+
+            self.assertTrue(driver.connect())
+            data = driver.read_data()
+            self.assertEqual(data.Spot, 450.0)
+            self.assertEqual(data.spot_effective_value_age_ms_at_row, 188.0)
+            self.assertEqual(data.spot_value_age_clock_status, "ok")
 
     def test_replay_preserves_empty_temperature_as_none_for_v2_3_origin_none(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -460,6 +460,7 @@ class RealPLCDriver(BasePLCDriver):
             "spot_last_poll_completed_at",
             "spot_last_poll_completed_monotonic",
             "spot_last_valid_value_at",
+            "spot_last_valid_value_monotonic",
             "spot_snapshot_age_ms",
             "spot_value_age_ms",
             "diagnostics_snapshot_id",
