@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-11T17:13:31.165Z",
+  "lastUpdated": "2026-07-11T17:37:37.654Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -1693,10 +1693,32 @@
       }
     },
     "dependency-security-upgrade-nsis": {
-      "phase": "do",
-      "matchRate": null,
-      "iterationCount": 0,
-      "documents": {},
+      "phase": "completed",
+      "matchRate": 96,
+      "iterationCount": 2,
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/dependency-security-upgrade-nsis.plan.md",
+          "status": "completed"
+        },
+        "design": {
+          "path": "docs/02-design/features/dependency-security-upgrade-nsis.design.md",
+          "status": "completed"
+        },
+        "do": {
+          "path": "docs/02-design/features/dependency-security-upgrade-nsis.do.md",
+          "status": "completed"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/dependency-security-upgrade-nsis.analysis.md",
+          "status": "completed",
+          "match_rate": 96
+        },
+        "report": {
+          "path": "docs/04-report/dependency-security-upgrade-nsis.report.md",
+          "status": "completed"
+        }
+      },
       "taskChain": [
         {
           "phase": "plan",
@@ -1712,24 +1734,28 @@
         },
         {
           "phase": "do",
-          "status": "active",
-          "createdAt": "2026-07-11T17:11:28.384Z"
+          "status": "completed",
+          "createdAt": "2026-07-11T17:11:28.384Z",
+          "completedAt": "2026-07-11T17:35:20.029Z"
         },
         {
           "phase": "check",
-          "status": "pending",
-          "createdAt": "2026-07-11T17:11:28.384Z"
+          "status": "completed",
+          "createdAt": "2026-07-11T17:11:28.384Z",
+          "completedAt": "2026-07-11T17:36:41.832Z"
         },
         {
           "phase": "report",
-          "status": "pending",
-          "createdAt": "2026-07-11T17:11:28.384Z"
+          "status": "completed",
+          "createdAt": "2026-07-11T17:11:28.384Z",
+          "completedAt": "2026-07-11T17:37:37.654Z"
         }
       ],
       "timestamps": {
         "started": "2026-07-11T17:11:28.386Z",
-        "lastUpdated": "2026-07-11T17:13:31.165Z"
-      }
+        "lastUpdated": "2026-07-11T17:37:37.654Z"
+      },
+      "completedAt": "2026-07-11T17:37:37.649Z"
     }
   },
   "pipeline": {
@@ -1741,7 +1767,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-11T17:13:31.165Z"
+    "lastActivity": "2026-07-11T17:37:37.654Z"
   },
   "history": [
     {
@@ -2851,6 +2877,39 @@
       "phase": "design",
       "nextPhase": "do",
       "timestamp": "2026-07-11T17:13:31.162Z"
+    },
+    {
+      "feature": "dependency-security-upgrade-nsis",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-07-11T17:35:20.024Z"
+    },
+    {
+      "feature": "dependency-security-upgrade-nsis",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-07-11T17:35:20.026Z"
+    },
+    {
+      "feature": "dependency-security-upgrade-nsis",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-07-11T17:36:41.828Z"
+    },
+    {
+      "feature": "dependency-security-upgrade-nsis",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-07-11T17:36:41.830Z"
+    },
+    {
+      "feature": "dependency-security-upgrade-nsis",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-07-11T17:37:37.650Z"
     }
   ],
   "timeline": [

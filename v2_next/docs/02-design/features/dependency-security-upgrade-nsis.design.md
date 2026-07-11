@@ -120,8 +120,10 @@ details and must not change successful request/asset flows.
 The root NSIS configuration sets `warningsAsErrors: false` because
 electron-builder 26.15.3's bundled `allowOnlyOneInstallerInstance.nsh` references
 `IsPowerShellAvailable` from macros before the variable declaration macro is
-expanded. NSIS warning 6000 is therefore expected. The build log remains a hard
-review gate: any additional makensis warning is an unapproved failure.
+expanded. The default `-WX` build can therefore fail on NSIS warning 6000. The
+build log remains a hard review gate: successful output must contain no warning,
+or only that explicitly reviewed warning; any additional makensis warning is an
+unapproved failure.
 
 No behavior-bearing application source is expected to change. The backend version
 constant must change so `/health`, OpenAPI, and CSV metadata agree with the
@@ -175,8 +177,8 @@ and document the newly discovered migration before editing runtime logic.
 - Clean PyInstaller build through `scripts/deploy.ps1`.
 - Confirm backend EXE, frontend sidecar, required static assets, portable ZIP.
 - Run `npm run dist` and confirm the NSIS filename/version.
-- Capture the full makensis output and confirm the only warning is warning 6000
-  for `IsPowerShellAvailable`.
+- Capture the full makensis output and confirm it has no warning, or only warning
+  6000 for `IsPowerShellAvailable`.
 - Inspect ASAR or unpacked application contents for `main.js`, `preload.js`, and
   `tree-kill`; ensure build-only packages are not runtime dependencies.
 - Calculate SHA-256 for the backend EXE, portable ZIP, and NSIS installer.
