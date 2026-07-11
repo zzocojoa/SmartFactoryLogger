@@ -399,6 +399,7 @@ class PLCService:
                 {
                     "observation_fact_enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
                     "observation_fact_write_failure_count": None,
+                    "config_drift_detected_count": None,
                 }
             )
             return {
@@ -436,6 +437,7 @@ class PLCService:
             {
                 "observation_fact_enabled": bool(fact_health.get("enabled")),
                 "observation_fact_write_failure_count": fact_health.get("write_failure_count"),
+                "config_drift_detected_count": fact_health.get("config_drift_detected_count"),
             }
         )
         payload.update(

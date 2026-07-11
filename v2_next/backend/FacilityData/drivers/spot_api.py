@@ -38,12 +38,14 @@ from backend.FacilityData.spot_observation_fact import (
     SpotObservationFactWriter,
     encode_spot_diagnostic_evidence_codes,
 )
+from backend.FacilityData.spot_config_provenance import build_spot_configuration_snapshot
 from backend.FacilityData.spot_image_fact import SpotImageCaptureWriter
 from backend.FacilityData.temperature_state import (
     TemperatureStateDecision,
     TemperatureStateInput,
     derive_temperature_state,
 )
+from backend.version import resolve_runtime_git_commit
 
 _ACTUATOR_LOCK = threading.Lock()
 
@@ -72,7 +74,11 @@ _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_DIAGNOSTIC_OUTPUT_PARAMS = SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 _SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
-_SPOT_DIAGNOSTICS_COLLECTION_MODE = "async_fact_only"
+_SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
+    getattr(config, "SPOT_DIAGNOSTICS_COLLECTION_MODE", "async_fact_only")
+    or "async_fact_only"
+)
+_SPOT_RUNTIME_GIT_COMMIT = resolve_runtime_git_commit()
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 _img_fetch_lock = asyncio.Lock()
 _live_img_fetch_lock = asyncio.Lock()
@@ -107,6 +113,10 @@ _spot_diagnostics_snapshot: Optional[Dict[str, Any]] = None
 _spot_diagnostics_last_error_code: Optional[str] = None
 _spot_diagnostics_last_error_message: Optional[str] = None
 _spot_diagnostics_seq = 0
+_spot_config_provenance_lock = threading.Lock()
+_spot_config_drift_detected_count = 0
+_spot_config_active_drift_signature: Optional[str] = None
+_spot_last_configuration_snapshot: Optional[Dict[str, Any]] = None
 _spot_temperature_snapshot_lock = threading.Lock()
 _spot_service_instance_id = str(uuid4())
 _spot_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -802,26 +812,32 @@ def _spot_diagnostics_max_age_sec() -> float:
 
 
 def _spot_configuration_snapshot() -> Dict[str, Any]:
-    return {
-        "spot_model_info": str(getattr(config, "SPOT_MODEL_INFO", "") or ""),
-        "spot_app_mode": str(getattr(config, "SPOT_APP_MODE", "") or ""),
-        "spot_range_min_c": getattr(config, "SPOT_RANGE_MIN_C", None),
-        "spot_range_max_c": getattr(config, "SPOT_RANGE_MAX_C", None),
-        "spot_analog_4ma_c": getattr(config, "SPOT_ANALOG_4MA_C", None),
-        "spot_analog_20ma_c": getattr(config, "SPOT_ANALOG_20MA_C", None),
-        "low_signal_alarm_enabled": bool(getattr(config, "SPOT_LOW_SIGNAL_ALARM_ENABLED", False)),
-        "low_signal_threshold_pc": getattr(config, "SPOT_LOW_SIGNAL_THRESHOLD_PC", None),
-        "low_signal_comparator": str(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR", "") or ""),
-        "low_signal_comparator_verified": bool(getattr(config, "SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED", False)),
-        "low_signal_config_source": str(getattr(config, "SPOT_LOW_SIGNAL_CONFIG_SOURCE", "") or ""),
-        "peak_picker_enabled": bool(getattr(config, "SPOT_PEAK_PICKER_ENABLED", False)),
-        "limiter_enabled": bool(getattr(config, "SPOT_LIMITER_ENABLED", False)),
-        "averager_enabled": bool(getattr(config, "SPOT_AVERAGER_ENABLED", False)),
-        "modemaster_enabled": bool(getattr(config, "SPOT_MODEMASTER_ENABLED", False)),
-        "ratio_raw_enabled": bool(getattr(config, "SPOT_RATIO_RAW_ENABLED", False)),
-        "window_obscuration_pc": getattr(config, "SPOT_WINDOW_OBSCURATION_PC", None),
-        "focus_mm": getattr(config, "SPOT_FOCUS_MM", None),
-    }
+    global _spot_config_active_drift_signature
+    global _spot_config_drift_detected_count
+    global _spot_last_configuration_snapshot
+
+    snapshot = build_spot_configuration_snapshot(
+        config,
+        runtime_git_commit=_SPOT_RUNTIME_GIT_COMMIT,
+        device_readback_status="not_supported",
+    )
+    with _spot_config_provenance_lock:
+        if snapshot["config_drift_detected"]:
+            signature = json.dumps(
+                {
+                    "fingerprint": snapshot["spot_config_fingerprint_sha256"],
+                    "fields": snapshot["config_drift_fields"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            if signature != _spot_config_active_drift_signature:
+                _spot_config_drift_detected_count += 1
+            _spot_config_active_drift_signature = signature
+        else:
+            _spot_config_active_drift_signature = None
+        _spot_last_configuration_snapshot = dict(snapshot)
+    return snapshot
 
 
 async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str) -> tuple[str, str]:
@@ -1509,6 +1525,9 @@ def get_spot_observation_fact_health() -> Dict[str, Any]:
             if _spot_temperature_snapshot is not None
             else "missing"
         )
+    with _spot_config_provenance_lock:
+        config_snapshot = dict(_spot_last_configuration_snapshot or {})
+        config_drift_detected_count = _spot_config_drift_detected_count
     return {
         "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
         "write_failure_count": int(writer.failure_count) if writer is not None else 0,
@@ -1517,6 +1536,14 @@ def get_spot_observation_fact_health() -> Dict[str, Any]:
         "diagnostics_binding_status": diagnostics_binding_status,
         "diagnostics_last_error_code": _spot_diagnostics_last_error_code,
         "diagnostics_last_error_message": _spot_diagnostics_last_error_message,
+        "config_drift_detected_count": config_drift_detected_count,
+        "config_operator_verified": bool(config_snapshot.get("config_operator_verified", False)),
+        "config_attestation_status": str(
+            config_snapshot.get("config_attestation_status") or "not_observed"
+        ),
+        "device_config_readback_status": str(
+            config_snapshot.get("device_config_readback_status") or "not_observed"
+        ),
     }
 
 

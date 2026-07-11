@@ -101,26 +101,23 @@ class TemperatureOperationalTests(unittest.TestCase):
                 else:
                     self.assertNotIn("phase_setup_candidate", evidence_codes)
 
-    def test_under_range_cause_uses_non_config_diagnostic_evidence(self) -> None:
+    def test_collectorless_evidence_is_preserved_but_cause_promotion_is_suppressed(self) -> None:
         cases = [
             (
                 ("target_absent_verified",),
-                "target_out_of_fov_candidate",
-                0.6,
+                ("target_absent_verified",),
             ),
             (
                 ("actuator_position_changed",),
-                "alignment_change_candidate",
-                0.55,
+                ("actuator_position_changed",),
             ),
             (
                 ("measurement_range_configured", "detector_below_measurement_range"),
-                "below_measurement_range_candidate",
-                0.65,
+                ("detector_below_measurement_range", "measurement_range_configured"),
             ),
         ]
-        for evidence_codes, expected_cause, expected_confidence in cases:
-            with self.subTest(expected_cause=expected_cause):
+        for evidence_codes, expected_suppressed in cases:
+            with self.subTest(evidence_codes=evidence_codes):
                 decision = derive_temperature_operational_fields(
                     TemperatureOperationalInput(
                         poll_status="success",
@@ -134,9 +131,17 @@ class TemperatureOperationalTests(unittest.TestCase):
                     )
                 )
 
-                self.assertEqual(decision.temperature_under_range_cause_candidate, expected_cause)
-                self.assertEqual(decision.temperature_cause_confidence, expected_confidence)
-                self.assertIn("phase_setup_candidate", json.loads(decision.temperature_cause_evidence_codes))
+                self.assertEqual(decision.temperature_under_range_cause_candidate, "unknown")
+                self.assertEqual(decision.temperature_cause_confidence, 0.0)
+                self.assertTrue(decision.unsupported_evidence_suppressed)
+                self.assertEqual(
+                    json.loads(decision.unsupported_evidence_suppressed_codes),
+                    list(expected_suppressed),
+                )
+                output_evidence = json.loads(decision.temperature_cause_evidence_codes)
+                self.assertIn("phase_setup_candidate", output_evidence)
+                for evidence_code in evidence_codes:
+                    self.assertIn(evidence_code, output_evidence)
 
     def test_stale_string_evidence_alone_does_not_promote_config_sensitive_causes(self) -> None:
         for evidence_code in (
@@ -516,6 +521,24 @@ class TemperatureOperationalTests(unittest.TestCase):
         )
 
         self.assertNotEqual(result["temperature_under_range_cause_candidate"], "peak_picker_reset_candidate")
+
+    def test_peak_picker_config_without_collector_is_suppressed(self) -> None:
+        result = derive_under_range_cause_candidate(
+            alarmstatus=0,
+            signalpc=None,
+            low_signal_alarm_enabled=False,
+            low_signal_threshold_pc=2.0,
+            low_signal_comparator="lt",
+            peak_picker_enabled=True,
+            peak_picker_off_mode="Reset",
+            phase_evidence_codes=[],
+        )
+
+        self.assertEqual(result["temperature_under_range_cause_candidate"], "unknown")
+        self.assertEqual(
+            result["unsupported_evidence_suppressed_codes"],
+            ["peak_picker_off_mode_reset_configured"],
+        )
 
     def test_stale_precedence_preserves_raw_sentinel_but_outputs_stale(self) -> None:
         decision = derive_temperature_operational_fields(

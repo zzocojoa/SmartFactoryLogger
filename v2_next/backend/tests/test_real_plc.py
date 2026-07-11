@@ -1851,7 +1851,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertTrue(v2_files[0].with_suffix(".metadata.json").exists())
             self.assertTrue(v2_files[1].with_suffix(".metadata.json").exists())
 
-    def test_v2_sidecar_records_config_operator_verified_by_default(self) -> None:
+    def test_v2_sidecar_records_config_operator_unverified_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             log_dir = Path(tmp)
             service = CSVLoggerService()
@@ -1867,7 +1867,10 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             v2_file = next(log_dir.glob("Factory_Integrated_Log_v2_*.csv"))
             metadata = json.loads(v2_file.with_suffix(".metadata.json").read_text(encoding="utf-8"))
 
-        self.assertTrue(metadata["spot_configuration_snapshot"]["config_operator_verified"])
+        spot_config = metadata["spot_configuration_snapshot"]
+        self.assertFalse(spot_config["config_operator_verified"])
+        self.assertEqual(spot_config["config_attestation_status"], "not_requested")
+        self.assertFalse(spot_config["config_drift_detected"])
 
     def test_v2_writer_creates_separate_file_and_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1894,6 +1897,10 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             metadata = json.loads(v2_files[0].with_suffix(".metadata.json").read_text(encoding="utf-8"))
             self.assertIn("position-specific label", metadata["schema_metadata"]["header_policy"])
             self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.3.0")
+            self.assertEqual(
+                metadata["schema_metadata"]["temperature_operational_rule_version"],
+                "temperature-operational-v4",
+            )
             self.assertEqual(metadata["schema_metadata"]["operator_metadata_version"], "1.0.0")
             spot_image_linkage_policy = metadata["schema_metadata"]["spot_image_linkage_policy"]
             self.assertEqual(
@@ -1930,8 +1937,14 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertFalse(spot_config["peak_picker_enabled"])
             self.assertEqual(spot_config["window_obscuration_pc"], 12.0)
             self.assertEqual(spot_config["focus_mm"], 6071)
-            self.assertEqual(spot_config["config_source"], "spot_web_server_screenshot")
-            self.assertTrue(spot_config["config_operator_verified"])
+            self.assertEqual(spot_config["config_source"], "runtime_config_attestation")
+            self.assertFalse(spot_config["config_operator_verified"])
+            self.assertFalse(spot_config["config_operator_verified_requested"])
+            self.assertEqual(spot_config["spot_config_revision"], "spot-config-provenance-v1")
+            self.assertEqual(len(spot_config["spot_config_fingerprint_sha256"]), 64)
+            self.assertEqual(spot_config["spot_config_verified_fingerprint_sha256"], "")
+            self.assertEqual(spot_config["device_config_readback_status"], "not_supported")
+            self.assertEqual(spot_config["config_drift_fields"], [])
             self.assertTrue(spot_config["config_captured_at"].endswith("Z"))
             image_fact_manifest = metadata["spot_image_fact_manifest"]
             self.assertFalse(image_fact_manifest["enabled"])

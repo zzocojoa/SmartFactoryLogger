@@ -25,8 +25,27 @@ from backend.FacilityData.temperature_state import (
 )
 
 
-TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v3"
+TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v4"
 SPOT_ROW_FRESHNESS_RULE_VERSION = "spot-row-freshness-v1"
+UNSUPPORTED_CAUSE_EVIDENCE_CODES = frozenset(
+    {
+        "actuator_position_changed",
+        "actuator_scanning",
+        "detector_below_measurement_range",
+        "measurement_range_configured",
+        "peak_picker_off_mode_reset_configured",
+        "target_absent_verified",
+        "target_out_of_fov_evidence",
+    }
+)
+UNSUPPORTED_CAUSE_CANDIDATES = frozenset(
+    {
+        "alignment_change_candidate",
+        "below_measurement_range_candidate",
+        "peak_picker_reset_candidate",
+        "target_out_of_fov_candidate",
+    }
+)
 
 
 class TemperatureOutputStatus(str, Enum):
@@ -98,6 +117,8 @@ class TemperatureOperationalDecision:
     cached_fallback_rejected_reason: str
     diagnostics_cause_suppressed: bool
     diagnostics_cause_suppressed_reason: str
+    unsupported_evidence_suppressed: bool
+    unsupported_evidence_suppressed_codes: str
 
 
 def derive_temperature_operational_fields(
@@ -147,9 +168,15 @@ def derive_temperature_operational_fields(
         origin_decision_mismatch,
     )
     expectedness = _derive_expectedness(status, input_state.process_phase_candidate)
-    cause, confidence, evidence_json, diagnostics_suppressed, diagnostics_suppressed_reason = (
-        _derive_under_range_cause(status, input_state)
-    )
+    (
+        cause,
+        confidence,
+        evidence_json,
+        diagnostics_suppressed,
+        diagnostics_suppressed_reason,
+        unsupported_evidence_suppressed,
+        unsupported_evidence_suppressed_codes,
+    ) = _derive_under_range_cause(status, input_state)
     return TemperatureOperationalDecision(
         temperature_output_status=status,
         temperature_unavailable_reason=reason,
@@ -167,6 +194,8 @@ def derive_temperature_operational_fields(
         cached_fallback_rejected_reason=cached_fallback_rejected_reason,
         diagnostics_cause_suppressed=diagnostics_suppressed,
         diagnostics_cause_suppressed_reason=diagnostics_suppressed_reason,
+        unsupported_evidence_suppressed=unsupported_evidence_suppressed,
+        unsupported_evidence_suppressed_codes=unsupported_evidence_suppressed_codes,
     )
 
 
@@ -346,30 +375,30 @@ def derive_under_range_cause_candidate(
     )
     evidence = [str(code) for code in low_signal["evidence_codes"]]
     evidence.extend(str(code) for code in phase_evidence_codes if str(code))
+    unsupported_evidence: set[str] = set()
+    if peak_picker_enabled and _is_peak_picker_reset_mode(peak_picker_off_mode):
+        evidence.append("peak_picker_off_mode_reset_configured")
+        unsupported_evidence.add("peak_picker_off_mode_reset_configured")
 
     if "alarm_low_signal" in evidence:
         return {
             "temperature_under_range_cause_candidate": "low_signal_candidate",
             "temperature_cause_confidence": 0.85,
             "temperature_cause_evidence_codes": sorted(set(evidence)),
+            "unsupported_evidence_suppressed_codes": sorted(unsupported_evidence),
         }
     if low_signal["numeric_low_signal"] is True and low_signal_alarm_enabled is True:
         return {
             "temperature_under_range_cause_candidate": "low_signal_candidate",
             "temperature_cause_confidence": 0.65,
             "temperature_cause_evidence_codes": sorted(set(evidence)),
-        }
-    if peak_picker_enabled and _is_peak_picker_reset_mode(peak_picker_off_mode):
-        evidence.append("peak_picker_off_mode_reset_configured")
-        return {
-            "temperature_under_range_cause_candidate": "peak_picker_reset_candidate",
-            "temperature_cause_confidence": 0.75,
-            "temperature_cause_evidence_codes": sorted(set(evidence)),
+            "unsupported_evidence_suppressed_codes": sorted(unsupported_evidence),
         }
     return {
         "temperature_under_range_cause_candidate": "unknown",
         "temperature_cause_confidence": 0.0,
         "temperature_cause_evidence_codes": sorted(set(evidence)),
+        "unsupported_evidence_suppressed_codes": sorted(unsupported_evidence),
     }
 
 
@@ -442,10 +471,11 @@ def _eligible_low_signal_inputs(
 def _derive_under_range_cause(
     status: str,
     input_state: TemperatureOperationalInput,
-) -> tuple[str, Optional[float], str, bool, str]:
+) -> tuple[str, Optional[float], str, bool, str, bool, str]:
     if status != TemperatureOutputStatus.UNDER_RANGE.value:
-        return "", None, "", False, ""
+        return "", None, "", False, "", False, ""
     evidence = set(str(code) for code in input_state.evidence_codes if str(code))
+    unsupported_evidence = evidence.intersection(UNSUPPORTED_CAUSE_EVIDENCE_CODES)
     eligible_alarmstatus, eligible_signalpc, diagnostics_suppressed, diagnostics_reason = (
         _eligible_low_signal_inputs(input_state, evidence)
     )
@@ -476,6 +506,10 @@ def _derive_under_range_cause(
     )
     config_aware_evidence = cast(Iterable[object], config_aware["temperature_cause_evidence_codes"])
     evidence.update(str(code) for code in config_aware_evidence)
+    config_suppressed = cast(
+        Iterable[object], config_aware["unsupported_evidence_suppressed_codes"]
+    )
+    unsupported_evidence.update(str(code) for code in config_suppressed)
     config_aware_cause = str(config_aware["temperature_under_range_cause_candidate"])
     config_aware_confidence = cast(float, config_aware["temperature_cause_confidence"])
     if config_aware_cause != "unknown":
@@ -485,42 +519,19 @@ def _derive_under_range_cause(
             _json_list(sorted(evidence)),
             diagnostics_suppressed,
             diagnostics_reason,
+            bool(unsupported_evidence),
+            _json_list(sorted(unsupported_evidence)),
         )
 
     sorted_evidence = sorted(evidence)
-    if "target_absent_verified" in evidence or "target_out_of_fov_evidence" in evidence:
-        return (
-            "target_out_of_fov_candidate",
-            0.6,
-            _json_list(sorted_evidence),
-            diagnostics_suppressed,
-            diagnostics_reason,
-        )
-    if "actuator_scanning" in evidence or "actuator_position_changed" in evidence:
-        return (
-            "alignment_change_candidate",
-            0.55,
-            _json_list(sorted_evidence),
-            diagnostics_suppressed,
-            diagnostics_reason,
-        )
-    if {
-        "measurement_range_configured",
-        "detector_below_measurement_range",
-    }.issubset(evidence):
-        return (
-            "below_measurement_range_candidate",
-            0.65,
-            _json_list(sorted_evidence),
-            diagnostics_suppressed,
-            diagnostics_reason,
-        )
     return (
         "unknown",
         0.0,
         _json_list(sorted_evidence),
         diagnostics_suppressed,
         diagnostics_reason,
+        bool(unsupported_evidence),
+        _json_list(sorted(unsupported_evidence)),
     )
 
 
