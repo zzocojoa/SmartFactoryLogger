@@ -87,11 +87,13 @@ CSV_SCHEMA_VERSION_V2_1 = "2.1.0"
 CSV_SCHEMA_VERSION_V2_2 = "2.2.0"
 CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
 CSV_SCHEMA_VERSION_V2_4 = "2.4.0"
+CSV_SCHEMA_VERSION_V2_5 = "2.5.0"
 SUPPORTED_CSV_SCHEMA_VERSIONS = {
     CSV_SCHEMA_VERSION_V2_1,
     CSV_SCHEMA_VERSION_V2_2,
     CSV_SCHEMA_VERSION_V2_3,
     CSV_SCHEMA_VERSION_V2_4,
+    CSV_SCHEMA_VERSION_V2_5,
 }
 SPOT_IMAGE_FACT_REQUIRED_COLUMNS = [
     "spot_image_capture_id",
@@ -280,6 +282,10 @@ V2_4_OPERATIONAL_COLUMNS = [
     "spot_image_link_age_ms_nearest",
 ]
 
+V2_5_OPERATIONAL_HARDENING_COLUMNS = [
+    "spot_value_age_clock_status",
+]
+
 REQUIRED_V2_COLUMNS = [
     "schema_version",
     "sample_seq",
@@ -300,6 +306,12 @@ REQUIRED_V2_COLUMNS_BY_SCHEMA = {
     CSV_SCHEMA_VERSION_V2_2: REQUIRED_V2_COLUMNS,
     CSV_SCHEMA_VERSION_V2_3: [*REQUIRED_V2_COLUMNS, *SPOT_TEMPERATURE_SHADOW_COLUMNS],
     CSV_SCHEMA_VERSION_V2_4: [*REQUIRED_V2_COLUMNS, *SPOT_TEMPERATURE_SHADOW_COLUMNS, *V2_4_OPERATIONAL_COLUMNS],
+    CSV_SCHEMA_VERSION_V2_5: [
+        *REQUIRED_V2_COLUMNS,
+        *SPOT_TEMPERATURE_SHADOW_COLUMNS,
+        *V2_4_OPERATIONAL_COLUMNS,
+        *V2_5_OPERATIONAL_HARDENING_COLUMNS,
+    ],
 }
 
 BASE_REQUIRED_METADATA_FIELDS = {
@@ -328,11 +340,17 @@ REQUIRED_METADATA_FIELDS_BY_SCHEMA = {
         **BASE_REQUIRED_METADATA_FIELDS,
         **OPERATOR_METADATA_FIELDS,
     },
+    CSV_SCHEMA_VERSION_V2_5: {
+        **BASE_REQUIRED_METADATA_FIELDS,
+        **OPERATOR_METADATA_FIELDS,
+    },
 }
 
 V1_NAME_RE = re.compile(r"^Factory_Integrated_Log_(\d{8}_\d{6})\.csv$")
-V2_NAME_RE = re.compile(r"^Factory_Integrated_Log_v2_(\d{8}_\d{6})\.csv$")
-METADATA_NAME_RE = re.compile(r"^Factory_Integrated_Log_v2_(\d{8}_\d{6})\.metadata\.json$")
+V2_NAME_RE = re.compile(r"^Factory_Integrated_Log_v2_(\d{8}_\d{6}(?:_2_[345]_0)?)\.csv$")
+METADATA_NAME_RE = re.compile(
+    r"^Factory_Integrated_Log_v2_(\d{8}_\d{6}(?:_2_[345]_0)?)\.metadata\.json$"
+)
 
 
 def read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
@@ -937,6 +955,82 @@ def validate_v2_4_operational_invariants(
                 failures.append(f"row {row_number} fresh image link requires spot_observation_key")
             if image_link_age and _parse_finite_float(image_link_age) is None:
                 failures.append(f"row {row_number} spot_image_link_age_ms_nearest must be finite when populated")
+    return failures
+
+
+V2_5_TEMPERATURE_QUALITY_BY_STATUS = {
+    "valid": ("ok", "not_missing"),
+    "under_range": ("invalid", "invalid_value"),
+    "over_range": ("invalid", "invalid_value"),
+    "stale": ("stale", "stale_snapshot"),
+    "source_error": ("missing", "source_error"),
+    "startup_pending": ("missing", "source_missing"),
+    "unknown": ("unknown", "source_missing"),
+}
+
+
+def validate_v2_5_temperature_hardening_invariants(
+    rows: list[list[str]],
+    header: list[str],
+) -> list[str]:
+    required_columns = [
+        "Temperature",
+        "Temperature_quality",
+        "Temperature_missing_reason",
+        "temperature_output_status",
+        "spot_effective_value_age_ms_at_row",
+        "spot_value_age_clock_status",
+    ]
+    missing_columns = [column for column in required_columns if column not in header]
+    if missing_columns:
+        return ["v2.5 header missing temperature hardening columns: " + ", ".join(missing_columns)]
+
+    failures: list[str] = []
+    indices = {column: header.index(column) for column in required_columns}
+    for row_number, row in enumerate(rows, start=2):
+        if max(indices.values()) >= len(row):
+            failures.append(f"row {row_number} shorter than v2.5 temperature hardening columns")
+            continue
+
+        temperature = row[indices["Temperature"]].strip()
+        quality = row[indices["Temperature_quality"]].strip()
+        missing_reason = row[indices["Temperature_missing_reason"]].strip()
+        output_status = row[indices["temperature_output_status"]].strip()
+        value_age_text = row[indices["spot_effective_value_age_ms_at_row"]].strip()
+        clock_status = row[indices["spot_value_age_clock_status"]].strip()
+
+        expected_quality = V2_5_TEMPERATURE_QUALITY_BY_STATUS.get(output_status)
+        if expected_quality is None:
+            failures.append(
+                f"row {row_number} v2.5 temperature_output_status={output_status!r} has no quality mapping"
+            )
+        elif (quality, missing_reason) != expected_quality:
+            failures.append(
+                f"row {row_number} v2.5 quality mapping for {output_status!r} must be "
+                f"{expected_quality[0]!r}/{expected_quality[1]!r}"
+            )
+
+        if not temperature and quality == "ok" and missing_reason == "not_missing":
+            failures.append(
+                f"row {row_number} blank Temperature cannot use ok/not_missing in v2.5"
+            )
+
+        if clock_status not in {"ok", "clock_anomaly", "unknown"}:
+            failures.append(
+                f"row {row_number} spot_value_age_clock_status={clock_status!r} is invalid"
+            )
+            continue
+        parsed_value_age = _parse_finite_float(value_age_text) if value_age_text else None
+        if clock_status == "ok":
+            if parsed_value_age is None or parsed_value_age < 0:
+                failures.append(
+                    f"row {row_number} spot_value_age_clock_status=ok requires finite non-negative value age"
+                )
+        elif value_age_text:
+            failures.append(
+                f"row {row_number} {clock_status or 'blank'} value-age clock status requires blank value age"
+            )
+
     return failures
 
 
@@ -2392,7 +2486,12 @@ def validate(
     if missing_v2:
         failures.append(f"v2 header missing columns: {', '.join(missing_v2)}")
 
-    if v2_schema in {CSV_SCHEMA_VERSION_V2_2, CSV_SCHEMA_VERSION_V2_3, CSV_SCHEMA_VERSION_V2_4}:
+    if v2_schema in {
+        CSV_SCHEMA_VERSION_V2_2,
+        CSV_SCHEMA_VERSION_V2_3,
+        CSV_SCHEMA_VERSION_V2_4,
+        CSV_SCHEMA_VERSION_V2_5,
+    }:
         operator_metadata_version = metadata.get("schema_metadata", {}).get("operator_metadata_version")
         if operator_metadata_version != "1.0.0":
             failures.append(
@@ -2407,7 +2506,7 @@ def validate(
             if required_fields != ["product_no", "operator_mold_no"]:
                 failures.append(f"operator_metadata.required_fields={required_fields!r}")
 
-    if v2_schema in {CSV_SCHEMA_VERSION_V2_3, CSV_SCHEMA_VERSION_V2_4}:
+    if v2_schema in {CSV_SCHEMA_VERSION_V2_3, CSV_SCHEMA_VERSION_V2_4, CSV_SCHEMA_VERSION_V2_5}:
         schema_metadata = metadata.get("schema_metadata", {})
         if schema_metadata.get("row_unique_key") != ["logger_service_instance_id", "sample_seq"]:
             failures.append("schema_metadata.row_unique_key must be ['logger_service_instance_id', 'sample_seq']")
@@ -2419,7 +2518,7 @@ def validate(
         failures.extend(validate_spot_sequence_values(v2_rows, v2_header))
         failures.extend(validate_temperature_value_origin_invariants(v2_rows, v2_header))
         failures.extend(validate_spot_invalid_sentinel_invariants(v2_rows, v2_header))
-        if v2_schema == CSV_SCHEMA_VERSION_V2_4:
+        if v2_schema in {CSV_SCHEMA_VERSION_V2_4, CSV_SCHEMA_VERSION_V2_5}:
             failures.extend(
                 validate_v2_4_operational_invariants(
                     v2_rows,
@@ -2444,6 +2543,24 @@ def validate(
                     require_current_server_promotion_profile=require_current_server_promotion_profile,
                 )
             )
+            if v2_schema == CSV_SCHEMA_VERSION_V2_5:
+                failures.extend(validate_v2_5_temperature_hardening_invariants(v2_rows, v2_header))
+                expected_column_hash = hashlib.sha256(
+                    json.dumps(v2_header, separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                if schema_metadata.get("active_schema_version") != CSV_SCHEMA_VERSION_V2_5:
+                    failures.append("schema_metadata.active_schema_version must be '2.5.0'")
+                if schema_metadata.get("active_column_hash") != expected_column_hash:
+                    failures.append("schema_metadata.active_column_hash must match the v2.5 CSV header")
+                if schema_metadata.get("csv_v2_temperature_hardening_enabled") is not True:
+                    failures.append("schema_metadata.csv_v2_temperature_hardening_enabled must be true")
+                if schema_metadata.get("temperature_quality_mapping_version") != (
+                    "temperature-quality-operational-v1"
+                ):
+                    failures.append(
+                        "schema_metadata.temperature_quality_mapping_version must be "
+                        "'temperature-quality-operational-v1'"
+                    )
             spot_observation_fact_failures, spot_observation_fact_summary = (
                 validate_spot_observation_fact_manifest(
                     metadata,

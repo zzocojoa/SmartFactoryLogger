@@ -1,8 +1,8 @@
 # SPOT Temperature v2.4 Operational Hardening - Do Tracking
 
-> Version: 1.2.0 | Date: 2026-07-11 | Status: In Progress
-> Stage 3 baseline: `master@e42d75f66a3eacdd6f6f58fafc68a6b46a2b38f9`
-> Completed scope: Stage 1 - Cache and Comparator, Stage 2 - Diagnostics Integrity, Stage 3 - Config and Evidence
+> Version: 1.3.0 | Date: 2026-07-11 | Status: In Progress
+> Stage 4 baseline: `master@65b123a05677ad1a3468df9647ab8191b778e4e1`
+> Completed scope: Stage 1 - Cache and Comparator, Stage 2 - Diagnostics Integrity, Stage 3 - Config and Evidence, Stage 4 - Quality and Value Age
 
 ## 1. Stage Status
 
@@ -12,10 +12,10 @@
 | Stage 1 - Cache and Comparator | Completed | Cache fallback와 comparator 검증 |
 | Stage 2 - Diagnostics Integrity | Completed | Same-poll binding, completeness, age, fact provenance |
 | Stage 3 - Config and Evidence | Completed | Config attestation, drift, unsupported evidence 차단 |
-| Stage 4 - Quality and Value Age | Pending | v2.5 quality/value-age 계약 |
+| Stage 4 - Quality and Value Age | Completed | v2.5 quality/value-age 계약 |
 | Stage 5 - Controlled Verification | Pending | 전체 feature 완료 게이트 |
 
-Stage 4~5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
+Stage 5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 
 ## 2. Stage 3 구현
 
@@ -58,7 +58,34 @@ Stage 4~5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 - `unsupported_evidence_suppressed_count`로 차단 행 수를 집계한다.
 - 원인 판정 변경을 식별하도록 rule version을 `temperature-operational-v4`로 올리고, v3 artifact는 legacy validation 경로로 계속 읽는다.
 
-## 3. 운영 절차
+## 3. Stage 4 구현
+
+### 3.1 v2.5 원자적 계약
+
+- `CSV_V2_TEMPERATURE_HARDENING_ENABLED`를 기본 false로 추가했다.
+- hardening flag는 `CSV_V2_OPERATIONAL_FIELDS_ENABLED=true`를 요구하며 startup과 runtime config 적용 모두 fail-closed다.
+- v2.5는 v2.4 뒤에 `spot_value_age_clock_status` 한 열만 추가한다.
+- contract 변경 시 writer를 닫고 별도 v2.5 CSV와 sidecar를 열며 기존 v2.4 header에는 append하지 않는다.
+- sidecar에 active schema/column hash, hardening flag, operational rule과 quality mapping version을 기록한다.
+
+### 3.2 Temperature quality 정합화
+
+- v2.5에서는 operational status 확정 후 `Temperature_quality`와 `Temperature_missing_reason`을 매핑한다.
+- valid는 `ok/not_missing`, under/over-range는 `invalid/invalid_value`, stale은 `stale/stale_snapshot`이다.
+- source error는 `missing/source_error`, startup은 `missing/source_missing`, unknown은 `unknown/source_missing`이다.
+- blank `Temperature`와 `ok/not_missing` 조합은 v2.5 validator가 거부한다.
+- v2.3/v2.4 quality 의미와 header는 변경하지 않았다.
+
+### 3.3 Monotonic value age
+
+- SPOT driver는 마지막 valid value의 wall-clock과 monotonic 완료 시각을 함께 보존한다.
+- invalid sentinel은 마지막 valid 시각을 감사용으로 유지하고, verified no-target은 두 시각을 모두 지운다.
+- repository는 v2.5 row에서 monotonic delta를 우선 계산하고 monotonic source가 없을 때만 UTC timestamp로 fallback한다.
+- 음수·비유한 age는 값을 비우고 `clock_anomaly`, 두 source가 모두 없으면 `unknown`으로 기록한다.
+- health에 `value_age_clock_anomaly_count`를 추가했다.
+- replay consumer는 v2.5 rollover 파일과 새 clock status를 읽는다.
+
+## 4. 운영 절차
 
 1. 새 build를 `SPOT_CONFIG_OPERATOR_VERIFIED=false`로 기동한다.
 2. sidecar의 `spot_config_fingerprint_sha256`와 장비 설정을 확인한다.
@@ -68,7 +95,7 @@ Stage 4~5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 
 설정 또는 build가 바뀌면 1~5를 다시 수행한다. 승인 metadata 자체는 canonical settings hash에서 제외된다.
 
-## 4. Files Changed
+## 5. Files Changed
 
 ### Production
 
@@ -76,6 +103,9 @@ Stage 4~5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 - `backend/config.py`
 - `backend/FacilityData/spot_config_provenance.py`
 - `backend/FacilityData/drivers/spot_api.py`
+- `backend/FacilityData/drivers/real_plc.py`
+- `backend/FacilityData/drivers/csv_replay.py`
+- `backend/FacilityData/schemas.py`
 - `backend/FacilityData/repository.py`
 - `backend/FacilityData/service.py`
 - `backend/FacilityData/temperature_operational.py`
@@ -88,35 +118,39 @@ Stage 4~5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 - `backend/tests/test_temperature_operational.py`
 - `backend/tests/test_spot_api.py`
 - `backend/tests/test_real_plc.py`
+- `backend/tests/test_csv_replay_driver.py`
 - `backend/tests/test_csv_v2_4_operational_contract.py`
 
-## 5. Validation
+## 6. Validation
 
 - Stage 3 targeted pytest: `284 passed, 52 subtests passed`
+- Stage 4 targeted pytest: `262 passed, 38 subtests passed`
 - Frontend typecheck/lint: PASS
 - Frontend tests: `27 files, 202 tests` PASS
 - Backend ruff/mypy: PASS
-- Backend unittest: `481 tests OK`
+- Backend unittest: `494 tests OK`
 - Python compile: PASS
 - `git diff --check`: PASS
 - Local PyInstaller build: 미실행, PR의 Windows Release Artifact check를 merge gate로 사용
 
-## 6. Compatibility and Failure Modes
+## 7. Compatibility and Failure Modes
 
-- Realtime CSV header와 schema version은 변경하지 않았다.
+- v2.3/v2.4 realtime CSV header와 quality 의미는 변경하지 않았다.
+- v2.5는 hardening flag가 켜진 경우에만 별도 파일로 생성된다. exact-column-count consumer는 v2.5 지원이 필요하다.
+- invalid flag 조합, 음수/non-finite clock delta, header mismatch는 fail-closed다.
 - Database migration과 배포 migration은 없다.
 - 누락·손상·불일치 provenance는 `config_operator_verified=false`와 numeric comparator cause 차단으로 귀결된다.
 - 미수집 evidence는 삭제하지 않고 fact에 남기므로 사후 조사 가능성은 유지된다.
 - Future collector를 활성화하려면 typed field, source, captured-at, age, binding, completeness, validator test를 함께 추가해야 한다.
 
-## 7. Rollback
+## 8. Rollback
 
 - `spot_config_provenance.py`, config attestation 설정, driver/repository snapshot 통합을 함께 revert한다.
 - unsupported cause gate와 validator 규칙을 함께 revert해야 producer/validator 계약이 어긋나지 않는다.
 - 안전한 운영 rollback은 `SPOT_CONFIG_OPERATOR_VERIFIED=false`를 유지하는 것이다. 이 경우 numeric comparator cause는 비활성화되고 원인은 `unknown`으로 강등된다.
 - CSV migration은 필요하지 않다.
+- Stage 4 운영 rollback은 hardening flag를 끄고 새 v2.4 파일로 rollover하는 것이다. 기존 v2.5 파일은 수정하지 않는다.
 
-## 8. Remaining Work
+## 9. Remaining Work
 
-- Stage 4: legacy Temperature quality 정합화, monotonic value age, clock status, CSV v2.5 계약
 - Stage 5: 전체 feature gap analysis, controlled verification, final report

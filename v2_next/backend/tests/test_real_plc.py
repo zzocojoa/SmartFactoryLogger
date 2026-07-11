@@ -157,6 +157,7 @@ class SpotSnapshotTests(unittest.TestCase):
                 "spot_last_poll_completed_at": "2026-03-09T07:20:24.012Z",
                 "spot_last_poll_completed_monotonic": 12345.5,
                 "spot_last_valid_value_at": "2026-03-09T07:20:24.012Z",
+                "spot_last_valid_value_monotonic": 12345.5,
                 "spot_snapshot_age_ms": 188.0,
                 "spot_value_age_ms": 188.0,
                 "low_signal_comparator_verified": False,
@@ -184,8 +185,10 @@ class SpotSnapshotTests(unittest.TestCase):
         self.assertEqual(data.spot_raw_payload_encoding, "utf-8-replace")
         self.assertEqual(data.spot_last_response_at, "2026-03-09T07:20:24.012Z")
         self.assertEqual(data.spot_last_poll_completed_monotonic, 12345.5)
+        self.assertEqual(data.spot_last_valid_value_monotonic, 12345.5)
         self.assertFalse(data.low_signal_comparator_verified)
         self.assertNotIn("spot_last_poll_completed_monotonic", data.model_dump())
+        self.assertNotIn("spot_last_valid_value_monotonic", data.model_dump())
 
 
 

@@ -135,6 +135,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_observation_seq = 0
             spot_api._spot_temperature_snapshot = None
             spot_api._spot_last_valid_value_at = None
+            spot_api._spot_last_valid_value_monotonic = None
             spot_api._spot_temperature_cache_suppressed_until_valid = False
         with spot_api._spot_config_provenance_lock:
             spot_api._spot_config_drift_detected_count = 0
@@ -256,6 +257,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["_spot_last_poll_completed_monotonic"], 12345.5)
         self.assertEqual(diagnostics["spot_last_poll_completed_monotonic"], 12345.5)
         self.assertEqual(diagnostics["spot_snapshot_age_ms"], 0.0)
+        self.assertEqual(diagnostics["spot_last_valid_value_monotonic"], 12345.5)
         self.assertEqual(diagnostics["spot_poll_seq"], 1)
         self.assertEqual(diagnostics["spot_observation_seq"], 1)
         self.assertEqual(diagnostics["spot_poll_status"], "success")
@@ -300,6 +302,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["spot_target_state_observed_source"], "verified_device_code")
         self.assertIsNone(diagnostics["spot_temperature_effective_c"])
         self.assertIsNone(diagnostics["spot_last_valid_value_at"])
+        self.assertIsNone(diagnostics["spot_last_valid_value_monotonic"])
         self.assertEqual(spot_api._img_cache["temp_time"], 0.0)
 
 
@@ -605,6 +608,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["temperature_value_origin"], "none")
         self.assertEqual(diagnostics["spot_cache_status"], "available_not_used")
         self.assertIsNone(diagnostics["spot_temperature_effective_c"])
+        self.assertIsNotNone(diagnostics["spot_last_valid_value_monotonic"])
         self.assertEqual(diagnostics["spot_target_state_observed_shadow"], "unknown")
         self.assertGreater(float(diagnostics["spot_snapshot_age_ms"]), 1500.0)
 
@@ -690,6 +694,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["temperature_value_origin"], "cached_observation")
         self.assertEqual(diagnostics["spot_cache_status"], "reused")
         self.assertEqual(diagnostics["spot_temperature_effective_c"], 510.0)
+        self.assertIsNotNone(diagnostics["spot_last_valid_value_monotonic"])
 
     async def test_temperature_timeout_diagnostics_have_non_empty_message_and_status(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:

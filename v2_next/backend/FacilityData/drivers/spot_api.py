@@ -126,6 +126,7 @@ _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
 _spot_observation_fact_writer: Optional[SpotObservationFactWriter] = None
 _spot_diagnostics_prefetch_task: Optional[asyncio.Task[None]] = None
 _spot_last_valid_value_at: Optional[float] = None
+_spot_last_valid_value_monotonic: Optional[float] = None
 _spot_temperature_cache_suppressed_until_valid = False
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
 
@@ -1615,6 +1616,7 @@ def _publish_spot_temperature_snapshot(
     global _spot_observation_seq
     global _spot_temperature_snapshot
     global _spot_last_valid_value_at
+    global _spot_last_valid_value_monotonic
     global _spot_temperature_cache_suppressed_until_valid
 
     if classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
@@ -1640,11 +1642,13 @@ def _publish_spot_temperature_snapshot(
         observation_seq = _spot_observation_seq
         if classification.raw_validity == SpotRawValidity.VALID_TEMPERATURE:
             _spot_last_valid_value_at = poll_completed_at
+            _spot_last_valid_value_monotonic = effective_completed_monotonic
             _spot_temperature_cache_suppressed_until_valid = False
         elif classification.raw_validity == SpotRawValidity.INVALID_SENTINEL:
             _spot_temperature_cache_suppressed_until_valid = True
         elif classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
             _spot_last_valid_value_at = None
+            _spot_last_valid_value_monotonic = None
             _spot_temperature_cache_suppressed_until_valid = False
 
         cache_fallback_allowed = classification.cache_fallback_allowed
@@ -1746,6 +1750,7 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
         poll_seq = _spot_poll_seq
         observation_seq = _spot_observation_seq
         last_valid_value_at = _spot_last_valid_value_at
+        last_valid_value_monotonic = _spot_last_valid_value_monotonic
 
     if snapshot is None:
         decision = derive_temperature_state(
@@ -1777,6 +1782,7 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
             "spot_temperature_effective_c": None,
             "spot_temperature_observed_c": None,
             "spot_last_valid_value_at": None,
+            "spot_last_valid_value_monotonic": None,
             "spot_value_age_ms": None,
             "spot_snapshot_age_ms": None,
             "spot_last_poll_started_at": None,
@@ -1850,6 +1856,7 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
             "temperature_value_origin": decision.temperature_value_origin.value,
             "spot_temperature_effective_c": _effective_spot_temperature_for_decision(decision),
             "spot_last_valid_value_at": _epoch_to_utc_iso(last_valid_value_at),
+            "spot_last_valid_value_monotonic": last_valid_value_monotonic,
             "spot_value_age_ms": value_age_ms,
             "spot_snapshot_age_ms": snapshot_age_ms,
             "spot_last_poll_completed_monotonic": completed_monotonic,

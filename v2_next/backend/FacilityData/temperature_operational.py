@@ -72,6 +72,7 @@ class TemperatureOperationalInput:
     spot_error_code: Optional[str] = None
     spot_effective_age_ms_at_row: Optional[float] = None
     spot_effective_value_age_ms_at_row: Optional[float] = None
+    spot_value_age_clock_status: str = "unknown"
     spot_row_freshness_threshold_ms: Optional[float] = None
     # Trusted phase input. Realtime callers must normalize externally supplied
     # pre_changeover_hold_candidate to stopped_after_production_candidate before calling.
@@ -111,6 +112,7 @@ class TemperatureOperationalDecision:
     spot_effective_freshness_at_row: str
     spot_effective_value_age_ms_at_row: Optional[float]
     spot_row_age_clock_status: str
+    spot_value_age_clock_status: str
     temperature_value_origin: str
     origin_decision_mismatch: bool
     cached_fallback_accepted: bool
@@ -188,6 +190,7 @@ def derive_temperature_operational_fields(
         spot_effective_freshness_at_row=row_freshness,
         spot_effective_value_age_ms_at_row=input_state.spot_effective_value_age_ms_at_row,
         spot_row_age_clock_status=clock_status,
+        spot_value_age_clock_status=input_state.spot_value_age_clock_status,
         temperature_value_origin=output_origin,
         origin_decision_mismatch=origin_decision_mismatch,
         cached_fallback_accepted=cached_fallback_accepted,

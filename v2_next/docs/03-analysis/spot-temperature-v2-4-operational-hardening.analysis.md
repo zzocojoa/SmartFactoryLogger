@@ -1,70 +1,78 @@
 # Gap Analysis: SPOT Temperature v2.4 Operational Hardening
 
-> Date: 2026-07-11 | Scope: Stage 3 - Config and Evidence
+> Date: 2026-07-11 | Scope: Stage 4 - Quality and Value Age
 > Design: `docs/02-design/features/spot-temperature-v2-4-operational-hardening.design.md`
 
-## Match Rate: 100% (Stage 3 scope)
+## Match Rate: 100% (Stage 4 scope)
 
-이 문서는 Stage 3 범위만 분석한다. Stage 4~5가 남아 있으므로 전체 feature는 완료 상태가 아니며 PDCA phase는 `Do`를 유지한다.
+이 문서는 Stage 4 범위만 분석한다. Stage 5가 남아 있으므로 전체 feature는 완료 상태가 아니며 PDCA phase는 `Do`를 유지한다.
 
 ## Implemented Items
 
-- [x] 운영자 검증 기본값 false
-- [x] canonical config fingerprint와 constant-time 비교
-- [x] 승인 시각·운영자 ID·승인 fingerprint 필수화
-- [x] build/settings/SPOT 설정 변경 시 attestation 자동 무효화
-- [x] readback mismatch/partial/not-attempted/error fail-closed
-- [x] effective comparator verification을 config attestation과 결합
-- [x] collector 없는 cause evidence 승격 차단
-- [x] realtime/image fact/validator 동일 gate 적용
-- [x] drift와 unsupported suppression bounded health counter
+- [x] hardening flag 기본 false와 operational flag dependency
+- [x] v2.5 schema/header/sidecar contract
+- [x] v2.4에서 v2.5로 별도 파일 rollover
+- [x] operational status 기반 legacy Temperature quality 정합화
+- [x] blank Temperature와 `ok/not_missing` 조합 차단
+- [x] last-valid monotonic clock의 driver/RealPLC/FactoryData 전파
+- [x] monotonic 우선 value-age와 UTC fallback
+- [x] negative/non-finite clock anomaly fail-closed
+- [x] value-age clock anomaly bounded health counter
+- [x] v2.5 validator와 replay consumer 호환
 
 ## Acceptance Evidence
 
 | Design test | Result | Evidence |
 |---|---|---|
-| G-01 신규 배포 metadata 없음 | PASS | operator/comparator verification false |
-| G-02 exact fingerprint + valid by/at | PASS | effective verification true |
-| G-03 SPOT IP 변경 | PASS | fingerprint mismatch, verification false |
-| G-04 app mode/threshold/comparator/Peak Picker 변경 | PASS | 모든 변경에서 verification false |
-| G-05 build commit/settings 변경 | PASS | fingerprint mismatch, settings attestation 항목은 순환 제외 |
-| G-06 readback mismatch/error | PASS | fail-closed와 drift field 기록 |
-| G-07 Peak Picker config-only | PASS | evidence 보존, candidate unknown |
-| G-08 Actuator/FOV/Range 문자열 주입 | PASS | evidence 보존, candidate unknown, validator 거부 |
+| Q-01 v2.5 valid current/cached | PASS | finite Temperature, `ok/not_missing` |
+| Q-02 under/over range | PASS | blank Temperature, `invalid/invalid_value` |
+| Q-03 stale | PASS | blank Temperature, `stale/stale_snapshot` |
+| Q-04 source error | PASS | blank Temperature, `missing/source_error` |
+| Q-05 startup/unknown | PASS | `missing/source_missing`, `unknown/source_missing` |
+| Q-06 monotonic exact delta | PASS | explicit snapshot age 무시, finite non-negative age와 `ok` |
+| Q-07 UTC fallback | PASS | monotonic source가 없을 때만 timestamp delta 사용 |
+| Q-08 clock anomaly | PASS | monotonic/UTC 음수 모두 blank age와 `clock_anomaly` |
+| Q-09 age source 없음 | PASS | blank age와 `unknown` |
+| Q-10 v2.4 보존 | PASS | 기존 header, legacy quality, explicit value age 유지 |
+| Q-11 v2.4→v2.5 rollover | PASS | CSV와 sidecar가 schema별로 분리됨 |
+| Q-12 invalid flag 조합 | PASS | startup/runtime 모두 fail-closed, runtime config 부분 적용 없음 |
+| V-01 blank + quality ok | PASS | v2.5 validator가 거부 |
+| V-02 anomaly + nonblank age | PASS | v2.5 validator가 거부 |
 
-## Security Review
+## Correctness and Security Review
 
-- fingerprint는 lowercase SHA-256이며 비교는 `hmac.compare_digest`를 사용한다.
-- settings canonical hash에서 password/token/credential/auth 계열 키를 제외하고, fingerprint payload와 health counter에 비밀값을 추가하지 않았다.
-- 운영자 ID는 128자 이하의 제한된 비식별 문자 집합만 허용하며 이메일 형태는 허용하지 않는다.
-- health에는 IP, operator ID, raw diagnostics를 노출하지 않는다.
-- 설정 파일 hash는 canonical 내용의 hash만 기록하며 원문 설정값은 추가로 노출하지 않는다.
+- monotonic timestamp는 `FactoryData.model_dump()`에서 제외해 외부 API나 persisted payload에 process-local clock 값을 노출하지 않는다.
+- source monotonic 값이 존재하지만 invalid/negative/non-finite이면 wall-clock으로 우회하지 않고 `clock_anomaly`로 차단한다.
+- v2.5 metadata는 실제 header의 canonical SHA-256과 active schema를 validator에서 교차 검증한다.
+- hardening flag validation은 runtime config의 다른 값을 변경하기 전에 실행해 실패 시 부분 적용을 방지한다.
+- health에는 raw timestamp나 장비 식별자를 추가하지 않고 anomaly count만 노출한다.
+- 비공개 설정값, external URL 또는 사용자 식별정보를 새로 기록하지 않는다.
 
 ## Deviations and Decisions
 
-- device config readback collector는 이번 단계에서 구현하지 않았다. 실제 지원 증거가 없으므로 상태를 `not_supported`로 기록하고 `matched`를 생성하지 않는다.
-- attestation 항목은 canonical settings hash에서 제외했다. 그렇지 않으면 승인 fingerprint를 config 파일에 쓰는 행위가 fingerprint 자체를 변경해 고정점이 존재하지 않는다.
-- unsupported enum과 fact evidence는 호환성·감사를 위해 유지하고 causal promotion만 차단했다.
-- 원인 판정 rule을 `temperature-operational-v4`로 올렸으며 v3 sidecar/row는 legacy 호환 경로로 검증한다.
-- GitHub review P2에 따라 `device_config_readback_status=matched`는 nonblank current device fingerprint가 일치할 때만 validator가 허용한다.
-- 전체 feature 자동 gap analysis는 Stage 4~5 완료 전 PDCA를 `Check`로 이동시키므로 실행하지 않았다. 현재 분석은 Stage 3 scoped audit다.
+- v2.3/v2.4의 기존 value-age와 quality 의미는 호환성 때문에 유지하고 v2.5에서만 강화했다.
+- `spot_value_age_clock_status`는 v2.4 header에 넣지 않고 v2.5 마지막 열로 추가했다.
+- 프로세스 재시작 후 monotonic clock은 복원하지 않는다. 이때 wall-clock timestamp가 있으면 fallback하고 없으면 `unknown`이다.
+- invalid sentinel은 cache suppression 상태를 유지하되 last-valid 시각은 감사용으로 보존한다. verified no-target만 wall/monotonic 시각을 함께 제거한다.
+- 전체 feature 자동 gap analysis는 Stage 5 완료 전 PDCA를 `Check`로 이동시키므로 실행하지 않았다. 현재 분석은 Stage 4 scoped audit다.
 
 ## Validation
 
-- Targeted Stage 3 pytest: `284 passed, 52 subtests passed`
+- Targeted Stage 4 pytest: `262 passed, 38 subtests passed`
 - Full repository health: PASS
   - Frontend: typecheck/lint, `27 files / 202 tests`
-  - Backend: ruff/mypy, `481 tests OK`
-- Python compile: PASS
-- `git diff --check`: PASS
+  - Backend: ruff/mypy, `494 tests OK`
+- Full v2.5 producer→sidecar→validator path: PASS
+- v2.5 rollover replay consumer: PASS
+- Python compile와 `git diff --check`: final publish gate에서 재확인
 - Windows packaged artifact: PR CI merge gate에서 확인 예정
 
 ## Remaining Items
 
-- Stage 4: legacy Temperature quality와 operational status 정합화
-- Stage 4: monotonic `spot_effective_value_age_ms_at_row`와 clock status
-- Stage 5: 전체 feature gap analysis, controlled verification, final report
+- Stage 5: v2.3/v2.4/v2.5 writer-validator matrix
+- Stage 5: controlled replay, rollback drill, package build
+- Stage 5: 전체 feature gap analysis와 final report
 
 ## Recommendation
 
-Stage 3을 별도 PR로 검토한다. Windows Release Artifact check가 PASS한 뒤 merge하며, 전체 feature 완료 처리는 Stage 4~5 종료 후 수행한다.
+Stage 4를 별도 PR로 검토한다. Windows Release Artifact check가 PASS한 뒤 merge하며, 전체 feature 완료 처리는 Stage 5 종료 후 수행한다.
