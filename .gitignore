@@ -13,6 +13,7 @@ v2_next/backend/tests/*
 !v2_next/backend/tests/test_spot_api.py
 !v2_next/backend/tests/test_spot_observation.py
 !v2_next/backend/tests/test_spot_config_provenance.py
+!v2_next/backend/tests/test_spot_temperature_stage5_verification.py
 !v2_next/backend/tests/test_data_history_api.py
 !v2_next/backend/tests/test_csv_logger_service.py
 !v2_next/backend/tests/test_csv_logger_runtime.py

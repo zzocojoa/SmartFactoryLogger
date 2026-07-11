@@ -1,8 +1,8 @@
 # SPOT Temperature v2.4 Operational Hardening - Do Tracking
 
-> Version: 1.3.0 | Date: 2026-07-11 | Status: In Progress
-> Stage 4 baseline: `master@65b123a05677ad1a3468df9647ab8191b778e4e1`
-> Completed scope: Stage 1 - Cache and Comparator, Stage 2 - Diagnostics Integrity, Stage 3 - Config and Evidence, Stage 4 - Quality and Value Age
+> Version: 1.4.0 | Date: 2026-07-11 | Status: Completed
+> Stage 5 baseline: `master@9cf96f8ba42f408119808537a4ff66de2e979658`
+> Completed scope: Stage 0 - Contract Freeze through Stage 5 - Controlled Verification
 
 ## 1. Stage Status
 
@@ -13,9 +13,9 @@
 | Stage 2 - Diagnostics Integrity | Completed | Same-poll binding, completeness, age, fact provenance |
 | Stage 3 - Config and Evidence | Completed | Config attestation, drift, unsupported evidence 차단 |
 | Stage 4 - Quality and Value Age | Completed | v2.5 quality/value-age 계약 |
-| Stage 5 - Controlled Verification | Pending | 전체 feature 완료 게이트 |
+| Stage 5 - Controlled Verification | Completed | 전체 feature 완료 게이트 |
 
-Stage 5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
+Stage 5까지 구현·검증되어 Do phase를 완료하고 전체 gap analysis인 Check로 이동했다.
 
 ## 2. Stage 3 구현
 
@@ -95,7 +95,29 @@ Stage 5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 
 설정 또는 build가 바뀌면 1~5를 다시 수행한다. 승인 metadata 자체는 canonical settings hash에서 제외된다.
 
-## 5. Files Changed
+## 5. Stage 5 검증
+
+### 5.1 Writer-validator matrix
+
+- 실제 `CSVLoggerService` writer로 v2.3, v2.4, v2.5 행과 sidecar를 생성했다.
+- 세 contract 모두 exact header/row length/schema metadata를 확인하고 full shadow validator를 통과했다.
+- v2.4/v2.5는 실제 observation fact를 기록하고 manifest를 갱신했다.
+
+### 5.2 Controlled replay와 rollback
+
+- Sanitized v2.5 artifact의 full validator 결과는 invariant violation 0건이다.
+- Realtime observation key 1건과 fact key 1건이 연결되어 link coverage 100%를 확인했다.
+- `CsvReplayDriver`가 v2.5 Temperature와 value-age clock status를 재생했다.
+- Hardening flag를 끈 rollback drill에서 기존 v2.5 CSV/sidecar byte가 바뀌지 않고 새 v2.4 파일과 sidecar가 열렸다.
+
+### 5.3 Package와 전체 health
+
+- Clean PyInstaller one-file build가 squash baseline `9cf96f8ba42f408119808537a4ff66de2e979658`를 시작·완료 시점에 동일하게 검증했다.
+- Embedded `backend/build_provenance.json`과 validator resource를 archive에서 직접 확인했다.
+- EXE SHA-256은 `8320ce0464c53dcd56b80256b1e99280a6cd23920a0212ac15d1d4f8d631f0ad`이다.
+- Targeted suite, full health, compile, diff check와 added-line sensitive scan을 통과했다.
+
+## 6. Files Changed
 
 ### Production
 
@@ -120,20 +142,31 @@ Stage 5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 - `backend/tests/test_real_plc.py`
 - `backend/tests/test_csv_replay_driver.py`
 - `backend/tests/test_csv_v2_4_operational_contract.py`
+- `backend/tests/test_spot_temperature_stage5_verification.py`
 
-## 6. Validation
+### PDCA
+
+- `docs/02-design/features/spot-temperature-v2-4-operational-hardening.do.md`
+- `docs/03-analysis/spot-temperature-v2-4-operational-hardening.analysis.md`
+- `docs/04-report/spot-temperature-v2-4-operational-hardening.report.md`
+
+## 7. Validation
 
 - Stage 3 targeted pytest: `284 passed, 52 subtests passed`
 - Stage 4 targeted pytest: `262 passed, 38 subtests passed`
+- Stage 5 controlled verification: `3 passed, 3 subtests passed`
+- Stage 5 targeted pytest: `381 passed, 87 subtests passed`
 - Frontend typecheck/lint: PASS
 - Frontend tests: `27 files, 202 tests` PASS
 - Backend ruff/mypy: PASS
-- Backend unittest: `494 tests OK`
+- Backend unittest: `497 tests OK`
 - Python compile: PASS
 - `git diff --check`: PASS
-- Local PyInstaller build: 미실행, PR의 Windows Release Artifact check를 merge gate로 사용
+- Added-line sensitive scan: `0 hits`
+- Local clean PyInstaller build와 embedded provenance 검증: PASS
+- PR #164 Windows Release Artifact workflow: PASS
 
-## 7. Compatibility and Failure Modes
+## 8. Compatibility and Failure Modes
 
 - v2.3/v2.4 realtime CSV header와 quality 의미는 변경하지 않았다.
 - v2.5는 hardening flag가 켜진 경우에만 별도 파일로 생성된다. exact-column-count consumer는 v2.5 지원이 필요하다.
@@ -143,7 +176,7 @@ Stage 5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 - 미수집 evidence는 삭제하지 않고 fact에 남기므로 사후 조사 가능성은 유지된다.
 - Future collector를 활성화하려면 typed field, source, captured-at, age, binding, completeness, validator test를 함께 추가해야 한다.
 
-## 8. Rollback
+## 9. Rollback
 
 - `spot_config_provenance.py`, config attestation 설정, driver/repository snapshot 통합을 함께 revert한다.
 - unsupported cause gate와 validator 규칙을 함께 revert해야 producer/validator 계약이 어긋나지 않는다.
@@ -151,6 +184,8 @@ Stage 5가 남아 있으므로 전체 PDCA phase는 `Do`를 유지한다.
 - CSV migration은 필요하지 않다.
 - Stage 4 운영 rollback은 hardening flag를 끄고 새 v2.4 파일로 rollover하는 것이다. 기존 v2.5 파일은 수정하지 않는다.
 
-## 9. Remaining Work
+## 10. Remaining Work
 
-- Stage 5: 전체 feature gap analysis, controlled verification, final report
+- 구현 gap은 없다.
+- Production enablement는 범위 밖이며 v2.5 hardening flag 기본값은 false다.
+- Stage 5 verification PR의 review/merge는 별도 승인 gate다.

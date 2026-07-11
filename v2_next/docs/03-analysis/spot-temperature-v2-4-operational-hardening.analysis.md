@@ -1,78 +1,88 @@
 # Gap Analysis: SPOT Temperature v2.4 Operational Hardening
 
-> Date: 2026-07-11 | Scope: Stage 4 - Quality and Value Age
+> Date: 2026-07-11 | Scope: Full feature, Stage 0-5
 > Design: `docs/02-design/features/spot-temperature-v2-4-operational-hardening.design.md`
+> Verification baseline: `master@9cf96f8ba42f408119808537a4ff66de2e979658`
 
-## Match Rate: 100% (Stage 4 scope)
+## Match Rate: 100%
 
-이 문서는 Stage 4 범위만 분석한다. Stage 5가 남아 있으므로 전체 feature는 완료 상태가 아니며 PDCA phase는 `Do`를 유지한다.
+설계의 exact test matrix 56개 중 56개가 코드, validator, automated test 또는 package/sensitive gate에 대응해 PASS했다. DEC-01~08과 FR-01~07도 모두 구현돼 blocking gap은 없다.
 
-## Implemented Items
+| Matrix | Passed | Total | Evidence area |
+|---|---:|---:|---|
+| C - Cache and Status | 10 | 10 | state, operational, SPOT API, RealPLC tests |
+| L - Low Signal | 7 | 7 | shared helper, operational/fact parity tests |
+| D - Diagnostics | 11 | 11 | poll binding, partial/stale/failure tests |
+| G - Config and Eligibility | 8 | 8 | provenance, drift, unsupported evidence tests |
+| Q - Quality, Age and Schema | 12 | 12 | v2.5 mapping, clock, rollover, config tests |
+| V - Validator and Packaging | 8 | 8 | validator, historical fact, package, scan gates |
+| **Total** | **56** | **56** | **100%** |
 
-- [x] hardening flag 기본 false와 operational flag dependency
-- [x] v2.5 schema/header/sidecar contract
-- [x] v2.4에서 v2.5로 별도 파일 rollover
-- [x] operational status 기반 legacy Temperature quality 정합화
-- [x] blank Temperature와 `ok/not_missing` 조합 차단
-- [x] last-valid monotonic clock의 driver/RealPLC/FactoryData 전파
-- [x] monotonic 우선 value-age와 UTC fallback
-- [x] negative/non-finite clock anomaly fail-closed
-- [x] value-age clock anomaly bounded health counter
-- [x] v2.5 validator와 replay consumer 호환
+## Functional Requirement Results
 
-## Acceptance Evidence
-
-| Design test | Result | Evidence |
+| Requirement | Result | Implementation evidence |
 |---|---|---|
-| Q-01 v2.5 valid current/cached | PASS | finite Temperature, `ok/not_missing` |
-| Q-02 under/over range | PASS | blank Temperature, `invalid/invalid_value` |
-| Q-03 stale | PASS | blank Temperature, `stale/stale_snapshot` |
-| Q-04 source error | PASS | blank Temperature, `missing/source_error` |
-| Q-05 startup/unknown | PASS | `missing/source_missing`, `unknown/source_missing` |
-| Q-06 monotonic exact delta | PASS | explicit snapshot age 무시, finite non-negative age와 `ok` |
-| Q-07 UTC fallback | PASS | monotonic source가 없을 때만 timestamp delta 사용 |
-| Q-08 clock anomaly | PASS | monotonic/UTC 음수 모두 blank age와 `clock_anomaly` |
-| Q-09 age source 없음 | PASS | blank age와 `unknown` |
-| Q-10 v2.4 보존 | PASS | 기존 header, legacy quality, explicit value age 유지 |
-| Q-11 v2.4→v2.5 rollover | PASS | CSV와 sidecar가 schema별로 분리됨 |
-| Q-12 invalid flag 조합 | PASS | startup/runtime 모두 fail-closed, runtime config 부분 적용 없음 |
-| V-01 blank + quality ok | PASS | v2.5 validator가 거부 |
-| V-02 anomaly + nonblank age | PASS | v2.5 validator가 거부 |
+| FR-01 cache fallback | PASS | transport fallback precedence, TTL/freshness gate, invalid-sentinel latch, origin mismatch fail-closed |
+| FR-02 comparator verification | PASS | verified-only numeric comparison, bit 4 direct evidence, realtime/fact shared helper |
+| FR-03 diagnostics integrity | PASS | poll context, snapshot identity, per-field status, same-poll/age/required-field eligibility |
+| FR-04 config provenance | PASS | default false, canonical fingerprint, attestation, drift/readback fail-closed |
+| FR-05 evidence eligibility | PASS | collector 없는 candidate promotion 차단과 suppression counter |
+| FR-06 legacy quality | PASS | v2.5 operational mapping, blank/ok contradiction rejection, v2.3/v2.4 compatibility |
+| FR-07 monotonic value age | PASS | monotonic-first age, UTC fallback, anomaly/unknown status와 schema rollover |
 
-## Correctness and Security Review
+## Controlled Verification
 
-- monotonic timestamp는 `FactoryData.model_dump()`에서 제외해 외부 API나 persisted payload에 process-local clock 값을 노출하지 않는다.
-- source monotonic 값이 존재하지만 invalid/negative/non-finite이면 wall-clock으로 우회하지 않고 `clock_anomaly`로 차단한다.
-- v2.5 metadata는 실제 header의 canonical SHA-256과 active schema를 validator에서 교차 검증한다.
-- hardening flag validation은 runtime config의 다른 값을 변경하기 전에 실행해 실패 시 부분 적용을 방지한다.
-- health에는 raw timestamp나 장비 식별자를 추가하지 않고 anomaly count만 노출한다.
-- 비공개 설정값, external URL 또는 사용자 식별정보를 새로 기록하지 않는다.
+- 실제 writer와 full validator로 v2.3/v2.4/v2.5 matrix를 통과했다.
+- Sanitized v2.5 artifact는 full validator invariant violation 0건이다.
+- Observation fact/realtime link coverage는 `1/1`, missing 0, 100%다.
+- Replay 결과 Temperature `560.7`, value-age clock status `ok`를 확인했다.
+- Rollback은 v2.5 artifact를 변경하지 않고 hardening-disabled v2.4 새 파일을 생성했다.
+- Targeted pytest: `381 passed, 87 subtests passed`.
+- Full health: frontend `27 files / 202 tests`, backend ruff/mypy PASS, `497 tests OK`.
+- Python compile와 `git diff --check`: PASS.
+- Added-line sensitive-value scan: 0 hits.
 
-## Deviations and Decisions
+## Package Evidence
 
-- v2.3/v2.4의 기존 value-age와 quality 의미는 호환성 때문에 유지하고 v2.5에서만 강화했다.
-- `spot_value_age_clock_status`는 v2.4 header에 넣지 않고 v2.5 마지막 열로 추가했다.
-- 프로세스 재시작 후 monotonic clock은 복원하지 않는다. 이때 wall-clock timestamp가 있으면 fallback하고 없으면 `unknown`이다.
-- invalid sentinel은 cache suppression 상태를 유지하되 last-valid 시각은 감사용으로 보존한다. verified no-target만 wall/monotonic 시각을 함께 제거한다.
-- 전체 feature 자동 gap analysis는 Stage 5 완료 전 PDCA를 `Check`로 이동시키므로 실행하지 않았다. 현재 분석은 Stage 4 scoped audit다.
+- Clean PyInstaller one-file build: PASS.
+- Build 시작·완료 provenance: `9cf96f8ba42f408119808537a4ff66de2e979658`.
+- Embedded `backend/build_provenance.json`:
 
-## Validation
+```json
+{
+  "git_commit": "9cf96f8ba42f408119808537a4ff66de2e979658",
+  "schema_version": "1.0.0",
+  "source": "clean_git_head"
+}
+```
 
-- Targeted Stage 4 pytest: `262 passed, 38 subtests passed`
-- Full repository health: PASS
-  - Frontend: typecheck/lint, `27 files / 202 tests`
-  - Backend: ruff/mypy, `494 tests OK`
-- Full v2.5 producer→sidecar→validator path: PASS
-- v2.5 rollover replay consumer: PASS
-- Python compile와 `git diff --check`: final publish gate에서 재확인
-- Windows packaged artifact: PR CI merge gate에서 확인 예정
+- EXE size: `65,382,487` bytes.
+- EXE SHA-256: `8320ce0464c53dcd56b80256b1e99280a6cd23920a0212ac15d1d4f8d631f0ad`.
+- Bundled validator source/bytecode와 build provenance resource를 archive에서 확인했다.
+- PR #164 Windows Release Artifact workflow도 portable, NSIS, checksum, artifact upload를 통과했다.
 
-## Remaining Items
+## Design Decisions and Non-Gaps
 
-- Stage 5: v2.3/v2.4/v2.5 writer-validator matrix
-- Stage 5: controlled replay, rollback drill, package build
-- Stage 5: 전체 feature gap analysis와 final report
+- Atomic `/output`은 capability evidence가 없어 활성화하지 않았다. 설계 DEC-04에 따라 기본 `async_fact_only`와 strict same-poll eligibility를 사용하므로 미구현 gap이 아니다.
+- Device readback collector가 없는 환경은 `not_supported`로 표시하고 operator attestation과 fingerprint를 요구한다. `matched`로 위조하지 않는다.
+- Peak Picker, actuator, FOV, detector-range enum은 compatibility를 위해 유지하지만 provenance-capable collector 전에는 원인 승격을 차단한다.
+- v2.5 hardening flag 기본 false는 controlled rollout 경계이며 production enablement는 본 feature 범위 밖이다.
+
+## Delivery Traceability
+
+| Stage | PR | Squash commit | Result |
+|---|---|---|---|
+| Stage 1 | #161 | `218b57b5ea96588b742f7a25560c8188df07cc65` | MERGED |
+| Stage 2 | #162 | `e42d75f66a3eacdd6f6f58fafc68a6b46a2b38f9` | MERGED |
+| Stage 3 | #163 | `65b123a05677ad1a3468df9647ab8191b778e4e1` | MERGED |
+| Stage 4 | #164 | `9cf96f8ba42f408119808537a4ff66de2e979658` | MERGED |
+
+## Residual Risk
+
+- 실제 장비에서 atomic response와 readback을 지원하려면 별도 capability evidence와 collector PR이 필요하다.
+- v2.5 exact-column-count consumer는 production enablement 전에 v2.5 지원 확인이 필요하다.
+- Config/build 변경 후 attestation을 갱신하지 않으면 numeric low-signal candidate가 `unknown`으로 강등된다. 이는 의도한 fail-closed 동작이다.
 
 ## Recommendation
 
-Stage 4를 별도 PR로 검토한다. Windows Release Artifact check가 PASS한 뒤 merge하며, 전체 feature 완료 처리는 Stage 5 종료 후 수행한다.
+Match rate가 90% gate를 초과했고 blocking gap이 없으므로 Check를 완료하고 final report로 이동한다. Stage 5 test/document PR은 별도 review와 explicit merge approval을 거친다.
