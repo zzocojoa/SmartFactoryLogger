@@ -1872,6 +1872,48 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(manifest["diagnostic_field_coverage"]["signalpc_nonblank_count"], 1)
         self.assertRegex(manifest["sha256"], r"^[a-f0-9]{64}$")
 
+    def test_repository_initializes_empty_enabled_observation_fact_for_replay_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            service = CSVLoggerService()
+            service.fallback_log_dir = log_dir
+            service.apply_config(
+                log_path=log_dir,
+                auto_save=True,
+                csv_v2_enabled=True,
+                csv_v2_operational_fields_enabled=True,
+                csv_v2_temperature_hardening_enabled=True,
+            )
+            v2_path = log_dir / "Factory_Integrated_Log_v2_20260711_120000.csv"
+            self.write_csv_rows(v2_path, list(V2_5_CSV_COLUMNS), [])
+
+            with patch("backend.FacilityData.repository.config.SPOT_OBSERVATION_FACT_ENABLED", True):
+                service._write_v2_sidecar(v2_path, service._get_active_v2_contract())
+                service.refresh_spot_observation_fact_manifest_for_csv(v2_path)
+
+            fact_path = log_dir / "spot_observation_fact.csv"
+            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.reader(handle))
+            metadata_path = v2_path.with_suffix(".metadata.json")
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            failures, summary = validate_spot_observation_fact_manifest(
+                metadata,
+                metadata_path,
+                list(V2_5_CSV_COLUMNS),
+                [],
+                spot_observation_fact_path=fact_path,
+            )
+
+        self.assertEqual(rows, [SPOT_OBSERVATION_FACT_COLUMNS])
+        self.assertEqual(failures, [])
+        self.assertEqual(summary["spot_observation_fact_row_count_match"], "true")
+        self.assertEqual(summary["spot_observation_fact_link_coverage_pct"], "0.0")
+        manifest = metadata["spot_observation_fact_manifest"]
+        self.assertTrue(manifest["enabled"])
+        self.assertEqual(manifest["row_count"], 0)
+        self.assertEqual(manifest["write_failure_count"], 0)
+        self.assertRegex(manifest["sha256"], r"^[a-f0-9]{64}$")
+
     def test_v2_4_row_links_latest_spot_image_fact_for_same_observation(self) -> None:
         header = V2_4_CSV_COLUMNS
         service = CSVLoggerService()

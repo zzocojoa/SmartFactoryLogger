@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import math
+import threading
 from datetime import datetime, timezone
 import re
 from collections import Counter
@@ -27,6 +28,7 @@ from backend.FacilityData.spot_diagnostics import (
 SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.3.0"
 SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION = "1.2.1"
 SPOT_OBSERVATION_FACT_FILENAME = "spot_observation_fact.csv"
+_SPOT_OBSERVATION_FACT_FILE_LOCK = threading.Lock()
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
@@ -162,6 +164,20 @@ class SpotObservationFactWriter:
     def __post_init__(self) -> None:
         self._load_seen_keys_from_output()
 
+    def ensure_initialized(self) -> bool:
+        """Create a current-schema header even when no observation has been emitted yet."""
+        try:
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            with _SPOT_OBSERVATION_FACT_FILE_LOCK:
+                write_header = self._prepare_output_file_for_append()
+                if write_header:
+                    with self.output_path.open("a", encoding="utf-8-sig", newline="") as handle:
+                        csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS).writeheader()
+            return True
+        except Exception:
+            self.failure_count += 1
+            return False
+
     def write_fact(self, snapshot: Mapping[str, Any]) -> Optional[dict[str, str]]:
         fact = build_spot_observation_fact(snapshot)
         key = fact["spot_observation_key"]
@@ -179,12 +195,13 @@ class SpotObservationFactWriter:
             return None
 
     def _append_fact(self, fact: Mapping[str, str]) -> None:
-        write_header = self._prepare_output_file_for_append()
-        with self.output_path.open("a", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
-            if write_header:
-                writer.writeheader()
-            writer.writerow(fact)
+        with _SPOT_OBSERVATION_FACT_FILE_LOCK:
+            write_header = self._prepare_output_file_for_append()
+            with self.output_path.open("a", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
+                if write_header:
+                    writer.writeheader()
+                writer.writerow(fact)
 
     def _prepare_output_file_for_append(self) -> bool:
         if not self.output_path.exists() or self.output_path.stat().st_size == 0:
