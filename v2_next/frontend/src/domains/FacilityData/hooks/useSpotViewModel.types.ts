@@ -15,6 +15,6 @@ export interface UseSpotViewModel {
   controlSpot: (action: string, value?: number) => Promise<boolean>;
   controlFocus: (steps: number) => Promise<void>;
   controlActuator: (step: number) => Promise<void>;
-  handleImageLoad: () => void;
-  handleImageError: () => void;
+  handleImageLoad: (displayedImageUrl?: string) => void;
+  handleImageError: (displayedImageUrl?: string) => void;
 }

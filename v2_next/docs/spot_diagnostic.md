@@ -132,12 +132,12 @@ Direct Camera Latency: 25.4 ms
 
 ```powershell
 # 백엔드 프록시 속도 (1회)
-$ms=(Measure-Command { Invoke-WebRequest -UseBasicParsing -Uri ("http://127.0.0.1:8000/api/spot/proxy_image?ts="+[DateTime]::UtcNow.Ticks) -TimeoutSec 5 | Out-Null }).TotalMilliseconds; "Backend Proxy Latency: $([Math]::Round($ms,1)) ms"
+$ms=(Measure-Command { Invoke-WebRequest -UseBasicParsing -Uri ("http://127.0.0.1:8000/api/spot/image.jpg?ts="+[DateTime]::UtcNow.Ticks) -TimeoutSec 5 | Out-Null }).TotalMilliseconds; "Backend Proxy Latency: $([Math]::Round($ms,1)) ms"
 ```
 
 ```powershell
 - 결과
-PS C:\Users\user\AppData\Roaming\SmartFactoryLogger> $ms=(Measure-Command { Invoke-WebRequest -UseBasicParsing -Uri ("http://127.0.0.1:8000/api/spot/proxy_image?ts="+[DateTime]::UtcNow.Ticks) -TimeoutSec 5 | Out-Null }).TotalMilliseconds; "Backend Proxy Latency: $([Math]::Round($ms,1)) ms"
+PS C:\Users\user\AppData\Roaming\SmartFactoryLogger> $ms=(Measure-Command { Invoke-WebRequest -UseBasicParsing -Uri ("http://127.0.0.1:8000/api/spot/image.jpg?ts="+[DateTime]::UtcNow.Ticks) -TimeoutSec 5 | Out-Null }).TotalMilliseconds; "Backend Proxy Latency: $([Math]::Round($ms,1)) ms"
 Backend Proxy Latency: 79 ms
 ```
 

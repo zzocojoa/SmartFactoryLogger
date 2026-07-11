@@ -1,1 +1,1 @@
-export const buildSpotImageUrl = (apiBase: string): string => `${apiBase}/api/spot/proxy_image`;
+export const buildSpotImageUrl = (apiBase: string): string => `${apiBase}/api/spot/image.jpg`;

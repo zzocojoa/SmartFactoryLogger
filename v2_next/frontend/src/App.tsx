@@ -814,6 +814,8 @@ function App() {
         spotConfig={spotConfig}
         spotImageUrl={spotImageUrl}
         spotImageLoading={spotImageLoading}
+        handleSpotImageLoaded={handleSpotImageLoaded}
+        handleSpotImageError={handleSpotImageError}
         spotLastSuccessAt={spotLastSuccessAt}
         spotImageMetadata={spotImageMetadata}
         spotDiagnostics={spotDiagnostics}

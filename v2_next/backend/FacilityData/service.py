@@ -391,7 +391,7 @@ class PLCService:
         try:
             from backend.FacilityData.drivers import spot_api as spot_control
 
-            diagnostics = spot_control.get_image_proxy_diagnostics()
+            diagnostics = spot_control.get_spot_diagnostics()
             fact_health = spot_control.get_spot_observation_fact_health()
         except Exception as exc:
             v2_4_operational = logger_service.get_v2_4_operational_summary()

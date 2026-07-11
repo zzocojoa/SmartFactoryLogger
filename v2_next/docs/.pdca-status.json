@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-11T02:38:47.826Z",
+  "lastUpdated": "2026-07-11T05:59:36.700Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -20,7 +20,8 @@
     "spot-image-evidence-capture",
     "spot-image-capture-settings-ui",
     "nsis-startup-render-performance",
-    "spot-temperature-v2-4-operational-hardening"
+    "spot-temperature-v2-4-operational-hardening",
+    "spot-camera-rest-api-conformance"
   ],
   "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
@@ -1648,6 +1649,47 @@
         "lastUpdated": "2026-07-11T02:38:47.826Z"
       },
       "completedAt": "2026-07-11T02:38:47.822Z"
+    },
+    "spot-camera-rest-api-conformance": {
+      "phase": "act",
+      "matchRate": null,
+      "iterationCount": 1,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-11T04:49:46.462Z",
+          "completedAt": "2026-07-11T04:52:52.779Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-11T04:49:46.462Z",
+          "completedAt": "2026-07-11T04:54:39.917Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-07-11T04:49:46.462Z",
+          "completedAt": "2026-07-11T05:58:06.175Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-07-11T04:49:46.462Z",
+          "completedAt": "2026-07-11T05:59:36.699Z"
+        },
+        {
+          "phase": "report",
+          "status": "active",
+          "createdAt": "2026-07-11T04:49:46.462Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-11T04:49:46.463Z",
+        "lastUpdated": "2026-07-11T05:59:36.700Z"
+      }
     }
   },
   "pipeline": {
@@ -1659,7 +1701,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-11T02:38:47.826Z"
+    "lastActivity": "2026-07-11T05:59:36.700Z"
   },
   "history": [
     {
@@ -2679,6 +2721,64 @@
       "phase": "report",
       "nextPhase": "completed",
       "timestamp": "2026-07-11T02:38:47.823Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-07-11T04:52:52.772Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-07-11T04:52:52.775Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-07-11T04:53:03.774Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-07-11T04:54:39.914Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-07-11T04:54:39.915Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-07-11T05:58:06.171Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-07-11T05:58:06.172Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-07-11T05:59:36.695Z"
+    },
+    {
+      "feature": "spot-camera-rest-api-conformance",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-07-11T05:59:36.697Z"
     }
   ],
   "timeline": [

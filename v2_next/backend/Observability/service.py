@@ -13,11 +13,9 @@ RequestSample = Tuple[float, float, int, str, str]
 PollingClientCounts = Dict[str, int]
 PollingPathSummary = Dict[str, Any]
 PollingBucket = Tuple[float, Dict[str, PollingPathSummary]]
-_SPOT_PROXY_PATH = "/api/spot/proxy_image"
-_SPOT_LIVE_PATH = "/api/spot/live_image"
+_SPOT_IMAGE_PATH = "/api/spot/image.jpg"
 _POLLING_PATHS = {
-    _SPOT_PROXY_PATH,
-    _SPOT_LIVE_PATH,
+    _SPOT_IMAGE_PATH,
     "/api/data",
     "/health",
     "/stats",
@@ -54,8 +52,7 @@ def _performance_thresholds() -> Dict[str, Any]:
         "operational": {
             "health_latency_ms": {"target": 50, "warning": 50, "failure": 200},
             "data_latency_ms": {"target": 100, "warning": 100, "failure": 500},
-            "spot_live_image_latency_ms": {"target": 500, "warning": 500, "failure": None},
-            "spot_proxy_image_latency_ms": {"target": 500, "warning": 500, "failure": None},
+            "spot_image_latency_ms": {"target": 500, "warning": 500, "failure": None},
             "lcp_ms": {"target": 2500, "warning": 2500, "failure": 4000},
             "cls": {"target": 0.1, "warning": 0.1, "failure": 0.25},
         },
@@ -185,42 +182,19 @@ class ObservabilityService:
             "clients": {},
             "success_count": 0,
             "failure_count": 0,
-            "stale_count": 0,
-            "age_total_sec": 0.0,
-            "age_count": 0,
         }
         bucket[path] = next_entry
         return next_entry
 
-    def record_spot_proxy_result(self, status_code: int, age_sec: Optional[float], is_stale: bool) -> None:
+    def record_spot_image_result(self, status_code: int) -> None:
         now = time.time()
         with self._lock:
             self._trim_polling_buckets(now)
             bucket = self._get_or_create_polling_bucket(now)
-            entry = self._get_or_create_polling_entry(bucket, _SPOT_PROXY_PATH)
+            entry = self._get_or_create_polling_entry(bucket, _SPOT_IMAGE_PATH)
             if status_code >= 400:
                 return
             entry["success_count"] += 1
-            if is_stale:
-                entry["stale_count"] += 1
-            if age_sec is not None:
-                entry["age_total_sec"] += float(age_sec)
-                entry["age_count"] += 1
-
-    def record_spot_live_image_result(self, status_code: int, age_sec: Optional[float], is_stale: bool) -> None:
-        now = time.time()
-        with self._lock:
-            self._trim_polling_buckets(now)
-            bucket = self._get_or_create_polling_bucket(now)
-            entry = self._get_or_create_polling_entry(bucket, _SPOT_LIVE_PATH)
-            if status_code >= 400:
-                return
-            entry["success_count"] += 1
-            if is_stale:
-                entry["stale_count"] += 1
-            if age_sec is not None:
-                entry["age_total_sec"] += float(age_sec)
-                entry["age_count"] += 1
 
     def record_request(self, path: str, status_code: int, latency_ms: float, client_host: str) -> None:
         now = time.time()
@@ -252,7 +226,7 @@ class ObservabilityService:
                     entry["http_5xx_count"] += 1
                 clients: PollingClientCounts = entry["clients"]
                 clients[client_host] = clients.get(client_host, 0) + 1
-                if path in (_SPOT_PROXY_PATH, _SPOT_LIVE_PATH) and status_code >= 400:
+                if path == _SPOT_IMAGE_PATH and status_code >= 400:
                     entry["failure_count"] += 1
             else:
                 self._requests.append(sample)
@@ -495,9 +469,6 @@ class ObservabilityService:
                         "clients": {},
                         "success_count": 0,
                         "failure_count": 0,
-                        "stale_count": 0,
-                        "age_total_sec": 0.0,
-                        "age_count": 0,
                     },
                 )
                 path_entry["count"] += int(entry["count"])
@@ -506,9 +477,6 @@ class ObservabilityService:
                 path_entry["http_5xx_count"] += int(entry["http_5xx_count"])
                 path_entry["success_count"] += int(entry["success_count"])
                 path_entry["failure_count"] += int(entry["failure_count"])
-                path_entry["stale_count"] += int(entry["stale_count"])
-                path_entry["age_total_sec"] += float(entry["age_total_sec"])
-                path_entry["age_count"] += int(entry["age_count"])
                 clients: PollingClientCounts = path_entry["clients"]
                 for client_host, client_count in entry["clients"].items():
                     clients[client_host] = clients.get(client_host, 0) + int(client_count)
@@ -537,14 +505,9 @@ class ObservabilityService:
                     for client_host, client_count in top_clients
                 ],
             }
-            if path in (_SPOT_PROXY_PATH, _SPOT_LIVE_PATH):
-                age_count = int(entry["age_count"])
+            if path == _SPOT_IMAGE_PATH:
                 path_payload["success_count"] = int(entry["success_count"])
                 path_payload["failure_count"] = int(entry["failure_count"])
-                path_payload["stale_count"] = int(entry["stale_count"])
-                path_payload["avg_age_sec"] = (
-                    round(float(entry["age_total_sec"]) / age_count, 3) if age_count > 0 else None
-                )
             payload[path] = path_payload
 
         return {

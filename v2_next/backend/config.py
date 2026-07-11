@@ -33,8 +33,6 @@ DEFAULT_LS_IP = "192.168.10.220"
 DEFAULT_LS_PORT = 2004
 DEFAULT_SPOT_IP = "10.1.10.50"
 DEFAULT_SPOT_REFRESH_INTERVAL = 3.0
-DEFAULT_SPOT_IMAGE_URL = f"http://{DEFAULT_SPOT_IP}/image.jpg"
-DEFAULT_SPOT_LIVE_IMAGE_URL = f"http://{DEFAULT_SPOT_IP}/image.jpg"
 DEFAULT_SPOT_INTERNAL_TEMPERATURE_URL = f"http://{DEFAULT_SPOT_IP}/output?p=itemperature"
 DEFAULT_SPOT_CROSSHAIR_X = 0.5
 DEFAULT_SPOT_CROSSHAIR_Y = 0.5
@@ -418,13 +416,17 @@ if _safe_is_file(CONFIG_PATH):
         "imagecapturemaxbytes": str(DEFAULT_SPOT_IMAGE_CAPTURE_MAX_BYTES),
         "imagecapturelinktoobservation": str(DEFAULT_SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION).lower(),
         "internaltemperatureurl": f"http://{_spot_ip_default}/output?p=itemperature",
-        "liveimageurl": f"http://{_spot_ip_default}/image.jpg",
     }
     for _key, _default_val in _spot_defaults.items():
         if not CONFIG.has_option("SPOT", _key):
             CONFIG.set("SPOT", _key, _default_val)
             _updated = True
             _config_log("INFO", f"Auto-added missing SPOT.{_key} = {_default_val}")
+
+    for _legacy_image_option in ("imageurl", "liveimageurl"):
+        if CONFIG.remove_option("SPOT", _legacy_image_option):
+            _updated = True
+            _config_log("INFO", f"Removed legacy SPOT.{_legacy_image_option}")
 
     if _updated:
         _save_config(CONFIG_PATH, CONFIG, CONFIG_ENCODING or "utf-8-sig")
@@ -469,14 +471,6 @@ LS_TARGETS = _load_ls_targets()
 # SPOT
 SPOT_IP = os.getenv("SPOT_IP", _get(CONFIG, "SPOT", "ip", DEFAULT_SPOT_IP) or DEFAULT_SPOT_IP)
 SPOT_URL = os.getenv("SPOT_URL", f"http://{SPOT_IP}/output?p=temperature")
-SPOT_IMAGE_URL = os.getenv(
-    "SPOT_IMAGE_URL",
-    _get(CONFIG, "SPOT", "imageurl", f"http://{SPOT_IP}/image.jpg") or f"http://{SPOT_IP}/image.jpg",
-)
-SPOT_LIVE_IMAGE_URL = os.getenv(
-    "SPOT_LIVE_IMAGE_URL",
-    _get(CONFIG, "SPOT", "liveimageurl", SPOT_IMAGE_URL) or SPOT_IMAGE_URL or f"http://{SPOT_IP}/image.jpg",
-)
 SPOT_INTERNAL_TEMPERATURE_URL = os.getenv(
     "SPOT_INTERNAL_TEMPERATURE_URL",
     _get(CONFIG, "SPOT", "internaltemperatureurl", f"http://{SPOT_IP}/output?p=itemperature")

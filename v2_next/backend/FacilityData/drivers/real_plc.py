@@ -11,7 +11,7 @@ print(">>> REAL DRIVER V5 (NON-BLOCKING/SELECT) LOADED <<<")  # VERSION CHECK
 import httpx
 
 from .base import BasePLCDriver
-from .spot_api import get_cached_spot_temp, get_image_proxy_diagnostics
+from .spot_api import get_cached_spot_temp, get_spot_diagnostics
 from backend.FacilityData.schemas import FactoryData
 from backend import config
 from ..processor import LogicProcessor
@@ -772,7 +772,7 @@ class RealPLCDriver(BasePLCDriver):
     def _read_spot(self) -> float:
         get_cached_spot_temp()
         try:
-            metadata = get_image_proxy_diagnostics()
+            metadata = get_spot_diagnostics()
         except Exception as exc:
             metadata = {"spot_error_code": f"spot-diagnostics-error:{exc}"}
         captured_at = time.time()

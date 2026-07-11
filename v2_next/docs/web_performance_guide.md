@@ -294,7 +294,7 @@ Total             : 201.5 ms
 | ----------------------- | ------------- | ------------- |
 | `/api/data`             | 실시간 데이터 | < 100ms       |
 | `/api/config`           | 설정 로드     | < 200ms       |
-| `/api/spot/proxy_image` | SPOT 이미지   | < 500ms       |
+| `/api/spot/image.jpg` | SPOT JPEG 이미지 | < 500ms       |
 | `/api/health`           | 건강 체크     | < 50ms        |
 
 ### 5.5 느린 API 찾기

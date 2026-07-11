@@ -438,17 +438,6 @@ def image_metadata(image_bytes: bytes) -> tuple[str, Optional[int], Optional[int
     if image_bytes.startswith(b"\xff\xd8") and image_bytes.endswith(b"\xff\xd9"):
         width, height = _jpeg_size(image_bytes)
         return "image/jpeg", width, height, ".jpg"
-    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-        width, height = _png_size(image_bytes)
-        return "image/png", width, height, ".png"
-    if image_bytes.startswith(b"GIF87a") or image_bytes.startswith(b"GIF89a"):
-        width, height = _little_endian_size(image_bytes, 6)
-        return "image/gif", width, height, ".gif"
-    if image_bytes.startswith(b"BM"):
-        width, height = _bmp_size(image_bytes)
-        return "image/bmp", width, height, ".bmp"
-    if len(image_bytes) >= 12 and image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
-        return "image/webp", None, None, ".webp"
     return "application/octet-stream", None, None, ".bin"
 
 
@@ -477,29 +466,6 @@ def _is_managed_capture_stem(stem: str) -> bool:
         and len(digest) == 12
         and all(char in "0123456789abcdef" for char in digest.lower())
     )
-
-
-def _png_size(image_bytes: bytes) -> tuple[Optional[int], Optional[int]]:
-    if len(image_bytes) < 24:
-        return None, None
-    return int.from_bytes(image_bytes[16:20], "big"), int.from_bytes(image_bytes[20:24], "big")
-
-
-def _little_endian_size(image_bytes: bytes, offset: int) -> tuple[Optional[int], Optional[int]]:
-    if len(image_bytes) < offset + 4:
-        return None, None
-    return int.from_bytes(image_bytes[offset : offset + 2], "little"), int.from_bytes(
-        image_bytes[offset + 2 : offset + 4],
-        "little",
-    )
-
-
-def _bmp_size(image_bytes: bytes) -> tuple[Optional[int], Optional[int]]:
-    if len(image_bytes) < 26:
-        return None, None
-    width = int.from_bytes(image_bytes[18:22], "little", signed=True)
-    height = int.from_bytes(image_bytes[22:26], "little", signed=True)
-    return abs(width), abs(height)
 
 
 def _jpeg_size(image_bytes: bytes) -> tuple[Optional[int], Optional[int]]:

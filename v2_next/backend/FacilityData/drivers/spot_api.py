@@ -54,15 +54,8 @@ class _TemperatureCache(TypedDict):
     temp: float
     temp_time: float
 
-# Short-lived image proxy cache
-_img_cache: Dict[str, Any] = {"data": None, "time": 0.0, "temp": 0.0, "temp_time": 0.0}
+_temperature_cache: _TemperatureCache = {"temp": 0.0, "temp_time": 0.0}
 _internal_temp_cache: _TemperatureCache = {"temp": 0.0, "temp_time": 0.0}
-_IMG_CACHE_TTL_SEC = 2.0
-_IMG_BACKOFF_BASE_SEC = 0.5
-_IMG_BACKOFF_MAX_SEC = 5.0
-_LIVE_IMG_SHARED_FRAME_TTL_SEC = 0.05
-_LIVE_IMG_BACKOFF_BASE_SEC = 0.25
-_LIVE_IMG_BACKOFF_MAX_SEC = 2.0
 _TEMP_CACHE_TTL_SEC = 15.0
 _SPOT_VERIFIED_NO_TARGET_VALUES: tuple[str, ...] = ()
 _SPOT_INVALID_SENTINEL_VALUES: tuple[str, ...] = SPOT_INVALID_SENTINEL_VALUES
@@ -81,21 +74,11 @@ _SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
 _SPOT_RUNTIME_GIT_COMMIT = resolve_runtime_git_commit()
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 _img_fetch_lock = asyncio.Lock()
-_live_img_fetch_lock = asyncio.Lock()
 _img_last_error = 0.0
 _img_failure_count = 0
-_img_cache_state = "empty"
-_img_last_cache_log_at = 0.0
 _img_last_error_code: Optional[str] = None
 _img_last_error_message: Optional[str] = None
-_img_next_retry_at: Optional[float] = None
-_live_img_cache: Dict[str, Any] = {"data": None, "time": 0.0, "url": None}
-_live_img_last_error = 0.0
-_live_img_failure_count = 0
-_live_img_last_error_code: Optional[str] = None
-_live_img_last_error_message: Optional[str] = None
-_live_img_last_url: Optional[str] = None
-_live_img_next_retry_at: Optional[float] = None
+_img_last_success_at = 0.0
 _temp_last_error = 0.0
 _temp_last_error_code: Optional[str] = None
 _temp_last_error_message: Optional[str] = None
@@ -124,7 +107,7 @@ _spot_poll_seq = 0
 _spot_observation_seq = 0
 _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
 _spot_observation_fact_writer: Optional[SpotObservationFactWriter] = None
-_spot_diagnostics_prefetch_task: Optional[asyncio.Task[None]] = None
+_spot_diagnostics_task: Optional[asyncio.Task[None]] = None
 _spot_last_valid_value_at: Optional[float] = None
 _spot_last_valid_value_monotonic: Optional[float] = None
 _spot_temperature_cache_suppressed_until_valid = False
@@ -168,7 +151,7 @@ _spot_image_capture_last_fact: Optional[Dict[str, str]] = None
 
 class SpotImageConfigError(ValueError):
     def __init__(self, image_url: str) -> None:
-        super().__init__("SPOT_IMAGE_URL is not configured")
+        super().__init__("SPOT_IP is not configured")
         self.image_url = image_url
 
 
@@ -185,30 +168,6 @@ class SpotImageFetchError(RuntimeError):
         self.code = code
         self.image_url = image_url
         self.upstream_status = upstream_status
-
-
-class SpotImageBackoffError(RuntimeError):
-    def __init__(self, image_url: str, retry_after_sec: float) -> None:
-        super().__init__(f"SPOT image retry backoff is active; retry_after_sec={retry_after_sec:.3f}")
-        self.code = "retry-backoff-active"
-        self.image_url = image_url
-        self.upstream_status: Optional[int] = None
-        self.retry_after_sec = retry_after_sec
-
-
-class SpotLiveImageConfigError(ValueError):
-    def __init__(self, image_url: str) -> None:
-        super().__init__("SPOT_LIVE_IMAGE_URL is not configured")
-        self.image_url = image_url
-
-
-class SpotLiveImageBackoffError(RuntimeError):
-    def __init__(self, image_url: str, retry_after_sec: float) -> None:
-        super().__init__(f"SPOT live image retry backoff is active; retry_after_sec={retry_after_sec:.3f}")
-        self.code = "live-backoff-active"
-        self.image_url = image_url
-        self.upstream_status: Optional[int] = None
-        self.retry_after_sec = retry_after_sec
 
 
 class SpotTemperatureConfigError(ValueError):
@@ -416,8 +375,8 @@ def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> bool:
 
 
 def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
-    global _prefetch_running
-    _prefetch_running = False
+    global _spot_poll_running
+    _spot_poll_running = False
     _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.set()
     thread = _spot_image_capture_thread
     if getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) > 0 and (
@@ -657,18 +616,8 @@ def _response_content_type(response: httpx.Response) -> str:
     return str(response.headers.get("content-type") or "").strip()
 
 
-def _image_payload_type(data: bytes) -> Optional[str]:
-    if data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9"):
-        return "jpeg"
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "png"
-    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
-        return "gif"
-    if data.startswith(b"BM"):
-        return "bmp"
-    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
-        return "webp"
-    return None
+def _is_jpeg_payload(data: bytes) -> bool:
+    return data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")
 
 
 def _payload_looks_like_html(data: bytes) -> bool:
@@ -701,7 +650,7 @@ def _validate_spot_image_response(response: httpx.Response, image_url: str, data
             image_url=image_url,
             upstream_status=response.status_code,
         )
-    if _image_payload_type(data) is None:
+    if not _is_jpeg_payload(data):
         raise SpotImageFetchError(
             "invalid-image-payload",
             (
@@ -715,73 +664,10 @@ def _validate_spot_image_response(response: httpx.Response, image_url: str, data
 
 
 def _resolve_spot_image_url() -> str:
-    image_url = str(config.SPOT_IMAGE_URL or "").strip()
-    if not image_url:
-        raise SpotImageConfigError(image_url)
-    return image_url
-
-
-def _resolve_spot_live_image_url() -> str:
-    fallback_url = str(config.SPOT_IMAGE_URL or "").strip() or f"http://{config.SPOT_IP}/image.jpg"
-    image_url = str(getattr(config, "SPOT_LIVE_IMAGE_URL", "") or "").strip() or fallback_url
-    if not image_url:
-        raise SpotLiveImageConfigError(image_url)
-    return image_url
-
-
-def _resolve_spot_image_url_candidates(image_url: str) -> list[str]:
-    stripped_url = image_url.rstrip("/")
-    try:
-        parsed = urlsplit(stripped_url)
-    except Exception as exc:
-        raise SpotImageFetchError(
-            "upstream-request-error",
-            (
-                "SPOT image upstream URL is malformed; "
-                f"url={image_url}; error={_format_exception_message(exc)}"
-            ),
-            image_url=image_url,
-            upstream_status=None,
-        ) from exc
-
-    if not parsed.scheme or not parsed.netloc:
-        return [image_url]
-
-    normalized_path = (parsed.path or "").rstrip("/")
-    if not normalized_path:
-        return [image_url]
-
-    normalized_lower = normalized_path.lower()
-    variant_paths: list[str] = []
-    if normalized_lower.endswith("/image"):
-        variant_paths.append(normalized_path + ".jpg")
-    elif normalized_lower.endswith("/image.jpg"):
-        variant_paths.append(normalized_path[:-4])
-    elif normalized_lower.endswith("/image.jpeg"):
-        variant_paths.append(normalized_path[:-5])
-    elif normalized_lower.endswith("/image.png"):
-        variant_paths.append(normalized_path[:-4])
-
-    candidates = [image_url]
-    for variant_path in variant_paths:
-        if variant_path == normalized_path:
-            continue
-        candidates.append(parsed._replace(path=variant_path).geturl())
-    seen: list[str] = []
-    for candidate in candidates:
-        if candidate not in seen:
-            seen.append(candidate)
-    return seen
-
-
-def _is_retryable_spot_image_error(error: SpotImageFetchError, has_next_candidate: bool) -> bool:
-    if not has_next_candidate:
-        return False
-    if error.code == "upstream-http-error":
-        return error.upstream_status == 404
-    if error.code in {"invalid-image-html", "invalid-image-payload"}:
-        return True
-    return False
+    spot_ip = str(config.SPOT_IP or "").strip()
+    if not spot_ip:
+        raise SpotImageConfigError("")
+    return f"http://{spot_ip}/image.jpg"
 
 
 def _resolve_spot_temperature_url() -> str:
@@ -987,7 +873,7 @@ async def _refresh_spot_diagnostics_safely(
         )
 
 
-async def _request_spot_image_from_url(client: httpx.AsyncClient, image_url: str) -> bytes:
+async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
     try:
         response = await client.get(image_url)
         response.raise_for_status()
@@ -1034,55 +920,6 @@ async def _request_spot_image_from_url(client: httpx.AsyncClient, image_url: str
         )
     _validate_spot_image_response(response, image_url, data)
     return data
-
-
-async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
-    candidates = _resolve_spot_image_url_candidates(image_url)
-    if len(candidates) == 1:
-        return await _request_spot_image_from_url(client, candidates[0])
-
-    last_error: Optional[SpotImageFetchError] = None
-    for index, candidate in enumerate(candidates):
-        try:
-            payload = await _request_spot_image_from_url(client, candidate)
-            if index > 0:
-                _logger.warning(
-                    "SPOT image endpoint fallback succeeded",
-                    extra={
-                        "configured_image_url": image_url,
-                        "resolved_image_url": candidate,
-                        "attempted_paths": candidates,
-                    },
-                )
-            return payload
-        except SpotImageFetchError as exc:
-            last_error = exc
-            if _is_retryable_spot_image_error(exc, index < len(candidates) - 1):
-                _logger.warning(
-                    "SPOT image endpoint candidate failed",
-                    extra={
-                        "configured_image_url": image_url,
-                        "attempted_image_url": candidate,
-                        "next_candidate": candidates[index + 1],
-                        "attempt": index + 1,
-                        "max_attempts": len(candidates),
-                        "error_code": exc.code,
-                        "upstream_status": exc.upstream_status,
-                    },
-                )
-                continue
-            break
-
-    if last_error is None:
-        last_error = SpotImageFetchError(
-            "upstream-request-error",
-            "SPOT image upstream failed for all configured endpoint candidates",
-            image_url=image_url,
-            upstream_status=None,
-        )
-    raise last_error
-
-
 async def _request_spot_temperature_observation(
     client: httpx.AsyncClient,
     temp_url: str,
@@ -1270,56 +1107,12 @@ def _record_image_success() -> None:
     global _img_failure_count
     global _img_last_error_code
     global _img_last_error_message
-    global _img_next_retry_at
+    global _img_last_success_at
 
     _img_failure_count = 0
     _img_last_error_code = None
     _img_last_error_message = None
-    _img_next_retry_at = None
-
-
-def _record_image_backoff(backoff_sec: float) -> None:
-    global _img_next_retry_at
-
-    if backoff_sec <= 0.0:
-        _img_next_retry_at = None
-        return
-    _img_next_retry_at = time.time() + backoff_sec
-
-
-def _record_live_image_error(code: str, message: str, image_url: str) -> None:
-    global _live_img_last_error
-    global _live_img_last_error_code
-    global _live_img_last_error_message
-    global _live_img_last_url
-
-    _live_img_last_error = time.time()
-    _live_img_last_error_code = code
-    _live_img_last_error_message = message
-    _live_img_last_url = image_url
-
-
-def _record_live_image_success(image_url: str) -> None:
-    global _live_img_failure_count
-    global _live_img_last_error_code
-    global _live_img_last_error_message
-    global _live_img_last_url
-    global _live_img_next_retry_at
-
-    _live_img_failure_count = 0
-    _live_img_last_error_code = None
-    _live_img_last_error_message = None
-    _live_img_last_url = image_url
-    _live_img_next_retry_at = None
-
-
-def _record_live_image_backoff(backoff_sec: float) -> None:
-    global _live_img_next_retry_at
-
-    if backoff_sec <= 0.0:
-        _live_img_next_retry_at = None
-        return
-    _live_img_next_retry_at = time.time() + backoff_sec
+    _img_last_success_at = time.time()
 
 
 def _record_temperature_error(
@@ -1389,7 +1182,7 @@ def _record_internal_temperature_success(temp_url: str) -> None:
 
 
 def _temperature_cache_age_sec(now: float) -> Optional[float]:
-    temp_time = float(_img_cache.get("temp_time") or 0.0)
+    temp_time = float(_temperature_cache.get("temp_time") or 0.0)
     if temp_time <= 0.0:
         return None
     return max(0.0, now - temp_time)
@@ -1620,8 +1413,8 @@ def _publish_spot_temperature_snapshot(
     global _spot_temperature_cache_suppressed_until_valid
 
     if classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
-        _img_cache["temp"] = 0.0
-        _img_cache["temp_time"] = 0.0
+        _temperature_cache["temp"] = 0.0
+        _temperature_cache["temp_time"] = 0.0
 
     raw_value_text = classification.raw_value_text
     if classification.raw_validity == SpotRawValidity.NOT_EVALUATED:
@@ -1737,7 +1530,7 @@ def _positive_float_or_none(value: Any) -> Optional[float]:
 def _effective_spot_temperature_for_decision(decision: TemperatureStateDecision) -> Optional[float]:
     if decision.temperature_value_origin.value == "none":
         return None
-    temperature = _img_cache.get("temp")
+    temperature = _temperature_cache.get("temp")
     if isinstance(temperature, bool) or not isinstance(temperature, (float, int)):
         return None
     return float(temperature)
@@ -1870,11 +1663,11 @@ def _schedule_spot_diagnostics_for_poll(
     client: httpx.AsyncClient,
     poll_context: SpotPollContext,
 ) -> None:
-    global _spot_diagnostics_prefetch_task
+    global _spot_diagnostics_task
 
-    if _spot_diagnostics_prefetch_task is not None and not _spot_diagnostics_prefetch_task.done():
+    if _spot_diagnostics_task is not None and not _spot_diagnostics_task.done():
         return
-    _spot_diagnostics_prefetch_task = asyncio.create_task(
+    _spot_diagnostics_task = asyncio.create_task(
         _refresh_spot_diagnostics_safely(
             client,
             _logger,
@@ -1928,8 +1721,8 @@ async def _refresh_spot_temperature(
         raise
 
     poll_completed_at, poll_completed_monotonic = _completed_poll_clocks()
-    _img_cache["temp"] = temperature
-    _img_cache["temp_time"] = poll_completed_at
+    _temperature_cache["temp"] = temperature
+    _temperature_cache["temp_time"] = poll_completed_at
     _record_temperature_success(temp_url)
     _publish_spot_temperature_snapshot(
         poll_seq=poll_seq,
@@ -1980,30 +1773,18 @@ async def _refresh_spot_internal_temperature_safely(client: httpx.AsyncClient, l
         )
 
 
-def get_image_proxy_diagnostics() -> Dict[str, Any]:
+def get_spot_diagnostics() -> Dict[str, Any]:
     now = time.time()
-    cached_image = _cached_image_data()
-    cache_age = _cache_age_sec(now) if cached_image is not None else None
-    cache_status = _cache_status(now)
-    retry_after = _retry_after_sec(now)
     payload = {
-        "cache_state": _cache_state_for_status(cache_status),
-        "cache_status": cache_status,
-        "image_status": _image_status_for_cache_status(cache_status),
-        "proxy_state": _image_proxy_state(now),
-        "last_cache_state": str(_img_cache_state),
+        "image_status": "error" if _img_last_error_code else ("ok" if _img_last_success_at else "idle"),
+        "image_source": "upstream" if _img_last_success_at else None,
         "failure_count": int(_img_failure_count),
         "last_error_at": float(_img_last_error) if _img_last_error else None,
         "last_error_code": _img_last_error_code,
         "last_error_message": _img_last_error_message,
-        "image_url_configured": bool(str(config.SPOT_IMAGE_URL or "").strip()),
-        "has_cached_image": cached_image is not None,
-        "cache_captured_at": float(_img_cache.get("time") or 0.0) if cached_image is not None else None,
-        "cache_age_sec": cache_age,
-        "max_stale_age_sec": _max_stale_age_sec(),
-        "current_backoff_sec": _current_backoff_sec(),
-        "next_retry_at": _img_next_retry_at,
-        "retry_after_sec": retry_after,
+        "last_success_at": float(_img_last_success_at) if _img_last_success_at else None,
+        "image_url_configured": bool(str(config.SPOT_IP or "").strip()),
+        "image_path": "/image.jpg",
         "temperature_url_configured": bool(str(config.SPOT_URL or "").strip()),
         "temperature_cache_status": _temperature_cache_status(now),
         "temperature_cache_age_sec": _temperature_cache_age_sec(now),
@@ -2023,84 +1804,13 @@ def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
     return _build_internal_temperature_diagnostics(time.time(), include_cached_at=True)
 
 
-def get_live_image_diagnostics() -> Dict[str, Any]:
-    now = time.time()
-    cached_at = float(_live_img_cache.get("time") or 0.0)
+def get_image_state_summary() -> Dict[str, Any]:
     return {
-        "live_image_url": _live_img_last_url or str(getattr(config, "SPOT_LIVE_IMAGE_URL", "") or ""),
-        "live_cache_age_sec": max(0.0, now - cached_at) if cached_at else None,
-        "live_failure_count": int(_live_img_failure_count),
-        "live_last_error": float(_live_img_last_error) if _live_img_last_error else None,
-        "live_last_error_code": _live_img_last_error_code,
-        "live_last_error_message": _live_img_last_error_message,
-        "live_next_retry_at": _live_img_next_retry_at,
-        "live_retry_after_sec": _live_retry_after_sec(now),
-        "live_current_backoff_sec": _current_live_backoff_sec(),
-    }
-
-
-def _cache_payload_bytes(value: Any) -> int:
-    if isinstance(value, (bytes, bytearray)):
-        return len(value)
-    return 0
-
-
-def _cache_age_for_payload(cached_at: Any, now: float, bytes_value: int) -> Optional[float]:
-    if bytes_value <= 0:
-        return None
-    try:
-        captured_at = float(cached_at or 0.0)
-    except (TypeError, ValueError):
-        return None
-    if captured_at <= 0.0:
-        return None
-    return max(0.0, now - captured_at)
-
-
-def _live_image_cache_state(now: float, live_image_bytes: int) -> str:
-    if live_image_bytes <= 0:
-        return "empty"
-    cached_at = float(_live_img_cache.get("time") or 0.0)
-    if cached_at <= 0.0:
-        return "empty"
-    if now - cached_at > _LIVE_IMG_SHARED_FRAME_TTL_SEC:
-        return "stale"
-    return "fresh"
-
-
-def get_image_cache_memory_summary() -> Dict[str, Any]:
-    now = time.time()
-    image_bytes = _cache_payload_bytes(_img_cache.get("data"))
-    live_image_bytes = _cache_payload_bytes(_live_img_cache.get("data"))
-    image_cache_status = _cache_status(now)
-    live_image_cache_state = _live_image_cache_state(now, live_image_bytes)
-    live_image_url_present = any(
-        str(value or "").strip()
-        for value in (
-            _live_img_cache.get("url"),
-            _live_img_last_url,
-            getattr(config, "SPOT_LIVE_IMAGE_URL", ""),
-            getattr(config, "SPOT_IMAGE_URL", ""),
-        )
-    )
-    return {
-        "image_bytes": image_bytes,
-        "image_age_sec": _cache_age_for_payload(_img_cache.get("time"), now, image_bytes),
-        "image_cache_state": _cache_state_for_status(image_cache_status),
-        "image_cache_status": image_cache_status,
+        "image_bytes": 0,
         "image_failure_count": int(_img_failure_count),
-        "image_next_retry_at": _img_next_retry_at,
-        "image_retry_after_sec": _retry_after_sec(now),
-        "image_current_backoff_sec": _current_backoff_sec(),
-        "live_image_bytes": live_image_bytes,
-        "live_image_age_sec": _cache_age_for_payload(_live_img_cache.get("time"), now, live_image_bytes),
-        "live_image_cache_state": live_image_cache_state,
-        "live_image_url_present": bool(live_image_url_present),
-        "live_image_failure_count": int(_live_img_failure_count),
-        "live_image_next_retry_at": _live_img_next_retry_at,
-        "live_image_retry_after_sec": _live_retry_after_sec(now),
-        "live_image_current_backoff_sec": _current_live_backoff_sec(),
-        "total_bytes": image_bytes + live_image_bytes,
+        "image_last_success_at": float(_img_last_success_at) if _img_last_success_at else None,
+        "image_url_present": bool(str(config.SPOT_IP or "").strip()),
+        "total_bytes": 0,
     }
 
 
@@ -2148,394 +1858,63 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
-def _current_backoff_sec() -> float:
-    if _img_failure_count <= 0:
-        return 0.0
-    return min(_IMG_BACKOFF_MAX_SEC, _IMG_BACKOFF_BASE_SEC * (2 ** (_img_failure_count - 1)))
-
-
-def _current_live_backoff_sec() -> float:
-    if _live_img_failure_count <= 0:
-        return 0.0
-    return min(_LIVE_IMG_BACKOFF_MAX_SEC, _LIVE_IMG_BACKOFF_BASE_SEC * (2 ** (_live_img_failure_count - 1)))
-
-
-def _live_retry_after_sec(now: float) -> Optional[float]:
-    if _live_img_next_retry_at is None:
-        return None
-    retry_after = float(_live_img_next_retry_at) - now
-    if retry_after <= 0.0:
-        return None
-    return retry_after
-
-
-def _max_stale_age_sec() -> float:
-    refresh = float(config.SPOT_REFRESH_INTERVAL or 0)
-    return max(5.0, refresh * 5.0)
-
-
-def _cache_age_sec(now: float) -> float:
-    return max(0.0, now - float(_img_cache.get("time") or 0.0))
-
-
-def _cached_image_data() -> Optional[bytes]:
-    data = _img_cache.get("data")
-    if not isinstance(data, bytes) or not data:
-        return None
-    return data
-
-
-def _cached_live_image_data(now: float, image_url: str, *, allow_stale: bool = False) -> Optional[bytes]:
-    data = _live_img_cache.get("data")
-    cached_url = str(_live_img_cache.get("url") or "")
-    cached_at = float(_live_img_cache.get("time") or 0.0)
-    if cached_url != image_url:
-        return None
-    cache_age_sec = max(0.0, now - cached_at)
-    if allow_stale:
-        if cache_age_sec > _max_stale_age_sec():
-            return None
-    elif cache_age_sec > _LIVE_IMG_SHARED_FRAME_TTL_SEC:
-        return None
-    if not isinstance(data, bytes) or not data:
-        return None
-    return data
-
-
-def _build_live_image_meta(
-    now: float,
-    image_url: str,
-    status: str,
-    source: str,
-    *,
-    retry_after_sec: Optional[float] = None,
-    fallback_error_code: Optional[str] = None,
-    fallback_upstream_status: Optional[int] = None,
-    fallback_reason: Optional[str] = None,
-) -> Dict[str, Any]:
-    captured_at = float(_live_img_cache.get("time") or now)
-    meta: Dict[str, Any] = {
-        "status": status,
-        "source": source,
-        "captured_at": captured_at,
-        "age_sec": max(0.0, now - captured_at),
-        "image_url": image_url,
-        "max_stale_age_sec": _max_stale_age_sec(),
-        "retry_after_sec": _live_retry_after_sec(now) if retry_after_sec is None else retry_after_sec,
-    }
-    if fallback_error_code:
-        meta["fallback"] = True
-        meta["fallback_reason"] = fallback_reason or "stale-cache"
-        meta["fallback_error_code"] = fallback_error_code
-        meta["fallback_upstream_status"] = fallback_upstream_status
-    return meta
-
-
-def _build_live_stale_cache_response(
-    now: float,
-    image_url: str,
-    *,
-    fallback_error_code: str,
-    fallback_upstream_status: Optional[int],
-    fallback_reason: str,
-    retry_after_sec: Optional[float] = None,
-) -> Optional[tuple[bytes, Dict[str, Any]]]:
-    cached_image = _cached_live_image_data(now, image_url, allow_stale=True)
-    if cached_image is None:
-        return None
-    return cached_image, _build_live_image_meta(
-        now,
-        image_url,
-        "stale",
-        "stale-cache",
-        retry_after_sec=retry_after_sec,
-        fallback_error_code=fallback_error_code,
-        fallback_upstream_status=fallback_upstream_status,
-        fallback_reason=fallback_reason,
-    )
-
-
-def _cache_status(now: float) -> str:
-    if _cached_image_data() is None:
-        return "empty"
-    if _cache_age_sec(now) >= _max_stale_age_sec():
-        return "stale"
-    return "fresh"
-
-
-def _cache_state_for_status(cache_status: str) -> str:
-    if cache_status == "fresh":
-        return "cache"
-    return cache_status
-
-
-def _image_status_for_cache_status(cache_status: str) -> str:
-    if cache_status == "fresh":
-        return "ok"
-    return cache_status
-
-
-def _retry_after_sec(now: float) -> Optional[float]:
-    if _img_next_retry_at is None or _img_failure_count <= 0:
-        return None
-    return max(0.0, _img_next_retry_at - now)
-
-
-def _image_proxy_state(now: float) -> str:
-    retry_after = _retry_after_sec(now)
-    if retry_after is not None and retry_after > 0.0:
-        return "backoff"
-    if _img_last_error_code:
-        return "error"
-    return "ok"
-
-
-def _build_image_meta(
-    now: float,
-    status: str,
-    source: str,
-    *,
-    cache_status: Optional[str] = None,
-) -> Dict[str, Any]:
-    captured_at = float(_img_cache.get("time") or 0.0)
-    if cache_status is None:
-        cache_status = _cache_status(now)
-    return {
-        "status": status,
-        "source": source,
-        "captured_at": captured_at,
-        "age_sec": _cache_age_sec(now),
-        "cache_status": cache_status,
-        "proxy_state": _image_proxy_state(now),
-        "failure_count": int(_img_failure_count),
-        "last_error_code": _img_last_error_code,
-        "max_stale_age_sec": _max_stale_age_sec(),
-        "next_retry_at": _img_next_retry_at,
-        "retry_after_sec": _retry_after_sec(now),
-    }
-
-
-def _should_log_cache_state(now: float) -> bool:
-    global _img_last_cache_log_at
-    if now - _img_last_cache_log_at < 10.0:
-        return False
-    _img_last_cache_log_at = now
-    return True
-
-
-def _build_cached_image_response(
-    now: float,
-    cached_image: bytes,
-    *,
-    cache_status: Optional[str] = None,
-) -> tuple[bytes, Dict[str, Any]]:
-    if cache_status is None:
-        cache_status = _cache_status(now)
-    status = _image_status_for_cache_status(cache_status)
-    cache_state = _cache_state_for_status(cache_status)
-    return cached_image, _build_image_meta(now, status, cache_state, cache_status=cache_status)
-
-
 async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
-    """筌?Ŋ??癒?퐣 筌앸맩??獄쏆꼹??(獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф?????筌왖)."""
+    """Read one current JPEG from the official SPOT /image.jpg resource."""
     global _img_failure_count
-    global _img_cache_state
-    now = time.time()
 
-    # 筌?Ŋ??????筌왖揶쎛 ??됱몵筌?筌앸맩??獄쏆꼹??
-    cached_image = _cached_image_data()
-    if cached_image is not None:
-        age = _cache_age_sec(now)
-        cache_status = _cache_status(now)
-        next_cache_state = _cache_state_for_status(cache_status)
-        if _img_cache_state != next_cache_state and _should_log_cache_state(now):
-            if next_cache_state == "cache":
-                _logger.info("Spot cache serve: age_sec=%.3f", age)
-            else:
-                _logger.warning("Spot stale serve: age_sec=%.3f", age)
-        _img_cache_state = next_cache_state
-        return _build_cached_image_response(now, cached_image, cache_status=cache_status)
-
-    # 筌?Ŋ?녶첎? ??쑴堉??됱몵筌??λ뜃由?嚥≪뮆諭띄몴??袁る퉸 ??甕?筌욊낯??揶쎛?紐꾩궔??
     try:
         image_url = _resolve_spot_image_url()
     except SpotImageConfigError as exc:
         _record_image_error("config-missing", str(exc))
+        _img_failure_count = min(_img_failure_count + 1, 10)
         raise
 
-    retry_after = _retry_after_sec(time.time())
-    if retry_after is not None and retry_after > 0.0:
-        cached_image = _cached_image_data()
-        if cached_image is not None:
-            backoff_cached_now = time.time()
-            cache_status = _cache_status(backoff_cached_now)
-            next_cache_state = _cache_state_for_status(cache_status)
-            _img_cache_state = next_cache_state
-            return _build_cached_image_response(backoff_cached_now, cached_image, cache_status=cache_status)
-        raise SpotImageBackoffError(image_url, retry_after)
-
     async with _img_fetch_lock:
-        # ?醫됲닊 ??얜굣 ??筌?Ŋ?녺몴???쇰뻻 ?類ㅼ뵥??뺣뼄.
-        cached_image = _cached_image_data()
-        if cached_image is not None:
-            cached_now = time.time()
-            cache_status = _cache_status(cached_now)
-            next_cache_state = _cache_state_for_status(cache_status)
-            _img_cache_state = next_cache_state
-            return _build_cached_image_response(cached_now, cached_image, cache_status=cache_status)
-
-        locked_retry_after = _retry_after_sec(time.time())
-        if locked_retry_after is not None and locked_retry_after > 0.0:
-            raise SpotImageBackoffError(image_url, locked_retry_after)
-
         client = _get_http_client()
+        started_at = time.monotonic()
         try:
             data = await _request_spot_image(client, image_url)
         except SpotImageFetchError as exc:
-            if _is_spot_image_payload_rejection_code(exc.code):
-                raise
             _record_image_error(exc.code, str(exc))
             _img_failure_count = min(_img_failure_count + 1, 10)
-            _record_image_backoff(_current_backoff_sec())
             raise
+
         captured_at = time.time()
-        _img_cache["data"] = data
-        _img_cache["time"] = captured_at
-        _img_cache_state = "upstream"
+        latency_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
         _record_image_success()
         _maybe_enqueue_spot_image_capture(
             image_bytes=data,
             captured_at=captured_at,
             image_url=image_url,
-            source="proxy_upstream",
+            source="official_image_jpg",
             image_age_ms=0.0,
         )
-        return data, _build_image_meta(time.time(), "ok", "upstream")
+        return data, {
+            "status": "ok",
+            "source": "upstream",
+            "captured_at": captured_at,
+            "latency_ms": latency_ms,
+            "image_path": "/image.jpg",
+        }
+
+# --- Temperature and diagnostics polling ---
+_spot_poll_task: Optional[asyncio.Task] = None
+_internal_temperature_task: Optional[asyncio.Task] = None
+_spot_poll_running = False
 
 
-async def fetch_live_image_async() -> tuple[bytes, Dict[str, Any]]:
-    global _live_img_failure_count
-
-    try:
-        image_url = _resolve_spot_live_image_url()
-    except SpotLiveImageConfigError as exc:
-        _record_live_image_error("live-config-missing", str(exc), exc.image_url)
-        raise
-
-    now = time.time()
-    cached_image = _cached_live_image_data(now, image_url)
-    if cached_image is not None:
-        return cached_image, _build_live_image_meta(now, image_url, "ok", "shared-frame")
-
-    retry_after = _live_retry_after_sec(now)
-    if retry_after is not None and retry_after > 0.0:
-        stale_response = _build_live_stale_cache_response(
-            now,
-            image_url,
-            fallback_error_code="live-backoff-active",
-            fallback_upstream_status=None,
-            fallback_reason="backoff-active",
-            retry_after_sec=retry_after,
-        )
-        if stale_response is not None:
-            return stale_response
-        raise SpotLiveImageBackoffError(image_url, retry_after)
-
-    async with _live_img_fetch_lock:
-        locked_now = time.time()
-        cached_image = _cached_live_image_data(locked_now, image_url)
-        if cached_image is not None:
-            return cached_image, _build_live_image_meta(locked_now, image_url, "ok", "shared-frame")
-
-        locked_retry_after = _live_retry_after_sec(locked_now)
-        if locked_retry_after is not None and locked_retry_after > 0.0:
-            stale_response = _build_live_stale_cache_response(
-                locked_now,
-                image_url,
-                fallback_error_code="live-backoff-active",
-                fallback_upstream_status=None,
-                fallback_reason="backoff-active",
-                retry_after_sec=locked_retry_after,
-            )
-            if stale_response is not None:
-                return stale_response
-            raise SpotLiveImageBackoffError(image_url, locked_retry_after)
-
-        client = _get_http_client()
-        try:
-            data = await _request_spot_image(client, image_url)
-        except SpotImageFetchError as exc:
-            _record_live_image_error(exc.code, str(exc), exc.image_url)
-            _live_img_failure_count = min(_live_img_failure_count + 1, 10)
-            _record_live_image_backoff(_current_live_backoff_sec())
-            stale_response = _build_live_stale_cache_response(
-                time.time(),
-                image_url,
-                fallback_error_code=exc.code,
-                fallback_upstream_status=exc.upstream_status,
-                fallback_reason="upstream-failure",
-            )
-            if stale_response is not None:
-                return stale_response
-            raise
-
-        captured_at = time.time()
-        _live_img_cache["data"] = data
-        _live_img_cache["time"] = captured_at
-        _live_img_cache["url"] = image_url
-        _record_live_image_success(image_url)
-        _maybe_enqueue_spot_image_capture(
-            image_bytes=data,
-            captured_at=captured_at,
-            image_url=image_url,
-            source="live_upstream",
-            image_age_ms=0.0,
-        )
-        return data, _build_live_image_meta(captured_at, image_url, "ok", "upstream", retry_after_sec=None)
-
-
-# --- 獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ---
-_prefetch_task: Optional[asyncio.Task] = None
-_internal_temp_prefetch_task: Optional[asyncio.Task] = None
-_prefetch_running = False
-
-
-async def _prefetch_loop():
+async def _spot_poll_loop():
     """獄쏄퉫???깆뒲??뽯퓠??筌왖??우읅??곗쨮 SPOT ???筌왖 ?袁ⓥ봺??뤿Ф (??뺚봺?袁る뱜 獄쎻뫗? 嚥≪뮇彛??怨몄뒠)."""
-    global _img_cache_state, _img_failure_count, _img_last_error, _internal_temp_prefetch_task, _prefetch_running
-    global _spot_diagnostics_prefetch_task
-    _prefetch_running = True
+    global _internal_temperature_task, _spot_poll_running
+    global _spot_diagnostics_task
+    _spot_poll_running = True
 
     interval = max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
     next_tick = time.time()
 
-    while _prefetch_running:
+    while _spot_poll_running:
         try:
             client = _get_http_client()
-            if config.SPOT_IMAGE_URL:
-                image_url = _resolve_spot_image_url()
-                data = await _request_spot_image(client, image_url)
-
-                if data:
-                    captured_at = time.time()
-                    _img_cache["data"] = data
-                    _img_cache["time"] = captured_at
-                    _img_cache_state = "upstream"
-                    if _img_failure_count > 0:
-                        _logger.info(
-                            "Spot image fetch recovered",
-                            extra={"failure_count": _img_failure_count},
-                        )
-                    _img_failure_count = 0
-                    _record_image_success()
-                    _maybe_enqueue_spot_image_capture(
-                        image_bytes=data,
-                        captured_at=captured_at,
-                        image_url=image_url,
-                        source="prefetch_upstream",
-                        image_age_ms=0.0,
-                    )
-
             if config.SPOT_URL:
                 try:
                     await _refresh_spot_temperature(client, schedule_diagnostics=True)
@@ -2562,60 +1941,14 @@ async def _prefetch_loop():
                     )
 
             if config.SPOT_INTERNAL_TEMPERATURE_URL and (
-                _internal_temp_prefetch_task is None or _internal_temp_prefetch_task.done()
+                _internal_temperature_task is None or _internal_temperature_task.done()
             ):
-                _internal_temp_prefetch_task = asyncio.create_task(
+                _internal_temperature_task = asyncio.create_task(
                     _refresh_spot_internal_temperature_safely(client, _logger)
                 )
 
         except asyncio.CancelledError:
             break
-        except SpotImageConfigError as exc:
-            _record_image_error("config-missing", str(exc))
-            _img_failure_count = min(_img_failure_count + 1, 10)
-            config_backoff = max(interval, 1.0)
-            _record_image_backoff(config_backoff)
-            _logger.warning(
-                "Spot image fetch misconfigured",
-                extra={
-                    "code": "config-missing",
-                    "error": str(exc),
-                    "failure_count": _img_failure_count,
-                    "next_backoff_sec": config_backoff,
-                    "next_retry_at": _img_next_retry_at,
-                },
-            )
-            await asyncio.sleep(config_backoff)
-            next_tick = time.time()
-        except SpotImageFetchError as exc:
-            if _is_spot_image_payload_rejection_code(exc.code):
-                await asyncio.sleep(interval)
-                next_tick = time.time()
-                continue
-            else:
-                _record_image_error(exc.code, str(exc))
-                _img_failure_count = min(_img_failure_count + 1, 10)
-                backoff = _current_backoff_sec()
-                _record_image_backoff(backoff)
-                if _img_failure_count == 1 or _img_failure_count >= 6:
-                    _logger.warning(
-                        "Spot image fetch failed",
-                        extra={
-                            "code": exc.code,
-                            "error": str(exc),
-                            "failure_count": _img_failure_count,
-                            "next_backoff_sec": backoff,
-                            "next_retry_at": _img_next_retry_at,
-                            "image_url": exc.image_url,
-                            "upstream_status": exc.upstream_status,
-                        },
-                    )
-
-                if backoff > 0:
-                    await asyncio.sleep(backoff)
-                    next_tick = time.time()
-                    continue
-
         # ??뺚봺?袁る뱜 獄쎻뫗?: ??쇱벉 ??쎈뻬 ??볦퍢 ?④쑴沅?
         next_tick += interval
         now = time.time()
@@ -2629,43 +1962,43 @@ async def _prefetch_loop():
             await asyncio.sleep(0.1)  # 筌ㅼ뮇??0.1????곷뻼??곗쨮 ?袁⑥쨮?紐꾧퐣 ?癒?? 獄쎻뫗?
 
 
-async def start_prefetch_loop():
+async def start_spot_poll_loop():
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ??뽰삂."""
-    global _prefetch_task, _prefetch_running
-    if _prefetch_task and not _prefetch_task.done():
+    global _spot_poll_task, _spot_poll_running
+    if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
 
-    _prefetch_running = True
-    _prefetch_task = asyncio.create_task(_prefetch_loop())
+    _spot_poll_running = True
+    _spot_poll_task = asyncio.create_task(_spot_poll_loop())
 
 
-async def stop_prefetch_loop():
+async def stop_spot_poll_loop():
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф 餓λ쵐?."""
-    global _internal_temp_prefetch_task, _prefetch_task, _prefetch_running, _spot_diagnostics_prefetch_task
-    _prefetch_running = False
+    global _internal_temperature_task, _spot_poll_task, _spot_poll_running, _spot_diagnostics_task
+    _spot_poll_running = False
 
-    if _spot_diagnostics_prefetch_task:
-        _spot_diagnostics_prefetch_task.cancel()
+    if _spot_diagnostics_task:
+        _spot_diagnostics_task.cancel()
         try:
-            await _spot_diagnostics_prefetch_task
+            await _spot_diagnostics_task
         except asyncio.CancelledError:
             pass
-        _spot_diagnostics_prefetch_task = None
+        _spot_diagnostics_task = None
 
-    if _prefetch_task:
-        _prefetch_task.cancel()
+    if _spot_poll_task:
+        _spot_poll_task.cancel()
         try:
-            await _prefetch_task
+            await _spot_poll_task
         except asyncio.CancelledError:
             pass
-        _prefetch_task = None
-    if _internal_temp_prefetch_task:
-        _internal_temp_prefetch_task.cancel()
+        _spot_poll_task = None
+    if _internal_temperature_task:
+        _internal_temperature_task.cancel()
         try:
-            await _internal_temp_prefetch_task
+            await _internal_temperature_task
         except asyncio.CancelledError:
             pass
-        _internal_temp_prefetch_task = None
+        _internal_temperature_task = None
     stop_spot_image_capture_writer()
 
 
@@ -2673,9 +2006,11 @@ def get_cached_spot_temp() -> float:
     """筌?Ŋ???SPOT ??ㅻ즲??獄쏆꼹??(PLC ??뺤뵬??苡??源녿퓠??????."""
     now = time.time()
     # ???筌왖揶쎛 ??댭???살삋??뤿?椰꾧퀡援?15??, ??ㅻ즲揶쎛 ??곸몵筌?0.0 獄쏆꼹??
-    if not _img_cache["temp_time"] or (now - _img_cache["temp_time"] > _TEMP_CACHE_TTL_SEC):
+    if not _temperature_cache["temp_time"] or (
+        now - _temperature_cache["temp_time"] > _TEMP_CACHE_TTL_SEC
+    ):
         return 0.0
-    return _img_cache["temp"]
+    return _temperature_cache["temp"]
 
 
 def get_cached_spot_internal_temp() -> float:

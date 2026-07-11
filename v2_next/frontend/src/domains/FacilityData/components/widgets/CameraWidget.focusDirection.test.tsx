@@ -1,13 +1,13 @@
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useDashboardStore } from '../../../../store/useDashboardStore';
 import type { SpotConfig } from '../../../../shared/types';
 import type { SpotImageResponseMetadata } from '../../api/spotService.types';
-import { CameraComponent, resolveSpotLiveImageUrl } from './CameraWidget';
+import { CameraComponent } from './CameraWidget';
 
 const buildSpotConfig = (): SpotConfig => ({
-  image_url: '/api/spot/proxy_image',
+  image_url: '/api/spot/image.jpg',
   refresh_interval: 3,
   crosshair_x: 0.5,
   crosshair_y: 0.5,
@@ -25,20 +25,8 @@ const buildSpotConfig = (): SpotConfig => ({
 const buildSpotImageMetadata = (): SpotImageResponseMetadata => {
   const capturedAt: number = Date.now();
   return {
-    status: 'ok',
-    raw_status: 'ok',
-    cache_status: 'fresh',
-    raw_cache_status: 'fresh',
-    proxy_state: 'ok',
-    raw_proxy_state: 'ok',
-    source: 'cache',
-    age_sec: 0.25,
-    max_stale_age_sec: 15,
+    source: 'upstream',
     captured_at: capturedAt,
-    internal_temperature: 41.25,
-    internal_temperature_at: capturedAt,
-    internal_temperature_status: 'ok',
-    retry_after_sec: null,
     received_at: capturedAt + 250,
     latency_ms: 12,
   };
@@ -82,10 +70,10 @@ describe('CameraComponent focus direction controls', () => {
     expect(requestFocus).toHaveBeenCalledWith(-1);
   });
 
-  it('renders the internal temperature badge text from spot image metadata', () => {
+  it('does not couple the JPEG display to a separate temperature badge', () => {
     useDashboardStore.setState({
       spotConfig: buildSpotConfig(),
-      spotImageUrl: '/api/spot/proxy_image',
+      spotImageUrl: '/api/spot/image.jpg',
       spotImageLoading: false,
       spotImageError: null,
       spotLastSuccessAt: Date.now(),
@@ -94,45 +82,38 @@ describe('CameraComponent focus direction controls', () => {
 
     render(<CameraComponent focusBusy={false} />);
 
-    const badge = screen.getByText(/41\.3°C/);
-    expect(badge).toHaveClass('camera-internal-temperature-badge');
+    expect(document.querySelector('.camera-internal-temperature-badge')).toBeNull();
   });
 
-  it('renders live image endpoint and reloads it after onLoad without replacing proxy lifecycle image', () => {
-    vi.useFakeTimers();
+  it('renders the shared validated blob and delegates display completion to the view model', () => {
+    const handleImageLoad = vi.fn();
+    const handleImageError = vi.fn();
     useDashboardStore.setState({
-      spotConfig: {
-        ...buildSpotConfig(),
-        live_image_url: '/api/spot/live_image',
-      },
-      spotImageUrl: 'blob:spot-proxy-snapshot',
+      spotConfig: buildSpotConfig(),
+      spotImageUrl: 'blob:spot-image',
       spotImageLoading: false,
       spotImageError: null,
       spotLastSuccessAt: Date.now(),
       spotImageMetadata: buildSpotImageMetadata(),
     });
 
-    const { container } = render(<CameraComponent focusBusy={false} />);
-    const liveImage = container.querySelector('img.camera-image');
-    const lifecycleImage = container.querySelector('img[aria-hidden="true"]');
+    const { container } = render(
+      <CameraComponent
+        focusBusy={false}
+        onSpotImageLoaded={handleImageLoad}
+        onSpotImageError={handleImageError}
+      />
+    );
+    const image = container.querySelector('img.camera-image');
 
-    expect(liveImage).toBeInstanceOf(HTMLImageElement);
-    expect(liveImage?.getAttribute('src')).toMatch(/^\/api\/spot\/live_image\?t=/);
-    expect(lifecycleImage?.getAttribute('src')).toBe('blob:spot-proxy-snapshot');
+    expect(image).toHaveAttribute('src', 'blob:spot-image');
+    expect(container.querySelector('img[aria-hidden="true"]')).toBeNull();
 
-    const firstSrc = liveImage?.getAttribute('src');
-    fireEvent.load(liveImage as HTMLImageElement);
+    fireEvent.load(image as HTMLImageElement);
+    fireEvent.error(image as HTMLImageElement);
 
-    act(() => {
-      vi.advanceTimersByTime(34);
-    });
-    expect(liveImage?.getAttribute('src')).toBe(firstSrc);
-
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(liveImage?.getAttribute('src')).toMatch(/^\/api\/spot\/live_image\?t=/);
-    expect(liveImage?.getAttribute('src')).not.toBe(firstSrc);
+    expect(handleImageLoad).toHaveBeenCalledTimes(1);
+    expect(handleImageError).toHaveBeenCalledTimes(1);
   });
 
   it('uses finite crosshair geometry when the SPOT config response is missing SVG fields', () => {
@@ -165,15 +146,4 @@ describe('CameraComponent focus direction controls', () => {
     });
   });
 
-  it('resolves relative live image URLs against the API base for Electron file views', () => {
-    expect(resolveSpotLiveImageUrl('/api/spot/live_image', 'http://localhost:8000')).toBe(
-      'http://localhost:8000/api/spot/live_image'
-    );
-    expect(resolveSpotLiveImageUrl('api/spot/live_image', 'http://localhost:8000/')).toBe(
-      'http://localhost:8000/api/spot/live_image'
-    );
-    expect(resolveSpotLiveImageUrl('http://127.0.0.1:8000/api/spot/live_image', 'http://localhost:8000')).toBe(
-      'http://127.0.0.1:8000/api/spot/live_image'
-    );
-  });
 });

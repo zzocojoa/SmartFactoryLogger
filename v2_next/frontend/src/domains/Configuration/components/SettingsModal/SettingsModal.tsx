@@ -190,6 +190,8 @@ export interface SettingsModalProps {
   spotConfig: SpotConfig | null;
   spotImageUrl: string;
   spotImageLoading: boolean;
+  handleSpotImageLoaded: (displayedImageUrl?: string) => void;
+  handleSpotImageError: (displayedImageUrl?: string) => void;
   spotLastSuccessAt: number | null;
   spotImageMetadata: SpotImageResponseMetadata | null;
   spotDiagnostics: SpotPollingDiagnostics;
@@ -346,6 +348,8 @@ export function SettingsModal(props: SettingsModalProps) {
     spotConfig,
     spotImageUrl,
     spotImageLoading,
+    handleSpotImageLoaded,
+    handleSpotImageError,
     spotLastSuccessAt,
     spotImageMetadata,
     spotDiagnostics,
@@ -428,7 +432,7 @@ export function SettingsModal(props: SettingsModalProps) {
 
   if (!settingsOpen) return null;
 
-  const spotPollingStats = stats?.polling?.paths?.['/api/spot/proxy_image'];
+  const spotPollingStats = stats?.polling?.paths?.['/api/spot/image.jpg'];
   const spotPollingClientText = spotPollingStats?.top_clients?.length
     ? spotPollingStats.top_clients.map((item) => `${item.client} ${item.count}`).join(', ')
     : '--';
@@ -1373,7 +1377,7 @@ export function SettingsModal(props: SettingsModalProps) {
                             <div className="settings-test-message">Top: --</div>
                           )}
                           <div className="settings-test-message">
-                            SPOT proxy: {spotPollingStats?.count ?? '--'} req / {spotPollingStats?.requests_per_sec ?? '--'} rps / client {spotPollingStats?.unique_clients ?? '--'}
+                            SPOT image: {spotPollingStats?.count ?? '--'} req / {spotPollingStats?.requests_per_sec ?? '--'} rps / client {spotPollingStats?.unique_clients ?? '--'}
                           </div>
                           <div className="settings-test-message">
                             SPOT clients: {spotPollingClientText}
@@ -1737,7 +1741,7 @@ export function SettingsModal(props: SettingsModalProps) {
                           <div className="settings-spot-meta">
                             <span>{LABELS.LAST_RECEIVE}: {spotLastSuccessAt ? new Date(spotLastSuccessAt).toLocaleTimeString() : LABELS.NOT_RECEIVED}</span>
                             <span>URL: {spotConfig?.image_url ?? (settingsForm.spotIp ? `http://${settingsForm.spotIp}/image.jpg` : '-')}</span>
-                            <span>주기: {spotDiagnostics.refresh_interval_ms ?? '--'}ms / 다음: {formatTime(spotDiagnostics.next_fetch_scheduled_at)}</span>
+                            <span>요청 방식: 이미지 표시 완료 후 다음 요청</span>
                             <span>최근 시작: {formatTime(spotDiagnostics.last_fetch_started_at)} / 완료: {formatTime(spotDiagnostics.last_fetch_completed_at)}</span>
                             <span>지연: {spotDiagnostics.last_fetch_latency_ms ?? '--'}ms / 요청 {spotDiagnostics.fetch_count} / 오류 {spotDiagnostics.error_count}</span>
                             <span>상태: {spotDiagnostics.in_flight ? 'in-flight' : 'idle'} / 이유: {spotDiagnostics.last_fetch_reason ?? '--'}</span>
@@ -1745,7 +1749,12 @@ export function SettingsModal(props: SettingsModalProps) {
                         </div>
                         <div className="settings-spot-frame">
                           {spotImageUrl ? (
-                            <img src={spotImageUrl} alt="SPOT preview" />
+                            <img
+                              src={spotImageUrl}
+                              alt="SPOT preview"
+                              onLoad={(event) => handleSpotImageLoaded(event.currentTarget.src)}
+                              onError={(event) => handleSpotImageError(event.currentTarget.src)}
+                            />
                           ) : (
                             <div className="settings-spot-empty">{LABELS.NO_PREVIEW}</div>
                           )}

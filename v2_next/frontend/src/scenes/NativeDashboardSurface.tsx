@@ -29,8 +29,8 @@ const ReactMarkdown = React.lazy(() => import('react-markdown').then(m => ({ def
 type NativeDashboardSurfaceProps = {
   layoutSnapshotLayout: LayoutMap | null;
   layoutRef: MutableRefObject<LayoutMap>;
-  onSpotImageLoaded: () => void;
-  onSpotImageError: () => void;
+  onSpotImageLoaded: (displayedImageUrl?: string) => void;
+  onSpotImageError: (displayedImageUrl?: string) => void;
   requestFocus: (steps: number) => void;
   focusBusy: boolean;
   onTimeSeriesVisible: () => void;
@@ -181,8 +181,8 @@ const NativeMarkdown = ({ item }: { item: DashboardItem }): JSX.Element => {
 
 const renderWidget = (
   item: DashboardItem,
-  onSpotImageLoaded: () => void,
-  onSpotImageError: () => void,
+  onSpotImageLoaded: (displayedImageUrl?: string) => void,
+  onSpotImageError: (displayedImageUrl?: string) => void,
   requestFocus: (steps: number) => void,
   focusBusy: boolean
 ): JSX.Element => {

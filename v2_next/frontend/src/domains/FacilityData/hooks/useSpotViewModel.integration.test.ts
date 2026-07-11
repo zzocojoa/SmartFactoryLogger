@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import { useSpotViewModel } from './useSpotViewModel';
 import { useDashboardStore } from '../../../store/useDashboardStore';
@@ -32,7 +32,7 @@ vi.mock('./useSpotViewModelEffects', () => ({
 }));
 
 const BASE_SPOT_CONFIG: SpotConfig = {
-  image_url: '/api/spot/proxy_image',
+  image_url: '/api/spot/image.jpg',
   refresh_interval: 3,
   crosshair_x: 0.5,
   crosshair_y: 0.5,
@@ -158,9 +158,7 @@ describe('useSpotViewModel integration', () => {
         null,
         expect.any(Number),
         expect.objectContaining({
-          status: 'ok',
-          raw_status: 'ok',
-          cache_status: 'fresh',
+          source: 'camera',
         }),
       );
       const [nextImageUrl, nextImageLoading, nextImageError] =
@@ -202,5 +200,48 @@ describe('useSpotViewModel integration', () => {
 
     expect(mockControlSpotFocus).toHaveBeenCalledTimes(1);
     expect(mockControlSpotFocus).toHaveBeenCalledWith(-1);
+  });
+
+  it('requests the next image only after display completion and stops after display error', async () => {
+    const originalCreateObjectURL = global.URL.createObjectURL;
+    const originalRevokeObjectURL = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = vi.fn(() => `blob:spot-${mockFetchSpotImageResponse.mock.calls.length}`);
+    global.URL.revokeObjectURL = vi.fn();
+    mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
+    mockFetchSpotImageResponse.mockImplementation(async () => buildValidJpegResponse());
+
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+
+    try {
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      act(() => {
+        result.current.refreshImage();
+      });
+      await waitFor(() => expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1));
+
+      act(() => {
+        result.current.handleImageLoad('blob:stale-consumer-frame');
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        result.current.handleImageLoad(result.current.imageUrl);
+      });
+      await waitFor(() => expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2));
+
+      act(() => {
+        result.current.handleImageError();
+      });
+      await Promise.resolve();
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+      mockFetchSpotConfig.mockReset();
+      mockFetchSpotImageResponse.mockReset();
+      global.URL.createObjectURL = originalCreateObjectURL;
+      global.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
   });
 });

@@ -2642,7 +2642,7 @@ class V24HealthCounterTests(unittest.TestCase):
         with (
             patch.object(facility_service.logger_service, "get_v2_4_operational_summary", return_value=dict(summary)),
             patch(
-                "backend.FacilityData.drivers.spot_api.get_image_proxy_diagnostics",
+                "backend.FacilityData.drivers.spot_api.get_spot_diagnostics",
                 return_value={"spot_poll_status": "success"},
             ),
             patch(

@@ -22,7 +22,6 @@ import base64
 import json
 import logging
 import ipaddress
-import math
 import re
 from logging.handlers import RotatingFileHandler
 import time
@@ -226,8 +225,7 @@ _last_memory_export_path: Path | None = None
 _access_log_lock = threading.Lock()
 _quiet_access_state: dict[tuple[str, str, int], dict[str, float | int]] = {}
 _QUIET_ACCESS_PATHS = {
-    "/api/spot/proxy_image",
-    "/api/spot/live_image",
+    "/api/spot/image.jpg",
     "/api/data",
     "/health",
     "/stats",
@@ -253,14 +251,9 @@ _ACCESS_LOG_SAMPLE_SEC = 5.0
 
 _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
-_SPOT_PROXY_IMAGE_PATH = "/api/spot/proxy_image"
-_SPOT_LIVE_IMAGE_PATH = "/api/spot/live_image"
+_SPOT_IMAGE_PATH = "/api/spot/image.jpg"
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 _SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
-_SPOT_INTERNAL_TEMPERATURE_HEADER = "X-Spot-Internal-Temperature"
-_SPOT_INTERNAL_TEMPERATURE_AT_HEADER = "X-Spot-Internal-Temperature-At"
-_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER = "X-Spot-Internal-Temperature-Status"
-_SPOT_INTERNAL_TEMPERATURE_STALE_STATUSES = {"empty", "error", "missing", "stale", "unavailable"}
 def _url_host(url: str) -> str | None:
     try:
         host = urlsplit(url).hostname
@@ -892,15 +885,6 @@ def _collect_config_manager() -> dict[str, Any]:
     )
 
 
-def _format_memory_note_seconds(value: Any) -> str:
-    if value is None:
-        return "n/a"
-    try:
-        return f"{float(value):.1f}s"
-    except (TypeError, ValueError):
-        return "n/a"
-
-
 def _format_memory_note_timestamp(value: Any) -> str:
     if value is None:
         return "none"
@@ -910,56 +894,18 @@ def _format_memory_note_timestamp(value: Any) -> str:
         return "none"
 
 
-def _collect_spot_image_cache() -> dict[str, Any]:
-    summary = spot_control.get_image_cache_memory_summary()
-    image_bytes = int(summary.get("image_bytes") or 0)
+def _collect_spot_image_state() -> dict[str, Any]:
+    summary = spot_control.get_image_state_summary()
     note = (
-        f"state={summary.get('image_cache_state')} "
-        f"age={_format_memory_note_seconds(summary.get('image_age_sec'))} "
         f"fail={summary.get('image_failure_count')} "
-        f"retry_at={_format_memory_note_timestamp(summary.get('image_next_retry_at'))}"
+        f"last_success_at={_format_memory_note_timestamp(summary.get('image_last_success_at'))} "
+        f"url_present={bool(summary.get('image_url_present'))}"
     )
     return _memory_result(
-        "spot.image_cache",
-        "cache",
-        image_bytes,
-        items=1 if image_bytes else 0,
-        note=note,
-        exactness="exact",
-    )
-
-
-def _collect_spot_live_cache() -> dict[str, Any]:
-    summary = spot_control.get_image_cache_memory_summary()
-    live_image_bytes = int(summary.get("live_image_bytes") or 0)
-    note = (
-        f"state={summary.get('live_image_cache_state')} "
-        f"age={_format_memory_note_seconds(summary.get('live_image_age_sec'))} "
-        f"fail={summary.get('live_image_failure_count')} "
-        f"retry_at={_format_memory_note_timestamp(summary.get('live_image_next_retry_at'))} "
-        f"url_present={bool(summary.get('live_image_url_present'))}"
-    )
-    return _memory_result(
-        "spot.live_cache",
-        "cache",
-        live_image_bytes,
-        items=1 if live_image_bytes else 0,
-        note=note,
-        exactness="exact",
-    )
-
-
-def _collect_spot_cache() -> dict[str, Any]:
-    summary = spot_control.get_image_cache_memory_summary()
-    image_bytes = int(summary.get("image_bytes") or 0)
-    live_image_bytes = int(summary.get("live_image_bytes") or 0)
-    total_bytes = int(summary.get("total_bytes") or image_bytes + live_image_bytes)
-    note = "compatibility alias; split=spot.image_cache,spot.live_cache"
-    return _memory_result(
-        "spot.cache",
-        "cache",
-        total_bytes,
-        items=int(image_bytes > 0) + int(live_image_bytes > 0),
+        "spot.image_state",
+        "state",
+        0,
+        items=0,
         note=note,
         exactness="exact",
     )
@@ -972,9 +918,7 @@ def _register_memory_collectors() -> None:
     memory_service.register_collector("facility.plc_history", _collect_plc_history)
     memory_service.register_collector("facility.csv_logger", _collect_csv_logger)
     memory_service.register_collector("configuration.snapshot", _collect_config_manager)
-    memory_service.register_collector("spot.image_cache", _collect_spot_image_cache)
-    memory_service.register_collector("spot.live_cache", _collect_spot_live_cache)
-    memory_service.register_collector("spot.cache", _collect_spot_cache)
+    memory_service.register_collector("spot.image_state", _collect_spot_image_state)
 
 
 _log_queue_listeners = []
@@ -1561,9 +1505,9 @@ async def lifespan(app: FastAPI):
     print("[Main] Starting Memory Service...")
     memory_service.start()
 
-    # Start SPOT image background prefetching
-    print("[Main] Starting SPOT Image Prefetch...")
-    await spot_control.start_prefetch_loop()
+    # Start SPOT temperature and diagnostics polling.
+    print("[Main] Starting SPOT temperature and diagnostics polling...")
+    await spot_control.start_spot_poll_loop()
     
     # Log local IPs for debugging remote connectivity
     try:
@@ -1582,8 +1526,8 @@ async def lifespan(app: FastAPI):
     finally:
         # Shutdown
         _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
-        print("[Main] Stopping SPOT Image Prefetch...")
-        await spot_control.stop_prefetch_loop()
+        print("[Main] Stopping SPOT temperature and diagnostics polling...")
+        await spot_control.stop_spot_poll_loop()
         print("[Main] Stopping Comm Metrics Logger...")
         comm_metrics_logger_service.stop()
         print("[Main] Stopping Memory Service...")
@@ -1690,13 +1634,13 @@ async def record_request_stats(request: Request, call_next):
         response = await call_next(request)
         status_code = response.status_code
         
-        is_spot_payload_rejection = _is_spot_proxy_payload_rejection_response(
+        is_spot_payload_rejection = _is_spot_payload_rejection_response(
             request.url.path,
             status_code,
             dict(response.headers),
         )
 
-        is_spot_image_route = request.url.path in {_SPOT_PROXY_IMAGE_PATH, _SPOT_LIVE_IMAGE_PATH}
+        is_spot_image_route = request.url.path == _SPOT_IMAGE_PATH
         if status_code >= 500 and not is_spot_payload_rejection and not is_spot_image_route:
             try:
                 observability_service.record_error(
@@ -2766,7 +2710,7 @@ def verify_compare(payload: VerificationCompareRequest):
 @app.get("/api/spot/config")
 def spot_config():
     return {
-        "image_url": config.SPOT_IMAGE_URL,
+        "image_url": _SPOT_IMAGE_PATH,
         "refresh_interval": config.SPOT_REFRESH_INTERVAL,
         "crosshair_x": config.SPOT_CROSSHAIR_X,
         "crosshair_y": config.SPOT_CROSSHAIR_Y,
@@ -2783,9 +2727,7 @@ def spot_config():
         "actuator_ip": config.SPOT_ACTUATOR_IP,
         "actuator_url": config.SPOT_ACTUATOR_URL,
         "focus_diagnostics": _spot_focus_diagnostics(),
-        "proxy": spot_control.get_image_proxy_diagnostics(),
-        "live_image_url": _SPOT_LIVE_IMAGE_PATH,
-        "live": spot_control.get_live_image_diagnostics(),
+        "image": spot_control.get_spot_diagnostics(),
         "image_capture": spot_control.get_spot_image_capture_health(),
     }
 
@@ -2825,134 +2767,6 @@ def spot_actuator(payload: SpotActuatorRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def _ceil_positive_seconds(value: float) -> int:
-    seconds = int(value)
-    if value > float(seconds):
-        seconds += 1
-    return max(1, seconds)
-
-
-def _ceil_positive_milliseconds(value: float) -> int:
-    milliseconds = int(value * 1000.0)
-    if value * 1000.0 > float(milliseconds):
-        milliseconds += 1
-    return max(1, milliseconds)
-
-
-def _spot_retry_headers_from_value(retry_after_sec: float | None) -> dict[str, str]:
-    if (
-        retry_after_sec is None
-        or isinstance(retry_after_sec, bool)
-        or not math.isfinite(retry_after_sec)
-        or retry_after_sec <= 0.0
-    ):
-        return {}
-    return {
-        "Retry-After": str(_ceil_positive_seconds(retry_after_sec)),
-        "X-Spot-Retry-After-Ms": str(_ceil_positive_milliseconds(retry_after_sec)),
-    }
-
-
-def _spot_retry_headers_from_diagnostics(diagnostics: dict[str, Any]) -> dict[str, str]:
-    retry_after_sec = diagnostics.get("retry_after_sec")
-    if isinstance(retry_after_sec, bool) or not isinstance(retry_after_sec, (float, int)):
-        return {}
-    return _spot_retry_headers_from_value(float(retry_after_sec))
-
-
-def _finite_float_from_value(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (float, int)):
-        parsed: float = float(value)
-        if math.isfinite(parsed):
-            return parsed
-        return None
-    if isinstance(value, str):
-        stripped_value: str = value.strip()
-        if not stripped_value:
-            return None
-        try:
-            parsed = float(stripped_value)
-        except ValueError:
-            return None
-        if math.isfinite(parsed):
-            return parsed
-    return None
-
-
-def _spot_internal_temperature_snapshot(meta: dict[str, Any]) -> dict[str, Any]:
-    snapshot = dict(meta)
-    getter: Any = getattr(spot_control, "get_spot_internal_temperature_diagnostics", None)
-    if callable(getter):
-        diagnostics: Any = getter()
-        if isinstance(diagnostics, dict):
-            snapshot.update(diagnostics)
-    return snapshot
-
-
-def _spot_internal_temperature_status(snapshot: dict[str, Any], temperature: float | None) -> str | None:
-    raw_status: Any = snapshot.get("internal_temperature_cache_status")
-    if raw_status is not None:
-        normalized_status: str = str(raw_status).strip().lower()
-        if normalized_status:
-            return normalized_status
-    if temperature is None:
-        return "missing"
-    return None
-
-
-def _spot_internal_temperature_ttl_sec() -> float | None:
-    raw_ttl: Any = getattr(
-        spot_control,
-        "_INTERNAL_TEMP_CACHE_TTL_SEC",
-        getattr(spot_control, "_TEMP_CACHE_TTL_SEC", None),
-    )
-    ttl_sec: float | None = _finite_float_from_value(raw_ttl)
-    if ttl_sec is None or ttl_sec <= 0.0:
-        return None
-    return ttl_sec
-
-
-def _is_spot_internal_temperature_stale(measured_at: float | None) -> bool:
-    if measured_at is None or measured_at <= 0.0:
-        return False
-    ttl_sec: float | None = _spot_internal_temperature_ttl_sec()
-    if ttl_sec is None:
-        return False
-    return time.time() - measured_at > ttl_sec
-
-
-def _spot_internal_temperature_headers(meta: dict[str, Any]) -> dict[str, str]:
-    try:
-        snapshot: dict[str, Any] = _spot_internal_temperature_snapshot(meta)
-        temperature: float | None = _finite_float_from_value(snapshot.get("internal_temperature"))
-        status: str | None = _spot_internal_temperature_status(snapshot, temperature)
-        measured_at: float | None = _finite_float_from_value(snapshot.get("internal_temperature_at"))
-        if status in _SPOT_INTERNAL_TEMPERATURE_STALE_STATUSES:
-            return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: status}
-        if _is_spot_internal_temperature_stale(measured_at):
-            return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: "stale"}
-        if temperature is None:
-            return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: "missing"}
-
-        headers: dict[str, str] = {_SPOT_INTERNAL_TEMPERATURE_HEADER: f"{temperature:.3f}"}
-        if measured_at is not None and measured_at > 0.0:
-            headers[_SPOT_INTERNAL_TEMPERATURE_AT_HEADER] = str(int(measured_at * 1000))
-        if status is not None:
-            headers[_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER] = status
-        return headers
-    except Exception as exc:
-        _logger.warning(
-            "SPOT internal temperature header unavailable",
-            extra={
-                "error_type": exc.__class__.__name__,
-                "error": str(exc),
-            },
-        )
-        return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: "error"}
-
-
 def _is_spot_payload_rejection_headers(headers: dict[str, str] | None) -> bool:
     if headers is None:
         return False
@@ -2963,291 +2777,99 @@ def _is_spot_payload_rejection_headers(headers: dict[str, str] | None) -> bool:
     return False
 
 
-def _is_spot_proxy_payload_rejection_response(
+def _is_spot_payload_rejection_response(
     path: str,
     status_code: int,
     headers: dict[str, str] | None,
 ) -> bool:
-    if path != _SPOT_PROXY_IMAGE_PATH:
+    if path != _SPOT_IMAGE_PATH:
         return False
     if status_code != 502:
         return False
     return _is_spot_payload_rejection_headers(headers)
 
 
-@app.get(_SPOT_LIVE_IMAGE_PATH)
-async def live_spot_image():
-    """Return a live SPOT camera image for direct browser <img> rendering."""
+@app.get(_SPOT_IMAGE_PATH)
+async def spot_image():
+    """Bridge one official SPOT /image.jpg response to the desktop UI."""
     headers: dict[str, str] = {
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
         "Expires": "0",
     }
     try:
-        data, meta = await spot_control.fetch_live_image_async()
+        data, meta = await spot_control.fetch_image_async()
         captured_at = meta.get("captured_at") or 0.0
-        age_sec = meta.get("age_sec")
         if captured_at:
-            headers["X-Spot-Live-Image-At"] = str(int(float(captured_at) * 1000))
-        if age_sec is not None:
-            headers["X-Spot-Live-Image-Age"] = f"{float(age_sec):.3f}"
+            headers["X-Spot-Image-At"] = str(int(float(captured_at) * 1000))
         if meta.get("source"):
-            headers["X-Spot-Live-Image-Source"] = str(meta["source"])
-        is_stale = str(meta.get("status") or "") == "stale"
-        if is_stale:
-            headers["X-SFL-Image-Stale"] = "true"
-        if str(meta.get("source") or "") == "stale-cache":
-            headers["X-SFL-Image-Source"] = "stale-cache"
-        fallback_error_code = meta.get("fallback_error_code")
-        if fallback_error_code:
-            headers["X-SFL-Image-Fallback-Code"] = str(fallback_error_code)
-            observability_service.record_error(
-                "spot_live_image",
-                "SPOT live image stale cache fallback",
-                detail=str({
-                    "code": fallback_error_code,
-                    "fallback_reason": meta.get("fallback_reason"),
-                    "upstream_status": meta.get("fallback_upstream_status"),
-                    "retry_after_sec": meta.get("retry_after_sec"),
-                }),
-                path=_SPOT_LIVE_IMAGE_PATH,
-                status_code=200,
-                error_type=str(fallback_error_code),
-                level="warning",
-            )
-        observability_service.record_spot_live_image_result(
-            200,
-            float(age_sec) if age_sec is not None else None,
-            is_stale,
-        )
+            headers["X-Spot-Image-Source"] = str(meta["source"])
+        if meta.get("latency_ms") is not None:
+            headers["X-Spot-Image-Latency-Ms"] = f"{float(meta['latency_ms']):.1f}"
+        observability_service.record_spot_image_result(200)
         return Response(content=data, media_type="image/jpeg", headers=headers)
-    except spot_control.SpotLiveImageConfigError as exc:
-        diagnostics = spot_control.get_live_image_diagnostics()
+    except spot_control.SpotImageConfigError as exc:
+        diagnostics = spot_control.get_spot_diagnostics()
+        observability_service.record_spot_image_result(404)
         raise HTTPException(
             status_code=404,
             detail={
-                "code": "live-config-missing",
-                "message": "SPOT live image URL is not configured.",
-                "diagnostics": diagnostics,
-            },
-            headers=headers,
-        ) from exc
-    except spot_control.SpotLiveImageBackoffError as exc:
-        diagnostics = spot_control.get_live_image_diagnostics()
-        diagnostics["live_retry_after_sec"] = exc.retry_after_sec
-        headers.update(_spot_retry_headers_from_value(exc.retry_after_sec))
-        observability_service.record_error(
-            "spot_live_image",
-            "SPOT live image retry backoff active",
-            detail=str({
-                "code": exc.code,
-                "upstream_status": exc.upstream_status,
-                "retry_after_sec": exc.retry_after_sec,
-            }),
-            path=_SPOT_LIVE_IMAGE_PATH,
-            status_code=503,
-            error_type=exc.code,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": exc.code,
-                "message": "SPOT live image retry backoff is active.",
-                "upstream_status": exc.upstream_status,
+                "code": "config-missing",
+                "message": "SPOT IP is not configured.",
                 "diagnostics": diagnostics,
             },
             headers=headers,
         ) from exc
     except spot_control.SpotImageFetchError as exc:
-        diagnostics = spot_control.get_live_image_diagnostics()
-        headers.update(_spot_retry_headers_from_diagnostics(diagnostics))
+        diagnostics = spot_control.get_spot_diagnostics()
         if exc.code in _SPOT_PAYLOAD_REJECTION_CODES:
             headers["X-Spot-Payload-Rejection"] = "1"
         observability_service.record_error(
-            "spot_live_image",
-            "SPOT live image upstream failure",
+            "spot_image",
+            "SPOT image upstream failure",
             detail=str({
                 "code": exc.code,
                 "upstream_status": exc.upstream_status,
                 "payload_rejection": exc.code in _SPOT_PAYLOAD_REJECTION_CODES,
             }),
-            path=_SPOT_LIVE_IMAGE_PATH,
+            path=_SPOT_IMAGE_PATH,
             status_code=502,
             error_type=exc.code,
             level="warning" if exc.code in _SPOT_PAYLOAD_REJECTION_CODES else "error",
         )
+        observability_service.record_spot_image_result(502)
         raise HTTPException(
             status_code=502,
             detail={
                 "code": exc.code,
-                "message": "SPOT live image upstream request failed.",
+                "message": "SPOT image upstream request failed.",
                 "upstream_status": exc.upstream_status,
                 "diagnostics": diagnostics,
             },
             headers=headers,
         ) from exc
     except Exception as exc:
-        diagnostics = spot_control.get_live_image_diagnostics()
+        diagnostics = spot_control.get_spot_diagnostics()
         observability_service.record_error(
-            "spot_live_image",
-            "SPOT live image unexpected failure",
+            "spot_image",
+            "SPOT image unexpected failure",
             detail=str({
                 "code": "unknown",
                 "error_type": exc.__class__.__name__,
             }),
-            path=_SPOT_LIVE_IMAGE_PATH,
+            path=_SPOT_IMAGE_PATH,
             status_code=502,
             error_type=exc.__class__.__name__,
         )
+        observability_service.record_spot_image_result(502)
         raise HTTPException(
             status_code=502,
             detail={
                 "code": "unknown",
-                "message": "Unexpected SPOT live image proxy error.",
+                "message": "Unexpected SPOT image bridge error.",
                 "diagnostics": diagnostics,
             },
             headers=headers,
-        ) from exc
-
-
-@app.get("/api/spot/proxy_image")
-async def proxy_spot_image():
-    """Proxy the SPOT camera image for remote clients (Async + Cached)."""
-    try:
-        data, meta = await spot_control.fetch_image_async()
-        headers: dict[str, str] = {
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        }
-        captured_at = meta.get("captured_at") or 0.0
-        age_sec = meta.get("age_sec")
-        is_stale = str(meta.get("status") or "") == "stale"
-        retry_after_sec = meta.get("retry_after_sec")
-        if captured_at:
-            headers["X-Spot-Image-At"] = str(int(captured_at * 1000))
-        if age_sec is not None:
-            headers["X-Spot-Image-Age"] = f"{age_sec:.3f}"
-        if meta.get("max_stale_age_sec") is not None:
-            headers["X-Spot-Max-Stale-Age"] = f"{float(meta['max_stale_age_sec']):.3f}"
-        if meta.get("status"):
-            headers["X-Spot-Image-Status"] = str(meta["status"])
-        if meta.get("cache_status"):
-            headers["X-Spot-Cache-Status"] = str(meta["cache_status"])
-        if meta.get("proxy_state"):
-            headers["X-Spot-Proxy-State"] = str(meta["proxy_state"])
-        if meta.get("source"):
-            headers["X-Spot-Image-Source"] = str(meta["source"])
-        if meta.get("failure_count") is not None:
-            headers["X-Spot-Failure-Count"] = str(int(meta["failure_count"]))
-        if meta.get("last_error_code"):
-            headers["X-Spot-Last-Error-Code"] = str(meta["last_error_code"])
-        if not isinstance(retry_after_sec, bool) and isinstance(retry_after_sec, (float, int)):
-            headers.update(_spot_retry_headers_from_value(float(retry_after_sec)))
-        headers.update(_spot_internal_temperature_headers(meta))
-        observability_service.record_spot_proxy_result(200, float(age_sec) if age_sec is not None else None, is_stale)
-        return Response(content=data, media_type="image/jpeg", headers=headers)
-    except spot_control.SpotImageConfigError as exc:
-        diagnostics = spot_control.get_image_proxy_diagnostics()
-        observability_service.record_error(
-            "spot_proxy",
-            "SPOT image proxy misconfigured",
-            detail=str({
-                "code": "config-missing",
-            }),
-            path="/api/spot/proxy_image",
-            level="warning",
-            status_code=404,
-            error_type="config-missing",
-        )
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "config-missing",
-                "message": "SPOT 이미지 URL이 설정되지 않았습니다.",
-                "diagnostics": diagnostics,
-            },
-            headers=_spot_retry_headers_from_diagnostics(diagnostics),
-        ) from exc
-    except spot_control.SpotImageBackoffError as exc:
-        diagnostics: dict[str, Any] = dict(spot_control.get_image_proxy_diagnostics())
-        diagnostics["cache_state"] = "empty"
-        diagnostics["cache_status"] = "empty"
-        diagnostics["proxy_state"] = "backoff"
-        diagnostics["retry_after_sec"] = exc.retry_after_sec
-        observability_service.record_error(
-            "spot_proxy",
-            "SPOT image proxy retry backoff active",
-            detail=str({
-                "code": exc.code,
-                "upstream_status": exc.upstream_status,
-                "retry_after_sec": exc.retry_after_sec,
-            }),
-            path="/api/spot/proxy_image",
-            status_code=503,
-            error_type=exc.code,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": exc.code,
-                "message": "SPOT 이미지 캐시가 비어 있고 재시도 대기 시간이 활성화되어 있습니다.",
-                "upstream_status": exc.upstream_status,
-                "image_url": exc.image_url,
-                "diagnostics": diagnostics,
-            },
-            headers=_spot_retry_headers_from_diagnostics(diagnostics),
-        ) from exc
-    except spot_control.SpotImageFetchError as exc:
-        diagnostics = spot_control.get_image_proxy_diagnostics()
-        error_headers = _spot_retry_headers_from_diagnostics(diagnostics)
-        if exc.code in _SPOT_PAYLOAD_REJECTION_CODES:
-            error_headers["X-Spot-Payload-Rejection"] = "1"
-        if exc.code not in _SPOT_PAYLOAD_REJECTION_CODES:
-            observability_service.record_error(
-                "spot_proxy",
-                "SPOT image proxy upstream failure",
-                detail=str({
-                    "code": exc.code,
-                    "upstream_status": exc.upstream_status,
-                    "payload_rejection": False,
-                }),
-                path="/api/spot/proxy_image",
-                status_code=502,
-                error_type=exc.code,
-            )
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": exc.code,
-                "message": "SPOT 이미지 상위 서버 요청에 실패했습니다.",
-                "upstream_status": exc.upstream_status,
-                "image_url": exc.image_url,
-                "diagnostics": diagnostics,
-            },
-            headers=error_headers,
-        ) from exc
-    except Exception as exc:
-        diagnostics = spot_control.get_image_proxy_diagnostics()
-        observability_service.record_error(
-            "spot_proxy",
-            "SPOT image proxy unexpected failure",
-            detail=str({
-                "code": "unknown",
-                "error_type": exc.__class__.__name__,
-            }),
-            path="/api/spot/proxy_image",
-            status_code=502,
-            error_type=exc.__class__.__name__,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "unknown",
-                "message": "SPOT 이미지 프록시 처리 중 알 수 없는 오류가 발생했습니다.",
-                "diagnostics": diagnostics,
-            },
-            headers=_spot_retry_headers_from_diagnostics(diagnostics),
         ) from exc
 
 
