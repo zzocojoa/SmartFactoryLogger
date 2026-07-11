@@ -119,6 +119,18 @@ class SpotObservationFactTests(unittest.TestCase):
             rows = output_path.read_text(encoding="utf-8-sig").splitlines()
             self.assertEqual(len(rows), 2)
 
+    def test_writer_initializes_header_only_fact_before_first_poll(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "spot_observation_fact.csv"
+            writer = SpotObservationFactWriter(output_path)
+
+            self.assertTrue(writer.ensure_initialized())
+            self.assertTrue(writer.ensure_initialized())
+
+            with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.reader(handle))
+            self.assertEqual(rows, [SPOT_OBSERVATION_FACT_COLUMNS])
+
     def test_writer_loads_existing_key_index_after_restart(self) -> None:
         snapshot = {
             "spot_service_instance_id": "svc-1",

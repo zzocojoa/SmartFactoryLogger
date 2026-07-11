@@ -1633,9 +1633,18 @@ def validate_spot_observation_fact_manifest(
                 f"spot_observation_fact_manifest.{manifest_key}={manifest_value!r}, actual={actual_value!r}"
             )
 
+    actual_link_coverage = actual_manifest.get("link_coverage", {})
+    realtime_key_rows = _parse_non_negative_int(
+        actual_link_coverage.get("realtime_rows_with_observation_key")
+    )
     row_count = _parse_non_negative_int(manifest.get("row_count"))
-    if row_count is None or row_count <= 0:
-        failures.append("spot_observation_fact_manifest.row_count must be greater than 0")
+    if row_count is None:
+        failures.append("spot_observation_fact_manifest.row_count must be non-negative")
+    elif realtime_key_rows and row_count <= 0:
+        failures.append(
+            "spot_observation_fact_manifest.row_count must be greater than 0 "
+            "when realtime observation keys are present"
+        )
     if not _is_sha256_text(str(manifest.get("sha256") or "")):
         failures.append("spot_observation_fact_manifest.sha256 must be populated with lowercase SHA-256")
 
@@ -1663,10 +1672,9 @@ def validate_spot_observation_fact_manifest(
         failures.extend(
             _compare_nested_counts(manifest, actual_manifest, "evidence_provenance_coverage", summary)
         )
-    actual_link_coverage = actual_manifest.get("link_coverage", {})
     if actual_link_coverage.get("missing_fact_key_rows") != 0:
         failures.append("spot_observation_fact_manifest.link_coverage.missing_fact_key_rows must be 0")
-    if actual_link_coverage.get("coverage_pct") != 100.0:
+    if realtime_key_rows and actual_link_coverage.get("coverage_pct") != 100.0:
         failures.append("spot_observation_fact_manifest.link_coverage.coverage_pct must be 100.0")
 
     failures.extend(validate_spot_observation_fact_invariants(fact_path))

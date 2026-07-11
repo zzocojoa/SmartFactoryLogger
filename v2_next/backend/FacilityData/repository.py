@@ -45,6 +45,7 @@ from backend.FacilityData.process_phase import (
 )
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_FILENAME,
+    SpotObservationFactWriter,
     build_spot_observation_fact_manifest,
     build_spot_observation_key,
     parse_spot_diagnostic_evidence_codes,
@@ -835,13 +836,30 @@ class CSVLoggerService:
             health = spot_api.get_spot_observation_fact_health()
         except Exception:
             health = {}
+        enabled = bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)))
+        fact_path = log_path / SPOT_OBSERVATION_FACT_FILENAME
+        initialization_failure_count = self._ensure_spot_observation_fact_file(
+            fact_path,
+            enabled=enabled,
+        )
         return build_spot_observation_fact_manifest(
-            fact_path=log_path / SPOT_OBSERVATION_FACT_FILENAME,
-            enabled=bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False))),
-            write_failure_count=int(health.get("write_failure_count", 0) or 0),
+            fact_path=fact_path,
+            enabled=enabled,
+            write_failure_count=(
+                int(health.get("write_failure_count", 0) or 0) + initialization_failure_count
+            ),
             spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
             path=SPOT_OBSERVATION_FACT_FILENAME,
         )
+
+    def _ensure_spot_observation_fact_file(self, fact_path: Path, *, enabled: bool) -> int:
+        if not enabled:
+            return 0
+        writer = SpotObservationFactWriter(fact_path)
+        if writer.ensure_initialized():
+            return 0
+        self.logger.warning("Failed to initialize enabled SPOT observation fact: %s", fact_path.name)
+        return max(1, writer.failure_count)
 
     def refresh_spot_observation_fact_manifest_for_csv(self, csv_path: Path) -> Optional[Path]:
         metadata_path = csv_path.with_suffix(".metadata.json")
@@ -864,10 +882,18 @@ class CSVLoggerService:
             health = spot_api.get_spot_observation_fact_health()
         except Exception:
             health = {}
+        enabled = bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)))
+        fact_path = csv_path.parent / SPOT_OBSERVATION_FACT_FILENAME
+        initialization_failure_count = self._ensure_spot_observation_fact_file(
+            fact_path,
+            enabled=enabled,
+        )
         payload["spot_observation_fact_manifest"] = build_spot_observation_fact_manifest(
-            fact_path=csv_path.parent / SPOT_OBSERVATION_FACT_FILENAME,
-            enabled=bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False))),
-            write_failure_count=int(health.get("write_failure_count", 0) or 0),
+            fact_path=fact_path,
+            enabled=enabled,
+            write_failure_count=(
+                int(health.get("write_failure_count", 0) or 0) + initialization_failure_count
+            ),
             spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
             realtime_rows=realtime_rows,
             path=SPOT_OBSERVATION_FACT_FILENAME,
