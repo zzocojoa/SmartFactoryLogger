@@ -1,0 +1,1640 @@
+{
+    "started_at":  "2026-07-11T23:20:39.0146589+09:00",
+    "completed_at":  "2026-07-11T23:35:39.2572258+09:00",
+    "installer_sha256":  "1391055AFE1AA829C30CD3C6955ED65FBC3D1DC5BA2F9D56D418738744D04BAE",
+    "backend_sha256":  "F8D62B78816F04C3B12F9558308FCED3EE30D5A117819E2191C831620EBB9A2A",
+    "start_health":  {
+                         "running":  true,
+                         "thread_alive":  true,
+                         "driver_thread_alive":  true,
+                         "last_update":  1783779635.3331425,
+                         "driver_connected":  true,
+                         "mode":  "REAL",
+                         "driver_snapshot_at":  1783779635.3331425,
+                         "driver_snapshot_age_sec":  3.6493427753448486,
+                         "driver_last_error":  "[redacted-runtime-endpoint]",
+                         "comm":  {
+                                      "extruder":  {
+                                                       "connected":  true,
+                                                       "connect_attempts":  2,
+                                                       "connect_failures":  0,
+                                                       "read_failures":  1,
+                                                       "invalid_responses":  0,
+                                                       "skipped_reads":  5,
+                                                       "backoff_count":  1,
+                                                       "backoff_sec":  1.0,
+                                                       "next_retry_at":  0.0,
+                                                       "last_error":  "Extruder send timeout",
+                                                       "last_error_time":  1783779634.43869,
+                                                       "last_success_time":  1783779638.9600308,
+                                                       "last_recovery_sec":  1.488574504852295,
+                                                       "recovery_count":  1,
+                                                       "total_downtime_sec":  1.488574504852295,
+                                                       "current_downtime_sec":  0.0,
+                                                       "last_disconnect_time":  1783779634.43869,
+                                                       "last_recovery_at":  1783779635.9272645,
+                                                       "merge_blocks":  true,
+                                                       "merge_failures":  0,
+                                                       "snapshot_at":  1783779638.9600308,
+                                                       "snapshot_age_sec":  0.022454500198364258,
+                                                       "snapshot_error":  null
+                                                   },
+                                      "ls_plc":  {
+                                                     "connected":  true,
+                                                     "connect_attempts":  2,
+                                                     "connect_failures":  0,
+                                                     "read_failures":  1,
+                                                     "invalid_responses":  0,
+                                                     "backoff_count":  1,
+                                                     "backoff_sec":  1.0,
+                                                     "next_retry_at":  0.0,
+                                                     "last_error":  "[WinError 10054] íì¬ ì°ê²°ì ìê²© í¸ì¤í¸ì ìí´ ê°ì ë¡ ëê²¼ìµëë¤",
+                                                     "last_error_time":  1783779634.4461954,
+                                                     "last_success_time":  1783779638.7764544,
+                                                     "last_recovery_sec":  1.1595063209533691,
+                                                     "recovery_count":  1,
+                                                     "total_downtime_sec":  1.1595063209533691,
+                                                     "current_downtime_sec":  0.0,
+                                                     "last_disconnect_time":  1783779634.4461954,
+                                                     "last_recovery_at":  1783779635.6057017,
+                                                     "snapshot_at":  1783779638.7764544,
+                                                     "snapshot_age_sec":  0.20603084564208984,
+                                                     "snapshot_error":  null
+                                                 },
+                                      "spot":  {
+                                                   "last_value":  523.8,
+                                                   "read_failures":  0,
+                                                   "last_error_time":  null,
+                                                   "last_success_time":  1783779638.4776874,
+                                                   "timeout_sec":  3.0,
+                                                   "snapshot_at":  1783779638.4776874,
+                                                   "snapshot_age_sec":  0.5047979354858398,
+                                                   "snapshot_error":  null
+                                               }
+                                  },
+                         "spot_temperature":  {
+                                                  "spot_service_instance_id":  "629b50da-8961-4c58-baff-57cd4d3daa29",
+                                                  "spot_poll_seq":  3,
+                                                  "spot_observation_seq":  3,
+                                                  "spot_poll_status":  "success",
+                                                  "spot_raw_validity":  "valid_temperature",
+                                                  "spot_source_freshness":  "fresh",
+                                                  "spot_device_status_code":  null,
+                                                  "temperature_status_shadow":  "ok",
+                                                  "spot_cache_status":  "fresh",
+                                                  "temperature_value_origin":  "current_observation",
+                                                  "cache_fallback_allowed":  false,
+                                                  "spot_snapshot_age_ms":  672.0000000204891,
+                                                  "spot_value_age_ms":  672.7933883666992,
+                                                  "spot_poll_freshness_threshold_sec":  3.0,
+                                                  "spot_cache_expiry_threshold_sec":  15.0,
+                                                  "temperature_cache_status":  "ok",
+                                                  "temperature_last_success_at":  1783779638.309692,
+                                                  "temperature_last_error_at":  null,
+                                                  "temperature_last_error_code":  null,
+                                                  "diagnostics_available":  true,
+                                                  "validation_state":  "shadow",
+                                                  "operational_truth":  false,
+                                                  "v2_4_operational":  {
+                                                                           "enabled":  true,
+                                                                           "schema_version":  "2.4.0",
+                                                                           "temperature_hardening_enabled":  false,
+                                                                           "rows_total":  1,
+                                                                           "rows_by_temperature_output_status":  {
+                                                                                                                     "startup_pending":  1
+                                                                                                                 },
+                                                                           "rows_by_temperature_unavailable_reason":  {
+                                                                                                                          "startup_pending":  1
+                                                                                                                      },
+                                                                           "sentinel_counts_by_spot_device_status_code":  {
+
+                                                                                                                          },
+                                                                           "stale_threshold_breach_count":  0,
+                                                                           "observation_fact_link_failure_count":  0,
+                                                                           "cached_fallback_accepted_count":  0,
+                                                                           "cached_fallback_rejected_count":  0,
+                                                                           "cached_fallback_rejected_reason_counts":  {
+
+                                                                                                                      },
+                                                                           "origin_decision_mismatch_count":  0,
+                                                                           "comparator_unverified_count":  0,
+                                                                           "diagnostics_capture_status_counts":  {
+                                                                                                                     "missing":  1
+                                                                                                                 },
+                                                                           "diagnostics_binding_status_counts":  {
+                                                                                                                     "missing":  1
+                                                                                                                 },
+                                                                           "diagnostics_cause_suppressed_count":  0,
+                                                                           "diagnostics_cause_suppressed_reason_counts":  {
+
+                                                                                                                          },
+                                                                           "unsupported_evidence_suppressed_count":  0,
+                                                                           "value_age_clock_anomaly_count":  0,
+                                                                           "process_phase_candidate_counts":  {
+                                                                                                                  "unknown":  1
+                                                                                                              },
+                                                                           "last_sample_seq":  1,
+                                                                           "last_updated_at":  "2026-07-11T14:20:00.655431Z",
+                                                                           "observation_fact_enabled":  true,
+                                                                           "observation_fact_write_failure_count":  0,
+                                                                           "config_drift_detected_count":  0
+                                                                       }
+                                              },
+                         "app_version":  "1.0.11",
+                         "runtime_kind":  "frozen",
+                         "executable_path":  "[redacted-local-path]/SmartFactoryBackend.exe",
+                         "executable_mtime":  "2026-07-11T23:10:42",
+                         "frontend_mode":  "frozen",
+                         "frontend_source":  "resources",
+                         "frontend_source_origin":  "executable_parent",
+                         "frontend_runtime_class":  "packaged-resources",
+                         "frontend_runtime_warning":  "none",
+                         "frontend_dist_path":  "[redacted-local-path]/frontend/dist",
+                         "frontend_resolution_reason":  "selected_ready_resources_executable_parent",
+                         "frontend_resolution_candidates":  [
+                                                                {
+                                                                    "priority":  1,
+                                                                    "source":  "sidecar",
+                                                                    "origin":  "executable_dir",
+                                                                    "path":  "[redacted-local-path]",
+                                                                    "exists":  false,
+                                                                    "missing_assets":  [
+
+                                                                                       ],
+                                                                    "is_ready":  false
+                                                                },
+                                                                {
+                                                                    "priority":  2,
+                                                                    "source":  "resources",
+                                                                    "origin":  "executable_parent",
+                                                                    "path":  "[redacted-local-path]",
+                                                                    "exists":  true,
+                                                                    "missing_assets":  [
+
+                                                                                       ],
+                                                                    "is_ready":  true
+                                                                },
+                                                                {
+                                                                    "priority":  3,
+                                                                    "source":  "resources",
+                                                                    "origin":  "executable_grandparent",
+                                                                    "path":  "[redacted-local-path]",
+                                                                    "exists":  false,
+                                                                    "missing_assets":  [
+
+                                                                                       ],
+                                                                    "is_ready":  false
+                                                                },
+                                                                {
+                                                                    "priority":  4,
+                                                                    "source":  "meipass",
+                                                                    "origin":  "pyinstaller_temp",
+                                                                    "path":  "[redacted-local-path]",
+                                                                    "exists":  true,
+                                                                    "missing_assets":  [
+
+                                                                                       ],
+                                                                    "is_ready":  true
+                                                                }
+                                                            ],
+                         "frontend_dist_exists":  true,
+                         "frontend_index_exists":  true,
+                         "frontend_assets_exists":  true,
+                         "frontend_missing_assets":  [
+
+                                                     ],
+                         "frontend_static_ready":  true
+                     },
+    "end_health":  {
+                       "running":  true,
+                       "thread_alive":  true,
+                       "driver_thread_alive":  true,
+                       "last_update":  1783780539.2032208,
+                       "driver_connected":  true,
+                       "mode":  "REAL",
+                       "driver_snapshot_at":  1783780539.2032208,
+                       "driver_snapshot_age_sec":  0.06914591789245605,
+                       "driver_last_error":  null,
+                       "comm":  {
+                                    "extruder":  {
+                                                     "connected":  true,
+                                                     "connect_attempts":  2,
+                                                     "connect_failures":  0,
+                                                     "read_failures":  1,
+                                                     "invalid_responses":  0,
+                                                     "skipped_reads":  5,
+                                                     "backoff_count":  1,
+                                                     "backoff_sec":  1.0,
+                                                     "next_retry_at":  0.0,
+                                                     "last_error":  "Extruder send timeout",
+                                                     "last_error_time":  1783779634.43869,
+                                                     "last_success_time":  1783780539.2092042,
+                                                     "last_recovery_sec":  1.488574504852295,
+                                                     "recovery_count":  1,
+                                                     "total_downtime_sec":  1.488574504852295,
+                                                     "current_downtime_sec":  0.0,
+                                                     "last_disconnect_time":  1783779634.43869,
+                                                     "last_recovery_at":  1783779635.9272645,
+                                                     "merge_blocks":  true,
+                                                     "merge_failures":  0,
+                                                     "snapshot_at":  1783780539.2092042,
+                                                     "snapshot_age_sec":  0.06316256523132324,
+                                                     "snapshot_error":  null
+                                                 },
+                                    "ls_plc":  {
+                                                   "connected":  true,
+                                                   "connect_attempts":  2,
+                                                   "connect_failures":  0,
+                                                   "read_failures":  1,
+                                                   "invalid_responses":  0,
+                                                   "backoff_count":  1,
+                                                   "backoff_sec":  1.0,
+                                                   "next_retry_at":  0.0,
+                                                   "last_error":  "[WinError 10054] íì¬ ì°ê²°ì ìê²© í¸ì¤í¸ì ìí´ ê°ì ë¡ ëê²¼ìµëë¤",
+                                                   "last_error_time":  1783779634.4461954,
+                                                   "last_success_time":  1783780539.2011106,
+                                                   "last_recovery_sec":  1.1595063209533691,
+                                                   "recovery_count":  1,
+                                                   "total_downtime_sec":  1.1595063209533691,
+                                                   "current_downtime_sec":  0.0,
+                                                   "last_disconnect_time":  1783779634.4461954,
+                                                   "last_recovery_at":  1783779635.6057017,
+                                                   "snapshot_at":  1783780539.2011106,
+                                                   "snapshot_age_sec":  0.07125616073608398,
+                                                   "snapshot_error":  null
+                                               },
+                                    "spot":  {
+                                                 "last_value":  524.2,
+                                                 "read_failures":  0,
+                                                 "last_error_time":  null,
+                                                 "last_success_time":  1783780538.6600323,
+                                                 "timeout_sec":  3.0,
+                                                 "snapshot_at":  1783780538.6600323,
+                                                 "snapshot_age_sec":  0.6123344898223877,
+                                                 "snapshot_error":  null
+                                             }
+                                },
+                       "spot_temperature":  {
+                                                "spot_service_instance_id":  "629b50da-8961-4c58-baff-57cd4d3daa29",
+                                                "spot_poll_seq":  903,
+                                                "spot_observation_seq":  903,
+                                                "spot_poll_status":  "success",
+                                                "spot_raw_validity":  "valid_temperature",
+                                                "spot_source_freshness":  "fresh",
+                                                "spot_device_status_code":  null,
+                                                "temperature_status_shadow":  "ok",
+                                                "spot_cache_status":  "fresh",
+                                                "temperature_value_origin":  "current_observation",
+                                                "cache_fallback_allowed":  false,
+                                                "spot_snapshot_age_ms":  561.9999999762513,
+                                                "spot_value_age_ms":  560.7805252075195,
+                                                "spot_poll_freshness_threshold_sec":  3.0,
+                                                "spot_cache_expiry_threshold_sec":  15.0,
+                                                "temperature_cache_status":  "ok",
+                                                "temperature_last_success_at":  1783780538.7115862,
+                                                "temperature_last_error_at":  null,
+                                                "temperature_last_error_code":  null,
+                                                "diagnostics_available":  true,
+                                                "validation_state":  "shadow",
+                                                "operational_truth":  false,
+                                                "v2_4_operational":  {
+                                                                         "enabled":  true,
+                                                                         "schema_version":  "2.4.0",
+                                                                         "temperature_hardening_enabled":  false,
+                                                                         "rows_total":  3998,
+                                                                         "rows_by_temperature_output_status":  {
+                                                                                                                   "startup_pending":  11,
+                                                                                                                   "stale":  29,
+                                                                                                                   "valid":  3958
+                                                                                                               },
+                                                                         "rows_by_temperature_unavailable_reason":  {
+                                                                                                                        "startup_pending":  11,
+                                                                                                                        "stale_observation":  29
+                                                                                                                    },
+                                                                         "sentinel_counts_by_spot_device_status_code":  {
+
+                                                                                                                        },
+                                                                         "stale_threshold_breach_count":  29,
+                                                                         "observation_fact_link_failure_count":  0,
+                                                                         "cached_fallback_accepted_count":  0,
+                                                                         "cached_fallback_rejected_count":  0,
+                                                                         "cached_fallback_rejected_reason_counts":  {
+
+                                                                                                                    },
+                                                                         "origin_decision_mismatch_count":  0,
+                                                                         "comparator_unverified_count":  0,
+                                                                         "diagnostics_capture_status_counts":  {
+                                                                                                                   "missing":  11,
+                                                                                                                   "async_complete":  3987
+                                                                                                               },
+                                                                         "diagnostics_binding_status_counts":  {
+                                                                                                                   "missing":  11,
+                                                                                                                   "previous_poll":  3987
+                                                                                                               },
+                                                                         "diagnostics_cause_suppressed_count":  0,
+                                                                         "diagnostics_cause_suppressed_reason_counts":  {
+
+                                                                                                                        },
+                                                                         "unsupported_evidence_suppressed_count":  0,
+                                                                         "value_age_clock_anomaly_count":  0,
+                                                                         "process_phase_candidate_counts":  {
+                                                                                                                "unknown":  159,
+                                                                                                                "production_stable":  3418,
+                                                                                                                "idle_candidate":  317,
+                                                                                                                "stopped_after_production_candidate":  104
+                                                                                                            },
+                                                                         "last_sample_seq":  3998,
+                                                                         "last_updated_at":  "2026-07-11T14:35:39.224410Z",
+                                                                         "observation_fact_enabled":  true,
+                                                                         "observation_fact_write_failure_count":  0,
+                                                                         "config_drift_detected_count":  0
+                                                                     }
+                                            },
+                       "app_version":  "1.0.11",
+                       "runtime_kind":  "frozen",
+                       "executable_path":  "[redacted-local-path]/SmartFactoryBackend.exe",
+                       "executable_mtime":  "2026-07-11T23:10:42",
+                       "frontend_mode":  "frozen",
+                       "frontend_source":  "resources",
+                       "frontend_source_origin":  "executable_parent",
+                       "frontend_runtime_class":  "packaged-resources",
+                       "frontend_runtime_warning":  "none",
+                       "frontend_dist_path":  "[redacted-local-path]/frontend/dist",
+                       "frontend_resolution_reason":  "selected_ready_resources_executable_parent",
+                       "frontend_resolution_candidates":  [
+                                                              {
+                                                                  "priority":  1,
+                                                                  "source":  "sidecar",
+                                                                  "origin":  "executable_dir",
+                                                                  "path":  "[redacted-local-path]",
+                                                                  "exists":  false,
+                                                                  "missing_assets":  [
+
+                                                                                     ],
+                                                                  "is_ready":  false
+                                                              },
+                                                              {
+                                                                  "priority":  2,
+                                                                  "source":  "resources",
+                                                                  "origin":  "executable_parent",
+                                                                  "path":  "[redacted-local-path]",
+                                                                  "exists":  true,
+                                                                  "missing_assets":  [
+
+                                                                                     ],
+                                                                  "is_ready":  true
+                                                              },
+                                                              {
+                                                                  "priority":  3,
+                                                                  "source":  "resources",
+                                                                  "origin":  "executable_grandparent",
+                                                                  "path":  "[redacted-local-path]",
+                                                                  "exists":  false,
+                                                                  "missing_assets":  [
+
+                                                                                     ],
+                                                                  "is_ready":  false
+                                                              },
+                                                              {
+                                                                  "priority":  4,
+                                                                  "source":  "meipass",
+                                                                  "origin":  "pyinstaller_temp",
+                                                                  "path":  "[redacted-local-path]",
+                                                                  "exists":  true,
+                                                                  "missing_assets":  [
+
+                                                                                     ],
+                                                                  "is_ready":  true
+                                                              }
+                                                          ],
+                       "frontend_dist_exists":  true,
+                       "frontend_index_exists":  true,
+                       "frontend_assets_exists":  true,
+                       "frontend_missing_assets":  [
+
+                                                   ],
+                       "frontend_static_ready":  true
+                   },
+    "rows_added":  3997,
+    "async_complete_added":  3987,
+    "async_partial_added":  0,
+    "diagnostics_missing_added":  10,
+    "diagnostics_error_added":  0,
+    "health_probe_failures":  0,
+    "temperature_poll_failures":  0,
+    "image_error_entries":  0,
+    "total_spot_failures":  0,
+    "fact_write_failure_delta":  0,
+    "link_failure_delta":  0,
+    "driver_connected":  true,
+    "fact_file":  "spot_observation_fact.csv",
+    "fact_window_rows":  900,
+    "signalpc_parse_error_rows":  0,
+    "signalpc_raw_missing_rows":  0,
+    "signalpc_raw_groups":  [
+
+                            ],
+    "health_samples":  [
+                           {
+                               "time_iso":  "2026-07-11T14:20:39.4906402+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  4,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:03.6248696+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  27,
+                               "spot_poll_status":  "success",
+                               "rows_total":  93
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:15.2996080+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  39,
+                               "spot_poll_status":  "success",
+                               "rows_total":  141
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:21.0104945+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  45,
+                               "spot_poll_status":  "success",
+                               "rows_total":  168
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:26.4584552+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  50,
+                               "spot_poll_status":  "success",
+                               "rows_total":  192
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:31.9622191+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  56,
+                               "spot_poll_status":  "success",
+                               "rows_total":  215
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:37.3473623+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  61,
+                               "spot_poll_status":  "success",
+                               "rows_total":  238
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:43.0107970+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  67,
+                               "spot_poll_status":  "success",
+                               "rows_total":  263
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:48.2480650+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  72,
+                               "spot_poll_status":  "success",
+                               "rows_total":  288
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:53.5621986+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  77,
+                               "spot_poll_status":  "success",
+                               "rows_total":  313
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:21:58.9571276+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  83,
+                               "spot_poll_status":  "success",
+                               "rows_total":  337
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:04.2923182+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  88,
+                               "spot_poll_status":  "success",
+                               "rows_total":  360
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:09.4606379+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  93,
+                               "spot_poll_status":  "success",
+                               "rows_total":  382
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:15.3917577+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  99,
+                               "spot_poll_status":  "success",
+                               "rows_total":  409
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:20.9258058+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  105,
+                               "spot_poll_status":  "success",
+                               "rows_total":  435
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:26.6100325+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  110,
+                               "spot_poll_status":  "success",
+                               "rows_total":  460
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:32.3428781+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  116,
+                               "spot_poll_status":  "success",
+                               "rows_total":  485
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:37.5911181+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  121,
+                               "spot_poll_status":  "success",
+                               "rows_total":  509
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:43.3640365+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  127,
+                               "spot_poll_status":  "success",
+                               "rows_total":  536
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:48.9122450+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  133,
+                               "spot_poll_status":  "success",
+                               "rows_total":  561
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:54.2447565+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  138,
+                               "spot_poll_status":  "success",
+                               "rows_total":  586
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:22:59.4962636+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  143,
+                               "spot_poll_status":  "success",
+                               "rows_total":  610
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:04.8647662+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  149,
+                               "spot_poll_status":  "success",
+                               "rows_total":  633
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:10.4319062+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  154,
+                               "spot_poll_status":  "success",
+                               "rows_total":  658
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:16.0756316+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  160,
+                               "spot_poll_status":  "success",
+                               "rows_total":  683
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:22.1460292+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  166,
+                               "spot_poll_status":  "success",
+                               "rows_total":  711
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:28.4882096+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  172,
+                               "spot_poll_status":  "success",
+                               "rows_total":  739
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:34.4644325+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  178,
+                               "spot_poll_status":  "success",
+                               "rows_total":  765
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:39.9763470+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  184,
+                               "spot_poll_status":  "success",
+                               "rows_total":  791
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:46.3961101+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  190,
+                               "spot_poll_status":  "success",
+                               "rows_total":  820
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:52.5778063+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  196,
+                               "spot_poll_status":  "success",
+                               "rows_total":  849
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:23:59.2613968+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  203,
+                               "spot_poll_status":  "success",
+                               "rows_total":  880
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:06.9439037+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  211,
+                               "spot_poll_status":  "success",
+                               "rows_total":  913
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:12.8792010+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  217,
+                               "spot_poll_status":  "success",
+                               "rows_total":  940
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:20.2590516+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  224,
+                               "spot_poll_status":  "success",
+                               "rows_total":  972
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:26.3300551+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  230,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1000
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:32.4299494+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  236,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1028
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:38.2821721+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  242,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1054
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:44.6099235+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  248,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1084
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:50.4799572+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  254,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1109
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:24:56.1748919+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  260,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1135
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:02.4971552+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  266,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1161
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:08.5158882+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  272,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1188
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:14.5743737+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  278,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1215
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:21.4897313+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  285,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1245
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:27.9133511+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  292,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1275
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:34.3113285+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  298,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1304
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:39.8465419+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  304,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1326
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:47.0940177+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  311,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1357
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:25:54.3202232+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  318,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1388
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:01.4602495+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  325,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1419
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:07.7554472+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  332,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1447
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:14.2637932+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  338,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1476
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:20.6426790+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  344,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1500
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:26.4292773+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  350,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1525
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:32.7311157+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  357,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1553
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:39.2597974+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  363,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1584
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:46.1955715+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  370,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1616
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:52.3274114+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  376,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1644
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:26:58.6305874+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  382,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1671
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:05.3764327+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  389,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1701
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:11.3223178+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  395,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1728
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:17.0575095+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  401,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1754
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:23.1397937+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  407,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1783
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:28.3969875+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  412,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1806
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:34.4232197+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  418,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1832
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:40.0749466+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  424,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1856
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:46.5106275+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  430,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1883
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:51.9600079+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  436,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1908
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:27:57.4706750+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  441,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1930
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:03.5898708+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  447,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1956
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:10.5110045+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  454,
+                               "spot_poll_status":  "success",
+                               "rows_total":  1988
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:16.6410437+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  460,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2017
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:22.3586667+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  466,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2043
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:28.7788018+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  473,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2072
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:34.7528071+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  479,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2098
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:42.0628913+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  486,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2132
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:47.5422354+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  491,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2157
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:28:54.5099072+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  498,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2186
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:00.9877049+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  505,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2214
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:06.6093236+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  510,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2239
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:12.6033867+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  516,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2266
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:18.4753719+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  522,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2293
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:25.0395376+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  529,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2322
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:31.4276299+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  535,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2351
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:37.5289601+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  541,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2379
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:44.5057860+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  548,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2411
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:50.6092670+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  554,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2439
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:29:57.0104174+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  561,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2470
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:03.9085977+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  568,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2502
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:12.4898889+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  576,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2537
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:24.0393803+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  588,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2575
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:30.0755117+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  594,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2603
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:35.4217681+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  599,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2627
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:40.6778132+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  604,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2648
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:46.2738898+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  610,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2674
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:52.0418713+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  616,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2699
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:30:57.3433835+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  621,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2724
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:02.6745991+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  626,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2749
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:08.2092219+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  632,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2771
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:13.5452022+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  637,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2796
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:18.9870541+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  643,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2821
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:24.3614975+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  648,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2847
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:29.5913836+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  653,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2872
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:35.0377998+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  659,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2896
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:40.4943043+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  664,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2921
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:45.9446434+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  670,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2946
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:51.3893315+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  675,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2972
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:31:57.1104726+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  681,
+                               "spot_poll_status":  "success",
+                               "rows_total":  2997
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:02.4941436+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  686,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3021
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:08.0940522+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  692,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3042
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:13.6296822+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  697,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3068
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:19.3061310+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  703,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3095
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:24.5713354+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  708,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3120
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:30.0270378+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  714,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3144
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:35.3714674+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  719,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3167
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:41.2992254+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  725,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3195
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:46.6439398+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  730,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3220
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:52.5552263+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  736,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3248
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:32:58.2239820+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  742,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3274
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:03.5121812+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  747,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3298
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:09.1043371+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  753,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3324
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:14.5596003+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  758,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3350
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:20.2237293+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  764,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3377
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:25.5292443+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  769,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3402
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:30.9065876+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  775,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3426
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:36.4544833+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  780,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3452
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:42.3408012+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  786,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3478
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:47.7868632+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  791,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3502
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:53.6251118+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  797,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3528
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:33:59.2758286+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  803,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3552
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:04.8699075+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  809,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3577
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:10.2562822+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  814,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3600
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:17.0744010+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  821,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3632
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:22.6780473+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  826,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3658
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:29.0373886+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  833,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3686
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:34.6682962+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  838,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3708
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:40.9442305+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  845,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3736
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:46.6886094+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  850,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3762
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:52.7202639+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  856,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3791
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:34:59.2239290+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  863,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3820
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:35:04.7190127+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  868,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3842
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:35:11.4716839+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  875,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3871
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:35:17.6711973+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  881,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3900
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:35:24.1906024+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  888,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3930
+                           },
+                           {
+                               "time_iso":  "2026-07-11T14:35:30.6916300+00:00",
+                               "health_ok":  true,
+                               "driver_connected":  true,
+                               "spot_poll_seq":  894,
+                               "spot_poll_status":  "success",
+                               "rows_total":  3958
+                           }
+                       ],
+    "spot_errors":  [
+
+                    ],
+    "base_pass":  false,
+    "diagnostics_pass":  true,
+    "evidence_captured":  false,
+    "evidence_preservation":  {
+                                  "schema_version":  "spot-server-validation-evidence-preservation-v1",
+                                  "source_file_name":  "spot-device-evidence-15min-20260711-233544.json",
+                                  "source_size_bytes":  98919,
+                                  "source_sha256":  "68ff989c4ac98fc7cf96712ad2ca12e3065e222b28d4dfec59343a70dc221cd4",
+                                  "sanitized_at_utc":  "2026-07-11T14:48:52.8667631+00:00",
+                                  "sanitized_fields":  [
+                                                           "fact_file",
+                                                           "start_health.driver_last_error",
+                                                           "start_health.executable_path",
+                                                           "start_health.frontend_dist_path",
+                                                           "start_health.frontend_resolution_candidates[*].path",
+                                                           "end_health.executable_path",
+                                                           "end_health.frontend_dist_path",
+                                                           "end_health.frontend_resolution_candidates[*].path"
+                                                       ],
+                                  "validation_conclusion":  "PASS_WITH_STARTUP_COUNTER_BOUNDARY",
+                                  "conclusion_basis":  [
+                                                           "900/900 observation fact polls async_complete",
+                                                           "0 signalpc parse errors",
+                                                           "0 image errors",
+                                                           "0 Temperature poll failures",
+                                                           "0 fact write failures",
+                                                           "0 observation fact link failures",
+                                                           "10 row-level diagnostics missing counts attributed to startup/counter boundary"
+                                                       ]
+                              }
+}
