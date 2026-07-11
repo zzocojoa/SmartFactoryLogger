@@ -2,6 +2,22 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.12] - 2026-07-12
+
+### Security
+
+- Updated Vite and Vitest within their current release lines to include Windows
+  path handling and test API security fixes.
+- Pinned python-multipart 0.0.32 and Pillow 12.3.0 so backend and packaged builds
+  use the reviewed parser and image-decoder security floors.
+- Moved the Electron runtime to the smallest currently supported stable line and
+  updated electron-builder to its audited remediation release.
+
+### Packaging
+
+- Bumped desktop and frontend release metadata to 1.0.12 for an independently
+  identifiable PyInstaller, portable, and NSIS build.
+
 ## [1.0.11] - 2026-06-01
 
 ### For contributors

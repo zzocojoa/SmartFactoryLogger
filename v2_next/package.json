@@ -1,6 +1,6 @@
 {
   "name": "smart-factory-logger-v2",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Smart Factory Logger V2 Dashboard",
   "main": "main.js",
   "scripts": {
@@ -21,8 +21,8 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^33.2.1",
-    "electron-builder": "^24.13.3",
+    "electron": "^41.10.1",
+    "electron-builder": "^26.15.3",
     "playwright": "^1.60.0"
   },
   "dependencies": {
