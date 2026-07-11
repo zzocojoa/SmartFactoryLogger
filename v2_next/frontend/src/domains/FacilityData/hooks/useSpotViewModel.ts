@@ -354,10 +354,25 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           const nextImageState = {
             ...imageStateRef.current,
             imageError: error.message,
+            metadata: latestResponseMetadata ?? imageStateRef.current.metadata,
           };
           imageStateRef.current = nextImageState;
           setImageError(error.message);
           setMetadata(nextImageState.metadata);
+          syncDashboardSpotImageState(
+            nextImageState.imageUrl,
+            false,
+            error.message,
+            nextImageState.lastSuccessAt,
+            nextImageState.metadata
+          );
+          setDiagnostics((prev) => ({
+            ...prev,
+            error_count: prev.error_count + 1,
+            last_image_status: 'error',
+            last_image_source: nextImageState.metadata?.source ?? prev.last_image_source,
+            last_image_latency_ms: nextImageState.metadata?.latency_ms ?? prev.last_image_latency_ms,
+          }));
           return;
         }
         console.error('Image fetch failed', error);
@@ -380,6 +395,9 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         setDiagnostics((prev) => ({
           ...prev,
           error_count: prev.error_count + 1,
+          last_image_status: 'error',
+          last_image_source: nextImageState.metadata?.source ?? prev.last_image_source,
+          last_image_latency_ms: nextImageState.metadata?.latency_ms ?? prev.last_image_latency_ms,
         }));
       } finally {
         const completedAt = Date.now();

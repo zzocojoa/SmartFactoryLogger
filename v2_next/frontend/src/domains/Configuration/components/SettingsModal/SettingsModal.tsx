@@ -192,6 +192,7 @@ export interface SettingsModalProps {
   spotImageLoading: boolean;
   handleSpotImageLoaded: (displayedImageUrl?: string) => void;
   handleSpotImageError: (displayedImageUrl?: string) => void;
+  handleSpotImageRetry: () => void;
   spotLastSuccessAt: number | null;
   spotImageMetadata: SpotImageResponseMetadata | null;
   spotDiagnostics: SpotPollingDiagnostics;
@@ -350,6 +351,7 @@ export function SettingsModal(props: SettingsModalProps) {
     spotImageLoading,
     handleSpotImageLoaded,
     handleSpotImageError,
+    handleSpotImageRetry,
     spotLastSuccessAt,
     spotImageMetadata,
     spotDiagnostics,
@@ -1738,6 +1740,16 @@ export function SettingsModal(props: SettingsModalProps) {
                               return <span className="settings-spot-badge error">{STATUS.ERROR}</span>;
                             })()}
                           </div>
+                          {spotImageError && (
+                            <button
+                              type="button"
+                              className="settings-action secondary"
+                              disabled={spotImageLoading}
+                              onClick={handleSpotImageRetry}
+                            >
+                              {LABELS.RETRY}
+                            </button>
+                          )}
                           <div className="settings-spot-meta">
                             <span>{LABELS.LAST_RECEIVE}: {spotLastSuccessAt ? new Date(spotLastSuccessAt).toLocaleTimeString() : LABELS.NOT_RECEIVED}</span>
                             <span>URL: {spotConfig?.image_url ?? (settingsForm.spotIp ? `http://${settingsForm.spotIp}/image.jpg` : '-')}</span>

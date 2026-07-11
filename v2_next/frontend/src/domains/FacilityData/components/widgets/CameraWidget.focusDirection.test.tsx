@@ -116,6 +116,24 @@ describe('CameraComponent focus direction controls', () => {
     expect(handleImageError).toHaveBeenCalledTimes(1);
   });
 
+  it('exposes an explicit retry action when the shared image state has an error', () => {
+    const retryImage = vi.fn();
+    useDashboardStore.setState({
+      spotConfig: buildSpotConfig(),
+      spotImageUrl: 'blob:last-valid-spot-image',
+      spotImageLoading: false,
+      spotImageError: 'SPOT image upstream request failed.',
+      spotLastSuccessAt: Date.now(),
+      spotImageMetadata: buildSpotImageMetadata(),
+    });
+
+    render(<CameraComponent focusBusy={false} onSpotImageRetry={retryImage} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /retry spot camera image/i }));
+
+    expect(retryImage).toHaveBeenCalledTimes(1);
+  });
+
   it('uses finite crosshair geometry when the SPOT config response is missing SVG fields', () => {
     useDashboardStore.setState({
       spotConfig: {

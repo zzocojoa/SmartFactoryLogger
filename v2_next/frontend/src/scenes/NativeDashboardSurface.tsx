@@ -31,6 +31,7 @@ type NativeDashboardSurfaceProps = {
   layoutRef: MutableRefObject<LayoutMap>;
   onSpotImageLoaded: (displayedImageUrl?: string) => void;
   onSpotImageError: (displayedImageUrl?: string) => void;
+  onSpotImageRetry: () => void;
   requestFocus: (steps: number) => void;
   focusBusy: boolean;
   onTimeSeriesVisible: () => void;
@@ -183,6 +184,7 @@ const renderWidget = (
   item: DashboardItem,
   onSpotImageLoaded: (displayedImageUrl?: string) => void,
   onSpotImageError: (displayedImageUrl?: string) => void,
+  onSpotImageRetry: () => void,
   requestFocus: (steps: number) => void,
   focusBusy: boolean
 ): JSX.Element => {
@@ -204,6 +206,7 @@ const renderWidget = (
         <CameraComponent
           onSpotImageLoaded={onSpotImageLoaded}
           onSpotImageError={onSpotImageError}
+          onSpotImageRetry={onSpotImageRetry}
           requestFocus={requestFocus}
           focusBusy={focusBusy}
         />
@@ -235,6 +238,7 @@ const NativeDashboardSurfaceComponent = ({
   layoutRef,
   onSpotImageLoaded,
   onSpotImageError,
+  onSpotImageRetry,
   requestFocus,
   focusBusy,
   onTimeSeriesVisible,
@@ -284,7 +288,7 @@ const NativeDashboardSurfaceComponent = ({
             onTimeSeriesVisible={onTimeSeriesVisible}
             renderContent={() => (
               <Suspense fallback={<div className="widget-loading">{WIDGET_FALLBACK_TEXT}</div>}>
-                {renderWidget(item, onSpotImageLoaded, onSpotImageError, requestFocus, focusBusy)}
+                {renderWidget(item, onSpotImageLoaded, onSpotImageError, onSpotImageRetry, requestFocus, focusBusy)}
               </Suspense>
             )}
           />

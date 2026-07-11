@@ -109,7 +109,7 @@ describe('useSpotViewModel integration', () => {
     mockControlSpotFocus.mockReset();
   });
 
-  it('does not call setSpotImageState when spot image fetch payload is rejected', async () => {
+  it('publishes payload rejection to shared state and recovers through explicit retry', async () => {
     const originalCreateObjectURL = global.URL.createObjectURL;
     const originalRevokeObjectURL = global.URL.revokeObjectURL;
     global.URL.createObjectURL = vi.fn(() => 'blob:mocked-spot-image');
@@ -126,6 +126,7 @@ describe('useSpotViewModel integration', () => {
     mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
     mockFetchSpotImageResponse.mockResolvedValueOnce(buildValidJpegResponse());
     mockFetchSpotImageResponse.mockResolvedValueOnce(buildRejectionResponse());
+    mockFetchSpotImageResponse.mockResolvedValueOnce(buildValidJpegResponse());
 
     const { result, unmount } = renderHook(() => useSpotViewModel());
 
@@ -142,7 +143,7 @@ describe('useSpotViewModel integration', () => {
         await result.current.refreshImage();
       });
 
-      expect(setSpotImageStateMock).toHaveBeenCalledTimes(2);
+      expect(setSpotImageStateMock).toHaveBeenCalledTimes(3);
       expect(setSpotImageStateMock).toHaveBeenNthCalledWith(
         1,
         '',
@@ -161,14 +162,24 @@ describe('useSpotViewModel integration', () => {
           source: 'camera',
         }),
       );
-      const [nextImageUrl, nextImageLoading, nextImageError] =
-        setSpotImageStateMock.mock.calls[1];
+      const [nextImageUrl, nextImageLoading, nextImageError] = setSpotImageStateMock.mock.calls[1];
       expect(nextImageUrl).toContain('blob:');
       expect(nextImageLoading).toBe(false);
       expect(nextImageError).toBeNull();
+      expect(setSpotImageStateMock).toHaveBeenNthCalledWith(
+        3,
+        nextImageUrl,
+        false,
+        expect.stringContaining('payload rejected'),
+        expect.any(Number),
+        expect.objectContaining({
+          source: 'camera',
+        })
+      );
       const errorStateCalls = setSpotImageStateMock.mock.calls.filter(([, ,imageError]) => imageError !== null);
-      expect(errorStateCalls).toHaveLength(0);
+      expect(errorStateCalls).toHaveLength(1);
       expect(result.current.imageError).toBeTruthy();
+      expect(result.current.diagnostics.error_count).toBe(1);
       expect(consoleErrorMock).toHaveBeenCalledWith(
         'Spot image payload validation failed',
         expect.objectContaining({
@@ -177,6 +188,23 @@ describe('useSpotViewModel integration', () => {
           responseStatus: 502,
         })
       );
+
+      await act(async () => {
+        await result.current.refreshImage();
+      });
+
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(3);
+      expect(setSpotImageStateMock).toHaveBeenCalledTimes(4);
+      expect(setSpotImageStateMock).toHaveBeenLastCalledWith(
+        expect.stringContaining('blob:'),
+        false,
+        null,
+        expect.any(Number),
+        expect.objectContaining({
+          source: 'camera',
+        })
+      );
+      expect(result.current.imageError).toBeNull();
     } finally {
       unmount();
       mockFetchSpotConfig.mockReset();
@@ -188,6 +216,43 @@ describe('useSpotViewModel integration', () => {
         ...useDashboardStore.getState(),
         setSpotImageState: originalSetSpotImageState,
       });
+    }
+  });
+
+  it('clears shared loading state when the first image payload is rejected', async () => {
+    const consoleErrorMock = vi.spyOn(console, 'error').mockImplementation((): void => undefined);
+    useDashboardStore.setState({
+      spotImageUrl: '',
+      spotImageLoading: false,
+      spotImageError: null,
+      spotLastSuccessAt: null,
+      spotImageMetadata: null,
+    });
+    mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
+    mockFetchSpotImageResponse.mockResolvedValueOnce(buildRejectionResponse());
+
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+
+    try {
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      await act(async () => {
+        await result.current.refreshImage();
+      });
+
+      const sharedImageState = useDashboardStore.getState();
+      expect(sharedImageState.spotImageUrl).toBe('');
+      expect(sharedImageState.spotImageLoading).toBe(false);
+      expect(sharedImageState.spotImageError).toContain('payload rejected');
+      expect(sharedImageState.spotLastSuccessAt).toBeNull();
+      expect(result.current.imageLoading).toBe(false);
+      expect(result.current.diagnostics.error_count).toBe(1);
+    } finally {
+      unmount();
+      mockFetchSpotConfig.mockReset();
+      mockFetchSpotImageResponse.mockReset();
+      consoleErrorMock.mockRestore();
     }
   });
 

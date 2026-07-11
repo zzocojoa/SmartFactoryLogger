@@ -1452,6 +1452,103 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(removed_live.status_code, 404)
         self.assertEqual(removed_proxy.status_code, 404)
 
+    def test_official_image_bridge_reports_missing_configuration(self) -> None:
+        from backend import app as backend_app
+
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "fetch_image_async",
+                AsyncMock(side_effect=spot_api.SpotImageConfigError("")),
+            ),
+            patch.object(backend_app.spot_control, "get_spot_diagnostics", return_value={"image_status": "idle"}),
+            patch.object(backend_app.observability_service, "record_spot_image_result") as result_mock,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"]["code"], "config-missing")
+        self.assertEqual(response.json()["detail"]["diagnostics"], {"image_status": "idle"})
+        result_mock.assert_called_once_with(404)
+
+    def test_official_image_bridge_marks_payload_rejection(self) -> None:
+        from backend import app as backend_app
+
+        error = spot_api.SpotImageFetchError(
+            "invalid-image-html",
+            "SPOT image upstream returned HTML",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=200,
+        )
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(side_effect=error)),
+            patch.object(backend_app.spot_control, "get_spot_diagnostics", return_value={"image_status": "error"}),
+            patch.object(backend_app.observability_service, "record_error") as error_mock,
+            patch.object(backend_app.observability_service, "record_spot_image_result") as result_mock,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.headers["x-spot-payload-rejection"], "1")
+        self.assertEqual(response.json()["detail"]["code"], "invalid-image-html")
+        self.assertEqual(response.json()["detail"]["upstream_status"], 200)
+        error_mock.assert_called_once()
+        self.assertEqual(error_mock.call_args.kwargs["error_type"], "invalid-image-html")
+        self.assertEqual(error_mock.call_args.kwargs["level"], "warning")
+        result_mock.assert_called_once_with(502)
+
+    def test_official_image_bridge_reports_upstream_failure_without_rejection_header(self) -> None:
+        from backend import app as backend_app
+
+        error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "SPOT image upstream timed out",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=None,
+        )
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(side_effect=error)),
+            patch.object(backend_app.spot_control, "get_spot_diagnostics", return_value={"image_status": "error"}),
+            patch.object(backend_app.observability_service, "record_error") as error_mock,
+            patch.object(backend_app.observability_service, "record_spot_image_result") as result_mock,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn("x-spot-payload-rejection", response.headers)
+        self.assertEqual(response.json()["detail"]["code"], "upstream-timeout")
+        self.assertIsNone(response.json()["detail"]["upstream_status"])
+        error_mock.assert_called_once()
+        self.assertEqual(error_mock.call_args.kwargs["error_type"], "upstream-timeout")
+        self.assertEqual(error_mock.call_args.kwargs["level"], "error")
+        result_mock.assert_called_once_with(502)
+
+    def test_official_image_bridge_reports_unexpected_failure(self) -> None:
+        from backend import app as backend_app
+
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "fetch_image_async",
+                AsyncMock(side_effect=RuntimeError("simulated bridge failure")),
+            ),
+            patch.object(backend_app.spot_control, "get_spot_diagnostics", return_value={"image_status": "error"}),
+            patch.object(backend_app.observability_service, "record_error") as error_mock,
+            patch.object(backend_app.observability_service, "record_spot_image_result") as result_mock,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"]["code"], "unknown")
+        self.assertEqual(response.json()["detail"]["message"], "Unexpected SPOT image bridge error.")
+        error_mock.assert_called_once()
+        self.assertEqual(error_mock.call_args.kwargs["error_type"], "RuntimeError")
+        result_mock.assert_called_once_with(502)
+
     def test_move_focus_uses_ametek_focus_control_endpoint(self) -> None:
         spot_api.config.SPOT_FOCUS_URL = "http://spot.local/control?p=focus"
         spot_api.config.SPOT_FOCUS_STEP = 50

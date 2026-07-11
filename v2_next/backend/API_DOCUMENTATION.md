@@ -843,7 +843,7 @@ SPOT 카메라 위젯 설정을 가져옵니다.
 
 ```json
 {
-    "image_url": "http://192.168.1.102/image.jpg",
+    "image_url": "/api/spot/image.jpg",
     "refresh_interval": 1000,
     "crosshair_x": 50,
     "crosshair_y": 50,

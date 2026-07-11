@@ -18,6 +18,7 @@ const DEFAULT_CROSSHAIR_THICKNESS = 2;
 interface CameraComponentProps {
   onSpotImageLoaded?: (displayedImageUrl?: string) => void;
   onSpotImageError?: (displayedImageUrl?: string) => void;
+  onSpotImageRetry?: () => void;
   requestFocus?: (steps: number) => void;
   focusBusy?: boolean;
 }
@@ -124,6 +125,16 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
         )}
       </div>
       <div className="camera-controls" style={{ marginTop: '4px' }}>
+        {spotImageError && (
+          <button
+            type="button"
+            disabled={spotImageLoading || !props.onSpotImageRetry}
+            aria-label="Retry SPOT camera image"
+            onClick={() => props.onSpotImageRetry?.()}
+          >
+            {LABELS.RETRY}
+          </button>
+        )}
         <button
           type="button"
           disabled={focusDisabled}

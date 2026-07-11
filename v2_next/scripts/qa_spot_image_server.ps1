@@ -69,6 +69,7 @@ function Invoke-HttpProbe {
         [switch]$IncludeBodyText
     )
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $response = $null
     try {
         $response = $httpClient.GetAsync($Uri).GetAwaiter().GetResult()
         $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
@@ -98,6 +99,10 @@ function Invoke-HttpProbe {
             body_bytes = 0
             body_text = $null
             error = $_.Exception.Message
+        }
+    } finally {
+        if ($null -ne $response) {
+            $response.Dispose()
         }
     }
 }

@@ -29,6 +29,7 @@ type DashboardSceneSurfaceProps = {
   layoutRef: React.MutableRefObject<LayoutMap>;
   onSpotImageLoaded: (displayedImageUrl?: string) => void;
   onSpotImageError: (displayedImageUrl?: string) => void;
+  onSpotImageRetry: () => void;
   requestFocus: (steps: number) => void;
   focusBusy: boolean;
 };
@@ -36,6 +37,7 @@ type DashboardSceneSurfaceProps = {
 type CameraWidgetProps = {
   onSpotImageLoaded: (displayedImageUrl?: string) => void;
   onSpotImageError: (displayedImageUrl?: string) => void;
+  onSpotImageRetry: () => void;
   requestFocus: (steps: number) => void;
   focusBusy: boolean;
 };
@@ -96,6 +98,7 @@ export const DashboardSceneSurface = ({
   layoutRef,
   onSpotImageLoaded,
   onSpotImageError,
+  onSpotImageRetry,
   requestFocus,
   focusBusy,
 }: DashboardSceneSurfaceProps): JSX.Element => {
@@ -103,10 +106,11 @@ export const DashboardSceneSurface = ({
     () => ({
       onSpotImageLoaded,
       onSpotImageError,
+      onSpotImageRetry,
       requestFocus,
       focusBusy,
     }),
-    [onSpotImageLoaded, onSpotImageError, requestFocus, focusBusy]
+    [onSpotImageLoaded, onSpotImageError, onSpotImageRetry, requestFocus, focusBusy]
   );
 
   const scene = useMemo(() => {
