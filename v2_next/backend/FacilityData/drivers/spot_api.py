@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, TypedDict
+from typing import Any, Callable, Dict, Optional, TypeVar, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -74,6 +74,7 @@ _SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
 _SPOT_RUNTIME_GIT_COMMIT = resolve_runtime_git_commit()
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
 _img_fetch_lock = asyncio.Lock()
+_spot_device_request_lock = asyncio.Lock()
 _img_last_error = 0.0
 _img_failure_count = 0
 _img_last_error_code: Optional[str] = None
@@ -729,8 +730,9 @@ def _spot_configuration_snapshot() -> Dict[str, Any]:
 
 async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str) -> tuple[str, str]:
     url = _resolve_spot_output_url(param)
-    response = await client.get(url)
-    response.raise_for_status()
+    async with _spot_device_request_lock:
+        response = await client.get(url)
+        response.raise_for_status()
     return param, response.text.strip()[:_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS]
 
 
@@ -784,10 +786,12 @@ async def _refresh_spot_diagnostics(
     global _spot_diagnostics_last_error_message
     global _spot_diagnostics_snapshot
 
-    results = await asyncio.gather(
-        *(_request_spot_diagnostic_output(client, param) for param in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS),
-        return_exceptions=True,
-    )
+    results: list[tuple[str, str] | BaseException] = []
+    for param in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS:
+        try:
+            results.append(await _request_spot_diagnostic_output(client, param))
+        except Exception as exc:
+            results.append(exc)
     payload: Dict[str, Any] = {}
     errors: list[str] = []
     field_status: dict[str, str] = {}
@@ -875,8 +879,9 @@ async def _refresh_spot_diagnostics_safely(
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
     try:
-        response = await client.get(image_url)
-        response.raise_for_status()
+        async with _spot_device_request_lock:
+            response = await client.get(image_url)
+            response.raise_for_status()
     except httpx.TimeoutException as exc:
         raise SpotImageFetchError(
             "upstream-timeout",
@@ -920,13 +925,16 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
         )
     _validate_spot_image_response(response, image_url, data)
     return data
+
+
 async def _request_spot_temperature_observation(
     client: httpx.AsyncClient,
     temp_url: str,
 ) -> tuple[float, SpotRawClassification]:
     try:
-        response = await client.get(temp_url)
-        response.raise_for_status()
+        async with _spot_device_request_lock:
+            response = await client.get(temp_url)
+            response.raise_for_status()
     except httpx.TimeoutException as exc:
         classification = classify_spot_raw_response(
             poll_status=SpotPollStatus.TIMEOUT,
@@ -2193,6 +2201,35 @@ def move_focus(steps: int) -> Dict[str, Any]:
         }
 
 
+_SerializedResult = TypeVar("_SerializedResult")
+
+
+async def _run_spot_device_sync_operation(
+    operation: Callable[[int], _SerializedResult],
+    value: int,
+) -> _SerializedResult:
+    async with _spot_device_request_lock:
+        operation_task = asyncio.create_task(asyncio.to_thread(operation, value))
+        try:
+            return await asyncio.shield(operation_task)
+        except asyncio.CancelledError:
+            try:
+                await operation_task
+            except Exception as exc:
+                _logger.warning(
+                    "SPOT control operation failed after caller cancellation",
+                    extra={
+                        "operation": getattr(operation, "__name__", operation.__class__.__name__),
+                        "error": _format_exception_message(exc),
+                    },
+                )
+            raise
+
+
+async def move_focus_serialized(steps: int) -> Dict[str, Any]:
+    return await _run_spot_device_sync_operation(move_focus, steps)
+
+
 def _resolve_spot_actuator_url() -> str:
     actuator_url = str(config.SPOT_ACTUATOR_URL or "").strip()
     if not actuator_url:
@@ -2319,3 +2356,7 @@ def move_actuator(steps: int) -> Dict[str, Any]:
             "request_steps": steps,
             "actuator_step": config.SPOT_ACTUATOR_STEP,
         }
+
+
+async def move_actuator_serialized(steps: int) -> Dict[str, Any]:
+    return await _run_spot_device_sync_operation(move_actuator, steps)

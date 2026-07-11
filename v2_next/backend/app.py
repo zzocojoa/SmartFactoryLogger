@@ -2732,9 +2732,9 @@ def spot_config():
     }
 
 @app.post("/api/spot/focus")
-def spot_focus(steps: int = 0):
+async def spot_focus(steps: int = 0):
     try:
-        return _spot_focus_response(spot_control.move_focus(steps))
+        return _spot_focus_response(await spot_control.move_focus_serialized(steps))
     except spot_control.SpotFocusControlError as exc:
         if exc.upstream_status in {401, 403}:
             raise HTTPException(status_code=exc.upstream_status, detail=str(exc)) from exc
@@ -2750,9 +2750,9 @@ def spot_focus(steps: int = 0):
 
 
 @app.post("/api/spot/actuator")
-def spot_actuator(payload: SpotActuatorRequest):
+async def spot_actuator(payload: SpotActuatorRequest):
     try:
-        return spot_control.move_actuator(payload.step)
+        return await spot_control.move_actuator_serialized(payload.step)
     except spot_control.SpotActuatorControlError as exc:
         if exc.upstream_status in {401, 403}:
             raise HTTPException(status_code=exc.upstream_status, detail=str(exc)) from exc

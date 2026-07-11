@@ -92,6 +92,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.reset_spot_state()
 
     def reset_spot_state(self) -> None:
+        spot_api._spot_device_request_lock = asyncio.Lock()
         spot_api._temperature_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._internal_temp_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._img_last_error = 0.0
@@ -397,38 +398,32 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("http://spot.local/output?p=itemperature", requests)
         self.assertIn("http://spot.local/output?p=appnumber", requests)
 
-    async def test_scheduled_diagnostics_share_poll_identity_when_completed_before_publish(self) -> None:
+    async def test_serialized_scheduled_diagnostics_bind_to_next_poll(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
-        diagnostics_completed = asyncio.Event()
-        original_refresh = spot_api._refresh_spot_diagnostics_safely
 
         async def handler(request: httpx.Request) -> httpx.Response:
             if str(request.url).endswith("p=temperature"):
-                await asyncio.wait_for(diagnostics_completed.wait(), timeout=1.0)
                 return httpx.Response(200, text="450.0", request=request)
             return httpx.Response(200, text="0", request=request)
 
-        async def refresh_and_signal(*args: Any, **kwargs: Any) -> None:
-            await original_refresh(*args, **kwargs)
-            diagnostics_completed.set()
-
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            with patch.object(
-                spot_api,
-                "_refresh_spot_diagnostics_safely",
-                side_effect=refresh_and_signal,
-            ):
-                await spot_api._refresh_spot_temperature(client, schedule_diagnostics=True)
-                task = spot_api._spot_diagnostics_task
-                if task is not None:
-                    await task
+            await spot_api._refresh_spot_temperature(client, schedule_diagnostics=True)
+            first_snapshot = spot_api.get_spot_temperature_poll_snapshot()
+            task = spot_api._spot_diagnostics_task
+            if task is not None:
+                await task
+            await spot_api._refresh_spot_temperature(client)
 
         snapshot = spot_api.get_spot_temperature_poll_snapshot()
+        self.assertIsNotNone(first_snapshot)
+        assert first_snapshot is not None
+        self.assertEqual(first_snapshot["diagnostics_capture_status"], "missing")
         self.assertIsNotNone(snapshot)
         assert snapshot is not None
         self.assertEqual(snapshot["diagnostics_capture_status"], "async_complete")
-        self.assertEqual(snapshot["diagnostics_binding_status"], "same_poll")
-        self.assertEqual(snapshot["diagnostics_source_poll_seq"], snapshot["spot_poll_seq"])
+        self.assertEqual(snapshot["diagnostics_binding_status"], "previous_poll")
+        self.assertEqual(snapshot["diagnostics_source_poll_seq"], 1)
+        self.assertEqual(snapshot["spot_poll_seq"], 2)
         self.assertRegex(snapshot["diagnostics_snapshot_id"], r":diag:[1-9][0-9]*$")
         self.assertGreaterEqual(float(snapshot["diagnostics_age_ms"]), 0.0)
         captured_monotonic = float(snapshot["_diagnostics_captured_monotonic"])
@@ -499,7 +494,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["diagnostics_field_status"]["d1temperature"], "http_error")
         self.assertIn("d1temperature", snapshot["diagnostics_missing_fields"])
 
-    async def test_diagnostics_failure_does_not_change_temperature_poll_status(self) -> None:
+    async def test_serialized_diagnostics_failure_does_not_change_temperature_poll_status(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
 
         async def handler(request: httpx.Request) -> httpx.Response:
@@ -519,12 +514,16 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         assert snapshot is not None
         self.assertEqual(snapshot["spot_poll_status"], "success")
         self.assertEqual(snapshot["spot_raw_validity"], "valid_temperature")
-        self.assertEqual(snapshot["diagnostics_capture_status"], "error")
-        self.assertEqual(snapshot["diagnostics_binding_status"], "same_poll")
+        self.assertEqual(snapshot["diagnostics_capture_status"], "missing")
+        self.assertEqual(snapshot["diagnostics_binding_status"], "missing")
+        with spot_api._spot_diagnostics_lock:
+            diagnostics = dict(spot_api._spot_diagnostics_snapshot or {})
+        self.assertEqual(diagnostics["diagnostics_capture_status"], "error")
+        self.assertEqual(diagnostics["diagnostics_source_poll_seq"], snapshot["spot_poll_seq"])
         self.assertTrue(
             all(
                 status == "http_error"
-                for status in snapshot["diagnostics_field_status"].values()
+                for status in diagnostics["diagnostics_field_status"].values()
             )
         )
 
@@ -1307,6 +1306,89 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request_mock.await_count, 2)
         self.assertEqual(maximum_active_requests, 1)
 
+    async def test_all_spot_device_http_requests_are_serialized(self) -> None:
+        active_requests = 0
+        maximum_active_requests = 0
+        image_bytes = b"\xff\xd8serialized-device-image\xff\xd9"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal active_requests, maximum_active_requests
+            active_requests += 1
+            maximum_active_requests = max(maximum_active_requests, active_requests)
+            try:
+                await asyncio.sleep(0.005)
+                if request.url.path == "/image.jpg":
+                    return httpx.Response(
+                        200,
+                        content=image_bytes,
+                        headers={"Content-Type": "image/jpeg"},
+                        request=request,
+                    )
+                if request.url.params.get("p") == "temperature":
+                    return httpx.Response(200, text="450.0", request=request)
+                return httpx.Response(200, text="0", request=request)
+            finally:
+                active_requests -= 1
+
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=9,
+            started_at_epoch=time.time(),
+            started_monotonic=time.monotonic(),
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            image, temperature, _diagnostics = await asyncio.gather(
+                spot_api._request_spot_image(client, "http://spot.local/image.jpg"),
+                spot_api._request_spot_temperature(client, "http://spot.local/output?p=temperature"),
+                spot_api._refresh_spot_diagnostics(client, context),
+            )
+
+        self.assertEqual(image, image_bytes)
+        self.assertEqual(temperature, 450.0)
+        self.assertEqual(maximum_active_requests, 1)
+        with spot_api._spot_diagnostics_lock:
+            diagnostics = dict(spot_api._spot_diagnostics_snapshot or {})
+        self.assertEqual(diagnostics["diagnostics_capture_status"], "async_complete")
+        self.assertEqual(diagnostics["diagnostics_source_poll_seq"], 9)
+
+    async def test_cancelled_focus_keeps_device_gate_until_worker_finishes(self) -> None:
+        focus_started = threading.Event()
+        release_focus = threading.Event()
+        image_started = asyncio.Event()
+        image_bytes = b"\xff\xd8post-focus-image\xff\xd9"
+
+        def slow_focus(steps: int) -> dict[str, Any]:
+            self.assertEqual(steps, 1)
+            focus_started.set()
+            if not release_focus.wait(timeout=1.0):
+                self.fail("Timed out waiting to release focus operation")
+            return {"status": "ok"}
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            image_started.set()
+            return httpx.Response(
+                200,
+                content=image_bytes,
+                headers={"Content-Type": "image/jpeg"},
+                request=request,
+            )
+
+        with patch.object(spot_api, "move_focus", side_effect=slow_focus):
+            focus_task = asyncio.create_task(spot_api.move_focus_serialized(1))
+            self.assertTrue(await asyncio.to_thread(focus_started.wait, 1.0))
+            focus_task.cancel()
+
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+                image_task = asyncio.create_task(
+                    spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+                )
+                await asyncio.sleep(0.01)
+                self.assertFalse(image_started.is_set())
+                release_focus.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await focus_task
+                self.assertEqual(await image_task, image_bytes)
+
     def test_only_official_image_bridge_route_is_registered(self) -> None:
         from backend import app as backend_app
 
@@ -1652,7 +1734,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch.object(backend_app.spot_control, "move_focus", Mock(side_effect=focus_error)),
+            patch.object(
+                backend_app.spot_control,
+                "move_focus_serialized",
+                AsyncMock(side_effect=focus_error),
+            ),
         ):
             client = TestClient(backend_app.app, raise_server_exceptions=False)
             try:
@@ -1669,8 +1755,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(
                 backend_app.spot_control,
-                "move_focus",
-                Mock(side_effect=RuntimeError("SPOT_FOCUS_URL is not configured")),
+                "move_focus_serialized",
+                AsyncMock(side_effect=RuntimeError("SPOT_FOCUS_URL is not configured")),
             ),
         ):
             client = TestClient(backend_app.app, raise_server_exceptions=False)
@@ -1692,7 +1778,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch.object(backend_app.spot_control, "move_focus", Mock(side_effect=focus_error)),
+            patch.object(
+                backend_app.spot_control,
+                "move_focus_serialized",
+                AsyncMock(side_effect=focus_error),
+            ),
         ):
             client = TestClient(backend_app.app, raise_server_exceptions=False)
             try:
@@ -1702,6 +1792,33 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertIn("HTTP 403", response.json()["detail"])
+
+    def test_spot_actuator_route_uses_serialized_operation(self) -> None:
+        from backend import app as backend_app
+
+        result = {
+            "status": "ok",
+            "current": 500,
+            "new": 550,
+            "verified": 550,
+            "request_steps": 1,
+            "actuator_step": 50,
+        }
+        actuator_mock = AsyncMock(return_value=result)
+        with patch.object(
+            backend_app.spot_control,
+            "move_actuator_serialized",
+            actuator_mock,
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                response = client.post("/api/spot/actuator", json={"step": 1})
+            finally:
+                client.close()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), result)
+        actuator_mock.assert_awaited_once_with(1)
 
 
 if __name__ == "__main__":

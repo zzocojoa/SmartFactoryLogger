@@ -1,80 +1,91 @@
 # Gap Analysis: spot-camera-rest-api-conformance
 
-> Date: 2026-07-11 | Design: docs/02-design/features/spot-camera-rest-api-conformance.design.md
+> Date: 2026-07-11 | Design: `docs/02-design/features/spot-camera-rest-api-conformance.design.md`
 
 ---
 
-## Match Rate: 92%
+## Match Rate: 96%
 
 ## Summary
 
-설계의 런타임 항목 22개는 모두 구현됐다. 남은 2개 gap은 clean commit이
-필요한 PyInstaller/NSIS 패키지 검증과 실장비 서버의 장시간 운영 관찰이다.
-개발 컴퓨터에서 수행 가능한 정적 검사, 전체 health, production frontend
-build, 단일 경로 API 및 완료 기반 UI 회귀 테스트는 통과했다.
+설계 항목 25개 중 개발 PC에서 검증 가능한 24개를 구현했다. 공식 SPOT REST API의
+`GET /image.jpg` 단일 경로, 완료 기반 UI polling, Dashboard/설정 화면 공통 transport에
+더해, 이미지·온도·진단·focus·actuator의 장비 전체 요청을 하나의 fair async lock으로
+직렬화했다.
+
+서버 실장비에서 direct `/image.jpg`는 60초 동안 2,014/2,014 성공했으나 기존 앱은 같은
+기간에 `502 upstream-timeout` 1건을 기록했다. 동시에 diagnostics에서 여러 output timeout이
+관찰되어, 장비 요청 경합을 원인으로 판단했다. 이번 iteration은 HTTP timeout을 늘리거나 UI
+간격을 임의 조정하지 않고 장비 단위 동시 요청 수를 1로 제한한다.
+
+남은 항목은 새 clean package를 서버 컴퓨터에 설치한 뒤 최소 15분 동안 실장비로 검증하는
+운영 AC 하나다. 이 검증 전에는 PDCA를 완료 처리하지 않는다.
 
 ## Implemented Items
 
-- [x] 장비 URL은 `SPOT_IP`에서 `http://{SPOT_IP}/image.jpg`로만 생성된다.
-- [x] `SPOT_IMAGE_URL`, `SPOT_LIVE_IMAGE_URL`, `imageurl`, `liveimageurl`
-      런타임 override가 제거됐다.
-- [x] 기존 설정 파일의 `imageurl` 및 `liveimageurl`은 저장/기동 시 제거된다.
-- [x] 장비 응답은 JPEG signature로 검증되고 HTML·빈 body·비 JPEG는 거부된다.
-- [x] backend image cache, stale response, alternate path, retry backoff 및 image
-      prefetch가 제거됐다.
-- [x] backend upstream 요청은 async lock으로 single-flight가 보장된다.
-- [x] 성공한 공식 JPEG만 기존 evidence writer에 전달된다.
-- [x] 앱 image route는 `GET /api/spot/image.jpg` 하나다.
+- [x] SPOT image upstream URL을 `http://{SPOT_IP}/image.jpg`로 고정했다.
+- [x] 비공식 image/live-image URL override와 legacy 설정 선택 경로를 제거했다.
+- [x] JPEG signature를 검증하고 HTML·빈 body·비 JPEG payload를 거부한다.
+- [x] backend image cache, stale response, alternate route, retry backoff, prefetch를 제거했다.
+- [x] backend image route를 `GET /api/spot/image.jpg` 하나로 통일했다.
 - [x] 제거된 live/proxy route는 404를 반환한다.
-- [x] route는 no-store JPEG 또는 404/502만 반환하며 stale 200은 없다.
-- [x] `/api/spot/config.image_url`은 내부 단일 route를 반환한다.
+- [x] `/api/spot/config.image_url`은 단일 route를 반환한다.
 - [x] frontend transport는 단일 route만 요청한다.
-- [x] 35ms success delay, 500ms error retry 및 interval image polling이 제거됐다.
-- [x] 첫 요청 후 표시 완료된 pending Blob만 다음 요청을 시작한다.
-- [x] Blob URL identity guard가 늦게 도착한 다른 consumer의 load event를 무시한다.
-- [x] display error는 재귀를 중단하고 explicit refresh만 허용한다.
-- [x] Dashboard와 Settings가 동일 Blob URL과 동일 load/error handler를 사용한다.
-- [x] image cache/backoff/stale/age 및 internal-temperature 결합 UI가 제거됐다.
-- [x] JPEG 이외 범용 image format 허용이 backend/frontend/evidence 경로에서 제거됐다.
-- [x] observability는 단일 route의 request, latency, success/failure만 기록한다.
-- [x] API 및 운영 진단 문서가 단일 route로 갱신됐다.
-- [x] 과거 live-image PDCA/QA 문서는 superseded 이력으로 명시됐다.
-- [x] package에 포함되는 서버 QA script도 단일 route의 completion-driven 관찰로 교체됐다.
+- [x] 고정 35ms delay와 interval polling을 제거하고 요청 완료 후 다음 요청을 시작한다.
+- [x] Dashboard와 설정의 SPOT 카메라는 같은 Blob URL lifecycle을 사용한다.
+- [x] display error 후 자동 재요청을 중단하고 명시적 refresh만 허용한다.
+- [x] image cache/backoff/stale/age와 internal-temperature 결합 UI를 제거했다.
+- [x] 성공한 공식 JPEG만 evidence writer에 전달한다.
+- [x] observability는 단일 route의 request, latency, success/failure를 기록한다.
+- [x] 운영 진단 문서와 패키지 QA script를 단일 route·완료 기반 관찰로 갱신했다.
+- [x] image, temperature, diagnostics HTTP 요청이 하나의 장비 lock을 공유한다.
+- [x] 8개 diagnostics output 요청을 병렬 gather가 아닌 순차 요청으로 전환했다.
+- [x] diagnostics 각 요청 사이에서 lock을 해제해 대기 중인 image/temperature에 공정성을 준다.
+- [x] internal temperature는 temperature request wrapper를 통해 같은 lock을 사용한다.
+- [x] focus와 actuator 동기 제어를 async wrapper 뒤에서 실행해 같은 lock을 사용한다.
+- [x] 제어 요청 취소 시 worker 완료 전 lock이 해제되지 않도록 했다.
+- [x] 테스트에서 image, temperature, diagnostics의 실제 upstream 최대 동시성이 1임을 검증했다.
+- [x] API focus/actuator가 serialized wrapper를 호출하는지 검증했다.
+- [x] 기존 temperature/diagnostics snapshot 계약을 직렬 실행 의미에 맞게 회귀 검증했다.
 
 ## Missing Items
 
-- [ ] Dirty worktree에서 fail-closed 되는 build provenance 정책 때문에, clean commit
-      기반 PyInstaller/NSIS package smoke는 아직 수행하지 않았다.
-- [ ] 실장비가 있는 서버 컴퓨터에서 새 EXE를 실행한 15분 이상 PLC/Temperature/CSV/
-      camera error queue 관찰은 아직 수행하지 않았다.
+- [ ] 새 clean PyInstaller/NSIS를 서버 컴퓨터에 설치하고 최소 15분 동안 실장비 image,
+      Temperature, diagnostics, CSV, observability error queue를 함께 검증한다.
 
 ## Changed Items (Deviations from Design)
 
-- [x] 설계는 기존 image evidence schema 보존만 요구했으나, 성공 upstream이 JPEG로
-      고정됐으므로 evidence metadata detector도 JPEG만 허용하도록 더 엄격하게 정리했다.
-- [x] 과거 URL key redaction은 외부에서 유입될 수 있는 legacy export payload 보호를
-      위해 유지했다. 이는 URL 선택 runtime을 유지하는 것이 아니다.
+- [x] 최초 설계의 image 전용 single-flight를 서버 증거에 따라 장비 전체 fair lock으로
+      확장했다. SPOT 장비의 동시 처리 용량을 추정하지 않고 앱에서 active request를 1개로
+      제한하는 보수적 정책이다.
+- [x] diagnostics는 하나의 긴 critical section으로 묶지 않고 field별로 lock을 다시 얻는다.
+      동일 response atomicity는 만들지 않지만 image starvation을 막고 기존 fact-only 계약을
+      유지한다.
+- [x] legacy URL key redaction은 과거 export payload 보호를 위해 유지하되 runtime URL 선택에는
+      사용하지 않는다.
 
 ## Validation Evidence
 
+- Server direct SPOT `/image.jpg`: 60초, 2,014 requests, 2,014 successes, 0 failures,
+  0 requests over 1,000ms
+- Previous app-only observation: 68.8초, `502 upstream-timeout` 1건
+- Focused backend SPOT tests: 60 tests PASS
+- Device concurrency test: image + temperature + 8 diagnostics, max active upstream = 1
 - `npm run health`: PASS
   - frontend typecheck, ESLint, 27 files / 180 tests
-  - backend ruff, mypy, 462 tests
-- `npm run build` in frontend: PASS
-- focused backend SPOT/config tests: 67 passed, 6 subtests passed
-- focused frontend camera/settings/image tests: 29 passed
-- Python compile and `git diff --check`: PASS
-- `scripts/qa_spot_image_server.ps1` PowerShell parse: PASS
-- runtime source search: removed contracts 없음; legacy option 삭제 코드만 존재
+  - backend ruff, mypy, 465 tests
+- 새 PyInstaller/NSIS package 및 packaged smoke: pending
+- Server real-device 15-minute validation: pending
 
 ## Recommendations
 
-1. 변경을 검토한 뒤 clean commit을 생성한다.
-2. clean commit에서 PyInstaller/NSIS package와 bundled provenance를 검증한다.
-3. 서버 컴퓨터에 승인된 package를 설치하고 단일 route 및 error queue를 관찰한다.
+1. 변경을 clean commit으로 확정한다.
+2. clean commit에서 PyInstaller/NSIS를 생성하고 bundled provenance와 packaged smoke를 검증한다.
+3. 서버 컴퓨터에 새 installer를 설치해 60초 preflight 후 최소 15분 관찰한다.
 
 ## Next Steps
 
-- [x] Runtime gap 수정 완료
+- [x] Device-wide request serialization 구현
+- [x] 개발 PC 회귀 테스트 및 전체 health
 - [ ] Clean package 검증
-- [ ] Server device validation 후 completion report 확정
+- [ ] Server real-device validation 후 completion report 확정

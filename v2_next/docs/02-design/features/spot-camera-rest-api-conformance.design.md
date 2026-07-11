@@ -103,6 +103,34 @@ These controls do not alter the SPOT resource contract and remain:
 - errors and latency are observable;
 - evidence capture consumes only successfully validated official JPEG bytes.
 
+### 2.5 Device-Wide Request Serialization
+
+Server validation showed that direct completion-driven `/image.jpg` access was
+stable for 2,014 consecutive requests, while the packaged app produced image
+and diagnostic upstream timeouts. The app currently serializes image requests
+only; temperature, internal-temperature, and eight diagnostic output requests
+can overlap the image request at the physical SPOT device.
+
+All runtime requests targeting the SPOT device therefore share one fair async
+device lock:
+
+- official `/image.jpg` acquisition;
+- `/output?p=temperature`;
+- each diagnostic `/output?p=...` read;
+- internal-temperature output;
+- focus and actuator control transactions invoked by the API.
+
+The lock is acquired before starting the HTTP timeout, so time waiting for a
+different SPOT operation is not misclassified as an upstream timeout.
+Diagnostic fields are requested sequentially rather than with
+`asyncio.gather()`. The lock is released between diagnostic fields so queued
+image and temperature requests receive a turn. Focus and actuator sync
+transactions run in worker threads behind async wrappers while the same device
+lock remains held, including cancellation cleanup.
+
+This backend arbitration does not add a camera frame timer or alter the PDF
+completion-driven UI state machine.
+
 ## 3. State Model
 
 ### 3.1 Image Lifecycle
@@ -221,6 +249,12 @@ Failure:
 - one request returns one latest validated JPEG;
 - HTML/invalid/timeout/HTTP errors return failure without stale bytes;
 - concurrent calls never create concurrent upstream requests;
+- image, temperature, diagnostics, internal-temperature, focus, and actuator
+  API operations never overlap at the SPOT device;
+- diagnostic output fields are collected sequentially and retain per-field
+  failure status;
+- cancellation of a threaded control request does not release the device lock
+  before the underlying request finishes;
 - successful official bytes still reach evidence capture when enabled;
 - removed routes return `404`.
 
