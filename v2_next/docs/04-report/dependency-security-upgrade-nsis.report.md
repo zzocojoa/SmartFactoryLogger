@@ -1,6 +1,6 @@
 # Completion Report: dependency-security-upgrade-nsis
 
-> Date: 2026-07-12 | Level: Dynamic
+> Date: 2026-07-13 | Level: Dynamic
 
 ---
 
@@ -20,7 +20,7 @@ portable bundle/ZIP, electron-builder unpacked application, and NSIS installer.
 
 ### 1.2 Final Match Rate
 
-96% (23 of 24 controls; target: 90%)
+100% (24 of 24 controls; target: 90%)
 
 ## 2. Completed Items
 
@@ -34,6 +34,11 @@ portable bundle/ZIP, electron-builder unpacked application, and NSIS installer.
 - [x] Produced and integrity-checked `smart-factory-logger-v2 Setup 1.0.12.exe`.
 - [x] Verified frozen backend health, frontend sidecar readiness, Electron
   renderer dashboard readiness, ASAR contents, and scoped process cleanup.
+- [x] Installed the NSIS in the current-user scope, launched the installed app,
+  observed the dashboard and frozen backend, closed it through native
+  `WM_CLOSE`, and removed the installation.
+- [x] Verified removal of the installation directory, uninstall registry entry,
+  and shortcut while preserving the existing user-data directory.
 - [x] Recorded remaining audit findings and operational release risks.
 
 ## 3. Engineering Assessment
@@ -41,7 +46,8 @@ portable bundle/ZIP, electron-builder unpacked application, and NSIS installer.
 ### 3.1 Risk and Compatibility
 
 - Overall change risk: medium. Electron crosses eight major versions, but the
-  application uses a small stable API surface and packaged startup passed.
+  application uses a small stable API surface and both packaged and installed
+  startup/normal-shutdown checks passed.
 - Migration risk: none for database, CSV schema, settings, or HTTP API. Lockfiles
   must be rolled back together with manifests.
 - Security impact: root npm audit is clean and the selected Python parsers/codecs
@@ -72,6 +78,12 @@ manifest/lockfile state.
 | electron-builder NSIS | Pass / final makensis warnings: 0 |
 | Electron unpacked smoke | Pass / HTTP 200 and `renderer.dashboard-ready` |
 | ASAR minimum runtime check | Pass / build-only packages excluded |
+| NSIS current-user install | Pass / exit 0, registry `1.0.12`, PE `1.0.12.0` |
+| Installed file integrity | Pass / backend and ASAR hashes match package |
+| Installed application lifecycle | Pass / frozen backend, 8 widgets, native `WM_CLOSE` |
+| Normal shutdown cleanup | Pass / 0 processes, port 8000 released |
+| NSIS current-user removal | Pass / exit 0, registry/directory/shortcut removed |
+| User-data preservation | Pass / directory retained, 65 of 65 files retained |
 | Authenticode | Not signed |
 
 The PyInstaller build emitted an existing `tzdata` hidden-import warning but
@@ -93,20 +105,16 @@ watch if timezone behavior is expanded.
 |---|---|
 | Behavior-bearing application LoC | 0 |
 | Tracked files touched | 13, including generated lockfiles and PDCA documents |
-| PDCA analysis iterations | 2 |
-| Implementation and validation duration | approximately 26 minutes |
+| PDCA analysis iterations | 3 |
+| Installed lifecycle validation | 2026-07-13 08:00-08:01 KST |
 | Build provenance commit | `18cceb270b8860bbcebda3bae1861b80c5bc0f8f` |
 
 ## 7. Deviations and Test Gaps
 
 - electron-builder required `nsis.warningsAsErrors=false` for its bundled NSIS
   template forward reference. The final build emitted zero warnings.
-- Interactive installer install/uninstall and elevation were not exercised.
-- A hidden desktop session could not obtain a window handle for
-  `CloseMainWindow()`. Runtime startup was verified and all scoped test processes
-  were removed. A final audit detected two delayed PyInstaller backend children;
-  both were terminated and port 8000 was verified closed. Graceful window-close
-  lifecycle remains a manual check.
+- The supported current-user install/remove path was exercised. Per-machine
+  elevation was not exercised because it is not configured for this release.
 - No dedicated timezone scenario was added for the existing PyInstaller
   `tzdata` warning.
 
@@ -116,13 +124,12 @@ watch if timezone behavior is expanded.
    not just npm audit resolution.
 2. Clean Git provenance is a real release input for this repository; dependency
    and packaging configuration must be committed before PyInstaller runs.
-3. Unpacked Electron smoke provides strong non-elevated runtime evidence, but it
-   does not replace a target-machine install/uninstall check.
+3. Unpacked smoke remains useful for fast diagnosis, while installed lifecycle
+   validation proves native window shutdown and NSIS cleanup behavior.
 
 ## 9. Follow-up Items
 
 - [ ] Sign the installer with the production Authenticode certificate.
-- [ ] Run one manual install, launch, close, and uninstall cycle on the supported
-  Windows baseline.
 - [ ] Handle Grafana and React Router advisories in separate compatibility-led
   work rather than expanding this upgrade set.
+- [ ] Validate elevation only if a future release adds per-machine installation.

@@ -1,17 +1,18 @@
 # Gap Analysis: dependency-security-upgrade-nsis
 
-> Date: 2026-07-12 | Design: docs/02-design/features/dependency-security-upgrade-nsis.design.md
+> Date: 2026-07-13 | Design: docs/02-design/features/dependency-security-upgrade-nsis.design.md
 
 ---
 
-## Match Rate: 96%
+## Match Rate: 100%
 
-The implementation satisfies 23 of 24 evaluated design and release controls.
+The implementation satisfies all 24 evaluated design and release controls.
 The dependency set, version invariant, automated checks, PyInstaller packaging,
 portable bundle, NSIS generation, artifact integrity, and packaged startup all
-match the design. The remaining gap is an automated graceful window-close test;
-the headless validation session could not obtain an Electron window handle, so
-test processes were explicitly terminated and confirmed absent instead.
+match the design. The final release-operations follow-up installed the NSIS on a
+supported Windows host, launched the installed application, observed renderer and
+backend readiness, closed it through the native window lifecycle, and removed it
+without deleting user data.
 
 ## Implemented Items
 
@@ -41,16 +42,23 @@ test processes were explicitly terminated and confirmed absent instead.
   excludes Electron/electron-builder/app-builder runtime packages.
 - [x] Unpacked Electron startup reached `renderer.dashboard-ready` with eight
   widgets, served the frontend shell with HTTP 200, and used the frozen backend.
+- [x] Current-user NSIS installation completed with exit code 0. The installed
+  registry version was `1.0.12`, the PE product version was `1.0.12.0`, and the
+  installed backend and ASAR hashes matched the packaged files.
+- [x] The installed Electron application reached `renderer.dashboard-ready` with
+  eight widgets, reported `app_version=1.0.12`, `runtime_kind=frozen`, and
+  `frontend_static_ready=true`, and accepted native `WM_CLOSE`.
+- [x] Normal window closure left zero installed application/backend processes and
+  released port 8000 without forced termination.
+- [x] Current-user NSIS removal completed with exit code 0 and removed the
+  registry entry, installation directory, and shortcut while preserving all 65
+  files in the existing user-data directory.
 - [x] SHA-256, size, and modification time were recorded for all primary
   artifacts.
 
 ## Missing Items
 
-- [ ] Automate a graceful Electron window-close assertion in a visible desktop
-test session. `CloseMainWindow()` returned no handle in the hidden session;
-cleanup instead force-terminated only processes rooted in `dist/win-unpacked`.
-A final delayed-child audit found and terminated two scoped PyInstaller backend
-processes, then verified that no packaged process or port 8000 listener remained.
+- None for the approved current-user Windows release path.
 
 ## Changed Items (Deviations from Design)
 
@@ -58,9 +66,10 @@ processes, then verified that no packaged process or port 8000 listener remained
   `IsPowerShellAvailable` forward-reference warning to an error. The documented
   `nsis.warningsAsErrors=false` setting was used, without modifying
   `node_modules`; the final successful build emitted zero makensis warnings.
-- [x] The NSIS installer was generated and inspected but not interactively
-  installed. Unpacked package startup provided the non-elevated runtime smoke;
-  interactive install/uninstall remains a release-operations check.
+- [x] The final lifecycle check used electron-builder's supported silent
+  current-user switches (`/S /currentuser`) for deterministic installation and
+  removal. The installed application itself ran with a visible native window and
+  was closed through `WM_CLOSE`.
 
 ## Artifact Evidence
 
@@ -73,13 +82,13 @@ processes, then verified that no packaged process or port 8000 listener remained
 
 ## Recommendations
 
-1. Perform one manual install, launch, close, and uninstall cycle on the target
-   Windows baseline before public distribution.
-2. Add Authenticode signing before external release; the current installer is
+1. Add Authenticode signing before external release; the current installer is
    `NotSigned` and may trigger SmartScreen warnings.
-3. Upgrade Grafana packages and React Router only in separate compatibility-led
+2. Upgrade Grafana packages and React Router only in separate compatibility-led
    work because those changes exceed this minimal security set.
+3. If a future release adds per-machine installation, validate its elevation and
+   multi-user removal path separately; this release uses the current-user path.
 
 ## Next Steps
 
-- [x] Match rate is at least 90%; proceed to the completion report.
+- [x] Match rate is 100%; release-operations validation is complete.
