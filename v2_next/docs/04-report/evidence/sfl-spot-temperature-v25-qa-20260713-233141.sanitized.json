@@ -1,0 +1,127 @@
+{
+  "schema_version": "spot-temperature-v25-server-validation-sanitized-v1",
+  "artifact_kind": "spot_temperature_v25_server_qa_closeout",
+  "source_evidence": {
+    "file_name": "sfl-spot-temperature-v25-qa-20260713-233141.json",
+    "size_bytes": 21510,
+    "sha256": "5726b259a7190f90004f6e4953688085ddbfca40410a86e6f90d01f990688807",
+    "committed": false,
+    "reason_not_committed": "contains local absolute Windows paths"
+  },
+  "sanitization": {
+    "absolute_paths_removed": true,
+    "file_basenames_preserved": true,
+    "runtime_endpoint_removed": true,
+    "operator_identity_present_in_source": false,
+    "credential_pattern_present_in_source": false,
+    "validator_output_reduced_to_invariant_summary": true
+  },
+  "release": {
+    "app_version": "1.0.13",
+    "csv_schema_version": "2.5.0",
+    "build_git_commit": "6acc606e49b5a8f7573adf9873c4b4b98586ff4f",
+    "qa_helper_commit": "a4f333fb77f9d2c69dc4088581b13915e00aed34",
+    "installer_sha256_release_artifact": "5d10dd3d8cf9cba27d86eeabe068dcfe41a35fe530d1db6e82fdd44035fc0246",
+    "qa_bundle_sha256": "a7c0af6ebab47f149b560890a315e62e392513ff6fa7b7731c70508eb0b1875b"
+  },
+  "execution": {
+    "verdict": "PASS",
+    "generated_at_utc": "2026-07-13T14:35:16.2935565Z",
+    "window_started_at_kst": "2026-07-13T23:31:42.5312312+09:00",
+    "window_completed_at_kst": "2026-07-13T23:35:16.2935565+09:00",
+    "observation_seconds": 60,
+    "sample_interval_seconds": 5,
+    "sample_count": 12,
+    "check_count": 31,
+    "passed_count": 31,
+    "failed_count": 0,
+    "warning_count": 0,
+    "qa_shutdown_requested": true
+  },
+  "runtime": {
+    "mode": "REAL",
+    "backend_reachable": true,
+    "spot_diagnostics_enabled": true,
+    "csv_operational_logging_enabled": true,
+    "temperature_hardening_enabled": true,
+    "observation_fact_writer_enabled": true,
+    "initial_rows_total": 187,
+    "final_rows_total": 434,
+    "rows_added_during_observation": 247,
+    "observed_poll_statuses": [
+      "success"
+    ],
+    "observed_value_origins": [
+      "current_observation"
+    ],
+    "observation_fact_write_failure_count": 0,
+    "observation_fact_link_failure_count": 0,
+    "origin_decision_mismatch_count": 0,
+    "value_age_clock_anomaly_count": 0
+  },
+  "attestation": {
+    "config_operator_verified": true,
+    "config_attestation_status": "verified",
+    "config_drift_detected": false,
+    "config_fingerprint_match": true,
+    "low_signal_comparator_verified": true,
+    "device_config_readback_status": "not_supported"
+  },
+  "finalized_files": {
+    "metadata_file": "Factory_Integrated_Log_v2_20260713_233024.metadata.json",
+    "csv_file": "Factory_Integrated_Log_v2_20260713_233024.csv",
+    "observation_fact_file": "spot_observation_fact.csv",
+    "spot_image_fact_final_manifest_file": "spot_image_fact_manifest.final.json"
+  },
+  "validator": {
+    "exit_code": 0,
+    "verdict": "PASS",
+    "v2_rows": 592,
+    "sample_seq": "1..592",
+    "observation_fact_manifest_row_count": 95273,
+    "observation_fact_actual_row_count": 95273,
+    "observation_fact_row_count_match": true,
+    "observation_fact_poll_seq_gap_count_match": true,
+    "observation_fact_link_coverage_pct": 100.0,
+    "observation_fact_diagnostic_source_mismatch_count": 0,
+    "spot_image_fact_manifest_row_count": 234534,
+    "spot_image_fact_actual_row_count": 234534,
+    "spot_image_fact_row_count_match": true,
+    "spot_image_fact_sha256_match": true,
+    "fact_manifest_write_failure_count": 0,
+    "fact_manifest_spool_pending_count": 0
+  },
+  "passed_checks": [
+    "Backend health API",
+    "Runtime mode",
+    "SPOT diagnostics",
+    "CSV operational logging",
+    "CSV schema",
+    "Temperature hardening",
+    "Observation fact writer",
+    "Final backend health sample",
+    "CSV rows increased",
+    "Successful SPOT poll observed",
+    "Current observation observed",
+    "Observation fact write failures",
+    "Observation fact link failures",
+    "Origin decision mismatches",
+    "Value age clock anomalies",
+    "Backend stopped for finalized CSV validation",
+    "Latest metadata sidecar",
+    "Sidecar schema",
+    "Sidecar hardening flag",
+    "Config operator verification",
+    "Config attestation status",
+    "Config drift",
+    "Config fingerprint match",
+    "Low-signal comparator verification",
+    "Device readback policy",
+    "Fact manifest enabled",
+    "Fact manifest write failures",
+    "Fact manifest pending spool",
+    "Matching v2 CSV",
+    "Observation fact CSV",
+    "Full CSV validator"
+  ]
+}

@@ -18,6 +18,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
   read-time SPOT snapshot races.
 - Added a portable one-command v2.5 QA bundle that performs graceful backend
   closeout before validating finalized CSV and fact manifests.
+- Verified the 1.0.13 server build with the physical SPOT device: all 31 runtime,
+  attestation, CSV, fact, and validator checks passed with zero warnings. See the
+  [server validation report](docs/04-report/spot-temperature-v2-5-server-validation.md).
 
 ### Security
 

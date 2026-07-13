@@ -49,6 +49,11 @@ unittest를 한 번에 실행합니다.
 npm run health
 ```
 
+SPOT Temperature v2.5 서버 검증은 다음 문서를 사용합니다.
+
+- [한 번에 실행하는 QA 절차](docs/V2/04_검증/spot_temperature_v25_one_command_qa.md)
+- [1.0.13 실장비 서버 검증 결과](docs/04-report/spot-temperature-v2-5-server-validation.md)
+
 ## Build commit provenance
 
 PyInstaller backend package는 clean Git HEAD만 build provenance로 포함하며, frozen

@@ -3,6 +3,8 @@
 > Version: 1.0.0 | Date: 2026-07-11 | Status: Complete
 > Baseline: `07dd370e22e8bf2c413c4afdc4cf85a30d54d031`
 > Verified through: `9cf96f8ba42f408119808537a4ff66de2e979658`
+> Production follow-up: 1.0.13 physical-device server QA completed `31/31 PASS` on
+> 2026-07-13. See [SPOT Temperature v2.5 Server Validation](spot-temperature-v2-5-server-validation.md).
 
 ## 1. Executive Summary
 

@@ -99,3 +99,11 @@ attestation을 반복하지 않는다. 로그 경로를 자동으로 찾지 못�
 
 QA는 loopback 주소의 현재 백엔드만 정상 종료할 수 있다. 원격 BackendBaseUrl에는 종료
 요청을 보내지 않는다. SPOT 설정, 네트워크, CSV 내용 또는 config 값을 변경하지 않는다.
+
+## 검증 기록
+
+SmartFactoryLogger 1.0.13과 실장비 SPOT을 사용한 최종 서버 검증은 `31/31 PASS`,
+warning `0`, full CSV validator PASS로 완료됐다.
+
+- [서버 검증 보고서](../../04-report/spot-temperature-v2-5-server-validation.md)
+- [Sanitized evidence](../../04-report/evidence/sfl-spot-temperature-v25-qa-20260713-233141.sanitized.json)
