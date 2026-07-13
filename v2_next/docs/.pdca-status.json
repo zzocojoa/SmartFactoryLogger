@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-13T15:34:03.274Z",
+  "lastUpdated": "2026-07-13T15:42:31.430Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -1760,7 +1760,7 @@
       "completedAt": "2026-07-12T23:03:29.914Z"
     },
     "spot-image-auto-recovery": {
-      "phase": "report",
+      "phase": "completed",
       "matchRate": null,
       "iterationCount": 1,
       "documents": {},
@@ -1791,14 +1791,16 @@
         },
         {
           "phase": "report",
-          "status": "active",
-          "createdAt": "2026-07-13T15:17:41.291Z"
+          "status": "completed",
+          "createdAt": "2026-07-13T15:17:41.291Z",
+          "completedAt": "2026-07-13T15:42:31.430Z"
         }
       ],
       "timestamps": {
         "started": "2026-07-13T15:17:41.293Z",
-        "lastUpdated": "2026-07-13T15:34:03.274Z"
-      }
+        "lastUpdated": "2026-07-13T15:42:31.430Z"
+      },
+      "completedAt": "2026-07-13T15:42:31.426Z"
     }
   },
   "pipeline": {
@@ -1810,7 +1812,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-13T15:34:03.274Z"
+    "lastActivity": "2026-07-13T15:42:31.430Z"
   },
   "history": [
     {
@@ -3044,6 +3046,13 @@
       "phase": "act",
       "nextPhase": "report",
       "timestamp": "2026-07-13T15:34:03.271Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-07-13T15:42:31.427Z"
     }
   ],
   "timeline": [
