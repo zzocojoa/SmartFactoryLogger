@@ -52,6 +52,11 @@ config_verified_by
 config_verified_fingerprint_sha256
 ```
 
+새 설치본으로 업그레이드하면 build commit이 fingerprint에 포함되므로 첫 QA에서
+`fingerprint_mismatch`가 한 번 발생할 수 있다. 이 경우 QA가 백엔드를 정상 종료한 뒤
+attestation 도구를 다시 실행한다. 도구는 `spot_config_fingerprint_sha256` 단독 drift만
+운영자 재확인 대상으로 허용하며, 장비 readback이나 다른 drift는 계속 차단한다.
+
 ## 한 번에 QA 실행
 
 1. SmartFactoryLogger를 실행한다.

@@ -255,8 +255,28 @@ $buildCommit = [string](Get-ObjectProperty $snapshot "build_git_commit" "")
 if ($buildCommit -notmatch "^[0-9a-f]{40}$") {
     throw "Latest metadata does not contain a valid packaged build commit."
 }
-if (Convert-ToBoolean (Get-ObjectProperty $snapshot "config_drift_detected" $false)) {
-    throw "Latest metadata already reports config drift. Resolve drift before attestation."
+$driftDetected = Convert-ToBoolean (Get-ObjectProperty $snapshot "config_drift_detected" $false)
+$driftFields = @(
+    Get-ObjectProperty $snapshot "config_drift_fields" @() |
+        ForEach-Object { [string]$_ }
+)
+$attestationStatus = [string](Get-ObjectProperty $snapshot "config_attestation_status" "")
+if ($driftDetected) {
+    $blockingDriftFields = @(
+        $driftFields | Where-Object { $_ -ne "spot_config_fingerprint_sha256" }
+    )
+    $isFingerprintOnlyReattestation = (
+        $driftFields.Count -eq 1 -and
+        $driftFields[0] -eq "spot_config_fingerprint_sha256" -and
+        $attestationStatus -eq "fingerprint_mismatch"
+    )
+    if (-not $isFingerprintOnlyReattestation -or $blockingDriftFields.Count -gt 0) {
+        $driftSummary = if ($driftFields.Count -gt 0) { $driftFields -join ", " } else { "unknown" }
+        throw "Latest metadata reports blocking config drift: $driftSummary"
+    }
+    Write-Host "[INFO] Build/config fingerprint changed; explicit operator re-attestation is allowed." -ForegroundColor Yellow
+} elseif ($driftFields.Count -gt 0) {
+    throw "Latest metadata has inconsistent config drift fields."
 }
 $readbackStatus = [string](Get-ObjectProperty $snapshot "device_config_readback_status" "")
 if ($readbackStatus -notin @("matched", "not_supported")) {
