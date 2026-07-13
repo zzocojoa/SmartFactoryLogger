@@ -59,6 +59,11 @@
       "last 1 safari version"
     ]
   },
+  "overrides": {
+    "@grafana/e2e-selectors": "12.3.1",
+    "@grafana/i18n": "12.3.1",
+    "@grafana/schema": "12.3.1"
+  },
   "devDependencies": {
     "@types/react-window": "^1.8.8",
     "@typescript-eslint/eslint-plugin": "^8.59.4",
