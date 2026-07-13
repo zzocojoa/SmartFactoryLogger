@@ -1437,10 +1437,6 @@ def _publish_spot_temperature_snapshot(
     global _spot_last_valid_value_monotonic
     global _spot_temperature_cache_suppressed_until_valid
 
-    if classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
-        _temperature_cache["temp"] = 0.0
-        _temperature_cache["temp_time"] = 0.0
-
     raw_value_text = classification.raw_value_text
     if classification.raw_validity == SpotRawValidity.NOT_EVALUATED:
         raw_value_text = None
@@ -1459,12 +1455,22 @@ def _publish_spot_temperature_snapshot(
         _spot_observation_seq += 1
         observation_seq = _spot_observation_seq
         if classification.raw_validity == SpotRawValidity.VALID_TEMPERATURE:
+            observed_temperature = classification.parsed_temperature_c
+            if (
+                observed_temperature is not None
+                and not isinstance(observed_temperature, bool)
+                and math.isfinite(float(observed_temperature))
+            ):
+                _temperature_cache["temp"] = float(observed_temperature)
+                _temperature_cache["temp_time"] = poll_completed_at
             _spot_last_valid_value_at = poll_completed_at
             _spot_last_valid_value_monotonic = effective_completed_monotonic
             _spot_temperature_cache_suppressed_until_valid = False
         elif classification.raw_validity == SpotRawValidity.INVALID_SENTINEL:
             _spot_temperature_cache_suppressed_until_valid = True
         elif classification.raw_validity == SpotRawValidity.VERIFIED_NO_TARGET:
+            _temperature_cache["temp"] = 0.0
+            _temperature_cache["temp_time"] = 0.0
             _spot_last_valid_value_at = None
             _spot_last_valid_value_monotonic = None
             _spot_temperature_cache_suppressed_until_valid = False
@@ -1552,13 +1558,15 @@ def _positive_float_or_none(value: Any) -> Optional[float]:
     return parsed
 
 
-def _effective_spot_temperature_for_decision(decision: TemperatureStateDecision) -> Optional[float]:
+def _effective_spot_temperature_for_decision(
+    decision: TemperatureStateDecision,
+    cached_temperature: Any,
+) -> Optional[float]:
     if decision.temperature_value_origin.value == "none":
         return None
-    temperature = _temperature_cache.get("temp")
-    if isinstance(temperature, bool) or not isinstance(temperature, (float, int)):
+    if isinstance(cached_temperature, bool) or not isinstance(cached_temperature, (float, int)):
         return None
-    return float(temperature)
+    return float(cached_temperature)
 
 
 def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
@@ -1569,6 +1577,8 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
         observation_seq = _spot_observation_seq
         last_valid_value_at = _spot_last_valid_value_at
         last_valid_value_monotonic = _spot_last_valid_value_monotonic
+        cached_temperature = _temperature_cache.get("temp")
+        cached_temperature_at = float(_temperature_cache.get("temp_time") or 0.0)
 
     if snapshot is None:
         decision = derive_temperature_state(
@@ -1620,7 +1630,7 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
     source_freshness = _spot_source_freshness_for_snapshot(snapshot, now, now_monotonic)
     poll_status = SpotPollStatus(str(snapshot["spot_poll_status"]))
     raw_validity = SpotRawValidity(str(snapshot["spot_raw_validity"]))
-    cache_age = _temperature_cache_age_sec(now)
+    cache_age = max(0.0, now - cached_temperature_at) if cached_temperature_at > 0.0 else None
     has_ttl_valid_cache = cache_age is not None and cache_age <= _TEMP_CACHE_TTL_SEC
     has_previous_valid_value = last_valid_value_at is not None
     decision = derive_temperature_state(
@@ -1672,7 +1682,10 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
             "temperature_status_shadow": decision.temperature_status_shadow.value,
             "spot_cache_status": decision.spot_cache_status.value,
             "temperature_value_origin": decision.temperature_value_origin.value,
-            "spot_temperature_effective_c": _effective_spot_temperature_for_decision(decision),
+            "spot_temperature_effective_c": _effective_spot_temperature_for_decision(
+                decision,
+                cached_temperature,
+            ),
             "spot_last_valid_value_at": _epoch_to_utc_iso(last_valid_value_at),
             "spot_last_valid_value_monotonic": last_valid_value_monotonic,
             "spot_value_age_ms": value_age_ms,
@@ -1732,7 +1745,7 @@ async def _refresh_spot_temperature(
         raise
 
     try:
-        temperature, classification = await _request_spot_temperature_observation(client, temp_url)
+        _temperature, classification = await _request_spot_temperature_observation(client, temp_url)
     except SpotTemperatureFetchError as exc:
         poll_completed_at, poll_completed_monotonic = _completed_poll_clocks()
         _publish_spot_temperature_snapshot(
@@ -1746,8 +1759,6 @@ async def _refresh_spot_temperature(
         raise
 
     poll_completed_at, poll_completed_monotonic = _completed_poll_clocks()
-    _temperature_cache["temp"] = temperature
-    _temperature_cache["temp_time"] = poll_completed_at
     _record_temperature_success(temp_url)
     _publish_spot_temperature_snapshot(
         poll_seq=poll_seq,

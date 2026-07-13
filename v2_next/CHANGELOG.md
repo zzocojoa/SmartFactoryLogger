@@ -2,6 +2,30 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.13] - 2026-07-13
+
+### Fixed
+
+- Published the SPOT effective temperature cache and observation snapshot as one
+  atomic generation so CSV `Temperature` cannot be paired with a different
+  `spot_temperature_observed_c` during a poll transition.
+- Captured the cache value and observation snapshot together when producing
+  diagnostics, preventing a concurrent poll from mixing two generations.
+
+### Validation
+
+- Added deterministic concurrency regression tests for both publish-time and
+  read-time SPOT snapshot races.
+- Added a portable one-command v2.5 QA bundle that performs graceful backend
+  closeout before validating finalized CSV and fact manifests.
+
+### Security
+
+- Refreshed compatible transitive frontend dependencies to remove the critical
+  `protobufjs` audit finding without forcing an unsupported Grafana upgrade.
+- Pinned the validated Grafana 12.3.1 / Scenes 6.52.0 dependency set so a clean
+  install cannot silently cross the repository's compatibility gate.
+
 ## [1.0.12] - 2026-07-12
 
 ### Security

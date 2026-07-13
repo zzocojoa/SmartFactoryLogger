@@ -263,6 +263,88 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(diagnostics["spot_last_valid_value_at"])
         self.assertIsNotNone(diagnostics["spot_raw_payload_hash"])
 
+    async def test_temperature_cache_and_observation_snapshot_publish_atomically(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+
+        async def first_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="448.5", request=request)
+
+        async def second_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="449.5", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(first_handler)) as client:
+            await spot_api._refresh_spot_temperature(client)
+
+        original_publish = spot_api._publish_spot_temperature_snapshot
+        interleaved_diagnostics: list[dict[str, Any]] = []
+
+        def observe_before_publish(**kwargs: Any) -> None:
+            interleaved_diagnostics.append(spot_api.get_spot_diagnostics())
+            original_publish(**kwargs)
+
+        with patch.object(spot_api, "_publish_spot_temperature_snapshot", side_effect=observe_before_publish):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(second_handler)) as client:
+                await spot_api._refresh_spot_temperature(client)
+
+        self.assertEqual(len(interleaved_diagnostics), 1)
+        interleaved = interleaved_diagnostics[0]
+        self.assertEqual(interleaved["temperature_value_origin"], "current_observation")
+        self.assertEqual(interleaved["spot_temperature_observed_c"], 448.5)
+        self.assertEqual(interleaved["spot_temperature_effective_c"], 448.5)
+
+        final_diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(final_diagnostics["spot_temperature_observed_c"], 449.5)
+        self.assertEqual(final_diagnostics["spot_temperature_effective_c"], 449.5)
+
+    async def test_temperature_diagnostics_read_one_cache_snapshot_generation(self) -> None:
+        spot_api.config.SPOT_URL = "http://spot.local/temp"
+
+        async def first_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="448.5", request=request)
+
+        async def second_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="449.5", request=request)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(first_handler)) as client:
+            await spot_api._refresh_spot_temperature(client)
+
+        derive_entered = threading.Event()
+        allow_derive = threading.Event()
+        original_derive = spot_api.derive_temperature_state
+        captured: list[dict[str, Any]] = []
+        reader_errors: list[BaseException] = []
+
+        def blocking_derive(input_state: Any) -> Any:
+            result = original_derive(input_state)
+            derive_entered.set()
+            if not allow_derive.wait(timeout=2.0):
+                raise TimeoutError("diagnostics read was not released")
+            return result
+
+        def read_diagnostics() -> None:
+            try:
+                captured.append(spot_api.get_spot_diagnostics())
+            except BaseException as exc:  # pragma: no cover - asserted below
+                reader_errors.append(exc)
+
+        with patch.object(spot_api, "derive_temperature_state", side_effect=blocking_derive):
+            reader = threading.Thread(target=read_diagnostics)
+            reader.start()
+            try:
+                self.assertTrue(derive_entered.wait(timeout=1.0))
+                async with httpx.AsyncClient(transport=httpx.MockTransport(second_handler)) as client:
+                    await spot_api._refresh_spot_temperature(client)
+            finally:
+                allow_derive.set()
+                reader.join(timeout=2.0)
+
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(reader_errors, [])
+        self.assertEqual(len(captured), 1)
+        diagnostics = captured[0]
+        self.assertEqual(diagnostics["spot_temperature_observed_c"], 448.5)
+        self.assertEqual(diagnostics["spot_temperature_effective_c"], 448.5)
+
     async def test_verified_no_target_invalidates_previous_temperature_cache(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/temp"
 
