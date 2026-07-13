@@ -27,6 +27,7 @@ interface UseSpotViewModelEffectsParams {
   loadConfig: () => Promise<SpotConfig | null>;
   applySpotConfig: (config: SpotConfig) => void;
   prevUrlRef: MutableRefObject<string | null>;
+  cancelPendingImageRetry: () => void;
 }
 
 const readStoredSpotConfig = (): SpotConfigBroadcastPayload | null => {
@@ -50,6 +51,7 @@ export const useSpotViewModelEffects = ({
   loadConfig,
   applySpotConfig,
   prevUrlRef,
+  cancelPendingImageRetry,
 }: UseSpotViewModelEffectsParams) => {
   useEffect(() => {
     if (!config || !config.image_url) {
@@ -58,6 +60,7 @@ export const useSpotViewModelEffects = ({
     void fetchInitialImage();
 
     return () => {
+      cancelPendingImageRetry();
       if (prevUrlRef.current) {
         URL.revokeObjectURL(prevUrlRef.current);
         prevUrlRef.current = null;
@@ -67,6 +70,7 @@ export const useSpotViewModelEffects = ({
     config?.image_url,
     fetchInitialImage,
     prevUrlRef,
+    cancelPendingImageRetry,
   ]);
 
   useEffect(() => {
