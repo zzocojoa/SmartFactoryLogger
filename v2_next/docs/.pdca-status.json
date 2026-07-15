@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-12T23:03:29.920Z",
+  "lastUpdated": "2026-07-13T15:42:31.430Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -22,7 +22,8 @@
     "nsis-startup-render-performance",
     "spot-temperature-v2-4-operational-hardening",
     "spot-camera-rest-api-conformance",
-    "dependency-security-upgrade-nsis"
+    "dependency-security-upgrade-nsis",
+    "spot-image-auto-recovery"
   ],
   "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
@@ -1757,6 +1758,49 @@
         "lastUpdated": "2026-07-12T23:03:29.920Z"
       },
       "completedAt": "2026-07-12T23:03:29.914Z"
+    },
+    "spot-image-auto-recovery": {
+      "phase": "completed",
+      "matchRate": null,
+      "iterationCount": 1,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-13T15:17:41.291Z",
+          "completedAt": "2026-07-13T15:19:01.825Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-13T15:17:41.291Z",
+          "completedAt": "2026-07-13T15:21:49.763Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-07-13T15:17:41.291Z",
+          "completedAt": "2026-07-13T15:32:28.643Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-07-13T15:17:41.291Z",
+          "completedAt": "2026-07-13T15:34:03.244Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-07-13T15:17:41.291Z",
+          "completedAt": "2026-07-13T15:42:31.430Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-13T15:17:41.293Z",
+        "lastUpdated": "2026-07-13T15:42:31.430Z"
+      },
+      "completedAt": "2026-07-13T15:42:31.426Z"
     }
   },
   "pipeline": {
@@ -1768,7 +1812,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-12T23:03:29.920Z"
+    "lastActivity": "2026-07-13T15:42:31.430Z"
   },
   "history": [
     {
@@ -2931,6 +2975,84 @@
       "phase": "report",
       "nextPhase": "completed",
       "timestamp": "2026-07-12T23:03:29.915Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-07-13T15:19:01.820Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-07-13T15:19:01.821Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-07-13T15:19:01.857Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-07-13T15:21:49.758Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-07-13T15:21:49.760Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-07-13T15:32:28.638Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-07-13T15:32:28.640Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-07-13T15:34:03.240Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-07-13T15:34:03.241Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-07-13T15:34:03.270Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-07-13T15:34:03.271Z"
+    },
+    {
+      "feature": "spot-image-auto-recovery",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-07-13T15:42:31.427Z"
     }
   ],
   "timeline": [

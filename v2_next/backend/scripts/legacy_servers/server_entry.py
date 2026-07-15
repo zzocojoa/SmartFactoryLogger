@@ -77,9 +77,8 @@ if os.name == "nt":
 import multiprocessing
 import threading
 import webbrowser
-from PIL import Image, ImageTk
+from PIL import Image
 import pystray
-import tkinter as tk
 import pydantic
 import pydantic_core
 from pydantic import BaseModel, field_validator
@@ -114,6 +113,16 @@ if str(project_root) not in sys.path:
     print(f"DEBUG: Added {project_root} to sys.path")
 
 print(f"DEBUG: sys.path after injection: {sys.path}")
+
+from backend.launcher_policy import is_embedded_electron, should_show_backend_splash
+
+_SHOW_BACKEND_SPLASH = should_show_backend_splash()
+if _SHOW_BACKEND_SPLASH:
+    from PIL import ImageTk
+    import tkinter as tk
+else:
+    ImageTk = None
+    tk = None
 
 try:
     from backend.version import get_runtime_info
@@ -160,6 +169,11 @@ _splash_closed = threading.Event()
 def show_splash():
     """Display a splash screen while application loads."""
     global _splash_window
+    if not _SHOW_BACKEND_SPLASH or ImageTk is None or tk is None:
+        print("[Splash] Skipped for embedded Electron host.")
+        _splash_closed.set()
+        return
+
     try:
         splash_path = resource_path(os.path.join("backend", "assets", "splash.png"))
         if not os.path.exists(splash_path):
@@ -225,7 +239,7 @@ def close_splash():
         print(f"[Splash] Failed to close splash: {e}")
 
 def open_browser(icon=None, item=None):
-    if os.getenv("SFL_EMBEDDED_ELECTRON") == "1":
+    if is_embedded_electron():
         print("[Launcher] Embedded Electron mode detected; skipping browser auto-open.")
         return
 
@@ -267,12 +281,16 @@ if __name__ == "__main__":
         # Parse CLI arguments
         parse_args()
         
-        # Start Splash Screen in separate thread (GUI must run in main for some OSes, but we'll try)
-        splash_thread = threading.Thread(target=show_splash, daemon=True)
-        splash_thread.start()
-        
-        # Give splash a moment to appear
-        time.sleep(0.3)
+        splash_thread = None
+        if _SHOW_BACKEND_SPLASH:
+            # Legacy standalone launcher only. Electron renders its own startup window.
+            splash_thread = threading.Thread(target=show_splash, daemon=True)
+            splash_thread.start()
+
+            # Give splash a moment to appear
+            time.sleep(0.3)
+        else:
+            print("[Splash] Skipped for embedded Electron host.")
         
         # Start Server thread
         server_thread = threading.Thread(target=run_server, daemon=True)
@@ -281,9 +299,10 @@ if __name__ == "__main__":
         # Wait for server to initialize (give it a moment)
         time.sleep(2.0)
         
-        # Close splash and open browser
-        close_splash()
-        time.sleep(0.3)
+        # Close the legacy standalone splash before opening the browser.
+        if splash_thread is not None:
+            close_splash()
+            time.sleep(0.3)
 
         # Auto-open browser
         threading.Timer(0.5, open_browser).start()

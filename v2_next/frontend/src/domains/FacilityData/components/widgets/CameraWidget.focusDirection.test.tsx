@@ -41,6 +41,7 @@ describe('CameraComponent focus direction controls', () => {
       spotImageUrl: '',
       spotImageLoading: false,
       spotImageError: null,
+      spotControlError: null,
       spotLastSuccessAt: null,
       spotImageMetadata: null,
     });
@@ -132,6 +133,23 @@ describe('CameraComponent focus direction controls', () => {
     fireEvent.click(screen.getByRole('button', { name: /retry spot camera image/i }));
 
     expect(retryImage).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders control errors separately without exposing image retry', () => {
+    useDashboardStore.setState({
+      spotConfig: buildSpotConfig(),
+      spotImageUrl: 'blob:last-valid-spot-image',
+      spotImageLoading: false,
+      spotImageError: null,
+      spotControlError: 'SPOT actuator control failed',
+      spotLastSuccessAt: Date.now(),
+      spotImageMetadata: buildSpotImageMetadata(),
+    });
+
+    render(<CameraComponent focusBusy={false} onSpotImageRetry={vi.fn()} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('SPOT actuator control failed');
+    expect(screen.queryByRole('button', { name: /retry spot camera image/i })).toBeNull();
   });
 
   it('uses finite crosshair geometry when the SPOT config response is missing SVG fields', () => {

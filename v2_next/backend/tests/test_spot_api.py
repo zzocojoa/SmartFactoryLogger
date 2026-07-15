@@ -868,6 +868,29 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.code, "upstream-timeout")
         self.assertIn("http://spot.local/image.jpg", str(error))
         self.assertIn("ReadTimeout", str(error))
+        self.assertEqual(error.transport_error_type, "ReadTimeout")
+        self.assertIsNotNone(error.request_elapsed_ms)
+        self.assertGreaterEqual(float(error.request_elapsed_ms), 0.0)
+
+    async def test_image_request_uses_image_specific_connect_timeout(self) -> None:
+        image_bytes = b"\xff\xd8image-data\xff\xd9"
+        request_timeouts: list[dict[str, float]] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            request_timeouts.append(dict(request.extensions["timeout"]))
+            return httpx.Response(200, content=image_bytes, request=request)
+
+        transport = httpx.MockTransport(handler)
+        client_timeout = httpx.Timeout(connect=0.1, read=0.1, write=0.1, pool=0.1)
+        async with httpx.AsyncClient(transport=transport, timeout=client_timeout) as client:
+            data = await spot_api._request_spot_image(client, "http://spot.local/image.jpg")
+
+        self.assertEqual(data, image_bytes)
+        self.assertEqual(len(request_timeouts), 1)
+        self.assertEqual(request_timeouts[0]["connect"], 2.0)
+        self.assertEqual(request_timeouts[0]["read"], 5.0)
+        self.assertEqual(request_timeouts[0]["write"], 1.0)
+        self.assertEqual(request_timeouts[0]["pool"], 5.0)
 
     async def test_image_empty_body_diagnostics_include_url_and_status(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
@@ -1589,6 +1612,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             "SPOT image upstream timed out",
             image_url="http://spot.local/image.jpg",
             upstream_status=None,
+            transport_error_type="ConnectTimeout",
+            request_elapsed_ms=1004.2,
         )
         with (
             patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(side_effect=error)),
@@ -1603,8 +1628,13 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("x-spot-payload-rejection", response.headers)
         self.assertEqual(response.json()["detail"]["code"], "upstream-timeout")
         self.assertIsNone(response.json()["detail"]["upstream_status"])
+        self.assertEqual(response.json()["detail"]["transport_error_type"], "ConnectTimeout")
+        self.assertEqual(response.json()["detail"]["request_elapsed_ms"], 1004.2)
         error_mock.assert_called_once()
-        self.assertEqual(error_mock.call_args.kwargs["error_type"], "upstream-timeout")
+        self.assertEqual(error_mock.call_args.kwargs["error_type"], "ConnectTimeout")
+        self.assertIn("'code': 'upstream-timeout'", error_mock.call_args.kwargs["detail"])
+        self.assertIn("'transport_error_type': 'ConnectTimeout'", error_mock.call_args.kwargs["detail"])
+        self.assertIn("'request_elapsed_ms': 1004.2", error_mock.call_args.kwargs["detail"])
         self.assertEqual(error_mock.call_args.kwargs["level"], "error")
         result_mock.assert_called_once_with(502)
 

@@ -39,6 +39,7 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
   const spotImageUrl = useDashboardStore(state => state.spotImageUrl);
   const spotImageLoading = useDashboardStore(state => state.spotImageLoading);
   const spotImageError = useDashboardStore(state => state.spotImageError);
+  const spotControlError = useDashboardStore(state => state.spotControlError);
   const spotLastSuccessAt = useDashboardStore(state => state.spotLastSuccessAt);
   const spotImageMetadata = useDashboardStore(state => state.spotImageMetadata);
   if (!spotConfig) return <div>Loading Config...</div>;
@@ -154,6 +155,11 @@ export const CameraComponent = React.memo(function CameraComponent(props: Camera
           Focus -&gt;
         </button>
       </div>
+      {spotControlError && (
+        <div className="camera-control-error" role="alert">
+          {spotControlError}
+        </div>
+      )}
     </div>
   );
 }

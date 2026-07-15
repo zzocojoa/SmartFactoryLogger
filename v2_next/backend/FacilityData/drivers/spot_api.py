@@ -113,6 +113,7 @@ _spot_last_valid_value_at: Optional[float] = None
 _spot_last_valid_value_monotonic: Optional[float] = None
 _spot_temperature_cache_suppressed_until_valid = False
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
+_SPOT_IMAGE_REQUEST_TIMEOUT = httpx.Timeout(connect=2.0, read=5.0, write=1.0, pool=5.0)
 
 # Async HTTP client reused for connection pooling.
 _http_client: Optional[httpx.AsyncClient] = None
@@ -164,11 +165,15 @@ class SpotImageFetchError(RuntimeError):
         *,
         image_url: str,
         upstream_status: Optional[int],
+        transport_error_type: Optional[str] = None,
+        request_elapsed_ms: Optional[float] = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.image_url = image_url
         self.upstream_status = upstream_status
+        self.transport_error_type = transport_error_type
+        self.request_elapsed_ms = request_elapsed_ms
 
 
 class SpotTemperatureConfigError(ValueError):
@@ -895,20 +900,30 @@ async def _refresh_spot_diagnostics_safely(
 
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+    request_started_at: Optional[float] = None
     try:
         async with _spot_device_request_lock:
-            response = await client.get(image_url)
+            request_started_at = time.monotonic()
+            response = await client.get(image_url, timeout=_SPOT_IMAGE_REQUEST_TIMEOUT)
             response.raise_for_status()
     except httpx.TimeoutException as exc:
+        request_elapsed_ms = (
+            max(0.0, (time.monotonic() - request_started_at) * 1000.0)
+            if request_started_at is not None
+            else None
+        )
+        elapsed_text = "unknown" if request_elapsed_ms is None else f"{request_elapsed_ms:.1f}"
         raise SpotImageFetchError(
             "upstream-timeout",
             (
                 "SPOT image upstream timed out; "
                 f"url={image_url}; error_type={exc.__class__.__name__}; "
-                f"error={_format_exception_message(exc)}"
+                f"request_elapsed_ms={elapsed_text}; error={_format_exception_message(exc)}"
             ),
             image_url=image_url,
             upstream_status=None,
+            transport_error_type=exc.__class__.__name__,
+            request_elapsed_ms=request_elapsed_ms,
         ) from exc
     except httpx.HTTPStatusError as exc:
         raise SpotImageFetchError(

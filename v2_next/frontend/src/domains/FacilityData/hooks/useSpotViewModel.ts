@@ -25,6 +25,10 @@ import {
   toPayloadRejectionValidationCode,
   validateSpotImagePayload,
 } from '../utils/spotImagePayloadValidation.pure';
+import {
+  getNextSpotImageRetryDelayMs,
+  isSpotImageFailureRetryable,
+} from '../utils/spotImageRecoveryPolicy.pure';
 import type { UseSpotViewModel } from './useSpotViewModel.types';
 
 interface SpotImageState {
@@ -58,6 +62,16 @@ type SpotPollingDiagnosticsWithImage = SpotPollingDiagnostics & {
   last_image_latency_ms: number | null;
 };
 
+class SpotImageRequestError extends Error {
+  readonly retryable: boolean;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = 'SpotImageRequestError';
+    this.retryable = retryable;
+  }
+}
+
 const resolveSpotImageErrorDetail = async (response: Response): Promise<SpotImageErrorDetail | null> => {
   try {
     const payload: unknown = await response.json();
@@ -79,6 +93,12 @@ const INITIAL_SPOT_DIAGNOSTICS: SpotPollingDiagnosticsWithImage = {
   refresh_interval_ms: null,
   fetch_count: 0,
   error_count: 0,
+  automatic_retry_count: 0,
+  consecutive_retry_attempt: 0,
+  automatic_retry_pending: false,
+  automatic_retry_exhausted: false,
+  next_retry_scheduled_at: null,
+  last_failure_retryable: null,
   last_fetch_started_at: null,
   last_fetch_completed_at: null,
   last_fetch_latency_ms: null,
@@ -94,16 +114,6 @@ const resolveSpotControlErrorMessage = (error: unknown, fallbackMessage: string)
     return error.message;
   }
   return fallbackMessage;
-};
-
-const buildSpotControlImageState = (
-  currentImageState: SpotImageState,
-  imageError: string
-): SpotImageState => {
-  return {
-    ...currentImageState,
-    imageError,
-  };
 };
 
 const isNoMovementFocusStatus = (status: string): boolean => {
@@ -179,6 +189,9 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   const pendingImageUrlRef = useRef<string | null>(null);
   const pendingPreviousImageStateRef = useRef<SpotImageState | null>(null);
   const inFlightRef = useRef(false);
+  const automaticRetryAttemptRef = useRef(0);
+  const automaticRetryTimerRef = useRef<number | null>(null);
+  const runSpotFetchRef = useRef<(reason: string) => Promise<void>>(async () => undefined);
   const configRef = useRef<SpotConfig | null>(null);
   const imageStateRef = useRef<SpotImageState>({
     imageUrl: '',
@@ -189,6 +202,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
 
   const setDashboardSpotConfig = useDashboardStore((state) => state.setSpotConfig);
   const setDashboardSpotImageState = useDashboardStore((state) => state.setSpotImageState);
+  const setDashboardSpotControlError = useDashboardStore((state) => state.setSpotControlError);
 
   configRef.current = config;
 
@@ -205,11 +219,73 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     [setDashboardSpotImageState]
   );
 
+  const cancelPendingImageRetry = useCallback((): void => {
+    if (automaticRetryTimerRef.current !== null) {
+      window.clearTimeout(automaticRetryTimerRef.current);
+      automaticRetryTimerRef.current = null;
+    }
+  }, []);
+
+  const resetImageRecovery = useCallback((): void => {
+    cancelPendingImageRetry();
+    automaticRetryAttemptRef.current = 0;
+    setDiagnostics((prev) => ({
+      ...prev,
+      consecutive_retry_attempt: 0,
+      automatic_retry_pending: false,
+      automatic_retry_exhausted: false,
+      next_retry_scheduled_at: null,
+      last_failure_retryable: null,
+    }));
+  }, [cancelPendingImageRetry]);
+
+  const scheduleAutomaticImageRetry = useCallback((): void => {
+    if (automaticRetryTimerRef.current !== null) {
+      return;
+    }
+
+    const delayMs = getNextSpotImageRetryDelayMs(automaticRetryAttemptRef.current);
+    if (delayMs === null) {
+      setDiagnostics((prev) => ({
+        ...prev,
+        automatic_retry_pending: false,
+        automatic_retry_exhausted: true,
+        next_retry_scheduled_at: null,
+        last_failure_retryable: true,
+      }));
+      return;
+    }
+
+    automaticRetryAttemptRef.current += 1;
+    const scheduledAt = Date.now() + delayMs;
+    automaticRetryTimerRef.current = window.setTimeout(() => {
+      automaticRetryTimerRef.current = null;
+      setDiagnostics((prev) => ({
+        ...prev,
+        automatic_retry_pending: false,
+        next_retry_scheduled_at: null,
+      }));
+      void runSpotFetchRef.current('automatic-retry');
+    }, delayMs);
+    setDiagnostics((prev) => ({
+      ...prev,
+      automatic_retry_count: prev.automatic_retry_count + 1,
+      consecutive_retry_attempt: automaticRetryAttemptRef.current,
+      automatic_retry_pending: true,
+      automatic_retry_exhausted: false,
+      next_retry_scheduled_at: scheduledAt,
+      last_failure_retryable: true,
+    }));
+  }, []);
+
   const applySpotConfig = useCallback(
     (nextConfig: SpotConfig): void => {
       const previousConfig = configRef.current;
       if (previousConfig && areSpotConfigsEqual(previousConfig, nextConfig)) {
         return;
+      }
+      if (previousConfig?.image_url !== nextConfig.image_url) {
+        resetImageRecovery();
       }
       setConfig(nextConfig);
       setDashboardSpotConfig(nextConfig);
@@ -219,7 +295,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         next_fetch_scheduled_at: null,
       }));
     },
-    [setDashboardSpotConfig]
+    [resetImageRecovery, setDashboardSpotConfig]
   );
 
   const loadConfig = useCallback(async (): Promise<SpotConfig | null> => {
@@ -238,6 +314,50 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     }
     applySpotConfig(nextConfig);
   }, [applySpotConfig, loadConfig]);
+
+  const publishImageFailure = useCallback(
+    (
+      nextImageError: string,
+      nextMetadata: SpotImageResponseMetadata | null,
+      retryable: boolean
+    ): void => {
+      const nextImageState = {
+        ...imageStateRef.current,
+        imageError: nextImageError,
+        metadata: nextMetadata ?? imageStateRef.current.metadata,
+      };
+      imageStateRef.current = nextImageState;
+      setImageError(nextImageError);
+      setMetadata(nextImageState.metadata);
+      syncDashboardSpotImageState(
+        nextImageState.imageUrl,
+        false,
+        nextImageError,
+        nextImageState.lastSuccessAt,
+        nextImageState.metadata
+      );
+      setDiagnostics((prev) => ({
+        ...prev,
+        error_count: prev.error_count + 1,
+        last_image_status: 'error',
+        last_image_source: nextImageState.metadata?.source ?? prev.last_image_source,
+        last_image_latency_ms: nextImageState.metadata?.latency_ms ?? prev.last_image_latency_ms,
+        last_failure_retryable: retryable,
+        automatic_retry_pending: retryable ? prev.automatic_retry_pending : false,
+        automatic_retry_exhausted: false,
+        next_retry_scheduled_at: retryable ? prev.next_retry_scheduled_at : null,
+        consecutive_retry_attempt: retryable ? prev.consecutive_retry_attempt : 0,
+      }));
+
+      if (retryable) {
+        scheduleAutomaticImageRetry();
+        return;
+      }
+      cancelPendingImageRetry();
+      automaticRetryAttemptRef.current = 0;
+    },
+    [cancelPendingImageRetry, scheduleAutomaticImageRetry, syncDashboardSpotImageState]
+  );
 
   const runSpotFetch = useCallback(
     async (reason: string): Promise<void> => {
@@ -301,13 +421,14 @@ export const useSpotViewModel = (): UseSpotViewModel => {
               detail?.message ?? resolveSpotImageErrorMessage(response.status, detail)
             );
           }
-          setDiagnostics((prev) => ({
-            ...prev,
-            last_image_status: 'error',
-            last_image_source: responseMetadata.source,
-            last_image_latency_ms: responseMetadata.latency_ms,
-          }));
-          throw new Error(resolveSpotImageErrorMessage(response.status, detail));
+          throw new SpotImageRequestError(
+            resolveSpotImageErrorMessage(response.status, detail),
+            isSpotImageFailureRetryable({
+              responseStatus: response.status,
+              code: detail?.code,
+              upstreamStatus: detail?.upstream_status,
+            })
+          );
         }
 
         const rawPayload = new Uint8Array(await response.arrayBuffer());
@@ -351,54 +472,15 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       } catch (error) {
         if (error instanceof SpotImagePayloadValidationError) {
           console.error('Spot image payload validation failed', buildSpotImageValidationLog(error));
-          const nextImageState = {
-            ...imageStateRef.current,
-            imageError: error.message,
-            metadata: latestResponseMetadata ?? imageStateRef.current.metadata,
-          };
-          imageStateRef.current = nextImageState;
-          setImageError(error.message);
-          setMetadata(nextImageState.metadata);
-          syncDashboardSpotImageState(
-            nextImageState.imageUrl,
-            false,
-            error.message,
-            nextImageState.lastSuccessAt,
-            nextImageState.metadata
-          );
-          setDiagnostics((prev) => ({
-            ...prev,
-            error_count: prev.error_count + 1,
-            last_image_status: 'error',
-            last_image_source: nextImageState.metadata?.source ?? prev.last_image_source,
-            last_image_latency_ms: nextImageState.metadata?.latency_ms ?? prev.last_image_latency_ms,
-          }));
+          publishImageFailure(error.message, latestResponseMetadata, false);
           return;
         }
         console.error('Image fetch failed', error);
         const nextImageError = error instanceof Error ? error.message : resolveSpotImageErrorMessage(0, null);
-        const nextImageState = {
-          ...imageStateRef.current,
-          imageError: nextImageError,
-          metadata: latestResponseMetadata ?? imageStateRef.current.metadata,
-        };
-        imageStateRef.current = nextImageState;
-        setImageError(nextImageError);
-        setMetadata(nextImageState.metadata);
-        syncDashboardSpotImageState(
-          nextImageState.imageUrl,
-          false,
-          nextImageError,
-          nextImageState.lastSuccessAt,
-          nextImageState.metadata
-        );
-        setDiagnostics((prev) => ({
-          ...prev,
-          error_count: prev.error_count + 1,
-          last_image_status: 'error',
-          last_image_source: nextImageState.metadata?.source ?? prev.last_image_source,
-          last_image_latency_ms: nextImageState.metadata?.latency_ms ?? prev.last_image_latency_ms,
-        }));
+        const retryable = error instanceof SpotImageRequestError
+          ? error.retryable
+          : isSpotImageFailureRetryable({ transportException: true });
+        publishImageFailure(nextImageError, latestResponseMetadata, retryable);
       } finally {
         const completedAt = Date.now();
         setImageLoading(false);
@@ -411,16 +493,19 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         }));
       }
     },
-    [syncDashboardSpotImageState]
+    [publishImageFailure, syncDashboardSpotImageState]
   );
+
+  runSpotFetchRef.current = runSpotFetch;
 
   const fetchInitialImage = useCallback(async (): Promise<void> => {
     await runSpotFetch('initial');
   }, [runSpotFetch]);
 
   const refreshImage = useCallback(() => {
+    resetImageRecovery();
     void runSpotFetch('manual');
-  }, [runSpotFetch]);
+  }, [resetImageRecovery, runSpotFetch]);
 
   const controlSpot = useCallback(async (action: string, value?: number) => {
     try {
@@ -441,39 +526,16 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       try {
         const response = await controlSpotFocus(steps);
         const responseMessage = resolveSpotFocusResponseMessage(steps, response);
-        if (responseMessage) {
-          const nextImageState = {
-            ...imageStateRef.current,
-            imageError: responseMessage,
-          };
-          imageStateRef.current = nextImageState;
-          setImageError(responseMessage);
-          syncDashboardSpotImageState(
-            nextImageState.imageUrl,
-            false,
-            responseMessage,
-            nextImageState.lastSuccessAt,
-            nextImageState.metadata
-          );
-        }
+        setDashboardSpotControlError(responseMessage);
       } catch (error) {
-        const nextImageError = resolveSpotControlErrorMessage(error, 'SPOT focus control failed');
-        const nextImageState = buildSpotControlImageState(imageStateRef.current, nextImageError);
+        const nextControlError = resolveSpotControlErrorMessage(error, 'SPOT focus control failed');
         console.error('Spot focus failed', error);
-        imageStateRef.current = nextImageState;
-        setImageError(nextImageError);
-        syncDashboardSpotImageState(
-          nextImageState.imageUrl,
-          false,
-          nextImageError,
-          nextImageState.lastSuccessAt,
-          nextImageState.metadata
-        );
+        setDashboardSpotControlError(nextControlError);
       } finally {
         setFocusBusy(false);
       }
     },
-    [focusBusy, syncDashboardSpotImageState]
+    [focusBusy, setDashboardSpotControlError]
   );
 
   const controlActuator = useCallback(
@@ -484,34 +546,27 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       setFocusBusy(true);
       try {
         await controlSpotActuator(step);
+        setDashboardSpotControlError(null);
       } catch (error) {
-        const nextImageError = resolveSpotControlErrorMessage(error, 'SPOT actuator control failed');
-        const nextImageState = buildSpotControlImageState(imageStateRef.current, nextImageError);
+        const nextControlError = resolveSpotControlErrorMessage(error, 'SPOT actuator control failed');
         console.error('Spot actuator failed', error);
-        imageStateRef.current = nextImageState;
-        setImageError(nextImageError);
-        syncDashboardSpotImageState(
-          nextImageState.imageUrl,
-          false,
-          nextImageError,
-          nextImageState.lastSuccessAt,
-          nextImageState.metadata
-        );
+        setDashboardSpotControlError(nextControlError);
       } finally {
         setFocusBusy(false);
       }
     },
-    [focusBusy, syncDashboardSpotImageState]
+    [focusBusy, setDashboardSpotControlError]
   );
 
   useEffect(() => {
     return () => {
+      cancelPendingImageRetry();
       const pendingPreviousUrl = pendingPreviousImageStateRef.current?.imageUrl ?? null;
       if (pendingPreviousUrl && pendingPreviousUrl !== prevUrlRef.current) {
         URL.revokeObjectURL(pendingPreviousUrl);
       }
     };
-  }, []);
+  }, [cancelPendingImageRetry]);
 
   useSpotViewModelEffects({
     config,
@@ -519,6 +574,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     loadConfig,
     applySpotConfig,
     prevUrlRef,
+    cancelPendingImageRetry,
   });
 
   const handleImageLoad = useCallback((displayedImageUrl?: string) => {
@@ -531,6 +587,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       pendingImageUrlRef.current === currentImageState.imageUrl &&
       loadedImageUrl === currentImageState.imageUrl;
     if (shouldRequestNext) {
+      resetImageRecovery();
       if (pendingPreviousUrl && pendingPreviousUrl !== currentImageState.imageUrl) {
         URL.revokeObjectURL(pendingPreviousUrl);
       }
@@ -547,22 +604,23 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     if (shouldRequestNext) {
       void runSpotFetch('completed');
     }
-  }, [runSpotFetch, syncDashboardSpotImageState]);
+  }, [resetImageRecovery, runSpotFetch, syncDashboardSpotImageState]);
 
   const handleImageError = useCallback((displayedImageUrl?: string) => {
     setImageLoading(false);
     const currentImageState = imageStateRef.current;
-    if (
+    const isPendingCurrentImage =
       pendingImageUrlRef.current === currentImageState.imageUrl &&
-      (displayedImageUrl ?? currentImageState.imageUrl) === currentImageState.imageUrl &&
-      pendingPreviousImageStateRef.current
-    ) {
+      (displayedImageUrl ?? currentImageState.imageUrl) === currentImageState.imageUrl;
+    if (isPendingCurrentImage) {
       const failedImageUrl = currentImageState.imageUrl;
       const previousImageState = pendingPreviousImageStateRef.current;
       const nextImageError = resolveSpotImageLoadErrorMessage();
-      const restoredImageState = {
-        ...previousImageState,
-        imageError: nextImageError,
+      const restoredImageState: SpotImageState = previousImageState ?? {
+        imageUrl: '',
+        imageError: null,
+        lastSuccessAt: null,
+        metadata: null,
       };
 
       URL.revokeObjectURL(failedImageUrl);
@@ -570,33 +628,16 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       pendingPreviousImageStateRef.current = null;
       prevUrlRef.current = restoredImageState.imageUrl || null;
       imageStateRef.current = restoredImageState;
+      hasImageRef.current = Boolean(restoredImageState.imageUrl);
       setImageUrl(restoredImageState.imageUrl);
-      setImageError(nextImageError);
       setLastSuccessAt(restoredImageState.lastSuccessAt);
       setMetadata(restoredImageState.metadata);
-      syncDashboardSpotImageState(
-        restoredImageState.imageUrl,
-        false,
-        nextImageError,
-        restoredImageState.lastSuccessAt,
-        restoredImageState.metadata
-      );
+      publishImageFailure(nextImageError, restoredImageState.metadata, true);
       return;
     }
     if (!currentImageState.imageError) {
       const nextImageError = resolveSpotImageLoadErrorMessage();
-      imageStateRef.current = {
-        ...currentImageState,
-        imageError: nextImageError,
-      };
-      setImageError(nextImageError);
-      syncDashboardSpotImageState(
-        currentImageState.imageUrl,
-        false,
-        nextImageError,
-        currentImageState.lastSuccessAt,
-        currentImageState.metadata
-      );
+      publishImageFailure(nextImageError, currentImageState.metadata, true);
       return;
     }
     syncDashboardSpotImageState(
@@ -606,7 +647,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       currentImageState.lastSuccessAt,
       currentImageState.metadata
     );
-  }, [syncDashboardSpotImageState]);
+  }, [publishImageFailure, syncDashboardSpotImageState]);
 
   return {
     config,

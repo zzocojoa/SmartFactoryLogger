@@ -1,0 +1,40 @@
+{
+  "evidence_schema": "spot-image-connect-timeout-server-validation-v1",
+  "recorded_at": "2026-07-15T22:37:33+09:00",
+  "source": {
+    "kind": "transcribed-server-console-and-recovered-observability-query",
+    "runtime": "packaged-app on server computer with physical SPOT device",
+    "sanitized": true
+  },
+  "build": {
+    "git_commit": "28609202ff965bfb2628beba0c9741af29626cad",
+    "installer_version": "1.0.13",
+    "installer_sha256": "2E0D88CEFB6AA1EDDF4FF659A6F73B163BC36457C7F56C03133C762EDFB4F69A",
+    "backend_sha256": "82C83366FF934D8D1ABD28A8F3D36087187B5EF4FD0087FF2653A9D295D55AE6"
+  },
+  "validation_window": {
+    "started_at": "2026-07-15T22:22:33+09:00",
+    "completed_at": "2026-07-15T22:37:33+09:00",
+    "duration_seconds": 900,
+    "dashboard_spot_camera_visible": true
+  },
+  "runtime_preflight": {
+    "result": "PASS",
+    "driver_connected": true,
+    "spot_poll_status": "success",
+    "image_route": "/api/spot/image.jpg"
+  },
+  "recovered_result": {
+    "driver_connected": true,
+    "spot_poll_status": "success",
+    "observability_error_entries": 0,
+    "spot_image_error_entries": 0,
+    "spot_image_failure_repeats": 0
+  },
+  "verdict": "PASS",
+  "limitations": [
+    "The monitoring loop completed, but its first final JSON serialization failed because Windows PowerShell 5.1 could not convert a Generic.List object through array subexpression syntax.",
+    "The exact validation window was recovered from the in-memory observability queue before it was cleared or the application was stopped.",
+    "Continuous health sample arrays and counter deltas were not preserved; the approval scope is the SPOT image timeout regression, its observability errors, and the final driver/poll state."
+  ]
+}

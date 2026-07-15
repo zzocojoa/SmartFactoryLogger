@@ -625,6 +625,12 @@ export interface SpotPollingDiagnostics {
   refresh_interval_ms: number | null;
   fetch_count: number;
   error_count: number;
+  automatic_retry_count: number;
+  consecutive_retry_attempt: number;
+  automatic_retry_pending: boolean;
+  automatic_retry_exhausted: boolean;
+  next_retry_scheduled_at: number | null;
+  last_failure_retryable: boolean | null;
   last_fetch_started_at: number | null;
   last_fetch_completed_at: number | null;
   last_fetch_latency_ms: number | null;

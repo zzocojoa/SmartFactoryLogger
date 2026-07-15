@@ -221,6 +221,7 @@ export interface DashboardState extends DashboardMetricsStatus {
   spotImageUrl: string;
   spotImageLoading: boolean;
   spotImageError: string | null;
+  spotControlError: string | null;
   spotLastSuccessAt: number | null;
   spotImageMetadata: SpotImageResponseMetadata | null;
   spotAlertActive: boolean;
@@ -241,6 +242,7 @@ export interface DashboardState extends DashboardMetricsStatus {
     lastSuccessAt: number | null,
     metadata?: SpotImageResponseMetadata | null
   ) => void;
+  setSpotControlError: (error: string | null) => void;
   setSpotAlertActive: (active: boolean) => void;
 }
 
@@ -410,6 +412,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   spotImageUrl: '',
   spotImageLoading: false,
   spotImageError: null,
+  spotControlError: null,
   spotLastSuccessAt: null,
   spotImageMetadata: null,
   spotAlertActive: false,
@@ -496,6 +499,12 @@ export const useDashboardStore = create<DashboardState>((set) => ({
       spotLastSuccessAt: nextSpotLastSuccessAt,
       spotImageMetadata: nextSpotImageMetadata,
     };
+  }),
+  setSpotControlError: (spotControlError) => set((state) => {
+    if (state.spotControlError === spotControlError) {
+      return state;
+    }
+    return { spotControlError };
   }),
   setSpotAlertActive: (spotAlertActive) => set((state) => {
     if (state.spotAlertActive === spotAlertActive) {

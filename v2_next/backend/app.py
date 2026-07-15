@@ -2822,6 +2822,8 @@ async def spot_image():
         ) from exc
     except spot_control.SpotImageFetchError as exc:
         diagnostics = spot_control.get_spot_diagnostics()
+        request_elapsed_ms = round(exc.request_elapsed_ms, 1) if exc.request_elapsed_ms is not None else None
+        observability_error_type = exc.transport_error_type or exc.code
         if exc.code in _SPOT_PAYLOAD_REJECTION_CODES:
             headers["X-Spot-Payload-Rejection"] = "1"
         observability_service.record_error(
@@ -2830,11 +2832,13 @@ async def spot_image():
             detail=str({
                 "code": exc.code,
                 "upstream_status": exc.upstream_status,
+                "transport_error_type": exc.transport_error_type,
+                "request_elapsed_ms": request_elapsed_ms,
                 "payload_rejection": exc.code in _SPOT_PAYLOAD_REJECTION_CODES,
             }),
             path=_SPOT_IMAGE_PATH,
             status_code=502,
-            error_type=exc.code,
+            error_type=observability_error_type,
             level="warning" if exc.code in _SPOT_PAYLOAD_REJECTION_CODES else "error",
         )
         observability_service.record_spot_image_result(502)
@@ -2844,6 +2848,8 @@ async def spot_image():
                 "code": exc.code,
                 "message": "SPOT image upstream request failed.",
                 "upstream_status": exc.upstream_status,
+                "transport_error_type": exc.transport_error_type,
+                "request_elapsed_ms": request_elapsed_ms,
                 "diagnostics": diagnostics,
             },
             headers=headers,
