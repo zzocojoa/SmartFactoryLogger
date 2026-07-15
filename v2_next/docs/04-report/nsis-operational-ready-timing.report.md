@@ -1,0 +1,142 @@
+# NSIS Operational Ready Timing Report
+
+> Version: 1.0.0 | Date: 2026-07-16 | Status: Complete
+> Feature: `nsis-operational-ready-timing`
+
+## 1. Summary
+
+- Added a separate full operator-wait metric without redefining the existing
+  visual dashboard-ready baseline.
+- Operational-ready now requires backend health, a positive timestamped
+  `Status=Running` factory snapshot, a confirmed dashboard paint, and two final
+  animation frames.
+- Added process-session correlation and a fail-closed PowerShell cold-start
+  measurement bundled in the installed application's `resources/qa` directory.
+- Generated the final SmartFactoryLogger `1.0.14` PyInstaller backend and NSIS
+  installer from clean commit `125c87d7e44fd7073497d579785ccaa27ac919af`.
+- Packaged MOCK live-data timing passed at 8.2266 seconds launcher-observed.
+- Development-PC hardware mode correctly timed out with only `live_data`
+  missing; it no longer counts a timestamped error snapshot as ready.
+
+## 2. Engineering Assessment
+
+- Risk level: medium. The change affects startup observability and release
+  identity but does not change device polling, CSV data, or dashboard layout.
+- Trade-off: operational-ready is intentionally stricter than visual-ready. A
+  disconnected PLC returns timeout evidence instead of a misleading fast PASS.
+- Compatibility: existing `renderer.dashboard-ready`, `/health`, `/api/data`,
+  frontend polling, backend schemas, and NSIS install behavior remain compatible.
+- Security: startup IPC remains allowlisted and flat-scalar sanitized. Session
+  IDs are bounded local correlation identifiers and contain no secret or device
+  data. Added-line sensitive scan found zero hits.
+- Observability: at most five additional bounded startup events are written per
+  process. Timeout names the missing gate and never substitutes a success event.
+- Migration: none.
+- Operational failure mode: unavailable hardware yields
+  `OPERATIONAL_TIMEOUT`/`missing_gates=live_data`; the script cleans up the
+  launched process tree unless `-KeepRunning` is explicitly supplied.
+- Rollback: revert commits `125c87d7` and `a77a3be`, restore version `1.0.13`,
+  rebuild backend/NSIS from a clean commit, and continue using the unchanged
+  visual-ready metric.
+
+## 3. Files Changed
+
+| File | Purpose |
+|------|---------|
+| `main.js` | Startup session ID and new renderer event allowlist |
+| `frontend/src/shared/startup/startupTelemetry.ts` | Readiness coordinator, data predicate, timeout |
+| `frontend/src/shared/startup/startupTelemetry.test.ts` | Invalid data, gate order, frame, timeout tests |
+| `frontend/src/shared/types.ts` | New startup event names |
+| `frontend/src/index.tsx` | Arm operational startup timeout |
+| `frontend/src/App.tsx` | Reuse first successful health response |
+| `frontend/src/domains/FacilityData/components/MetricsDataController.tsx` | Reuse first Running data snapshot |
+| `scripts/measure_nsis_operational_ready.ps1` | Cold-start measurement and self-test |
+| `backend/tests/test_data_history_api.py` | Electron/readiness/package contracts |
+| `backend/version.py` | Runtime version `1.0.14` |
+| root/frontend package manifests | NSIS/frontend version and bundled QA script |
+| `CHANGELOG.md` | Release notes |
+| PDCA plan/design/analysis/report | Traceability and evidence |
+
+## 4. Validation
+
+### Automated checks
+
+- Focused readiness tests: `18 passed`
+- Frontend: `28 test files`, `219 tests` passed
+- Frontend typecheck and lint: PASS
+- Backend ruff and mypy: PASS
+- Backend unittest: `484 tests` passed
+- Electron/readiness contracts: `6 passed`
+- PowerShell parser/self-test: PASS
+- `git diff --check`: PASS
+- Added-line sensitive scan: `sensitive_hits=0`
+
+### Package checks
+
+- Frontend production build: PASS
+- PyInstaller one-file backend: PASS
+- Provenance before/after build:
+  `125c87d7e44fd7073497d579785ccaa27ac919af`
+- electron-builder NSIS: PASS
+- Backend source/package SHA match: PASS
+- QA script source/package SHA match: PASS
+- Runtime version: `1.0.14`, runtime kind: `frozen`
+
+### Final artifacts
+
+| Artifact | Value |
+|----------|-------|
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Built at | `2026-07-16 00:05:13 KST` |
+| Size | `163,230,747 bytes` |
+| SHA-256 | `591C268D49101CAC5701B1142D2B35A8364E555962A46B5557B9C8654E4314E1` |
+| Backend SHA-256 | `69385CF6AF37916478C8704B566DE050A940CBFADC51A72CC9D200E711CBC8D2` |
+
+The earlier installer SHA `FF5DED...` was generated before the Act correction
+and is superseded. It must not be deployed.
+
+### Packaged runtime timing
+
+Positive package/state-machine test (`V2_MODE=MOCK`):
+
+| Gate | Electron elapsed |
+|------|------------------|
+| Dashboard visual ready | `636.9 ms` |
+| First Running live data | `7,080.7 ms` |
+| Backend health response | `7,983.8 ms` |
+| Operational ready | `8,009.6 ms` |
+| Launcher-observed operational ready | `8,226.6 ms` |
+
+Result: PASS, `ready_strategy=raf`, zero missing milestones,
+`driver_connected=true`, and process cleanup PASS. Data arrived before health,
+which also proves the coordinator is order independent.
+
+Development-PC hardware-path test:
+
+| Field | Result |
+|-------|--------|
+| Dashboard visual ready | `604.1 ms` |
+| Backend health response | `7,943.0 ms` |
+| First Running live data | absent |
+| Final status | `OPERATIONAL_TIMEOUT` |
+| Missing gate | `live_data` |
+| Cleanup | PASS, zero remaining processes |
+
+This is the expected result because the physical devices are on the server
+computer. It confirms the metric does not report an offline/error snapshot as
+usable live data.
+
+### Known non-blocking warning
+
+PyInstaller reports its existing `Hidden import "tzdata" not found` warning.
+No timezone code changed, all automated/package checks pass, and previous frozen
+runtime behavior is preserved. Physical server timing remains the final
+environment-specific validation.
+
+## 5. Next Action
+
+Copy only the final `591C268D...` installer to the server computer, verify its
+SHA-256, install `1.0.14`, fully close the app/backend, and run the bundled
+`resources\qa\measure_nsis_operational_ready.ps1` against the installed
+`smart-factory.exe`. Preserve the returned JSON as the physical-device full
+operator-wait evidence.

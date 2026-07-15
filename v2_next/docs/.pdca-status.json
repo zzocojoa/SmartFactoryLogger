@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-15T14:52:33.805Z",
+  "lastUpdated": "2026-07-15T15:08:48.476Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -1804,7 +1804,7 @@
       "completedAt": "2026-07-13T15:42:31.426Z"
     },
     "nsis-operational-ready-timing": {
-      "phase": "check",
+      "phase": "completed",
       "matchRate": null,
       "iterationCount": 1,
       "documents": {},
@@ -1829,19 +1829,22 @@
         },
         {
           "phase": "check",
-          "status": "active",
-          "createdAt": "2026-07-15T14:33:13.561Z"
+          "status": "completed",
+          "createdAt": "2026-07-15T14:33:13.561Z",
+          "completedAt": "2026-07-15T15:07:55.208Z"
         },
         {
           "phase": "report",
-          "status": "pending",
-          "createdAt": "2026-07-15T14:33:13.561Z"
+          "status": "completed",
+          "createdAt": "2026-07-15T14:33:13.561Z",
+          "completedAt": "2026-07-15T15:08:48.476Z"
         }
       ],
       "timestamps": {
         "started": "2026-07-15T14:33:13.563Z",
-        "lastUpdated": "2026-07-15T14:52:23.629Z"
-      }
+        "lastUpdated": "2026-07-15T15:08:48.476Z"
+      },
+      "completedAt": "2026-07-15T15:08:48.472Z"
     }
   },
   "pipeline": {
@@ -1853,7 +1856,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-15T14:52:33.805Z"
+    "lastActivity": "2026-07-15T15:08:48.476Z"
   },
   "history": [
     {
@@ -3139,6 +3142,26 @@
       "phase": "do",
       "nextPhase": "check",
       "timestamp": "2026-07-15T14:52:23.627Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-07-15T15:07:55.204Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-07-15T15:07:55.206Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-07-15T15:08:48.473Z"
     }
   ],
   "timeline": [
