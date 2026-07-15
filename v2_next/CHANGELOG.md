@@ -11,6 +11,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Added a strict packaged cold-start PowerShell measurement under `resources/qa`
   with contamination, timeout, and missing-milestone failure evidence.
 
+### Fixed
+
+- Kept the packaged cold-start measurement running for its caller-supplied
+  timeout budget after the renderer's 30-second diagnostic event, allowing a
+  genuine later operational-ready event to be measured instead of terminating
+  and force-closing the process at 30 seconds.
+
 ### Compatibility
 
 - Existing visual `renderer.dashboard-ready` telemetry, PLC/SPOT polling,

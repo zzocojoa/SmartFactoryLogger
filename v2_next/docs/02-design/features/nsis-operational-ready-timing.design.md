@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Design
 
-> Version: 1.0.0 | Date: 2026-07-15 | Status: Final
+> Version: 1.0.1 | Date: 2026-07-16 | Status: Act Iteration 2
 > Level: Dynamic | Plan: `docs/01-plan/features/nsis-operational-ready-timing.plan.md`
 
 ---
@@ -90,9 +90,11 @@ Public operations:
 - When all gates are true, the coordinator waits two more animation frames and
   emits operational-ready once. This ensures the final-arriving state update has
   had a paint opportunity, regardless of gate order.
-- At 30 seconds, emit the comma-delimited missing gate names. Timeout never
-  emits or substitutes operational-ready. A later recovery may still emit the
-  true event, but the measurement classifies any pre-ready timeout as failure.
+- At 30 seconds, emit the comma-delimited missing gate names. The event is a
+  diagnostic budget marker and never emits or substitutes operational-ready.
+  A later recovery may still emit the true event. The launcher continues until
+  true readiness or its caller-supplied `TimeoutSec`; it records whether the
+  30-second diagnostic budget was exceeded.
 
 ### 2.3 Data Flow
 
@@ -107,7 +109,9 @@ Public operations:
 7. The coordinator observes all gates, waits two frames, and emits the final
    event through the constrained preload bridge.
 8. The measurement script reads only events after launch with the selected
-   process session ID, validates milestones, and writes structured JSON.
+   process session ID. A 30-second diagnostic event is retained but is not a
+   terminal condition; the script waits for true readiness until `TimeoutSec`,
+   then validates milestones and writes structured JSON.
 
 ## 3. Data Model
 
@@ -150,6 +154,7 @@ dashboard_ready_elapsed_ms
 operational_ready_elapsed_ms
 launcher_observed_operational_ready_ms
 ready_strategy / missing_milestones / contamination
+operational_timeout_observed / diagnostic_budget_status
 cleanup / events
 ```
 
@@ -216,7 +221,8 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 - Electron allowlist includes all required events and still sanitizes payloads.
 - `App`, controller, and index contain their expected readiness call sites.
 - PowerShell script parses under strict mode and a synthetic log fixture proves
-  session correlation, milestone PASS, timeout FAIL, and contamination FAIL.
+  session correlation, milestone PASS, delayed recovery after the diagnostic
+  marker, timeout FAIL, and contamination FAIL.
 - Existing frontend startup tests, full frontend test/typecheck/lint, backend
   ruff/mypy/unittest, and `git diff --check` pass.
 
@@ -233,8 +239,9 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 - No secrets, credentials, URLs, raw data values, or arbitrary payload objects
   enter startup telemetry.
 - No new renderer privilege or generic IPC channel is added.
-- Failure mode is explicit: timeout/missing gate returns non-zero and preserves
-  diagnostic events; it cannot report PASS.
+- Failure mode is explicit: absence of true readiness at the caller deadline or
+  a missing required milestone returns non-zero and preserves diagnostic events;
+  a diagnostic marker alone cannot fabricate PASS.
 - Observability impact is local startup log growth of at most five bounded events
   per process.
 - Migration risk is none.
@@ -261,3 +268,4 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
 | 1.0.0 | 2026-07-15 | Final implementation design | Codex |
+| 1.0.1 | 2026-07-16 | Made caller timeout terminal and renderer timeout diagnostic | Codex |

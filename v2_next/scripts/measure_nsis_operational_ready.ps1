@@ -215,6 +215,21 @@ function Resolve-MeasurementStatus {
     return "TIMEOUT"
 }
 
+function Resolve-DiagnosticBudgetStatus {
+    param(
+        [object]$OperationalTimeout,
+        [object]$OperationalReady
+    )
+
+    if ($null -eq $OperationalTimeout) {
+        return "WITHIN_DIAGNOSTIC_BUDGET"
+    }
+    if ($null -ne $OperationalReady) {
+        return "RECOVERED_AFTER_DIAGNOSTIC_TIMEOUT"
+    }
+    return "DIAGNOSTIC_TIMEOUT_NOT_RECOVERED"
+}
+
 function Stop-LaunchedProcessTree {
     param(
         [System.Diagnostics.Process]$Process,
@@ -332,6 +347,13 @@ function Invoke-SelfTest {
     if ((Resolve-MeasurementStatus "MULTIPLE_STARTUP_SESSIONS" $null 8 $null) -ne "CONTAMINATED") {
         throw "Fixture contamination classification failed."
     }
+    $TimeoutFixture = [pscustomobject]@{ event = "renderer.dashboard-operational-timeout" }
+    if ((Resolve-DiagnosticBudgetStatus $TimeoutFixture $ReadyFixture) -ne "RECOVERED_AFTER_DIAGNOSTIC_TIMEOUT") {
+        throw "Fixture delayed recovery classification failed."
+    }
+    if ((Resolve-DiagnosticBudgetStatus $TimeoutFixture $null) -ne "DIAGNOSTIC_TIMEOUT_NOT_RECOVERED") {
+        throw "Fixture unrecovered diagnostic timeout classification failed."
+    }
 
     [pscustomobject][ordered]@{
         status               = "PASS"
@@ -392,10 +414,6 @@ while ([DateTimeOffset]::Now -lt $Deadline) {
                     Where-Object { $_.session_id -eq $SelectedSessionId }
             )
 
-            if ($null -ne (Get-StartupEvent -Events $SelectedEvents -Name "renderer.dashboard-operational-timeout")) {
-                $TerminalReason = "OPERATIONAL_TIMEOUT"
-                break
-            }
             if ($null -ne (Get-StartupEvent -Events $SelectedEvents -Name "renderer.dashboard-operational-ready")) {
                 $TerminalReason = "READY"
                 break
@@ -427,6 +445,14 @@ $OperationalTimeout = Get-StartupEvent -Events $SelectedEvents -Name "renderer.d
 $OperationalReady = Get-StartupEvent -Events $SelectedEvents -Name "renderer.dashboard-operational-ready"
 $ReadyStrategy = Get-EventPayloadValue -EventItem $OperationalReady -Name "ready_strategy"
 
+if ($TerminalReason -eq "TIMEOUT" -and $null -ne $OperationalTimeout) {
+    $TerminalReason = "OPERATIONAL_TIMEOUT"
+}
+
+$DiagnosticBudgetStatus = Resolve-DiagnosticBudgetStatus `
+    -OperationalTimeout $OperationalTimeout `
+    -OperationalReady $OperationalReady
+
 $Status = Resolve-MeasurementStatus `
     -TerminalReason $TerminalReason `
     -OperationalReady $OperationalReady `
@@ -457,7 +483,11 @@ $Result = [pscustomobject][ordered]@{
     operational_ready_elapsed_ms             = if ($null -eq $OperationalReady) { $null } else { $OperationalReady.elapsed_ms }
     launcher_observed_operational_ready_ms   = $LauncherObservedMs
     ready_strategy                          = $ReadyStrategy
+    operational_timeout_observed            = $null -ne $OperationalTimeout
+    operational_timeout_elapsed_ms           = if ($null -eq $OperationalTimeout) { $null } else { $OperationalTimeout.elapsed_ms }
+    operational_timeout_budget_ms            = Get-EventPayloadValue -EventItem $OperationalTimeout -Name "timeout_ms"
     operational_timeout_missing_gates       = Get-EventPayloadValue -EventItem $OperationalTimeout -Name "missing_gates"
+    diagnostic_budget_status                 = $DiagnosticBudgetStatus
     missing_milestones                      = $MissingMilestones
     multiple_startup_sessions               = $MultipleSessions
     event_count                             = $SelectedEvents.Count

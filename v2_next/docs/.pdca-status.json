@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-15T15:08:48.476Z",
+  "lastUpdated": "2026-07-15T15:18:13.499Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -1804,9 +1804,9 @@
       "completedAt": "2026-07-13T15:42:31.426Z"
     },
     "nsis-operational-ready-timing": {
-      "phase": "completed",
+      "phase": "check",
       "matchRate": null,
-      "iterationCount": 1,
+      "iterationCount": 2,
       "documents": {},
       "taskChain": [
         {
@@ -1856,7 +1856,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-15T15:08:48.476Z"
+    "lastActivity": "2026-07-15T15:18:13.499Z"
   },
   "history": [
     {

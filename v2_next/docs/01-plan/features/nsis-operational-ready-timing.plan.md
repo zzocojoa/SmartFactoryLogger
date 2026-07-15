@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Plan
 
-> Version: 1.0.0 | Date: 2026-07-15 | Status: Final
+> Version: 1.0.1 | Date: 2026-07-16 | Status: Act Iteration 2
 > Level: Dynamic
 
 ---
@@ -90,7 +90,7 @@ readiness without changing the existing startup baseline.
 | FR-04 | Record live-data readiness only for `Status=Running` `FactoryData` with finite positive `timestamp_ms`. | High | Pending |
 | FR-05 | Emit operational ready once, after all three gates and two animation frames. | High | Pending |
 | FR-06 | A timeout must report missing gates and must never be counted as operational ready. | High | Pending |
-| FR-07 | Measurement output must include session ID, per-gate elapsed values, main-clock total, launcher-observed total, ready strategy, and cleanup result. | High | Pending |
+| FR-07 | Measurement output must include session ID, per-gate elapsed values, main-clock total, launcher-observed total, ready strategy, diagnostic-budget status, and cleanup result; the caller's `TimeoutSec` is the terminal measurement budget. | High | Pending |
 | FR-08 | Measurement must fail when an existing app/backend process could contaminate a cold-start sample. | High | Pending |
 | FR-09 | Generate a clean PyInstaller backend and NSIS installer with SHA-256 evidence. | High | Pending |
 | FR-10 | Set root and frontend package identity consistently to `1.0.14`. | High | Pending |
@@ -119,7 +119,8 @@ readiness without changing the existing startup baseline.
 - [ ] `[AC-06]` Timeout evidence names missing gates and is never accepted as
   operational ready.
 - [ ] `[AC-07]` The measurement script correlates one startup session, rejects
-  contaminated runs, and returns structured PASS/FAIL JSON.
+  contaminated runs, continues after the 30-second diagnostic event until the
+  caller timeout, and returns structured PASS/FAIL JSON.
 - [ ] `[AC-08]` Frontend typecheck, lint, focused/full tests, backend checks, and
   PowerShell parser checks pass.
 - [ ] `[AC-09]` Clean frontend, PyInstaller, and NSIS builds pass; installer and
@@ -147,6 +148,7 @@ readiness without changing the existing startup baseline.
 | Multiple processes mix one log timeline | High | Medium | Add a process-unique session ID and reject pre-existing processes. |
 | Health response arrives before driver data | Low | High | Keep health and data as separate gates. |
 | Instrumentation changes runtime behavior | Medium | Low | Reuse existing responses; add no network requests or polling changes. |
+| Renderer diagnostic timeout prematurely ends a longer launcher measurement | High | Medium | Treat the 30-second event as evidence only; terminate only on true readiness, process failure, contamination, or caller timeout. |
 | Dirty package records unverifiable source | High | Medium | Commit first and use the existing fail-closed provenance gate. |
 
 ## 8. Architecture Considerations
@@ -175,3 +177,4 @@ readiness without changing the existing startup baseline.
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
 | 1.0.0 | 2026-07-15 | Initial final plan | Codex |
+| 1.0.1 | 2026-07-16 | Clarified launcher timeout authority after server Act evidence | Codex |

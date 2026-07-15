@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.0 | Date: 2026-07-16 | Status: Complete
+> Version: 1.0.1 | Date: 2026-07-16 | Status: Act 2 / Rebuild Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -12,8 +12,10 @@
   animation frames.
 - Added process-session correlation and a fail-closed PowerShell cold-start
   measurement bundled in the installed application's `resources/qa` directory.
-- Generated the final SmartFactoryLogger `1.0.14` PyInstaller backend and NSIS
-  installer from clean commit `125c87d7e44fd7073497d579785ccaa27ac919af`.
+- Server evidence exposed a QA launcher defect: the 30-second renderer diagnostic
+  marker prematurely terminated a caller-requested 90-second measurement.
+- Patched the launcher to retain that marker while waiting for true readiness
+  until the external deadline. A replacement package is pending.
 - Packaged MOCK live-data timing passed at 8.2266 seconds launcher-observed.
 - Development-PC hardware mode correctly timed out with only `live_data`
   missing; it no longer counts a timestamped error snapshot as ready.
@@ -33,8 +35,9 @@
   process. Timeout names the missing gate and never substitutes a success event.
 - Migration: none.
 - Operational failure mode: unavailable hardware yields
-  `OPERATIONAL_TIMEOUT`/`missing_gates=live_data`; the script cleans up the
-  launched process tree unless `-KeepRunning` is explicitly supplied.
+  `OPERATIONAL_TIMEOUT` only at the caller deadline when the internal diagnostic
+  marker was observed; the script then cleans up the launched process tree unless
+  `-KeepRunning` is explicitly supplied.
 - Rollback: revert commits `125c87d7` and `a77a3be`, restore version `1.0.13`,
   rebuild backend/NSIS from a clean commit, and continue using the unchanged
   visual-ready metric.
@@ -82,7 +85,7 @@
 - QA script source/package SHA match: PASS
 - Runtime version: `1.0.14`, runtime kind: `frozen`
 
-### Final artifacts
+### Superseded artifact
 
 | Artifact | Value |
 |----------|-------|
@@ -92,8 +95,8 @@
 | SHA-256 | `591C268D49101CAC5701B1142D2B35A8364E555962A46B5557B9C8654E4314E1` |
 | Backend SHA-256 | `69385CF6AF37916478C8704B566DE050A940CBFADC51A72CC9D200E711CBC8D2` |
 
-The earlier installer SHA `FF5DED...` was generated before the Act correction
-and is superseded. It must not be deployed.
+Installer SHA `591C268D...` contains the premature-termination QA script and is
+superseded for final readiness validation. SHA `FF5DED...` is also superseded.
 
 ### Packaged runtime timing
 
@@ -133,10 +136,16 @@ No timezone code changed, all automated/package checks pass, and previous frozen
 runtime behavior is preserved. Physical server timing remains the final
 environment-specific validation.
 
+### Server Act evidence
+
+The server visual shell was ready at `1,658.7 ms`, but the renderer recorded
+`missing_gates=backend_health,live_data` at `31,195.2 ms`. Although the launcher
+was invoked with `TimeoutSec=90`, it terminated and cleaned up the process at
+about 34 seconds. The resulting backend/GPU/network exit messages followed that
+cleanup and are not independent crash evidence.
+
 ## 5. Next Action
 
-Copy only the final `591C268D...` installer to the server computer, verify its
-SHA-256, install `1.0.14`, fully close the app/backend, and run the bundled
-`resources\qa\measure_nsis_operational_ready.ps1` against the installed
-`smart-factory.exe`. Preserve the returned JSON as the physical-device full
-operator-wait evidence.
+Run full checks, commit the launcher correction, and generate a replacement
+clean PyInstaller/NSIS package. Then verify its SHA on the server and rerun the
+bundled script with `TimeoutSec=90` to capture the physical-device full wait.

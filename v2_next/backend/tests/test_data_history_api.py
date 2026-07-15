@@ -340,6 +340,12 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("startup_session_id", script_text)
         self.assertIn("launcher_observed_operational_ready_ms", script_text)
         self.assertIn("renderer.dashboard-operational-timeout", script_text)
+        self.assertIn("RECOVERED_AFTER_DIAGNOSTIC_TIMEOUT", script_text)
+        self.assertIn("operational_timeout_observed", script_text)
+        self.assertNotIn(
+            '$TerminalReason = "OPERATIONAL_TIMEOUT"\n                break',
+            script_text,
+        )
         self.assertIn("Invoke-SelfTest", script_text)
 
     def test_preload_exposes_only_constrained_electron_bridge(self) -> None:

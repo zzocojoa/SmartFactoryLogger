@@ -1,16 +1,16 @@
 # Gap Analysis: NSIS Operational Ready Timing
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
-> Source commit: `125c87d7e44fd7073497d579785ccaa27ac919af`
+> Act iteration: 2 | Packaging status: pending rebuild
 
 ---
 
-## Match Rate: 100%
+## Match Rate: 95% (pre-package)
 
-Twenty implementation and validation checks were compared with the ten
-functional requirements and ten acceptance criteria. All twenty are satisfied.
-One false-positive gap was found during packaged validation and corrected in the
-Act iteration before the final build.
+The implementation matches the runtime readiness design, but server execution
+found that the launcher treated the renderer's 30-second diagnostic event as a
+terminal failure even when invoked with `-TimeoutSec 90`. The Act 2 source patch
+is complete; clean package generation and server rerun remain.
 
 ## Summary
 
@@ -35,9 +35,9 @@ Act iteration before the final build.
 | FR-04 real live-data readiness | PASS | Exact normalized `Status=Running`, non-empty time, positive finite timestamp |
 | FR-05 gate/paint state machine | PASS | Two gate-order tests and final two-frame assertion |
 | FR-06 fail-closed timeout | PASS | Missing-gate test plus packaged error-snapshot timeout |
-| FR-07 structured measurement | PASS | Self-test and packaged PASS/FAIL JSON |
+| FR-07 structured measurement | PASS (source) | Caller timeout remains authoritative; delayed recovery classification added |
 | FR-08 contamination rejection | PASS | Process and multi-session classification contract |
-| FR-09 clean package | PASS | PyInstaller provenance and electron-builder NSIS pass |
+| FR-09 clean package | PENDING | Rebuild required after Act 2 script change |
 | FR-10 version identity | PASS | Root/frontend/backend all `1.0.14`; artifact filename matches |
 
 ## Acceptance Criteria
@@ -50,9 +50,9 @@ Act iteration before the final build.
 | AC-04 | PASS | timestamped Running snapshot records once |
 | AC-05 | PASS | backend-data-paint and paint-data-backend order tests pass |
 | AC-06 | PASS | 30-second timeout names missing gates and emits no ready event |
-| AC-07 | PASS | parser/session/milestone/failure self-test PASS |
+| AC-07 | PASS (source) | parser/session/milestone/delayed-recovery/failure self-test PASS |
 | AC-08 | PASS | full health, parser, diff, and sensitive scan pass |
-| AC-09 | PASS | clean frontend/PyInstaller/NSIS build and hashes recorded |
+| AC-09 | PENDING | Act 2 clean PyInstaller/NSIS and hashes not yet generated |
 | AC-10 | PASS | `Setup 1.0.14.exe` plus runtime health `app_version=1.0.14` |
 
 ## Act Iteration
@@ -104,6 +104,25 @@ The data gate arrived before the health gate, confirming order independence in
 an actual packaged runtime. MOCK timing validates the package and state machine;
 it is not a substitute for the server-PC physical-device timing.
 
+### Act 2: server timeout-budget mismatch
+
+The first physical-server run of installer SHA `591C268D...` produced:
+
+```text
+dashboard_ready_elapsed_ms=1658.7
+renderer.dashboard-operational-timeout=31195.2
+missing_gates=backend_health,live_data
+launcher TimeoutSec=90
+script exit at approximately 34 seconds
+```
+
+The later `backend.closed code=1`, GPU-process exit, and network-service restart
+were emitted after the script force-cleaned the launched process tree. They do
+not prove a spontaneous backend crash. Root cause is the launcher's immediate
+break on a diagnostic-only renderer event. The patch removes that break, waits
+for true readiness until the external deadline, preserves the 30-second event,
+and reports `diagnostic_budget_status`.
+
 ## Validation Results
 
 | Check | Result |
@@ -125,7 +144,7 @@ PyInstaller repeated its existing non-blocking `Hidden import "tzdata" not
 found` warning. No timezone behavior was changed by this feature, and the full
 health/package build completed successfully.
 
-## Final Package Evidence
+## Superseded Package Evidence
 
 | Artifact | Evidence |
 |----------|----------|
@@ -138,11 +157,15 @@ health/package build completed successfully.
 | QA script source/package hash | MATCH |
 | Build time | `2026-07-16T00:05:13+09:00` |
 
+This installer remains runtime-valid but its bundled QA script ends a 90-second
+measurement at the 30-second diagnostic marker. It is superseded for this
+feature's final operational-ready validation and must not be used for that test.
+
 ## Missing Items
 
-None within the Plan scope. Physical-device timing is intentionally performed
-on the server computer because the development PC has no connected PLC/SPOT
-hardware. The packaged QA script is included for that final operational sample.
+- Generate a clean package containing the Act 2 launcher.
+- Rerun on the server and retain a true operational-ready measurement or a full
+  caller-deadline failure artifact.
 
 ## Deviations from Design
 
@@ -155,7 +178,6 @@ hardware. The packaged QA script is included for that final operational sample.
 
 ## Recommendation
 
-Proceed to the final PDCA report and preserve only the final `591C268D...`
-installer. On the server computer, run the bundled measurement with the app and
-backend fully stopped before launch; retain its JSON as physical-device timing
-evidence.
+Commit and build the Act 2 patch from a clean tree. Preserve only the new
+installer hash for final validation, then rerun the bundled launcher on the
+server with the app and backend fully stopped.
