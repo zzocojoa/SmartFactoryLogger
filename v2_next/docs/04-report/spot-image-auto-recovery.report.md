@@ -1,6 +1,6 @@
 # Completion Report: spot-image-auto-recovery
 
-> Date: 2026-07-14 | Level: Dynamic
+> Date: 2026-07-14 | Updated: 2026-07-15 | Level: Dynamic
 
 ---
 
@@ -55,8 +55,9 @@ introduced.
   requests (initial request plus three automatic attempts) leave the last frame
   or error state visible and require manual Retry.
 - Rollback: revert implementation commit
-  `b239df20cf959f99a5c573ea47dd0fc8e866ae31` and redeploy the preceding verified
-  installer. No migration rollback is required.
+  `b239df20cf959f99a5c573ea47dd0fc8e866ae31` and the image-timeout hardening
+  commit `28609202ff965bfb2628beba0c9741af29626cad`, then redeploy the preceding
+  verified installer. No migration rollback is required.
 
 ## 4. Validation
 
@@ -66,7 +67,8 @@ introduced.
 | Frontend typecheck and ESLint | Pass |
 | Full frontend tests | Pass / 28 files, 206 tests |
 | Backend Ruff and mypy | Pass |
-| Full backend tests | Pass / 475 tests |
+| Full backend tests | Pass / 480 tests |
+| Image timeout and observability regression tests | Pass / 68 tests |
 | `npm run health` | Pass |
 | `git diff --check` | Pass |
 | Added-line sensitive scan | Pass / 1,298 lines, 0 hits |
@@ -83,7 +85,7 @@ NSIS build did not emit a makensis warning.
 
 ## 5. Build Artifacts
 
-Build provenance commit:
+Initial recovery build provenance commit:
 `b239df20cf959f99a5c573ea47dd0fc8e866ae31`
 
 | Artifact | Modified (KST) | Bytes | SHA-256 |
@@ -94,6 +96,14 @@ Build provenance commit:
 
 The installer is not Authenticode-signed. Windows reputation or publisher
 warnings therefore remain possible.
+
+Final physical-device validation build provenance commit:
+`28609202ff965bfb2628beba0c9741af29626cad`
+
+| Artifact | Modified (KST) | Bytes | SHA-256 |
+|---|---|---:|---|
+| `backend/dist/SmartFactoryBackend.exe` | 2026-07-15 22:00:49 | 65,505,482 | `82C83366FF934D8D1ABD28A8F3D36087187B5EF4FD0087FF2653A9D295D55AE6` |
+| `dist/smart-factory-logger-v2 Setup 1.0.13.exe` | 2026-07-15 22:01:34 | 163,220,042 | `2E0D88CEFB6AA1EDDF4FF659A6F73B163BC36457C7F56C03133C762EDFB4F69A` |
 
 ## 6. Metrics
 
@@ -108,10 +118,16 @@ warnings therefore remain possible.
 
 ## 7. Deviations and Test Gaps
 
-- No server-computer or physical-device validation was run from the development
-  computer. The generated installer still requires the established 60-second
-  preflight and at least 15 minutes of SPOT image, Temperature, diagnostics, CSV,
-  and observability monitoring on the server computer.
+- Server-computer validation with the physical SPOT device completed on the
+  final build. The exact 15-minute window reported zero observability errors and
+  zero SPOT image failures while the driver remained connected and temperature
+  polling remained successful.
+- The first monitoring command completed its observation loop but failed during
+  final JSON serialization because of a Windows PowerShell 5.1
+  `Generic.List[object]` conversion limitation. The exact window was recovered
+  from the uncleared in-memory observability queue. Continuous health sample
+  arrays were therefore not preserved; this does not weaken the image-timeout
+  regression result, but it limits the artifact to that approval scope.
 - Automatic retry progress is available in diagnostics, while the existing error
   and Retry UI remains intentionally stable to avoid a broader camera-widget
   redesign.
@@ -129,6 +145,31 @@ warnings therefore remain possible.
 
 ## 9. Next Action
 
-Copy the installer to the server computer, verify its SHA-256, and run the
-physical-device preflight plus 15-minute monitoring gate before deployment
-approval.
+Review and merge the branch. No additional physical-device rerun is required
+for the SPOT image timeout regression.
+
+## 10. Final Server Validation
+
+- Result: `PASS`
+- Observation window: `2026-07-15T22:22:33+09:00` to
+  `2026-07-15T22:37:33+09:00`
+- Duration: `900` seconds
+- Runtime: packaged app on the server computer with the physical SPOT device
+- Runtime preflight: `PASS`
+- Driver connected at recovery query: `true`
+- SPOT temperature poll status: `success`
+- Image route: `/api/spot/image.jpg`
+- All observability error entries in the exact window: `0`
+- SPOT image error entries: `0`
+- SPOT image failure repeats: `0`
+- Sanitized evidence:
+  [spot-image-timeout-15min-20260715-223733.sanitized.json](evidence/spot-image-timeout-15min-20260715-223733.sanitized.json)
+- Sanitized evidence size: `1,739` bytes
+- Sanitized evidence SHA-256:
+  `303E5DBBDF73D213C47309D96A4309B393CDC745315670E4425C6E75E01111A7`
+
+The server query was executed before clearing the in-memory observability queue
+or stopping the application. This final gate validates that the image-only
+connect-timeout hardening removed the previously reproduced intermittent 502
+timeout within the observed physical-device window. The official `/image.jpg`
+upstream contract and the completion-driven UI cadence remained unchanged.
