@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.3 | Date: 2026-07-16 | Status: Candidate Package Ready / Server Validation Pending
+> Version: 1.0.4 | Date: 2026-07-16 | Status: Act 6 Patch Validated / Replacement Package Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -29,6 +29,16 @@
 - Packaged MOCK live-data timing passed at 8.2266 seconds launcher-observed.
 - Development-PC hardware mode correctly timed out with only `live_data`
   missing; it no longer counts a timestamped error snapshot as ready.
+- The Act 5 server package rendered the dashboard at `1,583.4 ms`, while the
+  frozen backend did not finish Uvicorn startup until about 43 seconds after
+  Electron launch. Neither renderer health nor live-data polling recovered by
+  the 90-second caller deadline.
+- The two readiness requests previously had no request timeout. Since each
+  recursive retry is scheduled only after its current promise settles, a
+  pre-listen pending request could suppress every later retry.
+- Act 6 bounds `/health` and `/api/data` requests to two seconds and keeps
+  health on the five-second base interval until its first success. Existing
+  post-success outage backoff and device polling are unchanged.
 
 ## 2. Engineering Assessment
 
@@ -53,6 +63,9 @@
   `OPERATIONAL_TIMEOUT` only at the caller deadline when the internal diagnostic
   marker was observed; the script then cleans up the launched process tree unless
   `-KeepRunning` is explicitly supplied.
+- Renderer recovery failure mode: a readiness request that exceeds two seconds
+  is aborted and counted as the existing poll failure, allowing the existing
+  timer/worker loop to continue rather than remaining pending.
 - Rollback: revert `b848755`, `125c87d7`, and `a77a3be`, restore version
   `1.0.13`, rebuild backend/NSIS from a clean commit, and continue using the
   unchanged visual-ready metric.
@@ -75,6 +88,11 @@
 | `backend/tests/test_memory_service.py` | Blocking-collector non-blocking-start regression |
 | `frontend/src/shared/api/client.mapper.ts` | Explicit packaged IPv4 loopback API base |
 | `frontend/src/shared/api/client.mapper.test.ts` | Packaged, override, and development API-base contracts |
+| `frontend/src/shared/api/pollingRequest.ts` | Two-second local readiness request bound |
+| `frontend/src/shared/api/transport/systemService.transport.ts` | Bounded `/health` request |
+| `frontend/src/shared/api/transport/metricService.transport.ts` | Bounded `/api/data` request |
+| `frontend/src/domains/Observability/hooks/useSystemViewModelEffects.ts` | Five-second health retry until first success |
+| focused frontend tests | Transport wiring and delayed-start recovery contracts |
 | `backend/version.py` | Runtime version `1.0.14` |
 | root/frontend package manifests | NSIS/frontend version and bundled QA script |
 | `CHANGELOG.md` | Release notes |
@@ -100,6 +118,9 @@
 - API-base contract: `4 passed`
 - Final packaged MOCK operational-ready: PASS at `8,267.7 ms`; launcher
   observed `8,582.7 ms`, `ready_strategy=raf`, cleanup PASS
+- Act 6 focused recovery tests: `2 files`, `3 tests` passed
+- Act 6 frontend: `31 test files`, `226 tests` passed
+- Act 6 typecheck and lint: PASS
 
 ### Package checks
 
@@ -225,8 +246,26 @@ cleanup and are not independent crash evidence.
 - Source MOCK runtime: `/health` at `1,814.3 ms`, `running=true`,
   `driver_connected=true`.
 
+### Act 5 server failure and Act 6 recovery patch
+
+- Act 5 server measurement: `OPERATIONAL_TIMEOUT`, dashboard paint
+  `1,583.4 ms`, backend/data gates absent, diagnostic timeout observed, and
+  cleanup PASS. A manually printed green PASS line after PowerShell throws is
+  not acceptance evidence.
+- Backend logs show the frozen process reached Uvicorn at about 43 seconds; no
+  fatal Python or Windows Application crash was present.
+- Code audit found no timeout on either readiness transport. Both recursive
+  loops wait for the current promise before scheduling their next request.
+- Act 6 adds only renderer-to-local-backend request bounds and pre-success
+  health retry behavior. PLC, SPOT, diagnostics, CSV, and image intervals are
+  unchanged.
+- Focused tests, full frontend tests, typecheck, lint, and `git diff --check`
+  pass. A replacement clean package and physical-server measurement remain
+  required.
+
 ## 5. Next Action
 
-Install only SHA `ABA6ED160B...` on the server and run the bundled 90-second
+Build the Act 6 replacement from a clean commit, record its hashes, then install
+only that replacement on the server and rerun the bundled 90-second
 physical-device operational-ready measurement with all existing app/backend
 processes stopped first.

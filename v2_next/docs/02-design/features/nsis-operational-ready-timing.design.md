@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Design
 
-> Version: 1.0.3 | Date: 2026-07-16 | Status: Act Iteration 5
+> Version: 1.0.4 | Date: 2026-07-16 | Status: Act Iteration 6
 > Level: Dynamic | Plan: `docs/01-plan/features/nsis-operational-ready-timing.plan.md`
 
 ---
@@ -50,7 +50,11 @@ memory diagnostics snapshot: `MemoryService.start()` starts its sampler thread,
 and that thread performs the first snapshot immediately before its first wait.
 The packaged `file:` renderer resolves its API base to
 `http://127.0.0.1:8000`; browser development remains relative and an explicit
-`VITE_API_BASE_URL` remains authoritative.
+`VITE_API_BASE_URL` remains authoritative. The two readiness transports bound
+each local request to two seconds. Health uses the existing five-second base
+interval until its first success, after which the existing outage backoff
+policy resumes unchanged. Live data keeps its existing worker interval and
+backoff policy; only a pending request is now bounded.
 
 ### 2.2 Component Design
 
@@ -211,6 +215,8 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | `backend/tests/test_memory_service.py` | blocking-collector startup regression |
 | `frontend/src/shared/api/client.mapper.ts` | packaged IPv4 loopback API base |
 | `frontend/src/shared/api/client.mapper.test.ts` | packaged and development resolution contracts |
+| `frontend/src/shared/api/pollingRequest.ts` | bounded readiness request timeout |
+| readiness transports and tests | timeout wiring and first-success recovery |
 | root/frontend package manifests | version `1.0.14` |
 
 ### 5.2 Implementation Order
@@ -248,6 +254,9 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
   `MemoryService.start()` returns before the collector is released.
 - Existing frontend startup tests, full frontend test/typecheck/lint, backend
   ruff/mypy/unittest, and `git diff --check` pass.
+- A transport contract proves `/health` and `/api/data` receive the two-second
+  bound, and a fake-timer hook test proves repeated pre-success health failures
+  remain at the five-second base interval before recovery.
 
 ### 6.3 Packaging Verification
 
@@ -287,6 +296,7 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | FR-10 | 6.3 | manifest and artifact-name checks |
 | FR-11 | 2.2 backend startup availability | blocking-collector regression and server package timing |
 | FR-12 | 2.1 packaged API base | mapper unit test and packaged operational-ready timing |
+| FR-13 | 2.1 bounded local polling | transport and first-success retry tests |
 
 ## Version History
 
@@ -296,3 +306,4 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | 1.0.1 | 2026-07-16 | Made caller timeout terminal and renderer timeout diagnostic | Codex |
 | 1.0.2 | 2026-07-16 | Moved initial memory snapshot off the lifespan caller contract | Codex |
 | 1.0.3 | 2026-07-16 | Added packaged IPv4 loopback API contract | Codex |
+| 1.0.4 | 2026-07-16 | Bounded pre-listen readiness requests and first-success health retries | Codex |

@@ -97,6 +97,7 @@ export const useSystemViewModelEffects = ({
     let heartbeatTimerId: number | null = null;
     let channel: BroadcastChannel | null = null;
     let healthFailures = 0;
+    let healthHasSucceeded = false;
     let statsFailures = 0;
     let healthDelayMs = BASE_POLL_INTERVAL_MS;
     let statsDelayMs = BASE_POLL_INTERVAL_MS;
@@ -162,17 +163,22 @@ export const useSystemViewModelEffects = ({
         try {
           const data = await fetchHealth();
           if (data) {
+            healthHasSucceeded = true;
             healthFailures = 0;
             healthDelayMs = BASE_POLL_INTERVAL_MS;
             broadcastSystem('health', data);
           } else {
             healthFailures += 1;
-            healthDelayMs = resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures);
+            healthDelayMs = healthHasSucceeded
+              ? resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures)
+              : BASE_POLL_INTERVAL_MS;
           }
         } catch (e) {
           console.error('Health poll failed', e);
           healthFailures += 1;
-          healthDelayMs = resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures);
+          healthDelayMs = healthHasSucceeded
+            ? resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures)
+            : BASE_POLL_INTERVAL_MS;
         }
       } else {
         healthFailures = 0;
@@ -286,6 +292,7 @@ export const useSystemViewModelEffects = ({
     const applyBroadcast = (payload: DashboardSystemBroadcast): void => {
       if (payload.kind === 'health') {
         applyHealthSnapshot(payload.data as HealthSnapshot);
+        healthHasSucceeded = true;
         healthFailures = 0;
         healthDelayMs = BASE_POLL_INTERVAL_MS;
         setHealthPolling(buildPollingState(healthDelayMs, healthFailures));

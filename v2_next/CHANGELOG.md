@@ -25,11 +25,18 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Routed packaged renderer API calls through the explicit IPv4 loopback address
   so Windows IPv6-first `localhost` resolution cannot delay every backend
   request past the operational-ready polling cycle.
+- Bounded the two operational startup polling requests (`/health` and
+  `/api/data`) to two seconds so a request opened before Uvicorn is listening
+  cannot indefinitely prevent its next retry.
+- Kept health polling at its five-second base interval until the first
+  successful response; the existing post-recovery outage backoff is unchanged.
 
 ### Compatibility
 
 - Existing visual `renderer.dashboard-ready` telemetry, memory snapshot content
   and cadence, PLC/SPOT polling, dashboard layout, and CSV schemas are unchanged.
+- SPOT/device request intervals and protocols are unchanged; the new timeout
+  applies only to renderer-to-local-backend operational polling.
 
 ## [1.0.13] - 2026-07-13
 

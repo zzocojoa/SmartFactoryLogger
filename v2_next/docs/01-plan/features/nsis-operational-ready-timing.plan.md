@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Plan
 
-> Version: 1.0.3 | Date: 2026-07-16 | Status: Act Iteration 5
+> Version: 1.0.4 | Date: 2026-07-16 | Status: Act Iteration 6
 > Level: Dynamic
 
 ---
@@ -49,6 +49,9 @@ readiness without changing the existing startup baseline.
   snapshot observes concurrently initializing physical-device workers.
 - Use an explicit IPv4 loopback API base in the packaged renderer so Windows
   IPv6-first `localhost` resolution cannot hide an otherwise-ready backend.
+- Bound pre-listen `/health` and `/api/data` requests and keep health at its
+  base retry interval until the first success so delayed Uvicorn startup can
+  recover within the caller measurement budget.
 - Build a clean PyInstaller backend and NSIS installer from the verified commit.
 
 ### 2.2 Non-Goals
@@ -75,6 +78,7 @@ readiness without changing the existing startup baseline.
 - Non-blocking initial memory diagnostics collection and backend lifecycle-stage
   timing logs.
 - Packaged renderer API-base resolution and its unit contract.
+- Bounded operational polling transport and first-success retry recovery.
 - PDCA analysis/report documents and clean package hashes.
 
 ### 3.2 Out of Scope
@@ -105,6 +109,7 @@ readiness without changing the existing startup baseline.
 | FR-10 | Set root and frontend package identity consistently to `1.0.14`. | High | Pending |
 | FR-11 | The first memory diagnostics snapshot must run immediately in its sampler thread and must not block FastAPI startup or `/health`. | High | Pending |
 | FR-12 | Packaged `file:` renderers must call the local backend through `127.0.0.1`, while explicit environment overrides and browser-relative development behavior remain unchanged. | High | Pending |
+| FR-13 | `/health` and `/api/data` startup requests must terminate within two seconds, and health must retry at the five-second base interval until its first success. | High | Pending |
 
 ### 4.2 Non-Functional Requirements
 
@@ -116,6 +121,7 @@ readiness without changing the existing startup baseline.
 | Observability | A failed operational startup identifies the missing gate without fabricating success. | Timeout unit/script tests |
 | Performance | Instrumentation does not introduce network requests or change polling intervals. | Code review and startup smoke check |
 | Availability | A slow initial memory collector cannot delay FastAPI startup completion. | Blocking-collector regression test and packaged server run |
+| Recovery | A local request started before Uvicorn listens cannot suspend all later startup polls. | Transport timeout and health first-success retry tests |
 | Packaging | PyInstaller build must fail closed on dirty or changed Git source. | Provenance gate and clean build log |
 
 ## 5. Success Criteria
@@ -144,6 +150,9 @@ readiness without changing the existing startup baseline.
 - [ ] `[AC-12]` Packaged API resolution returns `http://127.0.0.1:8000`, and
   the replacement package records backend health and live data without the
   Windows `localhost -> ::1` fallback delay.
+- [ ] `[AC-13]` Both operational polling transports use a two-second request
+  bound, health retries every five seconds before first success, and the server
+  package recovers backend/data gates within the caller timeout.
 
 ## 6. Schedule
 
@@ -168,6 +177,7 @@ readiness without changing the existing startup baseline.
 | Renderer diagnostic timeout prematurely ends a longer launcher measurement | High | Medium | Treat the 30-second event as evidence only; terminate only on true readiness, process failure, contamination, or caller timeout. |
 | Initial memory diagnostics blocks `/health` while hardware worker calls are slow | High | High | Run the first snapshot immediately on the existing sampler thread and log each lifespan startup stage duration. |
 | IPv6-first `localhost` resolution delays each renderer request while Uvicorn listens on IPv4 | High | High | Use the explicit IPv4 loopback address only for packaged/local fallback API resolution. |
+| A renderer request opened before Uvicorn listens remains pending and suppresses its recursive retry | High | High | Apply a two-second bound to the two operational polling requests and retain the base health interval before first success. |
 | Dirty package records unverifiable source | High | Medium | Commit first and use the existing fail-closed provenance gate. |
 
 ## 8. Architecture Considerations

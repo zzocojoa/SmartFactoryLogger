@@ -1,0 +1,1 @@
+export const STARTUP_POLL_REQUEST_TIMEOUT_MS = 2_000;
