@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.3 | Date: 2026-07-16 | Status: Act 5 Source Complete / Rebuild Pending
+> Version: 1.0.3 | Date: 2026-07-16 | Status: Candidate Package Ready / Server Validation Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -24,8 +24,8 @@
   `16.2 ms`, while `localhost` took `2052.2 ms` after `::1` failed.
 - Changed only packaged/local fallback API resolution to explicit
   `127.0.0.1`; environment overrides and browser development remain unchanged.
-- Installer SHA `0437A378...` is superseded; the Act 5 replacement package is
-  pending a clean source commit.
+- Installer SHA `0437A378...` is superseded. The Act 5 replacement installer is
+  SHA `ABA6ED160B...` and is ready for server validation.
 - Packaged MOCK live-data timing passed at 8.2266 seconds launcher-observed.
 - Development-PC hardware mode correctly timed out with only `live_data`
   missing; it no longer counts a timestamped error snapshot as ready.
@@ -98,17 +98,34 @@
 - Packaged loopback reproduction: `127.0.0.1` `16.2 ms`, `localhost`
   `2052.2 ms`, `[::1]` connection failure
 - API-base contract: `4 passed`
+- Final packaged MOCK operational-ready: PASS at `8,267.7 ms`; launcher
+  observed `8,582.7 ms`, `ready_strategy=raf`, cleanup PASS
 
 ### Package checks
 
 - Frontend production build: PASS
 - PyInstaller one-file backend: PASS
 - Provenance before/after build:
-  `b848755b118852df4cf1a1cc1f6c13160618c7df`
+  `c6be48c4398fa4f651e93b6a47ddfaf0f0308cb4`
 - electron-builder NSIS: PASS
 - Backend source/package SHA match: PASS
 - QA script source/package SHA match: PASS
 - Runtime version: `1.0.14`, runtime kind: `frozen`
+
+### Act 5 candidate artifact
+
+| Artifact | Value |
+|----------|-------|
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Built at | `2026-07-16 01:18:18 KST` |
+| Size | `163,232,993 bytes` |
+| SHA-256 | `ABA6ED160BED8A43AEBB0365471E2BF2B3B85798BFE9A64A5E2C2D967386A669` |
+| Backend SHA-256 | `8037F2B6B89384C41B495F0DE3C0533545388D0B1A2EE96DD7CD5EA4591FA7CD` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+
+Backend source/package and QA source/package hashes match. The final frontend
+bundle contains `http://127.0.0.1:8000` and contains no
+`http://localhost:8000` literal.
 
 ### Act 2 artifact, superseded for Act 3
 
@@ -210,6 +227,6 @@ cleanup and are not independent crash evidence.
 
 ## 5. Next Action
 
-Commit the Act 5 source, generate a clean PyInstaller/NSIS replacement, record
-its hashes, then install only that build on the server for the 90-second
-physical-device operational-ready measurement.
+Install only SHA `ABA6ED160B...` on the server and run the bundled 90-second
+physical-device operational-ready measurement with all existing app/backend
+processes stopped first.

@@ -6,7 +6,7 @@
 
 ---
 
-## Match Rate: 100% (source; replacement package pending)
+## Match Rate: 100% (candidate package; server validation pending)
 
 The implementation matches the runtime readiness design. Act 3 made the frozen
 backend responsive, but package reproduction showed that the `file:` renderer
@@ -192,10 +192,31 @@ endpoint, timeout, or polling interval changed.
 | Act 3 source MOCK `/health` | PASS at `1,814.3 ms` |
 | Act 5 API-base contract | `4 passed` |
 | Act 5 loopback reproduction | IPv4 `16.2 ms`; localhost `2052.2 ms`; IPv6 failed |
+| Act 5 packaged MOCK operational-ready | PASS at `8,267.7 ms`; launcher `8,582.7 ms` |
 
 PyInstaller repeated its existing non-blocking `Hidden import "tzdata" not
 found` warning. No timezone behavior was changed by this feature, and the full
 health/package build completed successfully.
+
+## Act 5 Candidate Package Evidence
+
+| Artifact | Evidence |
+|----------|----------|
+| Source/build commit | `c6be48c4398fa4f651e93b6a47ddfaf0f0308cb4` |
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Installer bytes | `163,232,993` |
+| Installer SHA-256 | `ABA6ED160BED8A43AEBB0365471E2BF2B3B85798BFE9A64A5E2C2D967386A669` |
+| Backend SHA-256 | `8037F2B6B89384C41B495F0DE3C0533545388D0B1A2EE96DD7CD5EA4591FA7CD` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+| Backend source/package hash | MATCH |
+| QA script source/package hash | MATCH |
+| Build time | `2026-07-16T01:18:18+09:00` |
+
+The final frontend bundle contains the explicit IPv4 API base and contains no
+`http://localhost:8000` literal. Packaged MOCK cold-start reached dashboard
+paint at `673.4 ms`, live data at `8,215.6 ms`, backend health at `8,225.5 ms`,
+and operational-ready at `8,267.7 ms`. It completed within the diagnostic budget
+with `ready_strategy=raf`, no missing milestone, and successful process cleanup.
 
 ## Act 2 Candidate Package Evidence
 
@@ -239,8 +260,6 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Commit Act 5 source, generate a clean replacement PyInstaller/NSIS package,
-  and record its hashes.
 - Run only the Act 5 installer on the server and retain a true
   operational-ready measurement artifact.
 
@@ -255,7 +274,7 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Do not reuse installer SHA `0437A378...`; it has the Act 3 backend fix but still
-contains the `localhost` packaged frontend. Build from the verified Act 5
-commit, verify the new installer/backend/QA hashes, then rerun the bundled
-launcher on the server with the app and backend fully stopped.
+Use only installer SHA `ABA6ED160B...` for final server validation. SHA
+`0437A378...` has the Act 3 backend fix but still contains the `localhost`
+packaged frontend. Rerun the bundled launcher on the server with the app and
+backend fully stopped.
