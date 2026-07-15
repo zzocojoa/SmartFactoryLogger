@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Design
 
-> Version: 1.0.2 | Date: 2026-07-16 | Status: Act Iteration 3
+> Version: 1.0.3 | Date: 2026-07-16 | Status: Act Iteration 5
 > Level: Dynamic | Plan: `docs/01-plan/features/nsis-operational-ready-timing.plan.md`
 
 ---
@@ -48,6 +48,9 @@ owner of the monotonic startup clock so renderer and main milestones share one
 elapsed timeline. The backend lifespan must not synchronously collect the first
 memory diagnostics snapshot: `MemoryService.start()` starts its sampler thread,
 and that thread performs the first snapshot immediately before its first wait.
+The packaged `file:` renderer resolves its API base to
+`http://127.0.0.1:8000`; browser development remains relative and an explicit
+`VITE_API_BASE_URL` remains authoritative.
 
 ### 2.2 Component Design
 
@@ -206,6 +209,8 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | `backend/Observability/memory_service.py` | non-blocking immediate initial snapshot |
 | `backend/app.py` | backend lifespan stage timing logs |
 | `backend/tests/test_memory_service.py` | blocking-collector startup regression |
+| `frontend/src/shared/api/client.mapper.ts` | packaged IPv4 loopback API base |
+| `frontend/src/shared/api/client.mapper.test.ts` | packaged and development resolution contracts |
 | root/frontend package manifests | version `1.0.14` |
 
 ### 5.2 Implementation Order
@@ -281,6 +286,7 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | FR-09 | 6.3 | clean build and SHA evidence |
 | FR-10 | 6.3 | manifest and artifact-name checks |
 | FR-11 | 2.2 backend startup availability | blocking-collector regression and server package timing |
+| FR-12 | 2.1 packaged API base | mapper unit test and packaged operational-ready timing |
 
 ## Version History
 
@@ -289,3 +295,4 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | 1.0.0 | 2026-07-15 | Final implementation design | Codex |
 | 1.0.1 | 2026-07-16 | Made caller timeout terminal and renderer timeout diagnostic | Codex |
 | 1.0.2 | 2026-07-16 | Moved initial memory snapshot off the lifespan caller contract | Codex |
+| 1.0.3 | 2026-07-16 | Added packaged IPv4 loopback API contract | Codex |

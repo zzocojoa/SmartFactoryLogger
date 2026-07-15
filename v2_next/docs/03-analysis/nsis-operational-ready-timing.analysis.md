@@ -2,17 +2,17 @@
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
 > Act 2 build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
-> Act iteration: 3 | Source complete; replacement packaging pending
+> Act iteration: 5 | Source complete; replacement packaging pending
 
 ---
 
 ## Match Rate: 100% (source; replacement package pending)
 
-The implementation matches the runtime readiness design. The second server run
-honored the 90-second launcher budget and exposed a different blocker: Uvicorn
-remained in application startup while the synchronous initial memory snapshot
-overlapped long-running physical-device workers. Act 3 moves that first snapshot
-onto the existing sampler thread and records per-stage lifespan timing.
+The implementation matches the runtime readiness design. Act 3 made the frozen
+backend responsive, but package reproduction showed that the `file:` renderer
+still called `localhost`. On the target Windows resolver this attempts IPv6
+`::1` first while Uvicorn listens on IPv4, delaying each request by about two
+seconds. Act 5 uses explicit IPv4 loopback for packaged renderer requests.
 
 ## Summary
 
@@ -23,6 +23,8 @@ onto the existing sampler thread and records per-stage lifespan timing.
   even when they carry a positive timestamp.
 - Operational ready is emitted once after all gates and two final animation
   frames; timeout reports missing gates and never fabricates success.
+- Packaged API calls use `127.0.0.1`; explicit environment overrides and
+  browser-relative development calls remain unchanged.
 - The PowerShell measurement rejects pre-existing processes and multiple startup
   sessions, and reports both Electron monotonic and launcher wall-clock time.
 - Root, frontend, backend, and NSIS artifact identity is `1.0.14`.
@@ -149,12 +151,30 @@ stage elapsed logs. A source MOCK runtime reached `/health` in `1,814.3 ms`; its
 startup stages were CSV `0.2 ms`, config sync `0.2 ms`, config watch `0.2 ms`,
 PLC `0.6 ms`, comm metrics `0.5 ms`, memory start `153.0 ms`, and SPOT `0.0 ms`.
 
+### Act 5: packaged renderer IPv6-first localhost delay
+
+The Act 3 frozen backend itself reached `/health` and `/api/data` in about
+`6.64 s`, but the renderer did not satisfy either gate. Direct reproduction on
+the same package showed:
+
+```text
+127.0.0.1 /health: 200 in 16.2 ms
+localhost /health: 200 in 2052.2 ms
+[::1] /health: connection failure in 2036.7 ms
+listener: 0.0.0.0:8000 (IPv4)
+```
+
+Windows resolves `localhost` to `::1` before `127.0.0.1`. The renderer therefore
+paid the failed IPv6 connection delay on each poll. The packaged `file:` API
+base now resolves directly to `http://127.0.0.1:8000`; no backend binding,
+endpoint, timeout, or polling interval changed.
+
 ## Validation Results
 
 | Check | Result |
 |-------|--------|
 | Focused startup telemetry | `18 passed` |
-| Frontend full suite | `28 files, 219 tests passed` |
+| Frontend full suite | `29 files, 223 tests passed` |
 | Frontend typecheck/lint | PASS |
 | Backend ruff/mypy | PASS |
 | Backend unittest | `484 tests passed` |
@@ -170,6 +190,8 @@ PLC `0.6 ms`, comm metrics `0.5 ms`, memory start `153.0 ms`, and SPOT `0.0 ms`.
 | PyInstaller provenance | clean HEAD verified before/after packaging |
 | NSIS electron-builder | PASS |
 | Act 3 source MOCK `/health` | PASS at `1,814.3 ms` |
+| Act 5 API-base contract | `4 passed` |
+| Act 5 loopback reproduction | IPv4 `16.2 ms`; localhost `2052.2 ms`; IPv6 failed |
 
 PyInstaller repeated its existing non-blocking `Hidden import "tzdata" not
 found` warning. No timezone behavior was changed by this feature, and the full
@@ -217,9 +239,9 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Commit Act 3 source, generate a clean replacement PyInstaller/NSIS package,
+- Commit Act 5 source, generate a clean replacement PyInstaller/NSIS package,
   and record its hashes.
-- Run only the Act 3 installer on the server and retain a true
+- Run only the Act 5 installer on the server and retain a true
   operational-ready measurement artifact.
 
 ## Deviations from Design
@@ -233,6 +255,7 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Do not reuse installer SHA `90AEF3AF...`. Build from the verified Act 3 commit,
-verify the new installer/backend/QA hashes, then rerun the bundled launcher on
-the server with the app and backend fully stopped.
+Do not reuse installer SHA `0437A378...`; it has the Act 3 backend fix but still
+contains the `localhost` packaged frontend. Build from the verified Act 5
+commit, verify the new installer/backend/QA hashes, then rerun the bundled
+launcher on the server with the app and backend fully stopped.

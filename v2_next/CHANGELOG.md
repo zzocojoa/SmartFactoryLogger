@@ -22,6 +22,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
   and `/health` availability.
 - Added per-stage backend lifespan timing logs for startup delay diagnosis
   without recording raw sensor or network configuration values.
+- Routed packaged renderer API calls through the explicit IPv4 loopback address
+  so Windows IPv6-first `localhost` resolution cannot delay every backend
+  request past the operational-ready polling cycle.
 
 ### Compatibility
 

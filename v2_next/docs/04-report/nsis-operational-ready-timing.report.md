@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.2 | Date: 2026-07-16 | Status: Act 3 Source Complete / Rebuild Pending
+> Version: 1.0.3 | Date: 2026-07-16 | Status: Act 5 Source Complete / Rebuild Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -20,7 +20,11 @@
   while initial memory diagnostics overlapped slow physical-device reads.
 - Moved the first memory snapshot into the existing sampler thread and added
   per-stage lifespan timing without changing memory content or cadence.
-- Installer SHA `90AEF3AF...` is superseded; the Act 3 replacement package is
+- Reproduced a Windows IPv6-first `localhost` delay: IPv4 health responded in
+  `16.2 ms`, while `localhost` took `2052.2 ms` after `::1` failed.
+- Changed only packaged/local fallback API resolution to explicit
+  `127.0.0.1`; environment overrides and browser development remain unchanged.
+- Installer SHA `0437A378...` is superseded; the Act 5 replacement package is
   pending a clean source commit.
 - Packaged MOCK live-data timing passed at 8.2266 seconds launcher-observed.
 - Development-PC hardware mode correctly timed out with only `live_data`
@@ -35,6 +39,8 @@
   disconnected PLC returns timeout evidence instead of a misleading fast PASS.
 - Compatibility: existing `renderer.dashboard-ready`, `/health`, `/api/data`,
   frontend polling, backend schemas, and NSIS install behavior remain compatible.
+- Network compatibility: packaged requests still target the same local backend
+  port and endpoints; only hostname resolution is made deterministic.
 - Security: startup IPC remains allowlisted and flat-scalar sanitized. Session
   IDs are bounded local correlation identifiers and contain no secret or device
   data. Added-line sensitive scan found zero hits.
@@ -67,6 +73,8 @@
 | `backend/Observability/memory_service.py` | Immediate initial snapshot on sampler thread |
 | `backend/app.py` | Per-stage lifespan startup elapsed logs |
 | `backend/tests/test_memory_service.py` | Blocking-collector non-blocking-start regression |
+| `frontend/src/shared/api/client.mapper.ts` | Explicit packaged IPv4 loopback API base |
+| `frontend/src/shared/api/client.mapper.test.ts` | Packaged, override, and development API-base contracts |
 | `backend/version.py` | Runtime version `1.0.14` |
 | root/frontend package manifests | NSIS/frontend version and bundled QA script |
 | `CHANGELOG.md` | Release notes |
@@ -77,7 +85,7 @@
 ### Automated checks
 
 - Focused readiness tests: `18 passed`
-- Frontend: `28 test files`, `219 tests` passed
+- Frontend: `29 test files`, `223 tests` passed
 - Frontend typecheck and lint: PASS
 - Backend ruff and mypy: PASS
 - Backend unittest: `485 tests` passed
@@ -87,6 +95,9 @@
 - Added-line sensitive scan: `sensitive_hits=0`
 - Source MOCK lifecycle: `/health` PASS at `1,814.3 ms`; memory stage returned in
   `153.0 ms`, all other logged stages below `1 ms`
+- Packaged loopback reproduction: `127.0.0.1` `16.2 ms`, `localhost`
+  `2052.2 ms`, `[::1]` connection failure
+- API-base contract: `4 passed`
 
 ### Package checks
 
@@ -199,6 +210,6 @@ cleanup and are not independent crash evidence.
 
 ## 5. Next Action
 
-Commit the Act 3 source, generate a clean PyInstaller/NSIS replacement, record
+Commit the Act 5 source, generate a clean PyInstaller/NSIS replacement, record
 its hashes, then install only that build on the server for the 90-second
 physical-device operational-ready measurement.

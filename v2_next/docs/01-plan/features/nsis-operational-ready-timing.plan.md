@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Plan
 
-> Version: 1.0.2 | Date: 2026-07-16 | Status: Act Iteration 3
+> Version: 1.0.3 | Date: 2026-07-16 | Status: Act Iteration 5
 > Level: Dynamic
 
 ---
@@ -47,6 +47,8 @@ readiness without changing the existing startup baseline.
   main clock and the launcher-observed wall-clock duration.
 - Keep the backend HTTP lifecycle responsive while the first memory diagnostics
   snapshot observes concurrently initializing physical-device workers.
+- Use an explicit IPv4 loopback API base in the packaged renderer so Windows
+  IPv6-first `localhost` resolution cannot hide an otherwise-ready backend.
 - Build a clean PyInstaller backend and NSIS installer from the verified commit.
 
 ### 2.2 Non-Goals
@@ -72,6 +74,7 @@ readiness without changing the existing startup baseline.
 - A new packaged operational-ready PowerShell measurement script.
 - Non-blocking initial memory diagnostics collection and backend lifecycle-stage
   timing logs.
+- Packaged renderer API-base resolution and its unit contract.
 - PDCA analysis/report documents and clean package hashes.
 
 ### 3.2 Out of Scope
@@ -101,6 +104,7 @@ readiness without changing the existing startup baseline.
 | FR-09 | Generate a clean PyInstaller backend and NSIS installer with SHA-256 evidence. | High | Pending |
 | FR-10 | Set root and frontend package identity consistently to `1.0.14`. | High | Pending |
 | FR-11 | The first memory diagnostics snapshot must run immediately in its sampler thread and must not block FastAPI startup or `/health`. | High | Pending |
+| FR-12 | Packaged `file:` renderers must call the local backend through `127.0.0.1`, while explicit environment overrides and browser-relative development behavior remain unchanged. | High | Pending |
 
 ### 4.2 Non-Functional Requirements
 
@@ -137,6 +141,9 @@ readiness without changing the existing startup baseline.
   metadata identify version `1.0.14` consistently.
 - [ ] `[AC-11]` `MemoryService.start()` returns before a deliberately blocked
   initial collector completes, while that collector still starts immediately.
+- [ ] `[AC-12]` Packaged API resolution returns `http://127.0.0.1:8000`, and
+  the replacement package records backend health and live data without the
+  Windows `localhost -> ::1` fallback delay.
 
 ## 6. Schedule
 
@@ -160,6 +167,7 @@ readiness without changing the existing startup baseline.
 | Instrumentation changes runtime behavior | Medium | Low | Reuse existing responses; add no network requests or polling changes. |
 | Renderer diagnostic timeout prematurely ends a longer launcher measurement | High | Medium | Treat the 30-second event as evidence only; terminate only on true readiness, process failure, contamination, or caller timeout. |
 | Initial memory diagnostics blocks `/health` while hardware worker calls are slow | High | High | Run the first snapshot immediately on the existing sampler thread and log each lifespan startup stage duration. |
+| IPv6-first `localhost` resolution delays each renderer request while Uvicorn listens on IPv4 | High | High | Use the explicit IPv4 loopback address only for packaged/local fallback API resolution. |
 | Dirty package records unverifiable source | High | Medium | Commit first and use the existing fail-closed provenance gate. |
 
 ## 8. Architecture Considerations
@@ -190,3 +198,4 @@ readiness without changing the existing startup baseline.
 | 1.0.0 | 2026-07-15 | Initial final plan | Codex |
 | 1.0.1 | 2026-07-16 | Clarified launcher timeout authority after server Act evidence | Codex |
 | 1.0.2 | 2026-07-16 | Added Act 3 non-blocking startup requirement from server logs | Codex |
+| 1.0.3 | 2026-07-16 | Added Act 5 packaged IPv4 loopback requirement from runtime reproduction | Codex |
