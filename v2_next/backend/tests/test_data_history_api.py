@@ -301,7 +301,7 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("markBackendHealthReady(health);", app_text)
         self.assertIn("markFirstLiveDataReady(data);", controller_text)
         self.assertIn("timestampMs > 0", telemetry_text)
-        self.assertIn("data.Status.trim().toLowerCase() !== 'initializing'", telemetry_text)
+        self.assertIn("data.Status.trim().toLowerCase() === 'running'", telemetry_text)
         self.assertIn("ready_strategy: 'raf'", telemetry_text)
 
     def test_package_identity_is_consistent_for_new_nsis(self) -> None:

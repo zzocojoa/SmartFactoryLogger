@@ -21,7 +21,7 @@ and the dashboard has painted after all required gates were observed.
   requests and change no polling interval.
 - Keep gate arrival order irrelevant and event emission one-shot under React
   StrictMode.
-- Reject the backend's synthetic `Initializing` snapshot deterministically.
+- Reject `Initializing`, `Offline`, and `Error` snapshots deterministically.
 - Correlate each log event to one Electron process and one cold-start sample.
 - Fail closed on timeout, contaminated process state, or missing milestones.
 - Generate a separately identifiable `1.0.14` installer from a clean commit.
@@ -81,7 +81,9 @@ Public operations:
 - `markBackendHealthReady(health)` accepts the first non-null successful health
   response and emits the backend gate event without sensor values.
 - `markFirstLiveDataReady(data)` accepts data only when `timestamp_ms` is finite
-  and positive, `Time` is non-empty, and `Status` is not `Initializing`.
+  and positive, `Time` is non-empty, and normalized `Status` is exactly
+  `Running`. This prevents a timestamped offline/error sample from satisfying
+  the operational gate.
 - `recordDashboardReadyAfterPaint(...)` preserves the visual event and marks the
   paint gate only for the real two-frame `raf` strategy. Its 5-second fallback
   remains visual telemetry but cannot satisfy operational readiness.
@@ -131,7 +133,7 @@ bounded and contains no machine name, user name, sensor value, or network data.
 | Event | Required payload | Acceptance rule |
 |-------|------------------|-----------------|
 | `renderer.backend-health-ready` | `running`, `driver_connected` | first successful parsed `/health` response |
-| `renderer.first-live-data` | `status`, `timestamp_present` | positive finite timestamp, non-empty time, non-initial status |
+| `renderer.first-live-data` | `status`, `timestamp_present` | positive finite timestamp, non-empty time, exact `Status=Running` |
 | `renderer.dashboard-ready` | existing payload | visual compatibility; only `raf` marks paint gate |
 | `renderer.dashboard-operational-timeout` | `missing_gates`, `timeout_ms` | diagnostic only |
 | `renderer.dashboard-operational-ready` | `ready_strategy`, `required_gates` | all gates + two frames, exactly once |
@@ -201,8 +203,9 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 
 - Bridge unavailable remains a harmless no-op.
 - Health and live-data gate events are emitted exactly once.
-- Missing/zero/NaN/infinite timestamp, blank time, and `Initializing` status are
-  rejected; a real timestamped snapshot is accepted.
+- Missing/zero/NaN/infinite timestamp, blank time, and
+  `Initializing/Offline/Error` statuses are rejected; a timestamped `Running`
+  snapshot is accepted.
 - Every permutation of the three gates produces one operational-ready event
   only after two frames.
 - Visual timeout fallback does not satisfy paint.

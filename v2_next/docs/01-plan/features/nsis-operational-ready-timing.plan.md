@@ -36,8 +36,9 @@ readiness without changing the existing startup baseline.
 - Preserve the existing visual `renderer.dashboard-ready` metric and baseline.
 - Record the first successful backend `/health` response in the renderer startup
   timeline.
-- Reject the backend's synthetic `Initializing` zero snapshot and record only the
-  first `/api/data` response carrying an authoritative positive `timestamp_ms`.
+- Reject synthetic, offline, and error snapshots and record only the first
+  `/api/data` response with `Status=Running` and an authoritative positive
+  `timestamp_ms`.
 - Emit one `renderer.dashboard-operational-ready` event only after backend
   response, live data, and a confirmed animation-frame paint are all complete.
 - Add a session identifier so a measurement script cannot mix startup events
@@ -86,7 +87,7 @@ readiness without changing the existing startup baseline.
 | FR-01 | Keep `renderer.dashboard-ready` behavior and existing measurement compatibility. | High | Pending |
 | FR-02 | Add a process-unique startup session ID to every Electron startup log event. | High | Pending |
 | FR-03 | Record backend readiness after the first successful `/health` response. | High | Pending |
-| FR-04 | Record live-data readiness only for a non-initial `FactoryData` response with finite positive `timestamp_ms`. | High | Pending |
+| FR-04 | Record live-data readiness only for `Status=Running` `FactoryData` with finite positive `timestamp_ms`. | High | Pending |
 | FR-05 | Emit operational ready once, after all three gates and two animation frames. | High | Pending |
 | FR-06 | A timeout must report missing gates and must never be counted as operational ready. | High | Pending |
 | FR-07 | Measurement output must include session ID, per-gate elapsed values, main-clock total, launcher-observed total, ready strategy, and cleanup result. | High | Pending |
@@ -110,8 +111,8 @@ readiness without changing the existing startup baseline.
 - [ ] `[AC-01]` Existing visual-ready tests and packaged metric remain compatible.
 - [ ] `[AC-02]` Backend health event is recorded exactly once after a successful
   health response.
-- [ ] `[AC-03]` `Status=Initializing`, missing timestamps, zero timestamps, NaN,
-  and infinite timestamps do not satisfy live-data readiness.
+- [ ] `[AC-03]` `Status=Initializing/Offline/Error`, missing timestamps, zero
+  timestamps, NaN, and infinite timestamps do not satisfy live-data readiness.
 - [ ] `[AC-04]` A valid timestamped snapshot records first-live-data exactly once.
 - [ ] `[AC-05]` Operational ready is independent of gate arrival order, waits for
   two animation frames, and is recorded exactly once.
@@ -140,7 +141,7 @@ readiness without changing the existing startup baseline.
 
 | Risk | Impact | Probability | Mitigation |
 |------|--------|-------------|------------|
-| Initial zero snapshot is counted as live data | High | High | Require finite positive `timestamp_ms` and non-`Initializing` status. |
+| Offline/error snapshot is counted as live data | High | High | Require finite positive `timestamp_ms` and exact normalized `Status=Running`. |
 | Event order differs across machines | High | Medium | Use an order-independent readiness coordinator and one-shot gates. |
 | `requestAnimationFrame` is throttled | Medium | Medium | Record timeout diagnostics but do not fabricate operational readiness. |
 | Multiple processes mix one log timeline | High | Medium | Add a process-unique session ID and reject pre-existing processes. |

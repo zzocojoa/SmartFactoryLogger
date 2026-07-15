@@ -247,8 +247,7 @@ export const isOperationalFactoryData = (data: FactoryData | null): data is Fact
     typeof data.Time === 'string' &&
     data.Time.trim().length > 0 &&
     typeof data.Status === 'string' &&
-    data.Status.trim().length > 0 &&
-    data.Status.trim().toLowerCase() !== 'initializing'
+    data.Status.trim().toLowerCase() === 'running'
   );
 };
 

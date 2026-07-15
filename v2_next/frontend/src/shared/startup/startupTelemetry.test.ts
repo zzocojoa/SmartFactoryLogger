@@ -34,7 +34,7 @@ const buildHealth = (): HealthSnapshot => ({
 
 const buildFactoryData = (overrides: Partial<FactoryData> = {}): FactoryData => ({
   Time: '2026-07-15 12:00:00',
-  Status: 'Connected',
+  Status: 'Running',
   timestamp_ms: 1_752_570_000_000,
   ...overrides,
 } as FactoryData);
@@ -176,6 +176,8 @@ describe('startupTelemetry', () => {
     ['blank time', { Time: '  ' }],
     ['blank status', { Status: '  ' }],
     ['initializing status', { Status: 'Initializing' }],
+    ['offline status', { Status: 'Offline' }],
+    ['error status', { Status: 'Error' }],
   ])('rejects %s as operational factory data', (_name, overrides) => {
     expect(isOperationalFactoryData(buildFactoryData(overrides))).toBe(false);
   });
@@ -203,7 +205,7 @@ describe('startupTelemetry', () => {
     expect(recordStartup).toHaveBeenNthCalledWith(
       2,
       'renderer.first-live-data',
-      expect.objectContaining({ status: 'Connected', timestamp_present: true })
+      expect.objectContaining({ status: 'Running', timestamp_present: true })
     );
   });
 
