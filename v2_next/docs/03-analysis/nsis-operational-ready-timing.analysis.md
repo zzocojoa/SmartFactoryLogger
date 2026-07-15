@@ -2,7 +2,7 @@
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
 > Act 2 build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
-> Act iteration: 5 | Source complete; replacement packaging pending
+> Act iteration: 6 | Replacement package ready; server validation pending
 
 ---
 
@@ -12,7 +12,10 @@ The implementation matches the runtime readiness design. Act 3 made the frozen
 backend responsive, but package reproduction showed that the `file:` renderer
 still called `localhost`. On the target Windows resolver this attempts IPv6
 `::1` first while Uvicorn listens on IPv4, delaying each request by about two
-seconds. Act 5 uses explicit IPv4 loopback for packaged renderer requests.
+seconds. Act 5 used explicit IPv4 loopback for packaged renderer requests, but
+server evidence then showed pre-listen requests could remain pending. Act 6
+bounds both readiness requests and preserves base health retry cadence until
+the first response.
 
 ## Summary
 
@@ -25,6 +28,8 @@ seconds. Act 5 uses explicit IPv4 loopback for packaged renderer requests.
   frames; timeout reports missing gates and never fabricates success.
 - Packaged API calls use `127.0.0.1`; explicit environment overrides and
   browser-relative development calls remain unchanged.
+- `/health` and `/api/data` polling requests terminate within two seconds, and
+  health remains on its five-second base interval before first success.
 - The PowerShell measurement rejects pre-existing processes and multiple startup
   sessions, and reports both Electron monotonic and launcher wall-clock time.
 - Root, frontend, backend, and NSIS artifact identity is `1.0.14`.
@@ -46,6 +51,8 @@ seconds. Act 5 uses explicit IPv4 loopback for packaged renderer requests.
 | FR-09 clean package | PASS | Clean PyInstaller provenance and replacement NSIS verified |
 | FR-10 version identity | PASS | Root/frontend/backend all `1.0.14`; artifact filename matches |
 | FR-11 non-blocking initial memory snapshot | PASS | Blocking-collector regression plus source runtime stage timing |
+| FR-12 explicit packaged IPv4 base | PASS | Mapper contract and final bundle scan |
+| FR-13 bounded pre-listen recovery | PASS | Transport contract and fake-timer first-success retry test |
 
 ## Acceptance Criteria
 
@@ -62,6 +69,8 @@ seconds. Act 5 uses explicit IPv4 loopback for packaged renderer requests.
 | AC-09 | PASS | Act 2 clean PyInstaller/NSIS hashes and bundled-resource equality verified |
 | AC-10 | PASS | `Setup 1.0.14.exe` plus runtime health `app_version=1.0.14` |
 | AC-11 | PASS | sampler collector starts immediately and `start()` returns before release |
+| AC-12 | PASS | packaged bundle contains IPv4 loopback and no localhost literal |
+| AC-13 | PENDING SERVER | source/package contracts PASS; physical recovery run pending |
 
 ## Act Iteration
 
@@ -169,6 +178,21 @@ paid the failed IPv6 connection delay on each poll. The packaged `file:` API
 base now resolves directly to `http://127.0.0.1:8000`; no backend binding,
 endpoint, timeout, or polling interval changed.
 
+### Act 6: pre-listen requests suppressed later retries
+
+The Act 5 physical-server run rendered the dashboard at `1,583.4 ms`, but both
+backend and data gates remained absent at the 90-second caller deadline. Backend
+logs showed Uvicorn eventually listening about 43 seconds after Electron launch
+with no fatal Python or Windows Application crash.
+
+Both readiness transports had no request timeout. The health timer and data
+worker schedule their next iteration only after the current promise settles, so
+a request opened while Uvicorn was unavailable could suppress every later
+attempt. Act 6 adds a two-second timeout only to `/health` and `/api/data` and
+keeps health on the five-second base interval until its first success. Existing
+post-success health backoff, data worker cadence, and device polling are
+unchanged.
+
 ## Validation Results
 
 | Check | Result |
@@ -193,12 +217,34 @@ endpoint, timeout, or polling interval changed.
 | Act 5 API-base contract | `4 passed` |
 | Act 5 loopback reproduction | IPv4 `16.2 ms`; localhost `2052.2 ms`; IPv6 failed |
 | Act 5 packaged MOCK operational-ready | PASS at `8,267.7 ms`; launcher `8,582.7 ms` |
+| Act 6 focused recovery tests | `2 files, 3 tests passed` |
+| Act 6 frontend full suite | `31 files, 226 tests passed` |
+| Act 6 packaged MOCK operational-ready | PASS at `20,422.1 ms`; launcher `20,724.5 ms` |
+
+## Act 6 Candidate Package Evidence
+
+| Artifact | Evidence |
+|----------|----------|
+| Source/build commit | `46c0f2cc13a205db27590ca72429f61c2cf344b0` |
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Installer bytes | `163,230,938` |
+| Installer SHA-256 | `39165C1EDBD05F1ADA9E9CE36A036AE31E46A2CBDAD4BCD63AD22940341D7FB9` |
+| Backend SHA-256 | `14657B890352662C6972A73C926A83BB5A416A0F5EB00D193289AFE3FD1B1A63` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+| Backend source/package hash | MATCH |
+| QA script source/package hash | MATCH |
+| Build time | `2026-07-16T08:24:22+09:00` |
+
+The unpacked frontend includes the two-second timeout in both the application
+and polling-worker bundles, contains the explicit IPv4 loopback base, and has no
+`http://localhost:8000` literal. Packaged MOCK cold start passed within the
+30-second diagnostic budget with zero missing milestones and cleanup PASS.
 
 PyInstaller repeated its existing non-blocking `Hidden import "tzdata" not
 found` warning. No timezone behavior was changed by this feature, and the full
 health/package build completed successfully.
 
-## Act 5 Candidate Package Evidence
+## Act 5 Candidate Package Evidence (superseded)
 
 | Artifact | Evidence |
 |----------|----------|
@@ -260,7 +306,7 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Run only the Act 5 installer on the server and retain a true
+- Run only the Act 6 installer on the server and retain a true
   operational-ready measurement artifact.
 
 ## Deviations from Design
@@ -274,7 +320,6 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Use only installer SHA `ABA6ED160B...` for final server validation. SHA
-`0437A378...` has the Act 3 backend fix but still contains the `localhost`
-packaged frontend. Rerun the bundled launcher on the server with the app and
-backend fully stopped.
+Use only installer SHA `39165C1E...` for final server validation. SHA
+`ABA6ED160B...` contains the IPv4 fix but not the bounded pre-listen recovery.
+Rerun the bundled launcher on the server with the app and backend fully stopped.

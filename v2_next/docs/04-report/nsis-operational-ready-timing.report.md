@@ -127,13 +127,34 @@
 - Frontend production build: PASS
 - PyInstaller one-file backend: PASS
 - Provenance before/after build:
-  `c6be48c4398fa4f651e93b6a47ddfaf0f0308cb4`
+  `46c0f2cc13a205db27590ca72429f61c2cf344b0`
 - electron-builder NSIS: PASS
 - Backend source/package SHA match: PASS
 - QA script source/package SHA match: PASS
 - Runtime version: `1.0.14`, runtime kind: `frozen`
 
-### Act 5 candidate artifact
+### Act 6 candidate artifact
+
+| Artifact | Value |
+|----------|-------|
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Built at | `2026-07-16 08:24:22 KST` |
+| Size | `163,230,938 bytes` |
+| SHA-256 | `39165C1EDBD05F1ADA9E9CE36A036AE31E46A2CBDAD4BCD63AD22940341D7FB9` |
+| Backend SHA-256 | `14657B890352662C6972A73C926A83BB5A416A0F5EB00D193289AFE3FD1B1A63` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+| Build commit | `46c0f2cc13a205db27590ca72429f61c2cf344b0` |
+
+Backend and QA source/package hashes match. The unpacked application and worker
+bundles contain the two-second bound; the frontend contains the IPv4 loopback
+base and no `http://localhost:8000` literal.
+
+Packaged MOCK cold start: dashboard `5,651.7 ms`, backend health `20,243.3 ms`,
+live data `20,305.9 ms`, operational-ready `20,422.1 ms`, launcher observed
+`20,724.5 ms`, `ready_strategy=raf`, diagnostic budget PASS, zero missing
+milestones, cleanup PASS.
+
+### Act 5 candidate artifact (superseded)
 
 | Artifact | Value |
 |----------|-------|
@@ -265,7 +286,6 @@ cleanup and are not independent crash evidence.
 
 ## 5. Next Action
 
-Build the Act 6 replacement from a clean commit, record its hashes, then install
-only that replacement on the server and rerun the bundled 90-second
+Copy and install only SHA `39165C1E...` on the server, then rerun the bundled 90-second
 physical-device operational-ready measurement with all existing app/backend
 processes stopped first.
