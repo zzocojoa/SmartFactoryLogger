@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Design
 
-> Version: 1.0.1 | Date: 2026-07-16 | Status: Act Iteration 2
+> Version: 1.0.2 | Date: 2026-07-16 | Status: Act Iteration 3
 > Level: Dynamic | Plan: `docs/01-plan/features/nsis-operational-ready-timing.plan.md`
 
 ---
@@ -45,7 +45,9 @@ PowerShell launcher
 
 No backend endpoint or response schema changes. Electron main remains the sole
 owner of the monotonic startup clock so renderer and main milestones share one
-elapsed timeline.
+elapsed timeline. The backend lifespan must not synchronously collect the first
+memory diagnostics snapshot: `MemoryService.start()` starts its sampler thread,
+and that thread performs the first snapshot immediately before its first wait.
 
 ### 2.2 Component Design
 
@@ -95,6 +97,17 @@ Public operations:
   A later recovery may still emit the true event. The launcher continues until
   true readiness or its caller-supplied `TimeoutSec`; it records whether the
   30-second diagnostic budget was exceeded.
+
+#### Backend startup availability
+
+- Preserve the existing memory snapshot content and collection cadence.
+- Move only the initial `capture_snapshot()` call from the FastAPI lifespan
+  caller into `MemorySampler`; collect immediately, then wait the configured
+  interval between subsequent samples.
+- `MemoryService.start()` must return after thread creation even if a collector
+  is blocked. Shutdown remains bounded by the existing two-second join.
+- Record elapsed time for each synchronous lifespan start stage so a future
+  server delay identifies the responsible service without raw device values.
 
 ### 2.3 Data Flow
 
@@ -190,6 +203,9 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | `frontend/src/domains/FacilityData/components/MetricsDataController.tsx` | mark first valid live snapshot |
 | `backend/tests/test_electron_startup_timing_contract.py` | main/renderer wiring contract |
 | `scripts/measure_nsis_operational_ready.ps1` | cold-start session-correlated measurement |
+| `backend/Observability/memory_service.py` | non-blocking immediate initial snapshot |
+| `backend/app.py` | backend lifespan stage timing logs |
+| `backend/tests/test_memory_service.py` | blocking-collector startup regression |
 | root/frontend package manifests | version `1.0.14` |
 
 ### 5.2 Implementation Order
@@ -223,6 +239,8 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 - PowerShell script parses under strict mode and a synthetic log fixture proves
   session correlation, milestone PASS, delayed recovery after the diagnostic
   marker, timeout FAIL, and contamination FAIL.
+- A collector held on a synchronization event begins immediately, while
+  `MemoryService.start()` returns before the collector is released.
 - Existing frontend startup tests, full frontend test/typecheck/lint, backend
   ruff/mypy/unittest, and `git diff --check` pass.
 
@@ -262,6 +280,7 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | FR-08 | 2.3 step 1 | process contamination test |
 | FR-09 | 6.3 | clean build and SHA evidence |
 | FR-10 | 6.3 | manifest and artifact-name checks |
+| FR-11 | 2.2 backend startup availability | blocking-collector regression and server package timing |
 
 ## Version History
 
@@ -269,3 +288,4 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 |---------|------|---------|--------|
 | 1.0.0 | 2026-07-15 | Final implementation design | Codex |
 | 1.0.1 | 2026-07-16 | Made caller timeout terminal and renderer timeout diagnostic | Codex |
+| 1.0.2 | 2026-07-16 | Moved initial memory snapshot off the lifespan caller contract | Codex |

@@ -17,11 +17,16 @@ All notable changes to Smart Factory Logger V2 are documented here.
   timeout budget after the renderer's 30-second diagnostic event, allowing a
   genuine later operational-ready event to be measured instead of terminating
   and force-closing the process at 30 seconds.
+- Moved the initial memory diagnostics snapshot onto the existing sampler
+  thread so slow physical-device initialization cannot block FastAPI startup
+  and `/health` availability.
+- Added per-stage backend lifespan timing logs for startup delay diagnosis
+  without recording raw sensor or network configuration values.
 
 ### Compatibility
 
-- Existing visual `renderer.dashboard-ready` telemetry, PLC/SPOT polling,
-  dashboard layout, and CSV schemas are unchanged.
+- Existing visual `renderer.dashboard-ready` telemetry, memory snapshot content
+  and cadence, PLC/SPOT polling, dashboard layout, and CSV schemas are unchanged.
 
 ## [1.0.13] - 2026-07-13
 

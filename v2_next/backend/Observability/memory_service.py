@@ -541,7 +541,6 @@ class MemoryService:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._loop, name="MemorySampler", daemon=True)
         self._thread.start()
-        self.capture_snapshot()
 
     def stop(self) -> None:
         if not self._running:
@@ -777,7 +776,7 @@ class MemoryService:
         }
 
     def _loop(self) -> None:
-        while not self._stop_event.wait(self._sample_interval_sec):
+        while not self._stop_event.is_set():
             try:
                 self._expire_profiler_if_needed()
                 sample = self._build_process_sample()
@@ -789,6 +788,8 @@ class MemoryService:
                     "Memory sampler failed",
                     extra={"memory_error": str(exc)},
                 )
+            if self._stop_event.wait(self._sample_interval_sec):
+                break
 
     def _apply_snapshot(self, sample: Mapping[str, Any], collectors: list[Dict[str, Any]]) -> None:
         top_consumers = sorted(collectors, key=lambda item: int(item.get("bytes") or 0), reverse=True)

@@ -1,17 +1,18 @@
 # Gap Analysis: NSIS Operational Ready Timing
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
-> Source/build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
-> Act iteration: 2 | Packaging complete; server verification pending
+> Act 2 build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
+> Act iteration: 3 | Source complete; replacement packaging pending
 
 ---
 
-## Match Rate: 100% (source and package)
+## Match Rate: 100% (source; replacement package pending)
 
-The implementation matches the runtime readiness design, but server execution
-found that the launcher treated the renderer's 30-second diagnostic event as a
-terminal failure even when invoked with `-TimeoutSec 90`. The Act 2 source patch
-and clean replacement package are complete; the physical-server rerun remains.
+The implementation matches the runtime readiness design. The second server run
+honored the 90-second launcher budget and exposed a different blocker: Uvicorn
+remained in application startup while the synchronous initial memory snapshot
+overlapped long-running physical-device workers. Act 3 moves that first snapshot
+onto the existing sampler thread and records per-stage lifespan timing.
 
 ## Summary
 
@@ -25,6 +26,8 @@ and clean replacement package are complete; the physical-server rerun remains.
 - The PowerShell measurement rejects pre-existing processes and multiple startup
   sessions, and reports both Electron monotonic and launcher wall-clock time.
 - Root, frontend, backend, and NSIS artifact identity is `1.0.14`.
+- Initial memory diagnostics still begins immediately, but cannot block FastAPI
+  startup or `/health` availability.
 
 ## Requirement Results
 
@@ -40,6 +43,7 @@ and clean replacement package are complete; the physical-server rerun remains.
 | FR-08 contamination rejection | PASS | Process and multi-session classification contract |
 | FR-09 clean package | PASS | Clean PyInstaller provenance and replacement NSIS verified |
 | FR-10 version identity | PASS | Root/frontend/backend all `1.0.14`; artifact filename matches |
+| FR-11 non-blocking initial memory snapshot | PASS | Blocking-collector regression plus source runtime stage timing |
 
 ## Acceptance Criteria
 
@@ -55,6 +59,7 @@ and clean replacement package are complete; the physical-server rerun remains.
 | AC-08 | PASS | full health, parser, diff, and sensitive scan pass |
 | AC-09 | PASS | Act 2 clean PyInstaller/NSIS hashes and bundled-resource equality verified |
 | AC-10 | PASS | `Setup 1.0.14.exe` plus runtime health `app_version=1.0.14` |
+| AC-11 | PASS | sampler collector starts immediately and `start()` returns before release |
 
 ## Act Iteration
 
@@ -124,6 +129,26 @@ break on a diagnostic-only renderer event. The patch removes that break, waits
 for true readiness until the external deadline, preserves the 30-second event,
 and reports `diagnostic_budget_status`.
 
+### Act 3: backend lifespan blocked by diagnostics
+
+The replacement package correctly waited for the full 90-second budget, but
+the physical server still returned no `/health` response. Backend logs proved:
+
+```text
+Python backend session start: 00:35:59
+Uvicorn: Waiting for application startup
+LS PLC reads observed: 28.80 s and 27.65 s
+Extruder send timeout observed
+Application startup complete: approximately 00:37:06
+```
+
+`PLCService` already performs reads on worker threads. The remaining synchronous
+startup call was `MemoryService.start() -> capture_snapshot()`. Act 3 preserves
+the immediate first sample but runs it inside `MemorySampler`, and adds bounded
+stage elapsed logs. A source MOCK runtime reached `/health` in `1,814.3 ms`; its
+startup stages were CSV `0.2 ms`, config sync `0.2 ms`, config watch `0.2 ms`,
+PLC `0.6 ms`, comm metrics `0.5 ms`, memory start `153.0 ms`, and SPOT `0.0 ms`.
+
 ## Validation Results
 
 | Check | Result |
@@ -133,6 +158,8 @@ and reports `diagnostic_budget_status`.
 | Frontend typecheck/lint | PASS |
 | Backend ruff/mypy | PASS |
 | Backend unittest | `484 tests passed` |
+| Act 3 focused memory service | `29 tests passed` |
+| Act 3 full backend unittest | `485 tests passed` |
 | Electron/source contracts | `6 passed` |
 | PowerShell parser/self-test | PASS |
 | 35-second forced negative path | `36.0 s`, diagnostic at `31.2727 s`, caller deadline honored |
@@ -142,12 +169,13 @@ and reports `diagnostic_budget_status`.
 | Frontend production build | PASS |
 | PyInstaller provenance | clean HEAD verified before/after packaging |
 | NSIS electron-builder | PASS |
+| Act 3 source MOCK `/health` | PASS at `1,814.3 ms` |
 
 PyInstaller repeated its existing non-blocking `Hidden import "tzdata" not
 found` warning. No timezone behavior was changed by this feature, and the full
 health/package build completed successfully.
 
-## Final Candidate Package Evidence
+## Act 2 Candidate Package Evidence
 
 | Artifact | Evidence |
 |----------|----------|
@@ -160,6 +188,9 @@ health/package build completed successfully.
 | Backend source/package hash | MATCH |
 | QA script source/package hash | MATCH |
 | Build time | `2026-07-16T00:26:08+09:00` |
+
+This package is superseded for Act 3 because it contains the synchronous initial
+memory snapshot. It remains useful only as the server root-cause evidence build.
 
 The replacement package also produced a local packaged PASS with dashboard,
 backend health, live data, and true operational-ready events. A separate
@@ -186,8 +217,10 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Rerun installer SHA `90AEF3AF...` on the server and retain a true
-  operational-ready measurement or a full caller-deadline failure artifact.
+- Commit Act 3 source, generate a clean replacement PyInstaller/NSIS package,
+  and record its hashes.
+- Run only the Act 3 installer on the server and retain a true
+  operational-ready measurement artifact.
 
 ## Deviations from Design
 
@@ -200,5 +233,6 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Copy only installer SHA `90AEF3AF...` for final validation, then rerun the
-bundled launcher on the server with the app and backend fully stopped.
+Do not reuse installer SHA `90AEF3AF...`. Build from the verified Act 3 commit,
+verify the new installer/backend/QA hashes, then rerun the bundled launcher on
+the server with the app and backend fully stopped.

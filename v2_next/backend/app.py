@@ -70,7 +70,7 @@ import traceback
 import time
 import uvicorn
 from urllib.request import Request as UrlRequest, urlopen
-from typing import Any, NamedTuple, TypedDict
+from typing import Any, Callable, NamedTuple, TypedDict
 
 # Import Service Layer using absolute imports
 from backend.FacilityData.operator_metadata import operator_metadata_store
@@ -319,6 +319,17 @@ def _spot_focus_response(result: dict[str, Any]) -> dict[str, Any]:
 
 def _lifecycle_log_fields() -> str:
     return f"session={_app_session_id} pid={os.getpid()} started_at={_app_started_at_iso}"
+
+
+def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
+    started_perf = time.perf_counter()
+    starter()
+    _logger.info(
+        "[Main] Lifespan startup stage complete stage=%s elapsed_ms=%.1f %s",
+        stage,
+        (time.perf_counter() - started_perf) * 1000.0,
+        _lifecycle_log_fields(),
+    )
 
 
 def _is_quiet_access_path(path: str) -> bool:
@@ -1493,21 +1504,27 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("Instance already running")
     _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
     print("[Main] Starting CSV Logger...")
-    logger_service.start()
+    _run_lifespan_start_stage("csv_logger", logger_service.start)
     print("[Main] Starting Config Sync Agent...")
-    config_sync_agent.start()
+    _run_lifespan_start_stage("config_sync", config_sync_agent.start)
     print("[Main] Starting Config Watcher...")
-    config_watch_service.start()
+    _run_lifespan_start_stage("config_watch", config_watch_service.start)
     print("[Main] Starting PLC Service...")
-    plc_service.start()
+    _run_lifespan_start_stage("plc_service", plc_service.start)
     print("[Main] Starting Comm Metrics Logger...")
-    comm_metrics_logger_service.start()
+    _run_lifespan_start_stage("comm_metrics", comm_metrics_logger_service.start)
     print("[Main] Starting Memory Service...")
-    memory_service.start()
+    _run_lifespan_start_stage("memory_service", memory_service.start)
 
     # Start SPOT temperature and diagnostics polling.
     print("[Main] Starting SPOT temperature and diagnostics polling...")
+    spot_started_perf = time.perf_counter()
     await spot_control.start_spot_poll_loop()
+    _logger.info(
+        "[Main] Lifespan startup stage complete stage=spot_poll elapsed_ms=%.1f %s",
+        (time.perf_counter() - spot_started_perf) * 1000.0,
+        _lifecycle_log_fields(),
+    )
     
     # Log local IPs for debugging remote connectivity
     try:

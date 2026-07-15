@@ -1,4 +1,5 @@
 import json
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -91,6 +92,44 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(collector_item["severity"], "ok")
         self.assertEqual(collector_item["severity_reasons"], [])
         self.assertIsNone(collector_item["budget"])
+
+    def test_start_runs_initial_snapshot_in_background_without_waiting_for_collector(self) -> None:
+        service = self.create_empty_service()
+        collector_started = threading.Event()
+        collector_release = threading.Event()
+        start_returned = threading.Event()
+
+        def blocking_collector() -> dict[str, object]:
+            collector_started.set()
+            collector_release.wait(timeout=2.0)
+            return {
+                "name": "test.blocking",
+                "kind": "snapshot",
+                "exactness": "exact",
+                "bytes": 0,
+                "items": 0,
+                "note": "released",
+            }
+
+        service.register_collector("test.blocking", blocking_collector)
+
+        def start_service() -> None:
+            service.start()
+            start_returned.set()
+
+        starter_thread = threading.Thread(target=start_service)
+
+        try:
+            starter_thread.start()
+            self.assertTrue(collector_started.wait(timeout=1.0))
+            self.assertTrue(start_returned.wait(timeout=1.0))
+            self.assertEqual(service.get_summary_state(), {})
+        finally:
+            collector_release.set()
+            starter_thread.join(timeout=1.0)
+            service.stop()
+
+        self.assertTrue(service.get_summary_state())
 
     def test_budget_severity_warn_and_critical(self) -> None:
         mib = 1024 * 1024

@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.1 | Date: 2026-07-16 | Status: Package Complete / Server Verification Pending
+> Version: 1.0.2 | Date: 2026-07-16 | Status: Act 3 Source Complete / Rebuild Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -16,16 +16,21 @@
   marker prematurely terminated a caller-requested 90-second measurement.
 - Patched the launcher to retain that marker while waiting for true readiness
   until the external deadline.
-- Generated replacement installer SHA `90AEF3AF...` from clean commit
-  `b848755b118852df4cf1a1cc1f6c13160618c7df`.
+- Server logs proved the Act 2 backend stayed in FastAPI application startup
+  while initial memory diagnostics overlapped slow physical-device reads.
+- Moved the first memory snapshot into the existing sampler thread and added
+  per-stage lifespan timing without changing memory content or cadence.
+- Installer SHA `90AEF3AF...` is superseded; the Act 3 replacement package is
+  pending a clean source commit.
 - Packaged MOCK live-data timing passed at 8.2266 seconds launcher-observed.
 - Development-PC hardware mode correctly timed out with only `live_data`
   missing; it no longer counts a timestamped error snapshot as ready.
 
 ## 2. Engineering Assessment
 
-- Risk level: medium. The change affects startup observability and release
-  identity but does not change device polling, CSV data, or dashboard layout.
+- Risk level: medium. The change affects startup lifecycle concurrency,
+  observability, and release identity but does not change device polling, CSV
+  data, or dashboard layout.
 - Trade-off: operational-ready is intentionally stricter than visual-ready. A
   disconnected PLC returns timeout evidence instead of a misleading fast PASS.
 - Compatibility: existing `renderer.dashboard-ready`, `/health`, `/api/data`,
@@ -35,6 +40,8 @@
   data. Added-line sensitive scan found zero hits.
 - Observability: at most five additional bounded startup events are written per
   process. Timeout names the missing gate and never substitutes a success event.
+- Backend observability: each synchronous lifespan stage records elapsed time;
+  no sensor value, credential, or device URL is added.
 - Migration: none.
 - Operational failure mode: unavailable hardware yields
   `OPERATIONAL_TIMEOUT` only at the caller deadline when the internal diagnostic
@@ -57,6 +64,9 @@
 | `frontend/src/domains/FacilityData/components/MetricsDataController.tsx` | Reuse first Running data snapshot |
 | `scripts/measure_nsis_operational_ready.ps1` | Cold-start measurement and self-test |
 | `backend/tests/test_data_history_api.py` | Electron/readiness/package contracts |
+| `backend/Observability/memory_service.py` | Immediate initial snapshot on sampler thread |
+| `backend/app.py` | Per-stage lifespan startup elapsed logs |
+| `backend/tests/test_memory_service.py` | Blocking-collector non-blocking-start regression |
 | `backend/version.py` | Runtime version `1.0.14` |
 | root/frontend package manifests | NSIS/frontend version and bundled QA script |
 | `CHANGELOG.md` | Release notes |
@@ -70,11 +80,13 @@
 - Frontend: `28 test files`, `219 tests` passed
 - Frontend typecheck and lint: PASS
 - Backend ruff and mypy: PASS
-- Backend unittest: `484 tests` passed
+- Backend unittest: `485 tests` passed
 - Electron/readiness contracts: `6 passed`
 - PowerShell parser/self-test: PASS
 - `git diff --check`: PASS
 - Added-line sensitive scan: `sensitive_hits=0`
+- Source MOCK lifecycle: `/health` PASS at `1,814.3 ms`; memory stage returned in
+  `153.0 ms`, all other logged stages below `1 ms`
 
 ### Package checks
 
@@ -87,7 +99,7 @@
 - QA script source/package SHA match: PASS
 - Runtime version: `1.0.14`, runtime kind: `frozen`
 
-### Final candidate artifact
+### Act 2 artifact, superseded for Act 3
 
 | Artifact | Value |
 |----------|-------|
@@ -99,6 +111,9 @@
 | QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
 
 Source/package backend hashes and source/package QA script hashes match.
+
+This package contains the synchronous initial memory snapshot and must not be
+used for final operational-ready acceptance.
 
 ### Superseded artifact
 
@@ -170,7 +185,20 @@ cleanup and are not independent crash evidence.
 - Local packaged positive smoke: true operational-ready event at `8.7921 s` and
   process cleanup PASS.
 
+### Act 3 backend startup validation
+
+- Server root cause: Uvicorn stayed at `Waiting for application startup` while
+  two PLC reads took `28.80 s` and `27.65 s` and the extruder timed out.
+- Windows Application log contained no matching crash event.
+- Blocking-collector contract: initial collector starts immediately and
+  `MemoryService.start()` returns before the collector is released.
+- Full health: frontend `28 files / 219 tests`; backend ruff/mypy PASS and
+  `485 tests` PASS.
+- Source MOCK runtime: `/health` at `1,814.3 ms`, `running=true`,
+  `driver_connected=true`.
+
 ## 5. Next Action
 
-Copy only installer SHA `90AEF3AF...` to the server, install it, and rerun the
-bundled script with `TimeoutSec=90` to capture the physical-device full wait.
+Commit the Act 3 source, generate a clean PyInstaller/NSIS replacement, record
+its hashes, then install only that build on the server for the 90-second
+physical-device operational-ready measurement.
