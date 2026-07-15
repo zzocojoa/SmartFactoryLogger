@@ -573,7 +573,11 @@ export type SmartFactoryStartupEventName =
   | 'renderer.native-surface-import-end'
   | 'renderer.native-surface-render-start'
   | 'renderer.native-surface-render-end'
-  | 'renderer.dashboard-ready';
+  | 'renderer.dashboard-ready'
+  | 'renderer.backend-health-ready'
+  | 'renderer.first-live-data'
+  | 'renderer.dashboard-operational-timeout'
+  | 'renderer.dashboard-operational-ready';
 
 export type SmartFactoryStartupEventPayload = Record<string, string | number | boolean | null | undefined>;
 

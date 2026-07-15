@@ -6,6 +6,7 @@ const fs = require('fs');
 const v8 = require('v8');
 
 const startupOriginNs = process.hrtime.bigint();
+const startupSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 // Software compositing avoids GPU channel setup delaying NSIS cold start render.
 app.disableHardwareAcceleration();
 const STARTUP_RENDERER_EVENT_NAMES = new Set([
@@ -26,6 +27,10 @@ const STARTUP_RENDERER_EVENT_NAMES = new Set([
   'renderer.native-surface-render-start',
   'renderer.native-surface-render-end',
   'renderer.dashboard-ready',
+  'renderer.backend-health-ready',
+  'renderer.first-live-data',
+  'renderer.dashboard-operational-timeout',
+  'renderer.dashboard-operational-ready',
 ]);
 const STARTUP_PAYLOAD_MAX_KEYS = 16;
 const STARTUP_PAYLOAD_MAX_KEY_LENGTH = 64;
@@ -109,6 +114,7 @@ function sanitizeStartupPayload(payload) {
 function logStartupEvent(eventName, payload) {
   const entry = {
     event: eventName,
+    session_id: startupSessionId,
     elapsed_ms: Math.round(getStartupElapsedMs() * 10) / 10,
   };
   const sanitizedPayload = sanitizeStartupPayload(payload);

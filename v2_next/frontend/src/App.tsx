@@ -149,7 +149,10 @@ import { useSnapshotManager } from './shared/hooks/useSnapshotManager';
 import { useObservabilityHandlers } from './shared/hooks/useObservabilityHandlers';
 import { useLayoutHandlers } from './shared/hooks/useLayoutHandlers';
 import { ProfilerProbe } from './shared/profiling/reactRenderProfiler';
-import { recordStartupEventOnce } from './shared/startup/startupTelemetry';
+import {
+  markBackendHealthReady,
+  recordStartupEventOnce,
+} from './shared/startup/startupTelemetry';
 
 recordStartupEventOnce('renderer.app-module-evaluated', 'renderer.app-module-evaluated');
 
@@ -323,6 +326,10 @@ function App() {
       settings_interval_ms: Math.round(intervalSec * 1000),
     });
   }, [intervalSec]);
+
+  useEffect(() => {
+    markBackendHealthReady(health);
+  }, [health]);
 
   const dashboardLeaderState = useDashboardStore((state) => (
     settingsOpen ? state.dashboardLeaderState : null

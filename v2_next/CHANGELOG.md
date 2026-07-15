@@ -2,6 +2,20 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.14] - 2026-07-16
+
+### Added
+
+- Added a session-correlated operational startup metric that waits for backend
+  health, the first timestamped live factory snapshot, and dashboard paint.
+- Added a strict packaged cold-start PowerShell measurement under `resources/qa`
+  with contamination, timeout, and missing-milestone failure evidence.
+
+### Compatibility
+
+- Existing visual `renderer.dashboard-ready` telemetry, PLC/SPOT polling,
+  dashboard layout, and CSV schemas are unchanged.
+
 ## [1.0.13] - 2026-07-13
 
 ### Fixed

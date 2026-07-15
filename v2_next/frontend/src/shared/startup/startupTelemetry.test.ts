@@ -1,19 +1,43 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  armDashboardOperationalReadyTimeout,
+  isOperationalFactoryData,
+  markBackendHealthReady,
+  markFirstLiveDataReady,
+  OPERATIONAL_READY_TIMEOUT_MS,
   recordDashboardReadyAfterPaint,
   recordStartupEvent,
   recordStartupEventOnce,
 } from './startupTelemetry';
+import type { FactoryData, HealthSnapshot } from '../types';
 
 type StartupTelemetryWindow = Window & {
   __SF_STARTUP_EVENT_KEYS__?: Set<string>;
+  __SF_OPERATIONAL_READY_STATE__?: unknown;
 };
 
 const resetStartupTelemetryState = (): void => {
   const startupWindow = window as StartupTelemetryWindow;
   delete startupWindow.__SF_STARTUP_EVENT_KEYS__;
+  delete startupWindow.__SF_OPERATIONAL_READY_STATE__;
 };
+
+const buildHealth = (): HealthSnapshot => ({
+  running: true,
+  thread_alive: true,
+  last_update: null,
+  driver_connected: true,
+  mode: 'real',
+  runtime_kind: 'packaged',
+});
+
+const buildFactoryData = (overrides: Partial<FactoryData> = {}): FactoryData => ({
+  Time: '2026-07-15 12:00:00',
+  Status: 'Connected',
+  timestamp_ms: 1_752_570_000_000,
+  ...overrides,
+} as FactoryData);
 
 afterEach(() => {
   delete window.smartFactoryElectron;
@@ -142,5 +166,131 @@ describe('startupTelemetry', () => {
 
     expect(recordStartup).toHaveBeenCalledTimes(1);
     cleanup();
+  });
+
+  it.each([
+    ['missing timestamp', { timestamp_ms: null }],
+    ['zero timestamp', { timestamp_ms: 0 }],
+    ['NaN timestamp', { timestamp_ms: Number.NaN }],
+    ['infinite timestamp', { timestamp_ms: Number.POSITIVE_INFINITY }],
+    ['blank time', { Time: '  ' }],
+    ['blank status', { Status: '  ' }],
+    ['initializing status', { Status: 'Initializing' }],
+  ])('rejects %s as operational factory data', (_name, overrides) => {
+    expect(isOperationalFactoryData(buildFactoryData(overrides))).toBe(false);
+  });
+
+  it('accepts timestamped non-initial factory data and records each response gate once', () => {
+    const recordStartup = vi.fn().mockResolvedValue({ ok: true });
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: recordStartup,
+    };
+
+    expect(markBackendHealthReady(null)).toBe(false);
+    expect(markBackendHealthReady(buildHealth())).toBe(true);
+    expect(markBackendHealthReady(buildHealth())).toBe(false);
+    expect(markFirstLiveDataReady(buildFactoryData({ timestamp_ms: 0 }))).toBe(false);
+    expect(markFirstLiveDataReady(buildFactoryData())).toBe(true);
+    expect(markFirstLiveDataReady(buildFactoryData())).toBe(false);
+
+    expect(recordStartup).toHaveBeenCalledTimes(2);
+    expect(recordStartup).toHaveBeenNthCalledWith(
+      1,
+      'renderer.backend-health-ready',
+      expect.objectContaining({ running: true, driver_connected: true })
+    );
+    expect(recordStartup).toHaveBeenNthCalledWith(
+      2,
+      'renderer.first-live-data',
+      expect.objectContaining({ status: 'Connected', timestamp_present: true })
+    );
+  });
+
+  it.each([
+    ['backend-data-paint', ['backend', 'data', 'paint']],
+    ['paint-data-backend', ['paint', 'data', 'backend']],
+  ])('records operational ready after all gates and two final frames: %s', (_name, order) => {
+    const frameCallbacks: FrameRequestCallback[] = [];
+    const recordStartup = vi.fn().mockResolvedValue({ ok: true });
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: recordStartup,
+    };
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+
+    const runGate = (gate: string): void => {
+      if (gate === 'backend') {
+        markBackendHealthReady(buildHealth());
+      } else if (gate === 'data') {
+        markFirstLiveDataReady(buildFactoryData());
+      } else {
+        recordDashboardReadyAfterPaint('native');
+        const firstDashboardFrame = frameCallbacks.shift();
+        firstDashboardFrame?.(0);
+        const secondDashboardFrame = frameCallbacks.shift();
+        secondDashboardFrame?.(16);
+      }
+    };
+
+    order.forEach(runGate);
+
+    expect(
+      recordStartup.mock.calls.some(([eventName]) => eventName === 'renderer.dashboard-operational-ready')
+    ).toBe(false);
+    const firstOperationalFrame = frameCallbacks.shift();
+    firstOperationalFrame?.(32);
+    expect(
+      recordStartup.mock.calls.some(([eventName]) => eventName === 'renderer.dashboard-operational-ready')
+    ).toBe(false);
+    const secondOperationalFrame = frameCallbacks.shift();
+    secondOperationalFrame?.(48);
+
+    const operationalCalls = recordStartup.mock.calls.filter(
+      ([eventName]) => eventName === 'renderer.dashboard-operational-ready'
+    );
+    expect(operationalCalls).toHaveLength(1);
+    expect(operationalCalls[0][1]).toEqual(expect.objectContaining({
+      ready_strategy: 'raf',
+      required_gates: 'backend_health,live_data,dashboard_paint',
+      surface: 'native',
+    }));
+
+    markBackendHealthReady(buildHealth());
+    markFirstLiveDataReady(buildFactoryData());
+    expect(recordStartup.mock.calls.filter(
+      ([eventName]) => eventName === 'renderer.dashboard-operational-ready'
+    )).toHaveLength(1);
+  });
+
+  it('records missing gates at the operational timeout without fabricating readiness', () => {
+    vi.useFakeTimers();
+    const recordStartup = vi.fn().mockResolvedValue({ ok: true });
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: recordStartup,
+    };
+
+    armDashboardOperationalReadyTimeout();
+    armDashboardOperationalReadyTimeout();
+    markBackendHealthReady(buildHealth());
+    vi.advanceTimersByTime(OPERATIONAL_READY_TIMEOUT_MS);
+
+    const timeoutCalls = recordStartup.mock.calls.filter(
+      ([eventName]) => eventName === 'renderer.dashboard-operational-timeout'
+    );
+    const readyCalls = recordStartup.mock.calls.filter(
+      ([eventName]) => eventName === 'renderer.dashboard-operational-ready'
+    );
+    expect(timeoutCalls).toHaveLength(1);
+    expect(timeoutCalls[0][1]).toEqual(expect.objectContaining({
+      missing_gates: 'live_data,dashboard_paint',
+      timeout_ms: OPERATIONAL_READY_TIMEOUT_MS,
+    }));
+    expect(readyCalls).toHaveLength(0);
   });
 });
