@@ -1,16 +1,17 @@
 # Gap Analysis: NSIS Operational Ready Timing
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
-> Act iteration: 2 | Packaging status: pending rebuild
+> Source/build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
+> Act iteration: 2 | Packaging complete; server verification pending
 
 ---
 
-## Match Rate: 95% (pre-package)
+## Match Rate: 100% (source and package)
 
 The implementation matches the runtime readiness design, but server execution
 found that the launcher treated the renderer's 30-second diagnostic event as a
 terminal failure even when invoked with `-TimeoutSec 90`. The Act 2 source patch
-is complete; clean package generation and server rerun remain.
+and clean replacement package are complete; the physical-server rerun remains.
 
 ## Summary
 
@@ -35,9 +36,9 @@ is complete; clean package generation and server rerun remain.
 | FR-04 real live-data readiness | PASS | Exact normalized `Status=Running`, non-empty time, positive finite timestamp |
 | FR-05 gate/paint state machine | PASS | Two gate-order tests and final two-frame assertion |
 | FR-06 fail-closed timeout | PASS | Missing-gate test plus packaged error-snapshot timeout |
-| FR-07 structured measurement | PASS (source) | Caller timeout remains authoritative; delayed recovery classification added |
+| FR-07 structured measurement | PASS | Caller timeout remains authoritative; delayed recovery classification added |
 | FR-08 contamination rejection | PASS | Process and multi-session classification contract |
-| FR-09 clean package | PENDING | Rebuild required after Act 2 script change |
+| FR-09 clean package | PASS | Clean PyInstaller provenance and replacement NSIS verified |
 | FR-10 version identity | PASS | Root/frontend/backend all `1.0.14`; artifact filename matches |
 
 ## Acceptance Criteria
@@ -50,9 +51,9 @@ is complete; clean package generation and server rerun remain.
 | AC-04 | PASS | timestamped Running snapshot records once |
 | AC-05 | PASS | backend-data-paint and paint-data-backend order tests pass |
 | AC-06 | PASS | 30-second timeout names missing gates and emits no ready event |
-| AC-07 | PASS (source) | parser/session/milestone/delayed-recovery/failure self-test PASS |
+| AC-07 | PASS | parser/session/milestone/delayed-recovery/failure self-test PASS |
 | AC-08 | PASS | full health, parser, diff, and sensitive scan pass |
-| AC-09 | PENDING | Act 2 clean PyInstaller/NSIS and hashes not yet generated |
+| AC-09 | PASS | Act 2 clean PyInstaller/NSIS hashes and bundled-resource equality verified |
 | AC-10 | PASS | `Setup 1.0.14.exe` plus runtime health `app_version=1.0.14` |
 
 ## Act Iteration
@@ -134,6 +135,8 @@ and reports `diagnostic_budget_status`.
 | Backend unittest | `484 tests passed` |
 | Electron/source contracts | `6 passed` |
 | PowerShell parser/self-test | PASS |
+| 35-second forced negative path | `36.0 s`, diagnostic at `31.2727 s`, caller deadline honored |
+| 90-second hardware-negative path | `91.1 s`, health `7.9722 s`, only `live_data` missing |
 | Added-line sensitive scan | `0 hits` |
 | `git diff --check` | PASS |
 | Frontend production build | PASS |
@@ -143,6 +146,26 @@ and reports `diagnostic_budget_status`.
 PyInstaller repeated its existing non-blocking `Hidden import "tzdata" not
 found` warning. No timezone behavior was changed by this feature, and the full
 health/package build completed successfully.
+
+## Final Candidate Package Evidence
+
+| Artifact | Evidence |
+|----------|----------|
+| Source/build commit | `b848755b118852df4cf1a1cc1f6c13160618c7df` |
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Installer bytes | `163,231,182` |
+| Installer SHA-256 | `90AEF3AFB614BC67E8ABE19ADE529386FF25A13C4F5D58E3428A6E7CE39C0441` |
+| Backend SHA-256 | `5FB92C00558341DA3E7CAD6C87BEB14E36AADC6A169CAACD8882CA63A9003A43` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+| Backend source/package hash | MATCH |
+| QA script source/package hash | MATCH |
+| Build time | `2026-07-16T00:26:08+09:00` |
+
+The replacement package also produced a local packaged PASS with dashboard,
+backend health, live data, and true operational-ready events. A separate
+90-second development hardware-path run reached backend health at `7.9722 s`,
+retained the renderer diagnostic at `30.3974 s`, and failed only at the external
+deadline because no physical-device `Status=Running` data was available.
 
 ## Superseded Package Evidence
 
@@ -163,9 +186,8 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Generate a clean package containing the Act 2 launcher.
-- Rerun on the server and retain a true operational-ready measurement or a full
-  caller-deadline failure artifact.
+- Rerun installer SHA `90AEF3AF...` on the server and retain a true
+  operational-ready measurement or a full caller-deadline failure artifact.
 
 ## Deviations from Design
 
@@ -178,6 +200,5 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Commit and build the Act 2 patch from a clean tree. Preserve only the new
-installer hash for final validation, then rerun the bundled launcher on the
-server with the app and backend fully stopped.
+Copy only installer SHA `90AEF3AF...` for final validation, then rerun the
+bundled launcher on the server with the app and backend fully stopped.

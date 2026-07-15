@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.1 | Date: 2026-07-16 | Status: Act 2 / Rebuild Pending
+> Version: 1.0.1 | Date: 2026-07-16 | Status: Package Complete / Server Verification Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -15,7 +15,9 @@
 - Server evidence exposed a QA launcher defect: the 30-second renderer diagnostic
   marker prematurely terminated a caller-requested 90-second measurement.
 - Patched the launcher to retain that marker while waiting for true readiness
-  until the external deadline. A replacement package is pending.
+  until the external deadline.
+- Generated replacement installer SHA `90AEF3AF...` from clean commit
+  `b848755b118852df4cf1a1cc1f6c13160618c7df`.
 - Packaged MOCK live-data timing passed at 8.2266 seconds launcher-observed.
 - Development-PC hardware mode correctly timed out with only `live_data`
   missing; it no longer counts a timestamped error snapshot as ready.
@@ -38,9 +40,9 @@
   `OPERATIONAL_TIMEOUT` only at the caller deadline when the internal diagnostic
   marker was observed; the script then cleans up the launched process tree unless
   `-KeepRunning` is explicitly supplied.
-- Rollback: revert commits `125c87d7` and `a77a3be`, restore version `1.0.13`,
-  rebuild backend/NSIS from a clean commit, and continue using the unchanged
-  visual-ready metric.
+- Rollback: revert `b848755`, `125c87d7`, and `a77a3be`, restore version
+  `1.0.13`, rebuild backend/NSIS from a clean commit, and continue using the
+  unchanged visual-ready metric.
 
 ## 3. Files Changed
 
@@ -79,11 +81,24 @@
 - Frontend production build: PASS
 - PyInstaller one-file backend: PASS
 - Provenance before/after build:
-  `125c87d7e44fd7073497d579785ccaa27ac919af`
+  `b848755b118852df4cf1a1cc1f6c13160618c7df`
 - electron-builder NSIS: PASS
 - Backend source/package SHA match: PASS
 - QA script source/package SHA match: PASS
 - Runtime version: `1.0.14`, runtime kind: `frozen`
+
+### Final candidate artifact
+
+| Artifact | Value |
+|----------|-------|
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Built at | `2026-07-16 00:26:08 KST` |
+| Size | `163,231,182 bytes` |
+| SHA-256 | `90AEF3AFB614BC67E8ABE19ADE529386FF25A13C4F5D58E3428A6E7CE39C0441` |
+| Backend SHA-256 | `5FB92C00558341DA3E7CAD6C87BEB14E36AADC6A169CAACD8882CA63A9003A43` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+
+Source/package backend hashes and source/package QA script hashes match.
 
 ### Superseded artifact
 
@@ -144,8 +159,18 @@ was invoked with `TimeoutSec=90`, it terminated and cleaned up the process at
 about 34 seconds. The resulting backend/GPU/network exit messages followed that
 cleanup and are not independent crash evidence.
 
+### Act 2 launcher validation
+
+- Packaged self-test: PASS
+- Forced unavailable-backend path: diagnostic at `31.2727 s`; launcher returned
+  only after the 35-second caller deadline (`36.0 s` wall clock).
+- Development hardware path with `TimeoutSec=90`: backend health at `7.9722 s`,
+  diagnostic at `30.3974 s`, then `OPERATIONAL_TIMEOUT` at `91.1 s` with only
+  `live_data` missing and cleanup PASS.
+- Local packaged positive smoke: true operational-ready event at `8.7921 s` and
+  process cleanup PASS.
+
 ## 5. Next Action
 
-Run full checks, commit the launcher correction, and generate a replacement
-clean PyInstaller/NSIS package. Then verify its SHA on the server and rerun the
+Copy only installer SHA `90AEF3AF...` to the server, install it, and rerun the
 bundled script with `TimeoutSec=90` to capture the physical-device full wait.
