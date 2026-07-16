@@ -1,5 +1,5 @@
 import { apiClient } from '../client';
-import { STARTUP_POLL_REQUEST_TIMEOUT_MS } from '../pollingRequest';
+import { POLL_REQUEST_TIMEOUT_MS } from '../pollingRequest';
 import type {
   LatestMetricResponse,
   MetricHistoryResponse,
@@ -9,7 +9,7 @@ const HISTORY_BACKFILL_LIMIT = 20_000;
 
 export const fetchLatestMetric = async (): Promise<LatestMetricResponse> => {
   const response = await apiClient.get<LatestMetricResponse>('/api/data', {
-    timeout: STARTUP_POLL_REQUEST_TIMEOUT_MS,
+    timeout: POLL_REQUEST_TIMEOUT_MS,
   });
   return response.data;
 };

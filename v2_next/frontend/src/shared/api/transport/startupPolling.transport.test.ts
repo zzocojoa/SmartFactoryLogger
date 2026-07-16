@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { STARTUP_POLL_REQUEST_TIMEOUT_MS } from '../pollingRequest';
+import {
+  POLL_REQUEST_TIMEOUT_MS,
+  STARTUP_HEALTH_REQUEST_TIMEOUT_MS,
+} from '../pollingRequest';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(),
@@ -19,13 +22,23 @@ describe('startup polling transport', () => {
     mocks.get.mockReset();
   });
 
-  it('bounds the health request so startup retries cannot remain pending indefinitely', async () => {
+  it('uses the startup-specific timeout when the health caller requests it', async () => {
+    const health = { running: true };
+    mocks.get.mockResolvedValueOnce({ data: health });
+
+    await expect(fetchHealth(STARTUP_HEALTH_REQUEST_TIMEOUT_MS)).resolves.toBe(health);
+    expect(mocks.get).toHaveBeenCalledWith('/health', {
+      timeout: STARTUP_HEALTH_REQUEST_TIMEOUT_MS,
+    });
+  });
+
+  it('returns health requests to the steady polling timeout by default', async () => {
     const health = { running: true };
     mocks.get.mockResolvedValueOnce({ data: health });
 
     await expect(fetchHealth()).resolves.toBe(health);
     expect(mocks.get).toHaveBeenCalledWith('/health', {
-      timeout: STARTUP_POLL_REQUEST_TIMEOUT_MS,
+      timeout: POLL_REQUEST_TIMEOUT_MS,
     });
   });
 
@@ -35,7 +48,7 @@ describe('startup polling transport', () => {
 
     await expect(fetchLatestMetric()).resolves.toBe(data);
     expect(mocks.get).toHaveBeenCalledWith('/api/data', {
-      timeout: STARTUP_POLL_REQUEST_TIMEOUT_MS,
+      timeout: POLL_REQUEST_TIMEOUT_MS,
     });
   });
 });

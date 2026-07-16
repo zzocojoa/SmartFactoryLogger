@@ -174,6 +174,35 @@ class FrontendRoutingHealthTests(unittest.TestCase):
             if "worker" in locals():
                 worker.join(timeout=1.0)
 
+    def test_slow_health_response_logs_stage_timings(self) -> None:
+        with (
+            patch.object(backend_app.plc_service, "get_health", return_value={"running": True}),
+            patch.object(backend_app, "get_runtime_info", return_value={"runtime_kind": "test"}),
+            patch.object(
+                backend_app,
+                "get_frontend_static_status",
+                return_value={"frontend_static_ready": True},
+            ),
+            patch.object(
+                backend_app.time,
+                "perf_counter",
+                side_effect=[10.0, 10.6, 10.7, 10.8],
+            ),
+            patch.object(backend_app._logger, "warning") as warning,
+        ):
+            payload = backend_app.build_health_payload()
+
+        self.assertTrue(payload["running"])
+        self.assertEqual(payload["runtime_kind"], "test")
+        self.assertTrue(payload["frontend_static_ready"])
+        warning.assert_called_once()
+        self.assertEqual(warning.call_args.args[0], "[Health] Slow response")
+        log_fields = warning.call_args.kwargs["extra"]
+        self.assertEqual(log_fields["health_total_ms"], 800.0)
+        self.assertEqual(log_fields["health_plc_service_ms"], 600.0)
+        self.assertEqual(log_fields["health_runtime_info_ms"], 100.0)
+        self.assertEqual(log_fields["health_frontend_static_ms"], 100.0)
+
 
 if __name__ == "__main__":
     unittest.main()

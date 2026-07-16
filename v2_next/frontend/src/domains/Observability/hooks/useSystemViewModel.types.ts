@@ -30,7 +30,7 @@ export interface UseSystemViewModel {
   statsPolling: PollingState;
   dashboardLeaderState: DashboardLeaderState | null;
   pollingPausedByVisibility: boolean;
-  fetchHealth: () => Promise<HealthSnapshot | null>;
+  fetchHealth: (timeoutMs?: number) => Promise<HealthSnapshot | null>;
   fetchStats: () => Promise<StatsSnapshot | null>;
   loadObservabilityErrors: () => Promise<void>;
   clearObservabilityErrors: () => Promise<void>;

@@ -1,5 +1,5 @@
 import { apiClient } from '../client';
-import { STARTUP_POLL_REQUEST_TIMEOUT_MS } from '../pollingRequest';
+import { POLL_REQUEST_TIMEOUT_MS } from '../pollingRequest';
 import type {
   BrowseFolderParams,
   BrowseFolderResponse,
@@ -21,9 +21,11 @@ import type {
   SystemStatsResponse,
 } from '../../../domains/Observability/api/systemService.types';
 
-export const fetchHealth = async (): Promise<SystemHealthResponse> => {
+export const fetchHealth = async (
+  timeoutMs: number = POLL_REQUEST_TIMEOUT_MS
+): Promise<SystemHealthResponse> => {
   const response = await apiClient.get<SystemHealthResponse>('/health', {
-    timeout: STARTUP_POLL_REQUEST_TIMEOUT_MS,
+    timeout: timeoutMs,
   });
   return response.data;
 };

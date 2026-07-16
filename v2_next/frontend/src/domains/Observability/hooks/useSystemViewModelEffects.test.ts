@@ -1,6 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HealthSnapshot } from '../../../shared/types';
+import {
+  POLL_REQUEST_TIMEOUT_MS,
+  STARTUP_HEALTH_REQUEST_TIMEOUT_MS,
+} from '../../../shared/api/pollingRequest';
 import { useSystemViewModelEffects } from './useSystemViewModelEffects';
 
 const setVisibilityState = (visibilityState: DocumentVisibilityState): void => {
@@ -29,7 +33,7 @@ describe('useSystemViewModelEffects startup recovery', () => {
   it('keeps the base health interval until the first successful response', async () => {
     const health = { running: true } as HealthSnapshot;
     const fetchHealth = vi
-      .fn<() => Promise<HealthSnapshot | null>>()
+      .fn<(timeoutMs?: number) => Promise<HealthSnapshot | null>>()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValue(health);
@@ -55,11 +59,13 @@ describe('useSystemViewModelEffects startup recovery', () => {
         await vi.advanceTimersByTimeAsync(0);
       });
       expect(fetchHealth).toHaveBeenCalledTimes(1);
+      expect(fetchHealth).toHaveBeenLastCalledWith(STARTUP_HEALTH_REQUEST_TIMEOUT_MS);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
       expect(fetchHealth).toHaveBeenCalledTimes(2);
+      expect(fetchHealth).toHaveBeenLastCalledWith(STARTUP_HEALTH_REQUEST_TIMEOUT_MS);
       expect(setHealthPolling).toHaveBeenLastCalledWith({
         degraded: true,
         intervalMs: 5_000,
@@ -70,11 +76,18 @@ describe('useSystemViewModelEffects startup recovery', () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
       expect(fetchHealth).toHaveBeenCalledTimes(3);
+      expect(fetchHealth).toHaveBeenLastCalledWith(STARTUP_HEALTH_REQUEST_TIMEOUT_MS);
       expect(setHealthPolling).toHaveBeenLastCalledWith({
         degraded: false,
         intervalMs: 5_000,
         failureCount: 0,
       });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(fetchHealth).toHaveBeenCalledTimes(4);
+      expect(fetchHealth).toHaveBeenLastCalledWith(POLL_REQUEST_TIMEOUT_MS);
     } finally {
       unmount();
     }
@@ -92,7 +105,7 @@ describe('useSystemViewModelEffects startup recovery', () => {
     );
     const health = { running: true } as HealthSnapshot;
     const fetchHealth = vi
-      .fn<() => Promise<HealthSnapshot | null>>()
+      .fn<(timeoutMs?: number) => Promise<HealthSnapshot | null>>()
       .mockResolvedValueOnce(null)
       .mockResolvedValue(health);
     const fetchStats = vi.fn().mockResolvedValue(null);

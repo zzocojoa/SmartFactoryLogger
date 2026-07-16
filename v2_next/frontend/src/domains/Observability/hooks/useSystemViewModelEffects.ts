@@ -2,6 +2,10 @@ import { useEffect, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { CommLogInfo, DashboardLeaderState, HealthSnapshot, StatsSnapshot } from '../../../shared/types';
 import {
+  POLL_REQUEST_TIMEOUT_MS,
+  STARTUP_HEALTH_REQUEST_TIMEOUT_MS,
+} from '../../../shared/api/pollingRequest';
+import {
   clearDashboardLeaderLock,
   readDashboardLeaderLock,
   readOrCreateDashboardTabId,
@@ -15,7 +19,7 @@ interface PollingState {
 }
 
 interface UseSystemViewModelEffectsParams {
-  fetchHealth: () => Promise<HealthSnapshot | null>;
+  fetchHealth: (timeoutMs?: number) => Promise<HealthSnapshot | null>;
   fetchStats: () => Promise<StatsSnapshot | null>;
   reconnectBusy: boolean;
   setHealthPolling: Dispatch<SetStateAction<PollingState>>;
@@ -168,7 +172,10 @@ export const useSystemViewModelEffects = ({
       if (!mounted || !canPollHealth()) return;
       if (!reconnectBusy) {
         try {
-          const data = await fetchHealth();
+          const healthTimeoutMs = healthHasSucceeded
+            ? POLL_REQUEST_TIMEOUT_MS
+            : STARTUP_HEALTH_REQUEST_TIMEOUT_MS;
+          const data = await fetchHealth(healthTimeoutMs);
           if (data) {
             healthHasSucceeded = true;
             healthFailures = 0;

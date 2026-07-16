@@ -48,7 +48,7 @@ import {
 } from '../../../shared/api/transport/systemService.transport';
 
 export const systemService = {
-  getHealth: (): Promise<SystemHealthResponse> => fetchHealth(),
+  getHealth: (timeoutMs?: number): Promise<SystemHealthResponse> => fetchHealth(timeoutMs),
   
   getStats: (): Promise<SystemStatsResponse> => fetchStats(),
 

@@ -1862,20 +1862,62 @@ def reset_operator_metadata(request: Request):
         raise HTTPException(status_code=500, detail="Operator metadata reset failed") from exc
 
 
+HEALTH_SLOW_RESPONSE_THRESHOLD_MS = 500.0
+
+
+def build_health_payload() -> dict[str, Any]:
+    started_perf = time.perf_counter()
+
+    plc_health = plc_service.get_health()
+    plc_completed_perf = time.perf_counter()
+
+    runtime_info = get_runtime_info()
+    runtime_completed_perf = time.perf_counter()
+
+    frontend_status = get_frontend_static_status(
+        frontend_dist,
+        frontend_mode,
+        frontend_source,
+        frontend_source_origin,
+        frontend_resolution_reason,
+        frontend_resolution_candidate_specs,
+    )
+    completed_perf = time.perf_counter()
+
+    total_ms = (completed_perf - started_perf) * 1000.0
+    if total_ms >= HEALTH_SLOW_RESPONSE_THRESHOLD_MS:
+        _logger.warning(
+            "[Health] Slow response",
+            extra={
+                "health_total_ms": round(total_ms, 1),
+                "health_plc_service_ms": round(
+                    (plc_completed_perf - started_perf) * 1000.0,
+                    1,
+                ),
+                "health_runtime_info_ms": round(
+                    (runtime_completed_perf - plc_completed_perf) * 1000.0,
+                    1,
+                ),
+                "health_frontend_static_ms": round(
+                    (completed_perf - runtime_completed_perf) * 1000.0,
+                    1,
+                ),
+                "session": _app_session_id,
+                "pid": os.getpid(),
+                "started_at": _app_started_at_iso,
+            },
+        )
+
+    return {
+        **plc_health,
+        **runtime_info,
+        **frontend_status,
+    }
+
+
 @app.get("/health")
 async def health():
-    return {
-        **plc_service.get_health(),
-        **get_runtime_info(),
-        **get_frontend_static_status(
-            frontend_dist,
-            frontend_mode,
-            frontend_source,
-            frontend_source_origin,
-            frontend_resolution_reason,
-            frontend_resolution_candidate_specs,
-        ),
-    }
+    return build_health_payload()
 
 @app.get("/stats")
 async def stats():
