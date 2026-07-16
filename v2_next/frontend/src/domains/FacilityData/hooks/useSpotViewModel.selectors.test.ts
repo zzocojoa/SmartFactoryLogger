@@ -6,10 +6,13 @@ import {
 } from './useSpotViewModel.selectors';
 
 describe('SPOT image response selectors', () => {
-  it('reads only the single image bridge observability headers', () => {
+  it('reads image observability and cached internal-temperature headers', () => {
     const headers = new Headers({
       'X-Spot-Image-Source': 'upstream',
       'X-Spot-Image-At': '1700000004000',
+      'X-Spot-Internal-Temperature': '41.250',
+      'X-Spot-Internal-Temperature-At': '1700000003500',
+      'X-Spot-Internal-Temperature-Status': 'ok',
     });
 
     const metadata = resolveSpotImageResponseMetadata(headers, 1_700_000_005_000, 25);
@@ -17,6 +20,9 @@ describe('SPOT image response selectors', () => {
     expect(metadata).toEqual({
       source: 'upstream',
       captured_at: 1_700_000_004_000,
+      internal_temperature: 41.25,
+      internal_temperature_at: 1_700_000_003_500,
+      internal_temperature_status: 'ok',
       received_at: 1_700_000_005_000,
       latency_ms: 25,
     });
@@ -26,6 +32,9 @@ describe('SPOT image response selectors', () => {
   it('uses receive time when the bridge capture header is absent', () => {
     const metadata = resolveSpotImageResponseMetadata(new Headers(), 1_700_000_005_000, 10);
     expect(resolveSpotImageSuccessAt(metadata, metadata.received_at)).toBe(metadata.received_at);
+    expect(metadata.internal_temperature).toBeNull();
+    expect(metadata.internal_temperature_at).toBeNull();
+    expect(metadata.internal_temperature_status).toBeNull();
   });
 
   it('maps upstream failures without cache or backoff states', () => {

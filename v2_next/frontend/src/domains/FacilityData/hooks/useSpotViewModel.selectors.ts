@@ -17,6 +17,15 @@ export type SpotImageErrorDetail = {
   diagnostics?: SpotImageDiagnostics | null;
 };
 
+const parseFiniteNumber = (rawValue: string | null): number | null => {
+  const normalized = rawValue?.trim() ?? '';
+  if (normalized === '') {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export const resolveSpotImageResponseMetadata = (
   headers: Headers,
   receivedAt: number,
@@ -24,6 +33,11 @@ export const resolveSpotImageResponseMetadata = (
 ): SpotImageResponseMetadata => ({
   source: headers.get('X-Spot-Image-Source'),
   captured_at: normalizeSpotImageCapturedAt(headers.get('X-Spot-Image-At')),
+  internal_temperature: parseFiniteNumber(headers.get('X-Spot-Internal-Temperature')),
+  internal_temperature_at: normalizeSpotImageCapturedAt(
+    headers.get('X-Spot-Internal-Temperature-At')
+  ),
+  internal_temperature_status: headers.get('X-Spot-Internal-Temperature-Status'),
   received_at: receivedAt,
   latency_ms: latencyMs,
 });

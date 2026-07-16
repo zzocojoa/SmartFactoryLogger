@@ -22,6 +22,7 @@ import base64
 import json
 import logging
 import ipaddress
+import math
 import re
 from logging.handlers import RotatingFileHandler
 import time
@@ -254,6 +255,47 @@ _NETWORK_WARN_MS = 200
 _SPOT_IMAGE_PATH = "/api/spot/image.jpg"
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 _SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
+_SPOT_INTERNAL_TEMPERATURE_HEADER = "X-Spot-Internal-Temperature"
+_SPOT_INTERNAL_TEMPERATURE_AT_HEADER = "X-Spot-Internal-Temperature-At"
+_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER = "X-Spot-Internal-Temperature-Status"
+
+
+def _finite_float(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _spot_internal_temperature_headers() -> dict[str, str]:
+    try:
+        diagnostics = spot_control.get_spot_internal_temperature_diagnostics()
+        raw_status = diagnostics.get("internal_temperature_cache_status")
+        status = str(raw_status or "missing").strip().lower() or "missing"
+        headers = {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: status}
+        if status != "ok":
+            return headers
+
+        temperature = _finite_float(diagnostics.get("internal_temperature"))
+        measured_at = _finite_float(diagnostics.get("internal_temperature_at"))
+        if temperature is None or measured_at is None or measured_at <= 0.0:
+            headers[_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER] = "missing"
+            return headers
+
+        headers[_SPOT_INTERNAL_TEMPERATURE_HEADER] = f"{temperature:.3f}"
+        headers[_SPOT_INTERNAL_TEMPERATURE_AT_HEADER] = str(int(measured_at * 1000))
+        return headers
+    except Exception as exc:
+        _logger.warning(
+            "SPOT internal temperature metadata unavailable",
+            extra={"error_type": exc.__class__.__name__},
+        )
+        return {_SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER: "error"}
+
+
 def _url_host(url: str) -> str | None:
     try:
         host = urlsplit(url).hostname
@@ -1599,6 +1641,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[
+        _SPOT_INTERNAL_TEMPERATURE_HEADER,
+        _SPOT_INTERNAL_TEMPERATURE_AT_HEADER,
+        _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER,
+    ],
 )
 
 
@@ -2883,6 +2930,7 @@ async def spot_image():
             headers["X-Spot-Image-Source"] = str(meta["source"])
         if meta.get("latency_ms") is not None:
             headers["X-Spot-Image-Latency-Ms"] = f"{float(meta['latency_ms']):.1f}"
+        headers.update(_spot_internal_temperature_headers())
         observability_service.record_spot_image_result(200)
         return Response(content=data, media_type="image/jpeg", headers=headers)
     except spot_control.SpotImageConfigError as exc:
