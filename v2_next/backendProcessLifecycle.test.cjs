@@ -30,8 +30,59 @@ test('graceful termination resolves only after the child close event', async () 
   });
   child.exitCode = 0;
   child.emit('close', 0);
-  assert.deepEqual(await resultPromise, { stopped: true, reason: 'close' });
+  assert.deepEqual(await resultPromise, {
+    stopped: true,
+    reason: 'close',
+    exitCode: 0,
+    signalCode: null,
+    forced: false,
+  });
   assert.equal(gracefulRequests, 1);
+});
+
+test('graceful non-zero backend exit rejects clean shutdown', async () => {
+  const child = createChild();
+  const resultPromise = stopProcessTree(child, {
+    killTree: () => assert.fail('force kill must not run after backend close'),
+    requestGracefulStop: async () => undefined,
+    graceMs: 50,
+    forceCloseMs: 50,
+  });
+  child.exitCode = 2;
+  child.emit('close', 2, null);
+  await assert.rejects(resultPromise, /code=2/);
+});
+
+test('pre-exited non-zero backend rejects clean shutdown before close is observed', async () => {
+  const child = createChild();
+  child.exitCode = 2;
+
+  await assert.rejects(
+    stopProcessTree(child, {
+      killTree: () => assert.fail('force kill must not run for a pre-exited backend'),
+      requestGracefulStop: async () => assert.fail('graceful stop must not run for a pre-exited backend'),
+    }),
+    /code=2/
+  );
+});
+
+test('pre-exited zero backend remains an idempotent clean stop', async () => {
+  const child = createChild();
+  child.exitCode = 0;
+
+  assert.deepEqual(
+    await stopProcessTree(child, {
+      killTree: () => assert.fail('force kill must not run for a pre-exited backend'),
+      requestGracefulStop: async () => assert.fail('graceful stop must not run for a pre-exited backend'),
+    }),
+    {
+      stopped: true,
+      reason: 'already_exited',
+      exitCode: 0,
+      signalCode: null,
+      forced: false,
+    }
+  );
 });
 
 test('graceful request failure escalates to SIGKILL and still waits for close', async () => {
@@ -52,7 +103,13 @@ test('graceful request failure escalates to SIGKILL and still waits for close', 
     graceMs: 5,
     forceCloseMs: 50,
   });
-  assert.deepEqual(await resultPromise, { stopped: true, reason: 'close' });
+  assert.deepEqual(await resultPromise, {
+    stopped: true,
+    reason: 'forced_close',
+    exitCode: null,
+    signalCode: 'SIGKILL',
+    forced: true,
+  });
   assert.deepEqual(signals, ['SIGKILL']);
 });
 

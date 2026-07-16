@@ -12,7 +12,10 @@ const {
   createBackendProgressParser,
 } = require('./startupCoordinator');
 const { stopProcessTree, createBackendRestartController } = require('./backendProcessLifecycle');
-const { createBackendProgressFileTransport } = require('./backendStartupProgress');
+const {
+  buildBackendProgressEnvironment,
+  createBackendProgressFileTransport,
+} = require('./backendStartupProgress');
 const { createStartupIpcHandlers, normalizeDocumentUrl } = require('./startupIpc');
 
 const startupOriginNs = process.hrtime.bigint();
@@ -50,7 +53,7 @@ const STARTUP_PAYLOAD_MAX_KEYS = 16;
 const STARTUP_PAYLOAD_MAX_KEY_LENGTH = 64;
 const STARTUP_PAYLOAD_MAX_STRING_LENGTH = 200;
 const MAX_RENDERER_STARTUP_EVENTS_PER_NAME = 4;
-const BACKEND_GRACEFUL_SHUTDOWN_MS = 305_000;
+const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;
 
 let mainWindow;
 let backendProcess;
@@ -548,12 +551,11 @@ function startBackend() {
       cwd: isPackaged ? path.join(process.resourcesPath, 'backend') : __dirname,
       shell: false,
       windowsHide: true,
-      env: {
-        ...process.env,
+      env: buildBackendProgressEnvironment(process.env, {
         ...progressEnvironment,
         SFL_EMBEDDED_ELECTRON: '1',
         SFL_CONTROL_TOKEN: backendControlToken,
-      }
+      }),
     };
 
     logStartupEvent('backend.spawn-start', { is_packaged: isPackaged });
@@ -677,6 +679,9 @@ async function stopBackendProcess(child = backendProcess) {
     logStartupEvent('backend.shutdown-complete', {
       pid: child.pid,
       reason: result.reason,
+      exit_code: result.exitCode ?? null,
+      signal_code: result.signalCode ?? null,
+      forced: result.forced === true,
       elapsed_ms: Math.round(Number(process.hrtime.bigint() - startedAtNs) / 100_000) / 10,
     });
     return result;
@@ -716,7 +721,7 @@ function restartBackend() {
 
 app.whenReady().then(() => {
   logStartupEvent('electron.app-ready');
-  log("App ready, starting backend and window...");
+  log("App ready, preparing startup window...");
   registerMemoryIpcHandlers();
   registerStartupIpcHandlers();
   startupCoordinator.start();

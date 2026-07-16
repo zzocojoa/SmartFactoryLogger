@@ -125,19 +125,26 @@ class CommMetricsLoggerService:
         self.thread.start()
         self.logger.info("Comm metrics logger started (interval=%.1fs).", self.interval_sec)
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         if not self.running:
-            return
+            return self.thread is None or not self.thread.is_alive()
         self.running = False
         if self.thread:
             self.thread.join(timeout=1.0)
-        self.thread = None
+        stopped = self.thread is None or not self.thread.is_alive()
+        if stopped:
+            self.thread = None
+        listener_stopped = True
         if hasattr(self, "listener") and self.listener:
             try:
                 self.listener.stop()
             except Exception:
-                pass
-        self.logger.info("Comm metrics logger stopped.")
+                listener_stopped = False
+        if stopped and listener_stopped:
+            self.logger.info("Comm metrics logger stopped.")
+        else:
+            self.logger.warning("Comm metrics logger did not stop cleanly.")
+        return stopped and listener_stopped
 
     def _summarize_ex(self, metrics: Optional[Dict[str, Any]]) -> str:
         if not metrics:

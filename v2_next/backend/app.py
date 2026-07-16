@@ -1716,6 +1716,7 @@ _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
     "plc_service_stopped",
     "logger_service_stopped",
     "comm_metrics_logger_service_stopped",
+    "memory_service_stopped",
     "config_sync_agent_stopped",
     "config_watch_service_stopped",
 )
@@ -1736,7 +1737,7 @@ def _run_control_shutdown_stage(
     )
     try:
         result = stopper()
-        succeeded = result is not False
+        succeeded = result is True
     except Exception as exc:
         succeeded = False
         _logger.warning(
@@ -1766,7 +1767,9 @@ def _stop_services_for_control_shutdown() -> dict[str, Any]:
     image_capture_drained = _run_control_shutdown_stage(
         stage="spot_image_capture",
         status_key="spot_image_capture_drained",
-        stopper=lambda: spot_control.stop_spot_image_capture_for_shutdown(timeout_sec=2.0),
+        stopper=lambda: spot_control.stop_spot_image_capture_for_shutdown(
+            timeout_sec=config.SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC
+        ),
         status=status,
     )
     if not image_capture_drained:
@@ -1797,6 +1800,12 @@ def _stop_services_for_control_shutdown() -> dict[str, Any]:
         stage="comm_metrics_logger_service",
         status_key="comm_metrics_logger_service_stopped",
         stopper=comm_metrics_logger_service.stop,
+        status=status,
+    )
+    _run_control_shutdown_stage(
+        stage="memory_service",
+        status_key="memory_service_stopped",
+        stopper=memory_service.stop,
         status=status,
     )
     _run_control_shutdown_stage(

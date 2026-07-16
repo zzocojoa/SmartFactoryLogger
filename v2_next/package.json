@@ -9,14 +9,15 @@
     "dist": "electron-builder",
     "profile:react": "node scripts/collect_react_profiler.cjs",
     "profile:react:mock": "node scripts/react_profiler_mock_backend.cjs",
-    "health": "npm run health:electron-startup && npm run health:frontend:typecheck && npm run health:frontend:lint && npm run health:frontend:test && npm run health:backend:lint && npm run health:backend:typecheck && npm run health:backend:test",
+    "health": "npm run health:electron-startup && npm run health:frontend:typecheck && npm run health:frontend:lint && npm run health:frontend:test && npm run health:backend:lint && npm run health:backend:typecheck && npm run health:backend:test && npm run health:qa:selftest",
     "health:electron-startup": "node --test startupCoordinator.test.cjs startupIpc.test.cjs backendStartupProgress.test.cjs backendProcessLifecycle.test.cjs",
     "health:frontend:typecheck": "npm --prefix frontend run typecheck",
     "health:frontend:lint": "npm --prefix frontend run lint",
     "health:frontend:test": "npm --prefix frontend run test",
     "health:backend:lint": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m ruff check backend",
     "health:backend:typecheck": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m mypy",
-    "health:backend:test": "node scripts/run_backend_unittest.cjs"
+    "health:backend:test": "node scripts/run_backend_unittest.cjs",
+    "health:qa:selftest": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/measure_nsis_operational_ready.ps1 -SelfTest"
   },
   "keywords": [],
   "author": "",

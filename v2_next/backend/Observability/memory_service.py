@@ -542,14 +542,15 @@ class MemoryService:
         self._thread = threading.Thread(target=self._loop, name="MemorySampler", daemon=True)
         self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         if not self._running:
-            return
+            return self._thread is None or not self._thread.is_alive()
         self._running = False
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
         self.stop_profiler()
+        return self._thread is None or not self._thread.is_alive()
 
     def start_profiler(self) -> Dict[str, Any]:
         self._expire_profiler_if_needed()

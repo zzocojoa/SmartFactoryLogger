@@ -61,7 +61,9 @@ startup flow without weakening the existing release performance metric.
 ### 3.1 In Scope
 
 - A pure main-process startup coordinator and bounded backend progress parser.
-- Structured backend lifecycle stage events written to embedded stdout.
+- Structured backend lifecycle stage events delivered through a bounded,
+  per-launch authenticated transport, with stdout retained as a development
+  fallback.
 - Constrained preload methods for startup state snapshot, subscription, retry,
   offline continuation, and exit.
 - An inline HTML overlay using the existing splash image and a locally rendered
@@ -89,7 +91,7 @@ startup flow without weakening the existing release performance metric.
 | FR-01 | Local HTML displays the splash overlay before the React module entry executes. | High |
 | FR-02 | Main owns the authoritative startup state and elapsed clock. | High |
 | FR-03 | Backend emits only allowlisted structured lifecycle stage names. | High |
-| FR-04 | Main parses fragmented/multiple stdout lines with a bounded buffer and ignores malformed or unknown events. | High |
+| FR-04 | Main parses fragmented/multiple progress records with bounded file/line buffers, authenticates the launch token, and ignores malformed or unknown events. | High |
 | FR-05 | Progress is milestone-based, monotonic, and reaches 100 only at a terminal ready/degraded state. | High |
 | FR-06 | Normal handoff requires backend health, first timestamped Running snapshot, and confirmed dashboard paint. | High |
 | FR-07 | Degraded handoff accepts a valid timestamped non-Running snapshot after backend health and paint. | High |
@@ -146,11 +148,17 @@ startup flow without weakening the existing release performance metric.
 | Overlay never dismisses | Production-critical | Medium | Separate snapshot and strict Running gates; 30-second action state; browser fallback removal. |
 | Dashboard shows before real paint | High | Medium | Reuse the confirmed `raf` dashboard event and apply a bounded fade. |
 | Retry starts duplicate backends | High | Medium | Serialize restart, kill the owned backend tree, and block repeated retry while restarting. |
-| Stdout parser trusts arbitrary text | High | Medium | Fixed prefix, bounded line/buffer sizes, JSON object validation, and stage allowlist. |
+| Progress parser trusts arbitrary text | High | Medium | Private per-launch file, random token, fixed prefix, bounded file/line buffers, JSON object validation, and stage allowlist. |
 | Device outage becomes app outage | High | High | Degraded dashboard is an accepted terminal UI state. |
 | Existing server QA semantics regress | High | Medium | Preserve strict first-live-data and operational-ready gates; add a new event instead of redefining old events. |
 | Startup image increases bundle drift | Medium | Low | Emit the existing tracked image during Vite build; no duplicated binary. |
 | New IPC broadens attack surface | High | Low | Fixed methods only, sender-frame validation in main, no arbitrary names/arguments. |
+| Backend reports a failed drain but Electron treats process close as success | Production-critical | Medium | Preserve exit code/signal in the lifecycle result and reject every graceful non-zero close before quit or retry. |
+| Writer thread exits after losing its final item | Production-critical | Low | Require explicit boolean service stops, zero new SPOT write failures, durable CSV final flush, and memory-thread termination. |
+| Backend exit is observed before its close event | Production-critical | Low | Apply the same exit-code/signal validation to the pre-exited lifecycle guard instead of treating it as idempotent success. |
+| Shutdown sentinel overtakes an accepted CSV row | Production-critical | Low | Serialize the running check, enqueue, stop transition, and sentinel insertion with one lifecycle lock. |
+| SPOT failure accounting races queue completion | Production-critical | Low | Record the writer outcome and `task_done()` atomically, and disable enqueue while taking the shutdown failure baseline. |
+| Parent environment injects a stale progress path/token | High | Low | Remove inherited progress variables before applying the per-launch authenticated transport. |
 
 ## 9. Rollback and Operations
 
@@ -162,6 +170,14 @@ startup flow without weakening the existing release performance metric.
   never a blank screen or infinite spinner.
 - Post-merge release validation must run the existing bundled operational-ready
   QA and verify normal, PLC-offline, SPOT-offline, retry, and clean-exit behavior.
+- Shutdown is bounded by per-stage backend caps (SPOT 30 seconds and CSV 300
+  seconds) and a 365-second Electron grace window. A failed stage exits with
+  code 2 instead of silently reporting a clean shutdown.
+- Electron accepts only graceful backend exit code 0 as clean. A non-zero close
+  blocks quit/retry and remains visible as `backend.shutdown-failed` evidence.
+- The bundled QA process exit remains the functional verdict by design. Release
+  automation must also require `performance_status=PASS` so the independent
+  30-second gate cannot be lost.
 
 ## 10. References
 

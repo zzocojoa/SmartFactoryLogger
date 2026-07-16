@@ -20,8 +20,28 @@ function hasProcessExited(child) {
 }
 
 function stopProcessTree(child, options) {
-  if (!child?.pid || hasProcessExited(child)) {
+  if (!child?.pid) {
     return Promise.resolve({ stopped: true, reason: 'already_exited' });
+  }
+
+  if (hasProcessExited(child)) {
+    const exitCode = child.exitCode ?? null;
+    const signalCode = child.signalCode ?? null;
+    if (exitCode === 0 && signalCode === null) {
+      return Promise.resolve({
+        stopped: true,
+        reason: 'already_exited',
+        exitCode,
+        signalCode,
+        forced: false,
+      });
+    }
+    const error = new Error(
+      `Backend exited before shutdown completed (code=${exitCode}, signal=${signalCode}).`
+    );
+    error.exitCode = exitCode;
+    error.signalCode = signalCode;
+    return Promise.reject(error);
   }
 
   const {
@@ -54,13 +74,13 @@ function stopProcessTree(child, options) {
       child.removeListener('close', onClose);
     };
 
-    const finish = (reason) => {
+    const finish = (reason, details = {}) => {
       if (settled) {
         return;
       }
       settled = true;
       cleanup();
-      resolve({ stopped: true, reason });
+      resolve({ stopped: true, reason, ...details });
     };
 
     const fail = (error) => {
@@ -72,8 +92,30 @@ function stopProcessTree(child, options) {
       reject(error);
     };
 
-    function onClose() {
-      finish('close');
+    function onClose(exitCode, signalCode) {
+      if (forcing) {
+        finish('forced_close', {
+          exitCode: exitCode ?? null,
+          signalCode: signalCode ?? null,
+          forced: true,
+        });
+        return;
+      }
+      if (exitCode === 0 && !signalCode) {
+        finish('close', {
+          exitCode: 0,
+          signalCode: null,
+          forced: false,
+        });
+        return;
+      }
+      const error = new Error(
+        `Backend PID ${child.pid} exited during graceful shutdown ` +
+        `(code=${exitCode ?? 'null'}, signal=${signalCode ?? 'null'}).`
+      );
+      error.exitCode = exitCode ?? null;
+      error.signalCode = signalCode ?? null;
+      fail(error);
     }
 
     const forceStop = () => {
@@ -95,7 +137,11 @@ function stopProcessTree(child, options) {
           return;
         }
         if (hasProcessExited(child)) {
-          finish('forced_exit_confirmed');
+          finish('forced_exit_confirmed', {
+            exitCode: child.exitCode ?? null,
+            signalCode: child.signalCode ?? null,
+            forced: true,
+          });
           return;
         }
         forceCloseTimer = setTimer(() => {

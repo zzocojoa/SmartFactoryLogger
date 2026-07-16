@@ -1238,10 +1238,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 release_thread.start()
                 with (
                     patch.object(backend_app, "logger_service", final_manifest_logger),
-                    patch.object(backend_app.plc_service, "stop", Mock()),
-                    patch.object(backend_app.comm_metrics_logger_service, "stop", Mock()),
-                    patch.object(backend_app.config_sync_agent, "stop", Mock()),
-                    patch.object(backend_app.config_watch_service, "stop", Mock()),
+                    patch.object(backend_app.plc_service, "stop", Mock(return_value=True)),
+                    patch.object(backend_app.comm_metrics_logger_service, "stop", Mock(return_value=True)),
+                    patch.object(backend_app.memory_service, "stop", Mock(return_value=True)),
+                    patch.object(backend_app.config_sync_agent, "stop", Mock(return_value=True)),
+                    patch.object(backend_app.config_watch_service, "stop", Mock(return_value=True)),
                 ):
                     shutdown_status = backend_app._stop_services_for_control_shutdown()
                 release_thread.join(timeout=1.0)
@@ -1290,6 +1291,52 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["spot_image_source"], "test_shutdown_pending")
         self.assertEqual(health["written_count"], 1)
         self.assertEqual(health_after_enqueue_attempt["enqueued_count"], 1)
+
+    async def test_shutdown_helper_fails_when_queued_capture_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            event = spot_api._SpotImageCaptureEvent(
+                image_bytes=b"\xff\xd8failed-shutdown-write\xff\xd9",
+                captured_at=time.time(),
+                source_url="http://spot.local/live.jpg",
+                source="test_shutdown_failure",
+                image_age_ms=0.0,
+                link_checked_at=None,
+                observation_snapshot=None,
+            )
+            spot_api._SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
+            with spot_api._spot_image_capture_lock:
+                spot_api._spot_image_capture_enqueued_count += 1
+
+            original_task_done = spot_api._SPOT_IMAGE_CAPTURE_QUEUE.task_done
+            outcome_and_task_done_are_atomic = False
+
+            def assert_atomic_task_done() -> None:
+                nonlocal outcome_and_task_done_are_atomic
+                acquired = spot_api._spot_image_capture_lock.acquire(blocking=False)
+                if acquired:
+                    spot_api._spot_image_capture_lock.release()
+                outcome_and_task_done_are_atomic = (
+                    not acquired and spot_api._spot_image_capture_failure_count == 1
+                )
+                original_task_done()
+
+            with patch.object(
+                SpotImageCaptureWriter,
+                "write_capture",
+                side_effect=RuntimeError("simulated capture write failure"),
+            ), patch.object(
+                spot_api._SPOT_IMAGE_CAPTURE_QUEUE,
+                "task_done",
+                side_effect=assert_atomic_task_done,
+            ):
+                drained = spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2.0)
+            health = spot_api.get_spot_image_capture_health()
+
+        self.assertFalse(drained)
+        self.assertEqual(health["failure_count"], 1)
+        self.assertTrue(outcome_and_task_done_are_atomic)
 
     def test_image_capture_health_separates_worker_writes_from_fact_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1357,6 +1404,77 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(second_fact, first_fact)
             self.assertEqual(rows[0]["spot_image_capture_id"], first_fact["spot_image_capture_id"])
             self.assertTrue((log_path / first_fact["spot_image_path"]).exists())
+
+    def test_image_capture_writer_does_not_scan_history_for_new_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            capture_root = log_path / "spot_images"
+            historical_captured_at = time.time()
+            historical_image_bytes = b"\xff\xd8historical-capture\xff\xd9"
+            first_writer = SpotImageCaptureWriter(log_path=log_path, capture_root=capture_root)
+            first_writer.write_capture(
+                image_bytes=historical_image_bytes,
+                captured_at=historical_captured_at,
+                source_url="http://spot.local/image.jpg",
+                source="test",
+                image_age_ms=0.0,
+                link_checked_at=None,
+                observation_snapshot=None,
+            )
+            historical_fact_mtime = time.time() - 10.0
+            os.utime(
+                first_writer.fact_path,
+                (historical_fact_mtime, historical_fact_mtime),
+            )
+
+            restarted_writer = SpotImageCaptureWriter(log_path=log_path, capture_root=capture_root)
+            with patch.object(
+                restarted_writer,
+                "_load_known_facts_by_capture_id",
+                side_effect=AssertionError("new capture must not scan historical facts"),
+            ):
+                first_current_fact = restarted_writer.write_capture(
+                    image_bytes=b"\xff\xd8new-capture\xff\xd9",
+                    captured_at=historical_fact_mtime + 1.0,
+                    source_url="http://spot.local/image.jpg",
+                    source="test",
+                    image_age_ms=0.0,
+                    link_checked_at=None,
+                    observation_snapshot=None,
+                )
+                (log_path / first_current_fact["spot_image_path"]).unlink()
+                duplicate_current_fact = restarted_writer.write_capture(
+                    image_bytes=b"\xff\xd8new-capture\xff\xd9",
+                    captured_at=historical_fact_mtime + 1.0,
+                    source_url="http://spot.local/image.jpg",
+                    source="test",
+                    image_age_ms=0.0,
+                    link_checked_at=None,
+                    observation_snapshot=None,
+                )
+                restarted_writer.write_capture(
+                    image_bytes=b"\xff\xd8queued-new-capture\xff\xd9",
+                    captured_at=historical_fact_mtime + 2.0,
+                    source_url="http://spot.local/image.jpg",
+                    source="test",
+                    image_age_ms=0.0,
+                    link_checked_at=None,
+                    observation_snapshot=None,
+                )
+            restarted_writer.write_capture(
+                image_bytes=historical_image_bytes,
+                captured_at=historical_captured_at,
+                source_url="http://spot.local/image.jpg",
+                source="test",
+                image_age_ms=0.0,
+                link_checked_at=None,
+                observation_snapshot=None,
+            )
+
+            rows = self.read_spot_image_fact_rows(log_path)
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(duplicate_current_fact, first_current_fact)
 
     def test_event_mode_captures_under_range_snapshot_and_skips_valid_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -102,6 +102,13 @@ function sanitizeSessionId(value) {
   return normalized || 'startup';
 }
 
+function buildBackendProgressEnvironment(baseEnvironment = {}, overrides = {}) {
+  const environment = { ...baseEnvironment };
+  delete environment.SFL_STARTUP_PROGRESS_PATH;
+  delete environment.SFL_STARTUP_PROGRESS_TOKEN;
+  return { ...environment, ...overrides };
+}
+
 function createBackendProgressFileTransport(options = {}) {
   const rootDirValue = String(options.rootDir ?? '').trim();
   if (!rootDirValue) {
@@ -137,6 +144,25 @@ function createBackendProgressFileTransport(options = {}) {
   });
   let offset = 0;
   let closed = false;
+  let timer = null;
+
+  const removeProgressFile = () => {
+    try {
+      fs.unlinkSync(filePath);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        onRejected('file_cleanup_failed');
+      }
+    }
+  };
+
+  const stopPolling = () => {
+    closed = true;
+    if (timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+  };
 
   const poll = () => {
     if (closed) {
@@ -163,6 +189,8 @@ function createBackendProgressFileTransport(options = {}) {
     if (stat.size > MAX_PROGRESS_FILE_BYTES || unreadBytes > MAX_PROGRESS_FILE_BYTES) {
       offset = stat.size;
       onRejected('file_too_large');
+      stopPolling();
+      removeProgressFile();
       return;
     }
 
@@ -182,7 +210,7 @@ function createBackendProgressFileTransport(options = {}) {
     }
   };
 
-  const timer = setTimer(poll, pollIntervalMs);
+  timer = setTimer(poll, pollIntervalMs);
   if (typeof timer?.unref === 'function') {
     timer.unref();
   }
@@ -193,15 +221,11 @@ function createBackendProgressFileTransport(options = {}) {
     }
     poll();
     parser.flush();
-    closed = true;
-    clearTimer(timer);
-    try {
-      fs.unlinkSync(filePath);
-    } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        onRejected('file_cleanup_failed');
-      }
+    if (closed) {
+      return;
     }
+    stopPolling();
+    removeProgressFile();
   };
 
   return {
@@ -218,6 +242,7 @@ function createBackendProgressFileTransport(options = {}) {
 module.exports = {
   BACKEND_PROGRESS_PREFIX,
   MAX_PROGRESS_FILE_BYTES,
+  buildBackendProgressEnvironment,
   createAuthenticatedProgressParser,
   createBackendProgressFileTransport,
 };

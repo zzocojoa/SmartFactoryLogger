@@ -328,6 +328,8 @@ def _spot_image_capture_worker() -> None:
             event = _SPOT_IMAGE_CAPTURE_QUEUE.get(timeout=0.1)
         except queue.Empty:
             continue
+        fact: Optional[Dict[str, str]] = None
+        capture_error: Optional[Exception] = None
         try:
             writer = _get_spot_image_capture_writer()
             fact = writer.write_capture(
@@ -339,26 +341,35 @@ def _spot_image_capture_worker() -> None:
                 link_checked_at=event.link_checked_at,
                 observation_snapshot=event.observation_snapshot,
             )
-            with _spot_image_capture_lock:
-                _spot_image_capture_written_count += 1
-                _spot_image_capture_last_write_at = time.time()
-                _spot_image_capture_last_fact = dict(fact)
-                _spot_image_capture_last_error_code = None
-                _spot_image_capture_last_error_message = None
         except Exception as exc:  # pragma: no cover - exercised through integration-style tests
+            capture_error = exc
+        finally:
+            if capture_error is None and fact is None:
+                capture_error = RuntimeError("capture writer returned no fact")
+            # Outcome accounting and Queue.task_done() are one atomic state
+            # transition. Shutdown can therefore never observe a recorded
+            # failure while the same capture still appears unfinished.
             with _spot_image_capture_lock:
-                _spot_image_capture_failure_count += 1
-                _spot_image_capture_last_error_at = time.time()
-                _spot_image_capture_last_error_code = exc.__class__.__name__
-                _spot_image_capture_last_error_message = "capture writer failed"
+                if capture_error is None and fact is not None:
+                    _spot_image_capture_written_count += 1
+                    _spot_image_capture_last_write_at = time.time()
+                    _spot_image_capture_last_fact = dict(fact)
+                    _spot_image_capture_last_error_code = None
+                    _spot_image_capture_last_error_message = None
+                else:
+                    assert capture_error is not None
+                    _spot_image_capture_failure_count += 1
+                    _spot_image_capture_last_error_at = time.time()
+                    _spot_image_capture_last_error_code = capture_error.__class__.__name__
+                    _spot_image_capture_last_error_message = "capture writer failed"
+                _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
+        if capture_error is not None:
             _logger.warning(
                 "SPOT image capture writer failed",
                 extra={
-                    "error_type": exc.__class__.__name__,
+                    "error_type": capture_error.__class__.__name__,
                 },
             )
-        finally:
-            _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
 
 
 def flush_spot_image_capture_queue(timeout_sec: float = 2.0) -> bool:
@@ -382,14 +393,19 @@ def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> bool:
 
 def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
     global _spot_poll_running
-    _spot_poll_running = False
-    _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.set()
+    with _spot_image_capture_lock:
+        _spot_poll_running = False
+        _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.set()
+        failure_count_before = _spot_image_capture_failure_count
     thread = _spot_image_capture_thread
     if getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) > 0 and (
         thread is None or not thread.is_alive()
     ):
         _start_spot_image_capture_worker(force=True)
-    return stop_spot_image_capture_writer(timeout_sec=timeout_sec)
+    stopped = stop_spot_image_capture_writer(timeout_sec=timeout_sec)
+    with _spot_image_capture_lock:
+        failure_count_after = _spot_image_capture_failure_count
+    return stopped and failure_count_after == failure_count_before
 
 
 def _reset_spot_image_capture_state_for_tests() -> None:

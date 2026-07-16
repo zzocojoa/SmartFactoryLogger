@@ -486,7 +486,7 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("triggerInitialBackendStart('splash_first_paint')", main_text)
         self.assertIn("armInitialBackendStartFallback();", main_text)
         self.assertIn("requestBackendGracefulShutdown", main_text)
-        self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 305_000;", main_text)
+        self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;", main_text)
         self.assertIn("backend.shutdown-complete", main_text)
         self.assertIn("X-SFL-Control-Token", main_text)
         self.assertIn("STARTUP_RENDERER_EVENT_NAMES", main_text)
@@ -495,6 +495,26 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("startupIpc.js", package_payload["build"]["files"])
         self.assertIn("backendStartupProgress.js", package_payload["build"]["files"])
         self.assertIn("backendProcessLifecycle.js", package_payload["build"]["files"])
+
+    def test_default_shutdown_budgets_fit_electron_grace(self) -> None:
+        main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")
+        grace_match = re.search(
+            r"const BACKEND_GRACEFUL_SHUTDOWN_MS = ([0-9_]+);",
+            main_text,
+        )
+
+        self.assertIsNotNone(grace_match)
+        assert grace_match is not None
+        grace_ms = int(grace_match.group(1).replace("_", ""))
+        backend_budget_ms = int(
+            (
+                backend_app.config.MAX_SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC
+                + backend_app.config.MAX_CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC
+            )
+            * 1000.0
+        )
+
+        self.assertGreaterEqual(grace_ms - backend_budget_ms, 30_000)
 
     def test_backend_emits_only_allowlisted_embedded_startup_progress(self) -> None:
         with (
@@ -546,17 +566,25 @@ class ElectronPreloadContractTests(unittest.TestCase):
         coordinator_text = (self.repo_root / "startupCoordinator.js").read_text(
             encoding="utf-8"
         )
+        qa_text = (
+            self.repo_root / "scripts" / "measure_nsis_operational_ready.ps1"
+        ).read_text(encoding="utf-8-sig")
         stage_block = coordinator_text.split(
             "const BACKEND_STAGE_MILESTONES = Object.freeze({", 1
         )[1].split("});", 1)[0]
+        qa_stage_block = qa_text.split(
+            "function Get-RequiredBackendProgressStages", 1
+        )[1].split("}", 1)[0]
         electron_stages = set(
             re.findall(r"^  ([a-z0-9_]+): Object\.freeze\(", stage_block, re.MULTILINE)
         )
+        qa_stages = set(re.findall(r'"([a-z0-9_]+)"', qa_stage_block))
 
         self.assertEqual(
             electron_stages,
             set(backend_app._EMBEDDED_STARTUP_PROGRESS_STAGES),
         )
+        self.assertEqual(qa_stages, electron_stages)
         self.assertIn(
             f"const BACKEND_PROGRESS_PREFIX = "
             f"'{backend_app._EMBEDDED_STARTUP_PROGRESS_PREFIX}';",

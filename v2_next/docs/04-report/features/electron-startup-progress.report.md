@@ -28,10 +28,16 @@ high-priority plan/design gap remains.
   window before starting the backend.
 - [x] Main-owned monotonic coordinator, timeout, and structured progress parser.
 - [x] Backend allowlisted lifecycle progress events.
+- [x] Authenticated private-file progress transport for packaged
+  `console=False`, with bounded stdout fallback for development.
 - [x] Strict normal and honest degraded readiness gates.
 - [x] Exact-document, main-frame, renderer-generation, semantic IPC validation.
 - [x] Serialized retry without overlapping backend generations.
 - [x] Per-launch authenticated graceful backend drain with forced fallback.
+- [x] Graceful non-zero backend close rejects Electron quit/retry and retains
+  exit code/signal observability.
+- [x] Durable shutdown verdict for SPOT capture writes, CSV final flush, and all
+  required worker threads including memory.
 - [x] Accessible progress/status/actions and browser-mode fallback.
 - [x] Local correlated observability without raw log or secret exposure.
 
@@ -45,23 +51,35 @@ high-priority plan/design gap remains.
   one-shot.
 - Renderer events carry document generation timing, preventing late events from
   a reloaded renderer from satisfying a new startup session.
+- Server evidence required a shutdown hotfix: current-session SPOT captures no
+  longer rescan the historical fact CSV, retention traversal is not run on the
+  first capture, and SPOT/CSV timeout maxima fit inside a 365-second Electron
+  grace window.
+- Final adversarial review required fail-closed shutdown semantics: queue-empty
+  and thread-dead are no longer sufficient after a write/flush failure, and
+  inherited startup-progress credentials are scrubbed before backend spawn.
+- Race-focused follow-up review also closed the pre-exited non-zero child gap,
+  made SPOT outcome/queue completion atomic, and serialized CSV enqueue against
+  the shutdown sentinel.
+- v2 batch write failures now retain pending rows for final retry, and a latched
+  runtime-loss verdict prevents an empty buffer from masking earlier data loss.
 
 ## 4. Quality Metrics
 
 | Metric | Result |
 |--------|--------|
 | Design match rate | 100% |
-| Node startup tests | 27 passed |
+| Node startup tests | 38 passed |
 | Frontend tests | 237 passed / 31 files |
-| Backend tests | 500 passed |
+| Backend tests | 510 passed |
 | Typecheck / lint | frontend and backend PASS |
 | Production frontend build | PASS (4,531 modules; splash copied) |
-| Electron cold-start smoke | overlay hidden; root rendered; clean exit |
+| Server cold start | all backend stages; operational-ready 10,478.3 ms; splash visually confirmed |
 | First splash paint | 282.0 ms |
 | Window shown | 299.4 ms |
 | Backend spawn start | 302.6 ms |
 | Local operational-ready | 7,547.9 ms |
-| Cleanup | backend exit code 0; TCP 8000 listeners 0 |
+| Pre-hotfix server cleanup | backend exited code 2 after 60,311.4 ms; SPOT drain false; CSV drain true |
 
 ## 5. Review Findings Closed
 
@@ -72,9 +90,15 @@ high-priority plan/design gap remains.
 - Fixed retry/quit overlap and unconfirmed process replacement.
 - Fixed forced Windows shutdown being used before writer drain.
 - Hardened exact URL/frame IPC trust and per-launch shutdown authentication.
+- Propagated backend exit code 2 instead of normalizing every close as success.
+- Prevented duplicate SPOT facts after a current-session image is deleted.
+- Required explicit service-stop booleans, SPOT write integrity, CSV final-flush
+  integrity, and memory-thread termination.
+- Removed inherited startup progress path/token values before child spawn.
 - Improved focus, sizing, Korean language declaration, wrapping, and inert root
   behavior for the startup modal.
-- Final independent `$review`: `CLEAN` with no unresolved production blocker.
+- Final independent `$review`: all reproducible production blockers fixed;
+  repository health and new NSIS server clean-exit remain the final gates.
 
 ## 6. Operations
 
@@ -83,8 +107,8 @@ high-priority plan/design gap remains.
 - Observability: correlated startup state transitions, backend stages, first-paint
   trigger reason, and existing operational-ready events remain in the local log.
 - Rollback: revert the feature commit. No state repair is required.
-- Test coverage gap: physical-server NSIS cold-start, PLC-offline, and operator
-  retry validation remain post-PR release gates.
+- Test coverage gap: the new post-review NSIS must repeat physical-server
+  cold-start, clean-exit, PLC-offline, and operator retry validation.
 
 ## 7. Related Documents
 
@@ -94,6 +118,7 @@ high-priority plan/design gap remains.
 
 ## 8. Next Action
 
-Create the pull request, then build a new NSIS from the reviewed commit and run
-the existing 30-second operational-ready server validation plus explicit retry,
-PLC-offline/degraded, and clean-exit checks before release promotion.
+Push the shutdown hotfix to draft PR #174, let Windows CI build a new NSIS, then
+run the existing 30-second operational-ready server validation plus explicit
+retry, PLC-offline/degraded, and clean-exit checks before merge or release
+promotion.

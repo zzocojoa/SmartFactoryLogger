@@ -92,13 +92,17 @@ class PLCService:
         self.thread.start()
         print("[PLCService] Background Thread Started.")
 
-    def stop(self):
+    def stop(self) -> bool:
         self.running = False
         if self.driver_thread:
             self.driver_thread.join(timeout=1.0)
         if self.thread:
             self.thread.join(timeout=1.0)
         self.driver.close()
+        return not (
+            (self.driver_thread is not None and self.driver_thread.is_alive())
+            or (self.thread is not None and self.thread.is_alive())
+        )
 
     def apply_interval(self, interval_sec: float) -> float:
         clamped = max(config.MIN_INTERVAL_SEC, min(config.MAX_INTERVAL_SEC, interval_sec))

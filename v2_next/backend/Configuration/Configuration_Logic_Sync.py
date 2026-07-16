@@ -68,13 +68,15 @@ class ConfigSyncAgent:
         self._thread.start()
         self._running = True
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         if not self._running:
-            return
+            return self._thread is None or not self._thread.is_alive()
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=2)
-        self._running = False
+        stopped = self._thread is None or not self._thread.is_alive()
+        self._running = not stopped
+        return stopped
 
     def _loop(self) -> None:
         base_interval = int(os.getenv("SFL_SYNC_INTERVAL", "60"))
