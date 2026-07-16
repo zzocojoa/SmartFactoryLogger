@@ -1,6 +1,10 @@
+import asyncio
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend import app as backend_app
 
@@ -147,6 +151,73 @@ class FrontendRoutingHealthTests(unittest.TestCase):
             backend_app.get_frontend_file_request_status(ready_status, "/nested/assets/missing.js"),
             404,
         )
+
+    def test_backend_address_discovery_does_not_block_readiness_caller(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_address_discovery() -> None:
+            entered.set()
+            release.wait(timeout=2.0)
+
+        try:
+            with patch.object(backend_app, "_log_backend_access_urls", blocking_address_discovery):
+                started = time.perf_counter()
+                worker = backend_app._start_backend_access_log_thread()
+                elapsed = time.perf_counter() - started
+
+            self.assertTrue(entered.wait(timeout=1.0))
+            self.assertLess(elapsed, 0.5)
+            self.assertTrue(worker.daemon)
+            self.assertEqual(worker.name, "BackendAccessUrlLogger")
+        finally:
+            release.set()
+            if "worker" in locals():
+                worker.join(timeout=1.0)
+
+    def test_slow_health_response_logs_stage_timings(self) -> None:
+        with (
+            patch.object(backend_app.plc_service, "get_health", return_value={"running": True}),
+            patch.object(backend_app, "get_runtime_info", return_value={"runtime_kind": "test"}),
+            patch.object(
+                backend_app,
+                "get_frontend_static_status",
+                return_value={"frontend_static_ready": True},
+            ),
+            patch.object(
+                backend_app.time,
+                "perf_counter",
+                side_effect=[10.0, 10.6, 10.7, 10.8],
+            ),
+            patch.object(backend_app._logger, "warning") as warning,
+        ):
+            payload = backend_app.build_health_payload()
+
+        self.assertTrue(payload["running"])
+        self.assertEqual(payload["runtime_kind"], "test")
+        self.assertTrue(payload["frontend_static_ready"])
+        warning.assert_called_once()
+        self.assertEqual(warning.call_args.args[0], "[Health] Slow response")
+        log_fields = warning.call_args.kwargs["extra"]
+        self.assertEqual(log_fields["health_total_ms"], 800.0)
+        self.assertEqual(log_fields["health_plc_service_ms"], 600.0)
+        self.assertEqual(log_fields["health_runtime_info_ms"], 100.0)
+        self.assertEqual(log_fields["health_frontend_static_ms"], 100.0)
+
+    def test_health_payload_runs_outside_the_event_loop_thread(self) -> None:
+        event_loop_thread_id = threading.get_ident()
+        health_thread_ids: list[int] = []
+
+        def build_health() -> dict[str, bool]:
+            health_thread_ids.append(threading.get_ident())
+            return {"running": True}
+
+        with patch.object(backend_app, "build_health_payload", side_effect=build_health):
+            payload = asyncio.run(backend_app.health())
+
+        self.assertTrue(payload["running"])
+        self.assertEqual(len(health_thread_ids), 1)
+        self.assertNotEqual(health_thread_ids[0], event_loop_thread_id)
 
 
 if __name__ == "__main__":

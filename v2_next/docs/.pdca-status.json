@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-13T15:42:31.430Z",
+  "lastUpdated": "2026-07-16T04:06:49.310Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -23,7 +23,8 @@
     "spot-temperature-v2-4-operational-hardening",
     "spot-camera-rest-api-conformance",
     "dependency-security-upgrade-nsis",
-    "spot-image-auto-recovery"
+    "spot-image-auto-recovery",
+    "nsis-operational-ready-timing"
   ],
   "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
@@ -1801,6 +1802,68 @@
         "lastUpdated": "2026-07-13T15:42:31.430Z"
       },
       "completedAt": "2026-07-13T15:42:31.426Z"
+    },
+    "nsis-operational-ready-timing": {
+      "phase": "completed",
+      "matchRate": 100,
+      "iterationCount": 11,
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/nsis-operational-ready-timing.plan.md",
+          "status": "completed_server_verified"
+        },
+        "design": {
+          "path": "docs/02-design/features/nsis-operational-ready-timing.design.md",
+          "status": "completed_server_verified"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/nsis-operational-ready-timing.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 100
+        },
+        "report": {
+          "path": "docs/04-report/nsis-operational-ready-timing.report.md",
+          "status": "completed_server_verified",
+          "match_rate": 100
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-15T14:33:13.561Z",
+          "completedAt": "2026-07-15T14:39:40.329Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-15T14:33:13.561Z",
+          "completedAt": "2026-07-15T14:41:37.263Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-07-15T14:33:13.561Z",
+          "completedAt": "2026-07-15T14:52:23.629Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-07-15T14:33:13.561Z",
+          "completedAt": "2026-07-15T15:07:55.208Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-07-15T14:33:13.561Z",
+          "completedAt": "2026-07-15T15:08:48.476Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-15T14:33:13.563Z",
+        "lastUpdated": "2026-07-16T04:06:49.310Z"
+      },
+      "completedAt": "2026-07-16T04:06:49.305Z"
     }
   },
   "pipeline": {
@@ -1812,7 +1875,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-13T15:42:31.430Z"
+    "lastActivity": "2026-07-16T04:06:49.310Z"
   },
   "history": [
     {
@@ -3053,6 +3116,104 @@
       "phase": "report",
       "nextPhase": "completed",
       "timestamp": "2026-07-13T15:42:31.427Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-07-15T14:39:40.324Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-07-15T14:39:40.326Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-07-15T14:39:51.958Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-07-15T14:41:37.260Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-07-15T14:41:37.261Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-07-15T14:52:23.626Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-07-15T14:52:23.627Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-07-15T15:07:55.204Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-07-15T15:07:55.206Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-07-15T15:08:48.473Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-07-16T04:06:40.052Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-07-16T04:06:40.053Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-07-16T04:06:45.090Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-07-16T04:06:45.091Z"
+    },
+    {
+      "feature": "nsis-operational-ready-timing",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-07-16T04:06:49.307Z"
     }
   ],
   "timeline": [

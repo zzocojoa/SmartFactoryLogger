@@ -18,6 +18,7 @@ import {
   readOrCreateDashboardTabId,
   writeDashboardLeaderLock,
 } from '../../../shared/utils/dashboardPollingLeader';
+import { isOperationalFactoryData } from '../../../shared/startup/startupTelemetry';
 
 interface UseMetricsPollingEffectsParams {
   pollIntervalMs: number;
@@ -91,7 +92,13 @@ export const useMetricsPollingEffects = ({
     let mainThreadTimerId: number | null = null;
     let heartbeatTimerId: number | null = null;
     let mainThreadFailureCount = 0;
-    let pollingPaused = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    const packagedStartupRecoveryEnabled =
+      typeof window !== 'undefined' && Boolean(window.smartFactoryElectron?.recordStartupEvent);
+    let hasReceivedOperationalData = false;
+    let pollingPaused =
+      typeof document !== 'undefined' &&
+      document.visibilityState === 'hidden' &&
+      !packagedStartupRecoveryEnabled;
     let backfillBlockingPolling = false;
     let historyBackfillPromise: Promise<void> | null = null;
     const tabId = readOrCreateDashboardTabId(DASHBOARD_TAB_ID_KEY);
@@ -108,6 +115,9 @@ export const useMetricsPollingEffects = ({
     };
 
     const isLeader = (): boolean => leaderState.mode === 'leader' || leaderState.mode === 'standalone';
+    const isPackagedStartupRecoveryPending = (): boolean =>
+      packagedStartupRecoveryEnabled && !hasReceivedOperationalData;
+    const isPollingOwner = (): boolean => isLeader() || isPackagedStartupRecoveryPending();
     const isPollingBlocked = (): boolean => pollingPaused || backfillBlockingPolling;
 
     const clearMainThreadTimer = (): void => {
@@ -162,7 +172,7 @@ export const useMetricsPollingEffects = ({
     };
 
     const scheduleMainThreadPoll = (delayMs: number): void => {
-      if (disposed || !usingMainThreadFallback || isPollingBlocked() || !isLeader()) {
+      if (disposed || !usingMainThreadFallback || isPollingBlocked() || !isPollingOwner()) {
         return;
       }
       clearMainThreadTimer();
@@ -172,13 +182,13 @@ export const useMetricsPollingEffects = ({
     };
 
     const runMainThreadPoll = async (): Promise<void> => {
-      if (disposed || !usingMainThreadFallback || isPollingBlocked() || !isLeader()) {
+      if (disposed || !usingMainThreadFallback || isPollingBlocked() || !isPollingOwner()) {
         return;
       }
 
       try {
         const payload = await fetchLatestMetricOnMainThreadWithLatency();
-        if (disposed || isPollingBlocked() || !isLeader()) {
+        if (disposed || isPollingBlocked() || !isPollingOwner()) {
           return;
         }
         mainThreadFailureCount = 0;
@@ -187,10 +197,18 @@ export const useMetricsPollingEffects = ({
           poll_interval_ms: pollIntervalMs,
           failure_count: mainThreadFailureCount,
         };
+        hasReceivedOperationalData =
+          hasReceivedOperationalData || isOperationalFactoryData(nextPayload.data);
         applyDataPayload(nextPayload);
         broadcastPayload(nextPayload);
+        if (hasReceivedOperationalData && document.visibilityState === 'hidden') {
+          pollingPaused = true;
+          setPollingPausedByVisibility(true);
+          stopPolling();
+          return;
+        }
       } catch (error) {
-        if (disposed || isPollingBlocked() || !isLeader()) {
+        if (disposed || isPollingBlocked() || !isPollingOwner()) {
           return;
         }
         mainThreadFailureCount += 1;
@@ -209,7 +227,7 @@ export const useMetricsPollingEffects = ({
     };
 
     const startMainThreadFallback = (reason: string): void => {
-      if (disposed || usingMainThreadFallback || !isLeader()) {
+      if (disposed || usingMainThreadFallback || !isPollingOwner()) {
         return;
       }
       usingMainThreadFallback = true;
@@ -240,7 +258,7 @@ export const useMetricsPollingEffects = ({
     };
 
     const startPolling = (): void => {
-      if (disposed || isPollingBlocked() || !isLeader()) {
+      if (disposed || isPollingBlocked() || !isPollingOwner()) {
         return;
       }
       if (usingMainThreadFallback) {
@@ -257,12 +275,19 @@ export const useMetricsPollingEffects = ({
         }
         worker.onmessage = (event: MessageEvent<WorkerOutboundMessage>) => {
           const { type, payload } = event.data;
-          if (disposed || isPollingBlocked() || !isLeader()) {
+          if (disposed || isPollingBlocked() || !isPollingOwner()) {
             return;
           }
           if (type === 'DATA') {
+            hasReceivedOperationalData =
+              hasReceivedOperationalData || isOperationalFactoryData(payload.data);
             applyDataPayload(payload);
             broadcastPayload(payload);
+            if (hasReceivedOperationalData && document.visibilityState === 'hidden') {
+              pollingPaused = true;
+              setPollingPausedByVisibility(true);
+              stopPolling();
+            }
             return;
           }
 
@@ -342,7 +367,9 @@ export const useMetricsPollingEffects = ({
         return;
       }
 
-      pollingPaused = document.visibilityState === 'hidden';
+      const hidden = document.visibilityState === 'hidden';
+      const startupRecoveryPending = isPackagedStartupRecoveryPending();
+      pollingPaused = hidden && !startupRecoveryPending;
       setPollingPausedByVisibility(pollingPaused);
       if (pollingPaused) {
         stopPolling();
@@ -358,6 +385,17 @@ export const useMetricsPollingEffects = ({
 
       const now = Date.now();
       const currentLock = readDashboardLeaderLock(DASHBOARD_LEADER_KEY);
+      if (startupRecoveryPending && currentLock?.tab_id !== tabId) {
+        writeDashboardLeaderLock(DASHBOARD_LEADER_KEY, { tab_id: tabId, updated_at: now });
+        updateLeaderState({
+          tab_id: tabId,
+          mode: 'leader',
+          leader_tab_id: tabId,
+          last_broadcast_at: leaderState.last_broadcast_at,
+        });
+        startPolling();
+        return;
+      }
       if (!currentLock || currentLock.tab_id === tabId) {
         writeDashboardLeaderLock(DASHBOARD_LEADER_KEY, { tab_id: tabId, updated_at: now });
         updateLeaderState({
@@ -399,6 +437,8 @@ export const useMetricsPollingEffects = ({
         if (!payload || payload.tab_id === tabId || isLeader()) {
           return;
         }
+        hasReceivedOperationalData =
+          hasReceivedOperationalData || isOperationalFactoryData(payload.payload.data);
         applyDataPayload(payload.payload);
         updateLeaderState({
           tab_id: tabId,

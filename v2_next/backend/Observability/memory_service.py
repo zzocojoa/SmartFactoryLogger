@@ -541,7 +541,6 @@ class MemoryService:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._loop, name="MemorySampler", daemon=True)
         self._thread.start()
-        self.capture_snapshot()
 
     def stop(self) -> None:
         if not self._running:
@@ -777,10 +776,14 @@ class MemoryService:
         }
 
     def _loop(self) -> None:
-        while not self._stop_event.wait(self._sample_interval_sec):
+        while not self._stop_event.is_set():
             try:
                 self._expire_profiler_if_needed()
-                sample = self._build_process_sample()
+                # Keep the periodic sampler lightweight. On Windows,
+                # memory_full_info() and open_files() may scan process handles
+                # for several seconds. Explicit diagnostic snapshots still
+                # include those expensive process details.
+                sample = self._build_process_sample(include_expensive_details=False)
                 collectors = self._run_collectors(force=False)
                 self._apply_snapshot(sample, collectors)
                 self._capture_profiler_diff(force=False)
@@ -789,6 +792,8 @@ class MemoryService:
                     "Memory sampler failed",
                     extra={"memory_error": str(exc)},
                 )
+            if self._stop_event.wait(self._sample_interval_sec):
+                break
 
     def _apply_snapshot(self, sample: Mapping[str, Any], collectors: list[Dict[str, Any]]) -> None:
         top_consumers = sorted(collectors, key=lambda item: int(item.get("bytes") or 0), reverse=True)
@@ -819,33 +824,36 @@ class MemoryService:
             self._latest_summary_state = self._build_summary_state_locked()
             self._latest_details_state = self._build_details_state_locked()
 
-    def _build_process_sample(self) -> Dict[str, Any]:
+    def _build_process_sample(self, *, include_expensive_details: bool = True) -> Dict[str, Any]:
         now = time.time()
         memory_info = self._process.memory_info()
         rss_bytes = int(memory_info.rss)
         vms_bytes = int(memory_info.vms)
         uss_bytes: Optional[int] = None
-        private_bytes: Optional[int] = None
-        try:
-            full_info = self._process.memory_full_info()
-            if hasattr(full_info, "uss"):
-                uss_bytes = int(full_info.uss)
-            if hasattr(full_info, "private"):
-                private_bytes = int(full_info.private)
-        except Exception:
-            uss_bytes = None
-            private_bytes = None
+        private_bytes: Optional[int] = (
+            int(memory_info.private) if hasattr(memory_info, "private") else None
+        )
+        if include_expensive_details:
+            try:
+                full_info = self._process.memory_full_info()
+                if hasattr(full_info, "uss"):
+                    uss_bytes = int(full_info.uss)
+                if hasattr(full_info, "private"):
+                    private_bytes = int(full_info.private)
+            except Exception:
+                uss_bytes = None
 
         open_files_count: Optional[int] = None
         handle_count: Optional[int] = None
-        try:
-            open_files_count = len(self._process.open_files())
-        except Exception:
-            open_files_count = None
-        try:
-            handle_count = int(self._process.num_handles())
-        except Exception:
-            handle_count = None
+        if include_expensive_details:
+            try:
+                open_files_count = len(self._process.open_files())
+            except Exception:
+                open_files_count = None
+            try:
+                handle_count = int(self._process.num_handles())
+            except Exception:
+                handle_count = None
 
         gc_counts = gc.get_count()
         return {

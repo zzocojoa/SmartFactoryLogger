@@ -4,7 +4,11 @@ import './index.css';
 import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom';
 import { GlobalModalProvider } from './shared/context/GlobalModalContext';
 import { ThemeProvider } from './shared/context/ThemeContext';
-import { recordStartupEvent, recordStartupEventOnce } from './shared/startup/startupTelemetry';
+import {
+  armDashboardOperationalReadyTimeout,
+  recordStartupEvent,
+  recordStartupEventOnce,
+} from './shared/startup/startupTelemetry';
 
 const CHUNK_RECOVERY_STORAGE_KEY = 'smartfactory_chunk_recovery_v1';
 const CHUNK_RECOVERY_COOLDOWN_MS = 30000;
@@ -143,6 +147,7 @@ void recordStartupEvent('renderer.index-boot', {
   route: resolveStartupRoute(),
   protocol: window.location.protocol,
 });
+armDashboardOperationalReadyTimeout();
 
 registerChunkRecoveryHandlers();
 

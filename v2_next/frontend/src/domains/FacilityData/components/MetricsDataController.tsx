@@ -6,7 +6,10 @@ import { useLastValidNumber } from '../../../shared/hooks/useLastValidNumber';
 import { useSustainedFlag } from '../../../shared/hooks/useSustainedFlag';
 import { useMetricsViewModel } from '../hooks/useMetricsViewModel';
 import type { UseMetricsViewModel } from '../hooks/useMetricsViewModel.types';
-import { recordStartupEventOnce } from '../../../shared/startup/startupTelemetry';
+import {
+  markFirstLiveDataReady,
+  recordStartupEventOnce,
+} from '../../../shared/startup/startupTelemetry';
 
 interface MetricsDataControllerProps {
   seriesPaused: boolean;
@@ -78,6 +81,10 @@ const MetricsDataControllerComponent = ({
       source: 'metrics.pollingIntervalMs',
     });
   }, [pollingDegraded, pollingFailureCount, pollingIntervalMs]);
+
+  useEffect(() => {
+    markFirstLiveDataReady(data);
+  }, [data]);
 
   useEffect(() => {
     setTimeSeriesState({

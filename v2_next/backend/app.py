@@ -70,7 +70,7 @@ import traceback
 import time
 import uvicorn
 from urllib.request import Request as UrlRequest, urlopen
-from typing import Any, NamedTuple, TypedDict
+from typing import Any, Callable, NamedTuple, TypedDict
 
 # Import Service Layer using absolute imports
 from backend.FacilityData.operator_metadata import operator_metadata_store
@@ -319,6 +319,41 @@ def _spot_focus_response(result: dict[str, Any]) -> dict[str, Any]:
 
 def _lifecycle_log_fields() -> str:
     return f"session={_app_session_id} pid={os.getpid()} started_at={_app_started_at_iso}"
+
+
+def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
+    started_perf = time.perf_counter()
+    starter()
+    _logger.info(
+        "[Main] Lifespan startup stage complete stage=%s elapsed_ms=%.1f %s",
+        stage,
+        (time.perf_counter() - started_perf) * 1000.0,
+        _lifecycle_log_fields(),
+    )
+
+
+def _log_backend_access_urls() -> None:
+    """Resolve local addresses outside the readiness-critical lifespan path."""
+    try:
+        hostname = socket.gethostname()
+        local_ips = socket.gethostbyname_ex(hostname)[2]
+        _logger.info(
+            "[Main] Resolved backend access URLs: %s %s",
+            ", ".join([f"http://{ip}:{config.BACKEND_PORT}" for ip in local_ips]),
+            _lifecycle_log_fields(),
+        )
+    except Exception as exc:
+        _logger.warning("[Main] Failed to log local IPs: %s", exc)
+
+
+def _start_backend_access_log_thread() -> threading.Thread:
+    thread = threading.Thread(
+        target=_log_backend_access_urls,
+        name="BackendAccessUrlLogger",
+        daemon=True,
+    )
+    thread.start()
+    return thread
 
 
 def _is_quiet_access_path(path: str) -> bool:
@@ -1493,33 +1528,33 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("Instance already running")
     _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
     print("[Main] Starting CSV Logger...")
-    logger_service.start()
+    _run_lifespan_start_stage("csv_logger", logger_service.start)
     print("[Main] Starting Config Sync Agent...")
-    config_sync_agent.start()
+    _run_lifespan_start_stage("config_sync", config_sync_agent.start)
     print("[Main] Starting Config Watcher...")
-    config_watch_service.start()
+    _run_lifespan_start_stage("config_watch", config_watch_service.start)
     print("[Main] Starting PLC Service...")
-    plc_service.start()
+    _run_lifespan_start_stage("plc_service", plc_service.start)
     print("[Main] Starting Comm Metrics Logger...")
-    comm_metrics_logger_service.start()
+    _run_lifespan_start_stage("comm_metrics", comm_metrics_logger_service.start)
     print("[Main] Starting Memory Service...")
-    memory_service.start()
+    _run_lifespan_start_stage("memory_service", memory_service.start)
 
     # Start SPOT temperature and diagnostics polling.
     print("[Main] Starting SPOT temperature and diagnostics polling...")
+    spot_started_perf = time.perf_counter()
     await spot_control.start_spot_poll_loop()
+    _logger.info(
+        "[Main] Lifespan startup stage complete stage=spot_poll elapsed_ms=%.1f %s",
+        (time.perf_counter() - spot_started_perf) * 1000.0,
+        _lifecycle_log_fields(),
+    )
     
-    # Log local IPs for debugging remote connectivity
-    try:
-        hostname = socket.gethostname()
-        local_ips = socket.gethostbyname_ex(hostname)[2]
-        _logger.info(
-            "[Main] Backend started. Accessible at: %s %s",
-            ", ".join([f"http://{ip}:{config.BACKEND_PORT}" for ip in local_ips]),
-            _lifecycle_log_fields(),
-        )
-    except Exception as exc:
-        _logger.warning(f"[Main] Failed to log local IPs: {exc}")
+    # Address discovery is diagnostic-only. Some Windows hosts take tens of
+    # seconds to resolve their own hostname, so it must not gate Uvicorn
+    # readiness.
+    _start_backend_access_log_thread()
+    _logger.info("[Main] Lifespan startup complete %s", _lifecycle_log_fields())
 
     try:
         yield
@@ -1827,20 +1862,62 @@ def reset_operator_metadata(request: Request):
         raise HTTPException(status_code=500, detail="Operator metadata reset failed") from exc
 
 
+HEALTH_SLOW_RESPONSE_THRESHOLD_MS = 500.0
+
+
+def build_health_payload() -> dict[str, Any]:
+    started_perf = time.perf_counter()
+
+    plc_health = plc_service.get_health()
+    plc_completed_perf = time.perf_counter()
+
+    runtime_info = get_runtime_info()
+    runtime_completed_perf = time.perf_counter()
+
+    frontend_status = get_frontend_static_status(
+        frontend_dist,
+        frontend_mode,
+        frontend_source,
+        frontend_source_origin,
+        frontend_resolution_reason,
+        frontend_resolution_candidate_specs,
+    )
+    completed_perf = time.perf_counter()
+
+    total_ms = (completed_perf - started_perf) * 1000.0
+    if total_ms >= HEALTH_SLOW_RESPONSE_THRESHOLD_MS:
+        _logger.warning(
+            "[Health] Slow response",
+            extra={
+                "health_total_ms": round(total_ms, 1),
+                "health_plc_service_ms": round(
+                    (plc_completed_perf - started_perf) * 1000.0,
+                    1,
+                ),
+                "health_runtime_info_ms": round(
+                    (runtime_completed_perf - plc_completed_perf) * 1000.0,
+                    1,
+                ),
+                "health_frontend_static_ms": round(
+                    (completed_perf - runtime_completed_perf) * 1000.0,
+                    1,
+                ),
+                "session": _app_session_id,
+                "pid": os.getpid(),
+                "started_at": _app_started_at_iso,
+            },
+        )
+
+    return {
+        **plc_health,
+        **runtime_info,
+        **frontend_status,
+    }
+
+
 @app.get("/health")
 async def health():
-    return {
-        **plc_service.get_health(),
-        **get_runtime_info(),
-        **get_frontend_static_status(
-            frontend_dist,
-            frontend_mode,
-            frontend_source,
-            frontend_source_origin,
-            frontend_resolution_reason,
-            frontend_resolution_candidate_specs,
-        ),
-    }
+    return await asyncio.to_thread(build_health_payload)
 
 @app.get("/stats")
 async def stats():

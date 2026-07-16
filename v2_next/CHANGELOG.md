@@ -2,6 +2,72 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.14] - 2026-07-16
+
+### Added
+
+- Added a session-correlated operational startup metric that waits for backend
+  health, the first timestamped live factory snapshot, and dashboard paint.
+- Added a strict packaged cold-start PowerShell measurement under `resources/qa`
+  with contamination, timeout, and missing-milestone failure evidence.
+- Added fail-closed verification for every installed backend bundle file,
+  including path, size, SHA-256, aggregate hash, and clean build commit.
+
+### Changed
+
+- Packaged the Python backend as a one-dir bundle while preserving the installed
+  `resources/backend/SmartFactoryBackend.exe` launcher path. This removes the
+  per-launch one-file extraction delay without changing operator entry points.
+- Kept periodic memory sampling lightweight; expensive USS, open-file, and
+  handle details remain available through explicit diagnostic snapshots.
+
+### Fixed
+
+- Kept the packaged cold-start measurement running for its caller-supplied
+  timeout budget after the renderer's 30-second diagnostic event, allowing a
+  genuine later operational-ready event to be measured instead of terminating
+  and force-closing the process at 30 seconds.
+- Moved the initial memory diagnostics snapshot onto the existing sampler
+  thread so slow physical-device initialization cannot block FastAPI startup
+  and `/health` availability.
+- Added per-stage backend lifespan timing logs for startup delay diagnosis
+  without recording raw sensor or network configuration values.
+- Routed packaged renderer API calls through the explicit IPv4 loopback address
+  so Windows IPv6-first `localhost` resolution cannot delay every backend
+  request past the operational-ready polling cycle.
+- Bounded startup `/health` requests to eight seconds until their first success,
+  then restored the existing two-second steady-state bound. `/api/data` remains
+  bounded to two seconds throughout.
+- Kept health polling at its five-second base interval until the first
+  successful response; the existing post-recovery outage backoff is unchanged.
+- Kept packaged cold-start health and live-data polling active until their first
+  successful readiness result even when the Electron document is hidden or a
+  stale dashboard leader lock exists; normal visibility and leader behavior
+  resumes after success.
+- Latched the first operational live-data result so a later transient
+  Offline/Error snapshot cannot reactivate startup recovery or bypass hidden-tab
+  leader rules.
+- Moved SPOT observation-fact writes and health payload construction off the
+  async event loop while preserving ordered fact persistence and cancellation
+  draining.
+- Moved local backend-address discovery to a diagnostic daemon thread so slow
+  Windows hostname resolution cannot delay Uvicorn readiness.
+
+### Validation
+
+- Verified the installed one-dir package on the physical server: operational
+  ready completed in `5,076.2 ms` with full 1,707-file bundle integrity.
+- Verified the same installed package for 15 minutes with zero runtime, image,
+  observability, logging, fact-write, fact-link, signalpc, or duplicate-key
+  failures.
+
+### Compatibility
+
+- Existing visual `renderer.dashboard-ready` telemetry, memory snapshot content
+  and cadence, PLC/SPOT polling, dashboard layout, and CSV schemas are unchanged.
+- SPOT/device request intervals and protocols are unchanged; the new timeout
+  applies only to renderer-to-local-backend operational polling.
+
 ## [1.0.13] - 2026-07-13
 
 ### Fixed

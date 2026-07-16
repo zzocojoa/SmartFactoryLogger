@@ -2,6 +2,10 @@ import { useEffect, useRef } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { CommLogInfo, DashboardLeaderState, HealthSnapshot, StatsSnapshot } from '../../../shared/types';
 import {
+  POLL_REQUEST_TIMEOUT_MS,
+  STARTUP_HEALTH_REQUEST_TIMEOUT_MS,
+} from '../../../shared/api/pollingRequest';
+import {
   clearDashboardLeaderLock,
   readDashboardLeaderLock,
   readOrCreateDashboardTabId,
@@ -15,7 +19,7 @@ interface PollingState {
 }
 
 interface UseSystemViewModelEffectsParams {
-  fetchHealth: () => Promise<HealthSnapshot | null>;
+  fetchHealth: (timeoutMs?: number) => Promise<HealthSnapshot | null>;
   fetchStats: () => Promise<StatsSnapshot | null>;
   reconnectBusy: boolean;
   setHealthPolling: Dispatch<SetStateAction<PollingState>>;
@@ -97,6 +101,7 @@ export const useSystemViewModelEffects = ({
     let heartbeatTimerId: number | null = null;
     let channel: BroadcastChannel | null = null;
     let healthFailures = 0;
+    let healthHasSucceeded = false;
     let statsFailures = 0;
     let healthDelayMs = BASE_POLL_INTERVAL_MS;
     let statsDelayMs = BASE_POLL_INTERVAL_MS;
@@ -117,6 +122,13 @@ export const useSystemViewModelEffects = ({
     };
 
     const isLeader = (): boolean => leaderState.mode === 'leader' || leaderState.mode === 'standalone';
+    const isPackagedStartupRecoveryPending = (): boolean =>
+      typeof window !== 'undefined' &&
+      Boolean(window.smartFactoryElectron?.recordStartupEvent) &&
+      !healthHasSucceeded;
+    const canPollHealth = (): boolean => isLeader() || isPackagedStartupRecoveryPending();
+    const isHealthVisibilityBlocked = (): boolean =>
+      document.visibilityState === 'hidden' && !isPackagedStartupRecoveryPending();
 
     const clearTimers = (): void => {
       if (healthTimeoutId !== null) {
@@ -157,29 +169,37 @@ export const useSystemViewModelEffects = ({
     };
 
     const pollHealth = async () => {
-      if (!mounted || !isLeader()) return;
+      if (!mounted || !canPollHealth()) return;
       if (!reconnectBusy) {
         try {
-          const data = await fetchHealth();
+          const healthTimeoutMs = healthHasSucceeded
+            ? POLL_REQUEST_TIMEOUT_MS
+            : STARTUP_HEALTH_REQUEST_TIMEOUT_MS;
+          const data = await fetchHealth(healthTimeoutMs);
           if (data) {
+            healthHasSucceeded = true;
             healthFailures = 0;
             healthDelayMs = BASE_POLL_INTERVAL_MS;
             broadcastSystem('health', data);
           } else {
             healthFailures += 1;
-            healthDelayMs = resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures);
+            healthDelayMs = healthHasSucceeded
+              ? resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures)
+              : BASE_POLL_INTERVAL_MS;
           }
         } catch (e) {
           console.error('Health poll failed', e);
           healthFailures += 1;
-          healthDelayMs = resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures);
+          healthDelayMs = healthHasSucceeded
+            ? resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures)
+            : BASE_POLL_INTERVAL_MS;
         }
       } else {
         healthFailures = 0;
         healthDelayMs = BASE_POLL_INTERVAL_MS;
       }
       setHealthPolling(buildPollingState(healthDelayMs, healthFailures));
-      if (mounted && isLeader() && document.visibilityState !== 'hidden') {
+      if (mounted && canPollHealth() && !isHealthVisibilityBlocked()) {
         healthTimeoutId = window.setTimeout(pollHealth, healthDelayMs);
       }
     };
@@ -214,11 +234,15 @@ export const useSystemViewModelEffects = ({
 
     const schedulePolling = (): void => {
       clearTimers();
-      if (!mounted || !isLeader() || document.visibilityState === 'hidden') {
+      if (!mounted) {
         return;
       }
-      healthTimeoutId = window.setTimeout(pollHealth, reconnectBusy ? BASE_POLL_INTERVAL_MS : 0);
-      statsTimeoutId = window.setTimeout(pollStats, reconnectBusy ? BASE_POLL_INTERVAL_MS + 500 : 500);
+      if (canPollHealth() && !isHealthVisibilityBlocked()) {
+        healthTimeoutId = window.setTimeout(pollHealth, reconnectBusy ? BASE_POLL_INTERVAL_MS : 0);
+      }
+      if (isLeader() && document.visibilityState !== 'hidden') {
+        statsTimeoutId = window.setTimeout(pollStats, reconnectBusy ? BASE_POLL_INTERVAL_MS + 500 : 500);
+      }
     };
 
     const reconcileLeadership = (): void => {
@@ -234,8 +258,9 @@ export const useSystemViewModelEffects = ({
       }
 
       const hidden = document.visibilityState === 'hidden';
-      setPollingPausedByVisibility(hidden);
-      if (hidden) {
+      const startupRecoveryPending = isPackagedStartupRecoveryPending();
+      setPollingPausedByVisibility(hidden && !startupRecoveryPending);
+      if (hidden && !startupRecoveryPending) {
         clearTimers();
         clearDashboardLeaderLock(DASHBOARD_LEADER_KEY, tabId);
         updateLeaderState({
@@ -249,6 +274,17 @@ export const useSystemViewModelEffects = ({
 
       const now = Date.now();
       const currentLock = readDashboardLeaderLock(DASHBOARD_LEADER_KEY);
+      if (startupRecoveryPending && currentLock?.tab_id !== tabId) {
+        writeDashboardLeaderLock(DASHBOARD_LEADER_KEY, { tab_id: tabId, updated_at: now });
+        updateLeaderState({
+          tab_id: tabId,
+          mode: 'leader',
+          leader_tab_id: tabId,
+          last_broadcast_at: leaderState.last_broadcast_at,
+        });
+        schedulePolling();
+        return;
+      }
       if (!currentLock || currentLock.tab_id === tabId) {
         writeDashboardLeaderLock(DASHBOARD_LEADER_KEY, { tab_id: tabId, updated_at: now });
         updateLeaderState({
@@ -286,6 +322,7 @@ export const useSystemViewModelEffects = ({
     const applyBroadcast = (payload: DashboardSystemBroadcast): void => {
       if (payload.kind === 'health') {
         applyHealthSnapshot(payload.data as HealthSnapshot);
+        healthHasSucceeded = true;
         healthFailures = 0;
         healthDelayMs = BASE_POLL_INTERVAL_MS;
         setHealthPolling(buildPollingState(healthDelayMs, healthFailures));

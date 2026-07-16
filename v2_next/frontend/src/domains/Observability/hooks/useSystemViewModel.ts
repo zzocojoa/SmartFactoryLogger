@@ -51,9 +51,9 @@ export const useSystemViewModel = (): UseSystemViewModel => {
     persistCommLogPath(next.path ?? null);
   }, []);
 
-  const fetchHealth = useCallback(async () => {
+  const fetchHealth = useCallback(async (timeoutMs?: number) => {
     try {
-      const data = await systemService.getHealth();
+      const data = await systemService.getHealth(timeoutMs);
       setHealth(data);
       return data;
     } catch (error) {

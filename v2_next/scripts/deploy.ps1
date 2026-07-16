@@ -55,6 +55,74 @@ function Get-FrontendEntryAssets {
     return $entryAssets | Sort-Object -Unique
 }
 
+function Get-Utf8Sha256 {
+    param([string]$Text)
+
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $encoding.GetBytes($Text)
+        $hash = $hasher.ComputeHash($bytes)
+        return ([System.BitConverter]::ToString($hash)).Replace("-", "")
+    } finally {
+        $hasher.Dispose()
+    }
+}
+
+function Write-BackendBundleManifest {
+    param(
+        [string]$BundlePath,
+        [string]$BuildGitCommit
+    )
+
+    $resolvedBundle = (Get-Item -LiteralPath $BundlePath).FullName.TrimEnd("\")
+    $manifestPath = Join-Path $resolvedBundle "bundle-manifest.json"
+    $rootPrefix = $resolvedBundle + "\"
+    $relativePaths = [string[]]@(
+        Get-ChildItem -LiteralPath $resolvedBundle -Recurse -File |
+            Where-Object { $_.FullName -ne $manifestPath } |
+            ForEach-Object {
+                $_.FullName.Substring($rootPrefix.Length).Replace("\", "/")
+            }
+    )
+    [System.Array]::Sort($relativePaths, [System.StringComparer]::Ordinal)
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    $aggregateLines = New-Object System.Collections.Generic.List[string]
+    foreach ($relativePath in $relativePaths) {
+        $nativeRelativePath = $relativePath.Replace("/", "\")
+        $filePath = Join-Path $resolvedBundle $nativeRelativePath
+        $file = Get-Item -LiteralPath $filePath
+        $sha256 = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToUpperInvariant()
+        [void]$entries.Add([ordered]@{
+            path   = $relativePath
+            length = [int64]$file.Length
+            sha256 = $sha256
+        })
+        [void]$aggregateLines.Add("$relativePath`t$($file.Length)`t$sha256")
+    }
+
+    $aggregatePayload = ($aggregateLines.ToArray() -join "`n") + "`n"
+    $bundleSha256 = Get-Utf8Sha256 -Text $aggregatePayload
+    $manifest = [ordered]@{
+        schema_version   = "smartfactory-backend-bundle-v1"
+        packaging_mode   = "onedir"
+        build_git_commit = $BuildGitCommit
+        file_count       = $entries.Count
+        bundle_sha256    = $bundleSha256
+        files            = $entries.ToArray()
+    }
+    $manifestJson = $manifest | ConvertTo-Json -Depth 5
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($manifestPath, $manifestJson + "`n", $encoding)
+
+    return [pscustomobject]@{
+        path          = $manifestPath
+        file_count    = $entries.Count
+        bundle_sha256 = $bundleSha256
+    }
+}
+
 # =============================================================================
 # 1. 프론트엔드 빌드
 # =============================================================================
@@ -118,6 +186,23 @@ Write-Host "    Detected Version: $Version" -ForegroundColor Cyan
 # EXE 빌드
 Invoke-CheckedCommand -Command { & $BackendVenvPython -m PyInstaller --noconfirm --clean build_specs\SmartFactoryBackend.spec } -ErrorMessage "Backend Packaging Failed"
 
+$BackendBundleDir = Join-Path $BackendDir "dist\SmartFactoryBackend"
+$BackendBundleExe = Join-Path $BackendBundleDir "SmartFactoryBackend.exe"
+if (-not (Test-Path -LiteralPath $BackendBundleExe)) {
+    Write-Error "Backend onedir executable not found: $BackendBundleExe"
+    exit 1
+}
+
+$BuildGitCommit = (& git -C $ScriptDir rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $BuildGitCommit -notmatch '^[0-9a-f]{40}$') {
+    Write-Error "Unable to resolve the backend build Git commit."
+    exit 1
+}
+$BackendManifest = Write-BackendBundleManifest `
+    -BundlePath $BackendBundleDir `
+    -BuildGitCommit $BuildGitCommit
+Write-Host "    Backend bundle manifest: $($BackendManifest.bundle_sha256) ($($BackendManifest.file_count) files)" -ForegroundColor Green
+
 Set-Location ".."
 
 # =============================================================================
@@ -130,12 +215,17 @@ $PortablePath = Join-Path $ScriptDir $PortableDir
 if (Test-Path $PortablePath) { Remove-Item $PortablePath -Recurse -Force }
 New-Item -ItemType Directory -Path $PortablePath -Force | Out-Null
 
-# EXE 복사
-$ExeName = "SmartFactory_v$Version.exe"
-$SourceExe = "backend\dist\SmartFactoryBackend.exe"
+# onedir 백엔드 번들 복사. 파일명을 유지해야 manifest 검증이 유효하다.
+$ExeName = "SmartFactoryBackend.exe"
+$SourceBackendDir = Join-Path $ScriptDir "backend\dist\SmartFactoryBackend"
+$SourceExe = Join-Path $SourceBackendDir $ExeName
 $DestExe = Join-Path $PortablePath $ExeName
-Copy-Item -Path $SourceExe -Destination $DestExe -Force
-Write-Host "    Copied EXE: $ExeName" -ForegroundColor Green
+Copy-Item -Path (Join-Path $SourceBackendDir "*") -Destination $PortablePath -Recurse -Force
+if (-not (Test-Path -LiteralPath $DestExe)) {
+    Write-Error "Portable backend executable copy failed: $DestExe"
+    exit 1
+}
+Write-Host "    Copied onedir backend bundle: $ExeName" -ForegroundColor Green
 
 # 브라우저 폴더 복사
 $BrowsersSource = Join-Path $ScriptDir "backend\browsers"
@@ -319,6 +409,8 @@ If Grafana is not configured:
 - ``start.bat`` - Start all services
 - ``stop.bat`` - Stop SmartFactory
 - ``setup_grafana.bat`` - Configure Grafana (run once as Admin)
+- ``SmartFactoryBackend.exe`` - Start backend directly
+- ``bundle-manifest.json`` - Backend bundle integrity manifest
 
 ## SPOT Actuator Config
 - Default ``[SPOT] actuatorstep`` is ``50`` for physical actuator movement.
