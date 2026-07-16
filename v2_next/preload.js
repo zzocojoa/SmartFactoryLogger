@@ -28,12 +28,26 @@ function recordPreloadStartupEvent(name, payload) {
   return ipcRenderer.invoke('sfl:record-startup-event', name, createRendererTimingPayload(payload));
 }
 
+function onStartupStateChanged(listener) {
+  if (typeof listener !== 'function') {
+    return () => undefined;
+  }
+  const wrappedListener = (_event, state) => listener(state);
+  ipcRenderer.on('sfl:startup-state-changed', wrappedListener);
+  return () => ipcRenderer.removeListener('sfl:startup-state-changed', wrappedListener);
+}
+
 void recordPreloadStartupEvent('renderer.preload-start', {
   document_ready_state: globalThis.document?.readyState ?? null,
 }).catch(() => undefined);
 
 contextBridge.exposeInMainWorld('smartFactoryElectron', {
   getMemory: () => ipcRenderer.invoke('sfl:get-electron-memory'),
+  getStartupState: () => ipcRenderer.invoke('sfl:get-startup-state'),
+  onStartupStateChanged,
+  retryStartup: () => ipcRenderer.invoke('sfl:retry-startup'),
+  continueStartupOffline: () => ipcRenderer.invoke('sfl:continue-startup-offline'),
+  exitStartup: () => ipcRenderer.invoke('sfl:exit-startup'),
   recordStartupEvent: (name, payload) => recordPreloadStartupEvent(name, payload),
 });
 

@@ -1,17 +1,28 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
+const http = require('http');
+const { randomBytes } = require('crypto');
 const { spawn } = require('child_process');
 const kill = require('tree-kill');
 const fs = require('fs');
 const v8 = require('v8');
+const {
+  StartupCoordinator,
+  createBackendProgressParser,
+} = require('./startupCoordinator');
+const { stopProcessTree, createBackendRestartController } = require('./backendProcessLifecycle');
+const { createStartupIpcHandlers, normalizeDocumentUrl } = require('./startupIpc');
 
 const startupOriginNs = process.hrtime.bigint();
 const startupSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+const backendControlToken = randomBytes(32).toString('hex');
 // Software compositing avoids GPU channel setup delaying NSIS cold start render.
 app.disableHardwareAcceleration();
 const STARTUP_RENDERER_EVENT_NAMES = new Set([
   'renderer.preload-start',
   'renderer.preload-bridge-exposed',
+  'renderer.splash-first-paint',
   'renderer.index-html-inline-script',
   'renderer.index-boot',
   'renderer.index-render',
@@ -27,7 +38,9 @@ const STARTUP_RENDERER_EVENT_NAMES = new Set([
   'renderer.native-surface-render-start',
   'renderer.native-surface-render-end',
   'renderer.dashboard-ready',
+  'renderer.dashboard-paint-fallback',
   'renderer.backend-health-ready',
+  'renderer.first-data-snapshot',
   'renderer.first-live-data',
   'renderer.dashboard-operational-timeout',
   'renderer.dashboard-operational-ready',
@@ -39,6 +52,18 @@ const MAX_RENDERER_STARTUP_EVENTS_PER_NAME = 4;
 
 let mainWindow;
 let backendProcess;
+let trustedMainDocumentUrl = null;
+let trustedRendererTimeOriginMs = null;
+let applicationQuitting = false;
+let shutdownInProgress = false;
+let shutdownComplete = false;
+let lastPublishedStartupState = null;
+let backendStartFallbackTimer = null;
+let backendStartTriggered = false;
+let mainWindowReadyToShow = false;
+let mainWindowShown = false;
+let splashFirstPaintAccepted = false;
+const expectedBackendExitPids = new Set();
 const rendererStartupEventCounts = new Map();
 
 // Robust Logging
@@ -123,6 +148,33 @@ function logStartupEvent(eventName, payload) {
   }
   log(`STARTUP ${JSON.stringify(entry)}`);
 }
+
+function publishStartupState(state) {
+  const previousState = lastPublishedStartupState;
+  logStartupEvent('electron.startup-state-changed', {
+    sequence: state.sequence,
+    from_status: previousState?.status ?? null,
+    to_status: state.status,
+    from_phase: previousState?.phase ?? null,
+    to_phase: state.phase,
+    progress: state.progress,
+    reason: state.reason,
+  });
+  lastPublishedStartupState = state;
+
+  const contents = mainWindow?.webContents;
+  if (!contents || contents.isDestroyed()) {
+    return;
+  }
+  contents.send('sfl:startup-state-changed', state);
+}
+
+const startupCoordinator = new StartupCoordinator({
+  sessionId: startupSessionId,
+  timeoutMs: 30_000,
+  now: getStartupElapsedMs,
+  onChange: publishStartupState,
+});
 
 function normalizeRejectedStartupEventName(value) {
   if (typeof value === 'string') {
@@ -213,35 +265,46 @@ function registerMemoryIpcHandlers() {
 }
 
 function registerStartupIpcHandlers() {
-  ipcMain.handle('sfl:record-startup-event', async (_event, name, payload) => {
-    if (typeof name !== 'string' || !STARTUP_RENDERER_EVENT_NAMES.has(name)) {
-      logStartupEvent('renderer.startup-event-rejected', {
-        reason: 'invalid_event',
-        name: normalizeRejectedStartupEventName(name),
-      });
-      return { ok: false, reason: 'invalid_event' };
-    }
-
-    const nextCount = (rendererStartupEventCounts.get(name) ?? 0) + 1;
-    rendererStartupEventCounts.set(name, nextCount);
-    if (nextCount > MAX_RENDERER_STARTUP_EVENTS_PER_NAME) {
-      logStartupEvent('renderer.startup-event-rejected', {
-        reason: 'event_limit',
-        name,
-      });
-      return { ok: false, reason: 'event_limit' };
-    }
-
-    logStartupEvent(name, payload);
-    return { ok: true };
+  const handlers = createStartupIpcHandlers({
+    getMainWindow: () => mainWindow,
+    getExpectedDocumentUrl: () => trustedMainDocumentUrl,
+    allowedEventNames: STARTUP_RENDERER_EVENT_NAMES,
+    eventCounts: rendererStartupEventCounts,
+    maxEventsPerName: MAX_RENDERER_STARTUP_EVENTS_PER_NAME,
+    coordinator: startupCoordinator,
+    sanitizePayload: sanitizeStartupPayload,
+    normalizeRejectedEventName: normalizeRejectedStartupEventName,
+    logStartupEvent,
+    getRendererGeneration: () => trustedRendererTimeOriginMs,
+    setRendererGeneration: (value) => {
+      trustedRendererTimeOriginMs = value;
+    },
+    onAcceptedEvent: (name) => {
+      if (name === 'renderer.splash-first-paint') {
+        splashFirstPaintAccepted = true;
+        maybeShowSplashAndTriggerInitialBackendStart();
+      }
+    },
+    restartBackend,
+    quitApplication: () => setImmediate(() => app.quit()),
   });
+
+  ipcMain.handle('sfl:record-startup-event', handlers.recordStartupEvent);
+  ipcMain.handle('sfl:get-startup-state', handlers.getStartupState);
+  ipcMain.handle('sfl:retry-startup', handlers.retryStartup);
+  ipcMain.handle('sfl:continue-startup-offline', handlers.continueStartupOffline);
+  ipcMain.handle('sfl:exit-startup', handlers.exitStartup);
 }
 
 function createWindow() {
   logStartupEvent('electron.window-create-start');
+  mainWindowReadyToShow = false;
+  mainWindowShown = false;
+  splashFirstPaintAccepted = false;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    show: false,
     webPreferences: {
       preload: resolvePreloadPath(),
       nodeIntegration: false,
@@ -260,6 +323,7 @@ function createWindow() {
   } else {
     indexPath = path.join(__dirname, 'frontend', 'dist', 'index.html');
   }
+  trustedMainDocumentUrl = pathToFileURL(indexPath).href;
   
   const indexExists = fs.existsSync(indexPath);
   log(`Loading index.html from: ${indexPath}`);
@@ -272,6 +336,10 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     logStartupEvent('electron.window-ready-to-show');
+    mainWindowReadyToShow = true;
+    if (!maybeShowSplashAndTriggerInitialBackendStart()) {
+      armInitialBackendStartFallback();
+    }
   });
 
   mainWindow.webContents.on('did-start-loading', () => {
@@ -286,6 +354,16 @@ function createWindow() {
       );
     }
   });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (normalizeDocumentUrl(url) !== normalizeDocumentUrl(trustedMainDocumentUrl)) {
+      event.preventDefault();
+      logStartupEvent('electron.navigation-blocked', {
+        protocol: getStartupUrlProtocol(url),
+      });
+    }
+  });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   mainWindow.webContents.on('dom-ready', () => {
     logStartupEvent('electron.webcontents-dom-ready');
@@ -326,11 +404,65 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    mainWindowReadyToShow = false;
+    mainWindowShown = false;
     mainWindow = null;
+    trustedMainDocumentUrl = null;
+    trustedRendererTimeOriginMs = null;
   });
 }
 
+function triggerInitialBackendStart(reason) {
+  if (backendStartTriggered || applicationQuitting) {
+    return false;
+  }
+  backendStartTriggered = true;
+  if (backendStartFallbackTimer !== null) {
+    clearTimeout(backendStartFallbackTimer);
+    backendStartFallbackTimer = null;
+  }
+  logStartupEvent('backend.initial-start-triggered', { reason });
+  return Boolean(startBackend());
+}
+
+function showStartupWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return false;
+  }
+  if (!mainWindowShown) {
+    mainWindow.show();
+    mainWindowShown = true;
+    logStartupEvent('electron.window-shown');
+  }
+  return true;
+}
+
+function maybeShowSplashAndTriggerInitialBackendStart() {
+  if (!mainWindowReadyToShow || !splashFirstPaintAccepted) {
+    return false;
+  }
+  if (!showStartupWindow()) {
+    return false;
+  }
+  return triggerInitialBackendStart('splash_first_paint');
+}
+
+function armInitialBackendStartFallback() {
+  if (!mainWindowReadyToShow || backendStartTriggered || backendStartFallbackTimer !== null) {
+    return;
+  }
+  backendStartFallbackTimer = setTimeout(() => {
+    backendStartFallbackTimer = null;
+    if (mainWindowReadyToShow && showStartupWindow()) {
+      triggerInitialBackendStart('splash_paint_fallback_after_window_show');
+    }
+  }, 750);
+}
+
 function startBackend() {
+  if (applicationQuitting) {
+    return null;
+  }
   const isPackaged = app.isPackaged;
   let backendPath;
   let args = [];
@@ -352,53 +484,160 @@ function startBackend() {
   if (isPackaged && !fs.existsSync(backendPath)) {
     log(`ERROR: Backend binary NOT FOUND at ${backendPath}`);
     dialog.showErrorBox('Backend Error', `Backend executable not found at:\n${backendPath}`);
-    return;
+    startupCoordinator.failBackend('backend_binary_missing');
+    return null;
   }
 
   const spawnOptions = {
     cwd: isPackaged ? path.join(process.resourcesPath, 'backend') : __dirname,
-    shell: true,
-    windowsVerbatimArguments: true,
+    shell: false,
+    windowsHide: true,
     env: {
       ...process.env,
-      SFL_EMBEDDED_ELECTRON: '1'
+      SFL_EMBEDDED_ELECTRON: '1',
+      SFL_CONTROL_TOKEN: backendControlToken,
     }
   };
 
   try {
     logStartupEvent('backend.spawn-start', { is_packaged: isPackaged });
+    startupCoordinator.handleMainMilestone('backend_spawn_start');
     log(`Spawning backend from: ${backendPath}`);
     log(`Arguments: ${JSON.stringify(args)}`);
     log(`CWD: ${spawnOptions.cwd}`);
     
-    backendProcess = spawn(`"${backendPath}"`, args, spawnOptions);
-
-    backendProcess.on('spawn', () => {
-      logStartupEvent('backend.spawned', { pid: backendProcess.pid ?? null });
-      log(`Backend process spawned successfully (PID: ${backendProcess.pid})`);
+    const child = spawn(backendPath, args, spawnOptions);
+    backendProcess = child;
+    const progressParser = createBackendProgressParser({
+      onStage: (stage) => {
+        logStartupEvent('backend.startup-progress', { stage });
+        startupCoordinator.handleBackendStage(stage);
+      },
+      onRejected: (reason) => {
+        logStartupEvent('backend.startup-progress-rejected', { reason });
+      },
     });
 
-    backendProcess.stdout.on('data', (data) => {
+    child.on('spawn', () => {
+      logStartupEvent('backend.spawned', { pid: child.pid ?? null });
+      startupCoordinator.handleMainMilestone('backend_spawned');
+      log(`Backend process spawned successfully (PID: ${child.pid})`);
+    });
+
+    child.stdout?.on('data', (data) => {
+      progressParser.push(data);
       log(`Backend STDOUT: ${data.toString().trim()}`);
     });
 
-    backendProcess.stderr.on('data', (data) => {
+    child.stderr?.on('data', (data) => {
       log(`Backend STDERR: ${data.toString().trim()}`);
     });
 
-    backendProcess.on('error', (err) => {
+    child.on('error', (err) => {
       logStartupEvent('backend.spawn-error', { message: err.message });
       log(`Failed to start backend process: ${err.message}`);
+      if (!expectedBackendExitPids.has(child.pid)) {
+        startupCoordinator.failBackend('backend_spawn_error');
+      }
     });
 
-    backendProcess.on('close', (code) => {
+    child.on('close', (code) => {
+      progressParser.flush();
       logStartupEvent('backend.closed', { code });
       log(`Backend process exited with code ${code}`);
+      const wasExpected = expectedBackendExitPids.delete(child.pid);
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
+      if (!wasExpected && !applicationQuitting) {
+        startupCoordinator.failBackend(`backend_closed_${code ?? 'unknown'}`);
+      }
     });
+    return child;
   } catch (err) {
     logStartupEvent('backend.spawn-exception', { message: err.message });
     log(`CRITICAL: Failed to spawn: ${err.message}`);
+    startupCoordinator.failBackend('backend_spawn_exception');
+    return null;
   }
+}
+
+function requestBackendGracefulShutdown() {
+  const configuredPort = Number.parseInt(process.env.BACKEND_PORT || '8000', 10);
+  const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65_535
+    ? configuredPort
+    : 8000;
+  const body = JSON.stringify({ reason: applicationQuitting ? 'electron_exit' : 'electron_retry' });
+
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/control/shutdown',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'X-SFL-Control-Token': backendControlToken,
+      },
+    }, (response) => {
+      response.resume();
+      response.once('end', () => {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve();
+          return;
+        }
+        reject(new Error(`Backend shutdown endpoint returned HTTP ${response.statusCode}.`));
+      });
+    });
+    request.setTimeout(2_000, () => {
+      request.destroy(new Error('Backend shutdown request timed out.'));
+    });
+    request.once('error', reject);
+    request.end(body);
+  });
+}
+
+async function stopBackendProcess(child = backendProcess) {
+  if (!child?.pid) {
+    return { stopped: true, reason: 'no_process' };
+  }
+
+  expectedBackendExitPids.add(child.pid);
+  const result = await stopProcessTree(child, {
+    killTree: kill,
+    requestGracefulStop: requestBackendGracefulShutdown,
+    log,
+    graceMs: 10_000,
+  });
+  if (result.reason === 'already_exited') {
+    expectedBackendExitPids.delete(child.pid);
+  }
+  return result;
+}
+
+const backendRestartController = createBackendRestartController({
+  getProcess: () => backendProcess,
+  setProcess: (child) => {
+    backendProcess = child;
+  },
+  stopProcess: stopBackendProcess,
+  startProcess: startBackend,
+  isQuitting: () => applicationQuitting,
+  beforeRestart: async () => {
+    logStartupEvent('backend.restart-requested');
+    rendererStartupEventCounts.clear();
+    trustedRendererTimeOriginMs = null;
+    startupCoordinator.reset('manual_retry');
+    const contents = mainWindow?.webContents;
+    if (contents && !contents.isDestroyed()) {
+      contents.reload();
+    }
+  },
+});
+
+function restartBackend() {
+  return backendRestartController.restart();
 }
 
 app.whenReady().then(() => {
@@ -406,7 +645,7 @@ app.whenReady().then(() => {
   log("App ready, starting backend and window...");
   registerMemoryIpcHandlers();
   registerStartupIpcHandlers();
-  startBackend();
+  startupCoordinator.start();
   createWindow();
   logStartupEvent('electron.ready-flow-complete');
 
@@ -417,19 +656,47 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    if (backendProcess) {
-      log("All windows closed, killing backend...");
-      kill(backendProcess.pid, 'SIGTERM', (err) => {
-        app.quit();
-      });
-    } else {
-      app.quit();
-    }
+    app.quit();
   }
 });
 
-app.on('quit', () => {
-  if (backendProcess) {
-    kill(backendProcess.pid);
+app.on('before-quit', (event) => {
+  applicationQuitting = true;
+  if (backendStartFallbackTimer !== null) {
+    clearTimeout(backendStartFallbackTimer);
+    backendStartFallbackTimer = null;
   }
+  startupCoordinator.dispose();
+  if (shutdownComplete) {
+    return;
+  }
+  event.preventDefault();
+  if (shutdownInProgress) {
+    return;
+  }
+  shutdownInProgress = true;
+  void (async () => {
+    try {
+      await backendRestartController.waitForActiveRestart();
+      const child = backendProcess;
+      if (child?.pid) {
+        await stopBackendProcess(child);
+        if (backendProcess === child) {
+          backendProcess = null;
+        }
+      }
+      shutdownComplete = true;
+      app.quit();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logStartupEvent('backend.shutdown-failed', { message });
+      log(`Backend shutdown failed: ${message}`);
+      applicationQuitting = false;
+      shutdownInProgress = false;
+      dialog.showErrorBox(
+        'Backend Shutdown Error',
+        '백엔드 프로세스를 안전하게 종료하지 못했습니다. 로그를 확인한 뒤 다시 종료하십시오.'
+      );
+    }
+  })();
 });

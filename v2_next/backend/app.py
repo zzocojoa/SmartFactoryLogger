@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import os
+import secrets
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -11,7 +12,7 @@ project_root = current_dir.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -87,6 +88,7 @@ from backend.Observability.metrics_logger import comm_metrics_logger_service
 from backend.Observability.memory_service import estimate_size_bytes, memory_service
 from backend.Observability.service import observability_service
 from backend.Configuration.Configuration_DB_Manager import config_manager
+from backend.launcher_policy import is_embedded_electron
 from backend.Configuration.Configuration_Logic_Layout import (
     delete_layout_slot,
     get_active_layout,
@@ -363,6 +365,30 @@ def _lifecycle_log_fields() -> str:
     return f"session={_app_session_id} pid={os.getpid()} started_at={_app_started_at_iso}"
 
 
+_EMBEDDED_STARTUP_PROGRESS_PREFIX = "SFL_STARTUP_PROGRESS "
+_EMBEDDED_STARTUP_PROGRESS_STAGES = frozenset(
+    {
+        "lifespan_begin",
+        "csv_logger_ready",
+        "config_sync_ready",
+        "config_watch_ready",
+        "plc_service_ready",
+        "comm_metrics_ready",
+        "memory_service_ready",
+        "spot_poll_ready",
+        "lifespan_complete",
+    }
+)
+
+
+def _emit_embedded_startup_progress(stage: str) -> None:
+    """Emit a bounded machine-readable startup milestone to the Electron host."""
+    if not is_embedded_electron() or stage not in _EMBEDDED_STARTUP_PROGRESS_STAGES:
+        return
+    payload = json.dumps({"stage": stage}, ensure_ascii=False, separators=(",", ":"))
+    print(f"{_EMBEDDED_STARTUP_PROGRESS_PREFIX}{payload}", flush=True)
+
+
 def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
     started_perf = time.perf_counter()
     starter()
@@ -372,6 +398,7 @@ def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
         (time.perf_counter() - started_perf) * 1000.0,
         _lifecycle_log_fields(),
     )
+    _emit_embedded_startup_progress(f"{stage}_ready")
 
 
 def _log_backend_access_urls() -> None:
@@ -1569,6 +1596,7 @@ async def lifespan(app: FastAPI):
     if not acquire_single_instance_lock():
         raise RuntimeError("Instance already running")
     _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
+    _emit_embedded_startup_progress("lifespan_begin")
     print("[Main] Starting CSV Logger...")
     _run_lifespan_start_stage("csv_logger", logger_service.start)
     print("[Main] Starting Config Sync Agent...")
@@ -1591,12 +1619,14 @@ async def lifespan(app: FastAPI):
         (time.perf_counter() - spot_started_perf) * 1000.0,
         _lifecycle_log_fields(),
     )
+    _emit_embedded_startup_progress("spot_poll_ready")
     
     # Address discovery is diagnostic-only. Some Windows hosts take tens of
     # seconds to resolve their own hostname, so it must not gate Uvicorn
     # readiness.
     _start_backend_access_log_thread()
     _logger.info("[Main] Lifespan startup complete %s", _lifecycle_log_fields())
+    _emit_embedded_startup_progress("lifespan_complete")
 
     try:
         yield
@@ -3042,11 +3072,10 @@ async def log_status_change(payload: StatusLogRequest):
         return {"ok": False, "error": str(e)}
 
 
-@app.post("/api/control/shutdown")
-def shutdown(payload: ShutdownRequest):
+def _schedule_control_shutdown(reason: str) -> None:
     def _shutdown() -> None:
         try:
-            _logger.info("Shutdown requested: reason=%s %s", payload.reason, _lifecycle_log_fields())
+            _logger.info("Shutdown requested: reason=%s %s", reason, _lifecycle_log_fields())
         except Exception:
             pass
         _stop_services_for_control_shutdown()
@@ -3054,6 +3083,23 @@ def shutdown(payload: ShutdownRequest):
         os._exit(0)
 
     threading.Thread(target=_shutdown, daemon=True).start()
+
+
+@app.post("/api/control/shutdown")
+def shutdown(
+    payload: ShutdownRequest,
+    control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
+):
+    if is_embedded_electron():
+        expected_token = os.environ.get("SFL_CONTROL_TOKEN", "")
+        if (
+            not expected_token
+            or control_token is None
+            or not secrets.compare_digest(control_token, expected_token)
+        ):
+            raise HTTPException(status_code=403, detail="Invalid embedded control token")
+
+    _schedule_control_shutdown(payload.reason)
     return {"ok": True}
 
 # --- Static File Serving (Frontend) ---

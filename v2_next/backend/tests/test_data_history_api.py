@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import unittest
 from pathlib import Path
@@ -257,6 +258,30 @@ class MemoryApiTests(unittest.TestCase):
 class ElectronPreloadContractTests(unittest.TestCase):
     repo_root = Path(__file__).resolve().parents[2]
 
+    def test_embedded_shutdown_requires_the_per_launch_control_token(self) -> None:
+        with (
+            patch.object(backend_app, "is_embedded_electron", return_value=True),
+            patch.dict(backend_app.os.environ, {"SFL_CONTROL_TOKEN": "launch-secret"}),
+            patch.object(backend_app, "_schedule_control_shutdown") as schedule_shutdown,
+        ):
+            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            try:
+                rejected = client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "electron_retry"},
+                )
+                accepted = client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "electron_retry"},
+                    headers={"X-SFL-Control-Token": "launch-secret"},
+                )
+            finally:
+                client.close()
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        schedule_shutdown.assert_called_once_with("electron_retry")
+
     def test_main_correlates_and_allowlists_operational_startup_events(self) -> None:
         main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")
 
@@ -264,6 +289,7 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("session_id: startupSessionId", main_text)
         for event_name in (
             "renderer.backend-health-ready",
+            "renderer.first-data-snapshot",
             "renderer.first-live-data",
             "renderer.dashboard-operational-timeout",
             "renderer.dashboard-operational-ready",
@@ -271,6 +297,32 @@ class ElectronPreloadContractTests(unittest.TestCase):
             self.assertIn(f"'{event_name}'", main_text)
         self.assertIn("sanitizeStartupPayload(payload)", main_text)
         self.assertIn("MAX_RENDERER_STARTUP_EVENTS_PER_NAME", main_text)
+
+    def test_main_shows_rendered_splash_before_backend_fallback(self) -> None:
+        main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")
+        browser_window_block = main_text[
+            main_text.index("mainWindow = new BrowserWindow") : main_text.index(
+                "logStartupEvent('electron.window-created')"
+            )
+        ]
+        ready_to_show_block = main_text[
+            main_text.index("mainWindow.once('ready-to-show'") : main_text.index(
+                "mainWindow.webContents.on('did-start-loading'"
+            )
+        ]
+        ready_flow_block = main_text[
+            main_text.index("app.whenReady().then") : main_text.index(
+                "app.on('window-all-closed'"
+            )
+        ]
+
+        self.assertIn("show: false", browser_window_block)
+        self.assertIn("mainWindowReadyToShow = true;", ready_to_show_block)
+        self.assertIn("maybeShowSplashAndTriggerInitialBackendStart()", ready_to_show_block)
+        self.assertIn("armInitialBackendStartFallback();", ready_to_show_block)
+        self.assertNotIn("armInitialBackendStartFallback();", ready_flow_block)
+        self.assertIn("mainWindow.show();", main_text)
+        self.assertIn("!mainWindowReadyToShow || !splashFirstPaintAccepted", main_text)
 
     def test_renderer_wires_existing_health_data_and_paint_responses(self) -> None:
         index_text = (self.repo_root / "frontend" / "src" / "index.tsx").read_text(
@@ -300,6 +352,7 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("armDashboardOperationalReadyTimeout();", index_text)
         self.assertIn("markBackendHealthReady(health);", app_text)
         self.assertIn("markFirstLiveDataReady(data);", controller_text)
+        self.assertIn("markFirstDataSnapshotReady(data);", controller_text)
         self.assertIn("timestampMs > 0", telemetry_text)
         self.assertIn("data.Status.trim().toLowerCase() === 'running'", telemetry_text)
         self.assertIn("ready_strategy: 'raf'", telemetry_text)
@@ -394,9 +447,18 @@ class ElectronPreloadContractTests(unittest.TestCase):
             "recordStartupEvent: (name, payload) => recordPreloadStartupEvent(name, payload)",
             preload_text,
         )
-        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 2)
+        for channel in (
+            "sfl:get-startup-state",
+            "sfl:retry-startup",
+            "sfl:continue-startup-offline",
+            "sfl:exit-startup",
+        ):
+            self.assertIn(f"ipcRenderer.invoke('{channel}')", preload_text)
+        self.assertIn("ipcRenderer.on('sfl:startup-state-changed'", preload_text)
+        self.assertIn("ipcRenderer.removeListener('sfl:startup-state-changed'", preload_text)
+        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 6)
+        self.assertEqual(preload_text.count("ipcRenderer.on("), 1)
         self.assertNotIn("ipcRenderer.send", preload_text)
-        self.assertNotIn("ipcRenderer.on", preload_text)
         self.assertNotIn("ipcRenderer.once", preload_text)
         self.assertNotIn("...args", preload_text)
 
@@ -407,8 +469,78 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("preload: resolvePreloadPath()", main_text)
         self.assertIn("ipcMain.handle('sfl:get-electron-memory'", main_text)
         self.assertIn("ipcMain.handle('sfl:record-startup-event'", main_text)
+        self.assertIn("ipcMain.handle('sfl:get-startup-state'", main_text)
+        self.assertIn("ipcMain.handle('sfl:retry-startup'", main_text)
+        self.assertIn("event.preventDefault();", main_text)
+        self.assertIn("await backendRestartController.waitForActiveRestart()", main_text)
+        self.assertIn("normalizeDocumentUrl(trustedMainDocumentUrl)", main_text)
+        self.assertIn("setWindowOpenHandler(() => ({ action: 'deny' }))", main_text)
+        self.assertIn("triggerInitialBackendStart('splash_first_paint')", main_text)
+        self.assertIn("armInitialBackendStartFallback();", main_text)
+        self.assertIn("requestBackendGracefulShutdown", main_text)
+        self.assertIn("X-SFL-Control-Token", main_text)
         self.assertIn("STARTUP_RENDERER_EVENT_NAMES", main_text)
         self.assertIn("preload.js", package_payload["build"]["files"])
+        self.assertIn("startupCoordinator.js", package_payload["build"]["files"])
+        self.assertIn("startupIpc.js", package_payload["build"]["files"])
+        self.assertIn("backendProcessLifecycle.js", package_payload["build"]["files"])
+
+    def test_backend_emits_only_allowlisted_embedded_startup_progress(self) -> None:
+        with (
+            patch.object(backend_app, "is_embedded_electron", return_value=True),
+            patch("builtins.print") as print_mock,
+        ):
+            backend_app._emit_embedded_startup_progress("csv_logger_ready")
+            backend_app._emit_embedded_startup_progress("not_allowlisted")
+
+        print_mock.assert_called_once_with(
+            'SFL_STARTUP_PROGRESS {"stage":"csv_logger_ready"}',
+            flush=True,
+        )
+
+        with (
+            patch.object(backend_app, "is_embedded_electron", return_value=False),
+            patch("builtins.print") as standalone_print,
+        ):
+            backend_app._emit_embedded_startup_progress("csv_logger_ready")
+
+            standalone_print.assert_not_called()
+
+    def test_backend_progress_protocol_matches_electron_parser_contract(self) -> None:
+        coordinator_text = (self.repo_root / "startupCoordinator.js").read_text(
+            encoding="utf-8"
+        )
+        stage_block = coordinator_text.split(
+            "const BACKEND_STAGE_MILESTONES = Object.freeze({", 1
+        )[1].split("});", 1)[0]
+        electron_stages = set(
+            re.findall(r"^  ([a-z0-9_]+): Object\.freeze\(", stage_block, re.MULTILINE)
+        )
+
+        self.assertEqual(
+            electron_stages,
+            set(backend_app._EMBEDDED_STARTUP_PROGRESS_STAGES),
+        )
+        self.assertIn(
+            f"const BACKEND_PROGRESS_PREFIX = "
+            f"'{backend_app._EMBEDDED_STARTUP_PROGRESS_PREFIX}';",
+            coordinator_text,
+        )
+
+    def test_backend_lifespan_wires_every_designed_progress_stage(self) -> None:
+        app_text = (self.repo_root / "backend" / "app.py").read_text(encoding="utf-8")
+
+        for stage in (
+            "csv_logger",
+            "config_sync",
+            "config_watch",
+            "plc_service",
+            "comm_metrics",
+            "memory_service",
+        ):
+            self.assertIn(f'_run_lifespan_start_stage("{stage}"', app_text)
+        for stage in ("lifespan_begin", "spot_poll_ready", "lifespan_complete"):
+            self.assertIn(f'_emit_embedded_startup_progress("{stage}")', app_text)
 
 
 if __name__ == "__main__":

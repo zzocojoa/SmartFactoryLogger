@@ -7,6 +7,7 @@ import { useSustainedFlag } from '../../../shared/hooks/useSustainedFlag';
 import { useMetricsViewModel } from '../hooks/useMetricsViewModel';
 import type { UseMetricsViewModel } from '../hooks/useMetricsViewModel.types';
 import {
+  markFirstDataSnapshotReady,
   markFirstLiveDataReady,
   recordStartupEventOnce,
 } from '../../../shared/startup/startupTelemetry';
@@ -83,6 +84,7 @@ const MetricsDataControllerComponent = ({
   }, [pollingDegraded, pollingFailureCount, pollingIntervalMs]);
 
   useEffect(() => {
+    markFirstDataSnapshotReady(data);
     markFirstLiveDataReady(data);
   }, [data]);
 

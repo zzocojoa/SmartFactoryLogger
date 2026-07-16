@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   armDashboardOperationalReadyTimeout,
   isOperationalFactoryData,
+  isStartupFactoryDataSnapshot,
   markBackendHealthReady,
+  markFirstDataSnapshotReady,
   markFirstLiveDataReady,
   OPERATIONAL_READY_TIMEOUT_MS,
   recordDashboardReadyAfterPaint,
@@ -14,22 +16,25 @@ import type { FactoryData, HealthSnapshot } from '../types';
 
 type StartupTelemetryWindow = Window & {
   __SF_STARTUP_EVENT_KEYS__?: Set<string>;
+  __SF_STARTUP_EVENT_PENDING_KEYS__?: Set<string>;
   __SF_OPERATIONAL_READY_STATE__?: unknown;
 };
 
 const resetStartupTelemetryState = (): void => {
   const startupWindow = window as StartupTelemetryWindow;
   delete startupWindow.__SF_STARTUP_EVENT_KEYS__;
+  delete startupWindow.__SF_STARTUP_EVENT_PENDING_KEYS__;
   delete startupWindow.__SF_OPERATIONAL_READY_STATE__;
 };
 
-const buildHealth = (): HealthSnapshot => ({
+const buildHealth = (overrides: Partial<HealthSnapshot> = {}): HealthSnapshot => ({
   running: true,
   thread_alive: true,
   last_update: null,
   driver_connected: true,
   mode: 'real',
   runtime_kind: 'packaged',
+  ...overrides,
 });
 
 const buildFactoryData = (overrides: Partial<FactoryData> = {}): FactoryData => ({
@@ -99,14 +104,35 @@ describe('startupTelemetry', () => {
     );
   });
 
-  it('records dashboard ready with a timeout fallback when animation frames are throttled', () => {
+  it('retries a rejected one-shot event and commits the key only after acceptance', async () => {
     vi.useFakeTimers();
+    const recordStartup = vi.fn()
+      .mockResolvedValueOnce({ ok: false, reason: 'temporarily_rejected' })
+      .mockResolvedValueOnce({ ok: true });
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: recordStartup,
+    };
+
+    recordStartupEventOnce('retry-key', 'renderer.app-import-start');
+    await vi.advanceTimersByTimeAsync(250);
+    recordStartupEventOnce('retry-key', 'renderer.app-import-start');
+
+    expect(recordStartup).toHaveBeenCalledTimes(2);
+  });
+
+  it('records an informational timeout fallback and still accepts a later RAF paint', () => {
+    vi.useFakeTimers();
+    const frameCallbacks: FrameRequestCallback[] = [];
     const recordStartup = vi.fn().mockResolvedValue({ ok: true });
     window.smartFactoryElectron = {
       getMemory: vi.fn(),
       recordStartupEvent: recordStartup,
     };
-    vi.stubGlobal('requestAnimationFrame', vi.fn((): number => 1));
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback): number => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    }));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
     const cleanup = recordDashboardReadyAfterPaint('native', { widget_count: 3 });
@@ -117,12 +143,20 @@ describe('startupTelemetry', () => {
 
     expect(recordStartup).toHaveBeenCalledTimes(1);
     expect(recordStartup).toHaveBeenCalledWith(
-      'renderer.dashboard-ready',
+      'renderer.dashboard-paint-fallback',
       expect.objectContaining({
         surface: 'native',
         ready_strategy: 'timeout-fallback',
         widget_count: 3,
       })
+    );
+
+    frameCallbacks[0](16);
+    frameCallbacks[1](32);
+    expect(recordStartup).toHaveBeenCalledTimes(2);
+    expect(recordStartup).toHaveBeenLastCalledWith(
+      'renderer.dashboard-ready',
+      expect.objectContaining({ ready_strategy: 'raf' })
     );
 
     cleanup();
@@ -182,6 +216,27 @@ describe('startupTelemetry', () => {
     expect(isOperationalFactoryData(buildFactoryData(overrides))).toBe(false);
   });
 
+  it('accepts a timestamped offline snapshot for startup handoff without claiming live data', () => {
+    const recordStartup = vi.fn().mockResolvedValue({ ok: true });
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: recordStartup,
+    };
+    const offlineData = buildFactoryData({ Status: 'Offline' });
+
+    expect(isStartupFactoryDataSnapshot(offlineData)).toBe(true);
+    expect(isStartupFactoryDataSnapshot(buildFactoryData({ Status: 'Initializing' }))).toBe(false);
+    expect(isStartupFactoryDataSnapshot(buildFactoryData({ Status: 'Unexpected' }))).toBe(false);
+    expect(markFirstDataSnapshotReady(offlineData)).toBe(true);
+    expect(markFirstDataSnapshotReady(offlineData)).toBe(false);
+    expect(markFirstLiveDataReady(offlineData)).toBe(false);
+    expect(recordStartup).toHaveBeenCalledTimes(1);
+    expect(recordStartup).toHaveBeenCalledWith(
+      'renderer.first-data-snapshot',
+      expect.objectContaining({ status: 'Offline', timestamp_present: true })
+    );
+  });
+
   it('accepts timestamped non-initial factory data and records each response gate once', () => {
     const recordStartup = vi.fn().mockResolvedValue({ ok: true });
     window.smartFactoryElectron = {
@@ -190,6 +245,7 @@ describe('startupTelemetry', () => {
     };
 
     expect(markBackendHealthReady(null)).toBe(false);
+    expect(markBackendHealthReady(buildHealth({ running: false }))).toBe(false);
     expect(markBackendHealthReady(buildHealth())).toBe(true);
     expect(markBackendHealthReady(buildHealth())).toBe(false);
     expect(markFirstLiveDataReady(buildFactoryData({ timestamp_ms: 0 }))).toBe(false);
