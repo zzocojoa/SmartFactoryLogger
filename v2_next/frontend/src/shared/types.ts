@@ -607,6 +607,7 @@ export interface ElectronStartupState {
   elapsed_ms: number;
   backend_health_ready: boolean;
   data_snapshot_ready: boolean;
+  live_data_ready: boolean;
   data_running: boolean;
   dashboard_paint_ready: boolean;
   can_retry: boolean;

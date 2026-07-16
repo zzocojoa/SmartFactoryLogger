@@ -175,6 +175,12 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
 
         self.assertTrue(status["logger_service_stopped"])
         self.assertEqual(logger_stub.timeout_sec, 123.0)
+        self.assertIn("logger_service_elapsed_ms", status)
+        self.assertIn("total_elapsed_ms", status)
+        self.assertEqual(backend_app._control_shutdown_exit_code(status), 0)
+
+        status["logger_service_stopped"] = False
+        self.assertEqual(backend_app._control_shutdown_exit_code(status), 2)
 
 
 if __name__ == "__main__":

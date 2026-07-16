@@ -335,9 +335,38 @@ function Get-RequiredMilestones {
         "renderer.index-boot",
         "renderer.app-render-end",
         "renderer.backend-health-ready",
+        "renderer.first-data-snapshot",
         "renderer.first-live-data",
         "renderer.dashboard-ready",
         "renderer.dashboard-operational-ready"
+    )
+}
+
+function Get-RequiredBackendProgressStages {
+    return @(
+        "lifespan_begin",
+        "csv_logger_ready",
+        "config_sync_ready",
+        "config_watch_ready",
+        "plc_service_ready",
+        "comm_metrics_ready",
+        "memory_service_ready",
+        "spot_poll_ready",
+        "lifespan_complete"
+    )
+}
+
+function Get-BackendProgressStages {
+    param([object[]]$Events)
+
+    return @(
+        $Events |
+            Where-Object { $_.event -eq "backend.startup-progress" } |
+            ForEach-Object {
+                Get-EventPayloadValue -EventItem $_ -Name "stage"
+            } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            Sort-Object -Unique
     )
 }
 
@@ -443,6 +472,30 @@ function Resolve-DiagnosticBudgetStatus {
     return "DIAGNOSTIC_TIMEOUT_NOT_RECOVERED"
 }
 
+function Resolve-PerformanceStatus {
+    param(
+        [object]$OperationalReady,
+        [object]$LauncherObservedMs,
+        [double]$BudgetMs = 30000.0
+    )
+
+    if (
+        $null -eq $OperationalReady -or
+        $null -eq $LauncherObservedMs -or
+        $null -eq $OperationalReady.PSObject.Properties["elapsed_ms"]
+    ) {
+        return "NOT_MEASURED"
+    }
+
+    if (
+        [double]$OperationalReady.elapsed_ms -le $BudgetMs -and
+        [double]$LauncherObservedMs -le $BudgetMs
+    ) {
+        return "PASS"
+    }
+    return "FAIL"
+}
+
 function Stop-LaunchedProcessTree {
     param(
         [System.Diagnostics.Process]$Process,
@@ -529,13 +582,28 @@ function Invoke-SelfTest {
         [pscustomobject]@{ event = "renderer.index-boot" },
         [pscustomobject]@{ event = "renderer.app-render-end" },
         [pscustomobject]@{ event = "renderer.backend-health-ready" },
+        [pscustomobject]@{ event = "renderer.first-data-snapshot" },
         [pscustomobject]@{ event = "renderer.first-live-data" },
         [pscustomobject]@{ event = "renderer.dashboard-ready" },
-        [pscustomobject]@{ event = "renderer.dashboard-operational-ready" }
+        [pscustomobject]@{ event = "renderer.dashboard-operational-ready"; elapsed_ms = 5000.0 }
     )
+    foreach ($BackendStage in (Get-RequiredBackendProgressStages)) {
+        $FixtureEvents += [pscustomobject]@{
+            event = "backend.startup-progress"
+            payload = [pscustomobject]@{ stage = $BackendStage }
+        }
+    }
     $Missing = @(Get-MissingMilestones -Events $FixtureEvents -Required (Get-RequiredMilestones))
     if ($Missing.Count -ne 0) {
         throw "Fixture milestone validation failed."
+    }
+    $FixtureBackendStages = @(Get-BackendProgressStages -Events $FixtureEvents)
+    $MissingBackendStages = @(
+        Get-RequiredBackendProgressStages |
+            Where-Object { $FixtureBackendStages -notcontains $_ }
+    )
+    if ($MissingBackendStages.Count -ne 0) {
+        throw "Fixture backend progress stage validation failed."
     }
 
     $ContaminatedSessionIds = @(Get-StartupSessionIds -Events @(
@@ -550,7 +618,9 @@ function Invoke-SelfTest {
         throw "Fixture multi-session contamination detection failed."
     }
 
-    $ReadyFixture = [pscustomobject]@{ event = "renderer.dashboard-operational-ready" }
+    $ReadyFixture = [pscustomobject]@{
+        event = "renderer.dashboard-operational-ready"; elapsed_ms = 5000.0
+    }
     if ((Resolve-MeasurementStatus "READY" $ReadyFixture 0 "raf") -ne "PASS") {
         throw "Fixture PASS classification failed."
     }
@@ -566,6 +636,18 @@ function Invoke-SelfTest {
     }
     if ((Resolve-DiagnosticBudgetStatus $TimeoutFixture $null) -ne "DIAGNOSTIC_TIMEOUT_NOT_RECOVERED") {
         throw "Fixture unrecovered diagnostic timeout classification failed."
+    }
+    if ((Resolve-PerformanceStatus $ReadyFixture 5100.0) -ne "PASS") {
+        throw "Fixture performance PASS classification failed."
+    }
+    $LateReadyFixture = [pscustomobject]@{
+        event = "renderer.dashboard-operational-ready"; elapsed_ms = 35000.0
+    }
+    if ((Resolve-PerformanceStatus $LateReadyFixture 35100.0) -ne "FAIL") {
+        throw "Fixture performance FAIL classification failed."
+    }
+    if ((Resolve-PerformanceStatus $null $null) -ne "NOT_MEASURED") {
+        throw "Fixture performance not-measured classification failed."
     }
 
     $BundleFixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
@@ -658,6 +740,9 @@ $BackendBundleIntegrity = Test-BackendBundleIntegrity -BackendRoot $BackendBundl
 if (-not $BackendBundleIntegrity.ok) {
     [pscustomobject][ordered]@{
         status                  = "BUNDLE_INTEGRITY_FAILED"
+        functional_status       = "BUNDLE_INTEGRITY_FAILED"
+        performance_status      = "NOT_MEASURED"
+        performance_budget_ms   = 30000.0
         exe_path                = $ResolvedExePath
         backend_bundle          = $BackendBundleIntegrity
         message                 = "Installed backend bundle does not match its integrity manifest."
@@ -668,6 +753,9 @@ $ContaminatingProcesses = @(Get-ContaminatingProcesses)
 if ($ContaminatingProcesses.Count -gt 0) {
     [pscustomobject][ordered]@{
         status                  = "CONTAMINATED"
+        functional_status       = "CONTAMINATED"
+        performance_status      = "NOT_MEASURED"
+        performance_budget_ms   = 30000.0
         exe_path                = $ResolvedExePath
         backend_bundle          = $BackendBundleIntegrity
         contaminating_processes = $ContaminatingProcesses
@@ -729,7 +817,13 @@ while ([DateTimeOffset]::Now -lt $Deadline) {
 $Cleanup = Stop-LaunchedProcessTree -Process $LaunchedProcess -KeepProcessRunning:$KeepRunning
 $RequiredMilestones = @(Get-RequiredMilestones)
 $MissingMilestones = @(Get-MissingMilestones -Events $SelectedEvents -Required $RequiredMilestones)
+$BackendProgressStages = @(Get-BackendProgressStages -Events $SelectedEvents)
+$MissingBackendProgressStages = @(
+    Get-RequiredBackendProgressStages |
+        Where-Object { $BackendProgressStages -notcontains $_ }
+)
 $BackendReady = Get-StartupEvent -Events $SelectedEvents -Name "renderer.backend-health-ready"
+$FirstDataSnapshot = Get-StartupEvent -Events $SelectedEvents -Name "renderer.first-data-snapshot"
 $FirstLiveData = Get-StartupEvent -Events $SelectedEvents -Name "renderer.first-live-data"
 $DashboardReady = Get-StartupEvent -Events $SelectedEvents -Name "renderer.dashboard-ready"
 $OperationalTimeout = Get-StartupEvent -Events $SelectedEvents -Name "renderer.dashboard-operational-timeout"
@@ -747,7 +841,7 @@ $DiagnosticBudgetStatus = Resolve-DiagnosticBudgetStatus `
 $Status = Resolve-MeasurementStatus `
     -TerminalReason $TerminalReason `
     -OperationalReady $OperationalReady `
-    -MissingMilestoneCount $MissingMilestones.Count `
+    -MissingMilestoneCount ($MissingMilestones.Count + $MissingBackendProgressStages.Count) `
     -ReadyStrategy $ReadyStrategy
 
 $OperationalReadyTimestampUtc = $null
@@ -758,8 +852,17 @@ if ($null -ne $OperationalReady) {
     $LauncherObservedMs = [math]::Round(($ReadyTimestamp - $StartedAtUtc).TotalMilliseconds, 1)
 }
 
+$PerformanceBudgetMs = 30000.0
+$PerformanceStatus = Resolve-PerformanceStatus `
+    -OperationalReady $OperationalReady `
+    -LauncherObservedMs $LauncherObservedMs `
+    -BudgetMs $PerformanceBudgetMs
+
 $Result = [pscustomobject][ordered]@{
     status                                  = $Status
+    functional_status                       = $Status
+    performance_status                      = $PerformanceStatus
+    performance_budget_ms                   = $PerformanceBudgetMs
     terminal_reason                         = $TerminalReason
     exe_path                                = $ResolvedExePath
     process_id                              = $LaunchedProcess.Id
@@ -770,6 +873,7 @@ $Result = [pscustomobject][ordered]@{
     log_path                                = $SelectedLogPath
     backend_bundle                          = $BackendBundleIntegrity
     backend_health_ready_elapsed_ms         = if ($null -eq $BackendReady) { $null } else { $BackendReady.elapsed_ms }
+    first_data_snapshot_elapsed_ms           = if ($null -eq $FirstDataSnapshot) { $null } else { $FirstDataSnapshot.elapsed_ms }
     first_live_data_elapsed_ms               = if ($null -eq $FirstLiveData) { $null } else { $FirstLiveData.elapsed_ms }
     dashboard_ready_elapsed_ms               = if ($null -eq $DashboardReady) { $null } else { $DashboardReady.elapsed_ms }
     operational_ready_elapsed_ms             = if ($null -eq $OperationalReady) { $null } else { $OperationalReady.elapsed_ms }
@@ -780,6 +884,8 @@ $Result = [pscustomobject][ordered]@{
     operational_timeout_budget_ms            = Get-EventPayloadValue -EventItem $OperationalTimeout -Name "timeout_ms"
     operational_timeout_missing_gates       = Get-EventPayloadValue -EventItem $OperationalTimeout -Name "missing_gates"
     diagnostic_budget_status                 = $DiagnosticBudgetStatus
+    backend_progress_stages                  = $BackendProgressStages
+    missing_backend_progress_stages          = $MissingBackendProgressStages
     missing_milestones                      = $MissingMilestones
     multiple_startup_sessions               = $MultipleSessions
     event_count                             = $SelectedEvents.Count

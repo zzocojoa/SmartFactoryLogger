@@ -1,5 +1,6 @@
 import json
 import re
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -409,6 +410,13 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("renderer.dashboard-operational-timeout", script_text)
         self.assertIn("RECOVERED_AFTER_DIAGNOSTIC_TIMEOUT", script_text)
         self.assertIn("operational_timeout_observed", script_text)
+        self.assertIn("renderer.first-data-snapshot", script_text)
+        self.assertIn("first_data_snapshot_elapsed_ms", script_text)
+        self.assertIn("Resolve-PerformanceStatus", script_text)
+        self.assertIn("performance_status", script_text)
+        self.assertIn("performance_budget_ms", script_text)
+        self.assertIn("Get-RequiredBackendProgressStages", script_text)
+        self.assertIn("missing_backend_progress_stages", script_text)
         self.assertNotIn(
             '$TerminalReason = "OPERATIONAL_TIMEOUT"\n                break',
             script_text,
@@ -478,11 +486,14 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("triggerInitialBackendStart('splash_first_paint')", main_text)
         self.assertIn("armInitialBackendStartFallback();", main_text)
         self.assertIn("requestBackendGracefulShutdown", main_text)
+        self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 305_000;", main_text)
+        self.assertIn("backend.shutdown-complete", main_text)
         self.assertIn("X-SFL-Control-Token", main_text)
         self.assertIn("STARTUP_RENDERER_EVENT_NAMES", main_text)
         self.assertIn("preload.js", package_payload["build"]["files"])
         self.assertIn("startupCoordinator.js", package_payload["build"]["files"])
         self.assertIn("startupIpc.js", package_payload["build"]["files"])
+        self.assertIn("backendStartupProgress.js", package_payload["build"]["files"])
         self.assertIn("backendProcessLifecycle.js", package_payload["build"]["files"])
 
     def test_backend_emits_only_allowlisted_embedded_startup_progress(self) -> None:
@@ -505,6 +516,31 @@ class ElectronPreloadContractTests(unittest.TestCase):
             backend_app._emit_embedded_startup_progress("csv_logger_ready")
 
             standalone_print.assert_not_called()
+
+    def test_backend_writes_authenticated_progress_when_stdout_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            progress_path = Path(temp_dir) / "startup.jsonl"
+            progress_path.write_text("", encoding="utf-8")
+            token = "a" * 64
+            with (
+                patch.object(backend_app, "is_embedded_electron", return_value=True),
+                patch.dict(
+                    backend_app.os.environ,
+                    {
+                        "SFL_STARTUP_PROGRESS_PATH": str(progress_path),
+                        "SFL_STARTUP_PROGRESS_TOKEN": token,
+                    },
+                ),
+                patch("builtins.print", side_effect=AttributeError("stdout unavailable")),
+            ):
+                backend_app._emit_embedded_startup_progress("lifespan_begin")
+
+            self.assertEqual(
+                progress_path.read_text(encoding="utf-8"),
+                'SFL_STARTUP_PROGRESS {"stage":"lifespan_begin","token":"'
+                + token
+                + '"}\n',
+            )
 
     def test_backend_progress_protocol_matches_electron_parser_contract(self) -> None:
         coordinator_text = (self.repo_root / "startupCoordinator.js").read_text(
