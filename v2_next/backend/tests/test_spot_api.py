@@ -1620,12 +1620,25 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             "latency_ms": 12.5,
             "image_path": "/image.jpg",
         }
+        internal_temperature_at = time.time()
         with (
             patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(return_value=(image_bytes, meta))),
+            patch.object(
+                backend_app.spot_control,
+                "get_spot_internal_temperature_diagnostics",
+                return_value={
+                    "internal_temperature": 41.25,
+                    "internal_temperature_at": internal_temperature_at,
+                    "internal_temperature_cache_status": "ok",
+                },
+            ),
             patch.object(backend_app.observability_service, "record_spot_image_result"),
             TestClient(backend_app.app) as client,
         ):
-            response = client.get("/api/spot/image.jpg")
+            response = client.get(
+                "/api/spot/image.jpg",
+                headers={"Origin": "file://"},
+            )
             config_response = client.get("/api/spot/config")
             removed_live = client.get("/api/spot/live_image")
             removed_proxy = client.get("/api/spot/proxy_image")
@@ -1634,6 +1647,23 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.content, image_bytes)
         self.assertEqual(response.headers["content-type"], "image/jpeg")
         self.assertEqual(response.headers["cache-control"], "no-store, no-cache, must-revalidate, max-age=0")
+        self.assertEqual(response.headers["x-spot-internal-temperature"], "41.250")
+        self.assertEqual(
+            response.headers["x-spot-internal-temperature-at"],
+            str(int(internal_temperature_at * 1000)),
+        )
+        self.assertEqual(response.headers["x-spot-internal-temperature-status"], "ok")
+        exposed_headers = {
+            value.strip().lower()
+            for value in response.headers["access-control-expose-headers"].split(",")
+        }
+        self.assertTrue(
+            {
+                "x-spot-internal-temperature",
+                "x-spot-internal-temperature-at",
+                "x-spot-internal-temperature-status",
+            }.issubset(exposed_headers)
+        )
         self.assertEqual(config_response.status_code, 200)
         self.assertEqual(config_response.json()["image_url"], "/api/spot/image.jpg")
         self.assertNotIn("live_image_url", config_response.json())
@@ -1641,6 +1671,68 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("live", config_response.json())
         self.assertEqual(removed_live.status_code, 404)
         self.assertEqual(removed_proxy.status_code, 404)
+
+    def test_official_image_bridge_does_not_expose_stale_internal_temperature(self) -> None:
+        from backend import app as backend_app
+
+        image_bytes = b"\xff\xd8bridge-image\xff\xd9"
+        meta = {
+            "status": "ok",
+            "source": "upstream",
+            "captured_at": time.time(),
+            "latency_ms": 12.5,
+            "image_path": "/image.jpg",
+        }
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(return_value=(image_bytes, meta))),
+            patch.object(
+                backend_app.spot_control,
+                "get_spot_internal_temperature_diagnostics",
+                return_value={
+                    "internal_temperature": None,
+                    "internal_temperature_at": None,
+                    "internal_temperature_cache_status": "stale",
+                },
+            ),
+            patch.object(backend_app.observability_service, "record_spot_image_result"),
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-spot-internal-temperature-status"], "stale")
+        self.assertNotIn("x-spot-internal-temperature", response.headers)
+        self.assertNotIn("x-spot-internal-temperature-at", response.headers)
+
+    def test_official_image_bridge_survives_internal_temperature_metadata_failure(self) -> None:
+        from backend import app as backend_app
+
+        image_bytes = b"\xff\xd8bridge-image\xff\xd9"
+        meta = {
+            "status": "ok",
+            "source": "upstream",
+            "captured_at": time.time(),
+            "latency_ms": 12.5,
+            "image_path": "/image.jpg",
+        }
+        with (
+            patch.object(backend_app.spot_control, "fetch_image_async", AsyncMock(return_value=(image_bytes, meta))),
+            patch.object(
+                backend_app.spot_control,
+                "get_spot_internal_temperature_diagnostics",
+                side_effect=RuntimeError("simulated metadata failure"),
+            ),
+            patch.object(backend_app.observability_service, "record_spot_image_result"),
+            patch.object(backend_app._logger, "warning") as warning,
+            TestClient(backend_app.app) as client,
+        ):
+            response = client.get("/api/spot/image.jpg")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, image_bytes)
+        self.assertEqual(response.headers["x-spot-internal-temperature-status"], "error")
+        self.assertNotIn("x-spot-internal-temperature", response.headers)
+        warning.assert_called_once()
 
     def test_official_image_bridge_reports_missing_configuration(self) -> None:
         from backend import app as backend_app

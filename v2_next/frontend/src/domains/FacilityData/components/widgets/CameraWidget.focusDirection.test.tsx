@@ -71,14 +71,40 @@ describe('CameraComponent focus direction controls', () => {
     expect(requestFocus).toHaveBeenCalledWith(-1);
   });
 
-  it('does not couple the JPEG display to a separate temperature badge', () => {
+  it('renders the cached SPOT internal temperature on a healthy image', () => {
     useDashboardStore.setState({
       spotConfig: buildSpotConfig(),
       spotImageUrl: '/api/spot/image.jpg',
       spotImageLoading: false,
       spotImageError: null,
       spotLastSuccessAt: Date.now(),
-      spotImageMetadata: buildSpotImageMetadata(),
+      spotImageMetadata: {
+        ...buildSpotImageMetadata(),
+        internal_temperature: 41.25,
+        internal_temperature_at: Date.now(),
+        internal_temperature_status: 'ok',
+      },
+    });
+
+    render(<CameraComponent focusBusy={false} />);
+
+    const badge = screen.getByText(/41\.3°C/);
+    expect(badge).toHaveClass('camera-internal-temperature-badge');
+  });
+
+  it('does not render stale SPOT internal temperature', () => {
+    useDashboardStore.setState({
+      spotConfig: buildSpotConfig(),
+      spotImageUrl: '/api/spot/image.jpg',
+      spotImageLoading: false,
+      spotImageError: null,
+      spotLastSuccessAt: Date.now(),
+      spotImageMetadata: {
+        ...buildSpotImageMetadata(),
+        internal_temperature: 41.25,
+        internal_temperature_at: Date.now() - 60_000,
+        internal_temperature_status: 'stale',
+      },
     });
 
     render(<CameraComponent focusBusy={false} />);
