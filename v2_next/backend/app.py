@@ -332,6 +332,30 @@ def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
     )
 
 
+def _log_backend_access_urls() -> None:
+    """Resolve local addresses outside the readiness-critical lifespan path."""
+    try:
+        hostname = socket.gethostname()
+        local_ips = socket.gethostbyname_ex(hostname)[2]
+        _logger.info(
+            "[Main] Resolved backend access URLs: %s %s",
+            ", ".join([f"http://{ip}:{config.BACKEND_PORT}" for ip in local_ips]),
+            _lifecycle_log_fields(),
+        )
+    except Exception as exc:
+        _logger.warning("[Main] Failed to log local IPs: %s", exc)
+
+
+def _start_backend_access_log_thread() -> threading.Thread:
+    thread = threading.Thread(
+        target=_log_backend_access_urls,
+        name="BackendAccessUrlLogger",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def _is_quiet_access_path(path: str) -> bool:
     if path in _QUIET_ACCESS_PATHS:
         return True
@@ -1526,17 +1550,11 @@ async def lifespan(app: FastAPI):
         _lifecycle_log_fields(),
     )
     
-    # Log local IPs for debugging remote connectivity
-    try:
-        hostname = socket.gethostname()
-        local_ips = socket.gethostbyname_ex(hostname)[2]
-        _logger.info(
-            "[Main] Backend started. Accessible at: %s %s",
-            ", ".join([f"http://{ip}:{config.BACKEND_PORT}" for ip in local_ips]),
-            _lifecycle_log_fields(),
-        )
-    except Exception as exc:
-        _logger.warning(f"[Main] Failed to log local IPs: {exc}")
+    # Address discovery is diagnostic-only. Some Windows hosts take tens of
+    # seconds to resolve their own hostname, so it must not gate Uvicorn
+    # readiness.
+    _start_backend_access_log_thread()
+    _logger.info("[Main] Lifespan startup complete %s", _lifecycle_log_fields())
 
     try:
         yield

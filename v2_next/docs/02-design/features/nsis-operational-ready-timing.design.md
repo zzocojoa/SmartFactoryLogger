@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Design
 
-> Version: 1.0.5 | Date: 2026-07-16 | Status: Act Iteration 7
+> Version: 1.0.6 | Date: 2026-07-16 | Status: Act Iteration 8
 > Level: Dynamic | Plan: `docs/01-plan/features/nsis-operational-ready-timing.plan.md`
 
 ---
@@ -228,9 +228,10 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | `frontend/src/domains/FacilityData/components/MetricsDataController.tsx` | mark first valid live snapshot |
 | `backend/tests/test_electron_startup_timing_contract.py` | main/renderer wiring contract |
 | `scripts/measure_nsis_operational_ready.ps1` | cold-start session-correlated measurement |
-| `backend/Observability/memory_service.py` | non-blocking immediate initial snapshot |
-| `backend/app.py` | backend lifespan stage timing logs |
-| `backend/tests/test_memory_service.py` | blocking-collector startup regression |
+| `backend/Observability/memory_service.py` | lightweight periodic sample; expensive process details only on explicit snapshot |
+| `backend/app.py` | backend lifespan stage timing and non-blocking local-address diagnostics |
+| `backend/tests/test_memory_service.py` | blocking-collector and lightweight-periodic-sample regressions |
+| `backend/tests/test_frontend_routing_health.py` | address-discovery readiness isolation regression |
 | `frontend/src/shared/api/client.mapper.ts` | packaged IPv4 loopback API base |
 | `frontend/src/shared/api/client.mapper.test.ts` | packaged and development resolution contracts |
 | `frontend/src/shared/api/pollingRequest.ts` | bounded readiness request timeout |
@@ -322,6 +323,7 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | FR-12 | 2.1 packaged API base | mapper unit test and packaged operational-ready timing |
 | FR-13 | 2.1 bounded local polling | transport and first-success retry tests |
 | FR-14 | 2.2 packaged startup polling ownership | hidden/stale-lock hook regressions and server package timing |
+| FR-15 | 2.2 backend observability isolation | process-probe and address-discovery regressions plus server package timing |
 
 ## Version History
 
@@ -333,3 +335,4 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | 1.0.3 | 2026-07-16 | Added packaged IPv4 loopback API contract | Codex |
 | 1.0.4 | 2026-07-16 | Bounded pre-listen readiness requests and first-success health retries | Codex |
 | 1.0.5 | 2026-07-16 | Kept packaged readiness pollers owned until first health and operational-data success | Codex |
+| 1.0.6 | 2026-07-16 | Isolated expensive Windows process probes and hostname resolution from readiness | Codex |

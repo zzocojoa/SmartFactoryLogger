@@ -1,6 +1,9 @@
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend import app as backend_app
 
@@ -147,6 +150,29 @@ class FrontendRoutingHealthTests(unittest.TestCase):
             backend_app.get_frontend_file_request_status(ready_status, "/nested/assets/missing.js"),
             404,
         )
+
+    def test_backend_address_discovery_does_not_block_readiness_caller(self) -> None:
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_address_discovery() -> None:
+            entered.set()
+            release.wait(timeout=2.0)
+
+        try:
+            with patch.object(backend_app, "_log_backend_access_urls", blocking_address_discovery):
+                started = time.perf_counter()
+                worker = backend_app._start_backend_access_log_thread()
+                elapsed = time.perf_counter() - started
+
+            self.assertTrue(entered.wait(timeout=1.0))
+            self.assertLess(elapsed, 0.5)
+            self.assertTrue(worker.daemon)
+            self.assertEqual(worker.name, "BackendAccessUrlLogger")
+        finally:
+            release.set()
+            if "worker" in locals():
+                worker.join(timeout=1.0)
 
 
 if __name__ == "__main__":

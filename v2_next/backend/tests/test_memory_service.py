@@ -1,7 +1,8 @@
 import json
 import threading
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from backend.Observability.memory_service import MemoryService, _calc_slope_bytes_per_min, estimate_size_bytes
 
@@ -92,6 +93,48 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(collector_item["severity"], "ok")
         self.assertEqual(collector_item["severity_reasons"], [])
         self.assertIsNone(collector_item["budget"])
+
+    def test_periodic_sampler_skips_expensive_windows_process_probes(self) -> None:
+        service = self.create_empty_service()
+        process = Mock()
+        process.memory_info.return_value = SimpleNamespace(rss=100, vms=200, private=300)
+        process.num_threads.return_value = 4
+        service._process = process
+        service._sample_interval_sec = 0.01
+
+        service.start()
+        try:
+            for _ in range(100):
+                if service.get_summary_state():
+                    break
+                threading.Event().wait(0.01)
+        finally:
+            service.stop()
+
+        self.assertTrue(service.get_summary_state())
+        process.memory_full_info.assert_not_called()
+        process.open_files.assert_not_called()
+        process.num_handles.assert_not_called()
+
+    def test_explicit_snapshot_keeps_expensive_process_details(self) -> None:
+        service = self.create_empty_service()
+        process = Mock()
+        process.memory_info.return_value = SimpleNamespace(rss=100, vms=200, private=300)
+        process.memory_full_info.return_value = SimpleNamespace(uss=250, private=275)
+        process.open_files.return_value = [object(), object()]
+        process.num_handles.return_value = 7
+        process.num_threads.return_value = 4
+        service._process = process
+
+        sample = service._build_process_sample(include_expensive_details=True)
+
+        self.assertEqual(sample["uss_bytes"], 250)
+        self.assertEqual(sample["private_bytes"], 275)
+        self.assertEqual(sample["open_files_count"], 2)
+        self.assertEqual(sample["handle_count"], 7)
+        process.memory_full_info.assert_called_once_with()
+        process.open_files.assert_called_once_with()
+        process.num_handles.assert_called_once_with()
 
     def test_start_runs_initial_snapshot_in_background_without_waiting_for_collector(self) -> None:
         service = self.create_empty_service()

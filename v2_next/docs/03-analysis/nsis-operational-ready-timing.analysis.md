@@ -2,11 +2,11 @@
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
 > Act 2 build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
-> Act iteration: 7 | Replacement package ready; server validation pending
+> Act iteration: 8 | Backend starvation patch verified locally; replacement package pending
 
 ---
 
-## Match Rate: 100% (candidate package; server validation pending)
+## Match Rate: 100% (Act 8 source; replacement package pending)
 
 The implementation matches the runtime readiness design. Act 3 made the frozen
 backend responsive, but package reproduction showed that the `file:` renderer
@@ -39,8 +39,8 @@ even across hidden visibility and stale dashboard leader state.
 - The PowerShell measurement rejects pre-existing processes and multiple startup
   sessions, and reports both Electron monotonic and launcher wall-clock time.
 - Root, frontend, backend, and NSIS artifact identity is `1.0.14`.
-- Initial memory diagnostics still begins immediately, but cannot block FastAPI
-  startup or `/health` availability.
+- Periodic memory diagnostics begins immediately with lightweight process
+  metrics; expensive Windows handle scans remain available on explicit snapshot.
 
 ## Requirement Results
 
@@ -56,10 +56,11 @@ even across hidden visibility and stale dashboard leader state.
 | FR-08 contamination rejection | PASS | Process and multi-session classification contract |
 | FR-09 clean package | PASS | Clean PyInstaller provenance and replacement NSIS verified |
 | FR-10 version identity | PASS | Root/frontend/backend all `1.0.14`; artifact filename matches |
-| FR-11 non-blocking initial memory snapshot | PASS | Blocking-collector regression plus source runtime stage timing |
+| FR-11 non-blocking memory sampler | PASS | Periodic path excludes expensive probes; explicit snapshot retains them |
 | FR-12 explicit packaged IPv4 base | PASS | Mapper contract and final bundle scan |
 | FR-13 bounded pre-listen recovery | PASS | Transport contract and fake-timer first-success retry test |
 | FR-14 packaged lifecycle recovery | PASS SOURCE | Hidden/stale-lock hook tests; server package validation pending |
+| FR-15 backend observability isolation | PASS SOURCE | Memory probe and asynchronous address-discovery regressions |
 
 ## Acceptance Criteria
 
@@ -79,6 +80,7 @@ even across hidden visibility and stale dashboard leader state.
 | AC-12 | PASS | packaged bundle contains IPv4 loopback and no localhost literal |
 | AC-13 | PENDING SERVER | source/package contracts PASS; physical recovery run pending |
 | AC-14 | PENDING SERVER | focused lifecycle regressions PASS; replacement package pending |
+| AC-15 | PENDING SERVER | Act 8 source and full backend suite PASS; replacement package pending |
 
 ## Act Iteration
 
@@ -228,6 +230,30 @@ remains pending until `isOperationalFactoryData()` accepts a `Status=Running`
 snapshot. `Initializing` does not end recovery. No request, endpoint, timer
 interval, device protocol, or normal post-success ownership policy changes.
 
+### Act 8: backend observability starved readiness
+
+The Act 7 renderer did recover, but only after the original 90-second QA
+window. Session-correlated Electron evidence recorded backend health at
+`143,597 ms`, first Running data at `149,143.5 ms`, and operational-ready at
+`149,161.7 ms`. This disproved the earlier classification that the renderer
+stopped retrying.
+
+Server lifespan evidence isolated two backend delays:
+
+```text
+memory_service stage: 16,571.7 ms, 17,074.0 ms, and 29,896.8 ms
+spot_poll complete -> backend URL log: up to approximately 32 s
+```
+
+The five-second memory sampler called `memory_full_info()`, `open_files()`, and
+`num_handles()` on every sample. Windows process-handle scans can take longer
+than the sampling interval, repeatedly delaying unrelated Python work. The
+periodic path now uses `memory_info()`, thread count, and GC counters only;
+explicit `/api/memory/snapshot` capture retains all expensive fields. The
+second gap matched synchronous `gethostbyname_ex(gethostname())`; local-address
+discovery now runs on a daemon diagnostic thread and a distinct lifespan
+completion marker is emitted before yielding.
+
 ## Validation Results
 
 | Check | Result |
@@ -262,6 +288,10 @@ interval, device protocol, or normal post-success ownership policy changes.
 | Act 7 PyInstaller provenance | clean HEAD `81356abb6ca629b93cecc3b171d65806e8ce3ab6` verified before/after build |
 | Act 7 NSIS electron-builder | PASS |
 | Act 7 packaged MOCK operational-ready | PASS at `8,568.5 ms`; launcher `8,886.4 ms` |
+| Act 8 focused backend tests | `39 passed` |
+| Act 8 backend lint/mypy | PASS |
+| Act 8 full backend unittest | `488 tests passed` |
+| Act 8 `git diff --check` | PASS |
 
 ## Act 7 Candidate Package Evidence
 
@@ -373,7 +403,7 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Run only the Act 7 installer on the server and retain a true
+- Build the Act 8 source from a clean commit and retain a true server
   operational-ready measurement artifact.
 
 ## Deviations from Design
@@ -387,6 +417,6 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Use only installer SHA `E771FDA7...` for final server validation. Do not use
-superseded SHA `39165C1E...`. Rerun the bundled launcher on the server with the
-app and backend fully stopped.
+Do not use the Act 7 installer SHA `E771FDA7...` for final acceptance; it is now
+root-cause evidence. Build the Act 8 source from a clean commit, verify package
+identity, and rerun the bundled launcher with all existing processes stopped.

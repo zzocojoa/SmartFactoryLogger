@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Plan
 
-> Version: 1.0.5 | Date: 2026-07-16 | Status: Act Iteration 7
+> Version: 1.0.6 | Date: 2026-07-16 | Status: Act Iteration 8
 > Level: Dynamic
 
 ---
@@ -186,7 +186,8 @@ readiness without changing the existing startup baseline.
 | Health response arrives before driver data | Low | High | Keep health and data as separate gates. |
 | Instrumentation changes runtime behavior | Medium | Low | Reuse existing responses; add no network requests or polling changes. |
 | Renderer diagnostic timeout prematurely ends a longer launcher measurement | High | Medium | Treat the 30-second event as evidence only; terminate only on true readiness, process failure, contamination, or caller timeout. |
-| Initial memory diagnostics blocks `/health` while hardware worker calls are slow | High | High | Run the first snapshot immediately on the existing sampler thread and log each lifespan startup stage duration. |
+| Repeated Windows process-handle scans starve startup and `/health` | High | High | Keep the five-second sampler on lightweight process metrics; reserve `memory_full_info`, open-file, and handle scans for explicit snapshots. |
+| Local hostname resolution delays the lifespan yield | High | High | Resolve and log local access URLs on a daemon diagnostic thread after scheduling readiness. |
 | IPv6-first `localhost` resolution delays each renderer request while Uvicorn listens on IPv4 | High | High | Use the explicit IPv4 loopback address only for packaged/local fallback API resolution. |
 | A renderer request opened before Uvicorn listens remains pending and suppresses its recursive retry | High | High | Apply a two-second bound to the two operational polling requests and retain the base health interval before first success. |
 | Electron visibility or a stale localStorage leader lock suppresses all retries before backend readiness | High | High | Treat the single packaged renderer as temporary polling owner until each readiness gate first succeeds, then restore the existing pause/leader policy. |
@@ -223,3 +224,4 @@ readiness without changing the existing startup baseline.
 | 1.0.3 | 2026-07-16 | Added Act 5 packaged IPv4 loopback requirement from runtime reproduction | Codex |
 | 1.0.4 | 2026-07-16 | Added Act 6 bounded readiness requests and first-success health retry | Codex |
 | 1.0.5 | 2026-07-16 | Added Act 7 packaged pre-success polling ownership across visibility and stale locks | Codex |
+| 1.0.6 | 2026-07-16 | Added Act 8 lightweight periodic memory sampling and non-blocking address discovery | Codex |

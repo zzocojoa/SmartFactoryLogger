@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.5 | Date: 2026-07-16 | Status: Act 7 Candidate Ready / Server Validation Pending
+> Version: 1.0.6 | Date: 2026-07-16 | Status: Act 8 Source Verified / Package Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -348,8 +348,27 @@ cleanup and are not independent crash evidence.
   backend tests pass. A clean replacement package and physical-server
   measurement are still required.
 
+### Act 7 delayed recovery and Act 8 backend patch
+
+- Act 7 server telemetry proved renderer recovery remained active: health was
+  recorded at `143,597 ms`, first Running data at `149,143.5 ms`, and true
+  operational-ready at `149,161.7 ms`.
+- Repeated lifespan logs showed `memory_service.start()` consuming
+  `16.6-29.9 s`. Its five-second sampler repeated Windows full-memory,
+  open-file, and handle scans, so one expensive sample could overrun the next.
+- A separate uninstrumented delay of up to approximately 32 seconds occurred
+  between `spot_poll` completion and the old URL log, matching synchronous local
+  hostname resolution.
+- Act 8 keeps periodic memory monitoring but uses lightweight process fields.
+  Expensive USS/open-file/handle details remain available through explicit
+  memory snapshots.
+- Local-address discovery is now diagnostic-only on a daemon thread. The new
+  `Lifespan startup complete` marker identifies readiness independently of DNS.
+- Focused tests: `39 passed`; backend ruff and mypy: PASS; full backend suite:
+  `488 tests passed`; `git diff --check`: PASS.
+
 ## 5. Next Action
 
-Copy and install only SHA `E771FDA7...` on the server, verify the installed
-backend and bundled frontend hashes, then rerun the bundled 90-second physical
-device operational-ready measurement with all existing processes stopped.
+Commit the Act 8 source, generate a clean provenance-verified PyInstaller/NSIS
+package, and rerun the bundled 90-second physical-device operational-ready
+measurement with all existing processes stopped.
