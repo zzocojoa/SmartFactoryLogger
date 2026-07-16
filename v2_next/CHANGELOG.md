@@ -60,6 +60,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Verified the same installed package for 15 minutes with zero runtime, image,
   observability, logging, fact-write, fact-link, signalpc, or duplicate-key
   failures.
+- Rebuilt the merged release candidate after the hidden-tab recovery latch,
+  then reverified installer SHA-256 `F72567E3EFFCD84D0858E42C81666BADD13F2C35F0AAA6ED1842D0830BB4A63F`
+  on the physical server. Final operational readiness completed in `4,184.3 ms`
+  with no timeout, one startup session, connected PLC, Running live data, and
+  1,707/1,707 backend bundle files verified.
 
 ### Compatibility
 

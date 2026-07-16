@@ -466,14 +466,48 @@ All health, data, disconnect, worker-thread, stale-data, SPOT, image,
 observability, fact-write, fact-link, signalpc, and duplicate-key failure
 counters were zero. Result: `SERVER ONEDIR 15-MINUTE STABILITY VALIDATION: PASS`.
 
+### Final merged release-candidate revalidation
+
+The automated PR review identified one P2 issue after the first one-dir server
+acceptance: a later Offline/Error snapshot could clear the renderer's first
+operational-data state and reactivate hidden-tab startup recovery. Commit
+`fb10f9605f567e77d1518f2c29769e896d48ea14` latched that state and added a
+dedicated regression test. The rebuilt installer preserves the already accepted
+backend bundle and includes the merged frontend correction.
+
+| Artifact | Value |
+|----------|-------|
+| Merged runtime commit | `d7a3e3d33346a4d21d81658fdfb2865404b0abee` |
+| Installer bytes | `147,090,492` |
+| Installer SHA-256 | `F72567E3EFFCD84D0858E42C81666BADD13F2C35F0AAA6ED1842D0830BB4A63F` |
+| Server artifact | `operational-ready-final-server-20260716-144613.json` |
+| Server artifact SHA-256 | `2BC2764ED9E6866CF83A54EB2DD778D087D9EB2B5AB6F0C8086ADAF5DF0C63A6` |
+| Backend bundle | `1,707 / 1,707` files verified |
+| Bundle aggregate SHA-256 | `D1F8EA83B561EB1325E249739771FFC31B9CC6424E8E23B64ECF329F85AFEF40` |
+
+Final physical-server timing:
+
+| Gate | Electron elapsed |
+|------|------------------|
+| Dashboard visual ready | `1,425.6 ms` |
+| Backend health ready | `3,619.0 ms` |
+| First real Running data | `4,105.0 ms` |
+| Operational ready | `4,184.3 ms` |
+| Launcher observed | `4,390.3 ms` |
+
+Result: PASS, `ready_strategy=raf`, no diagnostic timeout, no missing
+milestone, one startup session, `driver_connected=true`, first data status
+`Running`, complete package-identity and bundle-integrity verification, and
+cleanup PASS.
+
 Release gate verdict: `APPROVED`.
 
 ## 5. Next Action
 
-Use only installer SHA `5F895884...` for this release and reject superseded
-packages. The operational-ready and 15-minute physical-server artifacts are
-preserved by filename and SHA-256 above. Proceed through PR review, merge, and
-the repository-defined tagged Windows release-artifact workflow.
+Publish only installer SHA `F72567E3...` as the v1.0.14 server-validated release
+asset and reject both superseded local installers and unvalidated CI rebuilds.
+The operational-ready and 15-minute physical-server artifacts are preserved by
+filename and SHA-256 above.
 
 ## Version History
 
@@ -481,3 +515,4 @@ the repository-defined tagged Windows release-artifact workflow.
 |---------|------|---------|--------|
 | 1.1.0 | 2026-07-16 | Recorded final one-dir physical-server operational-ready acceptance | Codex |
 | 1.1.1 | 2026-07-16 | Preserved the 15-minute server stability artifact and approved the release gate | Codex |
+| 1.1.2 | 2026-07-16 | Recorded the exact merged installer revalidation and final release trust anchor | Codex |
