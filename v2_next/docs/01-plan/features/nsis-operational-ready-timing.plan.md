@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Plan
 
-> Version: 1.0.6 | Date: 2026-07-16 | Status: Act Iteration 8
+> Version: 1.1.0 | Date: 2026-07-16 | Status: Completed / Server Verified
 > Level: Dynamic
 
 ---
@@ -55,6 +55,10 @@ readiness without changing the existing startup baseline.
 - During packaged cold start, keep the existing health and live-data pollers
   active until their respective first successful readiness result even when
   the Electron document is hidden or a stale dashboard leader lock exists.
+- Remove the server-proven PyInstaller one-file extraction delay by packaging
+  the backend as one-dir while preserving the installed executable path.
+- Verify the complete installed backend bundle before timing, not only the
+  launcher EXE, and bind the bundle to the clean build commit.
 - Build a clean PyInstaller backend and NSIS installer from the verified commit.
 
 ### 2.2 Non-Goals
@@ -84,13 +88,17 @@ readiness without changing the existing startup baseline.
 - Bounded operational polling transport and first-success retry recovery.
 - Packaged startup polling ownership that survives pre-success visibility and
   stale-leader transitions without changing the normal post-success policy.
+- PyInstaller one-dir packaging, Electron/portable resource mapping, and exact
+  backend bundle integrity verification.
+- Physical-server cold-start validation with backend health, real Running data,
+  dashboard paint, and full operational-ready elapsed time recorded separately.
 - PDCA analysis/report documents and clean package hashes.
 
 ### 3.2 Out of Scope
 
-- Server-PC real-device execution of the generated installer.
 - Broad startup optimization beyond removing the server-proven synchronous
   diagnostics blocker.
+- Long-duration device stability validation unrelated to startup readiness.
 - Requiring every optional sensor field to be finite before the dashboard is
   considered usable.
 - Changes to the application's user-visible feature set beyond the package
@@ -102,20 +110,23 @@ readiness without changing the existing startup baseline.
 
 | ID | Requirement | Priority | Status |
 |----|-------------|----------|--------|
-| FR-01 | Keep `renderer.dashboard-ready` behavior and existing measurement compatibility. | High | Pending |
-| FR-02 | Add a process-unique startup session ID to every Electron startup log event. | High | Pending |
-| FR-03 | Record backend readiness after the first successful `/health` response. | High | Pending |
-| FR-04 | Record live-data readiness only for `Status=Running` `FactoryData` with finite positive `timestamp_ms`. | High | Pending |
-| FR-05 | Emit operational ready once, after all three gates and two animation frames. | High | Pending |
-| FR-06 | A timeout must report missing gates and must never be counted as operational ready. | High | Pending |
-| FR-07 | Measurement output must include session ID, per-gate elapsed values, main-clock total, launcher-observed total, ready strategy, diagnostic-budget status, and cleanup result; the caller's `TimeoutSec` is the terminal measurement budget. | High | Pending |
-| FR-08 | Measurement must fail when an existing app/backend process could contaminate a cold-start sample. | High | Pending |
-| FR-09 | Generate a clean PyInstaller backend and NSIS installer with SHA-256 evidence. | High | Pending |
-| FR-10 | Set root and frontend package identity consistently to `1.0.14`. | High | Pending |
-| FR-11 | The first memory diagnostics snapshot must run immediately in its sampler thread and must not block FastAPI startup or `/health`. | High | Pending |
-| FR-12 | Packaged `file:` renderers must call the local backend through `127.0.0.1`, while explicit environment overrides and browser-relative development behavior remain unchanged. | High | Pending |
-| FR-13 | `/health` and `/api/data` startup requests must terminate within two seconds, and health must retry at the five-second base interval until its first success. | High | Pending |
-| FR-14 | In packaged Electron startup, health polling must continue until the first successful health response and data polling until the first operational `Status=Running` snapshot, regardless of hidden visibility or a stale leader lock; normal visibility and leader ownership must resume after each first success. | High | Pending |
+| FR-01 | Keep `renderer.dashboard-ready` behavior and existing measurement compatibility. | High | Complete |
+| FR-02 | Add a process-unique startup session ID to every Electron startup log event. | High | Complete |
+| FR-03 | Record backend readiness after the first successful `/health` response. | High | Complete |
+| FR-04 | Record live-data readiness only for `Status=Running` `FactoryData` with finite positive `timestamp_ms`. | High | Complete |
+| FR-05 | Emit operational ready once, after all three gates and two animation frames. | High | Complete |
+| FR-06 | A timeout must report missing gates and must never be counted as operational ready. | High | Complete |
+| FR-07 | Measurement output must include session ID, per-gate elapsed values, main-clock total, launcher-observed total, ready strategy, diagnostic-budget status, and cleanup result; the caller's `TimeoutSec` is the terminal measurement budget. | High | Complete |
+| FR-08 | Measurement must fail when an existing app/backend process could contaminate a cold-start sample. | High | Complete |
+| FR-09 | Generate a clean PyInstaller backend and NSIS installer with SHA-256 evidence. | High | Complete |
+| FR-10 | Set root and frontend package identity consistently to `1.0.14`. | High | Complete |
+| FR-11 | The first memory diagnostics snapshot must run immediately in its sampler thread and must not block FastAPI startup or `/health`. | High | Complete |
+| FR-12 | Packaged `file:` renderers must call the local backend through `127.0.0.1`, while explicit environment overrides and browser-relative development behavior remain unchanged. | High | Complete |
+| FR-13 | Before first success, `/health` may use an eight-second bound; afterward it returns to two seconds. `/api/data` remains bounded to two seconds, and health retries at the five-second base interval until first success. | High | Complete |
+| FR-14 | In packaged Electron startup, health polling must continue until the first successful health response and data polling until the first operational `Status=Running` snapshot, regardless of hidden visibility or a stale leader lock; normal visibility and leader ownership must resume after each first success. | High | Complete |
+| FR-15 | Backend diagnostics, fact persistence, and address discovery must not block the event loop or FastAPI readiness. | High | Complete |
+| FR-16 | Package the backend as PyInstaller one-dir while preserving `resources/backend/SmartFactoryBackend.exe`. | High | Complete |
+| FR-17 | Generate and verify an exact, path-safe manifest for every backend bundle file before starting the measurement clock. | High | Complete |
 
 ### 4.2 Non-Functional Requirements
 
@@ -125,55 +136,61 @@ readiness without changing the existing startup baseline.
 | Correctness | Synthetic startup data cannot satisfy the live-data gate. | Unit tests with initializing and timestamped snapshots |
 | Security | Renderer may emit only allowlisted primitive, bounded telemetry payloads. | Electron bridge contract tests |
 | Observability | A failed operational startup identifies the missing gate without fabricating success. | Timeout unit/script tests |
-| Performance | Instrumentation does not introduce network requests or change polling intervals. | Code review and startup smoke check |
+| Performance | Physical-server operational-ready is at or below 30 seconds without changing device polling intervals. | Bundled QA server artifact |
 | Availability | A slow initial memory collector cannot delay FastAPI startup completion. | Blocking-collector regression test and packaged server run |
 | Recovery | A local request started before Uvicorn listens cannot suspend all later startup polls. | Transport timeout and health first-success retry tests |
 | Lifecycle recovery | Packaged pre-success polling cannot be paused by hidden visibility or stale leader state. | Hidden-document and stale-lock hook regression tests |
-| Packaging | PyInstaller build must fail closed on dirty or changed Git source. | Provenance gate and clean build log |
+| Packaging | PyInstaller build fails closed on dirty/changed source and the installed one-dir bundle exactly matches its clean-commit manifest. | Provenance gate, manifest verifier, installed server package |
 
 ## 5. Success Criteria
 
-- [ ] `[AC-01]` Existing visual-ready tests and packaged metric remain compatible.
-- [ ] `[AC-02]` Backend health event is recorded exactly once after a successful
+- [x] `[AC-01]` Existing visual-ready tests and packaged metric remain compatible.
+- [x] `[AC-02]` Backend health event is recorded exactly once after a successful
   health response.
-- [ ] `[AC-03]` `Status=Initializing/Offline/Error`, missing timestamps, zero
+- [x] `[AC-03]` `Status=Initializing/Offline/Error`, missing timestamps, zero
   timestamps, NaN, and infinite timestamps do not satisfy live-data readiness.
-- [ ] `[AC-04]` A valid timestamped snapshot records first-live-data exactly once.
-- [ ] `[AC-05]` Operational ready is independent of gate arrival order, waits for
+- [x] `[AC-04]` A valid timestamped snapshot records first-live-data exactly once.
+- [x] `[AC-05]` Operational ready is independent of gate arrival order, waits for
   two animation frames, and is recorded exactly once.
-- [ ] `[AC-06]` Timeout evidence names missing gates and is never accepted as
+- [x] `[AC-06]` Timeout evidence names missing gates and is never accepted as
   operational ready.
-- [ ] `[AC-07]` The measurement script correlates one startup session, rejects
+- [x] `[AC-07]` The measurement script correlates one startup session, rejects
   contaminated runs, continues after the 30-second diagnostic event until the
   caller timeout, and returns structured PASS/FAIL JSON.
-- [ ] `[AC-08]` Frontend typecheck, lint, focused/full tests, backend checks, and
+- [x] `[AC-08]` Frontend typecheck, lint, focused/full tests, backend checks, and
   PowerShell parser checks pass.
-- [ ] `[AC-09]` Clean frontend, PyInstaller, and NSIS builds pass; installer and
+- [x] `[AC-09]` Clean frontend, PyInstaller, and NSIS builds pass; installer and
   backend SHA-256 values are recorded.
-- [ ] `[AC-10]` The generated installer filename and installed application
+- [x] `[AC-10]` The generated installer filename and installed application
   metadata identify version `1.0.14` consistently.
-- [ ] `[AC-11]` `MemoryService.start()` returns before a deliberately blocked
+- [x] `[AC-11]` `MemoryService.start()` returns before a deliberately blocked
   initial collector completes, while that collector still starts immediately.
-- [ ] `[AC-12]` Packaged API resolution returns `http://127.0.0.1:8000`, and
+- [x] `[AC-12]` Packaged API resolution returns `http://127.0.0.1:8000`, and
   the replacement package records backend health and live data without the
   Windows `localhost -> ::1` fallback delay.
-- [ ] `[AC-13]` Both operational polling transports use a two-second request
-  bound, health retries every five seconds before first success, and the server
-  package recovers backend/data gates within the caller timeout.
-- [ ] `[AC-14]` A packaged hidden renderer with a stale leader lock continues
+- [x] `[AC-13]` Startup health uses an eight-second bound, steady-state health
+  and all data requests use two seconds, health retries every five seconds
+  before first success, and the server recovers within the caller timeout.
+- [x] `[AC-14]` A packaged hidden renderer with a stale leader lock continues
   health polling until the first response and live-data polling until the first
   operational snapshot; `Initializing` does not end recovery, and normal hidden
   pause behavior resumes immediately after success.
+- [x] `[AC-15]` The physical server records visual-ready, backend health,
+  first Running data, and operational-ready as separate milestones.
+- [x] `[AC-16]` The installed one-dir bundle exactly matches 1,707 manifest
+  entries and the clean build commit.
+- [x] `[AC-17]` Physical-server operational-ready completes within 30 seconds
+  with no missing milestone, diagnostic timeout, or contaminated session.
 
 ## 6. Schedule
 
 | Phase | Target Date | Status |
 |-------|------------|--------|
 | Plan | 2026-07-15 | Complete |
-| Design | 2026-07-15 | In Progress |
-| Implementation | 2026-07-15 | Pending |
-| Check / Act | 2026-07-16 | Pending |
-| Report / Package | 2026-07-16 | Pending |
+| Design | 2026-07-15 | Complete |
+| Implementation | 2026-07-16 | Complete |
+| Check / Act | 2026-07-16 | Complete |
+| Report / Package | 2026-07-16 | Complete |
 
 ## 7. Risks & Mitigations
 
@@ -189,8 +206,10 @@ readiness without changing the existing startup baseline.
 | Repeated Windows process-handle scans starve startup and `/health` | High | High | Keep the five-second sampler on lightweight process metrics; reserve `memory_full_info`, open-file, and handle scans for explicit snapshots. |
 | Local hostname resolution delays the lifespan yield | High | High | Resolve and log local access URLs on a daemon diagnostic thread after scheduling readiness. |
 | IPv6-first `localhost` resolution delays each renderer request while Uvicorn listens on IPv4 | High | High | Use the explicit IPv4 loopback address only for packaged/local fallback API resolution. |
-| A renderer request opened before Uvicorn listens remains pending and suppresses its recursive retry | High | High | Apply a two-second bound to the two operational polling requests and retain the base health interval before first success. |
+| A renderer request opened before Uvicorn listens remains pending and suppresses its recursive retry | High | High | Bound startup health to eight seconds, steady health/data to two seconds, and retain the base health interval before first success. |
 | Electron visibility or a stale localStorage leader lock suppresses all retries before backend readiness | High | High | Treat the single packaged renderer as temporary polling owner until each readiness gate first succeeds, then restore the existing pause/leader policy. |
+| PyInstaller one-file extraction dominates the user wait before Python starts | High | High | Use one-dir packaging and verify the backend launcher is spawned directly from the installed bundle. |
+| Missing or stale one-dir dependency causes partial startup | High | Medium | Verify the exact file set, sizes, per-file hashes, aggregate hash, and clean build commit before timing. |
 | Dirty package records unverifiable source | High | Medium | Commit first and use the existing fail-closed provenance gate. |
 
 ## 8. Architecture Considerations
@@ -202,17 +221,19 @@ readiness without changing the existing startup baseline.
   driver snapshot is composed; the synthetic startup object has no timestamp.
 - Operational readiness is an additional metric, not a redefinition of visual
   readiness.
+- The installed backend entry path remains stable; only its dependency layout
+  changes from runtime extraction to the adjacent `_internal` directory.
+- The installer SHA is the release trust anchor. The bundle manifest detects
+  installed-file drift but is not a substitute for code signing.
 - No persistent schema or migration is required.
 - Rollback is a joint revert of the new event allowlist, readiness coordinator,
   call sites, tests, and measurement script. Existing visual timing remains.
 
 ## 9. Next Steps
 
-1. Finalize the technical design and state machine.
-2. Implement event correlation, readiness gates, and tests.
-3. Run gap analysis and correct all blocking gaps.
-4. Commit the verified source so the provenance build gate can run.
-5. Generate and hash the new backend and NSIS installer.
+1. Preserve the server artifact and release hashes with the completion report.
+2. Use the validated installer SHA for deployment; reject superseded packages.
+3. Run long-duration device stability validation as a separate release gate.
 
 ## Version History
 
@@ -225,3 +246,4 @@ readiness without changing the existing startup baseline.
 | 1.0.4 | 2026-07-16 | Added Act 6 bounded readiness requests and first-success health retry | Codex |
 | 1.0.5 | 2026-07-16 | Added Act 7 packaged pre-success polling ownership across visibility and stale locks | Codex |
 | 1.0.6 | 2026-07-16 | Added Act 8 lightweight periodic memory sampling and non-blocking address discovery | Codex |
+| 1.1.0 | 2026-07-16 | Added one-dir packaging, complete bundle integrity, and final physical-server operational-ready acceptance | Codex |

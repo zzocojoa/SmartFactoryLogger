@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Design
 
-> Version: 1.0.6 | Date: 2026-07-16 | Status: Act Iteration 8
+> Version: 1.1.0 | Date: 2026-07-16 | Status: Completed / Server Verified
 > Level: Dynamic | Plan: `docs/01-plan/features/nsis-operational-ready-timing.plan.md`
 
 ---
@@ -24,6 +24,10 @@ and the dashboard has painted after all required gates were observed.
 - Reject `Initializing`, `Offline`, and `Error` snapshots deterministically.
 - Correlate each log event to one Electron process and one cold-start sample.
 - Fail closed on timeout, contaminated process state, or missing milestones.
+- Remove one-file bootstrap extraction from the measured cold-start path while
+  retaining the installed backend executable path.
+- Verify the complete backend bundle against clean-build provenance before the
+  launcher starts its timing clock.
 - Generate a separately identifiable `1.0.14` installer from a clean commit.
 
 ## 2. Architecture
@@ -50,16 +54,24 @@ memory diagnostics snapshot: `MemoryService.start()` starts its sampler thread,
 and that thread performs the first snapshot immediately before its first wait.
 The packaged `file:` renderer resolves its API base to
 `http://127.0.0.1:8000`; browser development remains relative and an explicit
-`VITE_API_BASE_URL` remains authoritative. The two readiness transports bound
-each local request to two seconds. Health uses the existing five-second base
+`VITE_API_BASE_URL` remains authoritative. Before first success, health permits
+an eight-second request; after success it returns to two seconds. Live data is
+always bounded to two seconds. Health uses the existing five-second base
 interval until its first success, after which the existing outage backoff
 policy resumes unchanged. Live data keeps its existing worker interval and
-backoff policy; only a pending request is now bounded. During packaged startup,
+backoff policy. During packaged startup,
 the single Electron renderer remains a temporary polling owner until health has
 first succeeded and an operational `Status=Running` snapshot has first arrived.
 Hidden visibility and a stale dashboard leader lock therefore cannot suppress
 those two readiness paths. Each path returns to the existing visibility and
 leader policy immediately after its own first success.
+
+The backend is packaged as PyInstaller one-dir. Electron still launches
+`resources/backend/SmartFactoryBackend.exe`, while dependencies live beside it
+under `_internal`. `bundle-manifest.json` records every non-manifest file using
+ordinal path order, length, SHA-256, aggregate SHA-256, and clean build commit.
+The bundled QA validates path safety, exact file-set equality, sizes, hashes,
+aggregate, schema, packaging mode, and commit before `started_at_utc`.
 
 ### 2.2 Component Design
 
@@ -134,6 +146,19 @@ Public operations:
   first success, the existing hidden pause, leader heartbeat, and outage backoff
   behavior applies without exception.
 
+#### Verified one-dir backend bundle
+
+- PyInstaller `EXE` excludes collected binaries and `COLLECT` creates the
+  `SmartFactoryBackend` one-dir bundle with `_internal` dependencies.
+- Electron copies the entire build directory to `resources/backend` and keeps
+  the launcher path unchanged.
+- The deploy script writes a UTF-8 deterministic manifest after PyInstaller
+  completes and before Electron packaging begins.
+- The verifier rejects unsafe or duplicate paths, missing or unexpected files,
+  length/hash mismatches, invalid schema/mode/commit, and aggregate mismatch.
+- Manifest verification occurs before the launcher timestamp so integrity I/O
+  cannot inflate the user-wait metric.
+
 ### 2.3 Data Flow
 
 1. PowerShell verifies no `smart-factory` or `SmartFactoryBackend` process is
@@ -193,6 +218,7 @@ operational_ready_elapsed_ms
 launcher_observed_operational_ready_ms
 ready_strategy / missing_milestones / contamination
 operational_timeout_observed / diagnostic_budget_status
+backend_bundle schema/mode/commit/file_count/aggregate/verification results
 cleanup / events
 ```
 
@@ -240,6 +266,11 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | `frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.ts` | Packaged operational-data polling ownership until first Running snapshot |
 | corresponding hook tests | Hidden-document, stale-lock, Initializing, and post-success pause regressions |
 | root/frontend package manifests | version `1.0.14` |
+| `backend/build_specs/SmartFactoryBackend.spec` | one-dir `EXE`/`COLLECT` layout |
+| `package.json` | copy complete backend directory to stable installed path |
+| `scripts/deploy.ps1` | deterministic bundle manifest and portable one-dir copy |
+| `scripts/measure_nsis_operational_ready.ps1` | pre-timing complete-bundle verification |
+| `backend/tests/test_data_history_api.py` | packaging/resource/manifest contract tests |
 
 ### 5.2 Implementation Order
 
@@ -276,9 +307,9 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
   `MemoryService.start()` returns before the collector is released.
 - Existing frontend startup tests, full frontend test/typecheck/lint, backend
   ruff/mypy/unittest, and `git diff --check` pass.
-- A transport contract proves `/health` and `/api/data` receive the two-second
-  bound, and a fake-timer hook test proves repeated pre-success health failures
-  remain at the five-second base interval before recovery.
+- A transport contract proves startup `/health` receives eight seconds while
+  steady health and `/api/data` receive two seconds. A fake-timer hook test
+  proves repeated pre-success health failures retain the five-second interval.
 - Packaged hook regressions start hidden with a stale leader lock, prove health
   retries until success, prove `Initializing` does not stop data polling, and
   prove hidden polling stops after the first operational snapshot.
@@ -290,6 +321,11 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 - Installer filename reports `Setup 1.0.14.exe`.
 - SHA-256 is recorded for installer and packaged backend.
 - Measurement script is included as a QA resource when required by packaging.
+- Installed backend contains the launcher, `_internal`, and manifest with no
+  missing or unexpected file relative to its 1,707 declared entries.
+- Bundled QA self-test proves valid-fixture PASS and tampered-file rejection.
+- Physical-server acceptance requires no timeout and operational-ready at or
+  below 30 seconds with a real timestamped `Status=Running` snapshot.
 
 ## 7. Security and Operations
 
@@ -301,7 +337,9 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
   a diagnostic marker alone cannot fabricate PASS.
 - Observability impact is local startup log growth of at most five bounded events
   per process.
-- Migration risk is none.
+- Migration risk is medium because the installed backend changes from one file
+  to a directory tree. Clean install and in-place upgrade package identity are
+  verified before cold-start acceptance.
 - Rollback is one joint revert of event names, coordinator/call sites, tests,
   script, and version metadata; the existing visual-ready metric remains usable.
 
@@ -324,6 +362,8 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | FR-13 | 2.1 bounded local polling | transport and first-success retry tests |
 | FR-14 | 2.2 packaged startup polling ownership | hidden/stale-lock hook regressions and server package timing |
 | FR-15 | 2.2 backend observability isolation | process-probe and address-discovery regressions plus server package timing |
+| FR-16 | 2.2 verified one-dir backend bundle | spec/resource contract plus installed package identity |
+| FR-17 | 2.2 verified one-dir backend bundle and 3.3 artifact | QA self-test, complete bundle verification, and server artifact |
 
 ## Version History
 
@@ -336,3 +376,4 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | 1.0.4 | 2026-07-16 | Bounded pre-listen readiness requests and first-success health retries | Codex |
 | 1.0.5 | 2026-07-16 | Kept packaged readiness pollers owned until first health and operational-data success | Codex |
 | 1.0.6 | 2026-07-16 | Isolated expensive Windows process probes and hostname resolution from readiness | Codex |
+| 1.1.0 | 2026-07-16 | Added verified one-dir backend packaging and final server acceptance design | Codex |

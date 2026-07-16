@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.6 | Date: 2026-07-16 | Status: Act 8 Candidate Ready / Server Validation Pending
+> Version: 1.1.0 | Date: 2026-07-16 | Status: Completed / Server Verified
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -48,12 +48,20 @@
   visibility and leader behavior resumes after success.
 - Built the clean Act 7 NSIS from commit `81356ab...`; installer SHA is
   `E771FDA7...`, and packaged MOCK operational-ready passed at `8,568.5 ms`.
+- Final isolation proved PyInstaller one-file extraction was the remaining
+  dominant cold-start delay before Python startup.
+- Switched the backend to verified one-dir packaging while preserving
+  `resources/backend/SmartFactoryBackend.exe` and portable execution.
+- Added an exact 1,707-file bundle manifest and fail-closed bundled QA verifier.
+- The physical server separately recorded visual-ready at `1,382.6 ms`, backend
+  health at `4,200.3 ms`, first real Running data at `4,373.8 ms`, and true
+  operational-ready at `5,076.2 ms` with no timeout.
 
 ## 2. Engineering Assessment
 
-- Risk level: medium. The change affects startup lifecycle concurrency,
-  observability, and release identity but does not change device polling, CSV
-  data, or dashboard layout.
+- Risk level: high, verified. The final package changes the backend distribution
+  layout from one file to a directory tree, but not device polling, CSV data,
+  dashboard layout, endpoint contracts, or the installed launcher path.
 - Trade-off: operational-ready is intentionally stricter than visual-ready. A
   disconnected PLC returns timeout evidence instead of a misleading fast PASS.
 - Compatibility: existing `renderer.dashboard-ready`, `/health`, `/api/data`,
@@ -67,20 +75,21 @@
   process. Timeout names the missing gate and never substitutes a success event.
 - Backend observability: each synchronous lifespan stage records elapsed time;
   no sensor value, credential, or device URL is added.
-- Migration: none.
+- Migration: existing configuration and data require no migration. Installer
+  layout migration is covered by exact installed package and bundle verification.
 - Operational failure mode: unavailable hardware yields
   `OPERATIONAL_TIMEOUT` only at the caller deadline when the internal diagnostic
   marker was observed; the script then cleans up the launched process tree unless
   `-KeepRunning` is explicitly supplied.
-- Renderer recovery failure mode: a readiness request that exceeds two seconds
-  is aborted and counted as the existing poll failure, allowing the existing
-  timer/worker loop to continue rather than remaining pending.
+- Renderer recovery failure mode: startup health is aborted after eight seconds;
+  steady health and data are aborted after two seconds. Existing retry loops
+  continue instead of remaining pending.
 - Lifecycle recovery failure mode: before first readiness success, packaged
   polling ignores only hidden visibility and stale leader ownership. Browser
   multi-tab behavior and all post-success pause/leader semantics are unchanged.
-- Rollback Act 7: revert commit `81356ab`, rebuild backend/NSIS from a clean
-  commit, and continue using the unchanged visual-ready metric while preserving
-  the prior bounded-request behavior if desired.
+- Rollback: reinstall validated one-file installer SHA `D1F74C00...`; its
+  operational-ready exceeded 30 seconds but preserves the previous runtime
+  layout and functional recovery behavior.
 
 ## 3. Files Changed
 
@@ -108,6 +117,9 @@
 | `frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.ts` | Packaged data polling ownership until first Running snapshot |
 | `frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts` | Initializing and post-success hidden-pause regressions |
 | focused frontend tests | Transport wiring and delayed-start recovery contracts |
+| `backend/build_specs/SmartFactoryBackend.spec` | PyInstaller one-dir `EXE`/`COLLECT` bundle |
+| `package.json` | Complete backend directory resource mapping |
+| `scripts/deploy.ps1` | Deterministic backend manifest and portable one-dir copy |
 | `backend/version.py` | Runtime version `1.0.14` |
 | root/frontend package manifests | NSIS/frontend version and bundled QA script |
 | `CHANGELOG.md` | Release notes |
@@ -142,6 +154,10 @@
 - Act 7 project health: backend ruff/mypy PASS, `485 tests` passed
 - Act 7 packaged MOCK operational-ready: PASS at `8,568.5 ms`; launcher
   `8,886.4 ms`, zero missing milestones, cleanup PASS
+- Final project health: frontend typecheck/lint and `229 tests` PASS; backend
+  Ruff/mypy and `493 tests` PASS
+- Bundle QA self-test: parser, session, milestones, classification, and tamper
+  detection PASS
 
 ### Package checks
 
@@ -397,9 +413,39 @@ cleanup and are not independent crash evidence.
   Packaged MOCK reached health at `7,574.8 ms`, Running data at `8,564.4 ms`,
   and operational-ready at `8,649.8 ms`; cleanup PASS.
 
+### Final Act 11 one-dir server acceptance
+
+| Artifact | Value |
+|----------|-------|
+| Build commit | `8c8a7c2288dd3d371e300de02a72d20a9a92a8cd` |
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Installer bytes | `147,090,255` |
+| Installer SHA-256 | `5F895884C1630077C33FA566B23D7ADAAA456B7511A01AA8C325246D34D40F4C` |
+| Backend launcher SHA-256 | `ED509DC4842EA496863187592C8B74E6ABF472BAB9ECB579467C2ABE26229C35` |
+| QA SHA-256 | `0F071EB1EB8F6B040FB0186284CB08603BD585FDE24D8485CA7E6C408DE99D1E` |
+| Bundle files | `1,707` |
+| Bundle aggregate SHA-256 | `D1F8EA83B561EB1325E249739771FFC31B9CC6424E8E23B64ECF329F85AFEF40` |
+| Server artifact SHA-256 | `3584FE57CB75435DEC7D0F21A1FD62E52011209E1046EFB15414EA7CFB55F4D9` |
+
+Physical-server results:
+
+| Gate | Electron elapsed |
+|------|------------------|
+| Backend spawned | `316.6 ms` |
+| Dashboard visual ready | `1,382.6 ms` |
+| Backend health ready | `4,200.3 ms` |
+| First real Running data | `4,373.8 ms` |
+| Operational ready | `5,076.2 ms` |
+| Launcher observed | `5,303.2 ms` |
+
+Result: PASS, `ready_strategy=raf`, no diagnostic timeout, no missing milestone,
+one startup session, `driver_connected=true`, full bundle integrity PASS, and
+cleanup PASS. This is approximately 86% faster than the last one-file server
+result of `36,395.9 ms`.
+
 ## 5. Next Action
 
-Copy and install only Act 9 SHA `F8C1E730...` on the server, verify installed
-backend SHA `C6057328...`, and rerun the bundled physical-device
-operational-ready measurement. Acceptance requires functional PASS with no
-diagnostic timeout and operational-ready at or below 30 seconds.
+Use only installer SHA `5F895884...` for this release. Preserve the server
+artifact and bundle manifest with release evidence. Run the existing 15-minute
+device stability suite as a separate deployment gate; it does not alter the
+completed operational-ready timing verdict.

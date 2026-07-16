@@ -1,24 +1,21 @@
 # Gap Analysis: NSIS Operational Ready Timing
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
-> Act 2 build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
-> Act iteration: 8 | Replacement package ready; server validation pending
+> Final build commit: `8c8a7c2288dd3d371e300de02a72d20a9a92a8cd`
+> Act iteration: 11 | Final one-dir package server verified
 
 ---
 
-## Match Rate: 100% (Act 8 candidate package; server validation pending)
+## Match Rate: 100% (final package and physical-server evidence verified)
 
-The implementation matches the runtime readiness design. Act 3 made the frozen
-backend responsive, but package reproduction showed that the `file:` renderer
-still called `localhost`. On the target Windows resolver this attempts IPv6
-`::1` first while Uvicorn listens on IPv4, delaying each request by about two
-seconds. Act 5 used explicit IPv4 loopback for packaged renderer requests, but
-server evidence then showed pre-listen requests could remain pending. Act 6
-bounds both readiness requests and preserves base health retry cadence until
-the first response. The Act 6 server run proved the backend eventually became
-ready, but the renderer still did not recover. Act 7 keeps packaged readiness
-polling ownership until health and operational data have each first succeeded,
-even across hidden visibility and stale dashboard leader state.
+The implementation and installed server package match the final design. Earlier
+iterations isolated renderer retry, backend event-loop, diagnostics, fact I/O,
+and health timing contributors. The remaining dominant delay occurred before
+Python startup: PyInstaller one-file extraction. Act 11 switches only the
+backend package layout to one-dir, keeps the Electron launcher path stable, and
+verifies all 1,707 installed bundle files before measurement. The physical
+server then reached true operational-ready in `5,076.2 ms` with real Running
+data and no diagnostic timeout.
 
 ## Summary
 
@@ -31,8 +28,9 @@ even across hidden visibility and stale dashboard leader state.
   frames; timeout reports missing gates and never fabricates success.
 - Packaged API calls use `127.0.0.1`; explicit environment overrides and
   browser-relative development calls remain unchanged.
-- `/health` and `/api/data` polling requests terminate within two seconds, and
-  health remains on its five-second base interval before first success.
+- Startup `/health` requests terminate within eight seconds; steady health and
+  all `/api/data` requests terminate within two seconds. Health remains on its
+  five-second base interval before first success.
 - Packaged health and live-data pollers cannot be suppressed by hidden
   visibility or a stale leader lock before their first readiness success;
   normal pause and leader behavior resumes afterward.
@@ -41,6 +39,12 @@ even across hidden visibility and stale dashboard leader state.
 - Root, frontend, backend, and NSIS artifact identity is `1.0.14`.
 - Periodic memory diagnostics begins immediately with lightweight process
   metrics; expensive Windows handle scans remain available on explicit snapshot.
+- PyInstaller one-dir removes runtime extraction while preserving
+  `resources/backend/SmartFactoryBackend.exe`.
+- Bundled QA verifies schema, mode, clean commit, exact file set, lengths,
+  per-file hashes, and aggregate hash before starting the measurement clock.
+- Physical-server visual paint, backend health, first Running data, and final
+  operational-ready are recorded separately and all completed within 5.1 seconds.
 
 ## Requirement Results
 
@@ -59,8 +63,10 @@ even across hidden visibility and stale dashboard leader state.
 | FR-11 non-blocking memory sampler | PASS | Periodic path excludes expensive probes; explicit snapshot retains them |
 | FR-12 explicit packaged IPv4 base | PASS | Mapper contract and final bundle scan |
 | FR-13 bounded pre-listen recovery | PASS | Transport contract and fake-timer first-success retry test |
-| FR-14 packaged lifecycle recovery | PASS SOURCE | Hidden/stale-lock hook tests; server package validation pending |
-| FR-15 backend observability isolation | PASS SOURCE | Memory probe and asynchronous address-discovery regressions |
+| FR-14 packaged lifecycle recovery | PASS | Hidden/stale-lock regressions and final server recovery evidence |
+| FR-15 backend observability isolation | PASS | Memory/address/fact-I/O regressions and final server readiness |
+| FR-16 one-dir backend package | PASS | PyInstaller `COLLECT`, stable installed launcher path, and package contract tests |
+| FR-17 complete bundle integrity | PASS | QA self-test and server verification of 1,707 files / aggregate SHA |
 
 ## Acceptance Criteria
 
@@ -78,9 +84,11 @@ even across hidden visibility and stale dashboard leader state.
 | AC-10 | PASS | `Setup 1.0.14.exe` plus runtime health `app_version=1.0.14` |
 | AC-11 | PASS | sampler collector starts immediately and `start()` returns before release |
 | AC-12 | PASS | packaged bundle contains IPv4 loopback and no localhost literal |
-| AC-13 | PENDING SERVER | source/package contracts PASS; physical recovery run pending |
-| AC-14 | PENDING SERVER | focused lifecycle regressions PASS; replacement package pending |
-| AC-15 | PENDING SERVER | Act 8 source and full backend suite PASS; replacement package pending |
+| AC-13 | PASS | final server health and data gates recovered without request deadlock |
+| AC-14 | PASS | final server recorded health, Running data, and operational-ready once |
+| AC-15 | PASS | visual, health, data, and total wait milestones are separately present |
+| AC-16 | PASS | installed bundle matched 1,707 entries and clean build commit |
+| AC-17 | PASS | operational-ready `5,076.2 ms`, no timeout/missing milestone/session contamination |
 
 ## Act Iteration
 
@@ -470,8 +478,7 @@ ready at `8,649.8 ms`; no diagnostic timeout occurred and cleanup passed.
 
 ## Missing Items
 
-- Install only the Act 9 candidate and retain a true server operational-ready
-  measurement artifact.
+- None for the operational-ready timing feature.
 
 ## Deviations from Design
 
@@ -484,6 +491,30 @@ ready at `8,649.8 ms`; no diagnostic timeout occurred and cleanup passed.
 
 ## Recommendation
 
-Use only Act 9 installer SHA `F8C1E730...` for final validation. Act 8 SHA
-`2207981A...` is root-cause evidence only. Verify package identity and rerun the
-bundled launcher with all existing processes stopped.
+Accept only the final one-dir installer SHA `5F895884...`. Retain the physical
+server artifact SHA `3584FE57...` and bundle aggregate `D1F8EA83...` as release
+evidence. Treat all earlier one-file packages as superseded. Long-duration
+device stability remains a separate release-validation concern, not a missing
+operational-ready requirement.
+
+## Final Act 11 Evidence
+
+| Evidence | Result |
+|----------|--------|
+| Build commit | `8c8a7c2288dd3d371e300de02a72d20a9a92a8cd` |
+| Installer SHA-256 | `5F895884C1630077C33FA566B23D7ADAAA456B7511A01AA8C325246D34D40F4C` |
+| Backend launcher SHA-256 | `ED509DC4842EA496863187592C8B74E6ABF472BAB9ECB579467C2ABE26229C35` |
+| QA SHA-256 | `0F071EB1EB8F6B040FB0186284CB08603BD585FDE24D8485CA7E6C408DE99D1E` |
+| Bundle files / aggregate | `1707` / `D1F8EA83B561EB1325E249739771FFC31B9CC6424E8E23B64ECF329F85AFEF40` |
+| Server artifact SHA-256 | `3584FE57CB75435DEC7D0F21A1FD62E52011209E1046EFB15414EA7CFB55F4D9` |
+| Dashboard visual ready | `1,382.6 ms` |
+| Backend health ready | `4,200.3 ms` |
+| First real Running data | `4,373.8 ms` |
+| Operational ready | `5,076.2 ms` |
+| Launcher observed | `5,303.2 ms` |
+| Timeout / missing / multiple sessions | `false` / `0` / `0` |
+| Bundle integrity / cleanup | PASS / PASS |
+
+Compared with the last one-file server result (`36,395.9 ms`), operational
+ready improved by approximately 86%. The backend spawn marker also moved to
+`316.6 ms`, eliminating the previously observed 20+ second extraction gap.
