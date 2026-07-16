@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Design
 
-> Version: 1.0.4 | Date: 2026-07-16 | Status: Act Iteration 6
+> Version: 1.0.5 | Date: 2026-07-16 | Status: Act Iteration 7
 > Level: Dynamic | Plan: `docs/01-plan/features/nsis-operational-ready-timing.plan.md`
 
 ---
@@ -54,7 +54,12 @@ The packaged `file:` renderer resolves its API base to
 each local request to two seconds. Health uses the existing five-second base
 interval until its first success, after which the existing outage backoff
 policy resumes unchanged. Live data keeps its existing worker interval and
-backoff policy; only a pending request is now bounded.
+backoff policy; only a pending request is now bounded. During packaged startup,
+the single Electron renderer remains a temporary polling owner until health has
+first succeeded and an operational `Status=Running` snapshot has first arrived.
+Hidden visibility and a stale dashboard leader lock therefore cannot suppress
+those two readiness paths. Each path returns to the existing visibility and
+leader policy immediately after its own first success.
 
 ### 2.2 Component Design
 
@@ -115,6 +120,19 @@ Public operations:
   is blocked. Shutdown remains bounded by the existing two-second join.
 - Record elapsed time for each synchronous lifespan start stage so a future
   server delay identifies the responsible service without raw device values.
+
+#### Packaged startup polling ownership
+
+- Detect packaged startup only through the constrained Electron preload bridge;
+  browser and multi-tab development behavior is unchanged.
+- Health recovery remains pending until the first non-null `/health` result.
+- Live-data recovery remains pending until `isOperationalFactoryData()` accepts
+  a timestamped `Status=Running` snapshot. `Initializing` never ends recovery.
+- While pending, the packaged renderer may replace a stale local leader lock and
+  continue the existing poller even when `document.visibilityState` is hidden.
+- No additional timer, request, endpoint, or interval is introduced. After the
+  first success, the existing hidden pause, leader heartbeat, and outage backoff
+  behavior applies without exception.
 
 ### 2.3 Data Flow
 
@@ -217,6 +235,9 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | `frontend/src/shared/api/client.mapper.test.ts` | packaged and development resolution contracts |
 | `frontend/src/shared/api/pollingRequest.ts` | bounded readiness request timeout |
 | readiness transports and tests | timeout wiring and first-success recovery |
+| `frontend/src/domains/Observability/hooks/useSystemViewModelEffects.ts` | Packaged health polling ownership until first success |
+| `frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.ts` | Packaged operational-data polling ownership until first Running snapshot |
+| corresponding hook tests | Hidden-document, stale-lock, Initializing, and post-success pause regressions |
 | root/frontend package manifests | version `1.0.14` |
 
 ### 5.2 Implementation Order
@@ -257,6 +278,9 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 - A transport contract proves `/health` and `/api/data` receive the two-second
   bound, and a fake-timer hook test proves repeated pre-success health failures
   remain at the five-second base interval before recovery.
+- Packaged hook regressions start hidden with a stale leader lock, prove health
+  retries until success, prove `Initializing` does not stop data polling, and
+  prove hidden polling stops after the first operational snapshot.
 
 ### 6.3 Packaging Verification
 
@@ -297,6 +321,7 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | FR-11 | 2.2 backend startup availability | blocking-collector regression and server package timing |
 | FR-12 | 2.1 packaged API base | mapper unit test and packaged operational-ready timing |
 | FR-13 | 2.1 bounded local polling | transport and first-success retry tests |
+| FR-14 | 2.2 packaged startup polling ownership | hidden/stale-lock hook regressions and server package timing |
 
 ## Version History
 
@@ -307,3 +332,4 @@ length 64, and string length 200. Unknown names and excess repeats are rejected.
 | 1.0.2 | 2026-07-16 | Moved initial memory snapshot off the lifespan caller contract | Codex |
 | 1.0.3 | 2026-07-16 | Added packaged IPv4 loopback API contract | Codex |
 | 1.0.4 | 2026-07-16 | Bounded pre-listen readiness requests and first-success health retries | Codex |
+| 1.0.5 | 2026-07-16 | Kept packaged readiness pollers owned until first health and operational-data success | Codex |

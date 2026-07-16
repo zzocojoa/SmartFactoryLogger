@@ -118,6 +118,13 @@ export const useSystemViewModelEffects = ({
     };
 
     const isLeader = (): boolean => leaderState.mode === 'leader' || leaderState.mode === 'standalone';
+    const isPackagedStartupRecoveryPending = (): boolean =>
+      typeof window !== 'undefined' &&
+      Boolean(window.smartFactoryElectron?.recordStartupEvent) &&
+      !healthHasSucceeded;
+    const canPollHealth = (): boolean => isLeader() || isPackagedStartupRecoveryPending();
+    const isHealthVisibilityBlocked = (): boolean =>
+      document.visibilityState === 'hidden' && !isPackagedStartupRecoveryPending();
 
     const clearTimers = (): void => {
       if (healthTimeoutId !== null) {
@@ -158,7 +165,7 @@ export const useSystemViewModelEffects = ({
     };
 
     const pollHealth = async () => {
-      if (!mounted || !isLeader()) return;
+      if (!mounted || !canPollHealth()) return;
       if (!reconnectBusy) {
         try {
           const data = await fetchHealth();
@@ -185,7 +192,7 @@ export const useSystemViewModelEffects = ({
         healthDelayMs = BASE_POLL_INTERVAL_MS;
       }
       setHealthPolling(buildPollingState(healthDelayMs, healthFailures));
-      if (mounted && isLeader() && document.visibilityState !== 'hidden') {
+      if (mounted && canPollHealth() && !isHealthVisibilityBlocked()) {
         healthTimeoutId = window.setTimeout(pollHealth, healthDelayMs);
       }
     };
@@ -220,11 +227,15 @@ export const useSystemViewModelEffects = ({
 
     const schedulePolling = (): void => {
       clearTimers();
-      if (!mounted || !isLeader() || document.visibilityState === 'hidden') {
+      if (!mounted) {
         return;
       }
-      healthTimeoutId = window.setTimeout(pollHealth, reconnectBusy ? BASE_POLL_INTERVAL_MS : 0);
-      statsTimeoutId = window.setTimeout(pollStats, reconnectBusy ? BASE_POLL_INTERVAL_MS + 500 : 500);
+      if (canPollHealth() && !isHealthVisibilityBlocked()) {
+        healthTimeoutId = window.setTimeout(pollHealth, reconnectBusy ? BASE_POLL_INTERVAL_MS : 0);
+      }
+      if (isLeader() && document.visibilityState !== 'hidden') {
+        statsTimeoutId = window.setTimeout(pollStats, reconnectBusy ? BASE_POLL_INTERVAL_MS + 500 : 500);
+      }
     };
 
     const reconcileLeadership = (): void => {
@@ -240,8 +251,9 @@ export const useSystemViewModelEffects = ({
       }
 
       const hidden = document.visibilityState === 'hidden';
-      setPollingPausedByVisibility(hidden);
-      if (hidden) {
+      const startupRecoveryPending = isPackagedStartupRecoveryPending();
+      setPollingPausedByVisibility(hidden && !startupRecoveryPending);
+      if (hidden && !startupRecoveryPending) {
         clearTimers();
         clearDashboardLeaderLock(DASHBOARD_LEADER_KEY, tabId);
         updateLeaderState({
@@ -255,6 +267,17 @@ export const useSystemViewModelEffects = ({
 
       const now = Date.now();
       const currentLock = readDashboardLeaderLock(DASHBOARD_LEADER_KEY);
+      if (startupRecoveryPending && currentLock?.tab_id !== tabId) {
+        writeDashboardLeaderLock(DASHBOARD_LEADER_KEY, { tab_id: tabId, updated_at: now });
+        updateLeaderState({
+          tab_id: tabId,
+          mode: 'leader',
+          leader_tab_id: tabId,
+          last_broadcast_at: leaderState.last_broadcast_at,
+        });
+        schedulePolling();
+        return;
+      }
       if (!currentLock || currentLock.tab_id === tabId) {
         writeDashboardLeaderLock(DASHBOARD_LEADER_KEY, { tab_id: tabId, updated_at: now });
         updateLeaderState({

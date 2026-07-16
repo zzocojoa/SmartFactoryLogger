@@ -2,11 +2,11 @@
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
 > Act 2 build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
-> Act iteration: 6 | Replacement package ready; server validation pending
+> Act iteration: 7 | Lifecycle patch validated; replacement package pending
 
 ---
 
-## Match Rate: 100% (candidate package; server validation pending)
+## Match Rate: 100% (source candidate; replacement package pending)
 
 The implementation matches the runtime readiness design. Act 3 made the frozen
 backend responsive, but package reproduction showed that the `file:` renderer
@@ -15,7 +15,10 @@ still called `localhost`. On the target Windows resolver this attempts IPv6
 seconds. Act 5 used explicit IPv4 loopback for packaged renderer requests, but
 server evidence then showed pre-listen requests could remain pending. Act 6
 bounds both readiness requests and preserves base health retry cadence until
-the first response.
+the first response. The Act 6 server run proved the backend eventually became
+ready, but the renderer still did not recover. Act 7 keeps packaged readiness
+polling ownership until health and operational data have each first succeeded,
+even across hidden visibility and stale dashboard leader state.
 
 ## Summary
 
@@ -30,6 +33,9 @@ the first response.
   browser-relative development calls remain unchanged.
 - `/health` and `/api/data` polling requests terminate within two seconds, and
   health remains on its five-second base interval before first success.
+- Packaged health and live-data pollers cannot be suppressed by hidden
+  visibility or a stale leader lock before their first readiness success;
+  normal pause and leader behavior resumes afterward.
 - The PowerShell measurement rejects pre-existing processes and multiple startup
   sessions, and reports both Electron monotonic and launcher wall-clock time.
 - Root, frontend, backend, and NSIS artifact identity is `1.0.14`.
@@ -53,6 +59,7 @@ the first response.
 | FR-11 non-blocking initial memory snapshot | PASS | Blocking-collector regression plus source runtime stage timing |
 | FR-12 explicit packaged IPv4 base | PASS | Mapper contract and final bundle scan |
 | FR-13 bounded pre-listen recovery | PASS | Transport contract and fake-timer first-success retry test |
+| FR-14 packaged lifecycle recovery | PASS SOURCE | Hidden/stale-lock hook tests; server package validation pending |
 
 ## Acceptance Criteria
 
@@ -71,6 +78,7 @@ the first response.
 | AC-11 | PASS | sampler collector starts immediately and `start()` returns before release |
 | AC-12 | PASS | packaged bundle contains IPv4 loopback and no localhost literal |
 | AC-13 | PENDING SERVER | source/package contracts PASS; physical recovery run pending |
+| AC-14 | PENDING SERVER | focused lifecycle regressions PASS; replacement package pending |
 
 ## Act Iteration
 
@@ -193,6 +201,33 @@ keeps health on the five-second base interval until its first success. Existing
 post-success health backoff, data worker cadence, and device polling are
 unchanged.
 
+### Act 7: renderer lifecycle suppressed bounded retries
+
+The Act 6 server package identity matched every expected backend, QA, and
+frontend asset hash. Electron launched at `08:33:45 KST`, and the frozen Python
+session entered at `08:34:08 KST`. Uvicorn completed startup around
+`08:34:48 KST`, approximately 63 seconds after Electron launch. The renderer
+had already emitted its 30-second diagnostic event and did not record health or
+live data during the remaining measurement budget:
+
+```text
+dashboard_ready_elapsed_ms=1565
+backend Python entry delay=23 s
+Uvicorn application startup complete=approximately 63 s after launch
+missing_gates=backend_health,live_data
+final classification=BACKEND_READY_BUT_RENDERER_DID_NOT_RECOVER
+```
+
+The backend and package were therefore not the remaining fault domain. Code
+inspection found that both hook lifecycles stop polling when the Electron
+document is hidden or another dashboard leader lock is observed. Those policies
+are correct after startup but could suppress all bounded retries before the
+first readiness result. Act 7 grants temporary ownership only to the packaged
+renderer: health remains pending until its first non-null result, and live data
+remains pending until `isOperationalFactoryData()` accepts a `Status=Running`
+snapshot. `Initializing` does not end recovery. No request, endpoint, timer
+interval, device protocol, or normal post-success ownership policy changes.
+
 ## Validation Results
 
 | Check | Result |
@@ -220,8 +255,12 @@ unchanged.
 | Act 6 focused recovery tests | `2 files, 3 tests passed` |
 | Act 6 frontend full suite | `31 files, 226 tests passed` |
 | Act 6 packaged MOCK operational-ready | PASS at `20,422.1 ms`; launcher `20,724.5 ms` |
+| Act 7 focused startup/lifecycle tests | `4 files, 29 tests passed` |
+| Act 7 frontend full suite | `31 files, 228 tests passed` |
+| Act 7 frontend typecheck/lint/build | PASS |
+| Act 7 project health | backend ruff/mypy PASS; `485 tests passed` |
 
-## Act 6 Candidate Package Evidence
+## Act 6 Candidate Package Evidence (superseded)
 
 | Artifact | Evidence |
 |----------|----------|
@@ -243,6 +282,9 @@ and polling-worker bundles, contains the explicit IPv4 loopback base, and has no
 PyInstaller repeated its existing non-blocking `Hidden import "tzdata" not
 found` warning. No timezone behavior was changed by this feature, and the full
 health/package build completed successfully.
+
+This package is superseded because the physical server proved that packaged
+visibility/leader lifecycle state could still suppress all post-listen retries.
 
 ## Act 5 Candidate Package Evidence (superseded)
 
@@ -306,7 +348,8 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Run only the Act 6 installer on the server and retain a true
+- Build a clean Act 7 PyInstaller/NSIS package and record its hashes.
+- Run only the Act 7 installer on the server and retain a true
   operational-ready measurement artifact.
 
 ## Deviations from Design
@@ -320,6 +363,7 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Use only installer SHA `39165C1E...` for final server validation. SHA
-`ABA6ED160B...` contains the IPv4 fix but not the bounded pre-listen recovery.
-Rerun the bundled launcher on the server with the app and backend fully stopped.
+Do not use installer SHA `39165C1E...` for final acceptance. Build the Act 7
+source from a clean commit, verify the replacement installer and bundled hashes,
+then rerun the bundled launcher on the server with the app and backend fully
+stopped.

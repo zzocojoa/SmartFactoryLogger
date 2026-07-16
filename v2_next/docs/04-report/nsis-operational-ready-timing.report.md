@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.4 | Date: 2026-07-16 | Status: Act 6 Patch Validated / Replacement Package Pending
+> Version: 1.0.5 | Date: 2026-07-16 | Status: Act 7 Patch Validated / Replacement Package Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -39,6 +39,13 @@
 - Act 6 bounds `/health` and `/api/data` requests to two seconds and keeps
   health on the five-second base interval until its first success. Existing
   post-success outage backoff and device polling are unchanged.
+- The Act 6 server package matched every expected hash and Uvicorn became ready
+  about 63 seconds after Electron launch, but the renderer did not recover its
+  health or live-data gates during the remaining caller budget.
+- Act 7 keeps the existing packaged health and live-data pollers temporarily
+  owned until their respective first successful readiness results, even when
+  the document is hidden or a stale dashboard leader lock exists. Normal
+  visibility and leader behavior resumes after success.
 
 ## 2. Engineering Assessment
 
@@ -66,6 +73,9 @@
 - Renderer recovery failure mode: a readiness request that exceeds two seconds
   is aborted and counted as the existing poll failure, allowing the existing
   timer/worker loop to continue rather than remaining pending.
+- Lifecycle recovery failure mode: before first readiness success, packaged
+  polling ignores only hidden visibility and stale leader ownership. Browser
+  multi-tab behavior and all post-success pause/leader semantics are unchanged.
 - Rollback: revert `b848755`, `125c87d7`, and `a77a3be`, restore version
   `1.0.13`, rebuild backend/NSIS from a clean commit, and continue using the
   unchanged visual-ready metric.
@@ -92,6 +102,9 @@
 | `frontend/src/shared/api/transport/systemService.transport.ts` | Bounded `/health` request |
 | `frontend/src/shared/api/transport/metricService.transport.ts` | Bounded `/api/data` request |
 | `frontend/src/domains/Observability/hooks/useSystemViewModelEffects.ts` | Five-second health retry until first success |
+| `frontend/src/domains/Observability/hooks/useSystemViewModelEffects.test.ts` | Hidden/stale-lock packaged health recovery regression |
+| `frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.ts` | Packaged data polling ownership until first Running snapshot |
+| `frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts` | Initializing and post-success hidden-pause regressions |
 | focused frontend tests | Transport wiring and delayed-start recovery contracts |
 | `backend/version.py` | Runtime version `1.0.14` |
 | root/frontend package manifests | NSIS/frontend version and bundled QA script |
@@ -121,6 +134,10 @@
 - Act 6 focused recovery tests: `2 files`, `3 tests` passed
 - Act 6 frontend: `31 test files`, `226 tests` passed
 - Act 6 typecheck and lint: PASS
+- Act 7 focused startup/lifecycle tests: `4 files`, `29 tests` passed
+- Act 7 frontend full suite: `31 files`, `228 tests` passed
+- Act 7 typecheck, lint, and production build: PASS
+- Act 7 project health: backend ruff/mypy PASS, `485 tests` passed
 
 ### Package checks
 
@@ -133,7 +150,7 @@
 - QA script source/package SHA match: PASS
 - Runtime version: `1.0.14`, runtime kind: `frozen`
 
-### Act 6 candidate artifact
+### Act 6 candidate artifact (superseded)
 
 | Artifact | Value |
 |----------|-------|
@@ -153,6 +170,10 @@ Packaged MOCK cold start: dashboard `5,651.7 ms`, backend health `20,243.3 ms`,
 live data `20,305.9 ms`, operational-ready `20,422.1 ms`, launcher observed
 `20,724.5 ms`, `ready_strategy=raf`, diagnostic budget PASS, zero missing
 milestones, cleanup PASS.
+
+The physical server proved this package can still stop renderer polling before
+Uvicorn becomes ready; it is retained as root-cause evidence and is not a final
+acceptance candidate.
 
 ### Act 5 candidate artifact (superseded)
 
@@ -284,8 +305,24 @@ cleanup and are not independent crash evidence.
   pass. A replacement clean package and physical-server measurement remain
   required.
 
+### Act 6 server failure and Act 7 lifecycle patch
+
+- Installed backend, QA, and all frontend asset hashes matched the Act 6
+  package; stale installation was excluded.
+- Electron launched at `08:33:45 KST`, the Python backend session entered 23
+  seconds later, and Uvicorn completed startup at approximately 63 seconds.
+- Dashboard visual paint completed at `1,565 ms`, but neither health nor live
+  data recovered after the 30-second renderer diagnostic marker. Final
+  classification: `BACKEND_READY_BUT_RENDERER_DID_NOT_RECOVER`.
+- Act 7 changes only the pre-success ownership conditions of the existing
+  renderer pollers. It adds no request, polling interval, endpoint, PLC/SPOT
+  operation, CSV field, or backend lifecycle work.
+- Focused hidden/stale-lock regressions, the `31 files / 228 tests` frontend
+  suite, typecheck, lint, production build, backend ruff/mypy, and all 485
+  backend tests pass. A clean replacement package and physical-server
+  measurement are still required.
+
 ## 5. Next Action
 
-Copy and install only SHA `39165C1E...` on the server, then rerun the bundled 90-second
-physical-device operational-ready measurement with all existing app/backend
-processes stopped first.
+Complete full frontend validation, build Act 7 from a clean provenance commit,
+and record the replacement installer/backend hashes before the next server run.

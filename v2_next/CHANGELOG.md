@@ -30,6 +30,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
   cannot indefinitely prevent its next retry.
 - Kept health polling at its five-second base interval until the first
   successful response; the existing post-recovery outage backoff is unchanged.
+- Kept packaged cold-start health and live-data polling active until their first
+  successful readiness result even when the Electron document is hidden or a
+  stale dashboard leader lock exists; normal visibility and leader behavior
+  resumes after success.
 
 ### Compatibility
 

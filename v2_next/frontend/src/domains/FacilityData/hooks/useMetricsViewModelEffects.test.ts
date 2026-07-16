@@ -89,6 +89,7 @@ describe('useMetricsPollingEffects', () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
+    delete window.smartFactoryElectron;
     vi.stubGlobal('BroadcastChannel', undefined);
     mocks.createPollingWorker.mockReturnValue({} as Worker);
     mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mockReset();
@@ -100,6 +101,7 @@ describe('useMetricsPollingEffects', () => {
 
   afterEach(() => {
     setVisibilityState('visible');
+    delete window.smartFactoryElectron;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -136,6 +138,75 @@ describe('useMetricsPollingEffects', () => {
 
       expect(seriesBufferRef.current.getSamples().map((sample) => sample.timestampMs)).toEqual([1_000, 2_000]);
       expect(seriesBufferRef.current.getSamples().map((sample) => sample.values.Spot)).toEqual([10, 20]);
+    } finally {
+      unmount();
+    }
+  });
+
+  it('recovers packaged startup data while hidden and a stale leader lock exists', async () => {
+    setVisibilityState('hidden');
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: vi.fn(),
+    };
+    window.localStorage.setItem(
+      'dashboard_polling_leader_v1',
+      JSON.stringify({ tab_id: 'stale-tab', updated_at: Date.now() })
+    );
+    const worker = {} as Worker;
+    mocks.createPollingWorker.mockReturnValue(worker);
+    const seriesBufferRef: MutableRefObject<SeriesBuffer> = {
+      current: new SeriesBuffer(10_000, 10),
+    };
+
+    const { unmount } = renderPollingEffects(seriesBufferRef);
+
+    try {
+      await waitFor(() => {
+        expect(mocks.startPollingWorker).toHaveBeenCalledWith(worker, 500);
+      });
+
+      const initializingMessage: MessageEvent<WorkerOutboundMessage> = {
+        data: {
+          type: 'DATA',
+          payload: {
+            data: {
+              ...buildFactoryData(1_000, 10, 1_000),
+              Status: 'Initializing',
+            },
+            latency: 3,
+            timestamp: 1_000,
+            poll_interval_ms: 500,
+            failure_count: 0,
+          },
+        },
+      } as MessageEvent<WorkerOutboundMessage>;
+
+      await act(async () => {
+        worker.onmessage?.call(worker, initializingMessage);
+      });
+
+      expect(mocks.stopPollingWorker).not.toHaveBeenCalled();
+
+      const liveMessage: MessageEvent<WorkerOutboundMessage> = {
+        data: {
+          type: 'DATA',
+          payload: {
+            data: buildFactoryData(2_000, 20, 2_000),
+            latency: 3,
+            timestamp: 2_000,
+            poll_interval_ms: 500,
+            failure_count: 0,
+          },
+        },
+      } as MessageEvent<WorkerOutboundMessage>;
+
+      await act(async () => {
+        worker.onmessage?.call(worker, liveMessage);
+      });
+
+      expect(seriesBufferRef.current.getSamples()).toHaveLength(2);
+      expect(mocks.stopPollingWorker).toHaveBeenCalledWith(worker);
     } finally {
       unmount();
     }

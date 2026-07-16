@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Plan
 
-> Version: 1.0.4 | Date: 2026-07-16 | Status: Act Iteration 6
+> Version: 1.0.5 | Date: 2026-07-16 | Status: Act Iteration 7
 > Level: Dynamic
 
 ---
@@ -52,6 +52,9 @@ readiness without changing the existing startup baseline.
 - Bound pre-listen `/health` and `/api/data` requests and keep health at its
   base retry interval until the first success so delayed Uvicorn startup can
   recover within the caller measurement budget.
+- During packaged cold start, keep the existing health and live-data pollers
+  active until their respective first successful readiness result even when
+  the Electron document is hidden or a stale dashboard leader lock exists.
 - Build a clean PyInstaller backend and NSIS installer from the verified commit.
 
 ### 2.2 Non-Goals
@@ -79,6 +82,8 @@ readiness without changing the existing startup baseline.
   timing logs.
 - Packaged renderer API-base resolution and its unit contract.
 - Bounded operational polling transport and first-success retry recovery.
+- Packaged startup polling ownership that survives pre-success visibility and
+  stale-leader transitions without changing the normal post-success policy.
 - PDCA analysis/report documents and clean package hashes.
 
 ### 3.2 Out of Scope
@@ -110,6 +115,7 @@ readiness without changing the existing startup baseline.
 | FR-11 | The first memory diagnostics snapshot must run immediately in its sampler thread and must not block FastAPI startup or `/health`. | High | Pending |
 | FR-12 | Packaged `file:` renderers must call the local backend through `127.0.0.1`, while explicit environment overrides and browser-relative development behavior remain unchanged. | High | Pending |
 | FR-13 | `/health` and `/api/data` startup requests must terminate within two seconds, and health must retry at the five-second base interval until its first success. | High | Pending |
+| FR-14 | In packaged Electron startup, health polling must continue until the first successful health response and data polling until the first operational `Status=Running` snapshot, regardless of hidden visibility or a stale leader lock; normal visibility and leader ownership must resume after each first success. | High | Pending |
 
 ### 4.2 Non-Functional Requirements
 
@@ -122,6 +128,7 @@ readiness without changing the existing startup baseline.
 | Performance | Instrumentation does not introduce network requests or change polling intervals. | Code review and startup smoke check |
 | Availability | A slow initial memory collector cannot delay FastAPI startup completion. | Blocking-collector regression test and packaged server run |
 | Recovery | A local request started before Uvicorn listens cannot suspend all later startup polls. | Transport timeout and health first-success retry tests |
+| Lifecycle recovery | Packaged pre-success polling cannot be paused by hidden visibility or stale leader state. | Hidden-document and stale-lock hook regression tests |
 | Packaging | PyInstaller build must fail closed on dirty or changed Git source. | Provenance gate and clean build log |
 
 ## 5. Success Criteria
@@ -153,6 +160,10 @@ readiness without changing the existing startup baseline.
 - [ ] `[AC-13]` Both operational polling transports use a two-second request
   bound, health retries every five seconds before first success, and the server
   package recovers backend/data gates within the caller timeout.
+- [ ] `[AC-14]` A packaged hidden renderer with a stale leader lock continues
+  health polling until the first response and live-data polling until the first
+  operational snapshot; `Initializing` does not end recovery, and normal hidden
+  pause behavior resumes immediately after success.
 
 ## 6. Schedule
 
@@ -178,6 +189,7 @@ readiness without changing the existing startup baseline.
 | Initial memory diagnostics blocks `/health` while hardware worker calls are slow | High | High | Run the first snapshot immediately on the existing sampler thread and log each lifespan startup stage duration. |
 | IPv6-first `localhost` resolution delays each renderer request while Uvicorn listens on IPv4 | High | High | Use the explicit IPv4 loopback address only for packaged/local fallback API resolution. |
 | A renderer request opened before Uvicorn listens remains pending and suppresses its recursive retry | High | High | Apply a two-second bound to the two operational polling requests and retain the base health interval before first success. |
+| Electron visibility or a stale localStorage leader lock suppresses all retries before backend readiness | High | High | Treat the single packaged renderer as temporary polling owner until each readiness gate first succeeds, then restore the existing pause/leader policy. |
 | Dirty package records unverifiable source | High | Medium | Commit first and use the existing fail-closed provenance gate. |
 
 ## 8. Architecture Considerations
@@ -209,3 +221,5 @@ readiness without changing the existing startup baseline.
 | 1.0.1 | 2026-07-16 | Clarified launcher timeout authority after server Act evidence | Codex |
 | 1.0.2 | 2026-07-16 | Added Act 3 non-blocking startup requirement from server logs | Codex |
 | 1.0.3 | 2026-07-16 | Added Act 5 packaged IPv4 loopback requirement from runtime reproduction | Codex |
+| 1.0.4 | 2026-07-16 | Added Act 6 bounded readiness requests and first-success health retry | Codex |
+| 1.0.5 | 2026-07-16 | Added Act 7 packaged pre-success polling ownership across visibility and stale locks | Codex |
