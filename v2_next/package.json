@@ -56,8 +56,8 @@
     "asar": true,
     "extraResources": [
       {
-        "from": "backend/dist/SmartFactoryBackend.exe",
-        "to": "backend/SmartFactoryBackend.exe"
+        "from": "backend/dist/SmartFactoryBackend",
+        "to": "backend"
       },
       {
         "from": "frontend/dist",

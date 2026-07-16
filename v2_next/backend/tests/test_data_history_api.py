@@ -323,6 +323,20 @@ class ElectronPreloadContractTests(unittest.TestCase):
         packaged_resources = root_package["build"]["extraResources"]
         self.assertIn(
             {
+                "from": "backend/dist/SmartFactoryBackend",
+                "to": "backend",
+            },
+            packaged_resources,
+        )
+        self.assertNotIn(
+            {
+                "from": "backend/dist/SmartFactoryBackend.exe",
+                "to": "backend/SmartFactoryBackend.exe",
+            },
+            packaged_resources,
+        )
+        self.assertIn(
+            {
                 "from": "scripts/measure_nsis_operational_ready.ps1",
                 "to": "qa/measure_nsis_operational_ready.ps1",
             },
@@ -347,6 +361,25 @@ class ElectronPreloadContractTests(unittest.TestCase):
             script_text,
         )
         self.assertIn("Invoke-SelfTest", script_text)
+        self.assertIn("Test-BackendBundleIntegrity", script_text)
+        self.assertIn('status                  = "BUNDLE_INTEGRITY_FAILED"', script_text)
+        self.assertIn("backend_bundle", script_text)
+
+    def test_backend_packaging_uses_onedir_bundle_with_integrity_manifest(self) -> None:
+        spec_text = (
+            self.repo_root / "backend" / "build_specs" / "SmartFactoryBackend.spec"
+        ).read_text(encoding="utf-8")
+        deploy_text = (self.repo_root / "scripts" / "deploy.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("exclude_binaries=True", spec_text)
+        self.assertIn("contents_directory='_internal'", spec_text)
+        self.assertIn("coll = COLLECT(", spec_text)
+        self.assertNotIn("a.binaries,\n    a.datas,\n    [],", spec_text)
+        self.assertIn('schema_version   = "smartfactory-backend-bundle-v1"', deploy_text)
+        self.assertIn('packaging_mode   = "onedir"', deploy_text)
+        self.assertIn("Write-BackendBundleManifest", deploy_text)
+        self.assertIn('"backend\\dist\\SmartFactoryBackend"', deploy_text)
+        self.assertNotIn('"backend\\dist\\SmartFactoryBackend.exe"', deploy_text)
 
     def test_preload_exposes_only_constrained_electron_bridge(self) -> None:
         preload_text = (self.repo_root / "preload.js").read_text(encoding="utf-8")
