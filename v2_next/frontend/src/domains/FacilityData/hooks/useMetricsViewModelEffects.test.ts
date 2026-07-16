@@ -212,6 +212,53 @@ describe('useMetricsPollingEffects', () => {
     }
   });
 
+  it('does not re-enter packaged startup recovery after operational data later goes offline', async () => {
+    window.smartFactoryElectron = {
+      getMemory: vi.fn(),
+      recordStartupEvent: vi.fn(),
+    };
+    const worker = {} as Worker;
+    mocks.createPollingWorker.mockReturnValue(worker);
+    const seriesBufferRef: MutableRefObject<SeriesBuffer> = {
+      current: new SeriesBuffer(10_000, 10),
+    };
+
+    const { unmount } = renderPollingEffects(seriesBufferRef);
+
+    try {
+      await waitFor(() => {
+        expect(mocks.startPollingWorker).toHaveBeenCalledWith(worker, 500);
+      });
+
+      const buildWorkerMessage = (status: string, timestamp: number): MessageEvent<WorkerOutboundMessage> => ({
+        data: {
+          type: 'DATA',
+          payload: {
+            data: {
+              ...buildFactoryData(timestamp, 20, timestamp),
+              Status: status,
+            },
+            latency: 3,
+            timestamp,
+            poll_interval_ms: 500,
+            failure_count: 0,
+          },
+        },
+      } as MessageEvent<WorkerOutboundMessage>);
+
+      await act(async () => {
+        worker.onmessage?.call(worker, buildWorkerMessage('Running', 2_000));
+        worker.onmessage?.call(worker, buildWorkerMessage('Offline', 3_000));
+        setVisibilityState('hidden');
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      expect(mocks.stopPollingWorker).toHaveBeenCalledWith(worker);
+    } finally {
+      unmount();
+    }
+  });
+
   it('resumes visible polling when history backfill fails', async () => {
     setVisibilityState('hidden');
     const consoleWarnMock = vi.spyOn(console, 'warn').mockImplementation((): void => undefined);

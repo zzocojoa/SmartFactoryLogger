@@ -197,7 +197,8 @@ export const useMetricsPollingEffects = ({
           poll_interval_ms: pollIntervalMs,
           failure_count: mainThreadFailureCount,
         };
-        hasReceivedOperationalData = isOperationalFactoryData(nextPayload.data);
+        hasReceivedOperationalData =
+          hasReceivedOperationalData || isOperationalFactoryData(nextPayload.data);
         applyDataPayload(nextPayload);
         broadcastPayload(nextPayload);
         if (hasReceivedOperationalData && document.visibilityState === 'hidden') {
@@ -278,7 +279,8 @@ export const useMetricsPollingEffects = ({
             return;
           }
           if (type === 'DATA') {
-            hasReceivedOperationalData = isOperationalFactoryData(payload.data);
+            hasReceivedOperationalData =
+              hasReceivedOperationalData || isOperationalFactoryData(payload.data);
             applyDataPayload(payload);
             broadcastPayload(payload);
             if (hasReceivedOperationalData && document.visibilityState === 'hidden') {
@@ -435,7 +437,8 @@ export const useMetricsPollingEffects = ({
         if (!payload || payload.tab_id === tabId || isLeader()) {
           return;
         }
-        hasReceivedOperationalData = isOperationalFactoryData(payload.payload.data);
+        hasReceivedOperationalData =
+          hasReceivedOperationalData || isOperationalFactoryData(payload.payload.data);
         applyDataPayload(payload.payload);
         updateLeaderState({
           tab_id: tabId,

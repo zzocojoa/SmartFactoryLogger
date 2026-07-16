@@ -44,6 +44,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
   successful readiness result even when the Electron document is hidden or a
   stale dashboard leader lock exists; normal visibility and leader behavior
   resumes after success.
+- Latched the first operational live-data result so a later transient
+  Offline/Error snapshot cannot reactivate startup recovery or bypass hidden-tab
+  leader rules.
 - Moved SPOT observation-fact writes and health payload construction off the
   async event loop while preserving ordered fact persistence and cancellation
   draining.
