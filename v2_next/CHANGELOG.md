@@ -10,6 +10,16 @@ All notable changes to Smart Factory Logger V2 are documented here.
   health, the first timestamped live factory snapshot, and dashboard paint.
 - Added a strict packaged cold-start PowerShell measurement under `resources/qa`
   with contamination, timeout, and missing-milestone failure evidence.
+- Added fail-closed verification for every installed backend bundle file,
+  including path, size, SHA-256, aggregate hash, and clean build commit.
+
+### Changed
+
+- Packaged the Python backend as a one-dir bundle while preserving the installed
+  `resources/backend/SmartFactoryBackend.exe` launcher path. This removes the
+  per-launch one-file extraction delay without changing operator entry points.
+- Kept periodic memory sampling lightweight; expensive USS, open-file, and
+  handle details remain available through explicit diagnostic snapshots.
 
 ### Fixed
 
@@ -25,15 +35,28 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Routed packaged renderer API calls through the explicit IPv4 loopback address
   so Windows IPv6-first `localhost` resolution cannot delay every backend
   request past the operational-ready polling cycle.
-- Bounded the two operational startup polling requests (`/health` and
-  `/api/data`) to two seconds so a request opened before Uvicorn is listening
-  cannot indefinitely prevent its next retry.
+- Bounded startup `/health` requests to eight seconds until their first success,
+  then restored the existing two-second steady-state bound. `/api/data` remains
+  bounded to two seconds throughout.
 - Kept health polling at its five-second base interval until the first
   successful response; the existing post-recovery outage backoff is unchanged.
 - Kept packaged cold-start health and live-data polling active until their first
   successful readiness result even when the Electron document is hidden or a
   stale dashboard leader lock exists; normal visibility and leader behavior
   resumes after success.
+- Moved SPOT observation-fact writes and health payload construction off the
+  async event loop while preserving ordered fact persistence and cancellation
+  draining.
+- Moved local backend-address discovery to a diagnostic daemon thread so slow
+  Windows hostname resolution cannot delay Uvicorn readiness.
+
+### Validation
+
+- Verified the installed one-dir package on the physical server: operational
+  ready completed in `5,076.2 ms` with full 1,707-file bundle integrity.
+- Verified the same installed package for 15 minutes with zero runtime, image,
+  observability, logging, fact-write, fact-link, signalpc, or duplicate-key
+  failures.
 
 ### Compatibility
 

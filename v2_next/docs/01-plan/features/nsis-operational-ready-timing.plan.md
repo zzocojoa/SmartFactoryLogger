@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Plan
 
-> Version: 1.1.0 | Date: 2026-07-16 | Status: Completed / Server Verified
+> Version: 1.1.1 | Date: 2026-07-16 | Status: Completed / Release Gate Approved
 > Level: Dynamic
 
 ---
@@ -231,9 +231,12 @@ readiness without changing the existing startup baseline.
 
 ## 9. Next Steps
 
-1. Preserve the server artifact and release hashes with the completion report.
-2. Use the validated installer SHA for deployment; reject superseded packages.
-3. Run long-duration device stability validation as a separate release gate.
+1. Completed: preserved both server artifacts and release hashes in the
+   completion report.
+2. Approved: use the validated installer SHA for deployment and reject
+   superseded packages.
+3. Completed: the independent 15-minute physical-device stability gate passed
+   with zero runtime, image, logging, fact, or observability failures.
 
 ## Version History
 
@@ -247,3 +250,4 @@ readiness without changing the existing startup baseline.
 | 1.0.5 | 2026-07-16 | Added Act 7 packaged pre-success polling ownership across visibility and stale locks | Codex |
 | 1.0.6 | 2026-07-16 | Added Act 8 lightweight periodic memory sampling and non-blocking address discovery | Codex |
 | 1.1.0 | 2026-07-16 | Added one-dir packaging, complete bundle integrity, and final physical-server operational-ready acceptance | Codex |
+| 1.1.1 | 2026-07-16 | Recorded the passing 15-minute server stability release gate | Codex |

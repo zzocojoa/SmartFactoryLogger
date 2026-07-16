@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.1.0 | Date: 2026-07-16 | Status: Completed / Server Verified
+> Version: 1.1.1 | Date: 2026-07-16 | Status: Completed / Release Gate Approved
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -443,9 +443,41 @@ one startup session, `driver_connected=true`, full bundle integrity PASS, and
 cleanup PASS. This is approximately 86% faster than the last one-file server
 result of `36,395.9 ms`.
 
+### Final 15-minute physical-server stability gate
+
+The same installed one-dir package completed the independent 15-minute device
+stability gate. The raw JSON remains in the controlled server evidence store;
+the immutable filename and SHA-256 below are the release record.
+
+| Artifact | Value |
+|----------|-------|
+| File | `server-stability-onedir-15min-20260716-133019.json` |
+| SHA-256 | `F8302E9D4B4384A7E3C94D56D046E6F808F76BB071CB9E5060B1209FC70E0D2D` |
+| Observation window | `2026-07-16 13:30:19` to `13:45:20 +09:00` |
+| Declared duration | `900 seconds` |
+| Runtime samples | `867` |
+| Image window | `2,011 / 2,011` successful |
+| CSV rows | `4,412` |
+| Async diagnostics | `4,412 complete / 0 partial` |
+| Observation facts | `901` rows, `0` incomplete |
+| Final driver state | connected |
+
+All health, data, disconnect, worker-thread, stale-data, SPOT, image,
+observability, fact-write, fact-link, signalpc, and duplicate-key failure
+counters were zero. Result: `SERVER ONEDIR 15-MINUTE STABILITY VALIDATION: PASS`.
+
+Release gate verdict: `APPROVED`.
+
 ## 5. Next Action
 
-Use only installer SHA `5F895884...` for this release. Preserve the server
-artifact and bundle manifest with release evidence. Run the existing 15-minute
-device stability suite as a separate deployment gate; it does not alter the
-completed operational-ready timing verdict.
+Use only installer SHA `5F895884...` for this release and reject superseded
+packages. The operational-ready and 15-minute physical-server artifacts are
+preserved by filename and SHA-256 above. Proceed through PR review, merge, and
+the repository-defined tagged Windows release-artifact workflow.
+
+## Version History
+
+| Version | Date | Changes | Author |
+|---------|------|---------|--------|
+| 1.1.0 | 2026-07-16 | Recorded final one-dir physical-server operational-ready acceptance | Codex |
+| 1.1.1 | 2026-07-16 | Preserved the 15-minute server stability artifact and approved the release gate | Codex |
