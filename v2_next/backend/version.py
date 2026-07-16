@@ -8,7 +8,7 @@ import subprocess
 import sys
 from typing import Any
 
-__version__ = "1.0.14"
+__version__ = "1.0.15"
 
 BUILD_PROVENANCE_FILENAME = "build_provenance.json"
 BUILD_PROVENANCE_SCHEMA_VERSION = "1.0.0"
