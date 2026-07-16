@@ -2,11 +2,11 @@
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
 > Act 2 build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
-> Act iteration: 8 | Backend starvation patch verified locally; replacement package pending
+> Act iteration: 8 | Replacement package ready; server validation pending
 
 ---
 
-## Match Rate: 100% (Act 8 source; replacement package pending)
+## Match Rate: 100% (Act 8 candidate package; server validation pending)
 
 The implementation matches the runtime readiness design. Act 3 made the frozen
 backend responsive, but package reproduction showed that the `file:` renderer
@@ -292,8 +292,32 @@ completion marker is emitted before yielding.
 | Act 8 backend lint/mypy | PASS |
 | Act 8 full backend unittest | `488 tests passed` |
 | Act 8 `git diff --check` | PASS |
+| Act 8 PyInstaller provenance | clean HEAD `e6116915dc072d1d12ca9ce55a56b57528468212` embedded and archive-verified |
+| Act 8 NSIS electron-builder | PASS |
+| Act 8 packaged MOCK operational-ready | PASS at `8,625.1 ms`; launcher `8,879.6 ms` |
 
-## Act 7 Candidate Package Evidence
+## Act 8 Candidate Package Evidence
+
+| Artifact | Evidence |
+|----------|----------|
+| Source/build commit | `e6116915dc072d1d12ca9ce55a56b57528468212` |
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Installer bytes | `163,235,599` |
+| Installer SHA-256 | `2207981A50DA99C2C496AD3CCC2BA2492E00473B6ACDBFCC52A8048638E07AC6` |
+| Backend SHA-256 | `EF358B3FC90ED8998FE7511ACDA5AB862B38EFB7F6AFE4CDE3B7690EA50DABB7` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+| Frontend index SHA-256 | `9C7411C828E1602B011734ED6F40918A9905A017DA7CD3146EB8746983391A2A` |
+| Frontend entry SHA-256 | `9D8B45B69334B161EA7B551B2750A60A1AD3866C44A8309851FBE180839B3CC1` |
+| Frontend app SHA-256 | `FDCA06AF669AA9EE5D2BBDAF77C6974A410EEB8752B429A46A12779049E99D0F` |
+| Frontend worker SHA-256 | `27E36A9D369886C88D922D615FCBA2ACD31245F7EB1C29C98729ABD3B1B84338` |
+| Build time | `2026-07-16T09:52:32+09:00` |
+
+Packaged MOCK cold start reached dashboard paint at `655.2 ms`, backend health
+at `7,667.3 ms`, first Running data at `8,563.3 ms`, and operational-ready at
+`8,625.1 ms`; launcher-observed time was `8,879.6 ms`. It completed within the
+30-second diagnostic budget with zero missing milestones and cleanup PASS.
+
+## Act 7 Candidate Package Evidence (superseded)
 
 | Artifact | Evidence |
 |----------|----------|
@@ -403,8 +427,8 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Build the Act 8 source from a clean commit and retain a true server
-  operational-ready measurement artifact.
+- Install only the Act 8 candidate and retain a true server operational-ready
+  measurement artifact.
 
 ## Deviations from Design
 
@@ -417,6 +441,6 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Do not use the Act 7 installer SHA `E771FDA7...` for final acceptance; it is now
-root-cause evidence. Build the Act 8 source from a clean commit, verify package
-identity, and rerun the bundled launcher with all existing processes stopped.
+Use only Act 8 installer SHA `2207981A...` for final validation. Act 7 SHA
+`E771FDA7...` is root-cause evidence only. Verify package identity and rerun the
+bundled launcher with all existing processes stopped.

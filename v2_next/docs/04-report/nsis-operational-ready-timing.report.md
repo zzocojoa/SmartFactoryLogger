@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.6 | Date: 2026-07-16 | Status: Act 8 Source Verified / Package Pending
+> Version: 1.0.6 | Date: 2026-07-16 | Status: Act 8 Candidate Ready / Server Validation Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -366,9 +366,15 @@ cleanup and are not independent crash evidence.
   `Lifespan startup complete` marker identifies readiness independently of DNS.
 - Focused tests: `39 passed`; backend ruff and mypy: PASS; full backend suite:
   `488 tests passed`; `git diff --check`: PASS.
+- Clean build commit: `e6116915dc072d1d12ca9ce55a56b57528468212`.
+- Installer SHA: `2207981A50DA99C2C496AD3CCC2BA2492E00473B6ACDBFCC52A8048638E07AC6`;
+  backend SHA: `EF358B3FC90ED8998FE7511ACDA5AB862B38EFB7F6AFE4CDE3B7690EA50DABB7`.
+- PyInstaller archive provenance matches the clean build commit. Packaged MOCK
+  reached health at `7,667.3 ms`, Running data at `8,563.3 ms`, and
+  operational-ready at `8,625.1 ms`; cleanup PASS.
 
 ## 5. Next Action
 
-Commit the Act 8 source, generate a clean provenance-verified PyInstaller/NSIS
-package, and rerun the bundled 90-second physical-device operational-ready
-measurement with all existing processes stopped.
+Copy and install only Act 8 SHA `2207981A...` on the server, verify installed
+backend SHA `EF358B3F...`, and rerun the bundled 90-second physical-device
+operational-ready measurement with all existing processes stopped.
