@@ -2,6 +2,29 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.15] - 2026-07-16
+
+### Fixed
+
+- Restored the SPOT camera's internal device-temperature badge using the
+  backend's existing cached temperature metadata. The dashboard continues to
+  use the official `/image.jpg` route and does not add another device request.
+- Kept the badge hidden when cached temperature metadata is stale or invalid so
+  camera playback remains independent from temperature availability.
+
+### Validation
+
+- Verified the release candidate on the physical server with 13/13 successful
+  image responses, 13/13 valid temperature samples from `50.3` to `50.5` °C,
+  zero processing, policy, or CORS violations, and visual badge confirmation.
+- Added backend header-policy and frontend parsing, visibility, and stale/error
+  regression coverage.
+
+### Compatibility
+
+- No persistent schema, configuration, PLC/SPOT protocol, polling interval, CSV
+  schema, image route, or operator workflow changes are required.
+
 ## [1.0.14] - 2026-07-16
 
 ### Added
