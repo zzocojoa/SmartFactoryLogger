@@ -6,7 +6,6 @@ import queue
 from datetime import datetime
 import os
 import threading
-import time
 from typing import Any, Dict, Optional
 from pythonjsonlogger import jsonlogger
 
@@ -54,6 +53,7 @@ class CommMetricsLoggerService:
         self.interval_sec = max(5.0, float(interval_sec))
         self.thread: Optional[threading.Thread] = None
         self.running = False
+        self._stop_event = threading.Event()
         self._file_path: Optional[str] = None
         self.logger = self._build_logger()
         self._last_ex_connected: Optional[bool] = None
@@ -120,6 +120,7 @@ class CommMetricsLoggerService:
     def start(self) -> None:
         if self.running:
             return
+        self._stop_event.clear()
         self.running = True
         self.thread = threading.Thread(target=self._loop, name="CommMetricsLogger", daemon=True)
         self.thread.start()
@@ -129,6 +130,7 @@ class CommMetricsLoggerService:
         if not self.running:
             return self.thread is None or not self.thread.is_alive()
         self.running = False
+        self._stop_event.set()
         if self.thread:
             self.thread.join(timeout=1.0)
         stopped = self.thread is None or not self.thread.is_alive()
@@ -346,7 +348,8 @@ class CommMetricsLoggerService:
                 self.logger.info("COMM_METRICS %s", " | ".join(parts))
             except Exception as exc:
                 self.logger.warning("COMM_METRICS log failed: %s", exc)
-            time.sleep(self.interval_sec)
+            if self._stop_event.wait(timeout=self.interval_sec):
+                break
 
 
 comm_metrics_logger_service = CommMetricsLoggerService()

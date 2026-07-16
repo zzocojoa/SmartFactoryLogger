@@ -98,13 +98,15 @@ honest Offline/Error degraded state. No high-priority design gap remains.
 |-------|--------|
 | Node coordinator/IPC/lifecycle tests | 38 passed |
 | Frontend tests | 237 passed across 31 files |
-| Backend tests | 510 passed; focused shutdown/SPOT/contract tests PASS |
+| Backend tests | 511 passed; focused shutdown/SPOT/contract tests PASS |
 | Frontend typecheck/lint | PASS |
 | Backend ruff/mypy | PASS |
 | Frontend production build and splash copy | PASS |
 | Electron local smoke | ready-to-show 274.6 ms; first paint 282.0 ms; window shown 299.4 ms; backend trigger 300.5 ms; operational-ready 7,547.9 ms; overlay hidden |
 | Server startup | all 9 stages; operational-ready 10,478.3 ms; visual confirmation PASS |
 | Server shutdown diagnosis | backend closed in 60,311.4 ms; SPOT drain failure isolated; CSV drain succeeded in 55,926.1 ms |
+| CI build `b0e7148` server startup | all 9 stages; operational-ready 8,517 ms |
+| CI build `b0e7148` server shutdown | SPOT and CSV passed; comm metrics failed after 1,013.9 ms because its 60-second sleep was not interruptible |
 | `git diff --check` | PASS |
 
 ## Risk Review
@@ -117,8 +119,9 @@ honest Offline/Error degraded state. No high-priority design gap remains.
 - Rollback: revert the feature commit to restore immediate dashboard exposure;
   no state repair is required.
 - Remaining environment gate: rebuild the NSIS from the reviewed hotfix and
-  rerun the same server startup/splash/clean-exit validation. The prior package
-  is not releasable because SPOT drain returned false and backend exited code 2.
+  rerun the same server startup/splash/clean-exit validation. The latest package
+  proves the SPOT/CSV fixes but is not releasable because comm metrics shutdown
+  returned false and backend exited code 2.
 
 ## Recommendation
 

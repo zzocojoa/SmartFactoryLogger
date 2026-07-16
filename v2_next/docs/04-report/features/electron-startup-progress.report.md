@@ -71,7 +71,7 @@ high-priority plan/design gap remains.
 | Design match rate | 100% |
 | Node startup tests | 38 passed |
 | Frontend tests | 237 passed / 31 files |
-| Backend tests | 510 passed |
+| Backend tests | 511 passed |
 | Typecheck / lint | frontend and backend PASS |
 | Production frontend build | PASS (4,531 modules; splash copied) |
 | Server cold start | all backend stages; operational-ready 10,478.3 ms; splash visually confirmed |
@@ -80,6 +80,8 @@ high-priority plan/design gap remains.
 | Backend spawn start | 302.6 ms |
 | Local operational-ready | 7,547.9 ms |
 | Pre-hotfix server cleanup | backend exited code 2 after 60,311.4 ms; SPOT drain false; CSV drain true |
+| CI build `b0e7148` server startup | all 9 backend stages; operational-ready 8,517 ms |
+| CI build `b0e7148` server cleanup | SPOT/CSV true; comm metrics false after 1,013.9 ms; backend exit code 2 |
 
 ## 5. Review Findings Closed
 
@@ -95,6 +97,8 @@ high-priority plan/design gap remains.
 - Required explicit service-stop booleans, SPOT write integrity, CSV final-flush
   integrity, and memory-thread termination.
 - Removed inherited startup progress path/token values before child spawn.
+- Made the comm metrics interval wait interruptible so shutdown does not wait
+  behind the normal 60-second sampling cadence.
 - Improved focus, sizing, Korean language declaration, wrapping, and inert root
   behavior for the startup modal.
 - Final independent `$review`: all reproducible production blockers fixed;
@@ -107,7 +111,7 @@ high-priority plan/design gap remains.
 - Observability: correlated startup state transitions, backend stages, first-paint
   trigger reason, and existing operational-ready events remain in the local log.
 - Rollback: revert the feature commit. No state repair is required.
-- Test coverage gap: the new post-review NSIS must repeat physical-server
+- Test coverage gap: the rebuilt post-review NSIS must repeat physical-server
   cold-start, clean-exit, PLC-offline, and operator retry validation.
 
 ## 7. Related Documents
@@ -118,7 +122,6 @@ high-priority plan/design gap remains.
 
 ## 8. Next Action
 
-Push the shutdown hotfix to draft PR #174, let Windows CI build a new NSIS, then
-run the existing 30-second operational-ready server validation plus explicit
-retry, PLC-offline/degraded, and clean-exit checks before merge or release
-promotion.
+Push the interruptible comm-metrics shutdown fix to draft PR #174, let Windows
+CI build a new NSIS, then rerun the 30-second operational-ready and clean-exit
+server gates before merge or release promotion.
