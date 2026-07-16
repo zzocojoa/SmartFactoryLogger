@@ -559,6 +559,7 @@ export interface ElectronMemorySnapshot {
 export type SmartFactoryStartupEventName =
   | 'renderer.preload-start'
   | 'renderer.preload-bridge-exposed'
+  | 'renderer.splash-first-paint'
   | 'renderer.index-html-inline-script'
   | 'renderer.index-boot'
   | 'renderer.index-render'
@@ -574,7 +575,9 @@ export type SmartFactoryStartupEventName =
   | 'renderer.native-surface-render-start'
   | 'renderer.native-surface-render-end'
   | 'renderer.dashboard-ready'
+  | 'renderer.dashboard-paint-fallback'
   | 'renderer.backend-health-ready'
+  | 'renderer.first-data-snapshot'
   | 'renderer.first-live-data'
   | 'renderer.dashboard-operational-timeout'
   | 'renderer.dashboard-operational-ready';
@@ -586,8 +589,41 @@ export interface SmartFactoryStartupEventResult {
   reason?: string;
 }
 
+export type ElectronStartupStatus =
+  | 'loading'
+  | 'ready'
+  | 'degraded'
+  | 'timeout'
+  | 'error';
+
+export interface ElectronStartupState {
+  schema_version: 'electron-startup-state-v1';
+  session_id: string;
+  sequence: number;
+  status: ElectronStartupStatus;
+  phase: string;
+  message: string;
+  progress: number;
+  elapsed_ms: number;
+  backend_health_ready: boolean;
+  data_snapshot_ready: boolean;
+  data_running: boolean;
+  dashboard_paint_ready: boolean;
+  can_retry: boolean;
+  can_continue_offline: boolean;
+  can_exit: boolean;
+  reason: string;
+}
+
 export interface SmartFactoryElectronBridge {
   getMemory: () => Promise<ElectronMemorySnapshot>;
+  getStartupState?: () => Promise<ElectronStartupState | null>;
+  onStartupStateChanged?: (
+    listener: (state: ElectronStartupState) => void
+  ) => (() => void);
+  retryStartup?: () => Promise<SmartFactoryStartupEventResult>;
+  continueStartupOffline?: () => Promise<SmartFactoryStartupEventResult>;
+  exitStartup?: () => Promise<SmartFactoryStartupEventResult>;
   recordStartupEvent: (
     name: SmartFactoryStartupEventName,
     payload?: SmartFactoryStartupEventPayload

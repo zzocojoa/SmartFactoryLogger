@@ -21,6 +21,7 @@ type OperationalReadyState = {
 
 type StartupTelemetryWindow = Window & {
   __SF_STARTUP_EVENT_KEYS__?: Set<string>;
+  __SF_STARTUP_EVENT_PENDING_KEYS__?: Set<string>;
   __SF_OPERATIONAL_READY_STATE__?: OperationalReadyState;
 };
 
@@ -28,6 +29,8 @@ type DashboardReadySurface = 'native' | 'scene';
 type DashboardReadyStrategy = 'raf' | 'timeout-fallback' | 'timeout-no-raf';
 
 const DASHBOARD_READY_FALLBACK_MS = 5000;
+const STARTUP_EVENT_RETRY_DELAY_MS = 250;
+const STARTUP_EVENT_MAX_ATTEMPTS = 3;
 export const OPERATIONAL_READY_TIMEOUT_MS = 30000;
 const OPERATIONAL_READY_GATES = [
   'backend_health',
@@ -41,6 +44,14 @@ const getStartupEventKeys = (): Set<string> => {
     startupWindow.__SF_STARTUP_EVENT_KEYS__ = new Set<string>();
   }
   return startupWindow.__SF_STARTUP_EVENT_KEYS__;
+};
+
+const getPendingStartupEventKeys = (): Set<string> => {
+  const startupWindow = window as StartupTelemetryWindow;
+  if (!startupWindow.__SF_STARTUP_EVENT_PENDING_KEYS__) {
+    startupWindow.__SF_STARTUP_EVENT_PENDING_KEYS__ = new Set<string>();
+  }
+  return startupWindow.__SF_STARTUP_EVENT_PENDING_KEYS__;
 };
 
 const getOperationalReadyState = (): OperationalReadyState => {
@@ -117,12 +128,27 @@ export const recordStartupEventOnce = (
   payload?: SmartFactoryStartupEventPayload
 ): void => {
   const recordedKeys = getStartupEventKeys();
-  if (recordedKeys.has(key)) {
+  const pendingKeys = getPendingStartupEventKeys();
+  if (recordedKeys.has(key) || pendingKeys.has(key)) {
     return;
   }
 
-  recordedKeys.add(key);
-  void recordStartupEvent(name, payload);
+  pendingKeys.add(key);
+  const attemptRecord = (attempt: number): void => {
+    void recordStartupEvent(name, payload).then((result) => {
+      if (result.ok) {
+        recordedKeys.add(key);
+        pendingKeys.delete(key);
+        return;
+      }
+      if (attempt < STARTUP_EVENT_MAX_ATTEMPTS) {
+        window.setTimeout(() => attemptRecord(attempt + 1), STARTUP_EVENT_RETRY_DELAY_MS);
+        return;
+      }
+      pendingKeys.delete(key);
+    });
+  };
+  attemptRecord(1);
 };
 
 const getMissingOperationalReadyGates = (state: OperationalReadyState): string[] => {
@@ -211,7 +237,7 @@ export const armDashboardOperationalReadyTimeout = (): void => {
 };
 
 export const markBackendHealthReady = (health: HealthSnapshot | null): boolean => {
-  if (!health) {
+  if (!health || health.running !== true) {
     return false;
   }
 
@@ -249,6 +275,43 @@ export const isOperationalFactoryData = (data: FactoryData | null): data is Fact
     typeof data.Status === 'string' &&
     data.Status.trim().toLowerCase() === 'running'
   );
+};
+
+export const isStartupFactoryDataSnapshot = (data: FactoryData | null): data is FactoryData => {
+  if (!data) {
+    return false;
+  }
+
+  const timestampMs = data.timestamp_ms;
+  const normalizedStatus = typeof data.Status === 'string'
+    ? data.Status.trim().toLowerCase()
+    : '';
+  return (
+    typeof timestampMs === 'number' &&
+    Number.isFinite(timestampMs) &&
+    timestampMs > 0 &&
+    typeof data.Time === 'string' &&
+    data.Time.trim().length > 0 &&
+    ['running', 'offline', 'error'].includes(normalizedStatus)
+  );
+};
+
+export const markFirstDataSnapshotReady = (data: FactoryData | null): boolean => {
+  if (!isStartupFactoryDataSnapshot(data)) {
+    return false;
+  }
+
+  const recordedKeys = getStartupEventKeys();
+  const pendingKeys = getPendingStartupEventKeys();
+  const key = 'renderer.first-data-snapshot';
+  if (recordedKeys.has(key) || pendingKeys.has(key)) {
+    return false;
+  }
+  recordStartupEventOnce(key, 'renderer.first-data-snapshot', {
+    status: data.Status,
+    timestamp_present: true,
+  });
+  return true;
 };
 
 export const markFirstLiveDataReady = (data: FactoryData | null): boolean => {
@@ -305,13 +368,22 @@ export const recordDashboardReadyAfterPaint = (
       markDashboardPaintReady(surface);
     }
 
-    recordStartupEventOnce('renderer.dashboard-ready', 'renderer.dashboard-ready', {
+    const eventPayload = {
       surface,
       route: resolveRoute(),
       ready_state: document.readyState,
       ready_strategy: readyStrategy,
       ...payload,
-    });
+    };
+    if (readyStrategy === 'raf') {
+      recordStartupEventOnce('renderer.dashboard-ready', 'renderer.dashboard-ready', eventPayload);
+    } else {
+      recordStartupEventOnce(
+        'renderer.dashboard-paint-fallback',
+        'renderer.dashboard-paint-fallback',
+        eventPayload
+      );
+    }
   };
 
   if (typeof window.requestAnimationFrame === 'function') {
