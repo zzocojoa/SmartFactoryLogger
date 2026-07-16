@@ -373,8 +373,33 @@ cleanup and are not independent crash evidence.
   reached health at `7,667.3 ms`, Running data at `8,563.3 ms`, and
   operational-ready at `8,625.1 ms`; cleanup PASS.
 
+### Act 8 server isolation and Act 9 timeout patch
+
+- Act 8 recovered functionally on the physical server but required
+  `63,895.4 ms`, exceeding the 30-second performance budget.
+- Renderer/external correlation proved the renderer observed a successful
+  external health response within `886.9 ms`; the remaining delay was not a
+  renderer event-loss problem.
+- Backend-only data-first cold start returned Running `/api/data` at
+  `21,183.4 ms`. A separate single-request run reached TCP at `15,260.9 ms`
+  and completed one `/health` request in `3,926.8 ms`.
+- The previous shared `2,000 ms` timeout therefore canceled a valid startup
+  health response. Act 9 grants only pre-success health requests `8,000 ms`,
+  then restores `2,000 ms`; `/api/data` remains `2,000 ms` throughout.
+- Slow health processing now records structured total, PLC service, runtime
+  metadata, and frontend static timings without changing endpoint behavior.
+- Full health: frontend `229 tests`; backend `489 tests`; typecheck, ESLint,
+  Ruff, and mypy all PASS.
+- Clean build commit: `896cafbcd60be9b4624581a483bd31ab929b75b9`.
+- Installer SHA: `F8C1E7300BA0F374DFE682CA1FB166AB9C3511CA650BBA7E7DFA664148BC2987`;
+  backend SHA: `C6057328A4112E6467707DFA12A5E0DE028069D3F0A1E1B63F59E8CE04D21786`.
+- PyInstaller archive provenance content matches the clean build commit.
+  Packaged MOCK reached health at `7,574.8 ms`, Running data at `8,564.4 ms`,
+  and operational-ready at `8,649.8 ms`; cleanup PASS.
+
 ## 5. Next Action
 
-Copy and install only Act 8 SHA `2207981A...` on the server, verify installed
-backend SHA `EF358B3F...`, and rerun the bundled 90-second physical-device
-operational-ready measurement with all existing processes stopped.
+Copy and install only Act 9 SHA `F8C1E730...` on the server, verify installed
+backend SHA `C6057328...`, and rerun the bundled physical-device
+operational-ready measurement. Acceptance requires functional PASS with no
+diagnostic timeout and operational-ready at or below 30 seconds.

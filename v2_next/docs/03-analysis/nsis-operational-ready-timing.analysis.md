@@ -425,9 +425,52 @@ This installer remains runtime-valid but its bundled QA script ends a 90-second
 measurement at the 30-second diagnostic marker. It is superseded for this
 feature's final operational-ready validation and must not be used for that test.
 
+## Act 9 Startup Health Timeout Contract
+
+Physical-server isolation measurements narrowed the remaining delay to the
+renderer startup health request contract:
+
+- Backend-only data-first cold start returned Running `/api/data` at
+  `21,183.4 ms` and `/health` at `21,508.1 ms`, both within the 30-second
+  operational budget.
+- A backend-only single-request run reached TCP readiness at `15,260.9 ms`.
+  The first `/health` request then completed successfully in `3,926.8 ms`, at
+  `19,201.1 ms` from launch.
+- The renderer allowed only `2,000 ms` for that startup health request, so it
+  canceled a valid physical-server response approximately `1,926.8 ms` before
+  completion. `/api/data` itself remained fast after backend readiness.
+
+Act 9 therefore separates only the request budgets: pre-success `/health` uses
+`8,000 ms`, while steady-state `/health` and all `/api/data` polling retain the
+existing `2,000 ms` timeout. The first successful health response switches the
+next request back to the steady-state budget. No polling interval, backoff,
+device I/O, SPOT request, PLC collector, or data schema changes.
+
+Slow health responses at or above `500 ms` now emit one structured log entry
+with total, PLC service, runtime metadata, and frontend static stage timings.
+This is diagnostic-only and does not change the health payload.
+
+### Act 9 candidate package
+
+| Artifact | Evidence |
+|----------|----------|
+| Source/build commit | `896cafbcd60be9b4624581a483bd31ab929b75b9` |
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Installer bytes | `163,232,128` |
+| Installer SHA-256 | `F8C1E7300BA0F374DFE682CA1FB166AB9C3511CA650BBA7E7DFA664148BC2987` |
+| Backend SHA-256 | `C6057328A4112E6467707DFA12A5E0DE028069D3F0A1E1B63F59E8CE04D21786` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+| Frontend index SHA-256 | `4D7388BF22CEFDFBDD6E53A186F5A9EF7D1045C19DB26DE33036DDACD349E8E4` |
+| PyInstaller archive provenance | clean HEAD embedded and content-verified |
+
+Full health passed: frontend `31 files / 229 tests`, backend ruff/mypy and
+`489 tests`. Packaged MOCK cold start reached dashboard paint at `528.9 ms`,
+health at `7,574.8 ms`, first Running data at `8,564.4 ms`, and operational
+ready at `8,649.8 ms`; no diagnostic timeout occurred and cleanup passed.
+
 ## Missing Items
 
-- Install only the Act 8 candidate and retain a true server operational-ready
+- Install only the Act 9 candidate and retain a true server operational-ready
   measurement artifact.
 
 ## Deviations from Design
@@ -441,6 +484,6 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Use only Act 8 installer SHA `2207981A...` for final validation. Act 7 SHA
-`E771FDA7...` is root-cause evidence only. Verify package identity and rerun the
+Use only Act 9 installer SHA `F8C1E730...` for final validation. Act 8 SHA
+`2207981A...` is root-cause evidence only. Verify package identity and rerun the
 bundled launcher with all existing processes stopped.
