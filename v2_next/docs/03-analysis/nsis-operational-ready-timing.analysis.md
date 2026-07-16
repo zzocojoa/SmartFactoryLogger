@@ -2,11 +2,11 @@
 
 > Date: 2026-07-16 | Design: `docs/02-design/features/nsis-operational-ready-timing.design.md`
 > Act 2 build commit: `b848755b118852df4cf1a1cc1f6c13160618c7df`
-> Act iteration: 7 | Lifecycle patch validated; replacement package pending
+> Act iteration: 7 | Replacement package ready; server validation pending
 
 ---
 
-## Match Rate: 100% (source candidate; replacement package pending)
+## Match Rate: 100% (candidate package; server validation pending)
 
 The implementation matches the runtime readiness design. Act 3 made the frozen
 backend responsive, but package reproduction showed that the `file:` renderer
@@ -259,6 +259,31 @@ interval, device protocol, or normal post-success ownership policy changes.
 | Act 7 frontend full suite | `31 files, 228 tests passed` |
 | Act 7 frontend typecheck/lint/build | PASS |
 | Act 7 project health | backend ruff/mypy PASS; `485 tests passed` |
+| Act 7 PyInstaller provenance | clean HEAD `81356abb6ca629b93cecc3b171d65806e8ce3ab6` verified before/after build |
+| Act 7 NSIS electron-builder | PASS |
+| Act 7 packaged MOCK operational-ready | PASS at `8,568.5 ms`; launcher `8,886.4 ms` |
+
+## Act 7 Candidate Package Evidence
+
+| Artifact | Evidence |
+|----------|----------|
+| Source/build commit | `81356abb6ca629b93cecc3b171d65806e8ce3ab6` |
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Installer bytes | `163,230,457` |
+| Installer SHA-256 | `E771FDA73E729A6DFA613FC3BB0CE4D1AA2033E515403238EA1AE72C4B71E32E` |
+| Backend SHA-256 | `EC937974019156EC531EC4E9B840CC2E3D28B82B891CC45691BD64FFFA321885` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+| Frontend index SHA-256 | `9C7411C828E1602B011734ED6F40918A9905A017DA7CD3146EB8746983391A2A` |
+| Frontend entry SHA-256 | `9D8B45B69334B161EA7B551B2750A60A1AD3866C44A8309851FBE180839B3CC1` |
+| Frontend app SHA-256 | `FDCA06AF669AA9EE5D2BBDAF77C6974A410EEB8752B429A46A12779049E99D0F` |
+| Frontend worker SHA-256 | `27E36A9D369886C88D922D615FCBA2ACD31245F7EB1C29C98729ABD3B1B84338` |
+| Source/package hash checks | backend, QA, and four frontend assets MATCH |
+| Build time | `2026-07-16T09:06:45+09:00` |
+
+Packaged MOCK cold start reached dashboard paint at `513.3 ms`, backend health
+at `7,544.0 ms`, first Running data at `8,488.3 ms`, and operational-ready at
+`8,568.5 ms`; launcher-observed time was `8,886.4 ms`. It completed within the
+30-second diagnostic budget with zero missing milestones and cleanup PASS.
 
 ## Act 6 Candidate Package Evidence (superseded)
 
@@ -348,7 +373,6 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Missing Items
 
-- Build a clean Act 7 PyInstaller/NSIS package and record its hashes.
 - Run only the Act 7 installer on the server and retain a true
   operational-ready measurement artifact.
 
@@ -363,7 +387,6 @@ feature's final operational-ready validation and must not be used for that test.
 
 ## Recommendation
 
-Do not use installer SHA `39165C1E...` for final acceptance. Build the Act 7
-source from a clean commit, verify the replacement installer and bundled hashes,
-then rerun the bundled launcher on the server with the app and backend fully
-stopped.
+Use only installer SHA `E771FDA7...` for final server validation. Do not use
+superseded SHA `39165C1E...`. Rerun the bundled launcher on the server with the
+app and backend fully stopped.

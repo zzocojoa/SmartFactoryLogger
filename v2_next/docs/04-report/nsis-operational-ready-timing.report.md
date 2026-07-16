@@ -1,6 +1,6 @@
 # NSIS Operational Ready Timing Report
 
-> Version: 1.0.5 | Date: 2026-07-16 | Status: Act 7 Patch Validated / Replacement Package Pending
+> Version: 1.0.5 | Date: 2026-07-16 | Status: Act 7 Candidate Ready / Server Validation Pending
 > Feature: `nsis-operational-ready-timing`
 
 ## 1. Summary
@@ -24,8 +24,8 @@
   `16.2 ms`, while `localhost` took `2052.2 ms` after `::1` failed.
 - Changed only packaged/local fallback API resolution to explicit
   `127.0.0.1`; environment overrides and browser development remain unchanged.
-- Installer SHA `0437A378...` is superseded. The Act 5 replacement installer is
-  SHA `ABA6ED160B...` and is ready for server validation.
+- Installer SHA `0437A378...` and Act 5 SHA `ABA6ED160B...` are superseded by
+  the later server-evidence iterations.
 - Packaged MOCK live-data timing passed at 8.2266 seconds launcher-observed.
 - Development-PC hardware mode correctly timed out with only `live_data`
   missing; it no longer counts a timestamped error snapshot as ready.
@@ -46,6 +46,8 @@
   owned until their respective first successful readiness results, even when
   the document is hidden or a stale dashboard leader lock exists. Normal
   visibility and leader behavior resumes after success.
+- Built the clean Act 7 NSIS from commit `81356ab...`; installer SHA is
+  `E771FDA7...`, and packaged MOCK operational-ready passed at `8,568.5 ms`.
 
 ## 2. Engineering Assessment
 
@@ -76,9 +78,9 @@
 - Lifecycle recovery failure mode: before first readiness success, packaged
   polling ignores only hidden visibility and stale leader ownership. Browser
   multi-tab behavior and all post-success pause/leader semantics are unchanged.
-- Rollback: revert `b848755`, `125c87d7`, and `a77a3be`, restore version
-  `1.0.13`, rebuild backend/NSIS from a clean commit, and continue using the
-  unchanged visual-ready metric.
+- Rollback Act 7: revert commit `81356ab`, rebuild backend/NSIS from a clean
+  commit, and continue using the unchanged visual-ready metric while preserving
+  the prior bounded-request behavior if desired.
 
 ## 3. Files Changed
 
@@ -138,17 +140,41 @@
 - Act 7 frontend full suite: `31 files`, `228 tests` passed
 - Act 7 typecheck, lint, and production build: PASS
 - Act 7 project health: backend ruff/mypy PASS, `485 tests` passed
+- Act 7 packaged MOCK operational-ready: PASS at `8,568.5 ms`; launcher
+  `8,886.4 ms`, zero missing milestones, cleanup PASS
 
 ### Package checks
 
 - Frontend production build: PASS
 - PyInstaller one-file backend: PASS
 - Provenance before/after build:
-  `46c0f2cc13a205db27590ca72429f61c2cf344b0`
+  `81356abb6ca629b93cecc3b171d65806e8ce3ab6`
 - electron-builder NSIS: PASS
 - Backend source/package SHA match: PASS
 - QA script source/package SHA match: PASS
 - Runtime version: `1.0.14`, runtime kind: `frozen`
+
+### Act 7 candidate artifact
+
+| Artifact | Value |
+|----------|-------|
+| Installer | `dist/smart-factory-logger-v2 Setup 1.0.14.exe` |
+| Built at | `2026-07-16 09:06:45 KST` |
+| Size | `163,230,457 bytes` |
+| SHA-256 | `E771FDA73E729A6DFA613FC3BB0CE4D1AA2033E515403238EA1AE72C4B71E32E` |
+| Backend SHA-256 | `EC937974019156EC531EC4E9B840CC2E3D28B82B891CC45691BD64FFFA321885` |
+| QA script SHA-256 | `C92A160C2B60F5DDA5601F8C384A07A7F3253FDD8F0F0266F849629C76285F34` |
+| Frontend index SHA-256 | `9C7411C828E1602B011734ED6F40918A9905A017DA7CD3146EB8746983391A2A` |
+| Frontend entry SHA-256 | `9D8B45B69334B161EA7B551B2750A60A1AD3866C44A8309851FBE180839B3CC1` |
+| Frontend app SHA-256 | `FDCA06AF669AA9EE5D2BBDAF77C6974A410EEB8752B429A46A12779049E99D0F` |
+| Frontend worker SHA-256 | `27E36A9D369886C88D922D615FCBA2ACD31245F7EB1C29C98729ABD3B1B84338` |
+| Build commit | `81356abb6ca629b93cecc3b171d65806e8ce3ab6` |
+
+Backend, QA, and the four recorded frontend assets match their packaged copies.
+Packaged MOCK cold start: dashboard `513.3 ms`, backend health `7,544.0 ms`,
+first Running data `8,488.3 ms`, operational-ready `8,568.5 ms`, launcher
+observed `8,886.4 ms`, `ready_strategy=raf`, diagnostic budget PASS, zero
+missing milestones, and cleanup PASS.
 
 ### Act 6 candidate artifact (superseded)
 
@@ -324,5 +350,6 @@ cleanup and are not independent crash evidence.
 
 ## 5. Next Action
 
-Complete full frontend validation, build Act 7 from a clean provenance commit,
-and record the replacement installer/backend hashes before the next server run.
+Copy and install only SHA `E771FDA7...` on the server, verify the installed
+backend and bundled frontend hashes, then rerun the bundled 90-second physical
+device operational-ready measurement with all existing processes stopped.
