@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import threading
 import time
@@ -202,6 +203,21 @@ class FrontendRoutingHealthTests(unittest.TestCase):
         self.assertEqual(log_fields["health_plc_service_ms"], 600.0)
         self.assertEqual(log_fields["health_runtime_info_ms"], 100.0)
         self.assertEqual(log_fields["health_frontend_static_ms"], 100.0)
+
+    def test_health_payload_runs_outside_the_event_loop_thread(self) -> None:
+        event_loop_thread_id = threading.get_ident()
+        health_thread_ids: list[int] = []
+
+        def build_health() -> dict[str, bool]:
+            health_thread_ids.append(threading.get_ident())
+            return {"running": True}
+
+        with patch.object(backend_app, "build_health_payload", side_effect=build_health):
+            payload = asyncio.run(backend_app.health())
+
+        self.assertTrue(payload["running"])
+        self.assertEqual(len(health_thread_ids), 1)
+        self.assertNotEqual(health_thread_ids[0], event_loop_thread_id)
 
 
 if __name__ == "__main__":

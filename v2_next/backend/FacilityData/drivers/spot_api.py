@@ -1345,6 +1345,17 @@ def _write_spot_observation_fact_safely(snapshot: Dict[str, Any]) -> None:
         writer.failure_count += 1
 
 
+async def _write_spot_observation_fact_async(snapshot: Dict[str, Any]) -> None:
+    write_task = asyncio.create_task(
+        asyncio.to_thread(_write_spot_observation_fact_safely, snapshot)
+    )
+    try:
+        await asyncio.shield(write_task)
+    except asyncio.CancelledError:
+        await write_task
+        raise
+
+
 def get_spot_observation_fact_health() -> Dict[str, Any]:
     writer = _spot_observation_fact_writer
     with _spot_diagnostics_lock:
@@ -1445,7 +1456,7 @@ def _publish_spot_temperature_snapshot(
     temp_url: str,
     classification: SpotRawClassification,
     poll_completed_monotonic: Optional[float] = None,
-) -> None:
+) -> Dict[str, Any]:
     global _spot_observation_seq
     global _spot_temperature_snapshot
     global _spot_last_valid_value_at
@@ -1528,7 +1539,7 @@ def _publish_spot_temperature_snapshot(
             _spot_temperature_snapshot
         )
         snapshot_for_fact = dict(_spot_temperature_snapshot)
-    _write_spot_observation_fact_safely(snapshot_for_fact)
+    return snapshot_for_fact
 
 
 def get_spot_temperature_poll_snapshot() -> Optional[Dict[str, Any]]:
@@ -1749,7 +1760,7 @@ async def _refresh_spot_temperature(
             body=None,
             error_code="temperature-config-missing",
         )
-        _publish_spot_temperature_snapshot(
+        snapshot_for_fact = _publish_spot_temperature_snapshot(
             poll_seq=poll_seq,
             poll_started_at=poll_started_at,
             poll_completed_at=poll_completed_at,
@@ -1757,13 +1768,14 @@ async def _refresh_spot_temperature(
             temp_url=exc.temp_url,
             classification=classification,
         )
+        await _write_spot_observation_fact_async(snapshot_for_fact)
         raise
 
     try:
         _temperature, classification = await _request_spot_temperature_observation(client, temp_url)
     except SpotTemperatureFetchError as exc:
         poll_completed_at, poll_completed_monotonic = _completed_poll_clocks()
-        _publish_spot_temperature_snapshot(
+        snapshot_for_fact = _publish_spot_temperature_snapshot(
             poll_seq=poll_seq,
             poll_started_at=poll_started_at,
             poll_completed_at=poll_completed_at,
@@ -1771,11 +1783,12 @@ async def _refresh_spot_temperature(
             temp_url=exc.temp_url,
             classification=_classification_for_temperature_error(exc),
         )
+        await _write_spot_observation_fact_async(snapshot_for_fact)
         raise
 
     poll_completed_at, poll_completed_monotonic = _completed_poll_clocks()
     _record_temperature_success(temp_url)
-    _publish_spot_temperature_snapshot(
+    snapshot_for_fact = _publish_spot_temperature_snapshot(
         poll_seq=poll_seq,
         poll_started_at=poll_started_at,
         poll_completed_at=poll_completed_at,
@@ -1783,6 +1796,7 @@ async def _refresh_spot_temperature(
         temp_url=temp_url,
         classification=classification,
     )
+    await _write_spot_observation_fact_async(snapshot_for_fact)
 
 
 async def _refresh_spot_internal_temperature(client: httpx.AsyncClient) -> None:

@@ -1917,7 +1917,7 @@ def build_health_payload() -> dict[str, Any]:
 
 @app.get("/health")
 async def health():
-    return build_health_payload()
+    return await asyncio.to_thread(build_health_payload)
 
 @app.get("/stats")
 async def stats():
