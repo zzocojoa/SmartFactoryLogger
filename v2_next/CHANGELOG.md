@@ -2,6 +2,37 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.16] - 2026-07-17
+
+### Added
+
+- Added a splash-first startup flow that renders before backend launch and
+  reports the Electron, backend lifespan, dashboard paint, health, and live-data
+  readiness stages through a monotonic progress coordinator.
+- Added a dedicated packaged-backend progress channel so startup stages remain
+  observable when the frozen backend runs without a console window.
+
+### Fixed
+
+- Accepted both the first data snapshot and first live-data readiness events
+  without rejecting the coordinator payload during packaged startup.
+- Aligned Electron's graceful-shutdown wait with the backend control-shutdown
+  contract and added explicit SPOT queue drain, CSV durable flush, and
+  communication-metrics shutdown evidence.
+
+### Validation
+
+- Verified the merged master installer on the physical server with all nine
+  backend progress stages and bundled backend integrity checks passing.
+- Verified operational readiness in `7,597.2 ms`, backend exit code `0`, no
+  forced Electron termination, and zero residual processes or TCP 8000
+  listeners.
+
+### Compatibility
+
+- No persistent schema, configuration, PLC/SPOT protocol, CSV schema, image
+  route, or operator workflow migration is required.
+
 ## [1.0.15] - 2026-07-16
 
 ### Fixed
