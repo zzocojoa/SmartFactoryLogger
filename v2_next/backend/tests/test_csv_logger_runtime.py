@@ -2,10 +2,12 @@ import csv
 from datetime import datetime
 import io
 import queue
+import tempfile
 import threading
 import time
 import unittest
 from unittest.mock import Mock, patch
+from pathlib import Path
 
 from backend import app as backend_app
 from backend.FacilityData.repository import CSVLoggerService
@@ -49,6 +51,39 @@ def create_factory_data() -> FactoryData:
 
 
 class CSVLoggerRuntimeTests(unittest.TestCase):
+    def test_stop_sentinel_is_ordered_after_an_accepted_concurrent_enqueue(self) -> None:
+        enqueue_entered = threading.Event()
+        release_enqueue = threading.Event()
+
+        class BlockingQueue(queue.Queue[FactoryData | None]):
+            def put_nowait(self, item: FactoryData | None) -> None:
+                if item is not None:
+                    enqueue_entered.set()
+                    release_enqueue.wait(timeout=1.0)
+                super().put_nowait(item)
+
+        service = CSVLoggerService()
+        service.queue = BlockingQueue(maxsize=10)
+        service.running = True
+        data = create_factory_data()
+        stop_result: list[bool] = []
+
+        enqueue_thread = threading.Thread(target=service.enqueue, args=(data,))
+        stop_thread = threading.Thread(target=lambda: stop_result.append(service.stop()))
+        enqueue_thread.start()
+        self.assertTrue(enqueue_entered.wait(timeout=1.0))
+        stop_thread.start()
+        time.sleep(0.01)
+        self.assertTrue(stop_thread.is_alive())
+
+        release_enqueue.set()
+        enqueue_thread.join(timeout=1.0)
+        stop_thread.join(timeout=1.0)
+
+        self.assertEqual(stop_result, [True])
+        self.assertIs(service.queue.get_nowait(), data)
+        self.assertIsNone(service.queue.get_nowait())
+
     def test_csv_logger_drop_count_increments_on_full_queue(self) -> None:
         service = CSVLoggerService()
         service.queue = queue.Queue(maxsize=1)
@@ -152,6 +187,47 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
             release.set()
             service.thread.join(timeout=1.0)
 
+    def test_stop_reports_final_flush_failure_after_thread_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = CSVLoggerService()
+            log_path = Path(temp_dir)
+            service.fallback_log_dir = log_path
+            service.apply_config(
+                log_path=log_path,
+                auto_save=True,
+                csv_v1_enabled=True,
+                csv_v2_enabled=False,
+            )
+            with patch.object(service, "_flush_buffer", return_value=False):
+                service.start()
+                service.enqueue(create_factory_data())
+                self.assertFalse(service.stop(timeout_sec=2.0))
+
+        self.assertFalse(service._shutdown_flush_succeeded)
+
+    def test_runtime_v2_flush_failure_cannot_be_reported_as_clean_shutdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = CSVLoggerService()
+            log_path = Path(temp_dir)
+            service.fallback_log_dir = log_path
+            service.apply_config(
+                log_path=log_path,
+                auto_save=True,
+                csv_v1_enabled=False,
+                csv_v2_enabled=True,
+            )
+            with patch.object(service, "_flush_v2_buffer", return_value=False) as flush_v2:
+                service.start()
+                for _ in range(20):
+                    service.enqueue(create_factory_data())
+                deadline = time.time() + 2.0
+                while flush_v2.call_count == 0 and time.time() < deadline:
+                    time.sleep(0.01)
+                self.assertGreaterEqual(flush_v2.call_count, 1)
+                self.assertFalse(service.stop(timeout_sec=2.0))
+
+        self.assertFalse(service._shutdown_flush_succeeded)
+
     def test_control_shutdown_waits_for_csv_logger_stop_timeout(self) -> None:
         class LoggerStub:
             timeout_sec: float | None = None
@@ -165,16 +241,82 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         with (
             patch.object(backend_app, "logger_service", logger_stub),
             patch.object(backend_app.config, "CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC", 123.0),
-            patch.object(backend_app.spot_control, "stop_spot_image_capture_for_shutdown", Mock(return_value=True)),
-            patch.object(backend_app.plc_service, "stop", Mock()),
-            patch.object(backend_app.comm_metrics_logger_service, "stop", Mock()),
-            patch.object(backend_app.config_sync_agent, "stop", Mock()),
-            patch.object(backend_app.config_watch_service, "stop", Mock()),
+            patch.object(backend_app.config, "SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC", 30.0),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                Mock(return_value=True),
+            ) as stop_image_capture,
+            patch.object(backend_app.plc_service, "stop", Mock(return_value=True)),
+            patch.object(backend_app.comm_metrics_logger_service, "stop", Mock(return_value=True)),
+            patch.object(backend_app.memory_service, "stop", Mock(return_value=True)),
+            patch.object(backend_app.config_sync_agent, "stop", Mock(return_value=True)),
+            patch.object(backend_app.config_watch_service, "stop", Mock(return_value=True)),
         ):
             status = backend_app._stop_services_for_control_shutdown()
 
         self.assertTrue(status["logger_service_stopped"])
+        stop_image_capture.assert_called_once_with(timeout_sec=30.0)
         self.assertEqual(logger_stub.timeout_sec, 123.0)
+        self.assertIn("logger_service_elapsed_ms", status)
+        self.assertIn("total_elapsed_ms", status)
+        self.assertEqual(backend_app._control_shutdown_exit_code(status), 0)
+
+        status["logger_service_stopped"] = False
+        self.assertEqual(backend_app._control_shutdown_exit_code(status), 2)
+
+    def test_control_shutdown_records_failed_stage_and_continues(self) -> None:
+        later_stop = Mock(return_value=True)
+
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                Mock(return_value=False),
+            ),
+            patch.object(backend_app.plc_service, "stop", later_stop),
+            patch.object(backend_app.logger_service, "stop", Mock(return_value=True)),
+            patch.object(backend_app.comm_metrics_logger_service, "stop", Mock(return_value=True)),
+            patch.object(backend_app.memory_service, "stop", Mock(return_value=True)),
+            patch.object(backend_app.config_sync_agent, "stop", Mock(return_value=True)),
+            patch.object(backend_app.config_watch_service, "stop", Mock(return_value=True)),
+        ):
+            status = backend_app._stop_services_for_control_shutdown()
+
+        self.assertFalse(status["spot_image_capture_drained"])
+        self.assertTrue(status["plc_service_stopped"])
+        later_stop.assert_called_once_with()
+        self.assertEqual(backend_app._control_shutdown_exit_code(status), 2)
+
+    def test_control_shutdown_stage_records_exceptions(self) -> None:
+        status: dict[str, object] = {}
+
+        def raise_stop_error() -> None:
+            raise RuntimeError("stop failed")
+
+        succeeded = backend_app._run_control_shutdown_stage(
+            stage="test_service",
+            status_key="test_service_stopped",
+            stopper=raise_stop_error,
+            status=status,
+        )
+
+        self.assertFalse(succeeded)
+        self.assertFalse(status["test_service_stopped"])
+        self.assertIn("test_service_elapsed_ms", status)
+
+    def test_control_shutdown_stage_rejects_ambiguous_none_result(self) -> None:
+        status: dict[str, object] = {}
+
+        succeeded = backend_app._run_control_shutdown_stage(
+            stage="test_service",
+            status_key="test_service_stopped",
+            stopper=lambda: None,
+            status=status,
+        )
+
+        self.assertFalse(succeeded)
+        self.assertFalse(status["test_service_stopped"])
 
 
 if __name__ == "__main__":

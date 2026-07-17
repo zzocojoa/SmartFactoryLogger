@@ -56,14 +56,19 @@ class ConfigWatchService:
         self.thread.start()
         self.logger.info("Config watch started.")
 
-    def stop(self) -> None:
+    def stop(self) -> bool:
         if not self.running:
-            return
+            return self.thread is None or not self.thread.is_alive()
         self.running = False
         if self.thread:
             self.thread.join(timeout=1.0)
-        self.thread = None
-        self.logger.info("Config watch stopped.")
+        stopped = self.thread is None or not self.thread.is_alive()
+        if stopped:
+            self.thread = None
+            self.logger.info("Config watch stopped.")
+        else:
+            self.logger.warning("Config watch thread did not stop within 1.0 seconds.")
+        return stopped
 
     def _loop(self) -> None:
         path = self._config_path()

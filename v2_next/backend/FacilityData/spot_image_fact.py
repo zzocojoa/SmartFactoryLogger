@@ -62,9 +62,21 @@ class SpotImageCaptureWriter:
     link_stale_threshold_ms: float = 9000.0
     failure_count: int = 0
     written_count: int = 0
-    last_cleanup_at: float = 0.0
+    last_cleanup_at: float = field(default_factory=time.time)
     _known_facts_by_capture_id: Optional[dict[str, dict[str, str]]] = field(default=None, init=False, repr=False)
+    _known_facts_complete: bool = field(default=False, init=False, repr=False)
     _fact_row_count: Optional[int] = field(default=None, init=False, repr=False)
+    _historical_fact_mtime: Optional[float] = field(default=None, init=False, repr=False)
+    _historical_fact_metadata_readable: bool = field(default=True, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        try:
+            self._historical_fact_mtime = self.fact_path.stat().st_mtime
+        except FileNotFoundError:
+            self._historical_fact_mtime = None
+        except OSError:
+            # Unknown history must preserve the conservative deduplication path.
+            self._historical_fact_metadata_readable = False
 
     @property
     def fact_path(self) -> Path:
@@ -98,7 +110,12 @@ class SpotImageCaptureWriter:
         output_path.mkdir(parents=True, exist_ok=True)
         image_path = output_path / f"{capture_id}{extension}"
 
-        existing_fact = self._existing_fact_for_capture_id(capture_id)
+        existing_fact = self._cached_fact_for_capture_id(capture_id)
+        if existing_fact is None and self._capture_may_already_be_recorded(
+            captured_at=captured_at,
+            image_path=image_path,
+        ):
+            existing_fact = self._existing_fact_for_capture_id(capture_id)
         if existing_fact is not None:
             if not image_path.exists():
                 tmp_path = image_path.with_suffix(f"{image_path.suffix}.tmp")
@@ -131,6 +148,16 @@ class SpotImageCaptureWriter:
         self.written_count += 1
         self._cleanup_retention(time.time())
         return fact
+
+    def _capture_may_already_be_recorded(self, *, captured_at: float, image_path: Path) -> bool:
+        if image_path.exists():
+            return True
+        if not self._historical_fact_metadata_readable:
+            return True
+        return (
+            self._historical_fact_mtime is not None
+            and self._historical_fact_mtime >= captured_at
+        )
 
     def _relative_image_path(self, captured_dt: datetime, capture_id: str, extension: str) -> Path:
         try:
@@ -169,6 +196,7 @@ class SpotImageCaptureWriter:
         )
         self.fact_path.rename(archive_path)
         self._known_facts_by_capture_id = {}
+        self._known_facts_complete = True
         self._fact_row_count = 0
         return True
 
@@ -177,8 +205,14 @@ class SpotImageCaptureWriter:
         fact = facts_by_id.get(capture_id)
         return dict(fact) if fact is not None else None
 
+    def _cached_fact_for_capture_id(self, capture_id: str) -> Optional[dict[str, str]]:
+        if self._known_facts_by_capture_id is None:
+            return None
+        fact = self._known_facts_by_capture_id.get(capture_id)
+        return dict(fact) if fact is not None else None
+
     def _load_known_facts_by_capture_id(self) -> dict[str, dict[str, str]]:
-        if self._known_facts_by_capture_id is not None:
+        if self._known_facts_complete and self._known_facts_by_capture_id is not None:
             return self._known_facts_by_capture_id
         facts_by_id: dict[str, dict[str, str]] = {}
         row_count = 0
@@ -197,6 +231,7 @@ class SpotImageCaptureWriter:
                 facts_by_id = {}
                 row_count = 0
         self._known_facts_by_capture_id = facts_by_id
+        self._known_facts_complete = True
         self._fact_row_count = row_count
         return facts_by_id
 
@@ -218,11 +253,13 @@ class SpotImageCaptureWriter:
         capture_id = str(fact.get("spot_image_capture_id") or "").strip()
         if not capture_id:
             return
-        facts_by_id = self._load_known_facts_by_capture_id()
+        if self._known_facts_by_capture_id is None:
+            self._known_facts_by_capture_id = {}
+        facts_by_id = self._known_facts_by_capture_id
         was_known = capture_id in facts_by_id
         facts_by_id[capture_id] = dict(fact)
-        if not was_known:
-            self._fact_row_count = int(self._fact_row_count or 0) + 1
+        if not was_known and self._fact_row_count is not None:
+            self._fact_row_count += 1
 
     def _cleanup_retention(self, now: float) -> None:
         if self.retention_days <= 0 or now - self.last_cleanup_at < 3600.0:

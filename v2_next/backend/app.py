@@ -366,6 +366,7 @@ def _lifecycle_log_fields() -> str:
 
 
 _EMBEDDED_STARTUP_PROGRESS_PREFIX = "SFL_STARTUP_PROGRESS "
+_EMBEDDED_STARTUP_PROGRESS_TOKEN_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _EMBEDDED_STARTUP_PROGRESS_STAGES = frozenset(
     {
         "lifespan_begin",
@@ -385,8 +386,39 @@ def _emit_embedded_startup_progress(stage: str) -> None:
     """Emit a bounded machine-readable startup milestone to the Electron host."""
     if not is_embedded_electron() or stage not in _EMBEDDED_STARTUP_PROGRESS_STAGES:
         return
-    payload = json.dumps({"stage": stage}, ensure_ascii=False, separators=(",", ":"))
-    print(f"{_EMBEDDED_STARTUP_PROGRESS_PREFIX}{payload}", flush=True)
+
+    progress_path_value = os.environ.get("SFL_STARTUP_PROGRESS_PATH", "")
+    progress_token = os.environ.get("SFL_STARTUP_PROGRESS_TOKEN", "")
+    if progress_path_value and _EMBEDDED_STARTUP_PROGRESS_TOKEN_PATTERN.fullmatch(progress_token):
+        progress_path = Path(progress_path_value)
+        if progress_path.is_absolute() and progress_path.suffix.lower() == ".jsonl":
+            authenticated_payload = json.dumps(
+                {"stage": stage, "token": progress_token},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            try:
+                with progress_path.open("a", encoding="utf-8", newline="\n") as progress_file:
+                    progress_file.write(
+                        f"{_EMBEDDED_STARTUP_PROGRESS_PREFIX}{authenticated_payload}\n"
+                    )
+                    progress_file.flush()
+            except OSError:
+                _logger.warning(
+                    "Embedded startup progress file write failed stage=%s %s",
+                    stage,
+                    _lifecycle_log_fields(),
+                )
+
+    stdout_payload = json.dumps(
+        {"stage": stage}, ensure_ascii=False, separators=(",", ":")
+    )
+    try:
+        print(f"{_EMBEDDED_STARTUP_PROGRESS_PREFIX}{stdout_payload}", flush=True)
+    except (AttributeError, OSError, ValueError):
+        # PyInstaller console=False can replace stdout with None. The private
+        # authenticated file channel above remains the packaged transport.
+        pass
 
 
 def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
@@ -1679,47 +1711,128 @@ app.add_middleware(
 )
 
 
-def _stop_services_for_control_shutdown() -> dict[str, bool]:
-    status: dict[str, bool] = {}
+_CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
+    "spot_image_capture_drained",
+    "plc_service_stopped",
+    "logger_service_stopped",
+    "comm_metrics_logger_service_stopped",
+    "memory_service_stopped",
+    "config_sync_agent_stopped",
+    "config_watch_service_stopped",
+)
+
+
+def _run_control_shutdown_stage(
+    *,
+    stage: str,
+    status_key: str,
+    stopper: Callable[[], Any],
+    status: dict[str, Any],
+) -> bool:
+    started_perf = time.perf_counter()
+    _logger.info(
+        "[Main] Control shutdown stage begin stage=%s %s",
+        stage,
+        _lifecycle_log_fields(),
+    )
     try:
-        spot_image_capture_drained = spot_control.stop_spot_image_capture_for_shutdown(timeout_sec=2.0)
-        status["spot_image_capture_drained"] = spot_image_capture_drained
-        if not spot_image_capture_drained:
-            _logger.warning("SPOT image capture queue did not drain before control shutdown")
+        result = stopper()
+        succeeded = result is True
     except Exception as exc:
-        status["spot_image_capture_drained"] = False
-        _logger.warning("Failed to stop SPOT image capture before control shutdown: %s", exc)
-    try:
-        plc_service.stop()
-        status["plc_service_stopped"] = True
-    except Exception:
-        status["plc_service_stopped"] = False
-    try:
-        logger_service_stopped = logger_service.stop(timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC)
-        status["logger_service_stopped"] = logger_service_stopped
-        if not logger_service_stopped:
-            _logger.warning(
-                "CSV logger did not stop within %.1f seconds before control shutdown",
-                config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
-            )
-    except Exception:
-        status["logger_service_stopped"] = False
-    try:
-        comm_metrics_logger_service.stop()
-        status["comm_metrics_logger_service_stopped"] = True
-    except Exception:
-        status["comm_metrics_logger_service_stopped"] = False
-    try:
-        config_sync_agent.stop()
-        status["config_sync_agent_stopped"] = True
-    except Exception:
-        status["config_sync_agent_stopped"] = False
-    try:
-        config_watch_service.stop()
-        status["config_watch_service_stopped"] = True
-    except Exception:
-        status["config_watch_service_stopped"] = False
+        succeeded = False
+        _logger.warning(
+            "[Main] Control shutdown stage failed stage=%s error_type=%s %s",
+            stage,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+
+    elapsed_ms = round((time.perf_counter() - started_perf) * 1000.0, 1)
+    status[status_key] = succeeded
+    status[f"{stage}_elapsed_ms"] = elapsed_ms
+    _logger.info(
+        "[Main] Control shutdown stage complete stage=%s success=%s elapsed_ms=%.1f %s",
+        stage,
+        succeeded,
+        elapsed_ms,
+        _lifecycle_log_fields(),
+    )
+    return succeeded
+
+
+def _stop_services_for_control_shutdown() -> dict[str, Any]:
+    status: dict[str, Any] = {}
+    shutdown_started_perf = time.perf_counter()
+
+    image_capture_drained = _run_control_shutdown_stage(
+        stage="spot_image_capture",
+        status_key="spot_image_capture_drained",
+        stopper=lambda: spot_control.stop_spot_image_capture_for_shutdown(
+            timeout_sec=config.SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC
+        ),
+        status=status,
+    )
+    if not image_capture_drained:
+        _logger.warning("SPOT image capture queue did not drain before control shutdown")
+
+    _run_control_shutdown_stage(
+        stage="plc_service",
+        status_key="plc_service_stopped",
+        stopper=plc_service.stop,
+        status=status,
+    )
+
+    logger_service_stopped = _run_control_shutdown_stage(
+        stage="logger_service",
+        status_key="logger_service_stopped",
+        stopper=lambda: logger_service.stop(
+            timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC
+        ),
+        status=status,
+    )
+    if not logger_service_stopped:
+        _logger.warning(
+            "CSV logger did not stop within %.1f seconds before control shutdown",
+            config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+        )
+
+    _run_control_shutdown_stage(
+        stage="comm_metrics_logger_service",
+        status_key="comm_metrics_logger_service_stopped",
+        stopper=comm_metrics_logger_service.stop,
+        status=status,
+    )
+    _run_control_shutdown_stage(
+        stage="memory_service",
+        status_key="memory_service_stopped",
+        stopper=memory_service.stop,
+        status=status,
+    )
+    _run_control_shutdown_stage(
+        stage="config_sync_agent",
+        status_key="config_sync_agent_stopped",
+        stopper=config_sync_agent.stop,
+        status=status,
+    )
+    _run_control_shutdown_stage(
+        stage="config_watch_service",
+        status_key="config_watch_service_stopped",
+        stopper=config_watch_service.stop,
+        status=status,
+    )
+
+    status["total_elapsed_ms"] = round(
+        (time.perf_counter() - shutdown_started_perf) * 1000.0,
+        1,
+    )
     return status
+
+
+def _control_shutdown_exit_code(status: dict[str, Any]) -> int:
+    all_stages_stopped = all(
+        status.get(key) is True for key in _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS
+    )
+    return 0 if all_stages_stopped else 2
 
 
 @app.middleware("http")
@@ -3078,9 +3191,20 @@ def _schedule_control_shutdown(reason: str) -> None:
             _logger.info("Shutdown requested: reason=%s %s", reason, _lifecycle_log_fields())
         except Exception:
             pass
-        _stop_services_for_control_shutdown()
+        status = _stop_services_for_control_shutdown()
+        exit_code = _control_shutdown_exit_code(status)
+        try:
+            _logger.info(
+                "[Main] Control shutdown complete success=%s exit_code=%d total_elapsed_ms=%.1f %s",
+                exit_code == 0,
+                exit_code,
+                float(status.get("total_elapsed_ms", 0.0)),
+                _lifecycle_log_fields(),
+            )
+        except Exception:
+            pass
         time.sleep(0.2)
-        os._exit(0)
+        os._exit(exit_code)
 
     threading.Thread(target=_shutdown, daemon=True).start()
 

@@ -58,12 +58,20 @@ test('normal startup reaches ready once with monotonic progress', () => {
     status: 'Running',
     timestamp_present: true,
   });
+  assert.equal(harness.coordinator.getState().status, 'loading');
+  assert.equal(harness.coordinator.getState().live_data_ready, false);
+  assert.equal(harness.timerCount(), 1);
+  harness.coordinator.handleRendererEvent('renderer.first-live-data', {
+    status: 'Running',
+    timestamp_present: true,
+  });
 
   const state = harness.coordinator.getState();
   assert.equal(state.status, 'ready');
   assert.equal(state.progress, 100);
   assert.equal(state.backend_health_ready, true);
   assert.equal(state.data_snapshot_ready, true);
+  assert.equal(state.live_data_ready, true);
   assert.equal(state.data_running, true);
   assert.equal(state.dashboard_paint_ready, true);
   assert.equal(harness.timerCount(), 0);
@@ -142,6 +150,10 @@ test('timeout exposes recovery actions and late gates can still recover', () => 
   assert.equal(state.can_exit, true);
 
   harness.coordinator.handleRendererEvent('renderer.backend-health-ready', { running: true });
+  harness.coordinator.handleRendererEvent('renderer.first-data-snapshot', {
+    status: 'Running',
+    timestamp_present: true,
+  });
   harness.coordinator.handleRendererEvent('renderer.first-live-data', {
     status: 'Running',
     timestamp_present: true,
@@ -165,6 +177,10 @@ test('backend failure is actionable before handoff and ignored after handoff', (
   const readyHarness = createHarness();
   readyHarness.coordinator.start();
   readyHarness.coordinator.handleRendererEvent('renderer.backend-health-ready', { running: true });
+  readyHarness.coordinator.handleRendererEvent('renderer.first-data-snapshot', {
+    status: 'Running',
+    timestamp_present: true,
+  });
   readyHarness.coordinator.handleRendererEvent('renderer.first-live-data', {
     status: 'Running',
     timestamp_present: true,
@@ -186,11 +202,16 @@ test('reset invalidates the old deadline and creates a fresh loading state', () 
   assert.equal(state.status, 'loading');
   assert.equal(state.phase, 'electron_ready');
   assert.equal(state.backend_health_ready, false);
+  assert.equal(state.live_data_ready, false);
   assert.equal(state.dashboard_paint_ready, false);
   assert.equal(state.sequence > previousSequence, true);
   assert.equal(harness.timerCount(), 1);
 
   harness.coordinator.handleRendererEvent('renderer.backend-health-ready', { running: true });
+  harness.coordinator.handleRendererEvent('renderer.first-data-snapshot', {
+    status: 'Running',
+    timestamp_present: true,
+  });
   harness.coordinator.handleRendererEvent('renderer.first-live-data', {
     status: 'Running',
     timestamp_present: true,
@@ -210,6 +231,55 @@ test('strict live-data fallback rejects an unverified renderer payload', () => {
     timestamp_present: true,
   }), false);
   assert.equal(harness.coordinator.getState().data_snapshot_ready, false);
+  assert.equal(harness.coordinator.getState().live_data_ready, false);
+});
+
+test('running snapshot and live data are independent required startup gates', () => {
+  const snapshotHarness = createHarness();
+  snapshotHarness.coordinator.start();
+  markPaint(snapshotHarness.coordinator);
+  snapshotHarness.coordinator.handleRendererEvent('renderer.backend-health-ready', { running: true });
+  snapshotHarness.coordinator.handleRendererEvent('renderer.first-data-snapshot', {
+    status: 'Running',
+    timestamp_present: true,
+  });
+  assert.equal(snapshotHarness.coordinator.getState().status, 'loading');
+  assert.equal(snapshotHarness.coordinator.getState().data_snapshot_ready, true);
+  assert.equal(snapshotHarness.coordinator.getState().live_data_ready, false);
+
+  const liveHarness = createHarness();
+  liveHarness.coordinator.start();
+  markPaint(liveHarness.coordinator);
+  liveHarness.coordinator.handleRendererEvent('renderer.backend-health-ready', { running: true });
+  liveHarness.coordinator.handleRendererEvent('renderer.first-live-data', {
+    status: 'Running',
+    timestamp_present: true,
+  });
+  assert.equal(liveHarness.coordinator.getState().status, 'loading');
+  assert.equal(liveHarness.coordinator.getState().data_snapshot_ready, false);
+  assert.equal(liveHarness.coordinator.getState().live_data_ready, true);
+});
+
+test('a verified live sample can promote an automatic degraded handoff to ready', () => {
+  const harness = createHarness();
+  harness.coordinator.start();
+  markPaint(harness.coordinator);
+  harness.coordinator.handleRendererEvent('renderer.backend-health-ready', { running: true });
+  harness.coordinator.handleRendererEvent('renderer.first-data-snapshot', {
+    status: 'Error',
+    timestamp_present: true,
+  });
+  assert.equal(harness.coordinator.getState().status, 'degraded');
+
+  assert.equal(harness.coordinator.handleRendererEvent('renderer.first-live-data', {
+    status: 'Running',
+    timestamp_present: true,
+  }), true);
+  const state = harness.coordinator.getState();
+  assert.equal(state.status, 'ready');
+  assert.equal(state.reason, 'live_data_recovered');
+  assert.equal(state.live_data_ready, true);
+  assert.equal(state.data_running, true);
 });
 
 test('manual offline continuation is terminal and clears the deadline', () => {

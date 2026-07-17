@@ -339,6 +339,7 @@ class CSVLoggerService:
         self._last_write_at: Optional[float] = None
         self._payload_bytes_ema: Optional[float] = None
         self._runtime_lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
         self._sample_seq = 0
         self.logger_service_instance_id = str(uuid4())
         self.logger_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -366,47 +367,57 @@ class CSVLoggerService:
         self._v2_4_last_sample_seq: Optional[int] = None
         self._v2_4_last_updated_at: Optional[str] = None
         self._current_v2_csv_path: Optional[Path] = None
+        self._shutdown_flush_succeeded: Optional[bool] = None
+        self._runtime_write_failure_observed = False
 
     def start(self) -> None:
-        if self.running:
-            return
-        self.running = True
-        self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
-        self.thread.start()
+        with self._lifecycle_lock:
+            if self.running:
+                return
+            self._shutdown_flush_succeeded = False
+            self._runtime_write_failure_observed = False
+            self.running = True
+            self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
+            self.thread.start()
 
     def stop(self, *, timeout_sec: Optional[float] = 2.0) -> bool:
-        if self.running:
-            self.running = False
-            try:
-                self.queue.put_nowait(None)
-            except queue.Full:
-                pass
+        with self._lifecycle_lock:
+            if self.running:
+                self.running = False
+                try:
+                    self.queue.put_nowait(None)
+                except queue.Full:
+                    pass
         if self.thread:
             self.thread.join(timeout=timeout_sec)
             stopped = not self.thread.is_alive()
             if not stopped:
                 self.logger.warning("CSV logger thread did not stop within %.1f seconds.", timeout_sec)
-            return stopped
+            elif self._shutdown_flush_succeeded is not True:
+                self.logger.warning("CSV logger stopped without a durable final flush.")
+            return stopped and self._shutdown_flush_succeeded is True
         return True
 
     def enqueue(self, data: FactoryData) -> None:
-        if not self.running:
-            return
         payload_bytes = self._estimate_factory_data_bytes(data)
         now = time.time()
-        with self._runtime_lock:
-            self._last_enqueue_at = now
-            if self._payload_bytes_ema is None:
-                self._payload_bytes_ema = float(payload_bytes)
-            else:
-                self._payload_bytes_ema = (self._payload_bytes_ema * 0.8) + (float(payload_bytes) * 0.2)
-        try:
-            self.queue.put_nowait(data)
-        except queue.Full:
+        with self._lifecycle_lock:
+            if not self.running:
+                return
+            try:
+                self.queue.put_nowait(data)
+            except queue.Full:
+                with self._runtime_lock:
+                    self._drop_count += 1
+                    self._last_drop_at = time.time()
+                self.logger.warning("CSV log queue full. Dropping data.")
+                return
             with self._runtime_lock:
-                self._drop_count += 1
-                self._last_drop_at = time.time()
-            self.logger.warning("CSV log queue full. Dropping data.")
+                self._last_enqueue_at = now
+                if self._payload_bytes_ema is None:
+                    self._payload_bytes_ema = float(payload_bytes)
+                else:
+                    self._payload_bytes_ema = (self._payload_bytes_ema * 0.8) + (float(payload_bytes) * 0.2)
 
     def _estimate_factory_data_bytes(self, data: FactoryData) -> int:
         try:
@@ -2301,8 +2312,10 @@ class CSVLoggerService:
                         if csv_v2_enabled and self._flush_v2_buffer(v2_writer, v2_handle, v2_buffer):
                             v2_buffer.clear()
                         else:
-                            if csv_v2_enabled:
-                                self.logger.warning("CSV v2 buffer dropped during config change.")
+                            self._runtime_write_failure_observed = True
+                            self.logger.warning(
+                                "CSV v2 buffer dropped during config change; clean shutdown will be rejected."
+                            )
                             v2_buffer.clear()
                     self._close_file(f_handle)
                     self._close_v2_file(v2_handle)
@@ -2434,8 +2447,13 @@ class CSVLoggerService:
                             v2_handle, v2_writer = self._open_v2_log_file(ts, prefix=v2_file_prefix)
                         if auto_save and csv_v2_enabled and self._flush_v2_buffer(v2_writer, v2_handle, v2_buffer):
                             v2_buffer.clear()
+                        elif auto_save and csv_v2_enabled:
+                            self.logger.warning("CSV v2 buffer retained because v2 writer is unavailable.")
                         else:
-                            self.logger.warning("CSV v2 buffer dropped because v2 writer is unavailable.")
+                            self._runtime_write_failure_observed = True
+                            self.logger.warning(
+                                "CSV v2 buffer dropped after persistence was disabled; clean shutdown will be rejected."
+                            )
                             v2_buffer.clear()
                     last_flush_time = now
             except Exception as exc:
@@ -2464,6 +2482,7 @@ class CSVLoggerService:
                     current_file_date = None
                 time.sleep(0.5)
 
+        shutdown_flush_succeeded = not self._runtime_write_failure_observed
         if buffer:
             try:
                 if self.auto_save and (f_handle is None or writer is None):
@@ -2474,8 +2493,10 @@ class CSVLoggerService:
                 if self._flush_buffer(writer, f_handle, buffer):
                     buffer.clear()
                 else:
+                    shutdown_flush_succeeded = False
                     self.logger.warning("CSV v1 final flush failed because writer is unavailable.")
             except Exception as exc:
+                shutdown_flush_succeeded = False
                 self.logger.warning("CSV v1 final flush failed: %s", exc)
         if v2_buffer:
             try:
@@ -2487,11 +2508,14 @@ class CSVLoggerService:
                 if self._flush_v2_buffer(v2_writer, v2_handle, v2_buffer):
                     v2_buffer.clear()
                 else:
+                    shutdown_flush_succeeded = False
                     self.logger.warning("CSV v2 final flush failed because writer is unavailable.")
             except Exception as exc:
+                shutdown_flush_succeeded = False
                 self.logger.warning("CSV v2 final flush failed: %s", exc)
         if deferred_item is not None:
             if buffer or v2_buffer:
+                shutdown_flush_succeeded = False
                 self.logger.warning(
                     "CSV deferred shutdown row was not written because previous-day final flush failed."
                 )
@@ -2511,6 +2535,7 @@ class CSVLoggerService:
                         if self._flush_buffer(writer, f_handle, [(row, timestamp)]):
                             self.logger.info("CSV deferred shutdown v1 row written after final rollover flush.")
                         else:
+                            shutdown_flush_succeeded = False
                             self.logger.warning("CSV deferred shutdown v1 row was not written.")
                     if self.csv_v2_enabled:
                         self._sample_seq += 1
@@ -2528,9 +2553,12 @@ class CSVLoggerService:
                         if self._flush_v2_buffer(v2_writer, v2_handle, [(v2_row, timestamp)]):
                             self.logger.info("CSV deferred shutdown v2 row written after final rollover flush.")
                         else:
+                            shutdown_flush_succeeded = False
                             self.logger.warning("CSV deferred shutdown v2 row was not written.")
                 except Exception as exc:
+                    shutdown_flush_succeeded = False
                     self.logger.warning("CSV deferred shutdown row write failed: %s", exc)
+        self._shutdown_flush_succeeded = shutdown_flush_succeeded
         self._buffer_size = 0
         self._close_file(f_handle)
         self._close_v2_file(v2_handle)

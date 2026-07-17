@@ -12,6 +12,10 @@ const {
   createBackendProgressParser,
 } = require('./startupCoordinator');
 const { stopProcessTree, createBackendRestartController } = require('./backendProcessLifecycle');
+const {
+  buildBackendProgressEnvironment,
+  createBackendProgressFileTransport,
+} = require('./backendStartupProgress');
 const { createStartupIpcHandlers, normalizeDocumentUrl } = require('./startupIpc');
 
 const startupOriginNs = process.hrtime.bigint();
@@ -49,9 +53,11 @@ const STARTUP_PAYLOAD_MAX_KEYS = 16;
 const STARTUP_PAYLOAD_MAX_KEY_LENGTH = 64;
 const STARTUP_PAYLOAD_MAX_STRING_LENGTH = 200;
 const MAX_RENDERER_STARTUP_EVENTS_PER_NAME = 4;
+const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;
 
 let mainWindow;
 let backendProcess;
+let backendProgressTransport;
 let trustedMainDocumentUrl = null;
 let trustedRendererTimeOriginMs = null;
 let applicationQuitting = false;
@@ -488,18 +494,70 @@ function startBackend() {
     return null;
   }
 
-  const spawnOptions = {
-    cwd: isPackaged ? path.join(process.resourcesPath, 'backend') : __dirname,
-    shell: false,
-    windowsHide: true,
-    env: {
-      ...process.env,
-      SFL_EMBEDDED_ELECTRON: '1',
-      SFL_CONTROL_TOKEN: backendControlToken,
-    }
-  };
-
+  let progressTransport = null;
   try {
+    if (backendProgressTransport) {
+      backendProgressTransport.close();
+      backendProgressTransport = null;
+    }
+    const seenProgressStages = new Set();
+    const closeProgressTransport = () => {
+      if (!progressTransport) {
+        return;
+      }
+      progressTransport.close();
+      if (backendProgressTransport === progressTransport) {
+        backendProgressTransport = null;
+      }
+      progressTransport = null;
+    };
+    const acceptProgressStage = (stage) => {
+      if (seenProgressStages.has(stage)) {
+        return;
+      }
+      seenProgressStages.add(stage);
+      logStartupEvent('backend.startup-progress', { stage });
+      startupCoordinator.handleBackendStage(stage);
+      if (stage === 'lifespan_complete') {
+        setImmediate(closeProgressTransport);
+      }
+    };
+    const progressParser = createBackendProgressParser({
+      onStage: acceptProgressStage,
+      onRejected: (reason) => {
+        logStartupEvent('backend.startup-progress-rejected', { reason, source: 'stdout' });
+      },
+    });
+    let progressEnvironment = {};
+    try {
+      progressTransport = createBackendProgressFileTransport({
+        rootDir: path.join(app.getPath('userData'), 'startup-progress'),
+        sessionId: startupSessionId,
+        onStage: acceptProgressStage,
+        onRejected: (reason) => {
+          logStartupEvent('backend.startup-progress-rejected', { reason, source: 'file' });
+        },
+      });
+      backendProgressTransport = progressTransport;
+      progressEnvironment = progressTransport.environment;
+    } catch (_error) {
+      logStartupEvent('backend.startup-progress-rejected', {
+        reason: 'transport_create_failed',
+        source: 'file',
+      });
+    }
+
+    const spawnOptions = {
+      cwd: isPackaged ? path.join(process.resourcesPath, 'backend') : __dirname,
+      shell: false,
+      windowsHide: true,
+      env: buildBackendProgressEnvironment(process.env, {
+        ...progressEnvironment,
+        SFL_EMBEDDED_ELECTRON: '1',
+        SFL_CONTROL_TOKEN: backendControlToken,
+      }),
+    };
+
     logStartupEvent('backend.spawn-start', { is_packaged: isPackaged });
     startupCoordinator.handleMainMilestone('backend_spawn_start');
     log(`Spawning backend from: ${backendPath}`);
@@ -508,15 +566,6 @@ function startBackend() {
     
     const child = spawn(backendPath, args, spawnOptions);
     backendProcess = child;
-    const progressParser = createBackendProgressParser({
-      onStage: (stage) => {
-        logStartupEvent('backend.startup-progress', { stage });
-        startupCoordinator.handleBackendStage(stage);
-      },
-      onRejected: (reason) => {
-        logStartupEvent('backend.startup-progress-rejected', { reason });
-      },
-    });
 
     child.on('spawn', () => {
       logStartupEvent('backend.spawned', { pid: child.pid ?? null });
@@ -534,6 +583,7 @@ function startBackend() {
     });
 
     child.on('error', (err) => {
+      closeProgressTransport();
       logStartupEvent('backend.spawn-error', { message: err.message });
       log(`Failed to start backend process: ${err.message}`);
       if (!expectedBackendExitPids.has(child.pid)) {
@@ -543,6 +593,7 @@ function startBackend() {
 
     child.on('close', (code) => {
       progressParser.flush();
+      closeProgressTransport();
       logStartupEvent('backend.closed', { code });
       log(`Backend process exited with code ${code}`);
       const wasExpected = expectedBackendExitPids.delete(child.pid);
@@ -555,6 +606,12 @@ function startBackend() {
     });
     return child;
   } catch (err) {
+    if (progressTransport) {
+      progressTransport.close();
+      if (backendProgressTransport === progressTransport) {
+        backendProgressTransport = null;
+      }
+    }
     logStartupEvent('backend.spawn-exception', { message: err.message });
     log(`CRITICAL: Failed to spawn: ${err.message}`);
     startupCoordinator.failBackend('backend_spawn_exception');
@@ -604,16 +661,38 @@ async function stopBackendProcess(child = backendProcess) {
   }
 
   expectedBackendExitPids.add(child.pid);
-  const result = await stopProcessTree(child, {
-    killTree: kill,
-    requestGracefulStop: requestBackendGracefulShutdown,
-    log,
-    graceMs: 10_000,
+  const startedAtNs = process.hrtime.bigint();
+  logStartupEvent('backend.shutdown-start', {
+    pid: child.pid,
+    grace_ms: BACKEND_GRACEFUL_SHUTDOWN_MS,
   });
-  if (result.reason === 'already_exited') {
-    expectedBackendExitPids.delete(child.pid);
+  try {
+    const result = await stopProcessTree(child, {
+      killTree: kill,
+      requestGracefulStop: requestBackendGracefulShutdown,
+      log,
+      graceMs: BACKEND_GRACEFUL_SHUTDOWN_MS,
+    });
+    if (result.reason === 'already_exited') {
+      expectedBackendExitPids.delete(child.pid);
+    }
+    logStartupEvent('backend.shutdown-complete', {
+      pid: child.pid,
+      reason: result.reason,
+      exit_code: result.exitCode ?? null,
+      signal_code: result.signalCode ?? null,
+      forced: result.forced === true,
+      elapsed_ms: Math.round(Number(process.hrtime.bigint() - startedAtNs) / 100_000) / 10,
+    });
+    return result;
+  } catch (error) {
+    logStartupEvent('backend.shutdown-failed', {
+      pid: child.pid,
+      message: error instanceof Error ? error.message : String(error),
+      elapsed_ms: Math.round(Number(process.hrtime.bigint() - startedAtNs) / 100_000) / 10,
+    });
+    throw error;
   }
-  return result;
 }
 
 const backendRestartController = createBackendRestartController({
@@ -642,7 +721,7 @@ function restartBackend() {
 
 app.whenReady().then(() => {
   logStartupEvent('electron.app-ready');
-  log("App ready, starting backend and window...");
+  log("App ready, preparing startup window...");
   registerMemoryIpcHandlers();
   registerStartupIpcHandlers();
   startupCoordinator.start();

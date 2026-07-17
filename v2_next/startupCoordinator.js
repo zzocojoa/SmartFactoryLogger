@@ -147,6 +147,7 @@ class StartupCoordinator {
       elapsed_ms: 0,
       backend_health_ready: false,
       data_snapshot_ready: false,
+      live_data_ready: false,
       data_running: false,
       dashboard_paint_ready: false,
       can_retry: false,
@@ -206,7 +207,17 @@ class StartupCoordinator {
   }
 
   handleRendererEvent(name, payload = {}) {
-    if (this._state.status === 'error' || this.isHandoffComplete()) {
+    const canRecoverDegradedLiveData = (
+      name === 'renderer.first-live-data' &&
+      this._state.status === 'degraded' &&
+      this._state.phase === 'degraded_ready' &&
+      this._state.data_snapshot_ready &&
+      !this._state.live_data_ready
+    );
+    if (
+      this._state.status === 'error' ||
+      (this.isHandoffComplete() && !canRecoverDegradedLiveData)
+    ) {
       return false;
     }
 
@@ -257,8 +268,23 @@ class StartupCoordinator {
       if (payload.timestamp_present !== true || normalizedStatus !== 'running') {
         return false;
       }
+      if (canRecoverDegradedLiveData) {
+        this._transition({
+          live_data_ready: true,
+          data_running: true,
+          status: 'ready',
+          phase: 'ready',
+          message: '준비가 완료되었습니다.',
+          progress: 100,
+          can_retry: false,
+          can_continue_offline: false,
+          can_exit: false,
+          reason: 'live_data_recovered',
+        }, 'live_data_recovered');
+        return true;
+      }
       this._applyMilestone(RENDERER_MILESTONES.data_snapshot, name, {
-        data_snapshot_ready: true,
+        live_data_ready: true,
         data_running: true,
       });
       this._maybeComplete();
@@ -351,8 +377,11 @@ class StartupCoordinator {
       return false;
     }
 
-    this._clearDeadline();
     const isRunning = this._state.data_running;
+    if (isRunning && !this._state.live_data_ready) {
+      return false;
+    }
+    this._clearDeadline();
     this._transition({
       status: isRunning ? 'ready' : 'degraded',
       phase: isRunning ? 'ready' : 'degraded_ready',

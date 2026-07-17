@@ -19,7 +19,8 @@ state transitions.
 - Separate user-interface readiness from the existing strict production-data
   performance metric.
 - Reuse current health/data/dashboard responses and add no HTTP/device request.
-- Report backend progress through a machine-readable, allowlisted stdout contract.
+- Report backend progress through a machine-readable, allowlisted, per-launch
+  authenticated file contract; keep stdout as a development fallback.
 - Fail visibly and recoverably instead of exposing an infinite spinner.
 - Preserve context isolation and a fixed, minimal preload API.
 - Make the state machine and parser deterministic under unit tests.
@@ -56,8 +57,9 @@ frontend/index.html startup overlay
       | existing renderer readiness events
 React dashboard + existing polling
 
-Embedded backend stdout
-  SFL_STARTUP_PROGRESS {"stage":"..."}
+Embedded backend progress transport
+  private JSONL: SFL_STARTUP_PROGRESS {"stage":"...","token":"..."}
+  stdout fallback: SFL_STARTUP_PROGRESS {"stage":"..."}
       |
       +---- parsed by Electron main only
 ```
@@ -90,7 +92,7 @@ can_retry / can_continue_offline / can_exit: boolean
 reason: bounded allowlisted reason string or null
 ```
 
-All state values originate from code-owned constants. Backend stdout provides
+All state values originate from code-owned constants. Backend progress provides
 only an allowlisted stage identifier; it cannot supply user-visible text,
 progress, IPC names, actions, paths, or raw error details.
 
@@ -142,7 +144,10 @@ _emit_embedded_startup_progress(stage)
 - Emits only when `SFL_EMBEDDED_ELECTRON=1`.
 - Accepts only a frozen stage set.
 - Writes exactly one compact JSON object after `SFL_STARTUP_PROGRESS `.
-- Uses `flush=True` to avoid pipe buffering.
+- Writes to a private randomized JSONL path with a 64-hex launch token when
+  Electron supplies the transport environment.
+- Uses `flush=True` for the stdout development fallback; packaged
+  `console=False` operation does not depend on stdout.
 - Emits no duration, file path, address, device value, exception, or log text.
 - Unknown stage calls are ignored.
 
@@ -160,10 +165,18 @@ spot_poll_ready
 lifespan_complete
 ```
 
-Main uses a per-process parser. It accepts arbitrary Buffer fragmentation, splits
-on CR/LF, limits each line and retained remainder, validates a plain JSON object,
-and ignores malformed/unknown events. Generic backend stdout logging remains,
-but structured lines are not forwarded to the renderer.
+Main uses a per-process authenticated file parser plus the existing stdout
+fallback parser. It polls only during startup, accepts arbitrary Buffer
+fragmentation, splits on CR/LF, limits the complete file, each line, and retained
+remainder, validates a plain JSON object and launch token, and ignores malformed
+or unknown events. Oversized files terminate the transport and are removed.
+Generic backend stdout logging remains, but structured lines are not forwarded
+to the renderer.
+
+Before spawning the backend, main removes inherited
+`SFL_STARTUP_PROGRESS_PATH` and `SFL_STARTUP_PROGRESS_TOKEN` values and then
+adds only the newly created per-launch transport. A transport creation failure
+therefore falls back to stdout without writing to an attacker-selected file.
 
 ### 2.4 IPC Boundary
 
@@ -194,12 +207,22 @@ event object.
 2. Mark the current child PID as an expected exit.
 3. POST the per-launch authenticated local control endpoint and wait for the
    backend to drain writers and close.
-4. If graceful shutdown fails or exceeds 10 seconds, force-terminate the owned
-   process tree and still require its close event.
+4. Wait up to 365 seconds for graceful shutdown. Backend stage budgets are
+   capped at SPOT 30 seconds plus CSV 300 seconds, leaving at least 35 seconds
+   for PLC/config/metrics stops and process-close propagation before forced
+   termination.
+   Every control-shutdown stage must return explicit `True`; `None`, timeout,
+   exception, a new SPOT writer failure, a failed CSV final flush, or a live
+   PLC/metrics/memory/config thread makes the backend exit with code 2.
+   Electron preserves the child exit code/signal and accepts only graceful code
+   0 as clean. A graceful non-zero close rejects quit/retry instead of starting
+   a replacement generation or recording `shutdown-complete`. The same rule is
+   applied when the child `exit` state is visible before its `close` event.
 5. Reset coordinator and arm a fresh 30-second deadline.
 6. Clear per-document event counters/generation and reload the renderer so readiness
    one-shots are measured again.
-7. Start exactly one replacement process with a fresh stdout parser.
+7. Start exactly one replacement process with fresh authenticated file and
+   stdout fallback parsers.
 
 The control token is generated in Electron main for each launch, passed only in
 the owned backend child environment, compared in constant time by embedded mode,
@@ -298,6 +321,7 @@ objects. No backend HTTP API or persistence schema changes.
 | `startupCoordinator.test.cjs` | Node state/parser/deadline tests |
 | `startupIpc.js` / `startupIpc.test.cjs` | exact sender/generation validation and action tests |
 | `backendProcessLifecycle.js` / `.test.cjs` | graceful/forced stop and serialized retry tests |
+| `backendStartupProgress.js` / `.test.cjs` | authenticated private-file progress transport and bounds tests |
 | `main.js` | coordinator integration, trusted IPC, state broadcast, serialized restart |
 | `preload.js` | fixed state/action bridge and unsubscribe subscription |
 | `package.json` | package coordinator and run Node test in health |
@@ -378,10 +402,22 @@ git diff --check
 - Exact document URL, owned main-frame identity, renderer generation, semantic
   gate payloads, and per-event limits are validated before state changes.
 - State broadcasts are sent only to the owned main window.
-- Parser memory is bounded under a missing-newline or malicious-output condition.
+- Parser memory and progress-file size are bounded under a missing-newline or
+  malicious-output condition; oversize is a terminal one-shot rejection.
 - No HTML is generated from backend content.
 - Retry is serialized and owns only the child process started by this Electron
   process. Graceful drain is attempted before Windows forced tree termination.
+- SPOT shutdown compares the capture failure counter across the drain window.
+  Writer outcome accounting and queue completion are one locked transition, and
+  enqueue is disabled under the same lock as the shutdown baseline.
+- CSV shutdown requires the thread to stop and its final v1/v2/deferred flush
+  to succeed. A lifecycle lock orders every accepted row before the stop
+  sentinel. Transient v2 batch failures retain their buffer for final retry;
+  any deliberate runtime buffer loss permanently rejects clean shutdown.
+  Memory is a required control-shutdown stage.
+- Bundled QA exposes functional and performance verdicts independently. Its
+  process exit preserves functional compatibility; release gates must parse and
+  require `performance_status=PASS` separately.
 - Rollback has no migration cost; revert restores immediate dashboard exposure.
 - Post-merge operational verification must include normal cold start, device
   Offline, forced backend exit, retry, and clean shutdown on the server computer.
