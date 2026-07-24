@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-24T14:42:01.580Z",
+  "lastUpdated": "2026-07-24T14:50:53.871Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -1911,9 +1911,9 @@
       "completedAt": "2026-07-16T10:15:22.115Z"
     },
     "spot-request-churn-remediation": {
-      "phase": "act",
-      "matchRate": 92,
-      "iterationCount": 1,
+      "phase": "report",
+      "matchRate": 100,
+      "iterationCount": 2,
       "documents": {
         "plan": {
           "path": "docs/01-plan/features/spot-request-churn-remediation.plan.md",
@@ -1925,9 +1925,9 @@
         },
         "analysis": {
           "path": "docs/03-analysis/spot-request-churn-remediation.analysis.md",
-          "status": "completed_gap_analysis_package_blocked",
-          "match_rate": 92,
-          "package_blocked": true
+          "status": "completed_gap_analysis_local_gates_passed",
+          "match_rate": 100,
+          "package_blocked": false
         }
       },
       "taskChain": [
@@ -1957,18 +1957,19 @@
         },
         {
           "phase": "act",
-          "status": "active",
-          "createdAt": "2026-07-24T14:03:32.330Z"
+          "status": "completed",
+          "createdAt": "2026-07-24T14:03:32.330Z",
+          "completedAt": "2026-07-24T14:50:53.871Z"
         },
         {
           "phase": "report",
-          "status": "pending",
+          "status": "active",
           "createdAt": "2026-07-24T14:03:32.330Z"
         }
       ],
       "timestamps": {
         "started": "2026-07-24T14:03:32.331Z",
-        "lastUpdated": "2026-07-24T14:42:01.580Z"
+        "lastUpdated": "2026-07-24T14:50:53.871Z"
       }
     }
   },
@@ -1981,7 +1982,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-24T14:42:01.580Z"
+    "lastActivity": "2026-07-24T14:50:53.871Z"
   },
   "history": [
     {
@@ -3456,6 +3457,19 @@
       "phase": "check",
       "nextPhase": "act",
       "timestamp": "2026-07-24T14:42:01.577Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "from": "act",
+      "to": "report",
+      "timestamp": "2026-07-24T14:50:53.866Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-07-24T14:50:53.868Z"
     }
   ],
   "timeline": [

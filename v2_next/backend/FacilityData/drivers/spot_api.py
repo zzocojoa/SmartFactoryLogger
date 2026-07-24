@@ -2170,6 +2170,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
 
     cache_entry = _img_cache_entry
     if _is_spot_image_cache_fresh(cache_entry, record_clock_anomaly=True):
+        assert cache_entry is not None
         _img_cache_hit_count += 1
         return _spot_image_response(cache_entry, source="cache")
 
@@ -2184,8 +2185,8 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             )
         cache_entry = _img_cache_entry
         if _is_spot_image_cache_fresh(cache_entry):
+            assert cache_entry is not None
             _img_cache_hit_count += 1
-            _img_coalesced_waiter_count += 1
             return _spot_image_response(cache_entry, source="cache")
 
         refresh_task = _img_refresh_task
