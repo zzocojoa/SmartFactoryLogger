@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-16T10:15:22.119Z",
+  "lastUpdated": "2026-07-24T14:09:49.062Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -25,7 +25,8 @@
     "dependency-security-upgrade-nsis",
     "spot-image-auto-recovery",
     "nsis-operational-ready-timing",
-    "electron-startup-progress"
+    "electron-startup-progress",
+    "spot-request-churn-remediation"
   ],
   "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
@@ -1908,6 +1909,45 @@
         "lastUpdated": "2026-07-16T10:15:22.119Z"
       },
       "completedAt": "2026-07-16T10:15:22.115Z"
+    },
+    "spot-request-churn-remediation": {
+      "phase": "do",
+      "matchRate": null,
+      "iterationCount": 0,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-24T14:03:32.330Z",
+          "completedAt": "2026-07-24T14:05:55.763Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-24T14:03:32.330Z",
+          "completedAt": "2026-07-24T14:09:49.062Z"
+        },
+        {
+          "phase": "do",
+          "status": "active",
+          "createdAt": "2026-07-24T14:03:32.330Z"
+        },
+        {
+          "phase": "check",
+          "status": "pending",
+          "createdAt": "2026-07-24T14:03:32.330Z"
+        },
+        {
+          "phase": "report",
+          "status": "pending",
+          "createdAt": "2026-07-24T14:03:32.330Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-24T14:03:32.331Z",
+        "lastUpdated": "2026-07-24T14:09:49.062Z"
+      }
     }
   },
   "pipeline": {
@@ -1919,7 +1959,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-16T10:15:22.119Z"
+    "lastActivity": "2026-07-24T14:09:49.062Z"
   },
   "history": [
     {
@@ -3336,6 +3376,38 @@
       "phase": "report",
       "nextPhase": "completed",
       "timestamp": "2026-07-16T10:15:22.116Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-07-24T14:05:55.759Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-07-24T14:05:55.760Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-07-24T14:06:00.271Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-07-24T14:09:49.058Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-07-24T14:09:49.059Z"
     }
   ],
   "timeline": [
