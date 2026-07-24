@@ -73,8 +73,37 @@ _SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
 )
 _SPOT_RUNTIME_GIT_COMMIT = resolve_runtime_git_commit()
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
+
+
+@dataclass(frozen=True)
+class _SpotImageCacheEntry:
+    image_bytes: bytes
+    captured_at_epoch: float
+    captured_at_monotonic: float
+    upstream_latency_ms: float
+
+
 _img_fetch_lock = asyncio.Lock()
 _spot_device_request_lock = asyncio.Lock()
+_SPOT_IMAGE_POLICY_VERSION = "spot-image-demand-shaping-v1"
+_SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC = 3.0
+_SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC = 1.0
+_SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC = 10.0
+_SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC = 7.0
+_img_cache_entry: Optional[_SpotImageCacheEntry] = None
+_img_refresh_task: Optional[asyncio.Task[_SpotImageCacheEntry]] = None
+_img_accepting_requests = True
+_img_last_source: Optional[str] = None
+_img_downstream_request_count = 0
+_img_upstream_request_count = 0
+_img_cache_hit_count = 0
+_img_singleflight_leader_count = 0
+_img_coalesced_waiter_count = 0
+_img_refresh_success_count = 0
+_img_refresh_failure_count = 0
+_img_cache_clock_anomaly_count = 0
+_img_last_upstream_started_at = 0.0
+_img_last_upstream_completed_at = 0.0
 _img_last_error = 0.0
 _img_failure_count = 0
 _img_last_error_code: Optional[str] = None
@@ -439,6 +468,41 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     _SPOT_IMAGE_CAPTURE_STOP.clear()
 
 
+def _reset_spot_image_request_state_for_tests() -> None:
+    global _img_fetch_lock, _img_cache_entry, _img_refresh_task, _img_accepting_requests, _img_last_source
+    global _img_downstream_request_count, _img_upstream_request_count, _img_cache_hit_count
+    global _img_singleflight_leader_count, _img_coalesced_waiter_count
+    global _img_refresh_success_count, _img_refresh_failure_count
+    global _img_cache_clock_anomaly_count
+    global _img_last_upstream_started_at, _img_last_upstream_completed_at
+    global _img_last_error, _img_failure_count, _img_last_error_code, _img_last_error_message
+    global _img_last_success_at
+
+    refresh_task = _img_refresh_task
+    if refresh_task is not None and not refresh_task.done():
+        refresh_task.cancel()
+    _img_fetch_lock = asyncio.Lock()
+    _img_cache_entry = None
+    _img_refresh_task = None
+    _img_accepting_requests = True
+    _img_last_source = None
+    _img_downstream_request_count = 0
+    _img_upstream_request_count = 0
+    _img_cache_hit_count = 0
+    _img_singleflight_leader_count = 0
+    _img_coalesced_waiter_count = 0
+    _img_refresh_success_count = 0
+    _img_refresh_failure_count = 0
+    _img_cache_clock_anomaly_count = 0
+    _img_last_upstream_started_at = 0.0
+    _img_last_upstream_completed_at = 0.0
+    _img_last_error = 0.0
+    _img_failure_count = 0
+    _img_last_error_code = None
+    _img_last_error_message = None
+    _img_last_success_at = 0.0
+
+
 def get_latest_spot_image_capture_fact() -> Dict[str, str]:
     with _spot_image_capture_lock:
         return dict(_spot_image_capture_last_fact or {})
@@ -690,6 +754,67 @@ def _resolve_spot_image_url() -> str:
     if not spot_ip:
         raise SpotImageConfigError("")
     return f"http://{spot_ip}/image.jpg"
+
+
+def _spot_image_refresh_interval_sec() -> float:
+    try:
+        configured_interval = float(config.SPOT_REFRESH_INTERVAL)
+    except (TypeError, ValueError):
+        return _SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC
+    if not math.isfinite(configured_interval) or configured_interval <= 0.0:
+        return _SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC
+    return min(
+        _SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC,
+        max(_SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC, configured_interval),
+    )
+
+
+def _spot_image_cache_age_ms(
+    entry: _SpotImageCacheEntry,
+    *,
+    now_monotonic: Optional[float] = None,
+) -> float:
+    now_value = time.monotonic() if now_monotonic is None else now_monotonic
+    return max(0.0, (now_value - entry.captured_at_monotonic) * 1000.0)
+
+
+def _is_spot_image_cache_fresh(
+    entry: Optional[_SpotImageCacheEntry],
+    *,
+    now_monotonic: Optional[float] = None,
+    record_clock_anomaly: bool = False,
+) -> bool:
+    global _img_cache_clock_anomaly_count
+    if entry is None:
+        return False
+    now_value = time.monotonic() if now_monotonic is None else now_monotonic
+    age_seconds = now_value - entry.captured_at_monotonic
+    if age_seconds < 0.0:
+        if record_clock_anomaly:
+            _img_cache_clock_anomaly_count += 1
+            _logger.warning(
+                "SPOT image cache monotonic clock moved backwards",
+                extra={"code": "spot-image-cache-clock-anomaly"},
+            )
+        return False
+    return age_seconds < _spot_image_refresh_interval_sec()
+
+
+def _spot_image_response(
+    entry: _SpotImageCacheEntry,
+    *,
+    source: str,
+) -> tuple[bytes, Dict[str, Any]]:
+    global _img_last_source
+    _img_last_source = source
+    return entry.image_bytes, {
+        "status": "ok",
+        "source": source,
+        "captured_at": entry.captured_at_epoch,
+        "latency_ms": entry.upstream_latency_ms,
+        "age_ms": _spot_image_cache_age_ms(entry),
+        "image_path": "/image.jpg",
+    }
 
 
 def _resolve_spot_temperature_url() -> str:
@@ -1856,14 +1981,38 @@ async def _refresh_spot_internal_temperature_safely(client: httpx.AsyncClient, l
 
 def get_spot_diagnostics() -> Dict[str, Any]:
     now = time.time()
+    cache_entry = _img_cache_entry
+    cache_age_ms = _spot_image_cache_age_ms(cache_entry) if cache_entry is not None else None
+    refresh_task = _img_refresh_task
     payload = {
         "image_status": "error" if _img_last_error_code else ("ok" if _img_last_success_at else "idle"),
-        "image_source": "upstream" if _img_last_success_at else None,
+        "image_source": _img_last_source,
         "failure_count": int(_img_failure_count),
         "last_error_at": float(_img_last_error) if _img_last_error else None,
         "last_error_code": _img_last_error_code,
         "last_error_message": _img_last_error_message,
         "last_success_at": float(_img_last_success_at) if _img_last_success_at else None,
+        "image_request_policy_version": _SPOT_IMAGE_POLICY_VERSION,
+        "image_refresh_interval_sec_effective": _spot_image_refresh_interval_sec(),
+        "image_cache_present": cache_entry is not None,
+        "image_cache_fresh": _is_spot_image_cache_fresh(cache_entry),
+        "image_cache_age_ms": cache_age_ms,
+        "image_refresh_in_flight": bool(refresh_task is not None and not refresh_task.done()),
+        "image_accepting_requests": bool(_img_accepting_requests),
+        "image_downstream_request_count": int(_img_downstream_request_count),
+        "image_upstream_request_count": int(_img_upstream_request_count),
+        "image_cache_hit_count": int(_img_cache_hit_count),
+        "image_singleflight_leader_count": int(_img_singleflight_leader_count),
+        "image_coalesced_waiter_count": int(_img_coalesced_waiter_count),
+        "image_refresh_success_count": int(_img_refresh_success_count),
+        "image_refresh_failure_count": int(_img_refresh_failure_count),
+        "image_cache_clock_anomaly_count": int(_img_cache_clock_anomaly_count),
+        "image_last_upstream_started_at": (
+            float(_img_last_upstream_started_at) if _img_last_upstream_started_at else None
+        ),
+        "image_last_upstream_completed_at": (
+            float(_img_last_upstream_completed_at) if _img_last_upstream_completed_at else None
+        ),
         "image_url_configured": bool(str(config.SPOT_IP or "").strip()),
         "image_path": "/image.jpg",
         "temperature_url_configured": bool(str(config.SPOT_URL or "").strip()),
@@ -1886,12 +2035,20 @@ def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
 
 
 def get_image_state_summary() -> Dict[str, Any]:
+    cache_entry = _img_cache_entry
     return {
-        "image_bytes": 0,
+        "image_bytes": len(cache_entry.image_bytes) if cache_entry is not None else 0,
         "image_failure_count": int(_img_failure_count),
         "image_last_success_at": float(_img_last_success_at) if _img_last_success_at else None,
+        "image_cache_age_ms": (
+            _spot_image_cache_age_ms(cache_entry) if cache_entry is not None else None
+        ),
+        "image_cache_fresh": _is_spot_image_cache_fresh(cache_entry),
+        "image_refresh_in_flight": bool(_img_refresh_task is not None and not _img_refresh_task.done()),
+        "image_upstream_request_count": int(_img_upstream_request_count),
+        "image_downstream_request_count": int(_img_downstream_request_count),
         "image_url_present": bool(str(config.SPOT_IP or "").strip()),
-        "total_bytes": 0,
+        "total_bytes": len(cache_entry.image_bytes) if cache_entry is not None else 0,
     }
 
 
@@ -1939,9 +2096,70 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
+def _consume_spot_image_refresh_result(task: asyncio.Task[_SpotImageCacheEntry]) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        return
+
+
+async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
+    global _img_cache_entry, _img_failure_count
+    global _img_upstream_request_count, _img_refresh_success_count, _img_refresh_failure_count
+    global _img_last_upstream_started_at, _img_last_upstream_completed_at
+
+    client = _get_http_client()
+    started_at_epoch = time.time()
+    started_at_monotonic = time.monotonic()
+    _img_upstream_request_count += 1
+    _img_last_upstream_started_at = started_at_epoch
+    try:
+        data = await _request_spot_image(client, image_url)
+    except SpotImageFetchError as exc:
+        _record_image_error(exc.code, str(exc))
+        _img_failure_count = min(_img_failure_count + 1, 10)
+        _img_refresh_failure_count += 1
+        _img_last_upstream_completed_at = time.time()
+        raise
+
+    captured_at_epoch = time.time()
+    captured_at_monotonic = time.monotonic()
+    entry = _SpotImageCacheEntry(
+        image_bytes=bytes(data),
+        captured_at_epoch=captured_at_epoch,
+        captured_at_monotonic=captured_at_monotonic,
+        upstream_latency_ms=max(0.0, (captured_at_monotonic - started_at_monotonic) * 1000.0),
+    )
+    _img_cache_entry = entry
+    _img_refresh_success_count += 1
+    _img_last_upstream_completed_at = captured_at_epoch
+    _record_image_success()
+    _maybe_enqueue_spot_image_capture(
+        image_bytes=entry.image_bytes,
+        captured_at=entry.captured_at_epoch,
+        image_url=image_url,
+        source="official_image_jpg",
+        image_age_ms=0.0,
+    )
+    return entry
+
+
 async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
-    """Read one current JPEG from the official SPOT /image.jpg resource."""
-    global _img_failure_count
+    """Return a fresh process-local JPEG, coalescing concurrent upstream refreshes."""
+    global _img_downstream_request_count, _img_cache_hit_count
+    global _img_singleflight_leader_count, _img_coalesced_waiter_count
+    global _img_refresh_task, _img_failure_count
+
+    _img_downstream_request_count += 1
+    if not _img_accepting_requests:
+        raise SpotImageFetchError(
+            "shutdown",
+            "SPOT image service is stopping",
+            image_url="",
+            upstream_status=None,
+        )
 
     try:
         image_url = _resolve_spot_image_url()
@@ -1950,33 +2168,76 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         _img_failure_count = min(_img_failure_count + 1, 10)
         raise
 
-    async with _img_fetch_lock:
-        client = _get_http_client()
-        started_at = time.monotonic()
-        try:
-            data = await _request_spot_image(client, image_url)
-        except SpotImageFetchError as exc:
-            _record_image_error(exc.code, str(exc))
-            _img_failure_count = min(_img_failure_count + 1, 10)
-            raise
+    cache_entry = _img_cache_entry
+    if _is_spot_image_cache_fresh(cache_entry, record_clock_anomaly=True):
+        _img_cache_hit_count += 1
+        return _spot_image_response(cache_entry, source="cache")
 
-        captured_at = time.time()
-        latency_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
-        _record_image_success()
-        _maybe_enqueue_spot_image_capture(
-            image_bytes=data,
-            captured_at=captured_at,
-            image_url=image_url,
-            source="official_image_jpg",
-            image_age_ms=0.0,
-        )
-        return data, {
-            "status": "ok",
-            "source": "upstream",
-            "captured_at": captured_at,
-            "latency_ms": latency_ms,
-            "image_path": "/image.jpg",
-        }
+    is_leader = False
+    async with _img_fetch_lock:
+        if not _img_accepting_requests:
+            raise SpotImageFetchError(
+                "shutdown",
+                "SPOT image service is stopping",
+                image_url=image_url,
+                upstream_status=None,
+            )
+        cache_entry = _img_cache_entry
+        if _is_spot_image_cache_fresh(cache_entry):
+            _img_cache_hit_count += 1
+            _img_coalesced_waiter_count += 1
+            return _spot_image_response(cache_entry, source="cache")
+
+        refresh_task = _img_refresh_task
+        if refresh_task is None or refresh_task.done():
+            refresh_task = asyncio.create_task(_refresh_spot_image_cache(image_url))
+            refresh_task.add_done_callback(_consume_spot_image_refresh_result)
+            _img_refresh_task = refresh_task
+            _img_singleflight_leader_count += 1
+            is_leader = True
+        else:
+            _img_coalesced_waiter_count += 1
+
+    try:
+        refreshed_entry = await asyncio.shield(refresh_task)
+    finally:
+        async with _img_fetch_lock:
+            if _img_refresh_task is refresh_task and refresh_task.done():
+                _img_refresh_task = None
+
+    return _spot_image_response(
+        refreshed_entry,
+        source="upstream" if is_leader else "coalesced",
+    )
+
+
+async def _stop_spot_image_refresh_for_shutdown(
+    timeout_sec: float = _SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC,
+) -> bool:
+    global _img_accepting_requests, _img_refresh_task
+
+    _img_accepting_requests = False
+    refresh_task = _img_refresh_task
+    if refresh_task is None:
+        return True
+    if not refresh_task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(refresh_task), timeout=max(0.0, timeout_sec))
+        except asyncio.TimeoutError:
+            _logger.warning(
+                "SPOT image refresh exceeded the shutdown timeout and will be cancelled",
+                extra={"code": "spot-image-refresh-shutdown-timeout"},
+            )
+            refresh_task.cancel()
+            await asyncio.gather(refresh_task, return_exceptions=True)
+        except SpotImageFetchError:
+            pass
+        except asyncio.CancelledError:
+            refresh_task.cancel()
+            await asyncio.gather(refresh_task, return_exceptions=True)
+            raise
+    _img_refresh_task = None
+    return refresh_task.done()
 
 # --- Temperature and diagnostics polling ---
 _spot_poll_task: Optional[asyncio.Task] = None
@@ -2045,10 +2306,11 @@ async def _spot_poll_loop():
 
 async def start_spot_poll_loop():
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ??뽰삂."""
-    global _spot_poll_task, _spot_poll_running
+    global _img_accepting_requests, _spot_poll_task, _spot_poll_running
     if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
 
+    _img_accepting_requests = True
     _spot_poll_running = True
     _spot_poll_task = asyncio.create_task(_spot_poll_loop())
 
@@ -2080,6 +2342,7 @@ async def stop_spot_poll_loop():
         except asyncio.CancelledError:
             pass
         _internal_temperature_task = None
+    await _stop_spot_image_refresh_for_shutdown()
     stop_spot_image_capture_writer()
 
 

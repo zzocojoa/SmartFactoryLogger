@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   fetchSpotImageResponse: vi.fn<() => Promise<Response>>(),
   controlSpotFocus: vi.fn<(steps: number) => Promise<SpotFocusResponse>>(),
   controlSpotActuator: vi.fn<(step: number) => Promise<void>>(),
+  cancelNormalImageRefresh: undefined as (() => void) | undefined,
+  resumeImageRefreshWhenVisible: undefined as (() => void) | undefined,
 }));
 
 const mockFetchSpotConfig = mocks.fetchSpotConfig;
@@ -30,7 +32,13 @@ vi.mock('../../../shared/api/client', () => ({
 }));
 
 vi.mock('./useSpotViewModelEffects', () => ({
-  useSpotViewModelEffects: () => undefined,
+  useSpotViewModelEffects: (params: {
+    cancelNormalImageRefresh: () => void;
+    resumeImageRefreshWhenVisible: () => void;
+  }) => {
+    mocks.cancelNormalImageRefresh = params.cancelNormalImageRefresh;
+    mocks.resumeImageRefreshWhenVisible = params.resumeImageRefreshWhenVisible;
+  },
 }));
 
 const BASE_SPOT_CONFIG: SpotConfig = {
@@ -139,6 +147,8 @@ describe('useSpotViewModel integration', () => {
     mockFetchSpotImageResponse.mockReset();
     mockControlSpotFocus.mockReset();
     mockControlSpotActuator.mockReset();
+    mocks.cancelNormalImageRefresh = undefined;
+    mocks.resumeImageRefreshWhenVisible = undefined;
   });
 
   it('publishes payload rejection to shared state and recovers through explicit retry', async () => {
@@ -299,7 +309,8 @@ describe('useSpotViewModel integration', () => {
     expect(mockControlSpotFocus).toHaveBeenCalledWith(-1);
   });
 
-  it('requests the next image after display completion and auto-recovers after display error', async () => {
+  it('waits for the configured interval after display completion and auto-recovers after display error', async () => {
+    vi.useFakeTimers();
     const originalCreateObjectURL = global.URL.createObjectURL;
     const originalRevokeObjectURL = global.URL.revokeObjectURL;
     global.URL.createObjectURL = vi.fn(() => `blob:spot-${mockFetchSpotImageResponse.mock.calls.length}`);
@@ -313,10 +324,11 @@ describe('useSpotViewModel integration', () => {
       await act(async () => {
         await result.current.refreshConfig();
       });
-      act(() => {
+      await act(async () => {
         result.current.refreshImage();
+        await Promise.resolve();
       });
-      await waitFor(() => expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1));
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
 
       act(() => {
         result.current.handleImageLoad('blob:stale-consumer-frame');
@@ -326,9 +338,20 @@ describe('useSpotViewModel integration', () => {
       act(() => {
         result.current.handleImageLoad(result.current.imageUrl);
       });
-      await waitFor(() => expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2));
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+      expect(result.current.diagnostics.refresh_interval_ms).toBe(3_000);
+      expect(result.current.diagnostics.next_fetch_scheduled_at).not.toBeNull();
 
-      vi.useFakeTimers();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_999);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+
       act(() => {
         result.current.handleImageError();
       });
@@ -393,9 +416,19 @@ describe('useSpotViewModel integration', () => {
         result.current.handleImageLoad(result.current.imageUrl);
         await Promise.resolve();
       });
-      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(3);
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
       expect(result.current.diagnostics.consecutive_retry_attempt).toBe(0);
       expect(result.current.diagnostics.automatic_retry_exhausted).toBe(false);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_999);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(3);
     } finally {
       unmount();
       consoleErrorMock.mockRestore();
@@ -524,6 +557,176 @@ describe('useSpotViewModel integration', () => {
     } finally {
       unmount();
       consoleErrorMock.mockRestore();
+      global.URL.createObjectURL = originalCreateObjectURL;
+      global.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it('manual refresh replaces a pending normal refresh without creating a duplicate request', async () => {
+    vi.useFakeTimers();
+    const originalCreateObjectURL = global.URL.createObjectURL;
+    const originalRevokeObjectURL = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = vi.fn(() => `blob:manual-${mockFetchSpotImageResponse.mock.calls.length}`);
+    global.URL.revokeObjectURL = vi.fn();
+    mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
+    mockFetchSpotImageResponse.mockImplementation(async () => buildValidJpegResponse());
+
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      await act(async () => {
+        result.current.refreshImage();
+        await Promise.resolve();
+      });
+      act(() => {
+        result.current.handleImageLoad(result.current.imageUrl);
+      });
+      expect(result.current.diagnostics.next_fetch_scheduled_at).not.toBeNull();
+
+      await act(async () => {
+        result.current.refreshImage();
+        await Promise.resolve();
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+      expect(result.current.diagnostics.next_fetch_scheduled_at).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+      global.URL.createObjectURL = originalCreateObjectURL;
+      global.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it('clamps the normal refresh interval to one-to-ten seconds', async () => {
+    vi.useFakeTimers();
+    const originalCreateObjectURL = global.URL.createObjectURL;
+    const originalRevokeObjectURL = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = vi.fn(() => `blob:clamped-${mockFetchSpotImageResponse.mock.calls.length}`);
+    global.URL.revokeObjectURL = vi.fn();
+    mockFetchSpotConfig.mockResolvedValue({ ...BASE_SPOT_CONFIG, refresh_interval: 0.25 });
+    mockFetchSpotImageResponse.mockImplementation(async () => buildValidJpegResponse());
+
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      await act(async () => {
+        result.current.refreshImage();
+        await Promise.resolve();
+      });
+      act(() => {
+        result.current.handleImageLoad(result.current.imageUrl);
+      });
+      expect(result.current.diagnostics.refresh_interval_ms).toBe(1_000);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(999);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+      global.URL.createObjectURL = originalCreateObjectURL;
+      global.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it('reschedules a displayed image when only the configured interval changes', async () => {
+    vi.useFakeTimers();
+    const originalCreateObjectURL = global.URL.createObjectURL;
+    const originalRevokeObjectURL = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = vi.fn(() => `blob:rescheduled-${mockFetchSpotImageResponse.mock.calls.length}`);
+    global.URL.revokeObjectURL = vi.fn();
+    mockFetchSpotConfig
+      .mockResolvedValueOnce(BASE_SPOT_CONFIG)
+      .mockResolvedValueOnce({ ...BASE_SPOT_CONFIG, refresh_interval: 5 });
+    mockFetchSpotImageResponse.mockImplementation(async () => buildValidJpegResponse());
+
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      await act(async () => {
+        result.current.refreshImage();
+        await Promise.resolve();
+      });
+      act(() => {
+        result.current.handleImageLoad(result.current.imageUrl);
+      });
+      expect(result.current.diagnostics.refresh_interval_ms).toBe(3_000);
+
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      expect(result.current.diagnostics.refresh_interval_ms).toBe(5_000);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+      global.URL.createObjectURL = originalCreateObjectURL;
+      global.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
+  it('cancels the normal timer while hidden and fetches once on visible resume', async () => {
+    vi.useFakeTimers();
+    const originalCreateObjectURL = global.URL.createObjectURL;
+    const originalRevokeObjectURL = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = vi.fn(() => `blob:visible-${mockFetchSpotImageResponse.mock.calls.length}`);
+    global.URL.revokeObjectURL = vi.fn();
+    mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
+    mockFetchSpotImageResponse.mockImplementation(async () => buildValidJpegResponse());
+
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      await act(async () => {
+        result.current.refreshImage();
+        await Promise.resolve();
+      });
+      act(() => {
+        result.current.handleImageLoad(result.current.imageUrl);
+      });
+      expect(result.current.diagnostics.next_fetch_scheduled_at).not.toBeNull();
+
+      act(() => {
+        mocks.cancelNormalImageRefresh?.();
+      });
+      expect(result.current.diagnostics.next_fetch_scheduled_at).toBeNull();
+
+      await act(async () => {
+        mocks.resumeImageRefreshWhenVisible?.();
+        await Promise.resolve();
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+      expect(result.current.diagnostics.last_fetch_reason).toBe('visible-resume');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
       global.URL.createObjectURL = originalCreateObjectURL;
       global.URL.revokeObjectURL = originalRevokeObjectURL;
     }

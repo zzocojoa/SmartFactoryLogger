@@ -1704,6 +1704,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=[
+        "X-Spot-Image-At",
+        "X-Spot-Image-Source",
+        "X-Spot-Image-Latency-Ms",
+        "X-Spot-Image-Age-Ms",
         _SPOT_INTERNAL_TEMPERATURE_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_AT_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER,
@@ -3073,6 +3077,8 @@ async def spot_image():
             headers["X-Spot-Image-Source"] = str(meta["source"])
         if meta.get("latency_ms") is not None:
             headers["X-Spot-Image-Latency-Ms"] = f"{float(meta['latency_ms']):.1f}"
+        if meta.get("age_ms") is not None:
+            headers["X-Spot-Image-Age-Ms"] = f"{float(meta['age_ms']):.1f}"
         headers.update(_spot_internal_temperature_headers())
         observability_service.record_spot_image_result(200)
         return Response(content=data, media_type="image/jpeg", headers=headers)

@@ -33,6 +33,7 @@ export const resolveSpotImageResponseMetadata = (
 ): SpotImageResponseMetadata => ({
   source: headers.get('X-Spot-Image-Source'),
   captured_at: normalizeSpotImageCapturedAt(headers.get('X-Spot-Image-At')),
+  age_ms: parseFiniteNumber(headers.get('X-Spot-Image-Age-Ms')),
   internal_temperature: parseFiniteNumber(headers.get('X-Spot-Internal-Temperature')),
   internal_temperature_at: normalizeSpotImageCapturedAt(
     headers.get('X-Spot-Internal-Temperature-At')

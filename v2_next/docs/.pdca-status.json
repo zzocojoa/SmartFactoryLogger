@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-24T14:09:49.062Z",
+  "lastUpdated": "2026-07-24T14:32:25.824Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -1911,7 +1911,7 @@
       "completedAt": "2026-07-16T10:15:22.115Z"
     },
     "spot-request-churn-remediation": {
-      "phase": "do",
+      "phase": "check",
       "matchRate": null,
       "iterationCount": 0,
       "documents": {},
@@ -1930,12 +1930,13 @@
         },
         {
           "phase": "do",
-          "status": "active",
-          "createdAt": "2026-07-24T14:03:32.330Z"
+          "status": "completed",
+          "createdAt": "2026-07-24T14:03:32.330Z",
+          "completedAt": "2026-07-24T14:32:25.824Z"
         },
         {
           "phase": "check",
-          "status": "pending",
+          "status": "active",
           "createdAt": "2026-07-24T14:03:32.330Z"
         },
         {
@@ -1946,7 +1947,7 @@
       ],
       "timestamps": {
         "started": "2026-07-24T14:03:32.331Z",
-        "lastUpdated": "2026-07-24T14:09:49.062Z"
+        "lastUpdated": "2026-07-24T14:32:25.824Z"
       }
     }
   },
@@ -1959,7 +1960,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-24T14:09:49.062Z"
+    "lastActivity": "2026-07-24T14:32:25.824Z"
   },
   "history": [
     {
@@ -3408,6 +3409,19 @@
       "phase": "design",
       "nextPhase": "do",
       "timestamp": "2026-07-24T14:09:49.059Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-07-24T14:32:25.820Z"
+    },
+    {
+      "feature": "spot-request-churn-remediation",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-07-24T14:32:25.821Z"
     }
   ],
   "timeline": [
