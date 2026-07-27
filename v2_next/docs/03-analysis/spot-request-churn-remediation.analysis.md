@@ -264,6 +264,75 @@ payload 또는 absolute path를 새 diagnostics field에 노출하지 않는다.
 - package/installer build: not run; 별도 Check 승인 전
 - actual-server 15-minute smoke: not run; 새 package와 별도 Check 승인 필요
 
+### Field Act iteration 3 package와 실제 서버 Check
+
+별도 Check 승인 후 Act iteration 3을 clean package로 만들고 실제 서버에서
+15분 passive smoke를 수행했다.
+
+| Identity | Value |
+|---|---|
+| source commit | `a03bf2c4ef47e31fd18ec1520e37287e0837f3e3` |
+| installer SHA-256 | `38C771E7F5E997961B7AC765F01901B4ED12D5EE52888C3C75A4EC9C9457E05D` |
+| packaged backend SHA-256 | `4F577276D83E80E4AC8512E86929BB3D905013DC30F1CCA8CD93B82259B7F0C4` |
+| backend bundle SHA-256 | `822F90FEA685CB420992431A2929677E9C1FDE86405C8D3E75C8CFCD36C5616F` |
+| sanitized evidence SHA-256 | `9F57E062D581105C683EE0C4BE37EFAA47DEDA375DD9659361DC36B5112C6CE8` |
+
+15분 packet/app 증거의 hard gate 결과:
+
+| Gate | Required | Observed | Verdict |
+|---|---:|---:|---|
+| image upstream 60초 p95 | `<=0.5/s` | `0.3333/s` | PASS |
+| 전체 SPOT 신규 TCP 60초 p95 | `<=6/s` | `3.1333/s` | PASS |
+| baseline `37.674/s` 대비 감소 | `>=80%` | `91.82%` | PASS |
+| 동일 4-tuple 5초 미만 재사용 | `0` | `0` | PASS |
+| 동일 4-tuple 60초 미만 재사용 | `0` | `33`, 최소 `51.052s` | **FAIL** |
+| SPOT handshake/HTTP/body | 전부 성공 | `2,788/2,788` | PASS |
+| ConnectTimeout/SPOT 5xx/RST | `0` | `0` | PASS |
+| ping/NIC error-discard | `0` | `0` | PASS |
+
+요청 예산과 diagnostic decimation은 의도대로 동작했고 통신 실패도 재현되지
+않았다. 그러나 Windows source-port allocator는 `3.1333/s`에서도 같은 4-tuple을
+60초 안에 다시 선택했다. 따라서 요청률 제한만으로 빠른 재사용 0건을 보장한다는
+설계 가정은 반증됐고 field promotion은 실패했다.
+
+관리형 스위치 counter가 없어 수집 상태는 `PARTIAL`이지만, 위 제품 hard gate의
+packet과 app 자료는 보존돼 있다. switch 자료 부재는 33건의 재사용 실패를
+무효화하지 않는다.
+
+### 최종 rollback closure
+
+후보는 정상 종료 후 검증된 v1.0.16으로 rollback됐다.
+
+- rollback backend SHA-256:
+  `F1A65AC7E2C27FC049398EA0AF2A6DAA775A081DE0311E42A3EAA87CE4A15A54`
+- config SHA-256:
+  `3E839DE1523906344BEA1087BE74F89E7C8DBC1A2F6258A32C3953E304B48704`
+- backend process `1`, Electron process `4`, health `200`, image status `ok`
+- evidence:
+  `server_check_after_approved_rollback_retry_20260727_102549.json`
+
+오류 큐는 clear하지 않았고 120분 canary는 실행하지 않았다. 실제 서버는 계속
+rollback v1.0.16을 운영한다.
+
+### 후속 Act 설계
+
+요청률 추가 감소로는 재사용 0건을 보장할 수 없으므로 후속 기능을 별도 PDCA로
+분리했다.
+
+- Plan:
+  `docs/01-plan/features/spot-tcp-source-port-quarantine-v2.plan.md`
+- Design:
+  `docs/02-design/features/spot-tcp-source-port-quarantine-v2.design.md`
+- 핵심:
+  - 75초 source-port quarantine
+  - OS가 동적으로 할당한 exclusive guard port 768개
+  - Python 표준 `http.client` parser와 `source_address`
+  - single-worker I/O 격리
+  - pool 실패 시 OS 자동 port fallback 금지
+  - 폐기된 raw-socket parser와 allocator code 재사용 금지
+
+이번 승인 범위는 Plan과 Design까지이며 제품 source는 아직 변경하지 않는다.
+
 ## Remaining Operational Risk
 
 - 로컬 loopback은 실제 SPOT 장비의 응답 지연, 관리형 스위치 오류 및 Windows 현장 부하를
@@ -281,16 +350,23 @@ payload 또는 absolute path를 새 diagnostics field에 노출하지 않는다.
   20초 age를 정상으로 허용한다. 온도 poll과 operator control cadence는 유지된다.
 - 관리형 스위치 자료가 없어 SPOT 장비와 switch 사이의 물리 상태는 배제하지 못했다.
   다만 이번 15분 구간에는 SPOT 전용 TCP/HTTP 실패가 없었다.
+- request-budget iteration 3은 연결률과 모든 HTTP 안정성 gate를 통과했지만
+  60초 미만 동일 4-tuple 재사용 33건으로 promotion할 수 없다.
+- source-port quarantine v2는 표준 parser를 사용하더라도 Windows guard socket,
+  worker cancellation과 pool exhaustion이라는 새 운영 실패 모드를 도입한다.
+  따라서 local loopback만으로 promotion할 수 없고 실제 Windows 15분 packet
+  Check가 필수다.
 
 ## Recommendations
 
 1. 검증된 rollback v1.0.16을 현재 운영 상태로 유지하고 오류 큐를 clear하지 않는다.
 2. 실패한 기존 candidate를 재설치하거나 120분 canary를 수행하지 않는다.
-3. 별도 Check 승인 후 이번 Act source를 clean commit/package로 만들고 identity를
-   검증한다.
-4. 실제 서버 15분 smoke에서 image upstream `<=0.5/s`, 전체 SPOT 신규 연결
-   `<=6/s`, baseline 대비 `>=80%` 감소, 60초 미만 동일 4-tuple 재사용 0을
-   다시 확인한다.
+3. 별도 Do 승인 전까지 `spot-tcp-source-port-quarantine-v2` 제품 코드를
+   수정하지 않는다.
+4. Do 승인 후 표준 `http.client`와 guard-port lease를 최소 범위로 구현하고
+   cancellation, exhaustion, HTTP/1.0 close 회귀를 로컬에서 먼저 검증한다.
+5. local Check 통과 뒤 별도 package/actual-server Check 승인을 받아 15분 smoke의
+   모든 기존 gate와 60초 미만 동일 4-tuple 재사용 0건을 다시 확인한다.
 
 ## Next Steps
 
@@ -306,6 +382,12 @@ payload 또는 absolute path를 새 diagnostics field에 노출하지 않는다.
 - [x] rollback identity와 운영 상태 확인
 - [x] Field Act iteration 3 설계 및 최소 구현
 - [x] Field Act local quality gate와 gap analysis 100%
-- [ ] 별도 Check 승인 후 clean commit/package 생성 및 identity 검증
-- [ ] 새 실제 서버 15분 smoke
+- [x] Field Act iteration 3 clean commit/package와 identity 검증
+- [x] 실제 서버 15분 smoke 수행 및 60초 미만 재사용 33건 확인
+- [x] 후보 정상 종료와 검증된 v1.0.16 rollback
+- [x] `spot-tcp-source-port-quarantine-v2` Plan 작성
+- [x] `spot-tcp-source-port-quarantine-v2` Design 작성
+- [ ] 별도 Do 승인 후 source-port quarantine v2 구현
+- [ ] local Check와 design-code gap analysis
+- [ ] 별도 승인 후 clean package와 실제 서버 15분 smoke
 - [ ] 120분 canary는 새 15분 smoke가 모두 통과할 때까지 보류

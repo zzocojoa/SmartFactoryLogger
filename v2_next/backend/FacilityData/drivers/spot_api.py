@@ -18,6 +18,22 @@ from uuid import uuid4
 import httpx
 
 from backend import config
+from backend.FacilityData.drivers.spot_http_transport import (
+    POOL_CAPACITY,
+    QUARANTINE_SECONDS,
+    SpotHttpRequest,
+    SpotHttpResponse,
+    SpotHttpTransport,
+    SpotRequestKind,
+    SpotTransportClosedError,
+    SpotTransportError,
+    SpotTransportTimeout,
+)
+from backend.FacilityData.drivers.spot_port_quarantine import (
+    POLICY_VERSION as _SPOT_SOURCE_PORT_POLICY_VERSION,
+    SourcePortLeasePool,
+    SpotPortPoolError,
+)
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_VALUES,
     SpotPollStatus,
@@ -152,10 +168,9 @@ _spot_last_valid_value_at: Optional[float] = None
 _spot_last_valid_value_monotonic: Optional[float] = None
 _spot_temperature_cache_suppressed_until_valid = False
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
-_SPOT_IMAGE_REQUEST_TIMEOUT = httpx.Timeout(connect=2.0, read=5.0, write=1.0, pool=5.0)
-
 # Async HTTP client reused for connection pooling.
 _http_client: Optional[httpx.AsyncClient] = None
+_spot_http_transport: Optional[SpotHttpTransport] = None
 _logger = logging.getLogger("spot_control")
 
 
@@ -975,7 +990,12 @@ async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str)
     url = _resolve_spot_diagnostic_url(param)
     async with _spot_device_request_lock:
         _spot_diagnostics_upstream_request_count += 1
-        response = await client.get(url)
+        response = await _request_spot_http_response(
+            client,
+            kind=SpotRequestKind.DIAGNOSTIC,
+            method="GET",
+            url=url,
+        )
         response.raise_for_status()
     return param, response.text.strip()[:_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS]
 
@@ -1136,7 +1156,14 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     try:
         async with _spot_device_request_lock:
             request_started_at = time.monotonic()
-            response = await client.get(image_url, timeout=_SPOT_IMAGE_REQUEST_TIMEOUT)
+            response = await _request_spot_http_response(
+                client,
+                kind=SpotRequestKind.IMAGE,
+                method="GET",
+                url=image_url,
+                connect_timeout_sec=2.0,
+                read_timeout_sec=5.0,
+            )
             response.raise_for_status()
     except httpx.TimeoutException as exc:
         request_elapsed_ms = (
@@ -1194,10 +1221,17 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
 async def _request_spot_temperature_observation(
     client: httpx.AsyncClient,
     temp_url: str,
+    *,
+    request_kind: SpotRequestKind = SpotRequestKind.TEMPERATURE,
 ) -> tuple[float, SpotRawClassification]:
     try:
         async with _spot_device_request_lock:
-            response = await client.get(temp_url)
+            response = await _request_spot_http_response(
+                client,
+                kind=request_kind,
+                method="GET",
+                url=temp_url,
+            )
             response.raise_for_status()
     except httpx.TimeoutException as exc:
         classification = classify_spot_raw_response(
@@ -1349,7 +1383,12 @@ async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) ->
 
 async def _request_spot_internal_temperature(client: httpx.AsyncClient, temp_url: str) -> float:
     try:
-        return await _request_spot_temperature(client, temp_url)
+        temperature, _classification = await _request_spot_temperature_observation(
+            client,
+            temp_url,
+            request_kind=SpotRequestKind.INTERNAL_TEMPERATURE,
+        )
+        return temperature
     except SpotTemperatureFetchError as exc:
         code = exc.code
         if code.startswith("temperature-"):
@@ -2155,6 +2194,7 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         "temperature_last_url": _temp_last_url,
     }
     payload.update(_spot_background_request_budget())
+    payload.update(_spot_source_port_diagnostics())
     payload.update(_build_spot_temperature_snapshot_diagnostics(now))
     payload.update(_build_internal_temperature_diagnostics(now, include_cached_at=False))
     return payload
@@ -2224,6 +2264,167 @@ def _get_http_client() -> httpx.AsyncClient:
         )
         _http_client = httpx.AsyncClient(timeout=timeout)
     return _http_client
+
+
+def _start_spot_http_transport() -> bool:
+    global _spot_http_transport
+
+    if _spot_http_transport is None:
+        _spot_http_transport = SpotHttpTransport()
+    return _spot_http_transport.start()
+
+
+async def _stop_spot_http_transport(timeout_sec: float = 7.0) -> bool:
+    global _http_client
+    global _spot_http_transport
+
+    transport = _spot_http_transport
+    drained = True
+    if transport is not None:
+        drained = await transport.close(timeout_sec=timeout_sec)
+        if drained:
+            _spot_http_transport = None
+
+    client = _http_client
+    if client is not None:
+        await client.aclose()
+        _http_client = None
+    return drained
+
+
+async def _reset_spot_http_transport_state_for_tests(
+    timeout_sec: float = 2.0,
+) -> None:
+    global _spot_http_transport
+
+    if not await _stop_spot_http_transport(timeout_sec=timeout_sec):
+        raise RuntimeError("SPOT HTTP transport test reset timed out")
+    _spot_http_transport = None
+
+
+def _spot_source_port_diagnostics() -> Dict[str, Any]:
+    transport = _spot_http_transport
+    if transport is not None:
+        return dict(transport.diagnostics())
+    supported = SourcePortLeasePool().supported
+    return {
+        "source_port_policy_version": _SPOT_SOURCE_PORT_POLICY_VERSION,
+        "source_port_enforcement_supported": supported,
+        "source_port_enforcement_active": False,
+        "source_port_quarantine_seconds": QUARANTINE_SECONDS,
+        "source_port_pool_capacity": POOL_CAPACITY,
+        "source_port_pool_guarded_count": 0,
+        "source_port_pool_leased_count": 0,
+        "source_port_pool_quarantined_count": 0,
+        "source_port_pool_rebind_pending_count": 0,
+        "source_port_pool_acquire_wait_count": 0,
+        "source_port_pool_exhaustion_count": 0,
+        "source_port_bind_collision_count": 0,
+        "source_port_rebind_retry_count": 0,
+        "source_port_reuse_violation_count": 0,
+        "source_port_minimum_reuse_interval_seconds": None,
+        "source_port_transport_started_count": 0,
+        "source_port_transport_success_count": 0,
+        "source_port_transport_failure_count": 0,
+    }
+
+
+def _active_spot_http_transport() -> SpotHttpTransport | None:
+    transport = _spot_http_transport
+    if transport is None or not transport.supported:
+        return None
+    if not transport.active:
+        raise SpotTransportClosedError("SPOT source-port enforcement is inactive")
+    return transport
+
+
+def _transport_response_as_httpx(
+    response: SpotHttpResponse,
+    *,
+    method: str,
+    url: str,
+) -> httpx.Response:
+    request = httpx.Request(method, url)
+    return httpx.Response(
+        response.status_code,
+        headers=dict(response.headers),
+        content=response.body,
+        request=request,
+    )
+
+
+async def _request_spot_http_response(
+    client: httpx.AsyncClient,
+    *,
+    kind: SpotRequestKind,
+    method: str,
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    body: bytes | None = None,
+    connect_timeout_sec: float = 1.0,
+    read_timeout_sec: float = 5.0,
+) -> httpx.Response:
+    request = httpx.Request(method, url)
+    try:
+        transport = _active_spot_http_transport()
+    except (SpotTransportError, SpotPortPoolError) as exc:
+        raise httpx.RequestError(str(exc), request=request) from exc
+    if transport is None:
+        return await client.request(
+            method,
+            url,
+            headers=headers,
+            content=body,
+            timeout=httpx.Timeout(
+                connect=connect_timeout_sec,
+                read=read_timeout_sec,
+                write=1.0,
+                pool=5.0,
+            ),
+        )
+
+    try:
+        response = await transport.request(
+            SpotHttpRequest(
+                kind=kind,
+                method=method,
+                url=url,
+                headers=headers or {},
+                body=body,
+                connect_timeout_sec=connect_timeout_sec,
+                read_timeout_sec=read_timeout_sec,
+            )
+        )
+    except SpotTransportTimeout as exc:
+        raise httpx.ReadTimeout(str(exc), request=request) from exc
+    except (SpotTransportError, SpotPortPoolError) as exc:
+        raise httpx.RequestError(str(exc), request=request) from exc
+    return _transport_response_as_httpx(response, method=method, url=url)
+
+
+def _request_spot_http_response_sync(
+    *,
+    kind: SpotRequestKind,
+    method: str,
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    body: bytes | None = None,
+    timeout_sec: float = 3.0,
+) -> SpotHttpResponse | None:
+    transport = _active_spot_http_transport()
+    if transport is None:
+        return None
+    return transport.request_sync(
+        SpotHttpRequest(
+            kind=kind,
+            method=method,
+            url=url,
+            headers=headers or {},
+            body=body,
+            connect_timeout_sec=timeout_sec,
+            read_timeout_sec=timeout_sec,
+        )
+    )
 
 
 def _consume_spot_image_refresh_result(task: asyncio.Task[_SpotImageCacheEntry]) -> None:
@@ -2441,6 +2642,7 @@ async def start_spot_poll_loop():
     if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
 
+    _start_spot_http_transport()
     _img_accepting_requests = True
     _spot_poll_running = True
     _spot_poll_task = asyncio.create_task(_spot_poll_loop())
@@ -2475,6 +2677,11 @@ async def stop_spot_poll_loop():
         _internal_temperature_task = None
     await _stop_spot_image_refresh_for_shutdown()
     stop_spot_image_capture_writer()
+    if not await _stop_spot_http_transport():
+        _logger.warning(
+            "SPOT HTTP transport did not drain before shutdown timeout",
+            extra={"code": "spot-http-transport-shutdown-timeout"},
+        )
 
 
 def get_cached_spot_temp() -> float:
@@ -2557,9 +2764,18 @@ def _raise_spot_focus_request_error(action: str, focus_url: str, exc: BaseExcept
 
 def _read_spot_focus_position(focus_url: str) -> int:
     try:
-        with urlopen(focus_url, timeout=3) as resp:
-            code = resp.getcode()
-            content = resp.read()
+        guarded_response = _request_spot_http_response_sync(
+            kind=SpotRequestKind.FOCUS_READ,
+            method="GET",
+            url=focus_url,
+        )
+        if guarded_response is None:
+            with urlopen(focus_url, timeout=3) as resp:
+                code = resp.getcode()
+                content = resp.read()
+        else:
+            code = guarded_response.status_code
+            content = guarded_response.body
     except HTTPError as exc:
         body = _preview_spot_focus_body(exc.read())
         raise SpotFocusControlError(
@@ -2567,7 +2783,7 @@ def _read_spot_focus_position(focus_url: str) -> int:
             focus_url=focus_url,
             upstream_status=exc.code,
         ) from exc
-    except (TimeoutError, URLError, ValueError) as exc:
+    except (TimeoutError, URLError, ValueError, SpotTransportError, SpotPortPoolError) as exc:
         _raise_spot_focus_request_error("read", focus_url, exc)
 
     if code != 200:
@@ -2589,9 +2805,20 @@ def _write_spot_focus_position(focus_url: str, new_val: int) -> None:
         method="PUT",
     )
     try:
-        with urlopen(request, timeout=3) as resp:
-            code = resp.getcode()
-            content = resp.read()
+        guarded_response = _request_spot_http_response_sync(
+            kind=SpotRequestKind.FOCUS_WRITE,
+            method="PUT",
+            url=focus_url,
+            headers={"Content-Type": "application/json;charset=utf-8"},
+            body=str(new_val).encode("ascii"),
+        )
+        if guarded_response is None:
+            with urlopen(request, timeout=3) as resp:
+                code = resp.getcode()
+                content = resp.read()
+        else:
+            code = guarded_response.status_code
+            content = guarded_response.body
     except HTTPError as exc:
         body = _preview_spot_focus_body(exc.read())
         raise SpotFocusControlError(
@@ -2600,7 +2827,7 @@ def _write_spot_focus_position(focus_url: str, new_val: int) -> None:
             focus_url=focus_url,
             upstream_status=exc.code,
         ) from exc
-    except (TimeoutError, URLError, ValueError) as exc:
+    except (TimeoutError, URLError, ValueError, SpotTransportError, SpotPortPoolError) as exc:
         _raise_spot_focus_request_error("write", focus_url, exc)
 
     if code != 200:
@@ -2707,9 +2934,18 @@ def _resolve_spot_actuator_url() -> str:
 def _read_spot_actuator_position(actuator_url: str) -> int:
     read_url = f"{actuator_url}?scan=3"
     try:
-        with urlopen(read_url, timeout=3) as resp:
-            code = resp.getcode()
-            content = resp.read()
+        guarded_response = _request_spot_http_response_sync(
+            kind=SpotRequestKind.ACTUATOR_READ,
+            method="GET",
+            url=read_url,
+        )
+        if guarded_response is None:
+            with urlopen(read_url, timeout=3) as resp:
+                code = resp.getcode()
+                content = resp.read()
+        else:
+            code = guarded_response.status_code
+            content = guarded_response.body
     except HTTPError as exc:
         body = _preview_spot_focus_body(exc.read())
         raise SpotActuatorControlError(
@@ -2717,7 +2953,7 @@ def _read_spot_actuator_position(actuator_url: str) -> int:
             actuator_url=actuator_url,
             upstream_status=exc.code,
         ) from exc
-    except (TimeoutError, URLError, ValueError) as exc:
+    except (TimeoutError, URLError, ValueError, SpotTransportError, SpotPortPoolError) as exc:
         raise SpotActuatorControlError(
             "SPOT actuator request failed; "
             f"action=read; url={read_url}; error_type={exc.__class__.__name__}; "
@@ -2746,9 +2982,18 @@ def _read_spot_actuator_position(actuator_url: str) -> int:
 def _write_spot_actuator_position(actuator_url: str, new_val: int) -> None:
     write_url = f"{actuator_url}?scan=3&move={new_val}"
     try:
-        with urlopen(write_url, timeout=3) as resp:
-            code = resp.getcode()
-            content = resp.read()
+        guarded_response = _request_spot_http_response_sync(
+            kind=SpotRequestKind.ACTUATOR_WRITE,
+            method="GET",
+            url=write_url,
+        )
+        if guarded_response is None:
+            with urlopen(write_url, timeout=3) as resp:
+                code = resp.getcode()
+                content = resp.read()
+        else:
+            code = guarded_response.status_code
+            content = guarded_response.body
     except HTTPError as exc:
         body = _preview_spot_focus_body(exc.read())
         raise SpotActuatorControlError(
@@ -2756,7 +3001,7 @@ def _write_spot_actuator_position(actuator_url: str, new_val: int) -> None:
             actuator_url=actuator_url,
             upstream_status=exc.code,
         ) from exc
-    except (TimeoutError, URLError, ValueError) as exc:
+    except (TimeoutError, URLError, ValueError, SpotTransportError, SpotPortPoolError) as exc:
         raise SpotActuatorControlError(
             "SPOT actuator request failed; "
             f"action=write; url={write_url}; error_type={exc.__class__.__name__}; "

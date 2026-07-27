@@ -47,6 +47,74 @@ class UrlopenResponse:
         return self.status_code
 
 
+class FakeSpotHttpTransport:
+    supported = True
+    active = True
+
+    def __init__(self) -> None:
+        self.requests: list[spot_api.SpotHttpRequest] = []
+
+    async def request(self, request: spot_api.SpotHttpRequest) -> spot_api.SpotHttpResponse:
+        return self.request_sync(request)
+
+    async def close(self, timeout_sec: float = 7.0) -> bool:
+        del timeout_sec
+        self.active = False
+        return True
+
+    def request_sync(self, request: spot_api.SpotHttpRequest) -> spot_api.SpotHttpResponse:
+        self.requests.append(request)
+        if request.kind == spot_api.SpotRequestKind.IMAGE:
+            body = b"\xff\xd8guarded-image\xff\xd9"
+            headers = {"content-type": "image/jpeg"}
+        elif request.kind in {
+            spot_api.SpotRequestKind.TEMPERATURE,
+            spot_api.SpotRequestKind.INTERNAL_TEMPERATURE,
+        }:
+            body = b"451.25"
+            headers = {"content-type": "text/plain"}
+        elif request.kind == spot_api.SpotRequestKind.DIAGNOSTIC:
+            body = b"7"
+            headers = {"content-type": "text/plain"}
+        elif request.kind in {
+            spot_api.SpotRequestKind.FOCUS_READ,
+            spot_api.SpotRequestKind.FOCUS_WRITE,
+        }:
+            body = b"600" if request.kind == spot_api.SpotRequestKind.FOCUS_READ else b"OK"
+            headers = {"content-type": "text/plain"}
+        else:
+            body = b"Pos--> 321"
+            headers = {"content-type": "text/plain"}
+        return spot_api.SpotHttpResponse(
+            status_code=200,
+            headers=headers,
+            body=body,
+            elapsed_ms=1.0,
+        )
+
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "source_port_policy_version": "spot-source-port-quarantine-v2",
+            "source_port_enforcement_supported": True,
+            "source_port_enforcement_active": True,
+            "source_port_quarantine_seconds": 75.0,
+            "source_port_pool_capacity": 768,
+            "source_port_pool_guarded_count": 767,
+            "source_port_pool_leased_count": 0,
+            "source_port_pool_quarantined_count": 1,
+            "source_port_pool_rebind_pending_count": 0,
+            "source_port_pool_acquire_wait_count": 0,
+            "source_port_pool_exhaustion_count": 0,
+            "source_port_bind_collision_count": 0,
+            "source_port_rebind_retry_count": 0,
+            "source_port_reuse_violation_count": 0,
+            "source_port_minimum_reuse_interval_seconds": None,
+            "source_port_transport_started_count": len(self.requests),
+            "source_port_transport_success_count": len(self.requests),
+            "source_port_transport_failure_count": 0,
+        }
+
+
 class SpotApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.original_spot_url: str = str(spot_api.config.SPOT_URL)
@@ -72,6 +140,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api.config.SPOT_IMAGE_CAPTURE_LINK_TO_OBSERVATION
         )
         self.reset_spot_state()
+
+    async def asyncSetUp(self) -> None:
+        await spot_api._reset_spot_http_transport_state_for_tests()
+
+    async def asyncTearDown(self) -> None:
+        await spot_api._reset_spot_http_transport_state_for_tests()
 
     def tearDown(self) -> None:
         spot_api.config.SPOT_URL = self.original_spot_url
@@ -2097,6 +2171,103 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stopped_context.exception.code, "shutdown")
         self.assertEqual(request_mock.await_count, 1)
         self.assertFalse(spot_api.get_spot_diagnostics()["image_accepting_requests"])
+
+    async def test_guarded_transport_routes_background_requests_by_kind(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+        client = AsyncMock(spec=httpx.AsyncClient)
+
+        image = await spot_api._request_spot_image(
+            client,
+            "http://spot.local/image.jpg",
+        )
+        temperature = await spot_api._request_spot_temperature(
+            client,
+            "http://spot.local/output?p=temperature",
+        )
+        internal_temperature = await spot_api._request_spot_internal_temperature(
+            client,
+            "http://spot.local/output?p=internal",
+        )
+        param, diagnostic = await spot_api._request_spot_diagnostic_output(
+            client,
+            "alarmstatus",
+        )
+
+        self.assertEqual(image, b"\xff\xd8guarded-image\xff\xd9")
+        self.assertEqual(temperature, 451.25)
+        self.assertEqual(internal_temperature, 451.25)
+        self.assertEqual((param, diagnostic), ("alarmstatus", "7"))
+        self.assertEqual(
+            [request.kind for request in transport.requests],
+            [
+                spot_api.SpotRequestKind.IMAGE,
+                spot_api.SpotRequestKind.TEMPERATURE,
+                spot_api.SpotRequestKind.INTERNAL_TEMPERATURE,
+                spot_api.SpotRequestKind.DIAGNOSTIC,
+            ],
+        )
+        client.request.assert_not_awaited()
+
+    async def test_transport_test_reset_closes_and_clears_module_state(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+
+        await spot_api._reset_spot_http_transport_state_for_tests()
+
+        self.assertIsNone(spot_api._spot_http_transport)
+        self.assertFalse(transport.active)
+
+    def test_guarded_transport_routes_focus_and_actuator_operations(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+
+        focus = spot_api._read_spot_focus_position("http://spot.local/focus")
+        spot_api._write_spot_focus_position("http://spot.local/focus", 620)
+        actuator = spot_api._read_spot_actuator_position("http://spot.local/actuator")
+        spot_api._write_spot_actuator_position("http://spot.local/actuator", 400)
+
+        self.assertEqual(focus, 600)
+        self.assertEqual(actuator, 321)
+        self.assertEqual(
+            [request.kind for request in transport.requests],
+            [
+                spot_api.SpotRequestKind.FOCUS_READ,
+                spot_api.SpotRequestKind.FOCUS_WRITE,
+                spot_api.SpotRequestKind.ACTUATOR_READ,
+                spot_api.SpotRequestKind.ACTUATOR_WRITE,
+            ],
+        )
+
+    def test_spot_diagnostics_include_aggregate_source_port_policy(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+        diagnostics = spot_api.get_spot_diagnostics()
+
+        self.assertEqual(
+            diagnostics["source_port_policy_version"],
+            "spot-source-port-quarantine-v2",
+        )
+        self.assertTrue(diagnostics["source_port_enforcement_supported"])
+        self.assertTrue(diagnostics["source_port_enforcement_active"])
+        self.assertEqual(diagnostics["source_port_quarantine_seconds"], 75.0)
+        self.assertEqual(diagnostics["source_port_pool_capacity"], 768)
+        self.assertNotIn("source_port_values", diagnostics)
+
+    async def test_supported_but_inactive_transport_fails_closed(self) -> None:
+        transport = FakeSpotHttpTransport()
+        transport.active = False
+        spot_api._spot_http_transport = transport
+        client = AsyncMock(spec=httpx.AsyncClient)
+
+        with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+            await spot_api._request_spot_image(
+                client,
+                "http://spot.local/image.jpg",
+            )
+
+        self.assertEqual(raised.exception.code, "upstream-request-error")
+        client.request.assert_not_awaited()
 
     async def test_all_spot_device_http_requests_are_serialized(self) -> None:
         active_requests = 0
