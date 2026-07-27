@@ -1,6 +1,6 @@
 # spot-request-churn-remediation - Design Document
 
-> Version: 1.0.0 | Date: 2026-07-24 | Status: Design complete, Do not started
+> Version: 1.1.0 | Date: 2026-07-27 | Status: Field Act iteration 3 locally implemented
 > Level: Dynamic
 > Plan: `docs/01-plan/features/spot-request-churn-remediation.plan.md`
 > Branch: `codex/spot-request-churn-remediation`
@@ -13,12 +13,14 @@
 ### 1.1 목적
 
 v1.0.16의 SPOT 공식 HTTP 경로와 검증된 `httpx` 동작은 유지하면서 정상 화면이
-생성하는 신규 TCP 연결을 줄인다. 설계는 두 방어 계층으로 구성한다.
+생성하는 신규 TCP 연결을 줄인다. 설계는 세 방어 계층으로 구성한다.
 
 1. frontend가 성공한 image 표시 직후 재요청하지 않고 기존
    `SPOT_REFRESH_INTERVAL`에 맞춰 다음 요청을 예약한다.
 2. backend가 fresh image cache와 single-flight를 제공하여 복수 caller가 같은
    freshness window에 만든 요청을 한 번의 SPOT upstream 연결로 합친다.
+3. backend가 8개 diagnostic parameter sweep를 매 temperature poll마다 실행하지
+   않고 장비 보호 간격에 맞춰 재사용한다.
 
 이 설계는 source port를 직접 제어하지 않는다. 4-tuple 재사용 위험은 신규 연결
 총량을 80% 이상 줄이는 방식으로 완화하며, 실제 재사용 감소는 packet canary에서
@@ -30,10 +32,13 @@ v1.0.16의 SPOT 공식 HTTP 경로와 검증된 `httpx` 동작은 유지하면�
 |---|---|
 | frontend cadence | image 표시 완료 후 effective refresh interval만큼 `setTimeout` |
 | 주기 입력 | 기존 `SPOT_REFRESH_INTERVAL` 재사용 |
-| 주기 경계 | 최소 1.0초, 최대 10.0초 |
+| frontend 주기 경계 | 최소 1.0초, 최대 10.0초 |
 | backend cache | process-local JPEG 1개와 상수 크기 metadata |
 | freshness 시계 | `time.monotonic()` |
-| cache TTL | frontend와 동일한 effective refresh interval |
+| image upstream 최소 간격 | 3.0초 |
+| cache TTL | `max(frontend effective interval, 3.0초)` |
+| diagnostic sweep 최소 간격 | 10.0초 |
+| 전체 background SPOT budget | 이론상 최대 6 connections/s |
 | concurrent miss | shared `asyncio.Task` 하나를 `asyncio.shield`로 await |
 | fresh cache | upstream 요청 없이 반환 |
 | stale-on-error | 금지; 만료 뒤 refresh 실패는 기존 502 |
@@ -85,9 +90,10 @@ CameraWidget image onLoad
 - diagnostics: 각 temperature poll에 최대 8개 parameter를 순차 요청
 - control: operator action 때만 실행
 
-현장 평균 37.674 connection/s 중 image가 지배적인 부하이며, image를 기본 약
-0.333/s로 낮추면 temperature·diagnostics를 유지해도 정상 aggregate는 약
-4/s 수준으로 예상한다. 이 값은 추정치이므로 6/s field gate로 실제 확인한다.
+초기 설계에서는 image가 지배적이라고 가정했으나 실제 candidate 15분 smoke에서
+image는 `0.9618/s`, diagnostics는 `7.9956/s`였다. 전체 `10.9562/s` 중 diagnostic
+8개 fan-out이 가장 큰 background 부하였다. 따라서 image만 낮추고 diagnostics를
+temperature poll마다 유지하는 설계로는 `6/s` field gate를 통과할 수 없다.
 
 ## 3. 목표 구조
 
@@ -122,9 +128,9 @@ fetch_image_async()
 ```
 
 frontend는 반환된 Blob의 표시 성공 뒤 바로 fetch하지 않는다.
-`effective_refresh_interval_sec` 뒤 한 번만 fetch한다. backend cache는 frontend
-timer와 같은 TTL을 사용하므로 서로 다른 caller가 조금 어긋나 요청해도 먼저
-갱신한 frame을 공유한다.
+`effective_refresh_interval_sec` 뒤 한 번만 fetch한다. backend cache는
+`max(effective_refresh_interval_sec, 3초)` TTL을 사용하므로 운영 설정이 1초이고
+caller가 둘 이상이어도 SPOT upstream image 요청은 최대 약 `0.333/s`로 제한된다.
 
 ### 3.2 component 책임
 
@@ -135,8 +141,33 @@ timer와 같은 TTL을 사용하므로 서로 다른 caller가 조금 어긋나 
 | image lifecycle effect | visibility/unmount cleanup | backend cache 제어 |
 | `fetch_image_async` | downstream count, fresh check, shared refresh join | raw socket 사용 |
 | shared refresh helper | 실제 upstream 1회, validation, cache publish | stale fallback |
-| diagnostics snapshot | cache/churn counter의 best-effort 표시 | source port 노출 |
+| diagnostic budget scheduler | 10초 이상 간격의 8-field sweep | temperature poll 차단 |
+| diagnostics snapshot | cache/churn/budget counter의 best-effort 표시 | source port 노출 |
 | route `spot_image` | 기존 HTTP 계약과 additive headers | browser cache 허용 |
+
+### 3.3 Field Act background budget
+
+운영 `refresh_interval=1.0s`, internal temperature URL 사용을 기준으로 한 상한은
+다음과 같다.
+
+| 종류 | 규칙 | 최대 요청률 |
+|---|---|---:|
+| image | backend TTL 최소 3초 | `0.333/s` |
+| temperature | 기존 1초 poll 유지 | `1.000/s` |
+| internal temperature | 기존 1초 poll 유지 | `1.000/s` |
+| diagnostics | 8 requests / 최소 10초 sweep | `0.800/s` |
+| 합계 | operator control 제외 background 상한 | `3.133/s` |
+
+설정 오류 또는 legacy 설정으로 temperature poll이 내부 하한 `0.5s`까지 빨라져도
+상한은 image `0.333` + temperature `2.0` + internal `2.0` + diagnostics `0.8`
+= `5.133/s`다. 따라서 source port를 직접 제어하지 않고도 `6/s` gate 아래를
+유지한다. focus/actuator는 operator action이므로 background budget에 포함하지
+않으며 기존 device serialization을 그대로 사용한다.
+
+diagnostic sweep는 startup 첫 poll에서 즉시 한 번 실행한다. 이후 monotonic start
+간격이 10초보다 짧으면 새 task를 만들지 않고 기존 snapshot을 사용한다. 실행 중인
+sweep가 있으면 중복 실행하지 않는다. diagnostic max age는 effective sweep interval의
+2배 이상으로 맞춰 정상 decimation을 stale failure로 오인하지 않는다.
 
 ## 4. frontend 상세 설계
 
@@ -471,8 +502,8 @@ cache가 있었음을 오류 detail에 넣어 stale data의 존재를 외부 cal
 
 | 필드 | 타입 | 의미 |
 |---|---|---|
-| `image_request_policy_version` | string | `spot-image-demand-shaping-v1` |
-| `image_refresh_interval_sec_effective` | number | 1~10초 정규화 결과 |
+| `image_request_policy_version` | string | `spot-image-demand-shaping-v2` |
+| `image_refresh_interval_sec_effective` | number | 3~10초 backend upstream 보호 결과 |
 | `image_downstream_request_count` | integer | backend route가 요청한 누계 |
 | `image_upstream_request_count` | integer | 실제 SPOT GET 시작 누계 |
 | `image_cache_hit_count` | integer | immediate fresh cache 반환 누계 |
@@ -486,6 +517,19 @@ cache가 있었음을 오류 detail에 넣어 stale data의 존재를 외부 cal
 | `image_refresh_in_flight` | boolean | shared task 진행 여부 |
 | `image_last_upstream_started_at` | number/null | epoch seconds |
 | `image_last_upstream_completed_at` | number/null | epoch seconds |
+| `request_budget_policy_version` | string | `spot-background-request-budget-v2` |
+| `request_budget_target_max_per_sec` | number | field gate `6.0` |
+| `request_budget_*_max_per_sec` | number | image/temperature/internal/diagnostics 상한 |
+| `request_budget_total_background_max_per_sec` | number | 설정 기준 합산 상한 |
+| `request_budget_within_target` | boolean | 합산 상한이 field gate 이하인지 |
+| `diagnostics_refresh_interval_sec_effective` | number | 최소 10초 sweep 간격 |
+| `diagnostics_refresh_in_flight` | boolean | sweep task 실행 여부 |
+| `diagnostics_sweep_started_count` | integer | 실제 sweep 시작 누계 |
+| `diagnostics_upstream_request_count` | integer | diagnostic upstream GET 누계 |
+| `diagnostics_suppressed_poll_count` | integer | interval budget으로 생략한 poll 누계 |
+| `diagnostics_inflight_suppressed_count` | integer | 실행 중 중복을 생략한 poll 누계 |
+| `diagnostics_last_started_at` | number/null | 마지막 sweep 시작 epoch |
+| `diagnostics_last_completed_at` | number/null | 마지막 sweep 종료 epoch |
 
 IP, URL, source port, MAC, payload 또는 absolute path는 추가하지 않는다.
 
@@ -653,6 +697,9 @@ Infinity는 invalid로 먼저 분류하므로 3초를 사용한다. 유한 11은
 - 기존 404/502/detail/payload rejection 유지
 - cache hit가 SPOT upstream call과 image capture enqueue를 늘리지 않음
 - diagnostics field 타입, 초기값, 누계와 process reset 확인
+- 3초 image 하한과 10초 diagnostic sweep 하한의 strict boundary 확인
+- 가장 빠른 0.5초 poll에서도 계산된 background 상한 `<=6/s`
+- diagnostic sweep 실행 중 또는 10초 안에는 새 task가 생성되지 않음
 - URL/IP/source port/payload가 diagnostics에 없음
 
 ### 10.6 HTTP/1.0 close multi-client QA
@@ -666,7 +713,7 @@ Infinity는 invalid로 먼저 분류하므로 3초를 사용한다. 유한 11은
 
 동시에 1, 2, 10개 caller로 backend route를 호출한다.
 
-기본 3초 interval의 최소 gate:
+backend image 보호 간격 3초의 최소 gate:
 
 ```text
 downstream success = 100%
@@ -808,7 +855,8 @@ frontend와 backend를 함께 package하지만 양쪽 방어 계층은 각각 �
 | cache가 영구 fresh | image age 증가, upstream count 정지 | stale safety 실패, 즉시 rollback |
 | shared refresh deadlock | in-flight true 지속, image freeze | timeout/evidence 보존 후 rollback |
 | SPOT connect failure 재발 | SYN 무응답/502 | physical attribution과 무관하게 rollback |
-| diagnostics starvation | missing/stale/timeout 증가 | rollback |
+| diagnostics 정상 decimation | 10초 sweep, max age 20초 이상 | cached snapshot 사용 |
+| diagnostics starvation | max age 초과 missing/stale/timeout 증가 | rollback |
 | control starvation | focus/actuator 지연/실패 | rollback |
 | config invalid | effective interval diagnostic 3초 | tight loop 없이 운영 |
 | process restart | cache/counter 0, 첫 요청 upstream | 정상 cold start |
@@ -826,7 +874,8 @@ frontend와 backend를 함께 package하지만 양쪽 방어 계층은 각각 �
 | P0-09 | 7, 11.5, 13 |
 | P1-01, P1-02, P1-03 | 10.1~10.6 |
 | P1-04, P1-05 | 11.1~11.5 |
-| P2-01, P2-02 | Plan 후속 범위로 유지; 이번 Do 제외 |
+| P2-01 | Field Act iteration 3에서 3.3, 6.4, 10.5로 승격 |
+| P2-02 | 관리형 switch 접근 부재로 후속 범위 유지 |
 | NFR-01, NFR-02, NFR-03, NFR-04, NFR-05 | 4, 5, 10.6, 11.4 |
 | NFR-06, NFR-07, NFR-08, NFR-09, NFR-10, NFR-11 | 7, 10.7, 13 |
 | NFR-12, NFR-13, NFR-14 | 6.1, 8.3, 12 |
@@ -836,13 +885,16 @@ frontend와 backend를 함께 package하지만 양쪽 방어 계층은 각각 �
 
 - Plan: Complete
 - Design: Complete
-- Do: **Not authorized / Not started**
+- Do iteration 2: Complete
+- Actual-server Check: **Failed / rollback completed**
+- Act iteration 3: **Local implementation and quality gates complete**
 - package build: Not authorized
 - actual server install/check: Not authorized
 - merge/promotion: Not authorized
 
-다음 단계는 별도 승인을 받은 Do-0 baseline과 최소 제품 구현이다. 이번 Design 완료
-자체는 source 수정, installer 생성 또는 실제 서버 작업 권한이 아니다.
+다음 단계는 별도 Check 승인 후 clean commit/package identity와 실제 서버 15분
+smoke를 검증하는 것이다. 이번 Act 완료 자체는 installer 생성 또는 실제 서버 작업
+권한이 아니다.
 
 ---
 
@@ -850,4 +902,5 @@ frontend와 backend를 함께 package하지만 양쪽 방어 계층은 각각 �
 
 | Version | Date | Changes | Author |
 |---|---|---|---|
+| 1.1.0 | 2026-07-27 | image 3초 하한, diagnostic 10초 sweep, 전체 SPOT budget Field Act | Codex |
 | 1.0.0 | 2026-07-24 | frontend cadence + backend fresh cache/single-flight 상세 설계 | Codex |

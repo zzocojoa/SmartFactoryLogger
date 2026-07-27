@@ -85,11 +85,14 @@ class _SpotImageCacheEntry:
 
 _img_fetch_lock = asyncio.Lock()
 _spot_device_request_lock = asyncio.Lock()
-_SPOT_IMAGE_POLICY_VERSION = "spot-image-demand-shaping-v1"
+_SPOT_REQUEST_BUDGET_POLICY_VERSION = "spot-background-request-budget-v2"
+_SPOT_BACKGROUND_REQUEST_BUDGET_TARGET_PER_SEC = 6.0
+_SPOT_IMAGE_POLICY_VERSION = "spot-image-demand-shaping-v2"
 _SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC = 3.0
-_SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC = 1.0
+_SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC = 3.0
 _SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC = 10.0
 _SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC = 7.0
+_SPOT_DIAGNOSTICS_REFRESH_INTERVAL_MIN_SEC = 10.0
 _img_cache_entry: Optional[_SpotImageCacheEntry] = None
 _img_refresh_task: Optional[asyncio.Task[_SpotImageCacheEntry]] = None
 _img_accepting_requests = True
@@ -126,6 +129,13 @@ _spot_diagnostics_snapshot: Optional[Dict[str, Any]] = None
 _spot_diagnostics_last_error_code: Optional[str] = None
 _spot_diagnostics_last_error_message: Optional[str] = None
 _spot_diagnostics_seq = 0
+_spot_diagnostics_last_started_at = 0.0
+_spot_diagnostics_last_started_monotonic: Optional[float] = None
+_spot_diagnostics_last_completed_at = 0.0
+_spot_diagnostics_sweep_started_count = 0
+_spot_diagnostics_upstream_request_count = 0
+_spot_diagnostics_suppressed_poll_count = 0
+_spot_diagnostics_inflight_suppressed_count = 0
 _spot_config_provenance_lock = threading.Lock()
 _spot_config_drift_detected_count = 0
 _spot_config_active_drift_signature: Optional[str] = None
@@ -503,6 +513,26 @@ def _reset_spot_image_request_state_for_tests() -> None:
     _img_last_success_at = 0.0
 
 
+def _reset_spot_diagnostics_request_state_for_tests() -> None:
+    global _spot_diagnostics_task
+    global _spot_diagnostics_last_started_at, _spot_diagnostics_last_started_monotonic
+    global _spot_diagnostics_last_completed_at, _spot_diagnostics_sweep_started_count
+    global _spot_diagnostics_upstream_request_count, _spot_diagnostics_suppressed_poll_count
+    global _spot_diagnostics_inflight_suppressed_count
+
+    diagnostics_task = _spot_diagnostics_task
+    if diagnostics_task is not None and not diagnostics_task.done():
+        diagnostics_task.cancel()
+    _spot_diagnostics_task = None
+    _spot_diagnostics_last_started_at = 0.0
+    _spot_diagnostics_last_started_monotonic = None
+    _spot_diagnostics_last_completed_at = 0.0
+    _spot_diagnostics_sweep_started_count = 0
+    _spot_diagnostics_upstream_request_count = 0
+    _spot_diagnostics_suppressed_poll_count = 0
+    _spot_diagnostics_inflight_suppressed_count = 0
+
+
 def get_latest_spot_image_capture_fact() -> Dict[str, str]:
     with _spot_image_capture_lock:
         return dict(_spot_image_capture_last_fact or {})
@@ -769,6 +799,54 @@ def _spot_image_refresh_interval_sec() -> float:
     )
 
 
+def _spot_poll_interval_sec() -> float:
+    try:
+        configured_interval = float(config.SPOT_REFRESH_INTERVAL)
+    except (TypeError, ValueError):
+        configured_interval = 1.0
+    if not math.isfinite(configured_interval) or configured_interval <= 0.0:
+        configured_interval = 1.0
+    return max(0.5, configured_interval)
+
+
+def _spot_diagnostics_refresh_interval_sec() -> float:
+    return max(
+        _SPOT_DIAGNOSTICS_REFRESH_INTERVAL_MIN_SEC,
+        _spot_poll_interval_sec(),
+    )
+
+
+def _spot_background_request_budget() -> Dict[str, float | bool | str]:
+    poll_interval = _spot_poll_interval_sec()
+    image_rate = 1.0 / _spot_image_refresh_interval_sec() if str(config.SPOT_IP or "").strip() else 0.0
+    temperature_rate = 1.0 / poll_interval if str(config.SPOT_URL or "").strip() else 0.0
+    internal_temperature_rate = (
+        1.0 / poll_interval
+        if str(config.SPOT_INTERNAL_TEMPERATURE_URL or "").strip()
+        else 0.0
+    )
+    diagnostics_rate = (
+        len(_SPOT_DIAGNOSTIC_OUTPUT_PARAMS) / _spot_diagnostics_refresh_interval_sec()
+        if str(config.SPOT_URL or "").strip()
+        else 0.0
+    )
+    total_rate = image_rate + temperature_rate + internal_temperature_rate + diagnostics_rate
+    return {
+        "request_budget_policy_version": _SPOT_REQUEST_BUDGET_POLICY_VERSION,
+        "request_budget_target_max_per_sec": _SPOT_BACKGROUND_REQUEST_BUDGET_TARGET_PER_SEC,
+        "request_budget_image_max_per_sec": round(image_rate, 6),
+        "request_budget_temperature_max_per_sec": round(temperature_rate, 6),
+        "request_budget_internal_temperature_max_per_sec": round(
+            internal_temperature_rate,
+            6,
+        ),
+        "request_budget_diagnostics_max_per_sec": round(diagnostics_rate, 6),
+        "request_budget_total_background_max_per_sec": round(total_rate, 6),
+        "request_budget_within_target": total_rate
+        <= _SPOT_BACKGROUND_REQUEST_BUDGET_TARGET_PER_SEC,
+    }
+
+
 def _spot_image_cache_age_ms(
     entry: _SpotImageCacheEntry,
     *,
@@ -853,7 +931,13 @@ def _resolve_spot_diagnostic_url(param: str) -> str:
 
 
 def _spot_diagnostics_max_age_sec() -> float:
-    return configured_diagnostics_max_age_ms(config.SPOT_REFRESH_INTERVAL) / 1000.0
+    configured_max_age_sec = (
+        configured_diagnostics_max_age_ms(config.SPOT_REFRESH_INTERVAL) / 1000.0
+    )
+    return max(
+        configured_max_age_sec,
+        _spot_diagnostics_refresh_interval_sec() * 2.0,
+    )
 
 
 def _spot_configuration_snapshot() -> Dict[str, Any]:
@@ -886,8 +970,11 @@ def _spot_configuration_snapshot() -> Dict[str, Any]:
 
 
 async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str) -> tuple[str, str]:
+    global _spot_diagnostics_upstream_request_count
+
     url = _resolve_spot_diagnostic_url(param)
     async with _spot_device_request_lock:
+        _spot_diagnostics_upstream_request_count += 1
         response = await client.get(url)
         response.raise_for_status()
     return param, response.text.strip()[:_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS]
@@ -1008,6 +1095,8 @@ async def _refresh_spot_diagnostics_safely(
     *,
     collection_mode: str = _SPOT_DIAGNOSTICS_COLLECTION_MODE,
 ) -> None:
+    global _spot_diagnostics_last_completed_at
+
     try:
         await _refresh_spot_diagnostics(client, poll_context, collection_mode=collection_mode)
     except Exception as exc:
@@ -1038,6 +1127,8 @@ async def _refresh_spot_diagnostics_safely(
             "Spot diagnostics fetch failed",
             extra={"code": "spot-diagnostics-fetch-error", "error": _format_exception_message(exc)},
         )
+    finally:
+        _spot_diagnostics_last_completed_at = time.time()
 
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
@@ -1867,11 +1958,28 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
 def _schedule_spot_diagnostics_for_poll(
     client: httpx.AsyncClient,
     poll_context: SpotPollContext,
-) -> None:
+) -> bool:
     global _spot_diagnostics_task
+    global _spot_diagnostics_last_started_at, _spot_diagnostics_last_started_monotonic
+    global _spot_diagnostics_sweep_started_count, _spot_diagnostics_suppressed_poll_count
+    global _spot_diagnostics_inflight_suppressed_count
 
     if _spot_diagnostics_task is not None and not _spot_diagnostics_task.done():
-        return
+        _spot_diagnostics_inflight_suppressed_count += 1
+        return False
+
+    now_monotonic = time.monotonic()
+    if (
+        _spot_diagnostics_last_started_monotonic is not None
+        and now_monotonic - _spot_diagnostics_last_started_monotonic
+        < _spot_diagnostics_refresh_interval_sec()
+    ):
+        _spot_diagnostics_suppressed_poll_count += 1
+        return False
+
+    _spot_diagnostics_last_started_at = time.time()
+    _spot_diagnostics_last_started_monotonic = now_monotonic
+    _spot_diagnostics_sweep_started_count += 1
     _spot_diagnostics_task = asyncio.create_task(
         _refresh_spot_diagnostics_safely(
             client,
@@ -1880,6 +1988,7 @@ def _schedule_spot_diagnostics_for_poll(
             collection_mode=_SPOT_DIAGNOSTICS_COLLECTION_MODE,
         )
     )
+    return True
 
 
 async def _refresh_spot_temperature(
@@ -2015,6 +2124,26 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         ),
         "image_url_configured": bool(str(config.SPOT_IP or "").strip()),
         "image_path": "/image.jpg",
+        "diagnostics_refresh_interval_sec_effective": _spot_diagnostics_refresh_interval_sec(),
+        "diagnostics_refresh_in_flight": bool(
+            _spot_diagnostics_task is not None and not _spot_diagnostics_task.done()
+        ),
+        "diagnostics_sweep_started_count": int(_spot_diagnostics_sweep_started_count),
+        "diagnostics_upstream_request_count": int(_spot_diagnostics_upstream_request_count),
+        "diagnostics_suppressed_poll_count": int(_spot_diagnostics_suppressed_poll_count),
+        "diagnostics_inflight_suppressed_count": int(
+            _spot_diagnostics_inflight_suppressed_count
+        ),
+        "diagnostics_last_started_at": (
+            float(_spot_diagnostics_last_started_at)
+            if _spot_diagnostics_last_started_at
+            else None
+        ),
+        "diagnostics_last_completed_at": (
+            float(_spot_diagnostics_last_completed_at)
+            if _spot_diagnostics_last_completed_at
+            else None
+        ),
         "temperature_url_configured": bool(str(config.SPOT_URL or "").strip()),
         "temperature_cache_status": _temperature_cache_status(now),
         "temperature_cache_age_sec": _temperature_cache_age_sec(now),
@@ -2025,6 +2154,7 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         "temperature_last_upstream_status": _temp_last_upstream_status,
         "temperature_last_url": _temp_last_url,
     }
+    payload.update(_spot_background_request_budget())
     payload.update(_build_spot_temperature_snapshot_diagnostics(now))
     payload.update(_build_internal_temperature_diagnostics(now, include_cached_at=False))
     return payload
@@ -2252,7 +2382,7 @@ async def _spot_poll_loop():
     global _spot_diagnostics_task
     _spot_poll_running = True
 
-    interval = max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
+    interval = _spot_poll_interval_sec()
     next_tick = time.time()
 
     while _spot_poll_running:

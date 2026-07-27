@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-24T14:50:53.871Z",
+  "lastUpdated": "2026-07-26T23:40:01.719Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -1911,9 +1911,9 @@
       "completedAt": "2026-07-16T10:15:22.115Z"
     },
     "spot-request-churn-remediation": {
-      "phase": "report",
+      "phase": "act",
       "matchRate": 100,
-      "iterationCount": 2,
+      "iterationCount": 4,
       "documents": {
         "plan": {
           "path": "docs/01-plan/features/spot-request-churn-remediation.plan.md",
@@ -1925,9 +1925,33 @@
         },
         "analysis": {
           "path": "docs/03-analysis/spot-request-churn-remediation.analysis.md",
-          "status": "completed_gap_analysis_local_gates_passed",
+          "status": "field_act_iteration_3_local_pass_field_recheck_required",
           "match_rate": 100,
-          "package_blocked": false
+          "package_blocked": true,
+          "field_gate": "recheck_required",
+          "rollback_required": false,
+          "rollback_status": "completed",
+          "rollback_completed_at_local": "2026-07-27 08:25:07 +09:00",
+          "rollback_backend_sha256": "F1A65AC7E2C27FC049398EA0AF2A6DAA775A081DE0311E42A3EAA87CE4A15A54",
+          "rollback_config_unchanged": true,
+          "operational_baseline": "restored_to_verified_v1.0.16",
+          "candidate_deployed": false,
+          "canary_blocked": true
+        },
+        "act_iteration_3": {
+          "status": "local_validation_passed",
+          "image_policy_version": "spot-image-demand-shaping-v2",
+          "request_budget_policy_version": "spot-background-request-budget-v2",
+          "image_refresh_interval_min_sec": 3.0,
+          "diagnostics_refresh_interval_min_sec": 10.0,
+          "diagnostics_max_age_min_sec": 20.0,
+          "background_budget_target_max_per_sec": 6.0,
+          "projected_background_max_per_sec_at_operating_poll": 3.133333,
+          "projected_background_max_per_sec_at_fastest_poll": 5.133333,
+          "local_match_rate": 100,
+          "package_built": false,
+          "actual_server_recheck_required": true,
+          "lastUpdated": "2026-07-26T23:40:01.719Z"
         }
       },
       "taskChain": [
@@ -1969,7 +1993,7 @@
       ],
       "timestamps": {
         "started": "2026-07-24T14:03:32.331Z",
-        "lastUpdated": "2026-07-24T14:50:53.871Z"
+        "lastUpdated": "2026-07-26T23:40:01.719Z"
       }
     }
   },
@@ -1982,7 +2006,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-24T14:50:53.871Z"
+    "lastActivity": "2026-07-26T23:40:01.719Z"
   },
   "history": [
     {

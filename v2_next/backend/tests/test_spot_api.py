@@ -94,6 +94,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
     def reset_spot_state(self) -> None:
         spot_api._reset_spot_image_request_state_for_tests()
+        spot_api._reset_spot_diagnostics_request_state_for_tests()
         spot_api._spot_device_request_lock = asyncio.Lock()
         spot_api._temperature_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._internal_temp_cache = {"temp": 0.0, "temp_time": 0.0}
@@ -119,7 +120,6 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_diagnostics_last_error_code = None
             spot_api._spot_diagnostics_last_error_message = None
             spot_api._spot_diagnostics_seq = 0
-        spot_api._spot_diagnostics_task = None
         with spot_api._spot_temperature_snapshot_lock:
             spot_api._spot_service_instance_id = "test-spot-service-instance"
             spot_api._spot_service_started_at = "2026-06-22T00:00:00Z"
@@ -529,6 +529,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         fact = spot_api.get_spot_temperature_poll_snapshot()
 
         self.assertEqual(diagnostics["diagnostics_capture_status"], "async_complete")
+        self.assertEqual(diagnostics["diagnostics_upstream_request_count"], 8)
         self.assertEqual(diagnostics["diagnostics_binding_status"], "unbound")
         self.assertEqual(diagnostics["diagnostics_collection_mode"], "async_fact_only")
         self.assertIsNone(diagnostics["diagnostics_source_poll_seq"])
@@ -599,6 +600,88 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(spot_api.time, "monotonic", return_value=captured_monotonic + 7.0):
             refreshed = spot_api._build_spot_temperature_snapshot_diagnostics(time.time())
         self.assertEqual(refreshed["diagnostics_age_ms"], "7000.000")
+
+    async def test_diagnostics_scheduler_enforces_the_device_request_budget(self) -> None:
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=1,
+            started_at_epoch=time.time(),
+            started_monotonic=100.0,
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+
+        with patch.object(
+            spot_api,
+            "_refresh_spot_diagnostics_safely",
+            AsyncMock(),
+        ) as refresh_mock:
+            with patch.object(spot_api.time, "monotonic", return_value=100.0):
+                self.assertTrue(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            first_task = spot_api._spot_diagnostics_task
+            assert first_task is not None
+            await first_task
+
+            with patch.object(spot_api.time, "monotonic", return_value=109.999):
+                self.assertFalse(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            with patch.object(spot_api.time, "monotonic", return_value=110.0):
+                self.assertTrue(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            second_task = spot_api._spot_diagnostics_task
+            assert second_task is not None
+            await second_task
+
+        self.assertEqual(refresh_mock.await_count, 2)
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["diagnostics_refresh_interval_sec_effective"], 10.0)
+        self.assertEqual(diagnostics["diagnostics_sweep_started_count"], 2)
+        self.assertEqual(diagnostics["diagnostics_suppressed_poll_count"], 1)
+        self.assertEqual(diagnostics["diagnostics_inflight_suppressed_count"], 0)
+
+    async def test_diagnostics_scheduler_does_not_overlap_a_slow_sweep(self) -> None:
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=1,
+            started_at_epoch=time.time(),
+            started_monotonic=100.0,
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_refresh(*_args: object, **_kwargs: object) -> None:
+            started.set()
+            await release.wait()
+
+        with patch.object(
+            spot_api,
+            "_refresh_spot_diagnostics_safely",
+            side_effect=slow_refresh,
+        ) as refresh_mock:
+            with patch.object(spot_api.time, "monotonic", return_value=100.0):
+                self.assertTrue(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            await started.wait()
+            with patch.object(spot_api.time, "monotonic", return_value=120.0):
+                self.assertFalse(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            release.set()
+            task = spot_api._spot_diagnostics_task
+            assert task is not None
+            await task
+
+        self.assertEqual(refresh_mock.await_count, 1)
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["diagnostics_sweep_started_count"], 1)
+        self.assertEqual(diagnostics["diagnostics_inflight_suppressed_count"], 1)
 
     async def test_late_diagnostics_do_not_block_temperature_or_bind_to_next_poll(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
@@ -1638,9 +1721,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
 
         spot_api.config.SPOT_REFRESH_INTERVAL = 0.25
-        self.assertEqual(spot_api._spot_image_refresh_interval_sec(), 1.0)
-        self.assertTrue(spot_api._is_spot_image_cache_fresh(entry, now_monotonic=10.999))
-        self.assertFalse(spot_api._is_spot_image_cache_fresh(entry, now_monotonic=11.0))
+        self.assertEqual(spot_api._spot_image_refresh_interval_sec(), 3.0)
+        self.assertTrue(spot_api._is_spot_image_cache_fresh(entry, now_monotonic=12.999))
+        self.assertFalse(spot_api._is_spot_image_cache_fresh(entry, now_monotonic=13.0))
 
         spot_api.config.SPOT_REFRESH_INTERVAL = 30.0
         self.assertEqual(spot_api._spot_image_refresh_interval_sec(), 10.0)
@@ -1655,6 +1738,40 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         self.assertEqual(spot_api.get_spot_diagnostics()["image_cache_clock_anomaly_count"], 1)
+
+    def test_background_request_budget_stays_below_field_gate_at_fastest_poll(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+        spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = (
+            "http://spot.local/output?p=itemperature"
+        )
+        spot_api.config.SPOT_REFRESH_INTERVAL = 0.25
+
+        diagnostics = spot_api.get_spot_diagnostics()
+
+        self.assertEqual(
+            diagnostics["request_budget_policy_version"],
+            "spot-background-request-budget-v2",
+        )
+        self.assertEqual(
+            diagnostics["image_request_policy_version"],
+            "spot-image-demand-shaping-v2",
+        )
+        self.assertEqual(diagnostics["image_refresh_interval_sec_effective"], 3.0)
+        self.assertEqual(diagnostics["diagnostics_refresh_interval_sec_effective"], 10.0)
+        self.assertEqual(spot_api._spot_diagnostics_max_age_sec(), 20.0)
+        self.assertEqual(diagnostics["request_budget_image_max_per_sec"], 0.333333)
+        self.assertEqual(diagnostics["request_budget_temperature_max_per_sec"], 2.0)
+        self.assertEqual(
+            diagnostics["request_budget_internal_temperature_max_per_sec"],
+            2.0,
+        )
+        self.assertEqual(diagnostics["request_budget_diagnostics_max_per_sec"], 0.8)
+        self.assertEqual(
+            diagnostics["request_budget_total_background_max_per_sec"],
+            5.133333,
+        )
+        self.assertTrue(diagnostics["request_budget_within_target"])
 
     async def test_official_image_requests_are_single_flight(self) -> None:
         spot_api.config.SPOT_IP = "spot.local"
@@ -1713,7 +1830,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._img_cache_entry = spot_api._SpotImageCacheEntry(
                 image_bytes=cached.image_bytes,
                 captured_at_epoch=cached.captured_at_epoch,
-                captured_at_monotonic=cached.captured_at_monotonic - 2.0,
+                captured_at_monotonic=cached.captured_at_monotonic - 4.0,
                 upstream_latency_ms=cached.upstream_latency_ms,
             )
             with self.assertRaises(spot_api.SpotImageFetchError):
@@ -1761,7 +1878,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._img_cache_entry = spot_api._SpotImageCacheEntry(
                 image_bytes=cached.image_bytes,
                 captured_at_epoch=cached.captured_at_epoch,
-                captured_at_monotonic=cached.captured_at_monotonic - 2.0,
+                captured_at_monotonic=cached.captured_at_monotonic - 4.0,
                 upstream_latency_ms=cached.upstream_latency_ms,
             )
 
