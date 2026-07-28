@@ -9,8 +9,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Added SPOT image request shaping with shared caching and single-flight
   refreshes so multiple dashboard consumers no longer create duplicate device
   connections.
-- Added a unified background request budget for image, temperature, focus, and
-  actuator traffic, with live diagnostics showing the effective request rate.
+- Added a unified background request budget for image, target-temperature,
+  internal-temperature, and diagnostic traffic, with live diagnostics showing
+  the effective request rate.
 - Added an exclusive source-port pool with a 75-second quarantine window so
   SPOT connections cannot quickly reuse the same TCP four-tuple.
 

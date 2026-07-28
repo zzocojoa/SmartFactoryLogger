@@ -844,7 +844,7 @@ SPOT 카메라 위젯 설정을 가져옵니다.
 ```json
 {
     "image_url": "/api/spot/image.jpg",
-    "refresh_interval": 1000,
+    "refresh_interval": 3.0,
     "crosshair_x": 50,
     "crosshair_y": 50,
     "crosshair_color": "#00FF00",
@@ -854,9 +854,34 @@ SPOT 카메라 위젯 설정을 가져옵니다.
     "widget_width": 640,
     "widget_height": 480,
     "focus_step": 10,
-    "focus_enabled": true
+    "focus_enabled": true,
+    "image": {
+        "image_request_policy_version": "spot-image-demand-shaping-v2",
+        "image_refresh_interval_sec_effective": 3.0,
+        "image_cache_present": true,
+        "image_cache_fresh": true,
+        "image_cache_age_ms": 250.5,
+        "image_refresh_in_flight": false,
+        "diagnostics_refresh_interval_sec_effective": 10.0,
+        "request_budget_policy_version": "spot-background-request-budget-v2",
+        "request_budget_target_max_per_sec": 6.0,
+        "request_budget_total_background_max_per_sec": 3.133333,
+        "request_budget_within_target": true,
+        "source_port_policy_version": "spot-source-port-quarantine-v2",
+        "source_port_enforcement_active": true,
+        "source_port_pool_capacity": 768,
+        "source_port_quarantine_seconds": 75.0,
+        "source_port_pool_exhaustion_count": 0,
+        "source_port_reuse_violation_count": 0
+    }
 }
 ```
+
+The `image` object is a backward-compatible diagnostics extension. It reports
+cache and single-flight state, the calculated background budget for image,
+target-temperature, internal-temperature, and diagnostic requests, plus
+aggregate source-port quarantine health. It never exposes source-port values.
+`refresh_interval` and the effective refresh interval fields use seconds.
 
 ### POST `/api/spot/focus`
 
@@ -884,13 +909,19 @@ POST /api/spot/focus?steps=10
 
 ### GET `/api/spot/image.jpg`
 
-Electron `file:` UI가 SPOT Web Server의 공식 `GET /image.jpg` 리소스를 사용할 수 있도록
-동일한 JPEG 응답을 한 번씩 전달합니다. 서버 캐시, 대체 이미지 경로, 자동 backoff는 사용하지 않습니다.
+The backend bridges the official SPOT `GET /image.jpg` resource to the Electron
+`file:` UI. It uses a shared process cache and single-flight refreshes so
+concurrent dashboard consumers reuse one upstream image request. The client
+response remains `no-store`; that header does not disable the backend cache.
 
 **응답:**
 
 - **Content-Type:** `image/jpeg`
 - **Cache-Control:** `no-store, no-cache, must-revalidate, max-age=0`
+- **X-Spot-Image-At:** upstream capture time in Unix milliseconds, when known
+- **X-Spot-Image-Source:** `upstream`, `cache`, or `coalesced`
+- **X-Spot-Image-Latency-Ms:** upstream request latency, when known
+- **X-Spot-Image-Age-Ms:** current shared-cache age, including cached responses
 - **Body:** 바이너리 JPEG 데이터
 
 **에러 응답 (404):**

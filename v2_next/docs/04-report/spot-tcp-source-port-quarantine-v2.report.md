@@ -2,6 +2,7 @@
 
 > Date: 2026-07-28 | Level: Dynamic | Match Rate: 100%
 > Status: `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL`
+> Evidence scope: packaged source commit `931c869e34e00b62acc8344a3f3f01731a776b7f`
 
 ---
 
@@ -13,11 +14,12 @@ routes requests through the Python standard HTTP client, and enforces a
 75-second application-monotonic quarantine before reuse.
 
 The implementation closes the field-observed same 4-tuple reuse risk without
-changing request cadence, public endpoints, configuration, CSV, database, or
-frontend contracts. The packaged candidate passed the approved 15-minute smoke
-and a 120-minute passive canary on the actual server. No new `spot_image`
-ConnectTimeout, SPOT handshake failure, HTTP error, pool exhaustion, transport
-failure, or reuse violation occurred.
+changing public routes, configuration, CSV, or database contracts. It
+intentionally reduces background request cadence and extends backward-compatible
+image metadata and `/api/spot/config.image` diagnostics. The packaged candidate
+passed the approved 15-minute smoke and a 120-minute passive canary on the actual
+server. No new `spot_image` ConnectTimeout, SPOT handshake failure, HTTP error,
+pool exhaustion, transport failure, or reuse violation occurred.
 
 Managed-switch evidence was unavailable, so the software promotion gate passes
 while physical-path attribution remains partial. This limitation does not
@@ -104,6 +106,9 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 
 - Source commit:
   `931c869e34e00b62acc8344a3f3f01731a776b7f`
+- This field evidence applies to that packaged commit only. Later release
+  hardening commits and the final `1.0.17` release commit require their own
+  same-backend field promotion run.
 - Candidate installer SHA-256:
   `DAF98A7191C38A3D06C1B71D2B48D2B4B3A26C220EE24A18C16EB99467F7821F`
 - Installed backend SHA-256:
@@ -165,6 +170,9 @@ deadline without a trigger.
   schema rollback is needed.
 - The actual server remains on the verified candidate. Current evidence does not
   indicate rollback.
+- The verified server candidate predates the final `1.0.17` release commit, so
+  its successful canary cannot be reused as release evidence for that final
+  backend identity.
 - Error-queue deletion, configuration changes, forced image-load tests, and an
   immediate repeat of the 120-minute canary are not required.
 
@@ -210,12 +218,15 @@ process failure. They are retained as non-blocking canary concerns.
 
 ## 9. Next Action
 
-Freeze this branch and its evidence as
-`FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL`. Keep the verified candidate running
-on the server. No further server action or immediate 120-minute repetition is
-required. If governance later requires full physical-path sign-off, collect
-managed-switch port counters and logs as a separate operational evidence task;
-do not redesign the product solely to close that evidence gap.
+Freeze this evidence as `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL` for packaged
+commit `931c869` only. Keep the verified server candidate running until the
+final `1.0.17` installer is ready. Before release promotion, build from the
+final release HEAD, install it, and complete the commit-bound operator
+re-attestation and live gate. Then run the approved 15-minute smoke followed by
+the 120-minute canary with that same packaged backend. If governance later
+requires full physical-path sign-off, collect managed-switch port counters and
+logs as a separate operational evidence task; do not redesign the product
+solely to close that evidence gap.
 
 ## Version History
 
@@ -223,3 +234,4 @@ do not redesign the product solely to close that evidence gap.
 |---|---|---|
 | 1.0 | 2026-07-27 | Local PDCA completion report |
 | 1.1 | 2026-07-28 | Actual-server 15-minute smoke and 120-minute field canary closure |
+| 1.2 | 2026-07-28 | Scoped field evidence to packaged commit `931c869`; final `1.0.17` promotion remains gated |
