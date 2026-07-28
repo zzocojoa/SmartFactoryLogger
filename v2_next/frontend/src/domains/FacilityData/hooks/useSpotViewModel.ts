@@ -426,6 +426,9 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       if (!currentConfig?.image_url) {
         return;
       }
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       if (inFlightRef.current) {
         return;
       }

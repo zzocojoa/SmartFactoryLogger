@@ -918,7 +918,7 @@ response remains `no-store`; that header does not disable the backend cache.
 
 - **Content-Type:** `image/jpeg`
 - **Cache-Control:** `no-store, no-cache, must-revalidate, max-age=0`
-- **X-Spot-Image-At:** upstream capture time in Unix milliseconds, when known
+- **X-Spot-Image-At:** backend cache capture/completion time in Unix milliseconds, when known
 - **X-Spot-Image-Source:** `upstream`, `cache`, or `coalesced`
 - **X-Spot-Image-Latency-Ms:** upstream request latency, when known
 - **X-Spot-Image-Age-Ms:** current shared-cache age, including cached responses

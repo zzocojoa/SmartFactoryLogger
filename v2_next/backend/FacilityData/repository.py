@@ -866,7 +866,7 @@ class CSVLoggerService:
     def _ensure_spot_observation_fact_file(self, fact_path: Path, *, enabled: bool) -> int:
         if not enabled:
             return 0
-        writer = SpotObservationFactWriter(fact_path)
+        writer = SpotObservationFactWriter(fact_path, load_existing_keys=False)
         if writer.ensure_initialized():
             return 0
         self.logger.warning("Failed to initialize enabled SPOT observation fact: %s", fact_path.name)

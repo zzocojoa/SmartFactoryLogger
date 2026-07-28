@@ -86,6 +86,7 @@ export const useSpotViewModelEffects = ({
 
     const handleImageVisibility = (): void => {
       if (document.visibilityState === 'hidden') {
+        cancelPendingImageRetry();
         cancelNormalImageRefresh();
         return;
       }
@@ -96,7 +97,11 @@ export const useSpotViewModelEffects = ({
     return () => {
       document.removeEventListener('visibilitychange', handleImageVisibility);
     };
-  }, [cancelNormalImageRefresh, resumeImageRefreshWhenVisible]);
+  }, [
+    cancelPendingImageRetry,
+    cancelNormalImageRefresh,
+    resumeImageRefreshWhenVisible,
+  ]);
 
   useEffect(() => {
     let disposed = false;

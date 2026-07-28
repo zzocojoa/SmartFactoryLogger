@@ -120,6 +120,13 @@ const buildTransientResponse = (code = 'upstream-timeout', upstreamStatus?: numb
     }
   );
 
+const setVisibilityState = (state: DocumentVisibilityState): void => {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    value: state,
+  });
+};
+
 describe('useSpotViewModel integration', () => {
   beforeEach(() => {
     mockControlSpotFocus.mockResolvedValue({
@@ -149,6 +156,7 @@ describe('useSpotViewModel integration', () => {
     mockControlSpotActuator.mockReset();
     mocks.cancelNormalImageRefresh = undefined;
     mocks.resumeImageRefreshWhenVisible = undefined;
+    setVisibilityState('visible');
   });
 
   it('publishes payload rejection to shared state and recovers through explicit retry', async () => {
@@ -821,6 +829,40 @@ describe('useSpotViewModel integration', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
     } finally {
+      consoleErrorMock.mockRestore();
+    }
+  });
+
+  it('does not execute a pending automatic retry after the page becomes hidden', async () => {
+    vi.useFakeTimers();
+    const consoleErrorMock = vi.spyOn(console, 'error').mockImplementation((): void => undefined);
+    mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
+    mockFetchSpotImageResponse.mockResolvedValue(buildTransientResponse());
+
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      await act(async () => {
+        result.current.refreshImage();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(result.current.diagnostics.automatic_retry_pending).toBe(true);
+
+      setVisibilityState('hidden');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+      expect(result.current.diagnostics.automatic_retry_pending).toBe(false);
+    } finally {
+      setVisibilityState('visible');
+      unmount();
       consoleErrorMock.mockRestore();
     }
   });

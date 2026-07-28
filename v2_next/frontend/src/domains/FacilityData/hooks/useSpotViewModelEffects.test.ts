@@ -41,7 +41,7 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     setVisibilityState('visible');
   });
 
-  it('cancels normal refresh while hidden and resumes once when visible', async () => {
+  it('cancels pending retry and normal refresh while hidden, then resumes once when visible', async () => {
     setVisibilityState('visible');
     const fetchInitialImage = vi.fn(async () => undefined);
     const loadConfig = vi.fn(async () => null);
@@ -70,6 +70,7 @@ describe('useSpotViewModelEffects image lifecycle', () => {
       setVisibilityState('hidden');
       document.dispatchEvent(new Event('visibilitychange'));
     });
+    expect(cancelPendingImageRetry).toHaveBeenCalledTimes(1);
     expect(cancelNormalImageRefresh).toHaveBeenCalledTimes(1);
     expect(resumeImageRefreshWhenVisible).not.toHaveBeenCalled();
 
@@ -80,7 +81,7 @@ describe('useSpotViewModelEffects image lifecycle', () => {
     expect(resumeImageRefreshWhenVisible).toHaveBeenCalledTimes(1);
 
     unmount();
-    expect(cancelPendingImageRetry).toHaveBeenCalledTimes(1);
+    expect(cancelPendingImageRetry).toHaveBeenCalledTimes(2);
     expect(cancelNormalImageRefresh).toHaveBeenCalledTimes(2);
   });
 });

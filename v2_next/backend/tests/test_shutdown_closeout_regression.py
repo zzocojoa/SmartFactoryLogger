@@ -3,18 +3,21 @@ import csv
 import hashlib
 import json
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import textwrap
 import tracemalloc
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from backend import app as backend_app
+from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.spot_image_fact import build_spot_image_fact_manifest
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_COLUMNS,
+    SpotObservationFactWriter,
     summarize_spot_observation_fact,
 )
 
@@ -74,6 +77,44 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             64 * 1024 * 1024,
             f"observation manifest peak memory was {peak_bytes} bytes",
         )
+
+    def test_observation_manifest_fails_closed_when_temporary_sqlite_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            fact_path.write_text("header\nrow\n", encoding="utf-8")
+            expected_sha256 = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+
+            with patch(
+                "backend.FacilityData.spot_observation_fact.sqlite3.connect",
+                side_effect=sqlite3.OperationalError("temporary storage unavailable"),
+            ):
+                summary = summarize_spot_observation_fact(fact_path=fact_path)
+
+        self.assertEqual(summary["row_count"], 0)
+        self.assertEqual(summary["distinct_observation_key_count"], 0)
+        self.assertEqual(summary["sha256"], expected_sha256)
+
+    def test_closeout_header_initialization_does_not_index_historical_fact_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            fact_path.write_text(
+                "\ufeff" + ",".join(SPOT_OBSERVATION_FACT_COLUMNS) + "\n",
+                encoding="utf-8",
+            )
+            service = CSVLoggerService()
+
+            with patch.object(
+                SpotObservationFactWriter,
+                "_load_seen_keys_from_output",
+                side_effect=AssertionError("closeout indexed historical observation keys"),
+            ) as load_seen_keys:
+                failure_count = service._ensure_spot_observation_fact_file(
+                    fact_path,
+                    enabled=True,
+                )
+
+        self.assertEqual(failure_count, 0)
+        load_seen_keys.assert_not_called()
 
     def test_image_manifest_hash_does_not_load_the_entire_fact_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -146,6 +187,33 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         self.assertGreaterEqual(len(order), 3)
         self.assertEqual(order[0], "spot_poll_loop")
         self.assertLess(order.index("spot_poll_loop"), order.index("logger_service"))
+
+    def test_control_shutdown_spot_failure_still_runs_closeout_and_exits_with_failure(self) -> None:
+        async def exercise() -> None:
+            downstream_status = {
+                key: True
+                for key in backend_app._CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS
+                if key != "spot_poll_loop_stopped"
+            }
+            with (
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_poll_loop",
+                    new=AsyncMock(side_effect=RuntimeError("SPOT stop failed")),
+                ),
+                patch.object(
+                    backend_app,
+                    "_stop_services_for_control_shutdown",
+                    return_value=downstream_status,
+                ) as closeout,
+                patch.object(backend_app.os, "_exit") as process_exit,
+            ):
+                await backend_app._run_control_shutdown("spot-stop-regression")
+
+            closeout.assert_called_once_with()
+            process_exit.assert_called_once_with(2)
+
+        asyncio.run(exercise())
 
     def test_control_shutdown_schedule_rejects_duplicate_requests(self) -> None:
         async def exercise() -> None:

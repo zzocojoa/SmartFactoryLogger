@@ -159,11 +159,13 @@ SPOT_DIAGNOSTIC_EVIDENCE_FIELDS = {
 class SpotObservationFactWriter:
     output_path: Path
     spool_path: Optional[Path] = None
+    load_existing_keys: bool = True
     failure_count: int = 0
     _seen_keys: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        self._load_seen_keys_from_output()
+        if self.load_existing_keys:
+            self._load_seen_keys_from_output()
 
     def ensure_initialized(self) -> bool:
         """Create a current-schema header even when no observation has been emitted yet."""
@@ -369,8 +371,9 @@ def summarize_spot_observation_fact(
     evidence_code_count = 0
     provenance_code_count = 0
 
-    distinct_state = sqlite3.connect("")
+    distinct_state: sqlite3.Connection | None = None
     try:
+        distinct_state = sqlite3.connect("")
         distinct_state.execute("PRAGMA journal_mode=OFF")
         distinct_state.execute("PRAGMA synchronous=OFF")
         distinct_state.execute("PRAGMA temp_store=FILE")
@@ -460,7 +463,8 @@ def summarize_spot_observation_fact(
         evidence_code_count = 0
         provenance_code_count = 0
     finally:
-        distinct_state.close()
+        if distinct_state is not None:
+            distinct_state.close()
 
     poll_seq_gap_count = 0
     if first_poll_seq is not None and last_poll_seq is not None:
@@ -522,33 +526,6 @@ def _spool_pending_count(spool_path: Path) -> int:
             return sum(1 for line in handle if line.strip())
     except OSError:
         return 0
-
-
-def _link_coverage(
-    realtime_rows: Iterable[Mapping[str, Any]] | None,
-    fact_keys: set[str],
-) -> dict[str, Any]:
-    if realtime_rows is None:
-        return {
-            "realtime_rows_with_observation_key": 0,
-            "linked_rows": 0,
-            "missing_fact_key_rows": 0,
-            "coverage_pct": 0.0,
-        }
-    realtime_keys = [
-        _text(row.get("spot_observation_key")).strip()
-        for row in realtime_rows
-        if _text(row.get("spot_observation_key")).strip()
-    ]
-    linked_rows = sum(1 for key in realtime_keys if key in fact_keys)
-    missing_rows = len(realtime_keys) - linked_rows
-    coverage_pct = (linked_rows / len(realtime_keys) * 100.0) if realtime_keys else 0.0
-    return {
-        "realtime_rows_with_observation_key": len(realtime_keys),
-        "linked_rows": linked_rows,
-        "missing_fact_key_rows": missing_rows,
-        "coverage_pct": round(coverage_pct, 6),
-    }
 
 
 def _positive_int_or_none(value: Any) -> int | None:
