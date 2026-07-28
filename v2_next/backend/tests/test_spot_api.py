@@ -1786,6 +1786,86 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["image_cache_hit_count"], 20)
         self.assertEqual(diagnostics["image_downstream_request_count"], 21)
 
+    async def test_image_cache_is_not_reused_after_spot_ip_changes(self) -> None:
+        spot_api.config.SPOT_IP = "spot-a.local"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 10.0
+
+        async def request_image(_client: httpx.AsyncClient, image_url: str) -> bytes:
+            if image_url == "http://spot-a.local/image.jpg":
+                return b"\xff\xd8spot-a\xff\xd9"
+            if image_url == "http://spot-b.local/image.jpg":
+                return b"\xff\xd8spot-b\xff\xd9"
+            self.fail(f"unexpected image URL: {image_url}")
+
+        with patch.object(
+            spot_api,
+            "_request_spot_image",
+            side_effect=request_image,
+        ) as request_mock:
+            first_data, _first_meta = await spot_api.fetch_image_async()
+            spot_api.config.SPOT_IP = "spot-b.local"
+            second_data, second_meta = await spot_api.fetch_image_async()
+
+        self.assertEqual(first_data, b"\xff\xd8spot-a\xff\xd9")
+        self.assertEqual(second_data, b"\xff\xd8spot-b\xff\xd9")
+        self.assertEqual(second_meta["source"], "upstream")
+        self.assertEqual(
+            [call.args[1] for call in request_mock.await_args_list],
+            [
+                "http://spot-a.local/image.jpg",
+                "http://spot-b.local/image.jpg",
+            ],
+        )
+        self.assertIsNotNone(spot_api._img_cache_entry)
+        assert spot_api._img_cache_entry is not None
+        self.assertEqual(
+            spot_api._img_cache_entry.image_url,
+            "http://spot-b.local/image.jpg",
+        )
+
+    async def test_inflight_image_refresh_does_not_cross_spot_ip_changes(self) -> None:
+        spot_api.config.SPOT_IP = "spot-a.local"
+        first_refresh_started = asyncio.Event()
+        release_first_refresh = asyncio.Event()
+
+        async def request_image(_client: httpx.AsyncClient, image_url: str) -> bytes:
+            if image_url == "http://spot-a.local/image.jpg":
+                first_refresh_started.set()
+                await release_first_refresh.wait()
+                return b"\xff\xd8spot-a\xff\xd9"
+            if image_url == "http://spot-b.local/image.jpg":
+                return b"\xff\xd8spot-b\xff\xd9"
+            self.fail(f"unexpected image URL: {image_url}")
+
+        with patch.object(
+            spot_api,
+            "_request_spot_image",
+            side_effect=request_image,
+        ) as request_mock:
+            first_caller = asyncio.create_task(spot_api.fetch_image_async())
+            await first_refresh_started.wait()
+            spot_api.config.SPOT_IP = "spot-b.local"
+            second_caller = asyncio.create_task(spot_api.fetch_image_async())
+            await asyncio.sleep(0)
+            release_first_refresh.set()
+            results = await asyncio.gather(first_caller, second_caller)
+
+        self.assertEqual(
+            [data for data, _meta in results],
+            [b"\xff\xd8spot-b\xff\xd9", b"\xff\xd8spot-b\xff\xd9"],
+        )
+        self.assertEqual(
+            [call.args[1] for call in request_mock.await_args_list],
+            [
+                "http://spot-a.local/image.jpg",
+                "http://spot-b.local/image.jpg",
+            ],
+        )
+        self.assertEqual(
+            {meta["source"] for _data, meta in results},
+            {"upstream", "coalesced"},
+        )
+
     def test_image_cache_freshness_uses_normalized_interval_and_strict_boundary(self) -> None:
         entry = spot_api._SpotImageCacheEntry(
             image_bytes=b"\xff\xd8boundary\xff\xd9",
@@ -2207,6 +2287,38 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 spot_api.SpotRequestKind.DIAGNOSTIC,
             ],
         )
+        client.request.assert_not_awaited()
+
+    async def test_guarded_transport_preserves_connect_and_read_timeout_types(self) -> None:
+        client = AsyncMock(spec=httpx.AsyncClient)
+        cases = (
+            (
+                spot_api.SpotTransportConnectTimeout("connect timed out"),
+                httpx.ConnectTimeout,
+            ),
+            (
+                spot_api.SpotTransportReadTimeout("response timed out"),
+                httpx.ReadTimeout,
+            ),
+        )
+
+        try:
+            for transport_error, expected_httpx_error in cases:
+                with self.subTest(expected_httpx_error=expected_httpx_error.__name__):
+                    transport = Mock(supported=True, active=True)
+                    transport.request = AsyncMock(side_effect=transport_error)
+                    spot_api._spot_http_transport = transport
+
+                    with self.assertRaises(expected_httpx_error):
+                        await spot_api._request_spot_http_response(
+                            client,
+                            kind=spot_api.SpotRequestKind.IMAGE,
+                            method="GET",
+                            url="http://spot.local/image.jpg",
+                        )
+        finally:
+            spot_api._spot_http_transport = None
+
         client.request.assert_not_awaited()
 
     async def test_transport_test_reset_closes_and_clears_module_state(self) -> None:

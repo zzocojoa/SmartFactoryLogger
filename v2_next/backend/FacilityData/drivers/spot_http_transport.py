@@ -70,6 +70,14 @@ class SpotTransportTimeout(SpotTransportError):
     """Raised for connect or response timeout."""
 
 
+class SpotTransportConnectTimeout(SpotTransportTimeout):
+    """Raised when the guarded socket cannot connect before its timeout."""
+
+
+class SpotTransportReadTimeout(SpotTransportTimeout):
+    """Raised when an established guarded request exceeds its response timeout."""
+
+
 class SpotTransportRequestError(SpotTransportError):
     """Raised for DNS, connect, send, or receive failures."""
 
@@ -274,6 +282,7 @@ class SpotHttpTransport:
             lease = self._pool.acquire(ACQUIRE_TIMEOUT_SECONDS)
             connection: _Connection | None = None
             started_at = self._monotonic()
+            request_phase = "connect"
             try:
                 self._pool.mark_connect_started(lease)
                 connection = self._connection_factory(
@@ -284,6 +293,7 @@ class SpotHttpTransport:
                     ("", lease.port),
                 )
                 connection.connect()
+                request_phase = "response"
                 if connection.sock is not None:
                     connection.sock.settimeout(request.read_timeout_sec)
                 connection.request(
@@ -302,7 +312,13 @@ class SpotHttpTransport:
                     elapsed_ms=max(0.0, (self._monotonic() - started_at) * 1000.0),
                 )
             except (socket.timeout, TimeoutError) as exc:
-                raise SpotTransportTimeout("SPOT transport timed out") from exc
+                if request_phase == "connect":
+                    raise SpotTransportConnectTimeout(
+                        "SPOT transport connect timed out"
+                    ) from exc
+                raise SpotTransportReadTimeout(
+                    "SPOT transport response timed out"
+                ) from exc
             except OSError as exc:
                 if self._is_bind_collision(exc):
                     with self._state_lock:
@@ -433,9 +449,11 @@ __all__ = [
     "SpotHttpTransport",
     "SpotPortBindError",
     "SpotRequestKind",
+    "SpotTransportConnectTimeout",
     "SpotTransportClosedError",
     "SpotTransportError",
     "SpotTransportProtocolError",
+    "SpotTransportReadTimeout",
     "SpotTransportRequestError",
     "SpotTransportTimeout",
 ]

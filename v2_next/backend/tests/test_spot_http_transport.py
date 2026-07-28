@@ -15,9 +15,10 @@ from backend.FacilityData.drivers.spot_http_transport import (
     SpotHttpTransport,
     SpotPortBindError,
     SpotRequestKind,
+    SpotTransportConnectTimeout,
     SpotTransportClosedError,
     SpotTransportProtocolError,
-    SpotTransportTimeout,
+    SpotTransportReadTimeout,
 )
 from backend.FacilityData.drivers.spot_port_quarantine import (
     SourcePortLeasePool,
@@ -408,11 +409,20 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_connect_and_read_timeouts_are_mapped_and_quarantined(self) -> None:
         cases = (
-            {"connect_error": socket.timeout("connect timed out")},
-            {"response_error": socket.timeout("read timed out")},
+            (
+                {"connect_error": socket.timeout("connect timed out")},
+                SpotTransportConnectTimeout,
+            ),
+            (
+                {"response_error": socket.timeout("read timed out")},
+                SpotTransportReadTimeout,
+            ),
         )
-        for connection_kwargs in cases:
-            with self.subTest(connection_kwargs=tuple(connection_kwargs)):
+        for connection_kwargs, expected_error in cases:
+            with self.subTest(
+                connection_kwargs=tuple(connection_kwargs),
+                expected_error=expected_error.__name__,
+            ):
 
                 def connection_factory(
                     _scheme: str,
@@ -429,7 +439,7 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                 )
                 transport.start()
                 try:
-                    with self.assertRaises(SpotTransportTimeout):
+                    with self.assertRaises(expected_error):
                         await transport.request(_request())
                     diagnostics = transport.diagnostics()
                 finally:
