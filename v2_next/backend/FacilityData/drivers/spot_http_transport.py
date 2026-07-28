@@ -7,9 +7,10 @@ import socket
 import sys
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, InvalidStateError
 from dataclasses import dataclass
 from enum import Enum
+from queue import Empty, Queue
 from typing import Callable, Mapping, Protocol
 from urllib.parse import SplitResult, urlsplit
 
@@ -17,6 +18,7 @@ from backend.FacilityData.drivers.spot_port_quarantine import (
     ACQUIRE_TIMEOUT_SECONDS,
     POOL_CAPACITY,
     QUARANTINE_SECONDS,
+    SourcePortLease,
     SourcePortLeasePool,
     SpotPortPoolError,
     SpotPortPoolInitError,
@@ -114,6 +116,111 @@ ConnectionFactory = Callable[
 ]
 
 
+@dataclass(frozen=True)
+class _WorkItem:
+    future: Future[SpotHttpResponse]
+    request: SpotHttpRequest
+
+
+class _DaemonSingleWorker:
+    """One daemon worker with cancellable queued futures and no exit-time join."""
+
+    def __init__(
+        self,
+        handler: Callable[[SpotHttpRequest], SpotHttpResponse],
+    ) -> None:
+        self._handler = handler
+        self._queue: Queue[_WorkItem | None] = Queue()
+        self._state_lock = threading.Lock()
+        self._accepting = True
+        self._current_future: Future[SpotHttpResponse] | None = None
+        self._thread = threading.Thread(
+            target=self._run,
+            name="spot-http-transport",
+            daemon=True,
+        )
+        self._thread.start()
+
+    @property
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
+    def submit(self, request: SpotHttpRequest) -> Future[SpotHttpResponse]:
+        future: Future[SpotHttpResponse] = Future()
+        with self._state_lock:
+            if not self._accepting:
+                raise RuntimeError("SPOT HTTP worker is closed")
+            self._queue.put(_WorkItem(future=future, request=request))
+        return future
+
+    def shutdown(self, *, cancel_futures: bool) -> None:
+        with self._state_lock:
+            if not self._accepting:
+                return
+            self._accepting = False
+            if cancel_futures:
+                self._fail_queued_locked()
+            self._queue.put(None)
+
+    def abandon_current(self, failure: BaseException) -> None:
+        with self._state_lock:
+            future = self._current_future
+        if future is None or future.done():
+            return
+        try:
+            future.set_exception(failure)
+        except InvalidStateError:
+            pass
+
+    def _fail_queued_locked(self) -> None:
+        retained_sentinel = False
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except Empty:
+                break
+            if item is None:
+                retained_sentinel = True
+                continue
+            try:
+                item.future.set_exception(
+                    SpotTransportClosedError(
+                        "SPOT transport is not accepting requests"
+                    )
+                )
+            except InvalidStateError:
+                pass
+        if retained_sentinel:
+            self._queue.put(None)
+
+    def _run(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            future = item.future
+            if future.cancelled():
+                continue
+            with self._state_lock:
+                self._current_future = future
+            try:
+                result = self._handler(item.request)
+            except BaseException as exc:
+                try:
+                    future.set_exception(exc)
+                except InvalidStateError:
+                    pass
+            else:
+                try:
+                    future.set_result(result)
+                except InvalidStateError:
+                    pass
+            finally:
+                with self._state_lock:
+                    if self._current_future is future:
+                        self._current_future = None
+
+
 def _default_connection_factory(
     scheme: str,
     host: str,
@@ -150,10 +257,13 @@ class SpotHttpTransport:
         self._connection_factory = connection_factory
         self._bind_retry_limit = int(bind_retry_limit)
         self._monotonic = monotonic
-        self._executor: ThreadPoolExecutor | None = None
+        self._executor: _DaemonSingleWorker | None = None
         self._state_lock = threading.RLock()
         self._request_lock = threading.Lock()
         self._pending: set[Future[SpotHttpResponse]] = set()
+        self._active_connections: dict[int, _Connection] = {}
+        self._shutdown_task: asyncio.Task[bool] | None = None
+        self._shutdown_result: bool | None = None
         self._active = False
         self._accepting = False
         self._closed = False
@@ -188,22 +298,13 @@ class SpotHttpTransport:
                     )
                 return False
             self._pool.initialize()
-            self._executor = ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix="spot-http-transport",
-            )
+            self._executor = _DaemonSingleWorker(self._execute_request_sync)
             self._active = True
             self._accepting = True
             return True
 
     async def request(self, request: SpotHttpRequest) -> SpotHttpResponse:
-        self._validate_request(request)
-        with self._state_lock:
-            if not self._accepting or not self._active or self._executor is None:
-                raise SpotTransportClosedError("SPOT transport is not accepting requests")
-            future = self._executor.submit(self.request_sync, request)
-            self._pending.add(future)
-            future.add_done_callback(self._discard_pending)
+        future = self._submit_request(request)
         wrapped = asyncio.wrap_future(future)
         try:
             return await asyncio.shield(wrapped)
@@ -213,11 +314,32 @@ class SpotHttpTransport:
             raise
 
     def request_sync(self, request: SpotHttpRequest) -> SpotHttpResponse:
+        future = self._submit_request(request)
+        return future.result()
+
+    def _submit_request(self, request: SpotHttpRequest) -> Future[SpotHttpResponse]:
         self._validate_request(request)
         with self._state_lock:
-            if not self._accepting or not self._active:
+            executor = self._executor
+            if not self._accepting or not self._active or executor is None:
                 raise SpotTransportClosedError("SPOT transport is not accepting requests")
+            try:
+                future = executor.submit(request)
+            except RuntimeError as exc:
+                raise SpotTransportClosedError(
+                    "SPOT transport is not accepting requests"
+                ) from exc
+            self._pending.add(future)
+            future.add_done_callback(self._discard_pending)
+            return future
+
+    def _execute_request_sync(self, request: SpotHttpRequest) -> SpotHttpResponse:
         with self._request_lock:
+            with self._state_lock:
+                if not self._accepting or not self._active:
+                    raise SpotTransportClosedError(
+                        "SPOT transport is not accepting requests"
+                    )
             self._record_started(request.kind)
             try:
                 response = self._request_with_bind_retries(request)
@@ -230,33 +352,103 @@ class SpotHttpTransport:
     async def close(self, timeout_sec: float = 7.0) -> bool:
         with self._state_lock:
             if self._closed:
-                return True
+                executor = self._executor
+                if self._shutdown_result is not False:
+                    return True
+                if executor is not None and not executor.is_alive:
+                    self._executor = None
+                    self._shutdown_result = True
+                    return True
+                return False
             self._accepting = False
+            shutdown_task = self._shutdown_task
+            if shutdown_task is None:
+                shutdown_task = asyncio.create_task(
+                    self._run_shutdown(max(0.0, timeout_sec))
+                )
+                self._shutdown_task = shutdown_task
+        return await asyncio.shield(shutdown_task)
+
+    async def _run_shutdown(self, timeout_sec: float) -> bool:
+        with self._state_lock:
             executor = self._executor
         if executor is None:
-            with self._state_lock:
-                self._active = False
-                self._closed = True
-            self._pool.close()
-            return True
-
-        shutdown_task = asyncio.create_task(
-            asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
-        )
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(shutdown_task),
-                timeout=max(0.0, timeout_sec),
-            )
-        except asyncio.TimeoutError:
-            return False
+            drained = True
+        else:
+            executor.shutdown(cancel_futures=True)
+            self._interrupt_active_connections()
+            deadline = asyncio.get_running_loop().time() + timeout_sec
+            while executor.is_alive and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(
+                    min(
+                        0.01,
+                        max(0.0, deadline - asyncio.get_running_loop().time()),
+                    )
+                )
+            drained = not executor.is_alive
+            if not drained:
+                failure = SpotTransportClosedError(
+                    "SPOT transport shutdown timed out"
+                )
+                executor.abandon_current(failure)
+                self._interrupt_active_connections()
 
         self._pool.close()
         with self._state_lock:
-            self._executor = None
             self._active = False
             self._closed = True
-        return True
+            self._shutdown_result = drained
+            if drained:
+                self._executor = None
+        return drained
+
+    def _interrupt_active_connections(self) -> None:
+        with self._state_lock:
+            connections = list(self._active_connections.values())
+        for connection in connections:
+            sock = getattr(connection, "sock", None)
+            if sock is not None:
+                shutdown = getattr(sock, "shutdown", None)
+                if callable(shutdown):
+                    try:
+                        shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                close_socket = getattr(sock, "close", None)
+                if callable(close_socket):
+                    try:
+                        close_socket()
+                    except OSError:
+                        pass
+            try:
+                connection.close()
+            except OSError:
+                pass
+
+    def _register_connection(self, connection: _Connection) -> None:
+        with self._state_lock:
+            if not self._accepting or not self._active:
+                try:
+                    connection.close()
+                except OSError:
+                    pass
+                raise SpotTransportClosedError(
+                    "SPOT transport is not accepting requests"
+                )
+            self._active_connections[id(connection)] = connection
+
+    def _discard_connection(self, connection: _Connection) -> None:
+        with self._state_lock:
+            self._active_connections.pop(id(connection), None)
+
+    def _release_lease(self, lease: SourcePortLease) -> None:
+        try:
+            self._pool.release(lease)
+        except SpotPortPoolError:
+            with self._state_lock:
+                shutting_down = not self._accepting
+            if not shutting_down:
+                raise
 
     def diagnostics(self) -> dict[str, object]:
         pool_diagnostics = self._pool.diagnostics()
@@ -292,6 +484,7 @@ class SpotHttpTransport:
                     request.connect_timeout_sec,
                     ("", lease.port),
                 )
+                self._register_connection(connection)
                 connection.connect()
                 request_phase = "response"
                 if connection.sock is not None:
@@ -337,11 +530,12 @@ class SpotHttpTransport:
                 raise
             finally:
                 if connection is not None:
+                    self._discard_connection(connection)
                     try:
                         connection.close()
                     except OSError:
                         pass
-                self._pool.release(lease)
+                self._release_lease(lease)
         raise SpotPortBindError("SPOT source-port bind retry limit was exhausted")
 
     def _record_started(self, kind: SpotRequestKind) -> None:

@@ -3,9 +3,13 @@ import gc
 import http.client
 import http.server
 import socket
+import subprocess
+import sys
 import threading
+import textwrap
 import unittest
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -148,13 +152,18 @@ class _FakeConnection:
         connect_error: BaseException | None = None,
         response_error: BaseException | None = None,
         release_response: threading.Event | None = None,
+        release_response_on_close: bool = False,
+        response_started: threading.Event | None = None,
     ) -> None:
         self.sock = _FakeSocket()
         self.response = response or _FakeResponse()
         self.connect_error = connect_error
         self.response_error = response_error
         self.release_response = release_response
+        self.release_response_on_close = release_response_on_close
+        self.response_started = response_started
         self.closed = False
+        self.close_count = 0
         self.request_args: tuple[str, str, bytes | None, Mapping[str, str]] | None = None
 
     def connect(self) -> None:
@@ -171,6 +180,8 @@ class _FakeConnection:
         self.request_args = (method, url, body, headers)
 
     def getresponse(self) -> _FakeResponse:
+        if self.response_started is not None:
+            self.response_started.set()
         if self.release_response is not None:
             if not self.release_response.wait(timeout=2.0):
                 raise TimeoutError("test response was not released")
@@ -179,7 +190,10 @@ class _FakeConnection:
         return self.response
 
     def close(self) -> None:
+        self.close_count += 1
         self.closed = True
+        if self.release_response_on_close and self.release_response is not None:
+            self.release_response.set()
 
 
 def _request(
@@ -680,14 +694,209 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SpotTransportClosedError):
             await transport.request(_request())
 
+        with self.assertRaises(SpotTransportClosedError):
+            await request_task
         release_response.set()
-        response = await request_task
-        self.assertEqual(response.body, b"ok")
-        self.assertTrue(await transport.close(timeout_sec=1.0))
+        for _attempt in range(100):
+            if await transport.close(timeout_sec=1.0):
+                break
+            await asyncio.sleep(0.01)
+        else:
+            self.fail("daemon SPOT worker did not finish after the response was released")
         self.assertEqual(
             transport.diagnostics()["source_port_pool_quarantined_count"],
             0,
         )
+
+    async def test_concurrent_close_calls_share_connection_interrupt_and_shutdown(
+        self,
+    ) -> None:
+        release_response = threading.Event()
+        request_started = threading.Event()
+        connection: _FakeConnection | None = None
+
+        def connection_factory(
+            _scheme: str,
+            _host: str,
+            _port: int,
+            _timeout: float,
+            _source_address: tuple[str, int],
+        ) -> _FakeConnection:
+            nonlocal connection
+            connection = _FakeConnection(
+                release_response=release_response,
+                release_response_on_close=True,
+                response_started=request_started,
+            )
+            return connection
+
+        transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=connection_factory,
+        )
+        transport.start()
+        request_task = asyncio.create_task(transport.request(_request()))
+        self.assertTrue(await asyncio.to_thread(request_started.wait, 1.0))
+
+        first_close, second_close = await asyncio.gather(
+            transport.close(timeout_sec=1.0),
+            transport.close(timeout_sec=1.0),
+        )
+        response = await request_task
+
+        self.assertTrue(first_close)
+        self.assertTrue(second_close)
+        self.assertEqual(response.body, b"ok")
+        self.assertIsNotNone(connection)
+        assert connection is not None
+        self.assertTrue(connection.closed)
+        self.assertGreaterEqual(connection.close_count, 1)
+
+    async def test_sync_requests_share_worker_and_shutdown_drain_tracking(self) -> None:
+        release_response = threading.Event()
+        request_started = threading.Event()
+        connection_count = 0
+
+        def connection_factory(
+            _scheme: str,
+            _host: str,
+            _port: int,
+            _timeout: float,
+            _source_address: tuple[str, int],
+        ) -> _FakeConnection:
+            nonlocal connection_count
+            connection_count += 1
+            request_started.set()
+            return _FakeConnection(release_response=release_response)
+
+        transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=2),
+            connection_factory=connection_factory,
+        )
+        transport.start()
+        first = asyncio.create_task(
+            asyncio.to_thread(transport.request_sync, _request())
+        )
+        self.assertTrue(await asyncio.to_thread(request_started.wait, 1.0))
+        second = asyncio.create_task(
+            asyncio.to_thread(
+                transport.request_sync,
+                _request(kind=SpotRequestKind.FOCUS_WRITE, method="PUT"),
+            )
+        )
+        await asyncio.sleep(0.01)
+
+        self.assertFalse(await transport.close(timeout_sec=0.01))
+        for task in (first, second):
+            with self.assertRaises(SpotTransportClosedError):
+                await task
+        self.assertEqual(connection_count, 1)
+
+        release_response.set()
+        for _attempt in range(100):
+            if await transport.close(timeout_sec=1.0):
+                break
+            await asyncio.sleep(0.01)
+        else:
+            self.fail("daemon SPOT worker did not exit after sync request release")
+
+    def test_single_close_timeout_does_not_block_process_exit(self) -> None:
+        script = textwrap.dedent(
+            """
+            import asyncio
+            import socket
+            import threading
+
+            from backend.FacilityData.drivers.spot_http_transport import (
+                SpotHttpRequest,
+                SpotHttpTransport,
+                SpotRequestKind,
+                SpotTransportClosedError,
+            )
+            from backend.FacilityData.drivers.spot_port_quarantine import (
+                SourcePortLeasePool,
+            )
+
+            class GuardFactory:
+                supported = True
+
+                def create_guard(self, local_host, port=0):
+                    guard = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    guard.bind((local_host, port))
+                    return guard, int(guard.getsockname()[1])
+
+            class BlockingConnection:
+                sock = None
+
+                def __init__(self, started):
+                    self.started = started
+                    self.never = threading.Event()
+
+                def connect(self):
+                    pass
+
+                def request(self, method, url, body, headers):
+                    pass
+
+                def getresponse(self):
+                    self.started.set()
+                    self.never.wait()
+
+                def close(self):
+                    pass
+
+            async def main():
+                started = threading.Event()
+                pool = SourcePortLeasePool(
+                    capacity=1,
+                    quarantine_seconds=75.0,
+                    acquire_timeout_seconds=0.1,
+                    socket_factory=GuardFactory(),
+                )
+                transport = SpotHttpTransport(
+                    pool=pool,
+                    connection_factory=lambda *_args: BlockingConnection(started),
+                )
+                transport.start()
+                request_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        transport.request_sync,
+                        SpotHttpRequest(
+                            kind=SpotRequestKind.IMAGE,
+                            method="GET",
+                            url="http://spot.local/image.jpg",
+                            headers={},
+                            body=None,
+                            connect_timeout_sec=1.0,
+                            read_timeout_sec=1.0,
+                        ),
+                    )
+                )
+                if not await asyncio.to_thread(started.wait, 1.0):
+                    raise RuntimeError("worker did not start")
+                drained = await transport.close(timeout_sec=0.05)
+                try:
+                    await request_task
+                except SpotTransportClosedError:
+                    pass
+                else:
+                    raise RuntimeError("timed-out request was not failed")
+                print(f"drained={drained}; active={transport.active}")
+
+            asyncio.run(main())
+            """
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "drained=False; active=False")
 
     async def test_shutdown_rejects_new_requests(self) -> None:
         transport = SpotHttpTransport(pool=self.make_pool())
