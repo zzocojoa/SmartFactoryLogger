@@ -286,11 +286,12 @@ class SpotHttpTransport:
 
     def start(self) -> bool:
         with self._state_lock:
-            if self._active:
-                self._accepting = True
-                return True
-            if self._closed:
+            if self._shutdown_task is not None or self._closed:
                 raise SpotTransportClosedError("SPOT transport is closed")
+            if self._active:
+                if not self._accepting:
+                    raise SpotTransportClosedError("SPOT transport is closing")
+                return True
             if not self.supported:
                 if sys.platform == "win32":
                     raise SpotPortPoolInitError(
@@ -407,19 +408,27 @@ class SpotHttpTransport:
             connections = list(self._active_connections.values())
         for connection in connections:
             sock = getattr(connection, "sock", None)
+            socket_interrupt_attempted = False
             if sock is not None:
                 shutdown = getattr(sock, "shutdown", None)
                 if callable(shutdown):
+                    socket_interrupt_attempted = True
                     try:
                         shutdown(socket.SHUT_RDWR)
                     except OSError:
                         pass
                 close_socket = getattr(sock, "close", None)
                 if callable(close_socket):
+                    socket_interrupt_attempted = True
                     try:
                         close_socket()
                     except OSError:
                         pass
+            if socket_interrupt_attempted:
+                # HTTPConnection.close() also closes its HTTPResponse. Calling it
+                # here can block on the buffered reader lock held by the worker.
+                # The interrupted worker owns final connection cleanup.
+                continue
             try:
                 connection.close()
             except OSError:
