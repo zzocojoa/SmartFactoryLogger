@@ -2,6 +2,47 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.17] - 2026-07-28
+
+### Added
+
+- Added SPOT image request shaping with shared caching and single-flight
+  refreshes so multiple dashboard consumers no longer create duplicate device
+  connections.
+- Added a unified background request budget for image, temperature, focus, and
+  actuator traffic, with live diagnostics showing the effective request rate.
+- Added an exclusive source-port pool with a 75-second quarantine window so
+  SPOT connections cannot quickly reuse the same TCP four-tuple.
+
+### Changed
+
+- Reduced normal SPOT image and diagnostic refresh rates while keeping the
+  dashboard responsive after visibility changes, errors, and route changes.
+- Expanded privacy-safe SPOT transport diagnostics without exposing raw source
+  port values or retaining packet payloads in shared evidence.
+
+### Fixed
+
+- Prevented cancelled requests, shutdown races, and blocked Windows sockets from
+  reopening SPOT transport intake or delaying application exit.
+- Kept source-port leases unavailable until their quarantine guard is
+  successfully rebound, including exhaustion and recovery behavior.
+- Preserved focus and actuator API compatibility while routing eligible
+  background requests through the guarded transport.
+
+### Validation
+
+- Passed the complete Electron, frontend, backend, lint, type-check, QA
+  self-test, production-build, transport-race, and socket-interrupt suites.
+- Exact `1.0.17` installer field promotion remains gated on the approved
+  15-minute smoke and 120-minute canary using the packaged backend from this
+  release commit.
+
+### Compatibility
+
+- No persistent schema, CSV format, SPOT device configuration, operator
+  attestation value, or API route migration is required.
+
 ## [1.0.16] - 2026-07-17
 
 ### Added

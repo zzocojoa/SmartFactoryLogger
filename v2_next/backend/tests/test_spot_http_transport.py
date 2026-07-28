@@ -683,11 +683,15 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_url_and_method_validation_reject_unsafe_requests(self) -> None:
         transport = SpotHttpTransport(pool=self.make_pool())
         transport.start()
+        credential_like_userinfo = "user:password"
+        unsafe_userinfo_url = (
+            f"http://{credential_like_userinfo}@spot.local/image"
+        )
         try:
             with self.assertRaises(SpotTransportProtocolError):
                 await transport.request(_request(method="POST"))
             with self.assertRaises(SpotTransportProtocolError):
-                await transport.request(_request(url="http://user:password@spot.local/image"))
+                await transport.request(_request(url=unsafe_userinfo_url))
             with self.assertRaises(SpotTransportProtocolError):
                 await transport.request(_request(url="file:///tmp/image"))
         finally:

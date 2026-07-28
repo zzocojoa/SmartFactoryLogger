@@ -367,9 +367,9 @@ class ElectronPreloadContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertEqual(root_package["version"], "1.0.16")
-        self.assertEqual(frontend_package["version"], "1.0.16")
-        self.assertIn('__version__ = "1.0.16"', backend_version)
+        self.assertEqual(root_package["version"], "1.0.17")
+        self.assertEqual(frontend_package["version"], "1.0.17")
+        self.assertIn('__version__ = "1.0.17"', backend_version)
         self.assertEqual(
             root_package["build"]["nsis"]["artifactName"],
             "smart-factory-logger-v2 Setup ${version}.${ext}",
