@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-27T02:43:00.863Z",
+  "lastUpdated": "2026-07-28T10:35:41.553Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2016,12 +2016,34 @@
       "reportAuthorization": "approved_by_user",
       "packageAuthorization": "approved_by_user",
       "parentFeature": "spot-request-churn-remediation",
-      "checkStatus": "act_recheck_passed_local",
+      "checkStatus": "field_canary_pass_physical_path_partial",
       "packageBlocked": false,
-      "packageStatus": "pending_clean_commit",
-      "actualServerCheckBlocked": true,
-      "canaryBlocked": true,
+      "packageStatus": "verified_clean_package",
+      "actualServerCheckBlocked": false,
+      "canaryBlocked": false,
       "actualWindowsSocketCheck": "passed",
+      "actualServerCheckStatus": "passed",
+      "fieldCanaryStatus": "FIELD_CANARY_PASS",
+      "physicalPathStatus": "PHYSICAL_PATH_PARTIAL",
+      "fieldValidatedAtLocal": "2026-07-28 15:18:26 +09:00",
+      "actualServerCanaryMinutes": 120,
+      "fieldEvidence": {
+        "runtime_id": "runtime_validation_20260728_131749",
+        "sanitized_artifact": "runtime_validation_20260728_131749_sanitized_share.zip",
+        "sanitized_sha256": "95585ADFD1AACC5371A52AA95454308EC0192B99D5E83E541525071F79781D97",
+        "collector_exit_code": 2,
+        "collector_partial_reason": "switch-evidence-unavailable",
+        "new_spot_image_connect_timeout_count": 0,
+        "spot_http_event_count": 22322,
+        "same_4tuple_reuse_under_60_seconds_count": 0,
+        "internal_minimum_reuse_interval_seconds": 75.0,
+        "total_spot_opens_60s_p95_per_sec": 3.133333,
+        "image_upstream_60s_p95_per_sec": 0.333333,
+        "pool_exhaustion_count": 0,
+        "reuse_violation_count": 0,
+        "transport_failure_count": 0,
+        "managed_switch_evidence_available": false
+      },
       "blockingGaps": [],
       "resolvedActGaps": [
         "windows_unsupported_enforcement_does_not_fail_startup",
@@ -2045,8 +2067,11 @@
         },
         "report": {
           "path": "docs/04-report/spot-tcp-source-port-quarantine-v2.report.md",
-          "status": "completed_local_report",
-          "match_rate": 100
+          "status": "completed_field_canary_report",
+          "match_rate": 100,
+          "field_status": "FIELD_CANARY_PASS",
+          "physical_path_status": "PHYSICAL_PATH_PARTIAL",
+          "lastUpdated": "2026-07-28T10:35:41.553Z"
         }
       },
       "taskChain": [
@@ -2089,7 +2114,7 @@
       ],
       "timestamps": {
         "started": "2026-07-27T01:32:07.127Z",
-        "lastUpdated": "2026-07-27T02:43:00.863Z"
+        "lastUpdated": "2026-07-28T10:35:41.553Z"
       },
       "completedAt": "2026-07-27T02:43:00.858Z"
     }
