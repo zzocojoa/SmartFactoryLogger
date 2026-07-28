@@ -19,6 +19,7 @@ v2_next/backend/tests/*
 !v2_next/backend/tests/test_data_history_api.py
 !v2_next/backend/tests/test_csv_logger_service.py
 !v2_next/backend/tests/test_csv_logger_runtime.py
+!v2_next/backend/tests/test_shutdown_closeout_regression.py
 !v2_next/backend/tests/test_frontend_routing_health.py
 !v2_next/backend/tests/test_spot_image_linkage_fact.py
 mes_data/

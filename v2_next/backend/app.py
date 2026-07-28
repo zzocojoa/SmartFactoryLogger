@@ -1716,6 +1716,7 @@ app.add_middleware(
 
 
 _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
+    "spot_poll_loop_stopped",
     "spot_image_capture_drained",
     "plc_service_stopped",
     "logger_service_stopped",
@@ -1724,6 +1725,7 @@ _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
     "config_sync_agent_stopped",
     "config_watch_service_stopped",
 )
+_control_shutdown_tasks: set[asyncio.Task[None]] = set()
 
 
 def _run_control_shutdown_stage(
@@ -1741,6 +1743,44 @@ def _run_control_shutdown_stage(
     )
     try:
         result = stopper()
+        succeeded = result is True
+    except Exception as exc:
+        succeeded = False
+        _logger.warning(
+            "[Main] Control shutdown stage failed stage=%s error_type=%s %s",
+            stage,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+
+    elapsed_ms = round((time.perf_counter() - started_perf) * 1000.0, 1)
+    status[status_key] = succeeded
+    status[f"{stage}_elapsed_ms"] = elapsed_ms
+    _logger.info(
+        "[Main] Control shutdown stage complete stage=%s success=%s elapsed_ms=%.1f %s",
+        stage,
+        succeeded,
+        elapsed_ms,
+        _lifecycle_log_fields(),
+    )
+    return succeeded
+
+
+async def _run_async_control_shutdown_stage(
+    *,
+    stage: str,
+    status_key: str,
+    stopper: Callable[[], Any],
+    status: dict[str, Any],
+) -> bool:
+    started_perf = time.perf_counter()
+    _logger.info(
+        "[Main] Control shutdown stage begin stage=%s %s",
+        stage,
+        _lifecycle_log_fields(),
+    )
+    try:
+        result = await stopper()
         succeeded = result is True
     except Exception as exc:
         succeeded = False
@@ -3191,32 +3231,55 @@ async def log_status_change(payload: StatusLogRequest):
         return {"ok": False, "error": str(e)}
 
 
-def _schedule_control_shutdown(reason: str) -> None:
-    def _shutdown() -> None:
-        try:
-            _logger.info("Shutdown requested: reason=%s %s", reason, _lifecycle_log_fields())
-        except Exception:
-            pass
-        status = _stop_services_for_control_shutdown()
-        exit_code = _control_shutdown_exit_code(status)
-        try:
-            _logger.info(
-                "[Main] Control shutdown complete success=%s exit_code=%d total_elapsed_ms=%.1f %s",
-                exit_code == 0,
-                exit_code,
-                float(status.get("total_elapsed_ms", 0.0)),
-                _lifecycle_log_fields(),
-            )
-        except Exception:
-            pass
-        time.sleep(0.2)
-        os._exit(exit_code)
+async def _run_control_shutdown(reason: str) -> None:
+    shutdown_started_perf = time.perf_counter()
+    try:
+        _logger.info("Shutdown requested: reason=%s %s", reason, _lifecycle_log_fields())
+    except Exception:
+        pass
 
-    threading.Thread(target=_shutdown, daemon=True).start()
+    status: dict[str, Any] = {}
+
+    async def _stop_spot_poll_loop() -> bool:
+        await spot_control.stop_spot_poll_loop()
+        return True
+
+    await _run_async_control_shutdown_stage(
+        stage="spot_poll_loop",
+        status_key="spot_poll_loop_stopped",
+        stopper=_stop_spot_poll_loop,
+        status=status,
+    )
+    status.update(await asyncio.to_thread(_stop_services_for_control_shutdown))
+    status["total_elapsed_ms"] = round(
+        (time.perf_counter() - shutdown_started_perf) * 1000.0,
+        1,
+    )
+    exit_code = _control_shutdown_exit_code(status)
+    try:
+        _logger.info(
+            "[Main] Control shutdown complete success=%s exit_code=%d total_elapsed_ms=%.1f %s",
+            exit_code == 0,
+            exit_code,
+            float(status.get("total_elapsed_ms", 0.0)),
+            _lifecycle_log_fields(),
+        )
+    except Exception:
+        pass
+    await asyncio.sleep(0.2)
+    os._exit(exit_code)
+
+
+def _schedule_control_shutdown(reason: str) -> None:
+    if _control_shutdown_tasks:
+        return
+    task = asyncio.create_task(_run_control_shutdown(reason))
+    _control_shutdown_tasks.add(task)
+    task.add_done_callback(_control_shutdown_tasks.discard)
 
 
 @app.post("/api/control/shutdown")
-def shutdown(
+async def shutdown(
     payload: ShutdownRequest,
     control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
 ):
@@ -3229,7 +3292,7 @@ def shutdown(
         ):
             raise HTTPException(status_code=403, detail="Invalid embedded control token")
 
-    _schedule_control_shutdown(payload.reason)
+    _schedule_control_shutdown(payload.reason or "api_request")
     return {"ok": True}
 
 # --- Static File Serving (Frontend) ---

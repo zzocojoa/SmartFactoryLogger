@@ -465,7 +465,11 @@ def _fact_file_stats(fact_path: Path) -> tuple[int, Optional[str]]:
     except (OSError, UnicodeError, csv.Error):
         row_count = 0
     try:
-        sha256 = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        with fact_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        sha256 = digest.hexdigest()
     except OSError:
         sha256 = None
     return row_count, sha256

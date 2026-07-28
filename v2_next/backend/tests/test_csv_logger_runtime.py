@@ -255,6 +255,7 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         ):
             status = backend_app._stop_services_for_control_shutdown()
 
+        status["spot_poll_loop_stopped"] = True
         self.assertTrue(status["logger_service_stopped"])
         stop_image_capture.assert_called_once_with(timeout_sec=30.0)
         self.assertEqual(logger_stub.timeout_sec, 123.0)
@@ -283,6 +284,7 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         ):
             status = backend_app._stop_services_for_control_shutdown()
 
+        status["spot_poll_loop_stopped"] = True
         self.assertFalse(status["spot_image_capture_drained"])
         self.assertTrue(status["plc_service_stopped"])
         later_stop.assert_called_once_with()

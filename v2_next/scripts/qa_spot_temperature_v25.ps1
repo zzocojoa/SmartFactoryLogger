@@ -19,6 +19,7 @@ $warnings = New-Object "System.Collections.Generic.List[string]"
 $samples = New-Object "System.Collections.Generic.List[object]"
 $attestationCanBeApplied = $false
 $qaShutdownRequested = $false
+$operatorShutdownRequested = $false
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     if (-not [string]::IsNullOrWhiteSpace($env:SFL_CONFIG_PATH)) {
@@ -297,32 +298,15 @@ Add-QaCheck -Name "Value age clock anomalies" `
 if (-not $SkipStopPrompt) {
     Write-Host ""
     Write-Host "[3/5] Finalizing SmartFactoryLogger CSV files safely." -ForegroundColor Yellow
-    Write-Host "Do not close the app or use Task Manager yet."
-    [void](Read-Host "Press Enter to stop backend logging safely and continue validation")
-
     $backendStopped = $false
     if (-not (Test-BackendReachable)) {
         $backendStopped = $true
-        Add-QaWarning "The backend had already stopped before QA requested graceful shutdown."
+        Add-QaWarning "The backend had already stopped before the operator shutdown step."
     } else {
-        $backendUri = [uri]$backend
-        if ($backendUri.IsLoopback) {
-            Write-Host "[INFO] Requesting the built-in graceful shutdown. This may take several minutes."
-            try {
-                $shutdownBody = @{ reason = "spot_temperature_v25_qa_closeout" } | ConvertTo-Json -Compress
-                $shutdownResponse = Invoke-RestMethod -Uri "$backend/api/control/shutdown" -Method Post `
-                    -ContentType "application/json" -Body $shutdownBody -TimeoutSec 5
-                if ([bool](Get-ObjectProperty $shutdownResponse "ok" $false)) {
-                    $qaShutdownRequested = $true
-                } else {
-                    Add-QaWarning "The backend graceful shutdown endpoint did not acknowledge the request."
-                }
-            } catch {
-                Add-QaWarning "The backend graceful shutdown request failed: $($_.Exception.Message)"
-            }
-        } else {
-            Add-QaWarning "QA-assisted shutdown was skipped because BackendBaseUrl is not loopback."
-        }
+        Write-Host "[ACTION] Close SmartFactoryLogger with the window X button." -ForegroundColor Yellow
+        Write-Host "Do not use Task Manager and do not stop SmartFactoryBackend.exe directly."
+        [void](Read-Host "After closing the SmartFactoryLogger window, press Enter to continue")
+        $operatorShutdownRequested = $true
     }
 
     $shutdownDeadline = (Get-Date).AddSeconds($GracefulShutdownTimeoutSeconds)
@@ -335,7 +319,7 @@ if (-not $SkipStopPrompt) {
     }
     Add-QaCheck -Name "Backend stopped for finalized CSV validation" -Passed $backendStopped `
         -Actual $(if ($backendStopped) {
-            if ($qaShutdownRequested) { "stopped after QA graceful shutdown" } else { "already stopped" }
+            if ($operatorShutdownRequested) { "stopped after operator UI shutdown" } else { "already stopped" }
         } else { "still reachable after graceful shutdown timeout" }) `
         -Expected "stopped"
     if (-not $backendStopped) {
@@ -346,6 +330,7 @@ if (-not $SkipStopPrompt) {
             poll_statuses = @($samples.poll_status | Sort-Object -Unique)
             value_origins = @($samples.temperature_value_origin | Sort-Object -Unique)
             qa_shutdown_requested = $qaShutdownRequested
+            operator_shutdown_requested = $operatorShutdownRequested
         }
         Add-QaWarning "Finalized CSV validation was skipped because the backend is still running."
         Save-QaArtifact -Verdict "FAIL" -RuntimeSummary $runtimeSummary -FileSummary $null -ValidatorOutput ""
@@ -518,6 +503,7 @@ $runtimeSummary = [ordered]@{
     poll_statuses = @($samples.poll_status | Sort-Object -Unique)
     value_origins = @($samples.temperature_value_origin | Sort-Object -Unique)
     qa_shutdown_requested = $qaShutdownRequested
+    operator_shutdown_requested = $operatorShutdownRequested
 }
 Save-QaArtifact -Verdict $verdict -RuntimeSummary $runtimeSummary -FileSummary $fileSummary `
     -ValidatorOutput $validatorOutput
