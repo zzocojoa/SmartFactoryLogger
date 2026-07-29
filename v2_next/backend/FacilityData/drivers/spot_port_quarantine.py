@@ -187,11 +187,13 @@ class SourcePortLeasePool:
             self._condition.notify_all()
 
     def acquire(self, timeout_seconds: float | None = None) -> SourcePortLease:
-        timeout = (
-            self._acquire_timeout_seconds
-            if timeout_seconds is None
-            else max(0.0, float(timeout_seconds))
-        )
+        timeout = self._acquire_timeout_seconds
+        if timeout_seconds is not None:
+            timeout = float(timeout_seconds)
+            if not math.isfinite(timeout) or timeout < 0.0:
+                raise ValueError(
+                    "timeout_seconds must be finite and non-negative"
+                )
         deadline = self._monotonic() + timeout
         counted_wait = False
 

@@ -95,6 +95,26 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         pool.initialize()
         return pool, selected_factory, selected_clock
 
+    def test_acquire_rejects_invalid_timeout_overrides(self) -> None:
+        pool, _factory, _clock = self.make_pool()
+        lease = pool.acquire()
+
+        try:
+            for timeout_seconds in (
+                -1.0,
+                float("nan"),
+                float("inf"),
+                float("-inf"),
+            ):
+                with self.subTest(timeout_seconds=timeout_seconds):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "finite and non-negative",
+                    ):
+                        pool.acquire(timeout_seconds)
+        finally:
+            pool.release(lease)
+
     def test_exact_quarantine_boundary_controls_reuse(self) -> None:
         pool, _factory, clock = self.make_pool()
         first = pool.acquire()
