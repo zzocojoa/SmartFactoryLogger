@@ -448,7 +448,7 @@ def summarize_spot_observation_fact(
             first_poll_seq = poll_sequence_summary[0]
             last_poll_seq = poll_sequence_summary[1]
             distinct_poll_sequence_count = int(poll_sequence_summary[2])
-    except (OSError, UnicodeError, csv.Error, sqlite3.Error):
+    except (OSError, UnicodeError, csv.Error):
         header = []
         row_count = 0
         distinct_observation_key_count = 0

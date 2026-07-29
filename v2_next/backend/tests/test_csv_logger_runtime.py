@@ -120,6 +120,24 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         self.assertTrue(service.running)
         self.assertTrue(service.stop(timeout_sec=2.0))
 
+    def test_start_rejects_running_state_without_a_live_worker(self) -> None:
+        dead_thread = threading.Thread(target=lambda: None)
+        dead_thread.start()
+        dead_thread.join(timeout=1.0)
+        self.assertFalse(dead_thread.is_alive())
+
+        for worker in (None, dead_thread):
+            with self.subTest(worker=worker):
+                service = CSVLoggerService()
+                service.running = True
+                service.thread = worker
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "marked running without a live worker thread",
+                ):
+                    service.start()
+
     def test_repeated_stop_can_disable_manifest_after_an_earlier_timeout(self) -> None:
         service = CSVLoggerService()
         loop_started = threading.Event()

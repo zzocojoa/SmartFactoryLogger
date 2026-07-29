@@ -933,16 +933,25 @@ class CSVLoggerService:
             fact_path,
             enabled=enabled,
         )
-        payload["spot_observation_fact_manifest"] = build_spot_observation_fact_manifest(
-            fact_path=fact_path,
-            enabled=enabled,
-            write_failure_count=(
-                int(health.get("write_failure_count", 0) or 0) + initialization_failure_count
-            ),
-            spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
-            realtime_rows=realtime_rows,
-            path=SPOT_OBSERVATION_FACT_FILENAME,
-        )
+        try:
+            observation_fact_manifest = build_spot_observation_fact_manifest(
+                fact_path=fact_path,
+                enabled=enabled,
+                write_failure_count=(
+                    int(health.get("write_failure_count", 0) or 0)
+                    + initialization_failure_count
+                ),
+                spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
+                realtime_rows=realtime_rows,
+                path=SPOT_OBSERVATION_FACT_FILENAME,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to build refreshed CSV v2 observation fact manifest: %s",
+                exc,
+            )
+            return None
+        payload["spot_observation_fact_manifest"] = observation_fact_manifest
         temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
         try:
             temp_path.write_text(

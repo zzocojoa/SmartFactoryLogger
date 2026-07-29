@@ -83,17 +83,47 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             fact_path = Path(temp_dir) / "spot_observation_fact.csv"
             fact_path.write_text("header\nrow\n", encoding="utf-8")
-            expected_sha256 = hashlib.sha256(fact_path.read_bytes()).hexdigest()
 
             with patch(
                 "backend.FacilityData.spot_observation_fact.sqlite3.connect",
                 side_effect=sqlite3.OperationalError("temporary storage unavailable"),
             ):
-                summary = summarize_spot_observation_fact(fact_path=fact_path)
+                with self.assertRaisesRegex(
+                    sqlite3.OperationalError,
+                    "temporary storage unavailable",
+                ):
+                    summarize_spot_observation_fact(fact_path=fact_path)
 
-        self.assertEqual(summary["row_count"], 0)
-        self.assertEqual(summary["distinct_observation_key_count"], 0)
-        self.assertEqual(summary["sha256"], expected_sha256)
+    def test_manifest_refresh_preserves_sidecar_when_temporary_sqlite_is_unavailable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            csv_path = log_path / "Factory_Integrated_Log_v2_test.csv"
+            csv_path.write_text(
+                "spot_observation_key\nservice-1:1\n",
+                encoding="utf-8-sig",
+            )
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            original_metadata = b'{"sentinel":"preserved"}\n'
+            metadata_path.write_bytes(original_metadata)
+            fact_path = log_path / "spot_observation_fact.csv"
+            fact_path.write_text(
+                "spot_observation_key,spot_poll_seq\nservice-1:1,1\n",
+                encoding="utf-8-sig",
+            )
+            service = CSVLoggerService()
+
+            with patch(
+                "backend.FacilityData.spot_observation_fact.sqlite3.connect",
+                side_effect=sqlite3.OperationalError("temporary storage unavailable"),
+            ):
+                refreshed = service.refresh_spot_observation_fact_manifest_for_csv(
+                    csv_path
+                )
+
+            self.assertIsNone(refreshed)
+            self.assertEqual(metadata_path.read_bytes(), original_metadata)
 
     def test_closeout_header_initialization_does_not_index_historical_fact_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

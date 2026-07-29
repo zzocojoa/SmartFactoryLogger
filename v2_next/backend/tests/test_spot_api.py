@@ -1876,6 +1876,31 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(spot_api._spot_poll_task)
         self.assertIsNone(spot_api._internal_temperature_task)
 
+    async def test_stop_spot_poll_loop_continues_after_shutdown_helper_exceptions(
+        self,
+    ) -> None:
+        spot_api._spot_diagnostics_task = None
+        spot_api._spot_poll_task = None
+        spot_api._internal_temperature_task = None
+
+        with (
+            patch.object(
+                spot_api,
+                "_stop_spot_image_refresh_for_shutdown",
+                new=AsyncMock(side_effect=RuntimeError("image stop failed")),
+            ) as stop_image_refresh,
+            patch.object(
+                spot_api,
+                "_stop_spot_http_transport",
+                new=AsyncMock(side_effect=RuntimeError("transport stop failed")),
+            ) as stop_transport,
+        ):
+            stopped = await spot_api.stop_spot_poll_loop()
+
+        self.assertFalse(stopped)
+        stop_image_refresh.assert_awaited_once_with()
+        stop_transport.assert_awaited_once_with()
+
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
