@@ -433,10 +433,10 @@ def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
     _emit_embedded_startup_progress(f"{stage}_ready")
 
 
-def _run_lifespan_stop_stage(stage: str, stopper: Callable[[], Any]) -> bool:
+async def _run_lifespan_stop_stage(stage: str, stopper: Callable[[], Any]) -> bool:
     started_perf = time.perf_counter()
     try:
-        result = stopper()
+        result = await asyncio.to_thread(stopper)
         succeeded = result is not False
     except Exception as exc:
         succeeded = False
@@ -1656,23 +1656,23 @@ async def lifespan(app: FastAPI):
         _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
         _emit_embedded_startup_progress("lifespan_begin")
         print("[Main] Starting CSV Logger...")
-        _run_lifespan_start_stage("csv_logger", logger_service.start)
         started_services.add("csv_logger")
+        _run_lifespan_start_stage("csv_logger", logger_service.start)
         print("[Main] Starting Config Sync Agent...")
-        _run_lifespan_start_stage("config_sync", config_sync_agent.start)
         started_services.add("config_sync")
+        _run_lifespan_start_stage("config_sync", config_sync_agent.start)
         print("[Main] Starting Config Watcher...")
-        _run_lifespan_start_stage("config_watch", config_watch_service.start)
         started_services.add("config_watch")
+        _run_lifespan_start_stage("config_watch", config_watch_service.start)
         print("[Main] Starting PLC Service...")
-        _run_lifespan_start_stage("plc_service", plc_service.start)
         started_services.add("plc_service")
+        _run_lifespan_start_stage("plc_service", plc_service.start)
         print("[Main] Starting Comm Metrics Logger...")
-        _run_lifespan_start_stage("comm_metrics", comm_metrics_logger_service.start)
         started_services.add("comm_metrics")
+        _run_lifespan_start_stage("comm_metrics", comm_metrics_logger_service.start)
         print("[Main] Starting Memory Service...")
-        _run_lifespan_start_stage("memory_service", memory_service.start)
         started_services.add("memory_service")
+        _run_lifespan_start_stage("memory_service", memory_service.start)
 
         # Start SPOT temperature and diagnostics polling.
         print("[Main] Starting SPOT temperature and diagnostics polling...")
@@ -1732,25 +1732,25 @@ async def lifespan(app: FastAPI):
                     )
             if "comm_metrics" in started_services:
                 print("[Main] Stopping Comm Metrics Logger...")
-                _run_lifespan_stop_stage(
+                await _run_lifespan_stop_stage(
                     "comm_metrics",
                     comm_metrics_logger_service.stop,
                 )
             if "memory_service" in started_services:
                 print("[Main] Stopping Memory Service...")
-                _run_lifespan_stop_stage("memory_service", memory_service.stop)
+                await _run_lifespan_stop_stage("memory_service", memory_service.stop)
             if "plc_service" in started_services:
                 print("[Main] Stopping PLC Service...")
-                _run_lifespan_stop_stage("plc_service", plc_service.stop)
+                await _run_lifespan_stop_stage("plc_service", plc_service.stop)
             if "config_sync" in started_services:
                 print("[Main] Stopping Config Sync Agent...")
-                _run_lifespan_stop_stage("config_sync", config_sync_agent.stop)
+                await _run_lifespan_stop_stage("config_sync", config_sync_agent.stop)
             if "config_watch" in started_services:
                 print("[Main] Stopping Config Watcher...")
-                _run_lifespan_stop_stage("config_watch", config_watch_service.stop)
+                await _run_lifespan_stop_stage("config_watch", config_watch_service.stop)
             if "csv_logger" in started_services:
                 print("[Main] Stopping CSV Logger...")
-                if not _run_lifespan_stop_stage(
+                if not await _run_lifespan_stop_stage(
                     "csv_logger",
                     lambda: logger_service.stop(
                         timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,

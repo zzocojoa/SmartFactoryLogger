@@ -18,7 +18,6 @@ $checks = New-Object "System.Collections.Generic.List[object]"
 $warnings = New-Object "System.Collections.Generic.List[string]"
 $samples = New-Object "System.Collections.Generic.List[object]"
 $attestationCanBeApplied = $false
-$qaShutdownRequested = $false
 $operatorShutdownRequested = $false
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
@@ -44,6 +43,49 @@ function Test-BackendReachable {
         return $false
     }
 }
+
+# BEGIN QA SHUTDOWN HELPERS
+function Invoke-OperatorShutdownCheckpoint {
+    param(
+        [int]$TimeoutSeconds,
+        [int]$PollIntervalSeconds = 2,
+        [scriptblock]$ReachabilityProbe = { Test-BackendReachable },
+        [scriptblock]$PromptAction = {
+            Write-Host "[ACTION] Close SmartFactoryLogger with the window X button." -ForegroundColor Yellow
+            Write-Host "Do not use Task Manager and do not stop SmartFactoryBackend.exe directly."
+            [void](Read-Host "After closing the SmartFactoryLogger window, press Enter to continue")
+        },
+        [scriptblock]$SleepAction = {
+            param([int]$Seconds)
+            Start-Sleep -Seconds $Seconds
+        }
+    )
+
+    if (-not (& $ReachabilityProbe)) {
+        return [PSCustomObject]@{
+            backend_stopped = $true
+            operator_shutdown_requested = $false
+        }
+    }
+
+    & $PromptAction
+    $deadline = (Get-Date).AddSeconds([math]::Max(0, $TimeoutSeconds))
+    while ((Get-Date) -lt $deadline) {
+        if (-not (& $ReachabilityProbe)) {
+            return [PSCustomObject]@{
+                backend_stopped = $true
+                operator_shutdown_requested = $true
+            }
+        }
+        & $SleepAction ([math]::Max(0, $PollIntervalSeconds))
+    }
+
+    return [PSCustomObject]@{
+        backend_stopped = $false
+        operator_shutdown_requested = $true
+    }
+}
+# END QA SHUTDOWN HELPERS
 
 function Get-ObjectProperty {
     param(
@@ -204,7 +246,7 @@ function Save-QaArtifact {
 Write-Host ""
 Write-Host "SPOT Temperature v2.5 one-command QA" -ForegroundColor Cyan
 Write-Host "This tool does not change SPOT device or application settings."
-Write-Host "It uses the backend's built-in graceful shutdown to finalize CSV metadata before validation."
+Write-Host "It requires a normal UI close to finalize CSV metadata before validation."
 Write-Host ""
 Write-Host "[1/5] Checking the running backend..." -ForegroundColor Cyan
 
@@ -298,25 +340,14 @@ Add-QaCheck -Name "Value age clock anomalies" `
 if (-not $SkipStopPrompt) {
     Write-Host ""
     Write-Host "[3/5] Finalizing SmartFactoryLogger CSV files safely." -ForegroundColor Yellow
-    $backendStopped = $false
-    if (-not (Test-BackendReachable)) {
-        $backendStopped = $true
+    $shutdownCheckpoint = Invoke-OperatorShutdownCheckpoint `
+        -TimeoutSeconds $GracefulShutdownTimeoutSeconds
+    $backendStopped = [bool]$shutdownCheckpoint.backend_stopped
+    $operatorShutdownRequested = [bool]$shutdownCheckpoint.operator_shutdown_requested
+    if ($backendStopped -and -not $operatorShutdownRequested) {
         Add-QaWarning "The backend had already stopped before the operator shutdown step."
-    } else {
-        Write-Host "[ACTION] Close SmartFactoryLogger with the window X button." -ForegroundColor Yellow
-        Write-Host "Do not use Task Manager and do not stop SmartFactoryBackend.exe directly."
-        [void](Read-Host "After closing the SmartFactoryLogger window, press Enter to continue")
-        $operatorShutdownRequested = $true
     }
 
-    $shutdownDeadline = (Get-Date).AddSeconds($GracefulShutdownTimeoutSeconds)
-    while ((Get-Date) -lt $shutdownDeadline) {
-        if (-not (Test-BackendReachable)) {
-            $backendStopped = $true
-            break
-        }
-        Start-Sleep -Seconds 2
-    }
     Add-QaCheck -Name "Backend stopped for finalized CSV validation" -Passed $backendStopped `
         -Actual $(if ($backendStopped) {
             if ($operatorShutdownRequested) { "stopped after operator UI shutdown" } else { "already stopped" }
@@ -329,7 +360,8 @@ if (-not $SkipStopPrompt) {
             sample_count = $samples.Count
             poll_statuses = @($samples.poll_status | Sort-Object -Unique)
             value_origins = @($samples.temperature_value_origin | Sort-Object -Unique)
-            qa_shutdown_requested = $qaShutdownRequested
+            # Compatibility field: QA no longer calls the authenticated shutdown API.
+            qa_shutdown_requested = $false
             operator_shutdown_requested = $operatorShutdownRequested
         }
         Add-QaWarning "Finalized CSV validation was skipped because the backend is still running."
@@ -502,7 +534,8 @@ $runtimeSummary = [ordered]@{
     sample_count = $samples.Count
     poll_statuses = @($samples.poll_status | Sort-Object -Unique)
     value_origins = @($samples.temperature_value_origin | Sort-Object -Unique)
-    qa_shutdown_requested = $qaShutdownRequested
+    # Compatibility field: QA no longer calls the authenticated shutdown API.
+    qa_shutdown_requested = $false
     operator_shutdown_requested = $operatorShutdownRequested
 }
 Save-QaArtifact -Verdict $verdict -RuntimeSummary $runtimeSummary -FileSummary $fileSummary `

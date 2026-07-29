@@ -3,6 +3,7 @@ import csv
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -267,15 +268,104 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
 
         asyncio.run(exercise())
 
-    def test_portable_qa_uses_operator_ui_shutdown_without_control_token_bypass(self) -> None:
-        qa_script = (self.repo_root / "scripts" / "qa_spot_temperature_v25.ps1").read_text(
-            encoding="utf-8"
-        )
+    def test_portable_qa_operator_shutdown_checkpoint_behaves_fail_closed(self) -> None:
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        if powershell is None:
+            self.skipTest("PowerShell is unavailable")
+
+        qa_path = self.repo_root / "scripts" / "qa_spot_temperature_v25.ps1"
+        qa_script = qa_path.read_text(encoding="utf-8")
 
         self.assertNotIn("/api/control/shutdown", qa_script)
-        self.assertIn("Close SmartFactoryLogger with the window X button.", qa_script)
-        self.assertIn("operator_shutdown_requested", qa_script)
         self.assertNotIn("X-SFL-Control-Token", qa_script)
+        self.assertLess(
+            qa_script.index("Invoke-OperatorShutdownCheckpoint"),
+            qa_script.index('[4/5] Checking the finalized CSV and config attestation'),
+        )
+
+        exercise = r"""
+$source = Get-Content -LiteralPath $args[0] -Raw -Encoding UTF8
+$beginMarker = "# BEGIN QA SHUTDOWN HELPERS"
+$endMarker = "# END QA SHUTDOWN HELPERS"
+$begin = $source.IndexOf($beginMarker)
+$end = $source.IndexOf($endMarker)
+if ($begin -lt 0 -or $end -lt $begin) {
+    throw "QA shutdown helper markers were not found."
+}
+$helperSource = $source.Substring(
+    $begin,
+    ($end + $endMarker.Length) - $begin
+)
+Invoke-Expression $helperSource
+
+$script:successProbeCount = 0
+$script:promptCount = 0
+$success = Invoke-OperatorShutdownCheckpoint `
+    -TimeoutSeconds 2 `
+    -PollIntervalSeconds 0 `
+    -ReachabilityProbe {
+        $script:successProbeCount += 1
+        return $script:successProbeCount -lt 2
+    } `
+    -PromptAction { $script:promptCount += 1 } `
+    -SleepAction { param([int]$Seconds) }
+
+$alreadyStopped = Invoke-OperatorShutdownCheckpoint `
+    -TimeoutSeconds 2 `
+    -PollIntervalSeconds 0 `
+    -ReachabilityProbe { return $false } `
+    -PromptAction { throw "prompt must not run" } `
+    -SleepAction { param([int]$Seconds) }
+
+$timeout = Invoke-OperatorShutdownCheckpoint `
+    -TimeoutSeconds 0 `
+    -PollIntervalSeconds 0 `
+    -ReachabilityProbe { return $true } `
+    -PromptAction { $script:promptCount += 1 } `
+    -SleepAction { param([int]$Seconds) }
+
+[PSCustomObject]@{
+    success_stopped = [bool]$success.backend_stopped
+    success_operator_requested = [bool]$success.operator_shutdown_requested
+    already_stopped = [bool]$alreadyStopped.backend_stopped
+    already_operator_requested = [bool]$alreadyStopped.operator_shutdown_requested
+    timeout_stopped = [bool]$timeout.backend_stopped
+    timeout_operator_requested = [bool]$timeout.operator_shutdown_requested
+    prompt_count = $script:promptCount
+} | ConvertTo-Json -Compress
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            exercise_path = Path(temp_dir) / "exercise-qa-shutdown.ps1"
+            exercise_path.write_text(exercise, encoding="utf-8-sig")
+            command = [
+                powershell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(exercise_path),
+                str(qa_path),
+            ]
+            if sys.platform == "win32":
+                command = ["cmd.exe", "/d", "/c", *command]
+            completed = subprocess.run(
+                command,
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout.strip().splitlines()[-1])
+        self.assertTrue(result["success_stopped"])
+        self.assertTrue(result["success_operator_requested"])
+        self.assertTrue(result["already_stopped"])
+        self.assertFalse(result["already_operator_requested"])
+        self.assertFalse(result["timeout_stopped"])
+        self.assertTrue(result["timeout_operator_requested"])
+        self.assertEqual(result["prompt_count"], 2)
 
 
 if __name__ == "__main__":

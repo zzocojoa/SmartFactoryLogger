@@ -1716,6 +1716,112 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         stop_spot_poll.assert_awaited_once_with()
         release_lock.assert_called_once_with()
 
+    async def test_lifespan_intermediate_start_failure_stops_partial_service_and_predecessors(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        service_entries = (
+            ("csv_logger", backend_app.logger_service, "start", "stop"),
+            ("config_sync", backend_app.config_sync_agent, "start", "stop"),
+            ("config_watch", backend_app.config_watch_service, "start", "stop"),
+            ("plc_service", backend_app.plc_service, "start", "stop"),
+            (
+                "comm_metrics",
+                backend_app.comm_metrics_logger_service,
+                "start",
+                "stop",
+            ),
+            ("memory_service", backend_app.memory_service, "start", "stop"),
+        )
+
+        for failure_index, (failure_stage, _, _, _) in enumerate(service_entries):
+            with self.subTest(failure_stage=failure_stage), ExitStack() as stack:
+                start_mocks = [Mock() for _ in service_entries]
+                start_mocks[failure_index].side_effect = RuntimeError(
+                    f"{failure_stage} partial start failed"
+                )
+                stop_mocks = [Mock(return_value=True) for _ in service_entries]
+                if failure_stage == "plc_service":
+                    stop_mocks[failure_index].side_effect = RuntimeError(
+                        "partial PLC cleanup failed"
+                    )
+
+                for (_, service, start_name, stop_name), start_mock, stop_mock in zip(
+                    service_entries,
+                    start_mocks,
+                    stop_mocks,
+                    strict=True,
+                ):
+                    stack.enter_context(patch.object(service, start_name, start_mock))
+                    stack.enter_context(patch.object(service, stop_name, stop_mock))
+
+                stack.enter_context(
+                    patch.object(
+                        backend_app,
+                        "acquire_single_instance_lock",
+                        return_value=True,
+                    )
+                )
+                release_lock = stack.enter_context(
+                    patch.object(backend_app, "release_single_instance_lock")
+                )
+                start_spot_poll = stack.enter_context(
+                    patch.object(
+                        backend_app.spot_control,
+                        "start_spot_poll_loop",
+                        new=AsyncMock(),
+                    )
+                )
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"{failure_stage} partial start failed",
+                ):
+                    async with backend_app.lifespan(backend_app.app):
+                        self.fail("lifespan startup unexpectedly succeeded")
+
+                for index, start_mock in enumerate(start_mocks):
+                    if index <= failure_index:
+                        start_mock.assert_called_once_with()
+                    else:
+                        start_mock.assert_not_called()
+                for index, stop_mock in enumerate(stop_mocks):
+                    if index <= failure_index:
+                        stop_mock.assert_called_once()
+                    else:
+                        stop_mock.assert_not_called()
+                start_spot_poll.assert_not_awaited()
+                release_lock.assert_called_once_with()
+
+    async def test_lifespan_stop_stage_keeps_event_loop_responsive(self) -> None:
+        from backend import app as backend_app
+
+        release_stopper = threading.Event()
+        events: list[str] = []
+
+        def blocking_stopper() -> bool:
+            events.append("stopper-start")
+            release_stopper.wait(timeout=0.5)
+            events.append("stopper-end")
+            return True
+
+        async def heartbeat() -> None:
+            await asyncio.sleep(0.01)
+            events.append("heartbeat")
+            release_stopper.set()
+
+        stopped, _ = await asyncio.gather(
+            backend_app._run_lifespan_stop_stage(
+                "blocking-test-service",
+                blocking_stopper,
+            ),
+            heartbeat(),
+        )
+
+        self.assertTrue(stopped)
+        self.assertLess(events.index("heartbeat"), events.index("stopper-end"))
+
     async def test_stop_spot_poll_loop_reports_transport_drain_and_skips_sync_writer_join(
         self,
     ) -> None:
@@ -1736,6 +1842,39 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(stopped)
         stop_writer.assert_not_called()
+
+    async def test_stop_spot_poll_loop_continues_cleanup_after_task_failure(
+        self,
+    ) -> None:
+        async def fail_before_shutdown() -> None:
+            raise RuntimeError("diagnostics failed")
+
+        failed_task = asyncio.create_task(fail_before_shutdown())
+        await asyncio.sleep(0)
+        spot_api._spot_diagnostics_task = failed_task
+        spot_api._spot_poll_task = None
+        spot_api._internal_temperature_task = None
+
+        with (
+            patch.object(
+                spot_api,
+                "_stop_spot_image_refresh_for_shutdown",
+                new=AsyncMock(return_value=True),
+            ) as stop_image_refresh,
+            patch.object(
+                spot_api,
+                "_stop_spot_http_transport",
+                new=AsyncMock(return_value=True),
+            ) as stop_transport,
+        ):
+            stopped = await spot_api.stop_spot_poll_loop()
+
+        self.assertFalse(stopped)
+        stop_image_refresh.assert_awaited_once_with()
+        stop_transport.assert_awaited_once_with()
+        self.assertIsNone(spot_api._spot_diagnostics_task)
+        self.assertIsNone(spot_api._spot_poll_task)
+        self.assertIsNone(spot_api._internal_temperature_task)
 
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

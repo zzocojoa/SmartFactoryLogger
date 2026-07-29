@@ -69,7 +69,7 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         self.assertTrue(stopped)
         write_manifest.assert_not_called()
 
-    def test_start_does_not_replace_a_logger_generation_that_is_stopping(self) -> None:
+    def test_start_fails_explicitly_while_a_logger_generation_is_stopping(self) -> None:
         service = CSVLoggerService()
         loop_started = threading.Event()
         release_loop = threading.Event()
@@ -101,7 +101,11 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         deadline = time.time() + 1.0
         while service.running and time.time() < deadline:
             time.sleep(0.01)
-        service.start()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "previous worker generation",
+        ):
+            service.start()
 
         self.assertIs(service.thread, retiring_thread)
         self.assertFalse(service._finalize_spot_image_manifest_on_stop)
@@ -111,6 +115,10 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         self.assertEqual(stop_result, [True])
         self.assertEqual(observed_finalize_values, [False])
         self.assertIsNone(service.thread)
+
+        service.start()
+        self.assertTrue(service.running)
+        self.assertTrue(service.stop(timeout_sec=2.0))
 
     def test_repeated_stop_can_disable_manifest_after_an_earlier_timeout(self) -> None:
         service = CSVLoggerService()

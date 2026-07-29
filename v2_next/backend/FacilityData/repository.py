@@ -374,14 +374,17 @@ class CSVLoggerService:
     def start(self) -> None:
         with self._lifecycle_lock:
             existing_thread = self.thread
-            if self.running or (
-                existing_thread is not None and existing_thread.is_alive()
-            ):
-                if not self.running:
-                    self.logger.warning(
-                        "CSV logger start ignored while the previous thread is stopping."
+            if self.running:
+                if existing_thread is None or not existing_thread.is_alive():
+                    raise RuntimeError(
+                        "CSV logger is marked running without a live worker thread."
                     )
                 return
+            if existing_thread is not None:
+                raise RuntimeError(
+                    "CSV logger cannot start until the previous worker generation "
+                    "has completed stop()."
+                )
             self.thread = None
             self._shutdown_flush_succeeded = False
             self._runtime_write_failure_observed = False
@@ -421,9 +424,12 @@ class CSVLoggerService:
                 self.logger.warning("CSV logger stopped without a durable final flush.")
             if stopped:
                 with self._lifecycle_lock:
+                    flush_succeeded = self._shutdown_flush_succeeded is True
                     if self.thread is retiring_thread:
                         self.thread = None
-            return stopped and self._shutdown_flush_succeeded is True
+            else:
+                flush_succeeded = False
+            return stopped and flush_succeeded
         return True
 
     def enqueue(self, data: FactoryData) -> None:

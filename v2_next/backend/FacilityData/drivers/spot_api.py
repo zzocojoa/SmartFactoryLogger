@@ -2698,36 +2698,72 @@ async def stop_spot_poll_loop() -> bool:
     global _internal_temperature_task, _spot_poll_task, _spot_poll_running, _spot_diagnostics_task
     _spot_poll_running = False
 
-    if _spot_diagnostics_task:
-        _spot_diagnostics_task.cancel()
-        try:
-            await _spot_diagnostics_task
-        except asyncio.CancelledError:
-            pass
-        _spot_diagnostics_task = None
+    task_entries = (
+        ("diagnostics", _spot_diagnostics_task),
+        ("poll", _spot_poll_task),
+        ("internal_temperature", _internal_temperature_task),
+    )
+    for _, task in task_entries:
+        if task is not None and not task.done():
+            task.cancel()
 
-    if _spot_poll_task:
-        _spot_poll_task.cancel()
-        try:
-            await _spot_poll_task
-        except asyncio.CancelledError:
-            pass
-        _spot_poll_task = None
-    if _internal_temperature_task:
-        _internal_temperature_task.cancel()
-        try:
-            await _internal_temperature_task
-        except asyncio.CancelledError:
-            pass
-        _internal_temperature_task = None
-    image_refresh_stopped = await _stop_spot_image_refresh_for_shutdown()
-    transport_stopped = await _stop_spot_http_transport()
+    task_results = await asyncio.gather(
+        *(task for _, task in task_entries if task is not None),
+        return_exceptions=True,
+    )
+    task_shutdown_succeeded = True
+    result_index = 0
+    for task_name, task in task_entries:
+        if task is None:
+            continue
+        result = task_results[result_index]
+        result_index += 1
+        if isinstance(result, BaseException) and not isinstance(
+            result,
+            asyncio.CancelledError,
+        ):
+            task_shutdown_succeeded = False
+            _logger.warning(
+                "SPOT background task failed before shutdown completed",
+                extra={
+                    "code": "spot-background-task-shutdown-failed",
+                    "task": task_name,
+                    "error_type": type(result).__name__,
+                },
+            )
+
+    _spot_diagnostics_task = None
+    _spot_poll_task = None
+    _internal_temperature_task = None
+
+    try:
+        image_refresh_stopped = await _stop_spot_image_refresh_for_shutdown()
+    except Exception as exc:
+        image_refresh_stopped = False
+        _logger.warning(
+            "SPOT image refresh shutdown failed",
+            extra={
+                "code": "spot-image-refresh-shutdown-failed",
+                "error_type": type(exc).__name__,
+            },
+        )
+    try:
+        transport_stopped = await _stop_spot_http_transport()
+    except Exception as exc:
+        transport_stopped = False
+        _logger.warning(
+            "SPOT HTTP transport shutdown failed",
+            extra={
+                "code": "spot-http-transport-shutdown-failed",
+                "error_type": type(exc).__name__,
+            },
+        )
     if not transport_stopped:
         _logger.warning(
             "SPOT HTTP transport did not drain before shutdown timeout",
             extra={"code": "spot-http-transport-shutdown-timeout"},
         )
-    return image_refresh_stopped and transport_stopped
+    return task_shutdown_succeeded and image_refresh_stopped and transport_stopped
 
 
 def get_cached_spot_temp() -> float:
