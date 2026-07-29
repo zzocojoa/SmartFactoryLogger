@@ -1380,7 +1380,13 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(SpotTransportProtocolError):
                 await transport.request(_request(url="file:///tmp/image"))
             for timeout_field in ("connect_timeout_sec", "read_timeout_sec"):
-                for timeout_value in (0.0, -0.1):
+                for timeout_value in (
+                    0.0,
+                    -0.1,
+                    float("nan"),
+                    float("inf"),
+                    float("-inf"),
+                ):
                     with self.subTest(
                         timeout_field=timeout_field,
                         timeout_value=timeout_value,

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   fetchSpotImageResponse: vi.fn<() => Promise<Response>>(),
   controlSpotFocus: vi.fn<(steps: number) => Promise<SpotFocusResponse>>(),
   controlSpotActuator: vi.fn<(step: number) => Promise<void>>(),
+  cancelPendingImageRetry: undefined as (() => void) | undefined,
   cancelNormalImageRefresh: undefined as (() => void) | undefined,
   resumeImageRefreshWhenVisible: undefined as (() => void) | undefined,
 }));
@@ -33,9 +34,11 @@ vi.mock('../../../shared/api/client', () => ({
 
 vi.mock('./useSpotViewModelEffects', () => ({
   useSpotViewModelEffects: (params: {
+    cancelPendingImageRetry: () => void;
     cancelNormalImageRefresh: () => void;
     resumeImageRefreshWhenVisible: () => void;
   }) => {
+    mocks.cancelPendingImageRetry = params.cancelPendingImageRetry;
     mocks.cancelNormalImageRefresh = params.cancelNormalImageRefresh;
     mocks.resumeImageRefreshWhenVisible = params.resumeImageRefreshWhenVisible;
   },
@@ -154,6 +157,7 @@ describe('useSpotViewModel integration', () => {
     mockFetchSpotImageResponse.mockReset();
     mockControlSpotFocus.mockReset();
     mockControlSpotActuator.mockReset();
+    mocks.cancelPendingImageRetry = undefined;
     mocks.cancelNormalImageRefresh = undefined;
     mocks.resumeImageRefreshWhenVisible = undefined;
     setVisibilityState('visible');
@@ -852,14 +856,19 @@ describe('useSpotViewModel integration', () => {
         await Promise.resolve();
       });
       expect(result.current.diagnostics.automatic_retry_pending).toBe(true);
+      expect(result.current.diagnostics.next_retry_scheduled_at).not.toBeNull();
 
       setVisibilityState('hidden');
+      act(() => {
+        mocks.cancelPendingImageRetry?.();
+      });
+      expect(result.current.diagnostics.automatic_retry_pending).toBe(false);
+      expect(result.current.diagnostics.next_retry_scheduled_at).toBeNull();
+
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1_000);
       });
-
       expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
-      expect(result.current.diagnostics.automatic_retry_pending).toBe(false);
     } finally {
       setVisibilityState('visible');
       unmount();

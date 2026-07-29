@@ -226,6 +226,15 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       window.clearTimeout(automaticRetryTimerRef.current);
       automaticRetryTimerRef.current = null;
     }
+    setDiagnostics((prev) => (
+      !prev.automatic_retry_pending && prev.next_retry_scheduled_at === null
+        ? prev
+        : {
+            ...prev,
+            automatic_retry_pending: false,
+            next_retry_scheduled_at: null,
+          }
+    ));
   }, []);
 
   const cancelNormalImageRefresh = useCallback((): void => {

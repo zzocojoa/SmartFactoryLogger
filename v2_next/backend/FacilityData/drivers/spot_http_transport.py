@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import http.client
 import logging
+import math
 import socket
 import sys
 import threading
@@ -871,8 +872,15 @@ class SpotHttpTransport:
     def _validate_request(request: SpotHttpRequest) -> None:
         if request.method.upper() not in _ALLOWED_METHODS:
             raise SpotTransportProtocolError("SPOT HTTP method is not allowed")
-        if request.connect_timeout_sec <= 0.0 or request.read_timeout_sec <= 0.0:
-            raise SpotTransportProtocolError("SPOT HTTP timeouts must be positive")
+        if (
+            not math.isfinite(request.connect_timeout_sec)
+            or not math.isfinite(request.read_timeout_sec)
+            or request.connect_timeout_sec <= 0.0
+            or request.read_timeout_sec <= 0.0
+        ):
+            raise SpotTransportProtocolError(
+                "SPOT HTTP timeouts must be finite and positive"
+            )
         if (
             isinstance(request.max_response_bytes, bool)
             or not isinstance(request.max_response_bytes, int)
