@@ -140,6 +140,27 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         pool.close()
         self.assertTrue(guard.closed)
 
+    def test_close_attempts_all_guards_and_retries_failed_closes(self) -> None:
+        pool, factory, _clock = self.make_pool(capacity=2)
+        failed_guard, healthy_guard = factory.guards
+        failed_guard.close_error = OSError("simulated shutdown close failure")
+
+        with self.assertRaisesRegex(
+            SpotPortPoolError,
+            "failed to close source-port guard sockets",
+        ):
+            pool.close()
+
+        self.assertFalse(failed_guard.closed)
+        self.assertTrue(healthy_guard.closed)
+        failed_guard.close_error = None
+
+        pool.close()
+
+        self.assertTrue(failed_guard.closed)
+        with self.assertRaises(SpotPortPoolError):
+            pool.acquire()
+
     def test_exact_quarantine_boundary_controls_reuse(self) -> None:
         pool, _factory, clock = self.make_pool()
         first = pool.acquire()

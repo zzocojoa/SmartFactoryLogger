@@ -1760,6 +1760,64 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         release_lock.assert_called_once_with()
 
+    async def test_lifespan_preserves_primary_error_when_drain_probe_raises(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        release_lock = Mock()
+        image_stop = Mock(return_value=True)
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app,
+                "release_single_instance_lock",
+                release_lock,
+            ),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(
+                backend_app,
+                "_run_lifespan_stop_stage",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                side_effect=ValueError("cleanup probe failed"),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                image_stop,
+            ),
+        ):
+            with self.assertLogs("SmartFactoryLoggerV2", level="WARNING") as logs:
+                with self.assertRaisesRegex(RuntimeError, "primary failure"):
+                    async with backend_app.lifespan(backend_app.app):
+                        raise RuntimeError("primary failure")
+
+        self.assertIn(
+            "Lifespan SPOT observation drain probe failed",
+            "\n".join(logs.output),
+        )
+        image_stop.assert_called_once()
+        release_lock.assert_called_once_with()
+
     async def test_lifespan_shutdown_fails_when_observation_writes_do_not_drain(
         self,
     ) -> None:
@@ -3530,6 +3588,23 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["source_port_quarantine_seconds"], 75.0)
         self.assertEqual(diagnostics["source_port_pool_capacity"], 768)
         self.assertNotIn("source_port_values", diagnostics)
+
+    def test_source_port_diagnostics_schema_is_stable_without_transport(self) -> None:
+        spot_api._spot_http_transport = None
+
+        inactive_diagnostics = spot_api._spot_source_port_diagnostics()
+        live_schema = spot_api.SpotHttpTransport().diagnostics()
+
+        self.assertEqual(set(inactive_diagnostics), set(live_schema))
+        self.assertEqual(inactive_diagnostics["source_port_transport_pending_count"], 0)
+        for kind in spot_api.SpotRequestKind:
+            for outcome in ("started", "success", "failure"):
+                self.assertEqual(
+                    inactive_diagnostics[
+                        f"source_port_{kind.value}_{outcome}_count"
+                    ],
+                    0,
+                )
 
     async def test_supported_but_inactive_transport_fails_closed(self) -> None:
         transport = FakeSpotHttpTransport()

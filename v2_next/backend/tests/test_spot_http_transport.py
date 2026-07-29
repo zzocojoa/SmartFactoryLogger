@@ -29,6 +29,7 @@ from backend.FacilityData.drivers.spot_http_transport import (
 from backend.FacilityData.drivers.spot_port_quarantine import (
     POOL_CAPACITY,
     SourcePortLeasePool,
+    SpotPortPoolError,
     SpotPortPoolInitError,
     SystemGuardSocketFactory,
 )
@@ -363,6 +364,34 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(await transport.close())
 
         acquire.assert_called_once_with()
+
+    async def test_shutdown_cleanup_is_retryable_after_pool_close_failure(
+        self,
+    ) -> None:
+        pool = self.make_pool(capacity=1)
+        transport = SpotHttpTransport(pool=pool)
+        original_close = pool.close
+        close_attempts = 0
+
+        def flaky_close() -> None:
+            nonlocal close_attempts
+            close_attempts += 1
+            if close_attempts == 1:
+                raise SpotPortPoolError("simulated pool close failure")
+            original_close()
+
+        with patch.object(pool, "close", side_effect=flaky_close):
+            transport.start()
+            with self.assertRaisesRegex(
+                SpotPortPoolError,
+                "simulated pool close failure",
+            ):
+                await transport.close()
+
+            self.assertFalse(transport.active)
+            self.assertTrue(await transport.close())
+
+        self.assertEqual(close_attempts, 2)
 
     async def test_response_interrupt_target_uses_public_connection_socket(
         self,

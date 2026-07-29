@@ -1695,9 +1695,18 @@ async def lifespan(app: FastAPI):
                     _logger.error(
                         "SPOT poll or transport did not drain before lifespan shutdown"
                     )
-                observation_fact_drained = (
-                    spot_control.spot_observation_fact_writes_drained()
-                )
+                try:
+                    observation_fact_drained = (
+                        spot_control.spot_observation_fact_writes_drained()
+                    )
+                except Exception as exc:
+                    observation_fact_drained = False
+                    _logger.warning(
+                        "[Main] Lifespan SPOT observation drain probe failed "
+                        "error_type=%s %s",
+                        type(exc).__name__,
+                        _lifecycle_log_fields(),
+                    )
                 if not observation_fact_drained:
                     shutdown_failures.append("spot_observation_fact")
                     _logger.error(

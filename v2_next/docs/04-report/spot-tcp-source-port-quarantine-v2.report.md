@@ -69,6 +69,10 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 - [x] Cancelled worker failures emit one privacy-safe bounded warning.
 - [x] Concurrent and asyncio wrapper exceptions are both collected.
 - [x] Internal test reset drains and clears transport/client state.
+- [x] Drain-probe failures preserve the original shutdown exception.
+- [x] Partial guard-close failures attempt all guards and remain retryable.
+- [x] Source-port diagnostics keep one key schema before, during, and after the
+  guarded transport lifecycle.
 - [x] Direct failure, protocol, cancellation, request-kind, and shutdown tests
   cover the designed transport contract.
 
@@ -82,7 +86,7 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Full backend tests | all | 599 at field commit / 606 at current HEAD | PASS |
+| Full backend tests | all | 599 at field commit / 610 at current HEAD | PASS |
 | Electron tests | all | 38 | PASS |
 | Frontend tests | all | 251 / 33 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
@@ -193,6 +197,9 @@ deadline without a trigger.
   schema rollback is needed.
 - The actual server remains on the verified `1.0.17` package built from
   `0c641b7`. Current evidence does not indicate rollback.
+- Later local hardening commits are not covered by that field evidence and remain
+  promotion-blocked until an identity-matched package completes the required
+  server validation.
 - Error-queue deletion, configuration changes, forced image-load tests, and an
   additional 15-minute or 120-minute collection are not required.
 
@@ -260,3 +267,4 @@ range separately from this closed TCP remediation.
 | 1.2 | 2026-07-28 | Scoped field evidence to packaged commit `931c869`; final `1.0.17` promotion remains gated |
 | 1.3 | 2026-07-29 | Final `0c641b7` package QA, 15-minute smoke, 120-minute canary, and final live-gate closure |
 | 1.4 | 2026-07-29 | Kept `0c641b7` field evidence separate from later current-HEAD promotion gates and refreshed automated test totals |
+| 1.5 | 2026-07-29 | Added exception-preserving, retryable shutdown cleanup and stable lifecycle diagnostics with regression coverage |

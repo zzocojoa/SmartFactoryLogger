@@ -28,6 +28,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
   reopening SPOT transport intake or delaying application exit.
 - Kept source-port leases unavailable until their quarantine guard is
   successfully rebound, including exhaustion and recovery behavior.
+- Preserved primary shutdown failures when drain probes fail, made partial guard
+  cleanup retryable, and kept source-port diagnostics schema-stable after
+  transport shutdown.
 - Preserved focus and actuator API compatibility while routing eligible
   background requests through the guarded transport.
 

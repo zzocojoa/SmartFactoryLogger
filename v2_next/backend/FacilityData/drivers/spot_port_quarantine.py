@@ -267,16 +267,27 @@ class SourcePortLeasePool:
 
     def close(self) -> None:
         with self._condition:
-            if self._closed:
+            if self._closed and all(
+                record.guard is None for record in self._records
+            ):
                 return
             self._closed = True
             self._active = False
+            close_errors: list[Exception] = []
             for record in self._records:
                 if record.guard is not None:
-                    record.guard.close()
-                    record.guard = None
+                    try:
+                        record.guard.close()
+                    except Exception as exc:
+                        close_errors.append(exc)
+                    else:
+                        record.guard = None
                 record.state = "closed"
             self._condition.notify_all()
+            if close_errors:
+                raise SpotPortPoolError(
+                    "failed to close source-port guard sockets"
+                ) from close_errors[0]
 
     def diagnostics(self) -> dict[str, object]:
         with self._condition:

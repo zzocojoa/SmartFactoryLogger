@@ -448,14 +448,23 @@ class SpotHttpTransport:
                 executor.abandon_current(failure)
                 self._interrupt_active_connections()
 
-        self._pool.close()
-        self._stop_response_deadline_watchdog()
-        with self._state_lock:
-            self._active = False
-            self._closed = True
-            self._shutdown_result = drained
-            if drained:
-                self._executor = None
+        pool_error: Exception | None = None
+        try:
+            self._pool.close()
+        except Exception as exc:
+            pool_error = exc
+        finally:
+            self._stop_response_deadline_watchdog()
+            with self._state_lock:
+                self._active = False
+                self._closed = pool_error is None
+                self._shutdown_result = drained and pool_error is None
+                if drained:
+                    self._executor = None
+                if pool_error is not None:
+                    self._shutdown_task = None
+        if pool_error is not None:
+            raise pool_error
         return drained
 
     def _interrupt_active_connections(self) -> None:

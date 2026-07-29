@@ -22,8 +22,6 @@ from backend.FacilityData.drivers.spot_http_transport import (
     DEFAULT_MAX_RESPONSE_BYTES,
     HARD_MAX_RESPONSE_BYTES,
     MAX_REDIRECT_HOPS,
-    POOL_CAPACITY,
-    QUARANTINE_SECONDS,
     SpotHttpRequest,
     SpotHttpResponse,
     SpotHttpTransport,
@@ -36,8 +34,6 @@ from backend.FacilityData.drivers.spot_http_transport import (
     resolve_spot_redirect_url,
 )
 from backend.FacilityData.drivers.spot_port_quarantine import (
-    POLICY_VERSION as _SPOT_SOURCE_PORT_POLICY_VERSION,
-    SourcePortLeasePool,
     SpotPortPoolError,
 )
 from backend.FacilityData.spot_observation import (
@@ -2373,27 +2369,7 @@ def _spot_source_port_diagnostics() -> Dict[str, Any]:
     transport = _spot_http_transport
     if transport is not None:
         return dict(transport.diagnostics())
-    supported = SourcePortLeasePool().supported
-    return {
-        "source_port_policy_version": _SPOT_SOURCE_PORT_POLICY_VERSION,
-        "source_port_enforcement_supported": supported,
-        "source_port_enforcement_active": False,
-        "source_port_quarantine_seconds": QUARANTINE_SECONDS,
-        "source_port_pool_capacity": POOL_CAPACITY,
-        "source_port_pool_guarded_count": 0,
-        "source_port_pool_leased_count": 0,
-        "source_port_pool_quarantined_count": 0,
-        "source_port_pool_rebind_pending_count": 0,
-        "source_port_pool_acquire_wait_count": 0,
-        "source_port_pool_exhaustion_count": 0,
-        "source_port_bind_collision_count": 0,
-        "source_port_rebind_retry_count": 0,
-        "source_port_reuse_violation_count": 0,
-        "source_port_minimum_reuse_interval_seconds": None,
-        "source_port_transport_started_count": 0,
-        "source_port_transport_success_count": 0,
-        "source_port_transport_failure_count": 0,
-    }
+    return dict(SpotHttpTransport().diagnostics())
 
 
 def _active_spot_http_transport() -> SpotHttpTransport | None:
