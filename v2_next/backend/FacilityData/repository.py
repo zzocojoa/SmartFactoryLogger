@@ -367,6 +367,8 @@ class CSVLoggerService:
         self._v2_4_last_sample_seq: Optional[int] = None
         self._v2_4_last_updated_at: Optional[str] = None
         self._current_v2_csv_path: Optional[Path] = None
+        self._v2_persisted_sample_seq_by_path: dict[str, int] = {}
+        self._v2_persisted_at_by_path: dict[str, str] = {}
         self._shutdown_flush_succeeded: Optional[bool] = None
         self._runtime_write_failure_observed = False
         self._finalize_spot_image_manifest_on_stop = True
@@ -964,7 +966,12 @@ class CSVLoggerService:
         self.logger.warning("Failed to initialize enabled SPOT observation fact: %s", fact_path.name)
         return 1
 
-    def refresh_spot_observation_fact_manifest_for_csv(self, csv_path: Path) -> Optional[Path]:
+    def refresh_spot_observation_fact_manifest_for_csv(
+        self,
+        csv_path: Path,
+        *,
+        closeout_reason: str = "runtime-close",
+    ) -> Optional[Path]:
         metadata_path = csv_path.with_suffix(".metadata.json")
         if not metadata_path.exists():
             return None
@@ -1019,17 +1026,45 @@ class CSVLoggerService:
                 exc,
             )
             return None
-        with self._v2_4_operational_lock:
-            final_sample_seq = self._v2_4_last_sample_seq
-            final_updated_at = self._v2_4_last_updated_at
+        csv_path_key = str(csv_path)
+        with self._runtime_lock:
+            final_persisted_sample_seq = self._v2_persisted_sample_seq_by_path.get(
+                csv_path_key
+            )
+            persisted_at = self._v2_persisted_at_by_path.get(csv_path_key)
+        if (
+            (final_persisted_sample_seq is None or persisted_at is None)
+            and not self._require_runtime_manifest_state
+        ):
+            try:
+                with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                    final_row: Optional[dict[str, str]] = None
+                    for final_row in csv.DictReader(handle):
+                        pass
+                if final_row is not None:
+                    final_persisted_sample_seq = int(final_row["sample_seq"])
+                    persisted_at = datetime.fromtimestamp(
+                        csv_path.stat().st_mtime,
+                        timezone.utc,
+                    ).isoformat().replace("+00:00", "Z")
+            except (KeyError, OSError, TypeError, ValueError):
+                final_persisted_sample_seq = None
+                persisted_at = None
+        if final_persisted_sample_seq is None or persisted_at is None:
+            self.logger.warning(
+                "Refusing CSV v2 closeout without a file-specific persisted sample: %s",
+                csv_path.name,
+            )
+            return None
         payload.pop("spot_observation_fact_closeout", None)
         payload["spot_observation_fact_manifest"] = observation_fact_manifest
         payload["csv_closeout"] = {
             "finalized": True,
+            "closeout_reason": closeout_reason,
             "csv_file_name": csv_path.name,
             "logger_service_instance_id": self.logger_service_instance_id,
-            "final_sample_seq": final_sample_seq,
-            "final_updated_at": final_updated_at,
+            "final_persisted_sample_seq": final_persisted_sample_seq,
+            "persisted_at": persisted_at,
         }
         temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
         try:
@@ -2391,8 +2426,37 @@ class CSVLoggerService:
             return False
         writer.writerows([row for row, _ in rows])
         handle.flush()
+        self._mark_v2_rows_persisted(rows)
         self._mark_write_completed()
         return True
+
+    def _mark_v2_rows_persisted(
+        self,
+        rows: list[Tuple[list, datetime]],
+    ) -> None:
+        csv_path = self._current_v2_csv_path
+        if csv_path is None:
+            raise RuntimeError("CSV v2 persisted rows have no active file identity.")
+        sample_seq_index = self._get_active_v2_contract().columns.index("sample_seq")
+        try:
+            persisted_sample_seq = max(int(row[sample_seq_index]) for row, _ in rows)
+        except (IndexError, TypeError, ValueError) as exc:
+            raise RuntimeError("CSV v2 persisted rows have an invalid sample_seq.") from exc
+        csv_path_key = str(csv_path)
+        persisted_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        with self._runtime_lock:
+            previous_sample_seq = self._v2_persisted_sample_seq_by_path.get(csv_path_key)
+            if (
+                previous_sample_seq is not None
+                and persisted_sample_seq <= previous_sample_seq
+            ):
+                raise RuntimeError(
+                    "CSV v2 persisted sample_seq did not advance for the active file."
+                )
+            self._v2_persisted_sample_seq_by_path[csv_path_key] = (
+                persisted_sample_seq
+            )
+            self._v2_persisted_at_by_path[csv_path_key] = persisted_at
 
     def _mark_write_completed(self) -> None:
         with self._runtime_lock:
@@ -2406,7 +2470,13 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to close CSV log file handle: %s", exc)
 
-    def _close_v2_file(self, handle: Optional[object]) -> bool:
+    def _close_v2_file(
+        self,
+        handle: Optional[object],
+        *,
+        closeout_reason: str = "runtime-close",
+        finalize_closeout: bool = True,
+    ) -> bool:
         csv_path = self._current_v2_csv_path
         closeout_succeeded = True
         if handle is not None:
@@ -2416,8 +2486,15 @@ class CSVLoggerService:
                 closeout_succeeded = False
                 self.logger.warning("Failed to flush CSV v2 log file before close: %s", exc)
         if csv_path is not None and self.csv_v2_sidecar_enabled:
-            if self._finalize_spot_observation_manifest_on_stop:
-                refreshed_path = self.refresh_spot_observation_fact_manifest_for_csv(csv_path)
+            if (
+                closeout_succeeded
+                and finalize_closeout
+                and self._finalize_spot_observation_manifest_on_stop
+            ):
+                refreshed_path = self.refresh_spot_observation_fact_manifest_for_csv(
+                    csv_path,
+                    closeout_reason=closeout_reason,
+                )
                 if refreshed_path is None:
                     closeout_succeeded = False
                     suppressed_path = self._suppress_spot_observation_fact_manifest_for_csv(
@@ -2434,8 +2511,19 @@ class CSVLoggerService:
                             "Invalidated stale SPOT observation fact manifest after refresh failure."
                         )
             else:
+                suppression_reason = (
+                    "close-flush-failed"
+                    if not closeout_succeeded
+                    else (
+                        "closeout-not-finalized"
+                        if not finalize_closeout
+                        else "shutdown-write-drain-timeout"
+                    )
+                )
                 suppressed_path = self._suppress_spot_observation_fact_manifest_for_csv(
-                    csv_path
+                    csv_path,
+                    writes_drained=closeout_succeeded,
+                    reason=suppression_reason,
                 )
                 if suppressed_path is None:
                     closeout_succeeded = False
@@ -2443,6 +2531,11 @@ class CSVLoggerService:
                     "Skipped SPOT observation fact manifest because writes did not drain."
                 )
         self._close_file(handle)
+        if csv_path is not None:
+            csv_path_key = str(csv_path)
+            with self._runtime_lock:
+                self._v2_persisted_sample_seq_by_path.pop(csv_path_key, None)
+                self._v2_persisted_at_by_path.pop(csv_path_key, None)
         self._current_v2_csv_path = None
         if not closeout_succeeded:
             self._runtime_write_failure_observed = True
@@ -2548,7 +2641,10 @@ class CSVLoggerService:
                             )
                             v2_buffer.clear()
                     self._close_file(f_handle)
-                    self._close_v2_file(v2_handle)
+                    self._close_v2_file(
+                        v2_handle,
+                        closeout_reason="config-change",
+                    )
                     f_handle = None
                     writer = None
                     v2_handle = None
@@ -2604,7 +2700,10 @@ class CSVLoggerService:
                                 )
                         if rollover_ready:
                             self._close_file(f_handle)
-                            self._close_v2_file(v2_handle)
+                            self._close_v2_file(
+                                v2_handle,
+                                closeout_reason="daily-rollover",
+                            )
                             f_handle = None
                             writer = None
                             v2_handle = None
@@ -2700,7 +2799,10 @@ class CSVLoggerService:
                             "Current row deferred to preserve daily file boundary."
                         )
                 self._close_file(f_handle)
-                self._close_v2_file(v2_handle)
+                self._close_v2_file(
+                    v2_handle,
+                    closeout_reason="runtime-error",
+                )
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
                 self._buffer_size = len(buffer)
@@ -2751,7 +2853,11 @@ class CSVLoggerService:
                 )
             elif self.auto_save:
                 self._close_file(f_handle)
-                if not self._close_v2_file(v2_handle):
+                if not self._close_v2_file(
+                    v2_handle,
+                    closeout_reason="daily-rollover",
+                    finalize_closeout=shutdown_flush_succeeded,
+                ):
                     shutdown_flush_succeeded = False
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
@@ -2791,7 +2897,11 @@ class CSVLoggerService:
                     self.logger.warning("CSV deferred shutdown row write failed: %s", exc)
         self._buffer_size = 0
         self._close_file(f_handle)
-        if not self._close_v2_file(v2_handle):
+        if not self._close_v2_file(
+            v2_handle,
+            closeout_reason="shutdown",
+            finalize_closeout=shutdown_flush_succeeded,
+        ):
             shutdown_flush_succeeded = False
         if (
             self.csv_v2_enabled

@@ -80,6 +80,14 @@ const data = await response.json();
 이전 CSV로 fallback하지 않습니다. 절대 경로와 CSV 내용은 `/health`에 노출하지
 않습니다.
 
+`csv_closeout`은 파일이 닫힌 이유를 `closeout_reason`으로 기록합니다.
+종료 QA는 동일 logger instance와 build commit 중
+`closeout_reason=shutdown`인 sidecar만 선택합니다.
+`final_persisted_sample_seq`는 `writerows`와 `flush`가 모두 성공한 뒤에만
+증가하며, validator는 이 값이 실제 CSV의 마지막 및 최댓값 `sample_seq`와
+같은지 확인합니다. 따라서 daily rollover sidecar나 실패한 최종 flush는
+정상 종료 증거가 될 수 없습니다.
+
 ### GET `/stats`
 
 백엔드 서버 통계를 가져옵니다.

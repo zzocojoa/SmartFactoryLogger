@@ -99,7 +99,7 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Full backend tests | all | 599 at field commit / 626 at current HEAD | PASS |
+| Full backend tests | all | 599 at field commit / 628 at current HEAD | PASS |
 | Electron tests | all | 38 | PASS |
 | Frontend tests | all | 251 / 33 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
@@ -284,3 +284,4 @@ range separately from this closed TCP remediation.
 | 1.6 | 2026-07-29 | Made fact-manifest shutdown closeout independent of accumulated historical file size |
 | 1.7 | 2026-07-29 | Preserved v2 CSV logging across LogPath fallback and transition while failing unmatched fact closeout closed |
 | 1.8 | 2026-07-29 | Bound QA to the exact live CSV closeout and rejected malformed, mismatched, unreadable, or pending spool work |
+| 1.9 | 2026-07-29 | Bound QA to the actual shutdown closeout and verified persisted sample sequence against the finalized CSV |

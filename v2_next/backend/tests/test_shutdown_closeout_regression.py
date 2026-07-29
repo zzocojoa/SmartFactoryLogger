@@ -1,5 +1,6 @@
 import asyncio
 import csv
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -13,7 +14,7 @@ import textwrap
 import time
 import tracemalloc
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend import app as backend_app
 from backend.FacilityData.repository import CSVLoggerService
@@ -26,6 +27,7 @@ from backend.FacilityData.spot_observation_fact import (
     SpotObservationFactWriter,
     summarize_spot_observation_fact,
 )
+from scripts.validate_csv_v2_shadow import validate_csv_closeout
 
 
 class ShutdownCloseoutRegressionTests(unittest.TestCase):
@@ -120,8 +122,12 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     )
 
             service = CSVLoggerService()
-            service._v2_4_last_sample_seq = realtime_row_total
-            service._v2_4_last_updated_at = "2026-07-29T05:00:00Z"
+            service._v2_persisted_sample_seq_by_path[str(csv_path)] = (
+                realtime_row_total
+            )
+            service._v2_persisted_at_by_path[str(csv_path)] = (
+                "2026-07-29T05:00:00Z"
+            )
             tracemalloc.start()
             try:
                 with patch(
@@ -134,7 +140,8 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     },
                 ):
                     refreshed = service.refresh_spot_observation_fact_manifest_for_csv(
-                        csv_path
+                        csv_path,
+                        closeout_reason="shutdown",
                     )
                 _, peak_bytes = tracemalloc.get_traced_memory()
             finally:
@@ -156,16 +163,74 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             csv_closeout,
             {
                 "finalized": True,
+                "closeout_reason": "shutdown",
                 "csv_file_name": csv_path.name,
                 "logger_service_instance_id": service.logger_service_instance_id,
-                "final_sample_seq": realtime_row_total,
-                "final_updated_at": "2026-07-29T05:00:00Z",
+                "final_persisted_sample_seq": realtime_row_total,
+                "persisted_at": "2026-07-29T05:00:00Z",
             },
         )
         self.assertLess(
             peak_bytes,
             64 * 1024 * 1024,
             f"realtime CSV closeout peak memory was {peak_bytes} bytes",
+        )
+
+    def test_v2_flush_failure_never_advances_persisted_closeout_state(self) -> None:
+        service = CSVLoggerService()
+        csv_path = Path("Factory_Integrated_Log_v2_flush_failure.csv")
+        service._current_v2_csv_path = csv_path
+        contract = service._get_active_v2_contract()
+        row = [""] * len(contract.columns)
+        row[contract.columns.index("sample_seq")] = "41"
+        writer = MagicMock()
+        handle = MagicMock()
+        handle.flush.side_effect = OSError("simulated final flush failure")
+
+        with self.assertRaisesRegex(OSError, "simulated final flush failure"):
+            service._flush_v2_buffer(
+                writer,
+                handle,
+                [(row, datetime.now().astimezone())],
+            )
+
+        self.assertNotIn(
+            str(csv_path),
+            service._v2_persisted_sample_seq_by_path,
+        )
+        self.assertNotIn(str(csv_path), service._v2_persisted_at_by_path)
+
+    def test_validator_rejects_closeout_ahead_of_final_csv_row(self) -> None:
+        csv_path = Path("Factory_Integrated_Log_v2_closeout.csv")
+        logger_id = "11111111-1111-1111-1111-111111111111"
+        metadata = {
+            "schema_metadata": {
+                "logger_service_instance_id": logger_id,
+            },
+            "csv_closeout": {
+                "finalized": True,
+                "closeout_reason": "shutdown",
+                "csv_file_name": csv_path.name,
+                "logger_service_instance_id": logger_id,
+                "final_persisted_sample_seq": 42,
+                "persisted_at": "2026-07-29T05:00:00Z",
+            },
+        }
+
+        failures = validate_csv_closeout(
+            metadata,
+            csv_path,
+            [[logger_id, "41"]],
+            ["logger_service_instance_id", "sample_seq"],
+        )
+
+        self.assertIn(
+            "csv_closeout.final_persisted_sample_seq does not match the final CSV row",
+            failures,
+        )
+        self.assertIn(
+            "csv_closeout.final_persisted_sample_seq does not match the maximum CSV sample_seq",
+            failures,
         )
 
     def test_runtime_observation_manifest_does_not_reread_historical_fact(self) -> None:
@@ -1276,13 +1341,17 @@ $corruptCurrent = Find-LatestMetadata `
         0
     }
     missing_is_null = ($null -eq $missing)
-    corrupt_current_is_null = ($null -eq $corruptCurrent)
+    corrupt_observed_still_matches_shutdown = (
+        $null -ne $corruptCurrent -and
+        $corruptCurrent.file.Name -eq $matched.file.Name
+    )
 } | ConvertTo-Json -Compress
 """
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             current_path = temp_path / "Factory_Integrated_Log_v2_20260729_100000.metadata.json"
+            shutdown_path = temp_path / "Factory_Integrated_Log_v2_20260729_100100.metadata.json"
             stale_path = temp_path / "Factory_Integrated_Log_v2_20260729_110000.metadata.json"
             older_path = temp_path / "Factory_Integrated_Log_v2_20260729_090000.metadata.json"
 
@@ -1292,6 +1361,7 @@ $corruptCurrent = Find-LatestMetadata `
                 build_commit: str,
                 sample_seq: int,
                 raw_value: str = "455.0",
+                closeout_reason: str = "daily-rollover",
             ) -> None:
                 csv_file_name = metadata_path.name.replace(
                     ".metadata.json",
@@ -1309,9 +1379,11 @@ $corruptCurrent = Find-LatestMetadata `
                             },
                             "csv_closeout": {
                                 "finalized": True,
+                                "closeout_reason": closeout_reason,
                                 "csv_file_name": csv_file_name,
                                 "logger_service_instance_id": logger_instance,
-                                "final_sample_seq": sample_seq,
+                                "final_persisted_sample_seq": sample_seq,
+                                "persisted_at": "2026-07-29T05:00:00Z",
                             },
                         }
                     ),
@@ -1336,11 +1408,25 @@ $corruptCurrent = Find-LatestMetadata `
                 201,
                 "6553.4\r\n",
             )
+            write_artifact(
+                shutdown_path,
+                expected_instance,
+                expected_commit,
+                202,
+                closeout_reason="shutdown",
+            )
             write_artifact(older_path, expected_instance, expected_commit, 200)
-            write_artifact(stale_path, stale_instance, stale_commit, 300)
+            write_artifact(
+                stale_path,
+                stale_instance,
+                stale_commit,
+                300,
+                closeout_reason="shutdown",
+            )
             now = time.time()
             os.utime(older_path, (now - 120, now - 120))
-            os.utime(current_path, (now - 60, now - 60))
+            os.utime(current_path, (now - 90, now - 90))
+            os.utime(shutdown_path, (now - 60, now - 60))
             os.utime(stale_path, (now, now))
             exercise_path = temp_path / "exercise-qa-metadata.ps1"
             exercise_path.write_text(exercise, encoding="utf-8-sig")
@@ -1372,11 +1458,11 @@ $corruptCurrent = Find-LatestMetadata `
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         result = json.loads(completed.stdout.strip().splitlines()[-1])
-        self.assertEqual(result["matched_name"], current_path.name)
+        self.assertEqual(result["matched_name"], shutdown_path.name)
         self.assertEqual(result["matched_instance"], expected_instance)
-        self.assertEqual(result["matched_final_sample_seq"], 201)
+        self.assertEqual(result["matched_final_sample_seq"], 202)
         self.assertTrue(result["missing_is_null"])
-        self.assertTrue(result["corrupt_current_is_null"])
+        self.assertTrue(result["corrupt_observed_still_matches_shutdown"])
 
 
 if __name__ == "__main__":

@@ -90,6 +90,18 @@ FINAL RESULT: PASS
 
 PASS 또는 FAIL 결과가 나온 뒤 운영이 필요하면 SmartFactoryLogger를 다시 실행한다.
 
+## 종료 파일 선택 기준
+
+QA는 60초 관찰 중 보였던 CSV 파일명 하나를 그대로 신뢰하지 않는다.
+운영자가 창의 X로 정상 종료한 뒤 동일 logger instance와 build commit의
+sidecar 중 `csv_closeout.closeout_reason=shutdown`인 파일을 찾는다.
+daily rollover나 설정 변경으로 닫힌 파일은 선택하지 않는다.
+
+종료 sidecar의 `final_persisted_sample_seq`는 해당 파일의 CSV write와 flush가
+성공한 뒤 기록된 값이어야 한다. repository validator는 이 값을 실제 CSV의
+마지막 행 및 최댓값 `sample_seq`와 비교한다. 값이 없거나 다르면 QA는
+fail closed 처리한다.
+
 ## FAIL인 경우
 
 화면에 표시된 `Evidence:` JSON 파일 하나만 개발 담당자에게 전달한다. 강제 종료하거나

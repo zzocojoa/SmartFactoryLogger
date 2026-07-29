@@ -342,8 +342,24 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
                     time.sleep(0.01)
                 self.assertGreaterEqual(flush_v2.call_count, 1)
                 self.assertFalse(service.stop(timeout_sec=2.0))
+            metadata_paths = list(
+                log_path.glob("Factory_Integrated_Log_v2_*.metadata.json")
+            )
+            self.assertEqual(len(metadata_paths), 1)
+            closeout_payload = json.loads(
+                metadata_paths[0].read_text(encoding="utf-8-sig")
+            )
 
         self.assertFalse(service._shutdown_flush_succeeded)
+        self.assertNotIn("csv_closeout", closeout_payload)
+        self.assertEqual(
+            closeout_payload["spot_observation_fact_closeout"],
+            {
+                "finalized": False,
+                "writes_drained": True,
+                "reason": "closeout-not-finalized",
+            },
+        )
 
     def test_observation_manifest_is_suppressed_when_writes_do_not_drain(
         self,

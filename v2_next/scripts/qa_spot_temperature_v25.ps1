@@ -252,20 +252,20 @@ function Find-LatestMetadata {
     ) {
         return $null
     }
-    $expectedMetadataName = $ExpectedCsvFileName -replace "\.csv$", ".metadata.json"
     foreach ($directory in $Directories) {
         if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
             continue
         }
-        $candidatePath = Join-Path $directory $expectedMetadataName
-        if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
-            continue
-        }
-        $candidate = Get-Item -LiteralPath $candidatePath -ErrorAction SilentlyContinue
-        if ($null -eq $candidate) {
-            continue
-        }
-        try {
+        $candidates = @(
+            Get-ChildItem `
+                -LiteralPath $directory `
+                -File `
+                -Filter "Factory_Integrated_Log_v2_*.metadata.json" `
+                -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTimeUtc -Descending
+        )
+        foreach ($candidate in $candidates) {
+            try {
             $metadata = Get-Content -LiteralPath $candidate.FullName -Raw -Encoding UTF8 |
                 ConvertFrom-Json
             $schemaMetadata = Get-ObjectProperty $metadata "schema_metadata"
@@ -282,10 +282,18 @@ function Find-LatestMetadata {
             )
             $closeoutSampleSeq = 0L
             $closeoutSampleSeqValid = [long]::TryParse(
-                [string](Get-ObjectProperty $csvCloseout "final_sample_seq" ""),
+                [string](
+                    Get-ObjectProperty `
+                        $csvCloseout `
+                        "final_persisted_sample_seq" `
+                        ""
+                ),
                 [ref]$closeoutSampleSeq
             )
-            $csvPath = Join-Path $directory $ExpectedCsvFileName
+            $closeoutCsvFileName = [string](
+                Get-ObjectProperty $csvCloseout "csv_file_name" ""
+            )
+            $csvPath = Join-Path $directory $closeoutCsvFileName
             if (
                 $loggerServiceInstanceId -eq $ExpectedLoggerServiceInstanceId -and
                 $schemaBuildCommit -eq $ExpectedBuildCommit -and
@@ -294,8 +302,11 @@ function Find-LatestMetadata {
                     Get-ObjectProperty $csvCloseout "finalized" $false
                 )) -and
                 ([string](
-                    Get-ObjectProperty $csvCloseout "csv_file_name" ""
-                )) -eq $ExpectedCsvFileName -and
+                    Get-ObjectProperty $csvCloseout "closeout_reason" ""
+                )) -eq "shutdown" -and
+                [System.IO.Path]::GetFileName($closeoutCsvFileName) -eq
+                    $closeoutCsvFileName -and
+                $closeoutCsvFileName -match "\.csv$" -and
                 ([string](
                     Get-ObjectProperty $csvCloseout "logger_service_instance_id" ""
                 )) -eq $ExpectedLoggerServiceInstanceId -and
@@ -308,10 +319,12 @@ function Find-LatestMetadata {
                     metadata = $metadata
                     csv_file = $csvPath
                     csv_final_sample_seq = $closeoutSampleSeq
+                    observed_csv_file_name = $ExpectedCsvFileName
                 }
             }
-        } catch {
-            continue
+            } catch {
+                continue
+            }
         }
     }
     return $null
@@ -535,7 +548,7 @@ $fileSummary = [ordered]@{
     expected_logger_service_instance_id = $expectedLoggerServiceInstanceId
     expected_build_commit = $expectedBuildCommit
     expected_minimum_sample_seq = $expectedMinimumSampleSeq
-    expected_csv_file_name = $expectedCsvFileName
+    observed_csv_file_name = $expectedCsvFileName
     log_directory = $null
     metadata_file = $null
     csv_file = $null
@@ -582,6 +595,13 @@ if ($null -eq $metadataFile) {
         -Passed ($metadataMatch.csv_final_sample_seq -ge $expectedMinimumSampleSeq) `
         -Actual ([string]$metadataMatch.csv_final_sample_seq) `
         -Expected ">= $expectedMinimumSampleSeq"
+        Add-QaCheck -Name "Shutdown CSV file identity" `
+        -Passed (
+            (Split-Path -Leaf $metadataMatch.csv_file) -match
+                "^Factory_Integrated_Log_v2_[A-Za-z0-9_.-]+\.csv$"
+        ) `
+        -Actual (Split-Path -Leaf $metadataMatch.csv_file) `
+        -Expected "current-session shutdown closeout CSV"
         Add-QaCheck -Name "Sidecar schema" `
         -Passed (([string](Get-ObjectProperty $schemaMetadata "active_schema_version")) -eq "2.5.0") `
         -Actual ([string](Get-ObjectProperty $schemaMetadata "active_schema_version" "missing")) -Expected "2.5.0"
@@ -707,7 +727,12 @@ $runtimeSummary = [ordered]@{
     logger_service_instance_id = $expectedLoggerServiceInstanceId
     build_commit = $expectedBuildCommit
     minimum_sample_seq = $expectedMinimumSampleSeq
-    csv_file_name = $expectedCsvFileName
+    observed_csv_file_name = $expectedCsvFileName
+    finalized_csv_file_name = if ($null -ne $metadataMatch) {
+        Split-Path -Leaf $metadataMatch.csv_file
+    } else {
+        ""
+    }
     initial_rows_total = $initialRows
     final_rows_total = $finalRows
     sample_count = $samples.Count
