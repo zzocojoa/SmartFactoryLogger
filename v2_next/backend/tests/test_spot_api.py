@@ -2318,6 +2318,22 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_diagnostics_task = None
             spot_api._internal_temperature_task = None
 
+    def test_observation_fact_closeout_rejects_completed_failures_and_spool(self) -> None:
+        writer = Mock()
+        writer.failure_count = 1
+        writer.spool_pending_count.return_value = 0
+        with patch.object(spot_api, "_spot_observation_fact_writer", writer):
+            self.assertFalse(spot_api.spot_observation_fact_writes_drained())
+
+        writer.failure_count = 0
+        writer.spool_pending_count.return_value = 1
+        with patch.object(spot_api, "_spot_observation_fact_writer", writer):
+            self.assertFalse(spot_api.spot_observation_fact_writes_drained())
+
+        writer.spool_pending_count.side_effect = OSError("unreadable spool")
+        with patch.object(spot_api, "_spot_observation_fact_writer", writer):
+            self.assertFalse(spot_api.spot_observation_fact_writes_drained())
+
     async def test_connection_test_routes_spot_through_guarded_helper(self) -> None:
         guarded_result = {
             "ok": True,
@@ -2484,6 +2500,16 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(drained)
         self.assertEqual(health["failure_count"], 1)
         self.assertTrue(outcome_and_task_done_are_atomic)
+
+    async def test_shutdown_helper_rejects_capture_failures_from_before_shutdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            with spot_api._spot_image_capture_lock:
+                spot_api._spot_image_capture_failure_count = 1
+
+            drained = spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2.0)
+
+        self.assertFalse(drained)
 
     def test_image_capture_health_separates_worker_writes_from_fact_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

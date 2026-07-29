@@ -79,6 +79,11 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 - [x] A LogPath fallback or live path change preserves v2 CSV recording while
   marking unmatched runtime fact manifests incomplete and failing closeout
   closed.
+- [x] One-command QA binds the selected metadata sidecar to the exact live
+  logger-service instance and build commit, and requires repeated health
+  failure plus zero product processes before treating UI shutdown as complete.
+- [x] Observation and image closeout reject earlier writer failures or pending
+  observation spool work instead of emitting a falsely clean final manifest.
 - [x] Direct failure, protocol, cancellation, request-kind, and shutdown tests
   cover the designed transport contract.
 
@@ -92,7 +97,7 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Full backend tests | all | 599 at field commit / 621 at current HEAD | PASS |
+| Full backend tests | all | 599 at field commit / 624 at current HEAD | PASS |
 | Electron tests | all | 38 | PASS |
 | Frontend tests | all | 251 / 33 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
@@ -276,3 +281,4 @@ range separately from this closed TCP remediation.
 | 1.5 | 2026-07-29 | Added exception-preserving, retryable shutdown cleanup and stable lifecycle diagnostics with regression coverage |
 | 1.6 | 2026-07-29 | Made fact-manifest shutdown closeout independent of accumulated historical file size |
 | 1.7 | 2026-07-29 | Preserved v2 CSV logging across LogPath fallback and transition while failing unmatched fact closeout closed |
+| 1.8 | 2026-07-29 | Bound QA artifacts to the live logger session/build and rejected closeout with prior fact/image failures or pending spool work |

@@ -460,7 +460,6 @@ def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
     with _spot_image_capture_lock:
         _spot_poll_running = False
         _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.set()
-        failure_count_before = _spot_image_capture_failure_count
     thread = _spot_image_capture_thread
     if getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) > 0 and (
         thread is None or not thread.is_alive()
@@ -469,7 +468,7 @@ def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
     stopped = stop_spot_image_capture_writer(timeout_sec=timeout_sec)
     with _spot_image_capture_lock:
         failure_count_after = _spot_image_capture_failure_count
-    return stopped and failure_count_after == failure_count_before
+    return stopped and failure_count_after == 0
 
 
 def _reset_spot_image_capture_state_for_tests() -> None:
@@ -1670,10 +1669,15 @@ async def _write_spot_observation_fact_async(snapshot: Dict[str, Any]) -> None:
 
 
 def spot_observation_fact_writes_drained() -> bool:
-    return not any(
-        not task.done()
-        for task in _spot_observation_fact_write_tasks
-    )
+    if any(not task.done() for task in _spot_observation_fact_write_tasks):
+        return False
+    writer = _spot_observation_fact_writer
+    if writer is None:
+        return True
+    try:
+        return writer.failure_count == 0 and writer.spool_pending_count() == 0
+    except Exception:
+        return False
 
 
 def get_spot_observation_fact_health() -> Dict[str, Any]:

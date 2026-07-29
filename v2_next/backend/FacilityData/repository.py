@@ -2003,6 +2003,8 @@ class CSVLoggerService:
                     if temperature_hardening_enabled
                     else CSV_SCHEMA_VERSION_V2_4
                 ),
+                "logger_service_instance_id": self.logger_service_instance_id,
+                "logger_service_started_at": self.logger_service_started_at,
                 "temperature_hardening_enabled": temperature_hardening_enabled,
                 "rows_total": self._v2_4_operational_rows_total,
                 "rows_by_temperature_output_status": dict(self._v2_4_temperature_output_status_counts),

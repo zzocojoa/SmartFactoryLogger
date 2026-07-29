@@ -49,7 +49,17 @@ function Invoke-OperatorShutdownCheckpoint {
     param(
         [int]$TimeoutSeconds,
         [int]$PollIntervalSeconds = 2,
+        [int]$ConsecutiveFailuresRequired = 3,
         [scriptblock]$ReachabilityProbe = { Test-BackendReachable },
+        [scriptblock]$ProductProcessProbe = {
+            $backendProcesses = @(
+                Get-Process -Name "SmartFactoryBackend" -ErrorAction SilentlyContinue
+            )
+            $electronProcesses = @(
+                Get-Process -Name "smart-factory" -ErrorAction SilentlyContinue
+            )
+            return ($backendProcesses.Count + $electronProcesses.Count) -gt 0
+        },
         [scriptblock]$PromptAction = {
             Write-Host "[ACTION] Close SmartFactoryLogger with the window X button." -ForegroundColor Yellow
             Write-Host "Do not use Task Manager and do not stop SmartFactoryBackend.exe directly."
@@ -61,32 +71,56 @@ function Invoke-OperatorShutdownCheckpoint {
         }
     )
 
-    if (-not (& $ReachabilityProbe)) {
+    $requiredFailures = [math]::Max(1, $ConsecutiveFailuresRequired)
+    $reachable = [bool](& $ReachabilityProbe)
+    $productProcessPresent = [bool](& $ProductProcessProbe)
+    $operatorRequested = $false
+    if ($reachable -or $productProcessPresent) {
+        & $PromptAction
+        $operatorRequested = $true
+    }
+
+    $consecutiveFailures = if (-not $reachable -and -not $productProcessPresent) {
+        1
+    } else {
+        0
+    }
+    if ($consecutiveFailures -ge $requiredFailures) {
         return [PSCustomObject]@{
             backend_stopped = $true
-            operator_shutdown_requested = $false
+            operator_shutdown_requested = $operatorRequested
+            consecutive_unreachable_count = $consecutiveFailures
         }
     }
 
-    & $PromptAction
     $deadline = (Get-Date).AddSeconds([math]::Max(0, $TimeoutSeconds))
     while ((Get-Date) -lt $deadline) {
-        if (-not (& $ReachabilityProbe)) {
+        & $SleepAction ([math]::Max(0, $PollIntervalSeconds))
+        $reachable = [bool](& $ReachabilityProbe)
+        $productProcessPresent = [bool](& $ProductProcessProbe)
+        if (-not $reachable -and -not $productProcessPresent) {
+            $consecutiveFailures += 1
+        } else {
+            $consecutiveFailures = 0
+        }
+        if ($consecutiveFailures -ge $requiredFailures) {
             return [PSCustomObject]@{
                 backend_stopped = $true
-                operator_shutdown_requested = $true
+                operator_shutdown_requested = $operatorRequested
+                consecutive_unreachable_count = $consecutiveFailures
             }
         }
-        & $SleepAction ([math]::Max(0, $PollIntervalSeconds))
     }
 
     return [PSCustomObject]@{
         backend_stopped = $false
-        operator_shutdown_requested = $true
+        operator_shutdown_requested = $operatorRequested
+        consecutive_unreachable_count = $consecutiveFailures
     }
 }
 # END QA SHUTDOWN HELPERS
 
+# BEGIN QA METADATA HELPERS
 function Get-ObjectProperty {
     param(
         [object]$Object,
@@ -203,7 +237,11 @@ function Get-LogDirectoryCandidates {
 }
 
 function Find-LatestMetadata {
-    param([string[]]$Directories)
+    param(
+        [string[]]$Directories,
+        [string]$ExpectedLoggerServiceInstanceId,
+        [string]$ExpectedBuildCommit
+    )
     $found = New-Object "System.Collections.Generic.List[object]"
     foreach ($directory in $Directories) {
         if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
@@ -212,8 +250,38 @@ function Find-LatestMetadata {
         Get-ChildItem -LiteralPath $directory -Filter "Factory_Integrated_Log_v2_*.metadata.json" -File -ErrorAction SilentlyContinue |
             ForEach-Object { $found.Add($_) }
     }
-    return $found | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    foreach ($candidate in @($found | Sort-Object LastWriteTime -Descending)) {
+        try {
+            $metadata = Get-Content -LiteralPath $candidate.FullName -Raw -Encoding UTF8 |
+                ConvertFrom-Json
+            $schemaMetadata = Get-ObjectProperty $metadata "schema_metadata"
+            $configSnapshot = Get-ObjectProperty $metadata "spot_configuration_snapshot"
+            $loggerServiceInstanceId = [string](
+                Get-ObjectProperty $schemaMetadata "logger_service_instance_id" ""
+            )
+            $schemaBuildCommit = [string](
+                Get-ObjectProperty $schemaMetadata "git_commit" ""
+            )
+            $configBuildCommit = [string](
+                Get-ObjectProperty $configSnapshot "build_git_commit" ""
+            )
+            if (
+                $loggerServiceInstanceId -eq $ExpectedLoggerServiceInstanceId -and
+                $schemaBuildCommit -eq $ExpectedBuildCommit -and
+                $configBuildCommit -eq $ExpectedBuildCommit
+            ) {
+                return [PSCustomObject]@{
+                    file = $candidate
+                    metadata = $metadata
+                }
+            }
+        } catch {
+            continue
+        }
+    }
+    return $null
 }
+# END QA METADATA HELPERS
 
 function Save-QaArtifact {
     param(
@@ -266,6 +334,9 @@ try {
 
 $initialSpot = Get-ObjectProperty -Object $initialHealth -Name "spot_temperature"
 $initialOperational = Get-ObjectProperty -Object $initialSpot -Name "v2_4_operational"
+$expectedLoggerServiceInstanceId = [string](
+    Get-ObjectProperty $initialOperational "logger_service_instance_id" ""
+)
 Add-QaCheck -Name "Runtime mode" -Passed (([string](Get-ObjectProperty $initialHealth "mode")) -eq "REAL") `
     -Actual ([string](Get-ObjectProperty $initialHealth "mode" "missing")) -Expected "REAL"
 Add-QaCheck -Name "SPOT diagnostics" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialSpot "diagnostics_available" $false)) `
@@ -278,6 +349,10 @@ Add-QaCheck -Name "Temperature hardening" -Passed (Convert-ToBoolean (Get-Object
     -Actual ([string](Get-ObjectProperty $initialOperational "temperature_hardening_enabled" "missing")) -Expected "true"
 Add-QaCheck -Name "Observation fact writer" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialOperational "observation_fact_enabled" $false)) `
     -Actual ([string](Get-ObjectProperty $initialOperational "observation_fact_enabled" "missing")) -Expected "true"
+Add-QaCheck -Name "Logger service instance" `
+    -Passed ($expectedLoggerServiceInstanceId -match "^[0-9a-fA-F-]{32,36}$") `
+    -Actual $(if ($expectedLoggerServiceInstanceId) { $expectedLoggerServiceInstanceId } else { "missing" }) `
+    -Expected "current logger service instance id"
 
 Write-Host ""
 Write-Host "[2/5] Observing SPOT for $ObservationSeconds seconds..." -ForegroundColor Cyan
@@ -314,6 +389,10 @@ try {
 }
 $finalSpot = Get-ObjectProperty $finalHealth "spot_temperature"
 $finalOperational = Get-ObjectProperty $finalSpot "v2_4_operational"
+$finalLoggerServiceInstanceId = [string](
+    Get-ObjectProperty $finalOperational "logger_service_instance_id" ""
+)
+$expectedBuildCommit = [string](Get-ObjectProperty $finalSpot "build_git_commit" "")
 $finalRows = Convert-ToInt64 (Get-ObjectProperty $finalOperational "rows_total" 0)
 $successfulPollObserved = @($samples | Where-Object { $_.poll_status -eq "success" }).Count -gt 0
 $currentOriginObserved = @($samples | Where-Object { $_.temperature_value_origin -eq "current_observation" }).Count -gt 0
@@ -336,6 +415,17 @@ Add-QaCheck -Name "Origin decision mismatches" `
 Add-QaCheck -Name "Value age clock anomalies" `
     -Passed ((Convert-ToInt64 (Get-ObjectProperty $finalOperational "value_age_clock_anomaly_count" 0)) -eq 0) `
     -Actual ([string](Get-ObjectProperty $finalOperational "value_age_clock_anomaly_count" "missing")) -Expected "0"
+Add-QaCheck -Name "Logger service instance remained stable" `
+    -Passed (
+        $expectedLoggerServiceInstanceId -ne "" -and
+        $finalLoggerServiceInstanceId -eq $expectedLoggerServiceInstanceId
+    ) `
+    -Actual "$expectedLoggerServiceInstanceId -> $finalLoggerServiceInstanceId" `
+    -Expected "unchanged"
+Add-QaCheck -Name "Runtime build commit" `
+    -Passed ($expectedBuildCommit -match "^[0-9a-f]{40}$") `
+    -Actual $(if ($expectedBuildCommit) { $expectedBuildCommit } else { "missing" }) `
+    -Expected "40-character lowercase Git commit"
 
 if (-not $SkipStopPrompt) {
     Write-Host ""
@@ -380,10 +470,16 @@ if (-not $SkipStopPrompt) {
 Write-Host ""
 Write-Host "[4/5] Checking the finalized CSV and config attestation..." -ForegroundColor Cyan
 $directories = Get-LogDirectoryCandidates -ExplicitLogPath $LogPath -SettingsPath $ConfigPath
-$metadataFile = Find-LatestMetadata -Directories $directories
+$metadataMatch = Find-LatestMetadata `
+    -Directories $directories `
+    -ExpectedLoggerServiceInstanceId $expectedLoggerServiceInstanceId `
+    -ExpectedBuildCommit $expectedBuildCommit
+$metadataFile = if ($null -ne $metadataMatch) { $metadataMatch.file } else { $null }
 $fileSummary = [ordered]@{
     config_path = $ConfigPath
     searched_log_directories = $directories
+    expected_logger_service_instance_id = $expectedLoggerServiceInstanceId
+    expected_build_commit = $expectedBuildCommit
     log_directory = $null
     metadata_file = $null
     csv_file = $null
@@ -393,20 +489,39 @@ $fileSummary = [ordered]@{
 $validatorOutput = ""
 
 if ($null -eq $metadataFile) {
-    Add-QaCheck -Name "Latest metadata sidecar" -Passed $false -Actual "not found" `
-        -Expected "Factory_Integrated_Log_v2_*.metadata.json; use -LogPath if auto-detection is wrong"
+    Add-QaCheck -Name "Current-session metadata sidecar" -Passed $false -Actual "not found" `
+        -Expected "sidecar matching the observed logger instance and build commit"
 } else {
     try {
         $fileSummary.log_directory = $metadataFile.DirectoryName
         $fileSummary.metadata_file = $metadataFile.FullName
-        Add-QaCheck -Name "Latest metadata sidecar" -Passed $true -Actual $metadataFile.Name -Expected "found"
-        # Metadata is UTF-8 without a BOM. Windows PowerShell 5.1 otherwise reads
-        # it with the active ANSI code page and can corrupt Korean JSON strings.
-        $metadataJson = Get-Content -LiteralPath $metadataFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        Add-QaCheck -Name "Current-session metadata sidecar" -Passed $true `
+            -Actual $metadataFile.Name -Expected "matching sidecar found"
+        $metadataJson = $metadataMatch.metadata
         $schemaMetadata = Get-ObjectProperty $metadataJson "schema_metadata"
         $configSnapshot = Get-ObjectProperty $metadataJson "spot_configuration_snapshot"
         $factManifest = Get-ObjectProperty $metadataJson "spot_observation_fact_manifest"
 
+        Add-QaCheck -Name "Sidecar logger service instance" `
+        -Passed (
+            ([string](Get-ObjectProperty $schemaMetadata "logger_service_instance_id" "")) -eq
+            $expectedLoggerServiceInstanceId
+        ) `
+        -Actual ([string](Get-ObjectProperty $schemaMetadata "logger_service_instance_id" "missing")) `
+        -Expected $expectedLoggerServiceInstanceId
+        Add-QaCheck -Name "Sidecar build commit" `
+        -Passed (
+            ([string](Get-ObjectProperty $schemaMetadata "git_commit" "")) -eq
+            $expectedBuildCommit -and
+            ([string](Get-ObjectProperty $configSnapshot "build_git_commit" "")) -eq
+            $expectedBuildCommit
+        ) `
+        -Actual (
+            "{0}/{1}" -f
+                [string](Get-ObjectProperty $schemaMetadata "git_commit" "missing"),
+                [string](Get-ObjectProperty $configSnapshot "build_git_commit" "missing")
+        ) `
+        -Expected "$expectedBuildCommit/$expectedBuildCommit"
         Add-QaCheck -Name "Sidecar schema" `
         -Passed (([string](Get-ObjectProperty $schemaMetadata "active_schema_version")) -eq "2.5.0") `
         -Actual ([string](Get-ObjectProperty $schemaMetadata "active_schema_version" "missing")) -Expected "2.5.0"
@@ -529,6 +644,8 @@ if ($null -eq $metadataFile) {
 $failedChecks = @($checks | Where-Object { -not $_.passed })
 $verdict = if ($failedChecks.Count -eq 0) { "PASS" } else { "FAIL" }
 $runtimeSummary = [ordered]@{
+    logger_service_instance_id = $expectedLoggerServiceInstanceId
+    build_commit = $expectedBuildCommit
     initial_rows_total = $initialRows
     final_rows_total = $finalRows
     sample_count = $samples.Count

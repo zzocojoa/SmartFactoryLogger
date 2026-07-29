@@ -2,6 +2,7 @@ import asyncio
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import tracemalloc
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -1114,34 +1116,53 @@ $script:promptCount = 0
 $success = Invoke-OperatorShutdownCheckpoint `
     -TimeoutSeconds 2 `
     -PollIntervalSeconds 0 `
+    -ConsecutiveFailuresRequired 3 `
     -ReachabilityProbe {
         $script:successProbeCount += 1
         return $script:successProbeCount -lt 2
     } `
+    -ProductProcessProbe { return $false } `
     -PromptAction { $script:promptCount += 1 } `
     -SleepAction { param([int]$Seconds) }
 
 $alreadyStopped = Invoke-OperatorShutdownCheckpoint `
     -TimeoutSeconds 2 `
     -PollIntervalSeconds 0 `
+    -ConsecutiveFailuresRequired 3 `
     -ReachabilityProbe { return $false } `
+    -ProductProcessProbe { return $false } `
     -PromptAction { throw "prompt must not run" } `
     -SleepAction { param([int]$Seconds) }
 
 $timeout = Invoke-OperatorShutdownCheckpoint `
     -TimeoutSeconds 0 `
     -PollIntervalSeconds 0 `
+    -ConsecutiveFailuresRequired 3 `
     -ReachabilityProbe { return $true } `
+    -ProductProcessProbe { return $true } `
+    -PromptAction { $script:promptCount += 1 } `
+    -SleepAction { param([int]$Seconds) }
+
+$transientHealthFailure = Invoke-OperatorShutdownCheckpoint `
+    -TimeoutSeconds 0 `
+    -PollIntervalSeconds 0 `
+    -ConsecutiveFailuresRequired 3 `
+    -ReachabilityProbe { return $false } `
+    -ProductProcessProbe { return $true } `
     -PromptAction { $script:promptCount += 1 } `
     -SleepAction { param([int]$Seconds) }
 
 [PSCustomObject]@{
     success_stopped = [bool]$success.backend_stopped
     success_operator_requested = [bool]$success.operator_shutdown_requested
+    success_consecutive_count = [int]$success.consecutive_unreachable_count
     already_stopped = [bool]$alreadyStopped.backend_stopped
     already_operator_requested = [bool]$alreadyStopped.operator_shutdown_requested
+    already_consecutive_count = [int]$alreadyStopped.consecutive_unreachable_count
     timeout_stopped = [bool]$timeout.backend_stopped
     timeout_operator_requested = [bool]$timeout.operator_shutdown_requested
+    transient_stopped = [bool]$transientHealthFailure.backend_stopped
+    transient_operator_requested = [bool]$transientHealthFailure.operator_shutdown_requested
     prompt_count = $script:promptCount
 } | ConvertTo-Json -Compress
 """
@@ -1172,11 +1193,127 @@ $timeout = Invoke-OperatorShutdownCheckpoint `
         result = json.loads(completed.stdout.strip().splitlines()[-1])
         self.assertTrue(result["success_stopped"])
         self.assertTrue(result["success_operator_requested"])
+        self.assertGreaterEqual(result["success_consecutive_count"], 3)
         self.assertTrue(result["already_stopped"])
         self.assertFalse(result["already_operator_requested"])
+        self.assertGreaterEqual(result["already_consecutive_count"], 3)
         self.assertFalse(result["timeout_stopped"])
         self.assertTrue(result["timeout_operator_requested"])
-        self.assertEqual(result["prompt_count"], 2)
+        self.assertFalse(result["transient_stopped"])
+        self.assertTrue(result["transient_operator_requested"])
+        self.assertEqual(result["prompt_count"], 3)
+
+    def test_portable_qa_metadata_selection_is_bound_to_current_session(self) -> None:
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        if powershell is None:
+            self.skipTest("PowerShell is unavailable")
+
+        qa_path = self.repo_root / "scripts" / "qa_spot_temperature_v25.ps1"
+        expected_instance = "11111111-1111-1111-1111-111111111111"
+        expected_commit = "a" * 40
+        stale_instance = "22222222-2222-2222-2222-222222222222"
+        stale_commit = "b" * 40
+
+        exercise = r"""
+$source = Get-Content -LiteralPath $args[0] -Raw -Encoding UTF8
+$beginMarker = "# BEGIN QA METADATA HELPERS"
+$endMarker = "# END QA METADATA HELPERS"
+$begin = $source.IndexOf($beginMarker)
+$end = $source.IndexOf($endMarker)
+if ($begin -lt 0 -or $end -lt $begin) {
+    throw "QA metadata helper markers were not found."
+}
+$helperSource = $source.Substring(
+    $begin,
+    ($end + $endMarker.Length) - $begin
+)
+Invoke-Expression $helperSource
+
+$matched = Find-LatestMetadata `
+    -Directories @($args[1]) `
+    -ExpectedLoggerServiceInstanceId $args[2] `
+    -ExpectedBuildCommit $args[3]
+$missing = Find-LatestMetadata `
+    -Directories @($args[1]) `
+    -ExpectedLoggerServiceInstanceId "33333333-3333-3333-3333-333333333333" `
+    -ExpectedBuildCommit ("c" * 40)
+
+[PSCustomObject]@{
+    matched_name = if ($null -ne $matched) { $matched.file.Name } else { "" }
+    matched_instance = if ($null -ne $matched) {
+        $matched.metadata.schema_metadata.logger_service_instance_id
+    } else {
+        ""
+    }
+    missing_is_null = ($null -eq $missing)
+} | ConvertTo-Json -Compress
+"""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            current_path = temp_path / "Factory_Integrated_Log_v2_20260729_100000.metadata.json"
+            stale_path = temp_path / "Factory_Integrated_Log_v2_20260729_110000.metadata.json"
+            current_path.write_text(
+                json.dumps(
+                    {
+                        "schema_metadata": {
+                            "logger_service_instance_id": expected_instance,
+                            "git_commit": expected_commit,
+                        },
+                        "spot_configuration_snapshot": {
+                            "build_git_commit": expected_commit,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stale_path.write_text(
+                json.dumps(
+                    {
+                        "schema_metadata": {
+                            "logger_service_instance_id": stale_instance,
+                            "git_commit": stale_commit,
+                        },
+                        "spot_configuration_snapshot": {
+                            "build_git_commit": stale_commit,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            now = time.time()
+            os.utime(current_path, (now - 60, now - 60))
+            os.utime(stale_path, (now, now))
+            exercise_path = temp_path / "exercise-qa-metadata.ps1"
+            exercise_path.write_text(exercise, encoding="utf-8-sig")
+            command = [
+                powershell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(exercise_path),
+                str(qa_path),
+                str(temp_path),
+                expected_instance,
+                expected_commit,
+            ]
+            if sys.platform == "win32":
+                command = ["cmd.exe", "/d", "/c", *command]
+            completed = subprocess.run(
+                command,
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["matched_name"], current_path.name)
+        self.assertEqual(result["matched_instance"], expected_instance)
+        self.assertTrue(result["missing_is_null"])
 
 
 if __name__ == "__main__":
