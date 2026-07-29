@@ -63,9 +63,22 @@ const data = await response.json();
   "running": true,
   "plc_connected": true,
   "last_update": 1704528000.0,
+  "spot_temperature": {
+    "build_git_commit": "0123456789abcdef0123456789abcdef01234567",
+    "v2_4_operational": {
+      "logger_service_instance_id": "00000000-0000-0000-0000-000000000000",
+      "current_v2_csv_file_name": "Factory_Integrated_Log_v2_20260729_140502.csv",
+      "last_sample_seq": 977
+    }
+  },
   ...
 }
 ```
+
+`current_v2_csv_file_name`은 실행 중인 logger가 현재 기록하는 파일의 basename입니다.
+종료 QA는 이 값과 종료 시 sidecar의 `csv_closeout`을 함께 사용해 같은 프로세스의
+이전 CSV로 fallback하지 않습니다. 절대 경로와 CSV 내용은 `/health`에 노출하지
+않습니다.
 
 ### GET `/stats`
 

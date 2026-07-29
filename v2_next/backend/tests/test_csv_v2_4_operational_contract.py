@@ -2128,6 +2128,9 @@ class CsvV24OperationalContractTests(unittest.TestCase):
     def test_v2_4_runtime_summary_counts_operational_rows(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_enabled=True, csv_v2_operational_fields_enabled=True)
+        service._current_v2_csv_path = Path(
+            "Factory_Integrated_Log_v2_20260729_100000.csv"
+        )
         under_range = self.create_data()
         stale = self.create_data().model_copy(
             update={
@@ -2149,6 +2152,10 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(
             summary["logger_service_started_at"],
             service.logger_service_started_at,
+        )
+        self.assertEqual(
+            summary["current_v2_csv_file_name"],
+            "Factory_Integrated_Log_v2_20260729_100000.csv",
         )
         self.assertEqual(summary["rows_total"], 2)
         self.assertEqual(summary["rows_by_temperature_output_status"]["under_range"], 1)

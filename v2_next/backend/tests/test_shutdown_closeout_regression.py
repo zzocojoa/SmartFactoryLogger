@@ -120,6 +120,8 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     )
 
             service = CSVLoggerService()
+            service._v2_4_last_sample_seq = realtime_row_total
+            service._v2_4_last_updated_at = "2026-07-29T05:00:00Z"
             tracemalloc.start()
             try:
                 with patch(
@@ -140,6 +142,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
 
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
             coverage = payload["spot_observation_fact_manifest"]["link_coverage"]
+            csv_closeout = payload["csv_closeout"]
 
         self.assertEqual(refreshed, metadata_path)
         self.assertEqual(
@@ -149,6 +152,16 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         self.assertEqual(coverage["linked_rows"], realtime_row_total)
         self.assertEqual(coverage["missing_fact_key_rows"], 0)
         self.assertEqual(coverage["coverage_pct"], 100.0)
+        self.assertEqual(
+            csv_closeout,
+            {
+                "finalized": True,
+                "csv_file_name": csv_path.name,
+                "logger_service_instance_id": service.logger_service_instance_id,
+                "final_sample_seq": realtime_row_total,
+                "final_updated_at": "2026-07-29T05:00:00Z",
+            },
+        )
         self.assertLess(
             peak_bytes,
             64 * 1024 * 1024,
@@ -1233,19 +1246,22 @@ $matched = Find-LatestMetadata `
     -Directories @($args[1]) `
     -ExpectedLoggerServiceInstanceId $args[2] `
     -ExpectedBuildCommit $args[3] `
-    -ExpectedMinimumSampleSeq ([long]$args[4])
+    -ExpectedMinimumSampleSeq ([long]$args[4]) `
+    -ExpectedCsvFileName $args[5]
 $missing = Find-LatestMetadata `
     -Directories @($args[1]) `
     -ExpectedLoggerServiceInstanceId "33333333-3333-3333-3333-333333333333" `
     -ExpectedBuildCommit ("c" * 40) `
-    -ExpectedMinimumSampleSeq ([long]$args[4])
+    -ExpectedMinimumSampleSeq ([long]$args[4]) `
+    -ExpectedCsvFileName $args[5]
 
-Set-Content -LiteralPath $args[5] -Value "{" -Encoding UTF8
+Set-Content -LiteralPath $args[6] -Value "{" -Encoding UTF8
 $corruptCurrent = Find-LatestMetadata `
     -Directories @($args[1]) `
     -ExpectedLoggerServiceInstanceId $args[2] `
     -ExpectedBuildCommit $args[3] `
-    -ExpectedMinimumSampleSeq ([long]$args[4])
+    -ExpectedMinimumSampleSeq ([long]$args[4]) `
+    -ExpectedCsvFileName $args[5]
 
 [PSCustomObject]@{
     matched_name = if ($null -ne $matched) { $matched.file.Name } else { "" }
@@ -1254,8 +1270,8 @@ $corruptCurrent = Find-LatestMetadata `
     } else {
         ""
     }
-    matched_last_sample_seq = if ($null -ne $matched) {
-        [long]$matched.csv_last_sample_seq
+    matched_final_sample_seq = if ($null -ne $matched) {
+        [long]$matched.csv_final_sample_seq
     } else {
         0
     }
@@ -1275,7 +1291,12 @@ $corruptCurrent = Find-LatestMetadata `
                 logger_instance: str,
                 build_commit: str,
                 sample_seq: int,
+                raw_value: str = "455.0",
             ) -> None:
+                csv_file_name = metadata_path.name.replace(
+                    ".metadata.json",
+                    ".csv",
+                )
                 metadata_path.write_text(
                     json.dumps(
                         {
@@ -1286,20 +1307,36 @@ $corruptCurrent = Find-LatestMetadata `
                             "spot_configuration_snapshot": {
                                 "build_git_commit": build_commit,
                             },
+                            "csv_closeout": {
+                                "finalized": True,
+                                "csv_file_name": csv_file_name,
+                                "logger_service_instance_id": logger_instance,
+                                "final_sample_seq": sample_seq,
+                            },
                         }
                     ),
                     encoding="utf-8",
                 )
-                csv_path = metadata_path.with_name(
-                    metadata_path.name.replace(".metadata.json", ".csv")
-                )
+                csv_path = metadata_path.with_name(csv_file_name)
                 with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
                     writer = csv.writer(handle)
-                    writer.writerow(["logger_service_instance_id", "sample_seq"])
-                    writer.writerow([logger_instance, sample_seq])
+                    writer.writerow(
+                        [
+                            "logger_service_instance_id",
+                            "sample_seq",
+                            "spot_temperature_raw",
+                        ]
+                    )
+                    writer.writerow([logger_instance, sample_seq, raw_value])
 
-            write_artifact(current_path, expected_instance, expected_commit, 200)
-            write_artifact(older_path, expected_instance, expected_commit, 100)
+            write_artifact(
+                current_path,
+                expected_instance,
+                expected_commit,
+                201,
+                "6553.4\r\n",
+            )
+            write_artifact(older_path, expected_instance, expected_commit, 200)
             write_artifact(stale_path, stale_instance, stale_commit, 300)
             now = time.time()
             os.utime(older_path, (now - 120, now - 120))
@@ -1318,7 +1355,8 @@ $corruptCurrent = Find-LatestMetadata `
                 str(temp_path),
                 expected_instance,
                 expected_commit,
-                "150",
+                "200",
+                current_path.name.replace(".metadata.json", ".csv"),
                 str(current_path),
             ]
             if sys.platform == "win32":
@@ -1336,7 +1374,7 @@ $corruptCurrent = Find-LatestMetadata `
         result = json.loads(completed.stdout.strip().splitlines()[-1])
         self.assertEqual(result["matched_name"], current_path.name)
         self.assertEqual(result["matched_instance"], expected_instance)
-        self.assertEqual(result["matched_last_sample_seq"], 200)
+        self.assertEqual(result["matched_final_sample_seq"], 201)
         self.assertTrue(result["missing_is_null"])
         self.assertTrue(result["corrupt_current_is_null"])
 

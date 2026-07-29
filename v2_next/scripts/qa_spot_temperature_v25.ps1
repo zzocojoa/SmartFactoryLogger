@@ -236,58 +236,41 @@ function Get-LogDirectoryCandidates {
     )
 }
 
-function Get-CsvTailIdentity {
-    param([string]$CsvPath)
-    if (-not (Test-Path -LiteralPath $CsvPath -PathType Leaf)) {
-        return $null
-    }
-    try {
-        $firstLines = @(Get-Content -LiteralPath $CsvPath -Encoding UTF8 -TotalCount 2)
-        $lastLine = Get-Content -LiteralPath $CsvPath -Encoding UTF8 -Tail 1
-        if ($firstLines.Count -lt 2 -or [string]::IsNullOrWhiteSpace($lastLine)) {
-            return $null
-        }
-        $row = @($firstLines[0], $lastLine) |
-            ConvertFrom-Csv |
-            Select-Object -Last 1
-        $sampleSeq = 0L
-        if (
-            $null -eq $row -or
-            -not [long]::TryParse([string]$row.sample_seq, [ref]$sampleSeq)
-        ) {
-            return $null
-        }
-        return [PSCustomObject]@{
-            logger_service_instance_id = [string]$row.logger_service_instance_id
-            sample_seq = $sampleSeq
-        }
-    } catch {
-        return $null
-    }
-}
-
 function Find-LatestMetadata {
     param(
         [string[]]$Directories,
         [string]$ExpectedLoggerServiceInstanceId,
         [string]$ExpectedBuildCommit,
-        [long]$ExpectedMinimumSampleSeq
+        [long]$ExpectedMinimumSampleSeq,
+        [string]$ExpectedCsvFileName
     )
-    $found = New-Object "System.Collections.Generic.List[object]"
-    $bestMatch = $null
+    if (
+        [string]::IsNullOrWhiteSpace($ExpectedCsvFileName) -or
+        [System.IO.Path]::GetFileName($ExpectedCsvFileName) -ne
+            $ExpectedCsvFileName -or
+        $ExpectedCsvFileName -notmatch "\.csv$"
+    ) {
+        return $null
+    }
+    $expectedMetadataName = $ExpectedCsvFileName -replace "\.csv$", ".metadata.json"
     foreach ($directory in $Directories) {
         if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
             continue
         }
-        Get-ChildItem -LiteralPath $directory -Filter "Factory_Integrated_Log_v2_*.metadata.json" -File -ErrorAction SilentlyContinue |
-            ForEach-Object { $found.Add($_) }
-    }
-    foreach ($candidate in @($found | Sort-Object LastWriteTime -Descending)) {
+        $candidatePath = Join-Path $directory $expectedMetadataName
+        if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+            continue
+        }
+        $candidate = Get-Item -LiteralPath $candidatePath -ErrorAction SilentlyContinue
+        if ($null -eq $candidate) {
+            continue
+        }
         try {
             $metadata = Get-Content -LiteralPath $candidate.FullName -Raw -Encoding UTF8 |
                 ConvertFrom-Json
             $schemaMetadata = Get-ObjectProperty $metadata "schema_metadata"
             $configSnapshot = Get-ObjectProperty $metadata "spot_configuration_snapshot"
+            $csvCloseout = Get-ObjectProperty $metadata "csv_closeout"
             $loggerServiceInstanceId = [string](
                 Get-ObjectProperty $schemaMetadata "logger_service_instance_id" ""
             )
@@ -297,36 +280,41 @@ function Find-LatestMetadata {
             $configBuildCommit = [string](
                 Get-ObjectProperty $configSnapshot "build_git_commit" ""
             )
+            $closeoutSampleSeq = 0L
+            $closeoutSampleSeqValid = [long]::TryParse(
+                [string](Get-ObjectProperty $csvCloseout "final_sample_seq" ""),
+                [ref]$closeoutSampleSeq
+            )
+            $csvPath = Join-Path $directory $ExpectedCsvFileName
             if (
                 $loggerServiceInstanceId -eq $ExpectedLoggerServiceInstanceId -and
                 $schemaBuildCommit -eq $ExpectedBuildCommit -and
-                $configBuildCommit -eq $ExpectedBuildCommit
+                $configBuildCommit -eq $ExpectedBuildCommit -and
+                (Convert-ToBoolean (
+                    Get-ObjectProperty $csvCloseout "finalized" $false
+                )) -and
+                ([string](
+                    Get-ObjectProperty $csvCloseout "csv_file_name" ""
+                )) -eq $ExpectedCsvFileName -and
+                ([string](
+                    Get-ObjectProperty $csvCloseout "logger_service_instance_id" ""
+                )) -eq $ExpectedLoggerServiceInstanceId -and
+                $closeoutSampleSeqValid -and
+                $closeoutSampleSeq -ge $ExpectedMinimumSampleSeq -and
+                (Test-Path -LiteralPath $csvPath -PathType Leaf)
             ) {
-                $csvPath = $candidate.FullName -replace "\.metadata\.json$", ".csv"
-                $tailIdentity = Get-CsvTailIdentity -CsvPath $csvPath
-                if (
-                    $null -ne $tailIdentity -and
-                    $tailIdentity.logger_service_instance_id -eq
-                        $ExpectedLoggerServiceInstanceId -and
-                    $tailIdentity.sample_seq -ge $ExpectedMinimumSampleSeq -and
-                    (
-                        $null -eq $bestMatch -or
-                        $tailIdentity.sample_seq -gt $bestMatch.csv_last_sample_seq
-                    )
-                ) {
-                    $bestMatch = [PSCustomObject]@{
-                        file = $candidate
-                        metadata = $metadata
-                        csv_file = $csvPath
-                        csv_last_sample_seq = $tailIdentity.sample_seq
-                    }
+                return [PSCustomObject]@{
+                    file = $candidate
+                    metadata = $metadata
+                    csv_file = $csvPath
+                    csv_final_sample_seq = $closeoutSampleSeq
                 }
             }
         } catch {
             continue
         }
     }
-    return $bestMatch
+    return $null
 }
 # END QA METADATA HELPERS
 
@@ -443,6 +431,9 @@ $expectedBuildCommit = [string](Get-ObjectProperty $finalSpot "build_git_commit"
 $expectedMinimumSampleSeq = Convert-ToInt64 (
     Get-ObjectProperty $finalOperational "last_sample_seq" 0
 )
+$expectedCsvFileName = [string](
+    Get-ObjectProperty $finalOperational "current_v2_csv_file_name" ""
+)
 $finalRows = Convert-ToInt64 (Get-ObjectProperty $finalOperational "rows_total" 0)
 $successfulPollObserved = @($samples | Where-Object { $_.poll_status -eq "success" }).Count -gt 0
 $currentOriginObserved = @($samples | Where-Object { $_.temperature_value_origin -eq "current_observation" }).Count -gt 0
@@ -480,6 +471,13 @@ Add-QaCheck -Name "Final operational sample sequence" `
     -Passed ($expectedMinimumSampleSeq -gt 0) `
     -Actual ([string]$expectedMinimumSampleSeq) `
     -Expected "positive current-session sample_seq"
+Add-QaCheck -Name "Current CSV file identity" `
+    -Passed (
+        $expectedCsvFileName -match
+            "^Factory_Integrated_Log_v2_[A-Za-z0-9_.-]+\.csv$"
+    ) `
+    -Actual $(if ($expectedCsvFileName) { $expectedCsvFileName } else { "missing" }) `
+    -Expected "current v2 CSV basename"
 
 if (-not $SkipStopPrompt) {
     Write-Host ""
@@ -528,7 +526,8 @@ $metadataMatch = Find-LatestMetadata `
     -Directories $directories `
     -ExpectedLoggerServiceInstanceId $expectedLoggerServiceInstanceId `
     -ExpectedBuildCommit $expectedBuildCommit `
-    -ExpectedMinimumSampleSeq $expectedMinimumSampleSeq
+    -ExpectedMinimumSampleSeq $expectedMinimumSampleSeq `
+    -ExpectedCsvFileName $expectedCsvFileName
 $metadataFile = if ($null -ne $metadataMatch) { $metadataMatch.file } else { $null }
 $fileSummary = [ordered]@{
     config_path = $ConfigPath
@@ -536,6 +535,7 @@ $fileSummary = [ordered]@{
     expected_logger_service_instance_id = $expectedLoggerServiceInstanceId
     expected_build_commit = $expectedBuildCommit
     expected_minimum_sample_seq = $expectedMinimumSampleSeq
+    expected_csv_file_name = $expectedCsvFileName
     log_directory = $null
     metadata_file = $null
     csv_file = $null
@@ -579,8 +579,8 @@ if ($null -eq $metadataFile) {
         ) `
         -Expected "$expectedBuildCommit/$expectedBuildCommit"
         Add-QaCheck -Name "Matching CSV final sample sequence" `
-        -Passed ($metadataMatch.csv_last_sample_seq -ge $expectedMinimumSampleSeq) `
-        -Actual ([string]$metadataMatch.csv_last_sample_seq) `
+        -Passed ($metadataMatch.csv_final_sample_seq -ge $expectedMinimumSampleSeq) `
+        -Actual ([string]$metadataMatch.csv_final_sample_seq) `
         -Expected ">= $expectedMinimumSampleSeq"
         Add-QaCheck -Name "Sidecar schema" `
         -Passed (([string](Get-ObjectProperty $schemaMetadata "active_schema_version")) -eq "2.5.0") `
@@ -707,6 +707,7 @@ $runtimeSummary = [ordered]@{
     logger_service_instance_id = $expectedLoggerServiceInstanceId
     build_commit = $expectedBuildCommit
     minimum_sample_seq = $expectedMinimumSampleSeq
+    csv_file_name = $expectedCsvFileName
     initial_rows_total = $initialRows
     final_rows_total = $finalRows
     sample_count = $samples.Count

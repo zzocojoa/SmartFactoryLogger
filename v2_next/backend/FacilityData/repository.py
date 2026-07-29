@@ -1019,8 +1019,18 @@ class CSVLoggerService:
                 exc,
             )
             return None
+        with self._v2_4_operational_lock:
+            final_sample_seq = self._v2_4_last_sample_seq
+            final_updated_at = self._v2_4_last_updated_at
         payload.pop("spot_observation_fact_closeout", None)
         payload["spot_observation_fact_manifest"] = observation_fact_manifest
+        payload["csv_closeout"] = {
+            "finalized": True,
+            "csv_file_name": csv_path.name,
+            "logger_service_instance_id": self.logger_service_instance_id,
+            "final_sample_seq": final_sample_seq,
+            "final_updated_at": final_updated_at,
+        }
         temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
         try:
             temp_path.write_text(
@@ -1052,6 +1062,7 @@ class CSVLoggerService:
             )
             return None
         payload.pop("spot_observation_fact_manifest", None)
+        payload.pop("csv_closeout", None)
         payload["spot_observation_fact_closeout"] = {
             "finalized": False,
             "writes_drained": writes_drained,
@@ -2005,6 +2016,11 @@ class CSVLoggerService:
                 ),
                 "logger_service_instance_id": self.logger_service_instance_id,
                 "logger_service_started_at": self.logger_service_started_at,
+                "current_v2_csv_file_name": (
+                    self._current_v2_csv_path.name
+                    if self._current_v2_csv_path is not None
+                    else None
+                ),
                 "temperature_hardening_enabled": temperature_hardening_enabled,
                 "rows_total": self._v2_4_operational_rows_total,
                 "rows_by_temperature_output_status": dict(self._v2_4_temperature_output_status_counts),

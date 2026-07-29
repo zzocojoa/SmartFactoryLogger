@@ -12,7 +12,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 from backend.FacilityData.spot_low_signal import (
     LOW_SIGNAL_ALARM_BIT,
@@ -291,20 +291,35 @@ class SpotObservationFactWriter:
                 continue
             try:
                 raw = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(raw, dict):
-                if raw.get("spot_observation_fact_schema_version") != SPOT_OBSERVATION_FACT_SCHEMA_VERSION or not set(
-                    SPOT_OBSERVATION_FACT_COLUMNS
-                ).issubset(raw):
-                    spool_path.rename(self._next_schema_mismatch_archive_path(spool_path))
-                    return
-                pending.append({column: _text(raw.get(column)) for column in SPOT_OBSERVATION_FACT_COLUMNS})
+            except json.JSONDecodeError as exc:
+                self._quarantine_invalid_spool(spool_path, "malformed-json", exc)
+            if not isinstance(raw, dict):
+                self._quarantine_invalid_spool(spool_path, "non-object-row")
+            if raw.get("spot_observation_fact_schema_version") != SPOT_OBSERVATION_FACT_SCHEMA_VERSION or not set(
+                SPOT_OBSERVATION_FACT_COLUMNS
+            ).issubset(raw):
+                self._quarantine_invalid_spool(spool_path, "schema-mismatch")
+            pending.append({column: _text(raw.get(column)) for column in SPOT_OBSERVATION_FACT_COLUMNS})
         for fact in pending:
             key = fact["spot_observation_key"]
             if key and key not in self._seen_keys:
                 self._append_fact(fact)
         spool_path.unlink(missing_ok=True)
+
+    def _quarantine_invalid_spool(
+        self,
+        spool_path: Path,
+        reason: str,
+        cause: Exception | None = None,
+    ) -> NoReturn:
+        archive_path = self._next_schema_mismatch_archive_path(spool_path)
+        spool_path.rename(archive_path)
+        error = ValueError(
+            f"Invalid SPOT observation fact spool quarantined: {reason}: {archive_path.name}"
+        )
+        if cause is not None:
+            raise error from cause
+        raise error
 
     def _spool_fact(self, fact: Mapping[str, str]) -> None:
         try:
@@ -323,10 +338,16 @@ class SpotObservationFactWriter:
 
     def spool_pending_count(self) -> int:
         spool_path = self._effective_spool_path()
-        if not spool_path.exists() or spool_path.stat().st_size == 0:
-            return 0
-        with spool_path.open("r", encoding="utf-8") as handle:
-            return sum(1 for line in handle if line.strip())
+        suffix = spool_path.suffix
+        archive_pattern = f"{spool_path.stem}.*.schema-mismatch{suffix}"
+        spool_paths = [spool_path, *sorted(spool_path.parent.glob(archive_pattern))]
+        pending_count = 0
+        for pending_path in spool_paths:
+            if not pending_path.exists() or pending_path.stat().st_size == 0:
+                continue
+            with pending_path.open("r", encoding="utf-8") as handle:
+                pending_count += sum(1 for line in handle if line.strip())
+        return pending_count
 
     def manifest_summary(
         self,

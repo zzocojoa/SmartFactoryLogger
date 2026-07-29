@@ -35,12 +35,14 @@ All notable changes to Smart Factory Logger V2 are documented here.
   row-count and SHA-256 manifest state while facts are appended instead of
   rescanning indefinitely growing historical files during shutdown.
 - Bound one-command QA to the exact logger-service session and build commit
-  observed before operator shutdown plus the current CSV sample sequence, so
-  stale same-process sidecars cannot satisfy validation and transient health
+  observed before operator shutdown plus the exact current CSV basename and its
+  finalized sidecar sample sequence, so multiline CSV values and stale
+  same-process sidecars cannot misdirect validation and transient health
   failures cannot impersonate a stopped app.
 - Rejected clean fact closeout when an observation spool remains pending or an
   observation/image writer recorded a failure earlier in the runtime, including
-  fail-closed handling when a restarted writer cannot read its spool.
+  fail-closed handling when a restarted writer cannot read its spool and
+  persistent quarantine of malformed or schema-mismatched spool rows.
 - Kept v2 CSV logging available when the configured LogPath falls back or
   changes before runtime fact writers can follow it, while marking the fact
   manifests incomplete and rejecting a falsely clean shutdown.

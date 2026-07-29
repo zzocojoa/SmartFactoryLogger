@@ -375,18 +375,70 @@ class SpotObservationFactTests(unittest.TestCase):
             writer = SpotObservationFactWriter(output_path, spool_path=spool_path)
             fact = writer.write_fact(success_snapshot)
 
-            self.assertIsNotNone(fact)
-            self.assertFalse(spool_path.exists())
+            self.assertIsNone(fact)
+            self.assertEqual(writer.failure_count, 1)
+            self.assertTrue(spool_path.exists())
             archives = list(
                 tmp_path.glob("spot_observation_fact.failed.*.schema-mismatch.jsonl")
             )
             self.assertEqual(len(archives), 1)
             self.assertIn("svc-legacy:11", archives[0].read_text(encoding="utf-8"))
-            with output_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                rows = list(csv.reader(handle))
-            self.assertEqual(rows[0], SPOT_OBSERVATION_FACT_COLUMNS)
-            self.assertEqual(len(rows), 2)
-            self.assertIn("svc-current:12", rows[1])
+            self.assertIn("svc-current:12", spool_path.read_text(encoding="utf-8"))
+            self.assertFalse(output_path.exists())
+            restarted_writer = SpotObservationFactWriter(
+                output_path,
+                spool_path=spool_path,
+            )
+            self.assertEqual(restarted_writer.spool_pending_count(), 2)
+
+    def test_spool_flush_quarantines_invalid_rows_and_fails_closed(self) -> None:
+        success_snapshot = {
+            "spot_service_instance_id": "svc-current",
+            "spot_poll_seq": 12,
+            "spot_observation_seq": 12,
+            "spot_poll_status": "success",
+            "spot_raw_validity": "valid_temperature",
+            "spot_raw_value_text": "456.0",
+            "spot_last_poll_completed_at": "2026-06-26T00:00:01Z",
+        }
+        invalid_rows = {
+            "malformed-json": '{"spot_observation_key":"truncated"',
+            "non-object-json": '["not", "a", "fact"]',
+        }
+        for label, invalid_row in invalid_rows.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                output_path = tmp_path / "spot_observation_fact.csv"
+                spool_path = tmp_path / "spot_observation_fact.failed.jsonl"
+                spool_path.write_text(f"{invalid_row}\n", encoding="utf-8")
+
+                writer = SpotObservationFactWriter(
+                    output_path,
+                    spool_path=spool_path,
+                )
+                fact = writer.write_fact(success_snapshot)
+
+                self.assertIsNone(fact)
+                self.assertEqual(writer.failure_count, 1)
+                archives = list(
+                    tmp_path.glob(
+                        "spot_observation_fact.failed.*.schema-mismatch.jsonl"
+                    )
+                )
+                self.assertEqual(len(archives), 1)
+                self.assertEqual(archives[0].read_text(encoding="utf-8").strip(), invalid_row)
+                self.assertTrue(spool_path.exists())
+                self.assertIn(
+                    "svc-current:12",
+                    spool_path.read_text(encoding="utf-8"),
+                )
+
+                restarted_writer = SpotObservationFactWriter(
+                    output_path,
+                    spool_path=spool_path,
+                )
+                self.assertEqual(restarted_writer.failure_count, 0)
+                self.assertEqual(restarted_writer.spool_pending_count(), 2)
 
     def test_build_fact_uses_missing_diagnostics_status(self) -> None:
         fact = build_spot_observation_fact(
