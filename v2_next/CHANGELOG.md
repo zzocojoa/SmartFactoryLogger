@@ -31,6 +31,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Preserved primary shutdown failures when drain probes fail, made partial guard
   cleanup retryable, and kept source-port diagnostics schema-stable after
   transport shutdown.
+- Kept observation and image fact closeout bounded by maintaining exact
+  row-count and SHA-256 manifest state while facts are appended instead of
+  rescanning indefinitely growing historical files during shutdown.
+- Kept v2 CSV logging available when the configured LogPath falls back or
+  changes before runtime fact writers can follow it, while marking the fact
+  manifests incomplete and rejecting a falsely clean shutdown.
 - Preserved focus and actuator API compatibility while routing eligible
   background requests through the guarded transport.
 

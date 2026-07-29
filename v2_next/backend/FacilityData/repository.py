@@ -45,13 +45,13 @@ from backend.FacilityData.process_phase import (
 )
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_FILENAME,
-    SpotObservationFactWriter,
     build_spot_observation_fact_manifest,
     build_spot_observation_key,
     parse_spot_diagnostic_evidence_codes,
 )
 from backend.FacilityData.spot_config_provenance import build_spot_configuration_snapshot
 from backend.FacilityData.spot_image_fact import (
+    SPOT_IMAGE_FACT_FILENAME,
     SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME,
     build_spot_image_fact_manifest,
 )
@@ -303,7 +303,7 @@ def _v2_column_hash(columns: Iterable[str]) -> str:
 
 
 class CSVLoggerService:
-    def __init__(self) -> None:
+    def __init__(self, *, require_runtime_manifest_state: bool = False) -> None:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.queue: queue.Queue[Optional[FactoryData]] = queue.Queue(maxsize=5000)
@@ -371,6 +371,7 @@ class CSVLoggerService:
         self._runtime_write_failure_observed = False
         self._finalize_spot_image_manifest_on_stop = True
         self._finalize_spot_observation_manifest_on_stop = True
+        self._require_runtime_manifest_state = bool(require_runtime_manifest_state)
 
     def start(self) -> None:
         with self._lifecycle_lock:
@@ -845,8 +846,20 @@ class CSVLoggerService:
             from backend.FacilityData.drivers import spot_api
 
             health = spot_api.get_spot_image_capture_health()
-        except Exception:
+            runtime_stats = spot_api.get_spot_image_capture_manifest_stats(
+                fact_path=log_path / SPOT_IMAGE_FACT_FILENAME,
+            )
+        except Exception as exc:
+            if self._require_runtime_manifest_state:
+                raise RuntimeError(
+                    "SPOT image fact runtime manifest state is unavailable"
+                ) from exc
             health = {}
+            runtime_stats = None
+        if runtime_stats is None and self._require_runtime_manifest_state:
+            raise RuntimeError(
+                "SPOT image fact runtime manifest path does not match closeout path"
+            )
         mode = str(health.get("mode") or getattr(config, "SPOT_IMAGE_CAPTURE_MODE", "off") or "off")
         enabled = bool(health.get("enabled", getattr(config, "SPOT_IMAGE_CAPTURE_ENABLED", False)))
         return build_spot_image_fact_manifest(
@@ -855,6 +868,7 @@ class CSVLoggerService:
             enabled=enabled,
             mode=mode,
             health=health,
+            runtime_stats=runtime_stats,
         )
 
     def write_spot_image_fact_final_manifest(self, log_path: Optional[Path] = None) -> Path:
@@ -870,11 +884,16 @@ class CSVLoggerService:
         temp_path.replace(final_path)
         return final_path
 
-    def _write_spot_image_fact_final_manifest_safely(self, log_path: Optional[Path] = None) -> None:
+    def _write_spot_image_fact_final_manifest_safely(
+        self,
+        log_path: Optional[Path] = None,
+    ) -> bool:
         try:
             self.write_spot_image_fact_final_manifest(log_path)
         except Exception as exc:
             self.logger.warning("Failed to write SPOT image fact final manifest: %s", exc)
+            return False
+        return True
 
     def _changeover_candidate_resolution_fact_manifest(self, log_path: Path) -> dict[str, Any]:
         return build_changeover_candidate_resolution_fact_manifest(
@@ -887,10 +906,12 @@ class CSVLoggerService:
         )
 
     def _spot_observation_fact_manifest(self, log_path: Path) -> dict[str, Any]:
+        spot_api_module: Any | None = None
         try:
-            from backend.FacilityData.drivers import spot_api
+            from backend.FacilityData.drivers import spot_api as imported_spot_api
 
-            health = spot_api.get_spot_observation_fact_health()
+            spot_api_module = imported_spot_api
+            health = spot_api_module.get_spot_observation_fact_health()
         except Exception:
             health = {}
         enabled = bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)))
@@ -899,6 +920,18 @@ class CSVLoggerService:
             fact_path,
             enabled=enabled,
         )
+        runtime_summary = (
+            spot_api_module.get_spot_observation_fact_manifest_summary(
+                fact_path=fact_path,
+                allow_offline_rebuild=not self._require_runtime_manifest_state,
+            )
+            if spot_api_module is not None
+            else None
+        )
+        if runtime_summary is None and self._require_runtime_manifest_state:
+            raise RuntimeError(
+                "SPOT observation fact runtime manifest state is unavailable"
+            )
         return build_spot_observation_fact_manifest(
             fact_path=fact_path,
             enabled=enabled,
@@ -907,16 +940,29 @@ class CSVLoggerService:
             ),
             spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
             path=SPOT_OBSERVATION_FACT_FILENAME,
+            summary=runtime_summary,
         )
 
     def _ensure_spot_observation_fact_file(self, fact_path: Path, *, enabled: bool) -> int:
         if not enabled:
             return 0
-        writer = SpotObservationFactWriter(fact_path, load_existing_keys=False)
-        if writer.ensure_initialized():
-            return 0
+        try:
+            from backend.FacilityData.drivers import spot_api
+
+            initialized = spot_api.ensure_spot_observation_fact_initialized(
+                fact_path=fact_path,
+                allow_offline_rebuild=not self._require_runtime_manifest_state,
+            )
+            if initialized:
+                return 0
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to initialize enabled SPOT observation fact: %s",
+                exc,
+            )
+            return 1
         self.logger.warning("Failed to initialize enabled SPOT observation fact: %s", fact_path.name)
-        return max(1, writer.failure_count)
+        return 1
 
     def refresh_spot_observation_fact_manifest_for_csv(self, csv_path: Path) -> Optional[Path]:
         metadata_path = csv_path.with_suffix(".metadata.json")
@@ -927,10 +973,12 @@ class CSVLoggerService:
         except (OSError, json.JSONDecodeError) as exc:
             self.logger.warning("Failed to read CSV v2 sidecar for observation fact refresh: %s", exc)
             return None
+        spot_api_module: Any | None = None
         try:
-            from backend.FacilityData.drivers import spot_api
+            from backend.FacilityData.drivers import spot_api as imported_spot_api
 
-            health = spot_api.get_spot_observation_fact_health()
+            spot_api_module = imported_spot_api
+            health = spot_api_module.get_spot_observation_fact_health()
         except Exception:
             health = {}
         enabled = bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)))
@@ -940,7 +988,18 @@ class CSVLoggerService:
             enabled=enabled,
         )
         try:
+            if spot_api_module is None:
+                raise RuntimeError(
+                    "SPOT observation fact runtime summary is unavailable"
+                )
             with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                runtime_summary = (
+                    spot_api_module.get_spot_observation_fact_manifest_summary(
+                        fact_path=fact_path,
+                        realtime_rows=csv.DictReader(handle),
+                        allow_offline_rebuild=not self._require_runtime_manifest_state,
+                    )
+                )
                 observation_fact_manifest = build_spot_observation_fact_manifest(
                     fact_path=fact_path,
                     enabled=enabled,
@@ -951,8 +1010,8 @@ class CSVLoggerService:
                     spool_pending_count=int(
                         health.get("spool_pending_count", 0) or 0
                     ),
-                    realtime_rows=csv.DictReader(handle),
                     path=SPOT_OBSERVATION_FACT_FILENAME,
+                    summary=runtime_summary,
                 )
         except Exception as exc:
             self.logger.warning(
@@ -960,6 +1019,7 @@ class CSVLoggerService:
                 exc,
             )
             return None
+        payload.pop("spot_observation_fact_closeout", None)
         payload["spot_observation_fact_manifest"] = observation_fact_manifest
         temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
         try:
@@ -1096,8 +1156,6 @@ class CSVLoggerService:
             },
             "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(active_contract),
             "spot_configuration_snapshot": self._spot_configuration_snapshot(runtime_git_commit),
-            "spot_observation_fact_manifest": self._spot_observation_fact_manifest(sidecar_path.parent),
-            "spot_image_fact_manifest": self._spot_image_fact_manifest(sidecar_path.parent),
             "changeover_candidate_resolution_fact_manifest": (
                 self._changeover_candidate_resolution_fact_manifest(sidecar_path.parent)
             ),
@@ -1306,6 +1364,39 @@ class CSVLoggerService:
                 ),
             },
         }
+        runtime_manifests = (
+            (
+                "spot_observation_fact_manifest",
+                "spot_observation_fact_closeout",
+                lambda: self._spot_observation_fact_manifest(sidecar_path.parent),
+            ),
+            (
+                "spot_image_fact_manifest",
+                "spot_image_fact_closeout",
+                lambda: self._spot_image_fact_manifest(sidecar_path.parent),
+            ),
+        )
+        for manifest_key, closeout_key, build_manifest in runtime_manifests:
+            try:
+                payload[manifest_key] = build_manifest()
+            except Exception as exc:
+                # A runtime fact writer can remain bound to the previous configured
+                # directory while the CSV logger has already selected its durable
+                # fallback or a newly configured LogPath. Preserve the realtime CSV
+                # in that situation, but make the incomplete fact closeout explicit
+                # and reject a clean shutdown until the manifests can be reconciled.
+                self._runtime_write_failure_observed = True
+                payload[closeout_key] = {
+                    "finalized": False,
+                    "writes_drained": False,
+                    "reason": "runtime-manifest-unavailable-at-open",
+                    "error_type": exc.__class__.__name__,
+                }
+                self.logger.warning(
+                    "CSV v2 logging will continue without %s: %s",
+                    manifest_key,
+                    exc,
+                )
         try:
             sidecar_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             self._sidecar_paths_written.add(sidecar_key)
@@ -2684,18 +2775,19 @@ class CSVLoggerService:
         self._close_file(f_handle)
         if not self._close_v2_file(v2_handle):
             shutdown_flush_succeeded = False
-        self._shutdown_flush_succeeded = shutdown_flush_succeeded
         if (
             self.csv_v2_enabled
             and self.csv_v2_sidecar_enabled
             and self._finalize_spot_image_manifest_on_stop
         ):
-            self._write_spot_image_fact_final_manifest_safely()
+            if not self._write_spot_image_fact_final_manifest_safely():
+                shutdown_flush_succeeded = False
         elif self.csv_v2_enabled and self.csv_v2_sidecar_enabled:
             self.logger.warning(
                 "Skipped SPOT image fact final manifest because image capture did not drain."
             )
+        self._shutdown_flush_succeeded = shutdown_flush_succeeded
         self.logger.info("CSV logger thread stopped.")
 
 
-logger_service = CSVLoggerService()
+logger_service = CSVLoggerService(require_runtime_manifest_state=True)

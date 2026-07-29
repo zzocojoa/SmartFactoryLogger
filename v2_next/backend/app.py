@@ -459,6 +459,19 @@ async def _run_lifespan_stop_stage(stage: str, stopper: Callable[[], Any]) -> bo
     return succeeded
 
 
+def _probe_spot_observation_fact_drained(shutdown_kind: str) -> bool:
+    try:
+        return bool(spot_control.spot_observation_fact_writes_drained())
+    except Exception as exc:
+        _logger.warning(
+            "[Main] %s SPOT observation drain probe failed error_type=%s %s",
+            shutdown_kind,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+        return False
+
+
 def _log_backend_access_urls() -> None:
     """Resolve local addresses outside the readiness-critical lifespan path."""
     try:
@@ -1695,18 +1708,9 @@ async def lifespan(app: FastAPI):
                     _logger.error(
                         "SPOT poll or transport did not drain before lifespan shutdown"
                     )
-                try:
-                    observation_fact_drained = (
-                        spot_control.spot_observation_fact_writes_drained()
-                    )
-                except Exception as exc:
-                    observation_fact_drained = False
-                    _logger.warning(
-                        "[Main] Lifespan SPOT observation drain probe failed "
-                        "error_type=%s %s",
-                        type(exc).__name__,
-                        _lifecycle_log_fields(),
-                    )
+                observation_fact_drained = _probe_spot_observation_fact_drained(
+                    "Lifespan"
+                )
                 if not observation_fact_drained:
                     shutdown_failures.append("spot_observation_fact")
                     _logger.error(
@@ -3387,7 +3391,9 @@ async def _run_control_shutdown(reason: str) -> None:
         stopper=_stop_spot_poll_loop,
         status=status,
     )
-    observation_fact_drained = spot_control.spot_observation_fact_writes_drained()
+    observation_fact_drained = _probe_spot_observation_fact_drained(
+        "Control shutdown"
+    )
     status["spot_observation_fact_drained"] = observation_fact_drained
     status.update(
         await asyncio.to_thread(

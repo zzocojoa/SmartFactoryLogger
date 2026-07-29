@@ -163,21 +163,58 @@ class SpotObservationFactWriter:
     load_existing_keys: bool = True
     failure_count: int = 0
     _seen_keys: set[str] = field(default_factory=set)
+    _seen_poll_sequences: set[int] = field(default_factory=set, init=False, repr=False)
+    _manifest_digest: Any = field(default_factory=hashlib.sha256, init=False, repr=False)
+    _manifest_state_ready: bool = field(default=True, init=False, repr=False)
+    _manifest_tracked_size: int = field(default=0, init=False, repr=False)
+    _manifest_row_count: int = field(default=0, init=False, repr=False)
+    _capture_status_counts: Counter[str] = field(
+        default_factory=Counter,
+        init=False,
+        repr=False,
+    )
+    _binding_status_counts: Counter[str] = field(
+        default_factory=Counter,
+        init=False,
+        repr=False,
+    )
+    _missing_field_counts: Counter[str] = field(
+        default_factory=Counter,
+        init=False,
+        repr=False,
+    )
+    _diagnostic_field_counts: Counter[str] = field(
+        default_factory=Counter,
+        init=False,
+        repr=False,
+    )
+    _evidence_code_count: int = field(default=0, init=False, repr=False)
+    _provenance_code_count: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.load_existing_keys:
-            self._load_seen_keys_from_output()
+            self._load_manifest_state_from_output()
 
     def ensure_initialized(self) -> bool:
         """Create a current-schema header even when no observation has been emitted yet."""
         try:
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
             with _SPOT_OBSERVATION_FACT_FILE_LOCK:
+                if (
+                    self._manifest_state_ready
+                    and self._output_size() != self._manifest_tracked_size
+                ):
+                    self._manifest_state_ready = False
                 write_header = self._prepare_output_file_for_append()
                 if write_header:
+                    previous_size = self._output_size()
                     with self.output_path.open("a", encoding="utf-8-sig", newline="") as handle:
                         csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS).writeheader()
-            return True
+                    self._extend_manifest_digest(previous_size)
+                return (
+                    self._manifest_state_ready
+                    and self._output_size() == self._manifest_tracked_size
+                )
         except Exception:
             self.failure_count += 1
             return False
@@ -191,7 +228,6 @@ class SpotObservationFactWriter:
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
             self._flush_spool()
             self._append_fact(fact)
-            self._seen_keys.add(key)
             return fact
         except Exception:
             self.failure_count += 1
@@ -201,11 +237,14 @@ class SpotObservationFactWriter:
     def _append_fact(self, fact: Mapping[str, str]) -> None:
         with _SPOT_OBSERVATION_FACT_FILE_LOCK:
             write_header = self._prepare_output_file_for_append()
+            previous_size = self._output_size()
             with self.output_path.open("a", encoding="utf-8-sig", newline="") as handle:
                 writer = csv.DictWriter(handle, fieldnames=SPOT_OBSERVATION_FACT_COLUMNS)
                 if write_header:
                     writer.writeheader()
                 writer.writerow(fact)
+            self._extend_manifest_digest(previous_size)
+            self._record_manifest_row(fact)
 
     def _prepare_output_file_for_append(self) -> bool:
         if not self.output_path.exists() or self.output_path.stat().st_size == 0:
@@ -226,6 +265,7 @@ class SpotObservationFactWriter:
     def _archive_mismatched_output_file(self) -> None:
         archive_path = self._next_schema_mismatch_archive_path(self.output_path)
         self.output_path.rename(archive_path)
+        self._reset_manifest_state()
 
     def _next_schema_mismatch_archive_path(self, source_path: Path) -> Path:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -264,7 +304,6 @@ class SpotObservationFactWriter:
             key = fact["spot_observation_key"]
             if key and key not in self._seen_keys:
                 self._append_fact(fact)
-                self._seen_keys.add(key)
         spool_path.unlink(missing_ok=True)
 
     def _spool_fact(self, fact: Mapping[str, str]) -> None:
@@ -292,20 +331,199 @@ class SpotObservationFactWriter:
         except OSError:
             return 0
 
-    def _load_seen_keys_from_output(self) -> None:
+    def manifest_summary(
+        self,
+        *,
+        realtime_rows: Iterable[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        with _SPOT_OBSERVATION_FACT_FILE_LOCK:
+            if (
+                self._manifest_state_ready
+                and self._output_size() != self._manifest_tracked_size
+            ):
+                self._manifest_state_ready = False
+            if not self._manifest_state_ready:
+                raise RuntimeError(
+                    "SPOT observation fact runtime manifest state is unavailable"
+                )
+            realtime_row_count = 0
+            linked_rows = 0
+            for row in realtime_rows or ():
+                key = _text(row.get("spot_observation_key")).strip()
+                if not key:
+                    continue
+                realtime_row_count += 1
+                if key in self._seen_keys:
+                    linked_rows += 1
+            first_poll_seq = (
+                min(self._seen_poll_sequences)
+                if self._seen_poll_sequences
+                else None
+            )
+            last_poll_seq = (
+                max(self._seen_poll_sequences)
+                if self._seen_poll_sequences
+                else None
+            )
+            poll_seq_gap_count = 0
+            if first_poll_seq is not None and last_poll_seq is not None:
+                poll_seq_gap_count = (
+                    last_poll_seq
+                    - first_poll_seq
+                    + 1
+                    - len(self._seen_poll_sequences)
+                )
+            missing_rows = realtime_row_count - linked_rows
+            link_coverage_pct = (
+                linked_rows / realtime_row_count * 100.0
+                if realtime_row_count
+                else 0.0
+            )
+            missing_provenance_count = max(
+                0,
+                self._evidence_code_count - self._provenance_code_count,
+            )
+            provenance_coverage_pct = (
+                self._provenance_code_count
+                / self._evidence_code_count
+                * 100.0
+                if self._evidence_code_count
+                else 100.0
+            )
+            return {
+                "header": list(SPOT_OBSERVATION_FACT_COLUMNS),
+                "row_count": self._manifest_row_count,
+                "distinct_observation_key_count": len(self._seen_keys),
+                "first_poll_seq": first_poll_seq,
+                "last_poll_seq": last_poll_seq,
+                "poll_seq_gap_count": max(0, poll_seq_gap_count),
+                "sha256": self._manifest_digest.copy().hexdigest(),
+                "link_coverage": {
+                    "realtime_rows_with_observation_key": realtime_row_count,
+                    "linked_rows": linked_rows,
+                    "missing_fact_key_rows": missing_rows,
+                    "coverage_pct": round(link_coverage_pct, 6),
+                },
+                "diagnostic_field_coverage": {
+                    manifest_key: self._diagnostic_field_counts[fact_column]
+                    for fact_column, manifest_key in (
+                        SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS.items()
+                    )
+                },
+                "diagnostics_capture_status_counts": dict(
+                    sorted(self._capture_status_counts.items())
+                ),
+                "diagnostics_binding_status_counts": dict(
+                    sorted(self._binding_status_counts.items())
+                ),
+                "diagnostics_missing_field_counts": dict(
+                    sorted(self._missing_field_counts.items())
+                ),
+                "evidence_provenance_coverage": {
+                    "evidence_code_count": self._evidence_code_count,
+                    "provenance_code_count": self._provenance_code_count,
+                    "missing_provenance_count": missing_provenance_count,
+                    "coverage_pct": round(provenance_coverage_pct, 6),
+                },
+            }
+
+    def _load_manifest_state_from_output(self) -> None:
         if not self.output_path.exists() or self.output_path.stat().st_size == 0:
             return
         try:
+            expected_size = self.output_path.stat().st_size
+            self._manifest_digest = _file_sha256_digest(self.output_path)
             with self.output_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 reader = csv.DictReader(handle)
                 if list(reader.fieldnames or []) != SPOT_OBSERVATION_FACT_COLUMNS:
+                    self._manifest_state_ready = False
                     return
                 for row in reader:
-                    key = _text(row.get("spot_observation_key")).strip()
-                    if key:
-                        self._seen_keys.add(key)
+                    self._record_manifest_row(row)
+            if self.output_path.stat().st_size != expected_size:
+                self._manifest_state_ready = False
+                return
+            self._manifest_tracked_size = expected_size
         except (OSError, UnicodeError, csv.Error):
+            self._manifest_state_ready = False
+
+    def _record_manifest_row(self, row: Mapping[str, Any]) -> None:
+        self._manifest_row_count += 1
+        key = _text(row.get("spot_observation_key")).strip()
+        if key:
+            self._seen_keys.add(key)
+        poll_sequence = _positive_int_or_none(row.get("spot_poll_seq"))
+        if poll_sequence is not None:
+            self._seen_poll_sequences.add(poll_sequence)
+        self._capture_status_counts[
+            _text(row.get("diagnostics_capture_status")).strip() or "missing"
+        ] += 1
+        self._binding_status_counts[
+            _text(row.get("diagnostics_binding_status")).strip() or "missing"
+        ] += 1
+        self._missing_field_counts.update(
+            parse_diagnostics_missing_fields(row.get("diagnostics_missing_fields"))
+        )
+        for fact_column in SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS:
+            if _text(row.get(fact_column)).strip():
+                self._diagnostic_field_counts[fact_column] += 1
+        evidence_codes = set(
+            parse_spot_diagnostic_evidence_codes(
+                row.get("spot_diagnostic_evidence_codes")
+            )
+        )
+        provenance = _json_object(row.get("evidence_provenance_json"))
+        self._evidence_code_count += len(evidence_codes)
+        self._provenance_code_count += len(
+            evidence_codes.intersection(provenance)
+        )
+
+    def _output_size(self) -> int:
+        try:
+            return self.output_path.stat().st_size
+        except FileNotFoundError:
+            return 0
+
+    def _extend_manifest_digest(self, previous_size: int) -> None:
+        if not self._manifest_state_ready:
             return
+        current_size = self._output_size()
+        if previous_size != self._manifest_tracked_size or current_size < previous_size:
+            self._manifest_state_ready = False
+            return
+        try:
+            with self.output_path.open("rb") as handle:
+                handle.seek(previous_size)
+                remaining = current_size - previous_size
+                while remaining > 0:
+                    chunk = handle.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise OSError("SPOT observation fact digest read was truncated")
+                    self._manifest_digest.update(chunk)
+                    remaining -= len(chunk)
+            if self._output_size() != current_size:
+                self._manifest_state_ready = False
+                return
+        except OSError:
+            # The CSV append already succeeded. Keep deduplication state current,
+            # but fail manifest closeout closed instead of spooling a duplicate.
+            self._manifest_state_ready = False
+            return
+        self._manifest_tracked_size = current_size
+
+    def _reset_manifest_state(self) -> None:
+        self._seen_keys.clear()
+        self._seen_poll_sequences.clear()
+        self._manifest_digest = hashlib.sha256()
+        self._manifest_state_ready = True
+        self._manifest_tracked_size = 0
+        self._manifest_row_count = 0
+        self._capture_status_counts.clear()
+        self._binding_status_counts.clear()
+        self._missing_field_counts.clear()
+        self._diagnostic_field_counts.clear()
+        self._evidence_code_count = 0
+        self._provenance_code_count = 0
 
 
 def build_spot_observation_fact_manifest(
@@ -316,21 +534,28 @@ def build_spot_observation_fact_manifest(
     spool_pending_count: int | None = None,
     realtime_rows: Iterable[Mapping[str, Any]] | None = None,
     path: str | None = None,
+    summary: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    summary = summarize_spot_observation_fact(
-        fact_path=fact_path,
-        realtime_rows=realtime_rows,
+    resolved_summary = (
+        dict(summary)
+        if summary is not None
+        else summarize_spot_observation_fact(
+            fact_path=fact_path,
+            realtime_rows=realtime_rows,
+        )
     )
     return {
         "enabled": bool(enabled),
         "schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
         "path": path or fact_path.name,
-        "row_count": summary["row_count"],
-        "distinct_observation_key_count": summary["distinct_observation_key_count"],
-        "first_poll_seq": summary["first_poll_seq"],
-        "last_poll_seq": summary["last_poll_seq"],
-        "poll_seq_gap_count": summary["poll_seq_gap_count"],
-        "sha256": summary["sha256"],
+        "row_count": resolved_summary["row_count"],
+        "distinct_observation_key_count": resolved_summary[
+            "distinct_observation_key_count"
+        ],
+        "first_poll_seq": resolved_summary["first_poll_seq"],
+        "last_poll_seq": resolved_summary["last_poll_seq"],
+        "poll_seq_gap_count": resolved_summary["poll_seq_gap_count"],
+        "sha256": resolved_summary["sha256"],
         "write_failure_count": int(write_failure_count),
         "spool_pending_count": (
             int(spool_pending_count)
@@ -338,12 +563,20 @@ def build_spot_observation_fact_manifest(
             else _spool_pending_count(fact_path.with_name(f"{fact_path.name}.failed.jsonl"))
         ),
         "required_columns": list(SPOT_OBSERVATION_FACT_COLUMNS),
-        "link_coverage": summary["link_coverage"],
-        "diagnostic_field_coverage": summary["diagnostic_field_coverage"],
-        "diagnostics_capture_status_counts": summary["diagnostics_capture_status_counts"],
-        "diagnostics_binding_status_counts": summary["diagnostics_binding_status_counts"],
-        "diagnostics_missing_field_counts": summary["diagnostics_missing_field_counts"],
-        "evidence_provenance_coverage": summary["evidence_provenance_coverage"],
+        "link_coverage": resolved_summary["link_coverage"],
+        "diagnostic_field_coverage": resolved_summary["diagnostic_field_coverage"],
+        "diagnostics_capture_status_counts": resolved_summary[
+            "diagnostics_capture_status_counts"
+        ],
+        "diagnostics_binding_status_counts": resolved_summary[
+            "diagnostics_binding_status_counts"
+        ],
+        "diagnostics_missing_field_counts": resolved_summary[
+            "diagnostics_missing_field_counts"
+        ],
+        "evidence_provenance_coverage": resolved_summary[
+            "evidence_provenance_coverage"
+        ],
     }
 
 
@@ -534,11 +767,15 @@ def summarize_spot_observation_fact(
 def _file_sha256(path: Path) -> str:
     if not path.exists() or not path.is_file():
         return ""
+    return _file_sha256_digest(path).hexdigest()
+
+
+def _file_sha256_digest(path: Path) -> Any:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
-    return digest.hexdigest()
+    return digest
 
 
 def _spool_pending_count(spool_path: Path) -> int:

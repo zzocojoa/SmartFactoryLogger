@@ -69,10 +69,16 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 - [x] Cancelled worker failures emit one privacy-safe bounded warning.
 - [x] Concurrent and asyncio wrapper exceptions are both collected.
 - [x] Internal test reset drains and clears transport/client state.
-- [x] Drain-probe failures preserve the original shutdown exception.
+- [x] Drain-probe failures preserve the original lifespan exception and cannot
+  bypass control-shutdown closeout.
 - [x] Partial guard-close failures attempt all guards and remain retryable.
 - [x] Source-port diagnostics keep one key schema before, during, and after the
   guarded transport lifecycle.
+- [x] Observation and image fact writers maintain exact runtime manifest state,
+  so shutdown closeout does not rescan indefinitely growing historical files.
+- [x] A LogPath fallback or live path change preserves v2 CSV recording while
+  marking unmatched runtime fact manifests incomplete and failing closeout
+  closed.
 - [x] Direct failure, protocol, cancellation, request-kind, and shutdown tests
   cover the designed transport contract.
 
@@ -86,7 +92,7 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Full backend tests | all | 599 at field commit / 610 at current HEAD | PASS |
+| Full backend tests | all | 599 at field commit / 621 at current HEAD | PASS |
 | Electron tests | all | 38 | PASS |
 | Frontend tests | all | 251 / 33 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
@@ -268,3 +274,5 @@ range separately from this closed TCP remediation.
 | 1.3 | 2026-07-29 | Final `0c641b7` package QA, 15-minute smoke, 120-minute canary, and final live-gate closure |
 | 1.4 | 2026-07-29 | Kept `0c641b7` field evidence separate from later current-HEAD promotion gates and refreshed automated test totals |
 | 1.5 | 2026-07-29 | Added exception-preserving, retryable shutdown cleanup and stable lifecycle diagnostics with regression coverage |
+| 1.6 | 2026-07-29 | Made fact-manifest shutdown closeout independent of accumulated historical file size |
+| 1.7 | 2026-07-29 | Preserved v2 CSV logging across LogPath fallback and transition while failing unmatched fact closeout closed |

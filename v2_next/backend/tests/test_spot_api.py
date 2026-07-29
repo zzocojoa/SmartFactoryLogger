@@ -2504,10 +2504,26 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
             rows = self.read_spot_image_fact_rows(log_path)
             health = spot_api.get_spot_image_capture_health()
+            manifest_stats = spot_api.get_spot_image_capture_manifest_stats(
+                fact_path=log_path / "spot_image_fact.csv",
+            )
 
             self.assertEqual(len(rows), 1)
             self.assertEqual(health["written_count"], 2)
             self.assertEqual(health["fact_row_count"], 1)
+            self.assertIsNotNone(manifest_stats)
+            assert manifest_stats is not None
+            self.assertTrue(manifest_stats["fact_manifest_state_ready"])
+            self.assertEqual(
+                health["fact_sha256"],
+                hashlib.sha256(
+                    (log_path / "spot_image_fact.csv").read_bytes()
+                ).hexdigest(),
+            )
+            self.assertEqual(
+                manifest_stats["fact_sha256"],
+                health["fact_sha256"],
+            )
 
     def test_image_capture_writer_dedupes_same_capture_id_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3595,7 +3611,56 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         inactive_diagnostics = spot_api._spot_source_port_diagnostics()
         live_schema = spot_api.SpotHttpTransport().diagnostics()
 
-        self.assertEqual(set(inactive_diagnostics), set(live_schema))
+        expected_keys = {
+            "source_port_policy_version",
+            "source_port_enforcement_supported",
+            "source_port_enforcement_active",
+            "source_port_quarantine_seconds",
+            "source_port_pool_capacity",
+            "source_port_pool_guarded_count",
+            "source_port_pool_leased_count",
+            "source_port_pool_quarantined_count",
+            "source_port_pool_rebind_pending_count",
+            "source_port_pool_acquire_wait_count",
+            "source_port_pool_exhaustion_count",
+            "source_port_rebind_retry_count",
+            "source_port_reuse_violation_count",
+            "source_port_minimum_reuse_interval_seconds",
+            "source_port_transport_started_count",
+            "source_port_transport_success_count",
+            "source_port_transport_failure_count",
+            "source_port_bind_collision_count",
+            "source_port_transport_pending_count",
+            "source_port_image_started_count",
+            "source_port_image_success_count",
+            "source_port_image_failure_count",
+            "source_port_temperature_started_count",
+            "source_port_temperature_success_count",
+            "source_port_temperature_failure_count",
+            "source_port_internal_temperature_started_count",
+            "source_port_internal_temperature_success_count",
+            "source_port_internal_temperature_failure_count",
+            "source_port_diagnostic_started_count",
+            "source_port_diagnostic_success_count",
+            "source_port_diagnostic_failure_count",
+            "source_port_connection_test_started_count",
+            "source_port_connection_test_success_count",
+            "source_port_connection_test_failure_count",
+            "source_port_focus_read_started_count",
+            "source_port_focus_read_success_count",
+            "source_port_focus_read_failure_count",
+            "source_port_focus_write_started_count",
+            "source_port_focus_write_success_count",
+            "source_port_focus_write_failure_count",
+            "source_port_actuator_read_started_count",
+            "source_port_actuator_read_success_count",
+            "source_port_actuator_read_failure_count",
+            "source_port_actuator_write_started_count",
+            "source_port_actuator_write_success_count",
+            "source_port_actuator_write_failure_count",
+        }
+        self.assertEqual(set(inactive_diagnostics), expected_keys)
+        self.assertEqual(set(live_schema), expected_keys)
         self.assertEqual(inactive_diagnostics["source_port_transport_pending_count"], 0)
         for kind in spot_api.SpotRequestKind:
             for outcome in ("started", "success", "failure"):

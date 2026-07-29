@@ -6,6 +6,7 @@ import queue
 import re
 import threading
 import time
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +32,7 @@ from backend.FacilityData.drivers.spot_http_transport import (
     SpotTransportError,
     SpotTransportReadTimeout,
     SpotTransportTimeout,
+    empty_spot_http_transport_diagnostics,
     resolve_spot_redirect_url,
 )
 from backend.FacilityData.drivers.spot_port_quarantine import (
@@ -166,6 +168,7 @@ _spot_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:0
 _spot_poll_seq = 0
 _spot_observation_seq = 0
 _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
+_spot_observation_fact_writer_lock = threading.Lock()
 _spot_observation_fact_writer: Optional[SpotObservationFactWriter] = None
 _spot_observation_fact_write_tasks: set[asyncio.Task[None]] = set()
 _spot_diagnostics_task: Optional[asyncio.Task[None]] = None
@@ -560,12 +563,18 @@ def get_latest_spot_image_capture_fact() -> Dict[str, str]:
         return dict(_spot_image_capture_last_fact or {})
 
 
-def _spot_image_capture_fact_row_count() -> int:
-    return _get_spot_image_capture_writer().fact_row_count
+def _spot_image_capture_fact_stats() -> tuple[int, Optional[str], bool]:
+    writer = _get_spot_image_capture_writer()
+    try:
+        return writer.fact_row_count, writer.fact_sha256, True
+    except RuntimeError:
+        return writer.fact_row_count, None, False
 
 
 def get_spot_image_capture_health() -> Dict[str, Any]:
-    fact_row_count = _spot_image_capture_fact_row_count()
+    fact_row_count, fact_sha256, fact_manifest_state_ready = (
+        _spot_image_capture_fact_stats()
+    )
     with _spot_image_capture_lock:
         last_fact = _spot_image_capture_last_fact or {}
         return {
@@ -576,6 +585,8 @@ def get_spot_image_capture_health() -> Dict[str, Any]:
             "enqueued_count": _spot_image_capture_enqueued_count,
             "written_count": _spot_image_capture_written_count,
             "fact_row_count": fact_row_count,
+            "fact_sha256": fact_sha256,
+            "fact_manifest_state_ready": fact_manifest_state_ready,
             "dropped_count": _spot_image_capture_dropped_count,
             "failure_count": _spot_image_capture_failure_count,
             "last_enqueue_at": _spot_image_capture_last_enqueue_at or None,
@@ -589,6 +600,21 @@ def get_spot_image_capture_health() -> Dict[str, Any]:
             "last_capture_link_age_ms": last_fact.get("spot_image_link_age_ms"),
             "last_capture_linked_observation_key": last_fact.get("spot_image_linked_observation_key"),
         }
+
+
+def get_spot_image_capture_manifest_stats(
+    *,
+    fact_path: Path,
+) -> Dict[str, Any] | None:
+    writer = _get_spot_image_capture_writer()
+    if writer.fact_path.resolve() != fact_path.resolve():
+        return None
+    fact_row_count, fact_sha256, state_ready = _spot_image_capture_fact_stats()
+    return {
+        "fact_row_count": fact_row_count,
+        "fact_sha256": fact_sha256,
+        "fact_manifest_state_ready": state_ready,
+    }
 
 
 def _spot_image_capture_evidence_codes(snapshot: Dict[str, Any]) -> set[str]:
@@ -1612,9 +1638,12 @@ def _spot_observation_fact_path() -> Path:
 def _get_spot_observation_fact_writer() -> SpotObservationFactWriter:
     global _spot_observation_fact_writer
 
-    if _spot_observation_fact_writer is None:
-        _spot_observation_fact_writer = SpotObservationFactWriter(_spot_observation_fact_path())
-    return _spot_observation_fact_writer
+    with _spot_observation_fact_writer_lock:
+        if _spot_observation_fact_writer is None:
+            _spot_observation_fact_writer = SpotObservationFactWriter(
+                _spot_observation_fact_path()
+            )
+        return _spot_observation_fact_writer
 
 
 def _write_spot_observation_fact_safely(snapshot: Dict[str, Any]) -> None:
@@ -2236,6 +2265,39 @@ def get_spot_diagnostics() -> Dict[str, Any]:
     return payload
 
 
+def get_spot_observation_fact_manifest_summary(
+    *,
+    fact_path: Path | None = None,
+    realtime_rows: Iterable[Mapping[str, Any]] | None = None,
+    allow_offline_rebuild: bool = True,
+) -> Dict[str, Any]:
+    writer = _get_spot_observation_fact_writer()
+    if fact_path is not None and writer.output_path.resolve() != fact_path.resolve():
+        if not allow_offline_rebuild:
+            raise RuntimeError(
+                "SPOT observation fact runtime manifest path does not match closeout path"
+            )
+        writer = SpotObservationFactWriter(fact_path)
+    return writer.manifest_summary(
+        realtime_rows=realtime_rows,
+    )
+
+
+def ensure_spot_observation_fact_initialized(
+    *,
+    fact_path: Path,
+    allow_offline_rebuild: bool = True,
+) -> bool:
+    writer = _get_spot_observation_fact_writer()
+    if writer.output_path.resolve() != fact_path.resolve():
+        if not allow_offline_rebuild:
+            raise RuntimeError(
+                "SPOT observation fact runtime manifest path does not match initialization path"
+            )
+        writer = SpotObservationFactWriter(fact_path)
+    return writer.ensure_initialized()
+
+
 def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
     return _build_internal_temperature_diagnostics(time.time(), include_cached_at=True)
 
@@ -2369,7 +2431,7 @@ def _spot_source_port_diagnostics() -> Dict[str, Any]:
     transport = _spot_http_transport
     if transport is not None:
         return dict(transport.diagnostics())
-    return dict(SpotHttpTransport().diagnostics())
+    return dict(empty_spot_http_transport_diagnostics())
 
 
 def _active_spot_http_transport() -> SpotHttpTransport | None:

@@ -15,7 +15,10 @@ from unittest.mock import AsyncMock, patch
 
 from backend import app as backend_app
 from backend.FacilityData.repository import CSVLoggerService
-from backend.FacilityData.spot_image_fact import build_spot_image_fact_manifest
+from backend.FacilityData.spot_image_fact import (
+    SpotImageCaptureWriter,
+    build_spot_image_fact_manifest,
+)
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_COLUMNS,
     SpotObservationFactWriter,
@@ -150,6 +153,184 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             f"realtime CSV closeout peak memory was {peak_bytes} bytes",
         )
 
+    def test_runtime_observation_manifest_does_not_reread_historical_fact(self) -> None:
+        row_total = 50_000
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=SPOT_OBSERVATION_FACT_COLUMNS,
+                )
+                writer.writeheader()
+                for sequence in range(1, row_total + 1):
+                    writer.writerow(
+                        {
+                            "spot_observation_key": f"service-1:{sequence}",
+                            "spot_poll_seq": sequence,
+                            "diagnostics_capture_status": "async_complete",
+                            "diagnostics_binding_status": "same_poll",
+                        }
+                    )
+            expected_sha256 = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+            runtime_writer = SpotObservationFactWriter(fact_path)
+            realtime_rows = (
+                {"spot_observation_key": "service-1:1"},
+                {"spot_observation_key": f"service-1:{row_total}"},
+            )
+            expected_summary = summarize_spot_observation_fact(
+                fact_path=fact_path,
+                realtime_rows=realtime_rows,
+            )
+
+            with patch.object(
+                Path,
+                "open",
+                side_effect=AssertionError("closeout reread historical fact"),
+            ):
+                summary = runtime_writer.manifest_summary(
+                    realtime_rows=realtime_rows
+                )
+
+        self.assertEqual(summary, expected_summary)
+        self.assertEqual(summary["row_count"], row_total)
+        self.assertEqual(summary["sha256"], expected_sha256)
+        self.assertEqual(summary["link_coverage"]["linked_rows"], 2)
+
+    def test_observation_digest_read_failure_does_not_spool_or_duplicate_durable_row(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            runtime_writer = SpotObservationFactWriter(fact_path)
+            original_open = Path.open
+
+            def fail_fact_digest_read(
+                path: Path,
+                mode: str = "r",
+                *args: object,
+                **kwargs: object,
+            ):
+                if path == fact_path and mode == "rb":
+                    raise OSError("digest read failed after append")
+                return original_open(path, mode, *args, **kwargs)
+
+            snapshot = {
+                "spot_service_instance_id": "service-1",
+                "spot_poll_seq": 1,
+                "spot_last_poll_completed_at": "2026-07-29T05:00:00Z",
+            }
+            with patch.object(Path, "open", new=fail_fact_digest_read):
+                first_write = runtime_writer.write_fact(snapshot)
+
+            duplicate_write = runtime_writer.write_fact(snapshot)
+            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+
+            self.assertIsNotNone(first_write)
+            self.assertIsNone(duplicate_write)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(runtime_writer.spool_pending_count(), 0)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime manifest state is unavailable",
+            ):
+                runtime_writer.manifest_summary()
+
+    def test_observation_header_initialization_uses_runtime_manifest_owner(
+        self,
+    ) -> None:
+        from backend.FacilityData.drivers import spot_api
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            runtime_writer = SpotObservationFactWriter(fact_path)
+            service = CSVLoggerService(require_runtime_manifest_state=True)
+            snapshot = {
+                "spot_service_instance_id": "service-1",
+                "spot_poll_seq": 1,
+                "spot_last_poll_completed_at": "2026-07-29T05:00:00Z",
+            }
+
+            with (
+                patch.object(
+                    spot_api,
+                    "_spot_observation_fact_writer",
+                    runtime_writer,
+                ),
+                patch.object(
+                    spot_api.config,
+                    "SPOT_OBSERVATION_FACT_ENABLED",
+                    True,
+                ),
+            ):
+                initialization_failures = (
+                    service._ensure_spot_observation_fact_file(
+                        fact_path,
+                        enabled=True,
+                    )
+                )
+                written = runtime_writer.write_fact(snapshot)
+                summary = runtime_writer.manifest_summary()
+
+            self.assertEqual(initialization_failures, 0)
+            self.assertIsNotNone(written)
+            self.assertEqual(summary["row_count"], 1)
+            self.assertEqual(
+                summary["sha256"],
+                hashlib.sha256(fact_path.read_bytes()).hexdigest(),
+            )
+
+    def test_external_observation_header_interleaving_fails_manifest_closed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            runtime_writer = SpotObservationFactWriter(fact_path)
+            initializer = SpotObservationFactWriter(
+                fact_path,
+                load_existing_keys=False,
+            )
+            snapshot = {
+                "spot_service_instance_id": "service-1",
+                "spot_poll_seq": 1,
+                "spot_last_poll_completed_at": "2026-07-29T05:00:00Z",
+            }
+
+            self.assertTrue(initializer.ensure_initialized())
+            self.assertIsNotNone(runtime_writer.write_fact(snapshot))
+            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(runtime_writer.spool_pending_count(), 0)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime manifest state is unavailable",
+            ):
+                runtime_writer.manifest_summary()
+
+    def test_unowned_observation_write_before_closeout_fails_manifest_closed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            retained_writer = SpotObservationFactWriter(fact_path)
+            self.assertTrue(retained_writer.ensure_initialized())
+            discarded_writer = SpotObservationFactWriter(fact_path)
+            snapshot = {
+                "spot_service_instance_id": "service-1",
+                "spot_poll_seq": 1,
+                "spot_last_poll_completed_at": "2026-07-29T05:00:00Z",
+            }
+
+            self.assertIsNotNone(discarded_writer.write_fact(snapshot))
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime manifest state is unavailable",
+            ):
+                retained_writer.manifest_summary()
+
     def test_observation_manifest_fails_closed_when_temporary_sqlite_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             fact_path = Path(temp_dir) / "spot_observation_fact.csv"
@@ -275,8 +456,11 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             service = CSVLoggerService()
 
             with patch(
-                "backend.FacilityData.spot_observation_fact.sqlite3.connect",
-                side_effect=sqlite3.OperationalError("temporary storage unavailable"),
+                "backend.FacilityData.drivers.spot_api."
+                "get_spot_observation_fact_manifest_summary",
+                side_effect=sqlite3.OperationalError(
+                    "runtime manifest state unavailable"
+                ),
             ):
                 refreshed = service.refresh_spot_observation_fact_manifest_for_csv(
                     csv_path
@@ -345,8 +529,11 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             service._current_v2_csv_path = csv_path
 
             with patch(
-                "backend.FacilityData.spot_observation_fact.sqlite3.connect",
-                side_effect=sqlite3.OperationalError("temporary storage unavailable"),
+                "backend.FacilityData.drivers.spot_api."
+                "get_spot_observation_fact_manifest_summary",
+                side_effect=sqlite3.OperationalError(
+                    "runtime manifest state unavailable"
+                ),
             ):
                 closed_cleanly = service._close_v2_file(None)
 
@@ -413,26 +600,183 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         )
 
     def test_closeout_header_initialization_does_not_index_historical_fact_keys(self) -> None:
+        from backend.FacilityData.drivers import spot_api
+
         with tempfile.TemporaryDirectory() as temp_dir:
             fact_path = Path(temp_dir) / "spot_observation_fact.csv"
             fact_path.write_text(
                 "\ufeff" + ",".join(SPOT_OBSERVATION_FACT_COLUMNS) + "\n",
                 encoding="utf-8",
             )
-            service = CSVLoggerService()
+            runtime_writer = SpotObservationFactWriter(fact_path)
+            service = CSVLoggerService(require_runtime_manifest_state=True)
 
-            with patch.object(
-                SpotObservationFactWriter,
-                "_load_seen_keys_from_output",
-                side_effect=AssertionError("closeout indexed historical observation keys"),
-            ) as load_seen_keys:
+            with (
+                patch.object(
+                    spot_api,
+                    "_spot_observation_fact_writer",
+                    runtime_writer,
+                ),
+                patch.object(
+                    SpotObservationFactWriter,
+                    "_load_manifest_state_from_output",
+                    side_effect=AssertionError(
+                        "closeout indexed historical observation keys"
+                    ),
+                ) as load_manifest_state,
+            ):
                 failure_count = service._ensure_spot_observation_fact_file(
                     fact_path,
                     enabled=True,
                 )
 
         self.assertEqual(failure_count, 0)
-        load_seen_keys.assert_not_called()
+        load_manifest_state.assert_not_called()
+
+    def test_strict_manifest_mismatch_preserves_v2_csv_on_log_path_fallback(
+        self,
+    ) -> None:
+        from backend.FacilityData.drivers import spot_api
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            configured_path = root / "configured"
+            fallback_path = root / "fallback"
+            configured_path.mkdir()
+            runtime_writer = SpotObservationFactWriter(
+                configured_path / "spot_observation_fact.csv"
+            )
+            service = CSVLoggerService(require_runtime_manifest_state=True)
+            service.fallback_log_dir = fallback_path
+            service.apply_config(
+                log_path=configured_path,
+                auto_save=True,
+                csv_v1_enabled=False,
+                csv_v2_enabled=True,
+                csv_v2_sidecar_enabled=True,
+            )
+            original_ensure_dir = service._ensure_dir
+
+            def fail_configured_log_dir(path: Path) -> bool:
+                if Path(path) == configured_path:
+                    return False
+                return original_ensure_dir(path)
+
+            with (
+                patch.object(service, "_ensure_dir", side_effect=fail_configured_log_dir),
+                patch.object(spot_api.config, "LOG_PATH", configured_path),
+                patch.object(
+                    spot_api.config,
+                    "SPOT_OBSERVATION_FACT_ENABLED",
+                    True,
+                ),
+                patch.object(
+                    spot_api,
+                    "_spot_observation_fact_writer",
+                    runtime_writer,
+                ),
+                patch.object(spot_api, "_spot_image_capture_writer", None),
+                patch.object(spot_api, "_spot_image_capture_writer_signature", None),
+            ):
+                handle, writer = service._open_v2_log_file(
+                    "20260729_150000",
+                    "Factory_Integrated_Log_v2",
+                )
+                self.assertIsNotNone(handle)
+                self.assertIsNotNone(writer)
+                assert handle is not None
+                assert writer is not None
+                writer.writerow([""] * len(service._get_active_v2_contract().columns))
+                handle.flush()
+                csv_path = Path(handle.name)
+                service._close_file(handle)
+
+            metadata = json.loads(
+                csv_path.with_suffix(".metadata.json").read_text(encoding="utf-8")
+            )
+            csv_size = csv_path.stat().st_size
+
+        self.assertEqual(csv_path.parent, fallback_path)
+        self.assertGreater(csv_size, 0)
+        self.assertTrue(service._runtime_write_failure_observed)
+        self.assertNotIn("spot_observation_fact_manifest", metadata)
+        self.assertNotIn("spot_image_fact_manifest", metadata)
+        self.assertEqual(
+            metadata["spot_observation_fact_closeout"]["reason"],
+            "runtime-manifest-unavailable-at-open",
+        )
+        self.assertEqual(
+            metadata["spot_image_fact_closeout"]["reason"],
+            "runtime-manifest-unavailable-at-open",
+        )
+
+    def test_live_log_path_change_keeps_v2_csv_when_observation_writer_is_old(
+        self,
+    ) -> None:
+        from backend.FacilityData.drivers import spot_api
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            previous_path = root / "previous"
+            next_path = root / "next"
+            previous_path.mkdir()
+            next_path.mkdir()
+            runtime_writer = SpotObservationFactWriter(
+                previous_path / "spot_observation_fact.csv"
+            )
+            self.assertTrue(runtime_writer.ensure_initialized())
+            service = CSVLoggerService(require_runtime_manifest_state=True)
+            service.fallback_log_dir = next_path
+            service.apply_config(
+                log_path=next_path,
+                auto_save=True,
+                csv_v1_enabled=False,
+                csv_v2_enabled=True,
+                csv_v2_sidecar_enabled=True,
+            )
+
+            with (
+                patch.object(spot_api.config, "LOG_PATH", next_path),
+                patch.object(
+                    spot_api.config,
+                    "SPOT_OBSERVATION_FACT_ENABLED",
+                    True,
+                ),
+                patch.object(
+                    spot_api,
+                    "_spot_observation_fact_writer",
+                    runtime_writer,
+                ),
+                patch.object(spot_api, "_spot_image_capture_writer", None),
+                patch.object(spot_api, "_spot_image_capture_writer_signature", None),
+            ):
+                handle, writer = service._open_v2_log_file(
+                    "20260729_160000",
+                    "Factory_Integrated_Log_v2",
+                )
+                self.assertIsNotNone(handle)
+                self.assertIsNotNone(writer)
+                assert handle is not None
+                assert writer is not None
+                writer.writerow([""] * len(service._get_active_v2_contract().columns))
+                handle.flush()
+                csv_path = Path(handle.name)
+                service._close_file(handle)
+
+            metadata = json.loads(
+                csv_path.with_suffix(".metadata.json").read_text(encoding="utf-8")
+            )
+            csv_size = csv_path.stat().st_size
+
+        self.assertEqual(csv_path.parent, next_path)
+        self.assertGreater(csv_size, 0)
+        self.assertTrue(service._runtime_write_failure_observed)
+        self.assertNotIn("spot_observation_fact_manifest", metadata)
+        self.assertEqual(
+            metadata["spot_observation_fact_closeout"]["reason"],
+            "runtime-manifest-unavailable-at-open",
+        )
+        self.assertIn("spot_image_fact_manifest", metadata)
 
     def test_image_manifest_hash_does_not_load_the_entire_fact_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -450,6 +794,109 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
 
         self.assertEqual(manifest["row_count"], 2)
         self.assertRegex(str(manifest["sha256"]), r"^[0-9a-f]{64}$")
+
+    def test_image_manifest_uses_runtime_stats_without_closeout_file_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            fact_path = log_path / "spot_image_fact.csv"
+            fact_path.write_text("header\nrow-1\nrow-2\n", encoding="utf-8")
+            expected_sha256 = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+
+            with patch(
+                "backend.FacilityData.spot_image_fact._fact_file_stats",
+                side_effect=AssertionError("closeout rescanned image fact"),
+            ):
+                manifest = build_spot_image_fact_manifest(
+                    log_path=log_path,
+                    capture_root=log_path / "spot_images",
+                    enabled=True,
+                    mode="all",
+                    runtime_stats={
+                        "fact_row_count": 2,
+                        "fact_sha256": expected_sha256,
+                        "fact_manifest_state_ready": True,
+                    },
+                )
+
+        self.assertEqual(manifest["row_count"], 2)
+        self.assertEqual(manifest["sha256"], expected_sha256)
+
+    def test_image_closeout_rejects_unready_runtime_state_without_fact_scan(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            fact_path = log_path / "spot_image_fact.csv"
+            fact_path.write_text("header\nrow-1\n", encoding="utf-8")
+            service = CSVLoggerService(require_runtime_manifest_state=True)
+
+            with (
+                patch(
+                    "backend.FacilityData.drivers.spot_api."
+                    "get_spot_image_capture_manifest_stats",
+                    return_value={
+                        "fact_row_count": 1,
+                        "fact_sha256": None,
+                        "fact_manifest_state_ready": False,
+                    },
+                ),
+                patch(
+                    "backend.FacilityData.spot_image_fact._fact_file_stats",
+                    side_effect=AssertionError("production closeout rescanned image fact"),
+                ) as fact_file_stats,
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "runtime manifest state is unavailable",
+                ),
+            ):
+                service.write_spot_image_fact_final_manifest(log_path)
+
+            fact_file_stats.assert_not_called()
+
+    def test_image_digest_read_failure_does_not_duplicate_durable_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            fact_path = log_path / "spot_image_fact.csv"
+            runtime_writer = SpotImageCaptureWriter(
+                log_path=log_path,
+                capture_root=log_path / "spot_images",
+            )
+            original_open = Path.open
+
+            def fail_fact_digest_read(
+                path: Path,
+                mode: str = "r",
+                *args: object,
+                **kwargs: object,
+            ):
+                if path == fact_path and mode == "rb":
+                    raise OSError("digest read failed after append")
+                return original_open(path, mode, *args, **kwargs)
+
+            capture_args = {
+                "image_bytes": b"\xff\xd8digest-failure\xff\xd9",
+                "captured_at": 1782910800.123456,
+                "source_url": "http://spot.local/image.jpg",
+                "source": "test",
+                "image_age_ms": 0.0,
+                "link_checked_at": None,
+                "observation_snapshot": None,
+            }
+            with patch.object(Path, "open", new=fail_fact_digest_read):
+                first_fact = runtime_writer.write_capture(**capture_args)
+
+            duplicate_fact = runtime_writer.write_capture(**capture_args)
+            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+
+            self.assertEqual(duplicate_fact, first_fact)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(runtime_writer.fact_row_count, 1)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime manifest state is unavailable",
+            ):
+                _ = runtime_writer.fact_sha256
 
     def test_control_shutdown_subprocess_quiesces_spot_before_logger_closeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -541,6 +988,42 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 await backend_app._run_control_shutdown("spot-stop-regression")
 
             closeout.assert_called_once_with(observation_fact_drained=True)
+            process_exit.assert_called_once_with(2)
+
+        asyncio.run(exercise())
+
+    def test_control_shutdown_drain_probe_failure_still_runs_closeout_and_exits_with_failure(
+        self,
+    ) -> None:
+        async def exercise() -> None:
+            downstream_status = {
+                key: True
+                for key in backend_app._CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS
+                if key != "spot_observation_fact_drained"
+            }
+            downstream_status["spot_observation_fact_drained"] = False
+            with (
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_poll_loop",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.spot_control,
+                    "spot_observation_fact_writes_drained",
+                    side_effect=RuntimeError("drain probe failed"),
+                ),
+                patch.object(
+                    backend_app,
+                    "_stop_services_for_control_shutdown",
+                    return_value=downstream_status,
+                ) as closeout,
+                patch.object(backend_app.os, "_exit") as process_exit,
+            ):
+                with self.assertLogs("SmartFactoryLoggerV2", level="WARNING"):
+                    await backend_app._run_control_shutdown("drain-probe-regression")
+
+            closeout.assert_called_once_with(observation_fact_drained=False)
             process_exit.assert_called_once_with(2)
 
         asyncio.run(exercise())
