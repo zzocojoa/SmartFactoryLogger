@@ -8,7 +8,7 @@ import threading
 import time
 import unittest
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.request import Request as UrlRequest
@@ -1637,6 +1637,105 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     pass
 
         self.assertFalse(logger_stub.finalize_requested)
+
+    async def test_lifespan_startup_failure_unwinds_started_services_and_lock(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        service_pairs = (
+            (backend_app.logger_service, "start", "stop"),
+            (backend_app.config_sync_agent, "start", "stop"),
+            (backend_app.config_watch_service, "start", "stop"),
+            (backend_app.plc_service, "start", "stop"),
+            (backend_app.comm_metrics_logger_service, "start", "stop"),
+            (backend_app.memory_service, "start", "stop"),
+        )
+        start_mocks = [Mock() for _ in service_pairs]
+        stop_mocks = [Mock(return_value=True) for _ in service_pairs]
+
+        patches = [
+            patch.object(service, start_name, start_mock)
+            for (service, start_name, _), start_mock in zip(
+                service_pairs,
+                start_mocks,
+                strict=True,
+            )
+        ]
+        patches.extend(
+            patch.object(service, stop_name, stop_mock)
+            for (service, _, stop_name), stop_mock in zip(
+                service_pairs,
+                stop_mocks,
+                strict=True,
+            )
+        )
+
+        with ExitStack() as stack:
+            for service_patch in patches:
+                stack.enter_context(service_patch)
+            stack.enter_context(
+                patch.object(
+                    backend_app,
+                    "acquire_single_instance_lock",
+                    return_value=True,
+                )
+            )
+            release_lock = stack.enter_context(
+                patch.object(backend_app, "release_single_instance_lock")
+            )
+            stack.enter_context(
+                patch.object(
+                    backend_app.spot_control,
+                    "start_spot_poll_loop",
+                    new=AsyncMock(side_effect=RuntimeError("port pool init failed")),
+                )
+            )
+            stop_spot_poll = stack.enter_context(
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_poll_loop",
+                    new=AsyncMock(return_value=True),
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_image_capture_for_shutdown",
+                    return_value=True,
+                )
+            )
+            with self.assertRaisesRegex(RuntimeError, "port pool init failed"):
+                async with backend_app.lifespan(backend_app.app):
+                    self.fail("lifespan startup unexpectedly succeeded")
+
+        for start_mock in start_mocks:
+            start_mock.assert_called_once_with()
+        for stop_mock in stop_mocks:
+            stop_mock.assert_called_once()
+        stop_spot_poll.assert_awaited_once_with()
+        release_lock.assert_called_once_with()
+
+    async def test_stop_spot_poll_loop_reports_transport_drain_and_skips_sync_writer_join(
+        self,
+    ) -> None:
+        with (
+            patch.object(
+                spot_api,
+                "_stop_spot_image_refresh_for_shutdown",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(
+                spot_api,
+                "_stop_spot_http_transport",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(spot_api, "stop_spot_image_capture_writer") as stop_writer,
+        ):
+            stopped = await spot_api.stop_spot_poll_loop()
+
+        self.assertFalse(stopped)
+        stop_writer.assert_not_called()
 
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

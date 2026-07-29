@@ -433,6 +433,29 @@ def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
     _emit_embedded_startup_progress(f"{stage}_ready")
 
 
+def _run_lifespan_stop_stage(stage: str, stopper: Callable[[], Any]) -> bool:
+    started_perf = time.perf_counter()
+    try:
+        result = stopper()
+        succeeded = result is not False
+    except Exception as exc:
+        succeeded = False
+        _logger.warning(
+            "[Main] Lifespan shutdown stage failed stage=%s error_type=%s %s",
+            stage,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+    _logger.info(
+        "[Main] Lifespan shutdown stage complete stage=%s success=%s elapsed_ms=%.1f %s",
+        stage,
+        succeeded,
+        (time.perf_counter() - started_perf) * 1000.0,
+        _lifecycle_log_fields(),
+    )
+    return succeeded
+
+
 def _log_backend_access_urls() -> None:
     """Resolve local addresses outside the readiness-critical lifespan path."""
     try:
@@ -1627,75 +1650,118 @@ async def lifespan(app: FastAPI):
     # Startup
     if not acquire_single_instance_lock():
         raise RuntimeError("Instance already running")
-    _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
-    _emit_embedded_startup_progress("lifespan_begin")
-    print("[Main] Starting CSV Logger...")
-    _run_lifespan_start_stage("csv_logger", logger_service.start)
-    print("[Main] Starting Config Sync Agent...")
-    _run_lifespan_start_stage("config_sync", config_sync_agent.start)
-    print("[Main] Starting Config Watcher...")
-    _run_lifespan_start_stage("config_watch", config_watch_service.start)
-    print("[Main] Starting PLC Service...")
-    _run_lifespan_start_stage("plc_service", plc_service.start)
-    print("[Main] Starting Comm Metrics Logger...")
-    _run_lifespan_start_stage("comm_metrics", comm_metrics_logger_service.start)
-    print("[Main] Starting Memory Service...")
-    _run_lifespan_start_stage("memory_service", memory_service.start)
-
-    # Start SPOT temperature and diagnostics polling.
-    print("[Main] Starting SPOT temperature and diagnostics polling...")
-    spot_started_perf = time.perf_counter()
-    await spot_control.start_spot_poll_loop()
-    _logger.info(
-        "[Main] Lifespan startup stage complete stage=spot_poll elapsed_ms=%.1f %s",
-        (time.perf_counter() - spot_started_perf) * 1000.0,
-        _lifecycle_log_fields(),
-    )
-    _emit_embedded_startup_progress("spot_poll_ready")
-    
-    # Address discovery is diagnostic-only. Some Windows hosts take tens of
-    # seconds to resolve their own hostname, so it must not gate Uvicorn
-    # readiness.
-    _start_backend_access_log_thread()
-    _logger.info("[Main] Lifespan startup complete %s", _lifecycle_log_fields())
-    _emit_embedded_startup_progress("lifespan_complete")
-
+    started_services: set[str] = set()
+    spot_start_attempted = False
     try:
+        _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
+        _emit_embedded_startup_progress("lifespan_begin")
+        print("[Main] Starting CSV Logger...")
+        _run_lifespan_start_stage("csv_logger", logger_service.start)
+        started_services.add("csv_logger")
+        print("[Main] Starting Config Sync Agent...")
+        _run_lifespan_start_stage("config_sync", config_sync_agent.start)
+        started_services.add("config_sync")
+        print("[Main] Starting Config Watcher...")
+        _run_lifespan_start_stage("config_watch", config_watch_service.start)
+        started_services.add("config_watch")
+        print("[Main] Starting PLC Service...")
+        _run_lifespan_start_stage("plc_service", plc_service.start)
+        started_services.add("plc_service")
+        print("[Main] Starting Comm Metrics Logger...")
+        _run_lifespan_start_stage("comm_metrics", comm_metrics_logger_service.start)
+        started_services.add("comm_metrics")
+        print("[Main] Starting Memory Service...")
+        _run_lifespan_start_stage("memory_service", memory_service.start)
+        started_services.add("memory_service")
+
+        # Start SPOT temperature and diagnostics polling.
+        print("[Main] Starting SPOT temperature and diagnostics polling...")
+        spot_started_perf = time.perf_counter()
+        spot_start_attempted = True
+        await spot_control.start_spot_poll_loop()
+        _logger.info(
+            "[Main] Lifespan startup stage complete stage=spot_poll elapsed_ms=%.1f %s",
+            (time.perf_counter() - spot_started_perf) * 1000.0,
+            _lifecycle_log_fields(),
+        )
+        _emit_embedded_startup_progress("spot_poll_ready")
+
+        # Address discovery is diagnostic-only. Some Windows hosts take tens of
+        # seconds to resolve their own hostname, so it must not gate Uvicorn
+        # readiness.
+        _start_backend_access_log_thread()
+        _logger.info("[Main] Lifespan startup complete %s", _lifecycle_log_fields())
+        _emit_embedded_startup_progress("lifespan_complete")
+
         yield
     finally:
-        # Shutdown
-        _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
-        print("[Main] Stopping SPOT temperature and diagnostics polling...")
-        await spot_control.stop_spot_poll_loop()
-        image_capture_drained = await asyncio.to_thread(
-            spot_control.stop_spot_image_capture_for_shutdown,
-            timeout_sec=config.SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC,
-        )
-        if not image_capture_drained:
-            _logger.error(
-                "SPOT image capture queue did not drain before lifespan shutdown; "
-                "the final image fact manifest will be suppressed"
-            )
-        print("[Main] Stopping Comm Metrics Logger...")
-        comm_metrics_logger_service.stop()
-        print("[Main] Stopping Memory Service...")
-        memory_service.stop()
-        print("[Main] Stopping PLC Service...")
-        plc_service.stop()
-        print("[Main] Stopping Config Sync Agent...")
-        config_sync_agent.stop()
-        print("[Main] Stopping Config Watcher...")
-        config_watch_service.stop()
-        print("[Main] Stopping CSV Logger...")
-        if not logger_service.stop(
-            timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
-            finalize_spot_image_manifest=image_capture_drained,
-        ):
-            _logger.warning(
-                "CSV logger did not stop within %.1f seconds during lifespan shutdown",
-                config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
-            )
-        release_single_instance_lock()
+        try:
+            _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
+            image_capture_drained = True
+            if spot_start_attempted:
+                print("[Main] Stopping SPOT temperature and diagnostics polling...")
+                try:
+                    spot_poll_stopped = await spot_control.stop_spot_poll_loop()
+                except Exception as exc:
+                    spot_poll_stopped = False
+                    _logger.warning(
+                        "[Main] Lifespan SPOT poll shutdown failed error_type=%s %s",
+                        type(exc).__name__,
+                        _lifecycle_log_fields(),
+                    )
+                if not spot_poll_stopped:
+                    _logger.error(
+                        "SPOT poll or transport did not drain before lifespan shutdown"
+                    )
+                try:
+                    image_capture_drained = await asyncio.to_thread(
+                        spot_control.stop_spot_image_capture_for_shutdown,
+                        timeout_sec=config.SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC,
+                    )
+                except Exception as exc:
+                    image_capture_drained = False
+                    _logger.warning(
+                        "[Main] Lifespan image capture shutdown failed error_type=%s %s",
+                        type(exc).__name__,
+                        _lifecycle_log_fields(),
+                    )
+                if not image_capture_drained:
+                    _logger.error(
+                        "SPOT image capture queue did not drain before lifespan shutdown; "
+                        "the final image fact manifest will be suppressed"
+                    )
+            if "comm_metrics" in started_services:
+                print("[Main] Stopping Comm Metrics Logger...")
+                _run_lifespan_stop_stage(
+                    "comm_metrics",
+                    comm_metrics_logger_service.stop,
+                )
+            if "memory_service" in started_services:
+                print("[Main] Stopping Memory Service...")
+                _run_lifespan_stop_stage("memory_service", memory_service.stop)
+            if "plc_service" in started_services:
+                print("[Main] Stopping PLC Service...")
+                _run_lifespan_stop_stage("plc_service", plc_service.stop)
+            if "config_sync" in started_services:
+                print("[Main] Stopping Config Sync Agent...")
+                _run_lifespan_stop_stage("config_sync", config_sync_agent.stop)
+            if "config_watch" in started_services:
+                print("[Main] Stopping Config Watcher...")
+                _run_lifespan_stop_stage("config_watch", config_watch_service.stop)
+            if "csv_logger" in started_services:
+                print("[Main] Stopping CSV Logger...")
+                if not _run_lifespan_stop_stage(
+                    "csv_logger",
+                    lambda: logger_service.stop(
+                        timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+                        finalize_spot_image_manifest=image_capture_drained,
+                    ),
+                ):
+                    _logger.warning(
+                        "CSV logger did not stop cleanly during lifespan shutdown"
+                    )
+        finally:
+            release_single_instance_lock()
 
 # --- App Definition ---
 app = FastAPI(
@@ -3254,8 +3320,7 @@ async def _run_control_shutdown(reason: str) -> None:
     status: dict[str, Any] = {}
 
     async def _stop_spot_poll_loop() -> bool:
-        await spot_control.stop_spot_poll_loop()
-        return True
+        return await spot_control.stop_spot_poll_loop()
 
     await _run_async_control_shutdown_stage(
         stage="spot_poll_loop",

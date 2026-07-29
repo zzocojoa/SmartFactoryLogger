@@ -2693,7 +2693,7 @@ async def start_spot_poll_loop():
     _spot_poll_task = asyncio.create_task(_spot_poll_loop())
 
 
-async def stop_spot_poll_loop():
+async def stop_spot_poll_loop() -> bool:
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф 餓λ쵐?."""
     global _internal_temperature_task, _spot_poll_task, _spot_poll_running, _spot_diagnostics_task
     _spot_poll_running = False
@@ -2720,13 +2720,14 @@ async def stop_spot_poll_loop():
         except asyncio.CancelledError:
             pass
         _internal_temperature_task = None
-    await _stop_spot_image_refresh_for_shutdown()
-    stop_spot_image_capture_writer()
-    if not await _stop_spot_http_transport():
+    image_refresh_stopped = await _stop_spot_image_refresh_for_shutdown()
+    transport_stopped = await _stop_spot_http_transport()
+    if not transport_stopped:
         _logger.warning(
             "SPOT HTTP transport did not drain before shutdown timeout",
             extra={"code": "spot-http-transport-shutdown-timeout"},
         )
+    return image_refresh_stopped and transport_stopped
 
 
 def get_cached_spot_temp() -> float:

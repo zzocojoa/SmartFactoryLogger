@@ -153,6 +153,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
 
                 async def stop_spot_poll_loop():
                     mark("spot_poll_loop")
+                    return True
 
                 class LoggerStub:
                     def stop(self, *, timeout_sec=None, finalize_spot_image_manifest=True):
@@ -209,6 +210,33 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 patch.object(backend_app.os, "_exit") as process_exit,
             ):
                 await backend_app._run_control_shutdown("spot-stop-regression")
+
+            closeout.assert_called_once_with()
+            process_exit.assert_called_once_with(2)
+
+        asyncio.run(exercise())
+
+    def test_control_shutdown_transport_timeout_exits_with_failure(self) -> None:
+        async def exercise() -> None:
+            downstream_status = {
+                key: True
+                for key in backend_app._CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS
+                if key != "spot_poll_loop_stopped"
+            }
+            with (
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_poll_loop",
+                    new=AsyncMock(return_value=False),
+                ),
+                patch.object(
+                    backend_app,
+                    "_stop_services_for_control_shutdown",
+                    return_value=downstream_status,
+                ) as closeout,
+                patch.object(backend_app.os, "_exit") as process_exit,
+            ):
+                await backend_app._run_control_shutdown("transport-timeout-regression")
 
             closeout.assert_called_once_with()
             process_exit.assert_called_once_with(2)

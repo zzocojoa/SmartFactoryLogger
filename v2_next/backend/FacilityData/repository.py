@@ -373,8 +373,16 @@ class CSVLoggerService:
 
     def start(self) -> None:
         with self._lifecycle_lock:
-            if self.running:
+            existing_thread = self.thread
+            if self.running or (
+                existing_thread is not None and existing_thread.is_alive()
+            ):
+                if not self.running:
+                    self.logger.warning(
+                        "CSV logger start ignored while the previous thread is stopping."
+                    )
                 return
+            self.thread = None
             self._shutdown_flush_succeeded = False
             self._runtime_write_failure_observed = False
             self._finalize_spot_image_manifest_on_stop = True
@@ -389,22 +397,32 @@ class CSVLoggerService:
         finalize_spot_image_manifest: bool = True,
     ) -> bool:
         with self._lifecycle_lock:
+            retiring_thread = self.thread
+            if (
+                retiring_thread is not None
+                and retiring_thread.is_alive()
+                and not finalize_spot_image_manifest
+            ):
+                # Once closeout is unsafe for a logger generation, a repeated
+                # stop must not re-enable its final manifest.
+                self._finalize_spot_image_manifest_on_stop = False
             if self.running:
-                self._finalize_spot_image_manifest_on_stop = bool(
-                    finalize_spot_image_manifest
-                )
                 self.running = False
                 try:
                     self.queue.put_nowait(None)
                 except queue.Full:
                     pass
-        if self.thread:
-            self.thread.join(timeout=timeout_sec)
-            stopped = not self.thread.is_alive()
+        if retiring_thread:
+            retiring_thread.join(timeout=timeout_sec)
+            stopped = not retiring_thread.is_alive()
             if not stopped:
                 self.logger.warning("CSV logger thread did not stop within %.1f seconds.", timeout_sec)
             elif self._shutdown_flush_succeeded is not True:
                 self.logger.warning("CSV logger stopped without a durable final flush.")
+            if stopped:
+                with self._lifecycle_lock:
+                    if self.thread is retiring_thread:
+                        self.thread = None
             return stopped and self._shutdown_flush_succeeded is True
         return True
 
