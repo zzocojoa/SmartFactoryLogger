@@ -25,6 +25,7 @@ from backend.FacilityData.spot_image_fact import (
     SpotImageCaptureWriter,
     _under_range_cause_candidate,
 )
+from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
 
 FocusUrlopenTarget = str | UrlRequest
 
@@ -2333,6 +2334,31 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         writer.spool_pending_count.side_effect = OSError("unreadable spool")
         with patch.object(spot_api, "_spot_observation_fact_writer", writer):
             self.assertFalse(spot_api.spot_observation_fact_writes_drained())
+
+    def test_observation_fact_closeout_rejects_unreadable_restarted_spool(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            spool_path = Path(temp_dir) / "spot_observation_fact.csv.failed.jsonl"
+            writer = SpotObservationFactWriter(fact_path, spool_path=spool_path)
+            spool_path.write_text('{"spot_observation_key":"pending"}\n', encoding="utf-8")
+            original_open = Path.open
+
+            def fail_spool_read(
+                path: Path,
+                mode: str = "r",
+                *args: object,
+                **kwargs: object,
+            ):
+                if path == spool_path and mode == "r":
+                    raise OSError("unreadable restarted spool")
+                return original_open(path, mode, *args, **kwargs)
+
+            self.assertEqual(writer.failure_count, 0)
+            with (
+                patch.object(Path, "open", new=fail_spool_read),
+                patch.object(spot_api, "_spot_observation_fact_writer", writer),
+            ):
+                self.assertFalse(spot_api.spot_observation_fact_writes_drained())
 
     async def test_connection_test_routes_spot_through_guarded_helper(self) -> None:
         guarded_result = {

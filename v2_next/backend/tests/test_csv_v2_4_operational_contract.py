@@ -2142,6 +2142,14 @@ class CsvV24OperationalContractTests(unittest.TestCase):
 
         summary = service.get_v2_4_operational_summary()
         self.assertTrue(summary["enabled"])
+        self.assertEqual(
+            summary["logger_service_instance_id"],
+            service.logger_service_instance_id,
+        )
+        self.assertEqual(
+            summary["logger_service_started_at"],
+            service.logger_service_started_at,
+        )
         self.assertEqual(summary["rows_total"], 2)
         self.assertEqual(summary["rows_by_temperature_output_status"]["under_range"], 1)
         self.assertEqual(summary["rows_by_temperature_output_status"]["stale"], 1)
@@ -2643,7 +2651,10 @@ class V24HealthCounterTests(unittest.TestCase):
             patch.object(facility_service.logger_service, "get_v2_4_operational_summary", return_value=dict(summary)),
             patch(
                 "backend.FacilityData.drivers.spot_api.get_spot_diagnostics",
-                return_value={"spot_poll_status": "success"},
+                return_value={
+                    "build_git_commit": "b" * 40,
+                    "spot_poll_status": "success",
+                },
             ),
             patch(
                 "backend.FacilityData.drivers.spot_api.get_spot_observation_fact_health",
@@ -2657,6 +2668,7 @@ class V24HealthCounterTests(unittest.TestCase):
             payload = facility_service.plc_service._spot_temperature_health()
 
         self.assertTrue(payload["diagnostics_available"])
+        self.assertEqual(payload["build_git_commit"], "b" * 40)
         self.assertEqual(payload["v2_4_operational"]["rows_total"], 3)
         self.assertEqual(payload["v2_4_operational"]["observation_fact_write_failure_count"], 2)
         self.assertTrue(payload["v2_4_operational"]["observation_fact_enabled"])

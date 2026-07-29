@@ -1232,11 +1232,20 @@ Invoke-Expression $helperSource
 $matched = Find-LatestMetadata `
     -Directories @($args[1]) `
     -ExpectedLoggerServiceInstanceId $args[2] `
-    -ExpectedBuildCommit $args[3]
+    -ExpectedBuildCommit $args[3] `
+    -ExpectedMinimumSampleSeq ([long]$args[4])
 $missing = Find-LatestMetadata `
     -Directories @($args[1]) `
     -ExpectedLoggerServiceInstanceId "33333333-3333-3333-3333-333333333333" `
-    -ExpectedBuildCommit ("c" * 40)
+    -ExpectedBuildCommit ("c" * 40) `
+    -ExpectedMinimumSampleSeq ([long]$args[4])
+
+Set-Content -LiteralPath $args[5] -Value "{" -Encoding UTF8
+$corruptCurrent = Find-LatestMetadata `
+    -Directories @($args[1]) `
+    -ExpectedLoggerServiceInstanceId $args[2] `
+    -ExpectedBuildCommit $args[3] `
+    -ExpectedMinimumSampleSeq ([long]$args[4])
 
 [PSCustomObject]@{
     matched_name = if ($null -ne $matched) { $matched.file.Name } else { "" }
@@ -1245,7 +1254,13 @@ $missing = Find-LatestMetadata `
     } else {
         ""
     }
+    matched_last_sample_seq = if ($null -ne $matched) {
+        [long]$matched.csv_last_sample_seq
+    } else {
+        0
+    }
     missing_is_null = ($null -eq $missing)
+    corrupt_current_is_null = ($null -eq $corruptCurrent)
 } | ConvertTo-Json -Compress
 """
 
@@ -1253,35 +1268,41 @@ $missing = Find-LatestMetadata `
             temp_path = Path(temp_dir)
             current_path = temp_path / "Factory_Integrated_Log_v2_20260729_100000.metadata.json"
             stale_path = temp_path / "Factory_Integrated_Log_v2_20260729_110000.metadata.json"
-            current_path.write_text(
-                json.dumps(
-                    {
-                        "schema_metadata": {
-                            "logger_service_instance_id": expected_instance,
-                            "git_commit": expected_commit,
-                        },
-                        "spot_configuration_snapshot": {
-                            "build_git_commit": expected_commit,
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            stale_path.write_text(
-                json.dumps(
-                    {
-                        "schema_metadata": {
-                            "logger_service_instance_id": stale_instance,
-                            "git_commit": stale_commit,
-                        },
-                        "spot_configuration_snapshot": {
-                            "build_git_commit": stale_commit,
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
+            older_path = temp_path / "Factory_Integrated_Log_v2_20260729_090000.metadata.json"
+
+            def write_artifact(
+                metadata_path: Path,
+                logger_instance: str,
+                build_commit: str,
+                sample_seq: int,
+            ) -> None:
+                metadata_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_metadata": {
+                                "logger_service_instance_id": logger_instance,
+                                "git_commit": build_commit,
+                            },
+                            "spot_configuration_snapshot": {
+                                "build_git_commit": build_commit,
+                            },
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                csv_path = metadata_path.with_name(
+                    metadata_path.name.replace(".metadata.json", ".csv")
+                )
+                with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(["logger_service_instance_id", "sample_seq"])
+                    writer.writerow([logger_instance, sample_seq])
+
+            write_artifact(current_path, expected_instance, expected_commit, 200)
+            write_artifact(older_path, expected_instance, expected_commit, 100)
+            write_artifact(stale_path, stale_instance, stale_commit, 300)
             now = time.time()
+            os.utime(older_path, (now - 120, now - 120))
             os.utime(current_path, (now - 60, now - 60))
             os.utime(stale_path, (now, now))
             exercise_path = temp_path / "exercise-qa-metadata.ps1"
@@ -1297,6 +1318,8 @@ $missing = Find-LatestMetadata `
                 str(temp_path),
                 expected_instance,
                 expected_commit,
+                "150",
+                str(current_path),
             ]
             if sys.platform == "win32":
                 command = ["cmd.exe", "/d", "/c", *command]
@@ -1313,7 +1336,9 @@ $missing = Find-LatestMetadata `
         result = json.loads(completed.stdout.strip().splitlines()[-1])
         self.assertEqual(result["matched_name"], current_path.name)
         self.assertEqual(result["matched_instance"], expected_instance)
+        self.assertEqual(result["matched_last_sample_seq"], 200)
         self.assertTrue(result["missing_is_null"])
+        self.assertTrue(result["corrupt_current_is_null"])
 
 
 if __name__ == "__main__":

@@ -325,11 +325,8 @@ class SpotObservationFactWriter:
         spool_path = self._effective_spool_path()
         if not spool_path.exists() or spool_path.stat().st_size == 0:
             return 0
-        try:
-            with spool_path.open("r", encoding="utf-8") as handle:
-                return sum(1 for line in handle if line.strip())
-        except OSError:
-            return 0
+        with spool_path.open("r", encoding="utf-8") as handle:
+            return sum(1 for line in handle if line.strip())
 
     def manifest_summary(
         self,

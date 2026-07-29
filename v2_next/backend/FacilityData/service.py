@@ -415,6 +415,7 @@ class PLCService:
             }
 
         exposed_fields = (
+            "build_git_commit",
             "spot_service_instance_id",
             "spot_poll_seq",
             "spot_observation_seq",
