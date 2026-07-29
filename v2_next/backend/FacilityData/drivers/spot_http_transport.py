@@ -8,11 +8,11 @@ import sys
 import threading
 import time
 from concurrent.futures import Future, InvalidStateError
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from queue import Empty, Queue
 from typing import Callable, Mapping, Protocol
-from urllib.parse import SplitResult, urlsplit
+from urllib.parse import SplitResult, urljoin, urlsplit
 
 from backend.FacilityData.drivers.spot_port_quarantine import (
     ACQUIRE_TIMEOUT_SECONDS,
@@ -27,8 +27,10 @@ from backend.FacilityData.drivers.spot_port_quarantine import (
 BIND_RETRY_LIMIT = 8
 DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024
 HARD_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_REDIRECT_HOPS = 5
 _RESPONSE_READ_CHUNK_BYTES = 64 * 1024
-_ALLOWED_METHODS = frozenset({"GET", "PUT"})
+_ALLOWED_METHODS = frozenset({"GET", "HEAD", "PUT"})
+_REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 _BIND_COLLISION_ERRNOS = frozenset({98, 10048})
 _logger = logging.getLogger("spot_control")
 
@@ -55,6 +57,7 @@ class SpotHttpRequest:
     connect_timeout_sec: float
     read_timeout_sec: float
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
+    read_response_body: bool = True
 
 
 @dataclass(frozen=True)
@@ -125,6 +128,12 @@ ConnectionFactory = Callable[
 class _WorkItem:
     future: Future[SpotHttpResponse]
     request: SpotHttpRequest
+
+
+@dataclass(frozen=True)
+class _ConnectionInterruptTarget:
+    connection: _Connection
+    response_socket: object | None = None
 
 
 class _DaemonSingleWorker:
@@ -269,9 +278,16 @@ class SpotHttpTransport:
         self._monotonic = monotonic
         self._executor: _DaemonSingleWorker | None = None
         self._state_lock = threading.RLock()
+        self._response_deadline_condition = threading.Condition(self._state_lock)
+        self._response_deadline_thread: threading.Thread | None = None
+        self._response_deadline_stop = False
+        self._response_deadline_target: _ConnectionInterruptTarget | None = None
+        self._response_deadline_expired: threading.Event | None = None
+        self._response_deadline_at: float | None = None
+        self._response_deadline_token = 0
         self._request_lock = threading.Lock()
         self._pending: set[Future[SpotHttpResponse]] = set()
-        self._active_connections: dict[int, _Connection] = {}
+        self._active_connections: dict[int, _ConnectionInterruptTarget] = {}
         self._shutdown_task: asyncio.Task[bool] | None = None
         self._shutdown_result: bool | None = None
         self._active = False
@@ -309,6 +325,7 @@ class SpotHttpTransport:
                     )
                 return False
             self._pool.initialize()
+            self._start_response_deadline_watchdog_locked()
             self._executor = _DaemonSingleWorker(self._execute_request_sync)
             self._active = True
             self._accepting = True
@@ -353,12 +370,39 @@ class SpotHttpTransport:
                     )
             self._record_started(request.kind)
             try:
-                response = self._request_with_bind_retries(request)
+                response = self._request_with_redirects(request)
             except BaseException:
                 self._record_failure(request.kind)
                 raise
             self._record_success(request.kind)
             return response
+
+    def _request_with_redirects(
+        self,
+        request: SpotHttpRequest,
+    ) -> SpotHttpResponse:
+        current_request = request
+        for hop in range(MAX_REDIRECT_HOPS + 1):
+            response = self._request_with_bind_retries(current_request)
+            location = response.headers.get("location")
+            if (
+                current_request.method.upper() not in {"GET", "HEAD"}
+                or response.status_code not in _REDIRECT_STATUS_CODES
+                or not location
+            ):
+                return response
+            if hop >= MAX_REDIRECT_HOPS:
+                raise SpotTransportProtocolError(
+                    "SPOT HTTP redirect limit was exceeded"
+                )
+            current_request = replace(
+                current_request,
+                url=resolve_spot_redirect_url(
+                    current_request.url,
+                    location,
+                ),
+            )
+        raise SpotTransportProtocolError("SPOT HTTP redirect limit was exceeded")
 
     async def close(self, timeout_sec: float = 7.0) -> bool:
         with self._state_lock:
@@ -405,6 +449,7 @@ class SpotHttpTransport:
                 self._interrupt_active_connections()
 
         self._pool.close()
+        self._stop_response_deadline_watchdog()
         with self._state_lock:
             self._active = False
             self._closed = True
@@ -415,36 +460,90 @@ class SpotHttpTransport:
 
     def _interrupt_active_connections(self) -> None:
         with self._state_lock:
-            connections = list(self._active_connections.values())
-        for connection in connections:
-            self._interrupt_connection(connection)
+            targets = list(self._active_connections.values())
+        for target in targets:
+            self._interrupt_target(target)
+
+    @classmethod
+    def _interrupt_target(cls, target: _ConnectionInterruptTarget) -> None:
+        if target.response_socket is not None:
+            cls._interrupt_socket(target.response_socket)
+            return
+        cls._interrupt_connection(target.connection)
 
     @staticmethod
     def _interrupt_connection(connection: _Connection) -> None:
         sock = getattr(connection, "sock", None)
-        socket_interrupt_attempted = False
         if sock is not None:
-            shutdown = getattr(sock, "shutdown", None)
-            if callable(shutdown):
-                socket_interrupt_attempted = True
-                try:
-                    shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-            close_socket = getattr(sock, "close", None)
-            if callable(close_socket):
-                socket_interrupt_attempted = True
-                try:
-                    close_socket()
-                except OSError:
-                    pass
-        if socket_interrupt_attempted:
-            # HTTPConnection.close() also closes its HTTPResponse. Calling it
-            # here can block on the buffered reader lock held by the worker.
-            # The interrupted worker owns final connection cleanup.
-            return
+            if SpotHttpTransport._interrupt_socket(sock):
+                # HTTPConnection.close() also closes its HTTPResponse. Calling it
+                # here can block on the buffered reader lock held by the worker.
+                # The interrupted worker owns final connection cleanup.
+                return
         try:
             connection.close()
+        except OSError:
+            pass
+
+    @staticmethod
+    def _interrupt_socket(sock: object) -> bool:
+        socket_interrupt_attempted = False
+        shutdown = getattr(sock, "shutdown", None)
+        if callable(shutdown):
+            socket_interrupt_attempted = True
+            try:
+                shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        close_socket = getattr(sock, "close", None)
+        if callable(close_socket):
+            socket_interrupt_attempted = True
+            try:
+                close_socket()
+            except OSError:
+                pass
+        return socket_interrupt_attempted
+
+    @staticmethod
+    def _response_socket(upstream: http.client.HTTPResponse) -> object | None:
+        response_file = getattr(upstream, "fp", None)
+        raw_file = getattr(response_file, "raw", None)
+        response_socket = getattr(raw_file, "_sock", None)
+        if response_socket is None:
+            return None
+        if not callable(getattr(response_socket, "close", None)):
+            return None
+        return response_socket
+
+    def _retarget_response_deadline(
+        self,
+        token: int,
+        target: _ConnectionInterruptTarget,
+        expired: threading.Event,
+    ) -> bool:
+        with self._response_deadline_condition:
+            still_armed = (
+                token == self._response_deadline_token
+                and self._response_deadline_target is not None
+                and self._response_deadline_expired is expired
+                and not expired.is_set()
+            )
+            if still_armed:
+                self._response_deadline_target = target
+                self._active_connections[id(target.connection)] = target
+                self._response_deadline_condition.notify_all()
+                return True
+
+        self._interrupt_target(target)
+        return False
+
+    @staticmethod
+    def _close_response(upstream: http.client.HTTPResponse) -> None:
+        close = getattr(upstream, "close", None)
+        if not callable(close):
+            return
+        try:
+            close()
         except OSError:
             pass
 
@@ -458,11 +557,101 @@ class SpotHttpTransport:
                 raise SpotTransportClosedError(
                     "SPOT transport is not accepting requests"
                 )
-            self._active_connections[id(connection)] = connection
+            self._active_connections[id(connection)] = _ConnectionInterruptTarget(
+                connection=connection
+            )
 
     def _discard_connection(self, connection: _Connection) -> None:
         with self._state_lock:
             self._active_connections.pop(id(connection), None)
+
+    def _start_response_deadline_watchdog_locked(self) -> None:
+        thread = self._response_deadline_thread
+        if thread is not None and thread.is_alive():
+            return
+        self._response_deadline_stop = False
+        thread = threading.Thread(
+            target=self._run_response_deadline_watchdog,
+            name=f"spot-http-deadline-{id(self):x}",
+            daemon=True,
+        )
+        self._response_deadline_thread = thread
+        thread.start()
+
+    def _run_response_deadline_watchdog(self) -> None:
+        while True:
+            with self._response_deadline_condition:
+                while (
+                    not self._response_deadline_stop
+                    and self._response_deadline_target is None
+                ):
+                    self._response_deadline_condition.wait()
+                if self._response_deadline_stop:
+                    return
+
+                deadline_at = self._response_deadline_at
+                if deadline_at is None:
+                    continue
+                remaining = deadline_at - time.monotonic()
+                if remaining > 0.0:
+                    self._response_deadline_condition.wait(timeout=remaining)
+                    continue
+
+                target = self._response_deadline_target
+                expired = self._response_deadline_expired
+                if expired is not None:
+                    expired.set()
+                self._response_deadline_target = None
+                self._response_deadline_expired = None
+                self._response_deadline_at = None
+
+            if target is not None and expired is not None:
+                self._interrupt_target(target)
+
+    def _arm_response_deadline(
+        self,
+        connection: _Connection,
+        *,
+        deadline_at: float,
+        expired: threading.Event,
+    ) -> int:
+        with self._response_deadline_condition:
+            if self._response_deadline_stop:
+                raise SpotTransportClosedError(
+                    "SPOT response deadline watchdog is closed"
+                )
+            self._response_deadline_token += 1
+            token = self._response_deadline_token
+            self._response_deadline_target = _ConnectionInterruptTarget(
+                connection=connection
+            )
+            self._response_deadline_expired = expired
+            self._response_deadline_at = deadline_at
+            self._response_deadline_condition.notify_all()
+            return token
+
+    def _disarm_response_deadline(self, token: int) -> None:
+        with self._response_deadline_condition:
+            if token != self._response_deadline_token:
+                return
+            self._response_deadline_target = None
+            self._response_deadline_expired = None
+            self._response_deadline_at = None
+            self._response_deadline_condition.notify_all()
+
+    def _stop_response_deadline_watchdog(self) -> None:
+        with self._response_deadline_condition:
+            self._response_deadline_stop = True
+            self._response_deadline_target = None
+            self._response_deadline_expired = None
+            self._response_deadline_at = None
+            thread = self._response_deadline_thread
+            self._response_deadline_condition.notify_all()
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=0.1)
+        with self._response_deadline_condition:
+            if thread is None or not thread.is_alive():
+                self._response_deadline_thread = None
 
     def _release_lease(self, lease: SourcePortLease) -> None:
         try:
@@ -496,8 +685,10 @@ class SpotHttpTransport:
         for attempt in range(self._bind_retry_limit):
             lease = self._pool.acquire(ACQUIRE_TIMEOUT_SECONDS)
             connection: _Connection | None = None
-            response_timer: threading.Timer | None = None
+            upstream: http.client.HTTPResponse | None = None
+            response_deadline_token: int | None = None
             response_deadline_expired = threading.Event()
+            response_deadline_at: float | None = None
             started_at = self._monotonic()
             request_phase = "connect"
             try:
@@ -514,13 +705,12 @@ class SpotHttpTransport:
                 request_phase = "response"
                 if connection.sock is not None:
                     connection.sock.settimeout(request.read_timeout_sec)
-                response_timer = threading.Timer(
-                    request.read_timeout_sec,
-                    self._expire_response_deadline,
-                    args=(connection, response_deadline_expired),
+                response_deadline_at = time.monotonic() + request.read_timeout_sec
+                response_deadline_token = self._arm_response_deadline(
+                    connection,
+                    deadline_at=response_deadline_at,
+                    expired=response_deadline_expired,
                 )
-                response_timer.daemon = True
-                response_timer.start()
                 connection.request(
                     request.method.upper(),
                     origin_form,
@@ -528,13 +718,35 @@ class SpotHttpTransport:
                     headers=dict(request.headers),
                 )
                 upstream = connection.getresponse()
-                raw_headers = list(upstream.getheaders())
-                body = self._read_bounded_response(
-                    upstream,
-                    raw_headers=raw_headers,
-                    max_response_bytes=request.max_response_bytes,
+                response_target = _ConnectionInterruptTarget(
+                    connection=connection,
+                    response_socket=self._response_socket(upstream),
                 )
-                if response_deadline_expired.is_set():
+                if not self._retarget_response_deadline(
+                    response_deadline_token,
+                    response_target,
+                    response_deadline_expired,
+                ):
+                    raise SpotTransportReadTimeout(
+                        "SPOT transport response deadline expired"
+                    )
+                raw_headers = list(upstream.getheaders())
+                body = (
+                    self._read_bounded_response(
+                        upstream,
+                        raw_headers=raw_headers,
+                        max_response_bytes=request.max_response_bytes,
+                    )
+                    if request.read_response_body
+                    else b""
+                )
+                if (
+                    response_deadline_expired.is_set()
+                    or (
+                        response_deadline_at is not None
+                        and time.monotonic() >= response_deadline_at
+                    )
+                ):
                     raise SpotTransportReadTimeout(
                         "SPOT transport response deadline expired"
                     )
@@ -578,8 +790,10 @@ class SpotHttpTransport:
             except SpotPortPoolError:
                 raise
             finally:
-                if response_timer is not None:
-                    response_timer.cancel()
+                if response_deadline_token is not None:
+                    self._disarm_response_deadline(response_deadline_token)
+                if upstream is not None:
+                    self._close_response(upstream)
                 if connection is not None:
                     self._discard_connection(connection)
                     try:
@@ -590,20 +804,13 @@ class SpotHttpTransport:
         raise SpotPortBindError("SPOT source-port bind retry limit was exhausted")
 
     @staticmethod
-    def _expire_response_deadline(
-        connection: _Connection,
-        expired: threading.Event,
-    ) -> None:
-        expired.set()
-        SpotHttpTransport._interrupt_connection(connection)
-
-    @staticmethod
     def _read_bounded_response(
         upstream: http.client.HTTPResponse,
         *,
         raw_headers: list[tuple[str, str]],
         max_response_bytes: int,
     ) -> bytes:
+        content_length: int | None = None
         content_lengths = {
             value.strip()
             for key, value in raw_headers
@@ -645,6 +852,10 @@ class SpotHttpTransport:
                     "SPOT response exceeds the configured byte limit"
                 )
             chunks.append(bytes(chunk))
+        if content_length is not None and total_bytes != content_length:
+            raise SpotTransportProtocolError(
+                "SPOT response body length does not match Content-Length"
+            )
         return b"".join(chunks)
 
     def _record_started(self, kind: SpotRequestKind) -> None:
@@ -750,8 +961,38 @@ class SpotHttpTransport:
             self._pending.discard(future)
 
 
+def resolve_spot_redirect_url(current_url: str, location: str) -> str:
+    normalized_location = location.strip()
+    if not normalized_location:
+        raise SpotTransportProtocolError("SPOT HTTP redirect location is empty")
+    target_url = urljoin(current_url, normalized_location)
+    current_parts, current_host, current_port, _ = SpotHttpTransport._parse_url(
+        current_url
+    )
+    target_parts, target_host, target_port, _ = SpotHttpTransport._parse_url(
+        target_url
+    )
+    current_origin = (
+        current_parts.scheme,
+        current_host.lower(),
+        current_port,
+    )
+    target_origin = (
+        target_parts.scheme,
+        target_host.lower(),
+        target_port,
+    )
+    if target_origin != current_origin:
+        raise SpotTransportProtocolError(
+            "SPOT HTTP redirect target is outside the configured device origin"
+        )
+    return target_url
+
+
 __all__ = [
     "BIND_RETRY_LIMIT",
+    "HARD_MAX_RESPONSE_BYTES",
+    "MAX_REDIRECT_HOPS",
     "POOL_CAPACITY",
     "QUARANTINE_SECONDS",
     "SourcePortLeasePool",
@@ -767,4 +1008,5 @@ __all__ = [
     "SpotTransportReadTimeout",
     "SpotTransportRequestError",
     "SpotTransportTimeout",
+    "resolve_spot_redirect_url",
 ]

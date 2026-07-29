@@ -376,7 +376,18 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     return True
 
                 class LoggerStub:
-                    def stop(self, *, timeout_sec=None, finalize_spot_image_manifest=True):
+                    def stop(
+                        self,
+                        *,
+                        timeout_sec=None,
+                        finalize_spot_image_manifest=True,
+                        finalize_spot_observation_manifest=True,
+                    ):
+                        del (
+                            timeout_sec,
+                            finalize_spot_image_manifest,
+                            finalize_spot_observation_manifest,
+                        )
                         return mark("logger_service")
 
                 backend_app.spot_control.stop_spot_poll_loop = stop_spot_poll_loop
@@ -431,7 +442,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             ):
                 await backend_app._run_control_shutdown("spot-stop-regression")
 
-            closeout.assert_called_once_with()
+            closeout.assert_called_once_with(observation_fact_drained=True)
             process_exit.assert_called_once_with(2)
 
         asyncio.run(exercise())
@@ -458,7 +469,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             ):
                 await backend_app._run_control_shutdown("transport-timeout-regression")
 
-            closeout.assert_called_once_with()
+            closeout.assert_called_once_with(observation_fact_drained=True)
             process_exit.assert_called_once_with(2)
 
         asyncio.run(exercise())

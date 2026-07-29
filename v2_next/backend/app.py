@@ -1676,6 +1676,7 @@ async def lifespan(app: FastAPI):
         try:
             _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
             image_capture_drained = True
+            observation_fact_drained = True
             if spot_start_attempted:
                 print("[Main] Stopping SPOT temperature and diagnostics polling...")
                 try:
@@ -1690,6 +1691,14 @@ async def lifespan(app: FastAPI):
                 if not spot_poll_stopped:
                     _logger.error(
                         "SPOT poll or transport did not drain before lifespan shutdown"
+                    )
+                observation_fact_drained = (
+                    spot_control.spot_observation_fact_writes_drained()
+                )
+                if not observation_fact_drained:
+                    _logger.error(
+                        "SPOT observation fact writes did not drain before lifespan "
+                        "shutdown; the observation manifest will be suppressed"
                     )
                 try:
                     image_capture_drained = await asyncio.to_thread(
@@ -1733,11 +1742,17 @@ async def lifespan(app: FastAPI):
                     lambda: logger_service.stop(
                         timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
                         finalize_spot_image_manifest=image_capture_drained,
+                        finalize_spot_observation_manifest=observation_fact_drained,
                     ),
                 ):
                     _logger.warning(
                         "CSV logger did not stop cleanly during lifespan shutdown"
                     )
+            if not observation_fact_drained:
+                raise RuntimeError(
+                    "SPOT observation fact writes did not drain before lifespan "
+                    "shutdown"
+                )
         finally:
             release_single_instance_lock()
 
@@ -1773,6 +1788,7 @@ app.add_middleware(
 
 _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
     "spot_poll_loop_stopped",
+    "spot_observation_fact_drained",
     "spot_image_capture_drained",
     "plc_service_stopped",
     "logger_service_stopped",
@@ -1860,8 +1876,13 @@ async def _run_async_control_shutdown_stage(
     return succeeded
 
 
-def _stop_services_for_control_shutdown() -> dict[str, Any]:
-    status: dict[str, Any] = {}
+def _stop_services_for_control_shutdown(
+    *,
+    observation_fact_drained: bool,
+) -> dict[str, Any]:
+    status: dict[str, Any] = {
+        "spot_observation_fact_drained": observation_fact_drained,
+    }
     shutdown_started_perf = time.perf_counter()
 
     image_capture_drained = _run_control_shutdown_stage(
@@ -1888,6 +1909,7 @@ def _stop_services_for_control_shutdown() -> dict[str, Any]:
         stopper=lambda: logger_service.stop(
             timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
             finalize_spot_image_manifest=image_capture_drained,
+            finalize_spot_observation_manifest=observation_fact_drained,
         ),
         status=status,
     )
@@ -2963,17 +2985,35 @@ def reconnect():
 @app.post("/api/control/test-connection")
 async def test_connection(payload: ConnectionTestPayload):
     try:
-        results: dict[str, dict] = {}
+        result_keys: list[str] = []
+        probes = []
         if payload.extruder is not None:
-            results["extruder"] = _test_tcp(payload.extruder.ip, payload.extruder.port)
-        if payload.ls_plc is not None:
-            results["ls_plc"] = _test_tcp(payload.ls_plc.ip, payload.ls_plc.port)
-        if payload.spot is not None:
-            results["spot"] = await spot_control.test_spot_http_connection(
-                payload.spot.url
+            result_keys.append("extruder")
+            probes.append(
+                asyncio.to_thread(
+                    _test_tcp,
+                    payload.extruder.ip,
+                    payload.extruder.port,
+                )
             )
-        if not results:
+        if payload.ls_plc is not None:
+            result_keys.append("ls_plc")
+            probes.append(
+                asyncio.to_thread(
+                    _test_tcp,
+                    payload.ls_plc.ip,
+                    payload.ls_plc.port,
+                )
+            )
+        if payload.spot is not None:
+            result_keys.append("spot")
+            probes.append(
+                spot_control.test_spot_http_connection(payload.spot.url)
+            )
+        if not probes:
             raise HTTPException(status_code=400, detail="No targets provided")
+        probe_results = await asyncio.gather(*probes)
+        results = dict(zip(result_keys, probe_results, strict=True))
         return {"results": results}
     except HTTPException:
         raise
@@ -3308,7 +3348,14 @@ async def _run_control_shutdown(reason: str) -> None:
         stopper=_stop_spot_poll_loop,
         status=status,
     )
-    status.update(await asyncio.to_thread(_stop_services_for_control_shutdown))
+    observation_fact_drained = spot_control.spot_observation_fact_writes_drained()
+    status["spot_observation_fact_drained"] = observation_fact_drained
+    status.update(
+        await asyncio.to_thread(
+            _stop_services_for_control_shutdown,
+            observation_fact_drained=observation_fact_drained,
+        )
+    )
     status["total_elapsed_ms"] = round(
         (time.perf_counter() - shutdown_started_perf) * 1000.0,
         1,

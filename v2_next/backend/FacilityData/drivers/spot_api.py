@@ -21,6 +21,7 @@ from backend import config
 from backend.FacilityData.drivers.spot_http_transport import (
     DEFAULT_MAX_RESPONSE_BYTES,
     HARD_MAX_RESPONSE_BYTES,
+    MAX_REDIRECT_HOPS,
     POOL_CAPACITY,
     QUARANTINE_SECONDS,
     SpotHttpRequest,
@@ -32,6 +33,7 @@ from backend.FacilityData.drivers.spot_http_transport import (
     SpotTransportError,
     SpotTransportReadTimeout,
     SpotTransportTimeout,
+    resolve_spot_redirect_url,
 )
 from backend.FacilityData.drivers.spot_port_quarantine import (
     POLICY_VERSION as _SPOT_SOURCE_PORT_POLICY_VERSION,
@@ -169,6 +171,7 @@ _spot_poll_seq = 0
 _spot_observation_seq = 0
 _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
 _spot_observation_fact_writer: Optional[SpotObservationFactWriter] = None
+_spot_observation_fact_write_tasks: set[asyncio.Task[None]] = set()
 _spot_diagnostics_task: Optional[asyncio.Task[None]] = None
 _spot_last_valid_value_at: Optional[float] = None
 _spot_last_valid_value_monotonic: Optional[float] = None
@@ -1632,11 +1635,20 @@ async def _write_spot_observation_fact_async(snapshot: Dict[str, Any]) -> None:
     write_task = asyncio.create_task(
         asyncio.to_thread(_write_spot_observation_fact_safely, snapshot)
     )
+    _spot_observation_fact_write_tasks.add(write_task)
+    write_task.add_done_callback(_spot_observation_fact_write_tasks.discard)
     try:
         await asyncio.shield(write_task)
     except asyncio.CancelledError:
         await write_task
         raise
+
+
+def spot_observation_fact_writes_drained() -> bool:
+    return not any(
+        not task.done()
+        for task in _spot_observation_fact_write_tasks
+    )
 
 
 def get_spot_observation_fact_health() -> Dict[str, Any]:
@@ -1660,6 +1672,11 @@ def get_spot_observation_fact_health() -> Dict[str, Any]:
         "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
         "write_failure_count": int(writer.failure_count) if writer is not None else 0,
         "spool_pending_count": int(writer.spool_pending_count()) if writer is not None else 0,
+        "pending_write_count": sum(
+            not task.done()
+            for task in _spot_observation_fact_write_tasks
+        ),
+        "writes_drained": spot_observation_fact_writes_drained(),
         "diagnostics_capture_status": diagnostics_status,
         "diagnostics_binding_status": diagnostics_binding_status,
         "diagnostics_last_error_code": _spot_diagnostics_last_error_code,
@@ -2312,15 +2329,29 @@ async def _stop_spot_http_transport(timeout_sec: float = 7.0) -> bool:
     _spot_http_transport_shutdown_started = True
     transport = _spot_http_transport
     drained = True
+    transport_error: BaseException | None = None
     if transport is not None:
-        drained = await transport.close(timeout_sec=timeout_sec)
-        if drained:
-            _spot_http_transport = None
+        try:
+            drained = await transport.close(timeout_sec=timeout_sec)
+        except BaseException as exc:
+            transport_error = exc
+        else:
+            if drained:
+                _spot_http_transport = None
 
     client = _http_client
+    client_error: BaseException | None = None
     if client is not None:
-        await client.aclose()
-        _http_client = None
+        try:
+            await client.aclose()
+        except BaseException as exc:
+            client_error = exc
+        finally:
+            _http_client = None
+    if transport_error is not None:
+        raise transport_error
+    if client_error is not None:
+        raise client_error
     return drained
 
 
@@ -2412,6 +2443,7 @@ async def _request_spot_http_response(
     connect_timeout_sec: float = 1.0,
     read_timeout_sec: float = 5.0,
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    read_response_body: bool = True,
 ) -> httpx.Response:
     request = httpx.Request(method, url)
     try:
@@ -2419,24 +2451,39 @@ async def _request_spot_http_response(
     except (SpotTransportError, SpotPortPoolError) as exc:
         raise httpx.RequestError(str(exc), request=request) from exc
     if transport is None:
-        response = await client.request(
+        timeout = httpx.Timeout(
+            connect=connect_timeout_sec,
+            read=read_timeout_sec,
+            write=1.0,
+            pool=5.0,
+        )
+        if read_response_body:
+            response = await client.request(
+                method,
+                url,
+                headers=headers,
+                content=body,
+                timeout=timeout,
+            )
+            if len(response.content) > max_response_bytes:
+                raise httpx.RequestError(
+                    "SPOT response exceeds the configured byte limit",
+                    request=request,
+                )
+            return response
+        async with client.stream(
             method,
             url,
             headers=headers,
             content=body,
-            timeout=httpx.Timeout(
-                connect=connect_timeout_sec,
-                read=read_timeout_sec,
-                write=1.0,
-                pool=5.0,
-            ),
-        )
-        if len(response.content) > max_response_bytes:
-            raise httpx.RequestError(
-                "SPOT response exceeds the configured byte limit",
+            timeout=timeout,
+        ) as response:
+            return httpx.Response(
+                response.status_code,
+                headers=dict(response.headers),
+                content=b"",
                 request=request,
             )
-        return response
 
     try:
         guarded_response = await transport.request(
@@ -2449,6 +2496,7 @@ async def _request_spot_http_response(
                 connect_timeout_sec=connect_timeout_sec,
                 read_timeout_sec=read_timeout_sec,
                 max_response_bytes=max_response_bytes,
+                read_response_body=read_response_body,
             )
         )
     except SpotTransportConnectTimeout as exc:
@@ -2475,16 +2523,22 @@ async def test_spot_http_connection(
     started_at = time.perf_counter()
     try:
         async with _spot_device_request_lock:
-            response = await _request_spot_http_response(
-                _get_http_client(),
-                kind=SpotRequestKind.CONNECTION_TEST,
-                method="GET",
+            client = _get_http_client()
+            response = await _request_spot_connection_probe(
+                client,
                 url=url,
-                connect_timeout_sec=timeout_sec,
-                read_timeout_sec=timeout_sec,
+                method="HEAD",
+                timeout_sec=timeout_sec,
             )
+            if response.status_code in {405, 501}:
+                response = await _request_spot_connection_probe(
+                    client,
+                    url=url,
+                    method="GET",
+                    timeout_sec=timeout_sec,
+                )
         latency_ms = int((time.perf_counter() - started_at) * 1000)
-        if response.status_code >= 400:
+        if not 200 <= response.status_code < 300:
             return {
                 "ok": False,
                 "latency_ms": latency_ms,
@@ -2502,6 +2556,45 @@ async def test_spot_http_connection(
             "latency_ms": latency_ms,
             "message": _format_exception_message(exc),
         }
+
+
+async def _request_spot_connection_probe(
+    client: httpx.AsyncClient,
+    *,
+    url: str,
+    method: str,
+    timeout_sec: float,
+) -> httpx.Response:
+    current_url = url
+    for hop in range(MAX_REDIRECT_HOPS + 1):
+        response = await _request_spot_http_response(
+            client,
+            kind=SpotRequestKind.CONNECTION_TEST,
+            method=method,
+            url=current_url,
+            connect_timeout_sec=timeout_sec,
+            read_timeout_sec=timeout_sec,
+            read_response_body=False,
+        )
+        location = response.headers.get("location")
+        if response.status_code not in {301, 302, 303, 307, 308} or not location:
+            return response
+        if hop >= MAX_REDIRECT_HOPS:
+            raise httpx.RequestError(
+                "SPOT HTTP redirect limit was exceeded",
+                request=httpx.Request(method, current_url),
+            )
+        try:
+            current_url = resolve_spot_redirect_url(current_url, location)
+        except SpotTransportError as exc:
+            raise httpx.RequestError(
+                str(exc),
+                request=httpx.Request(method, current_url),
+            ) from exc
+    raise httpx.RequestError(
+        "SPOT HTTP redirect limit was exceeded",
+        request=httpx.Request(method, current_url),
+    )
 
 
 def _request_spot_http_response_sync(
@@ -2831,9 +2924,12 @@ async def stop_spot_poll_loop() -> bool:
             },
         )
 
-    _spot_diagnostics_task = None
-    _spot_poll_task = None
-    _internal_temperature_task = None
+    if _spot_diagnostics_task is None or _spot_diagnostics_task.done():
+        _spot_diagnostics_task = None
+    if _spot_poll_task is None or _spot_poll_task.done():
+        _spot_poll_task = None
+    if _internal_temperature_task is None or _internal_temperature_task.done():
+        _internal_temperature_task = None
 
     try:
         image_refresh_stopped = await _stop_spot_image_refresh_for_shutdown()
@@ -2862,7 +2958,24 @@ async def stop_spot_poll_loop() -> bool:
             "SPOT HTTP transport did not drain before shutdown timeout",
             extra={"code": "spot-http-transport-shutdown-timeout"},
         )
-    return task_shutdown_succeeded and image_refresh_stopped and transport_stopped
+    observation_fact_drained = spot_observation_fact_writes_drained()
+    if not observation_fact_drained:
+        _logger.warning(
+            "SPOT observation fact writes did not drain before shutdown timeout",
+            extra={
+                "code": "spot-observation-fact-shutdown-timeout",
+                "pending_write_count": sum(
+                    not task.done()
+                    for task in _spot_observation_fact_write_tasks
+                ),
+            },
+        )
+    return (
+        task_shutdown_succeeded
+        and observation_fact_drained
+        and image_refresh_stopped
+        and transport_stopped
+    )
 
 
 def _consume_spot_background_shutdown_result(

@@ -1380,7 +1380,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     *,
                     timeout_sec: float | None = None,
                     finalize_spot_image_manifest: bool = True,
+                    finalize_spot_observation_manifest: bool = True,
                 ) -> bool:
+                    del finalize_spot_observation_manifest
                     if not finalize_spot_image_manifest:
                         return True
                     service = CSVLoggerService()
@@ -1409,7 +1411,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(backend_app.config_sync_agent, "stop", Mock(return_value=True)),
                     patch.object(backend_app.config_watch_service, "stop", Mock(return_value=True)),
                 ):
-                    shutdown_status = backend_app._stop_services_for_control_shutdown()
+                    shutdown_status = backend_app._stop_services_for_control_shutdown(
+                        observation_fact_drained=True
+                    )
                 release_thread.join(timeout=1.0)
 
             rows = self.read_spot_image_fact_rows(log_path)
@@ -1459,7 +1463,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     *,
                     timeout_sec: float | None = None,
                     finalize_spot_image_manifest: bool = True,
+                    finalize_spot_observation_manifest: bool = True,
                 ) -> bool:
+                    del finalize_spot_observation_manifest
                     self.finalize_requested = finalize_spot_image_manifest
                     if not finalize_spot_image_manifest:
                         return True
@@ -1575,7 +1581,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 *,
                 timeout_sec: float | None = None,
                 finalize_spot_image_manifest: bool = True,
+                finalize_spot_observation_manifest: bool = True,
             ) -> bool:
+                del finalize_spot_observation_manifest
                 self.finalize_requested = finalize_spot_image_manifest
                 return True
 
@@ -1637,6 +1645,100 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     pass
 
         self.assertFalse(logger_stub.finalize_requested)
+
+    async def test_lifespan_shutdown_fails_when_observation_writes_do_not_drain(
+        self,
+    ) -> None:
+        class LoggerStub:
+            finalize_observation_requested: bool | None = None
+
+            def start(self) -> None:
+                return None
+
+            def stop(
+                self,
+                *,
+                timeout_sec: float | None = None,
+                finalize_spot_image_manifest: bool = True,
+                finalize_spot_observation_manifest: bool = True,
+            ) -> bool:
+                del timeout_sec, finalize_spot_image_manifest
+                self.finalize_observation_requested = (
+                    finalize_spot_observation_manifest
+                )
+                return True
+
+        logger_stub = LoggerStub()
+        release_lock = Mock()
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app,
+                "release_single_instance_lock",
+                release_lock,
+            ),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                return_value=False,
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                return_value=True,
+            ),
+            patch.object(backend_app, "logger_service", logger_stub),
+            patch.object(
+                backend_app.comm_metrics_logger_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.memory_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.plc_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.config_sync_agent,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.config_watch_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "observation fact writes did not drain",
+            ):
+                async with backend_app.lifespan(backend_app.app):
+                    pass
+
+        self.assertFalse(logger_stub.finalize_observation_requested)
+        release_lock.assert_called_once_with()
 
     async def test_lifespan_startup_failure_unwinds_started_services_and_lock(
         self,
@@ -1967,6 +2069,83 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await poll_task
 
+    async def test_stop_retains_pending_observation_writer_until_it_drains(
+        self,
+    ) -> None:
+        write_started = threading.Event()
+        release_write = threading.Event()
+
+        def blocking_write(_snapshot: dict[str, Any]) -> None:
+            write_started.set()
+            release_write.wait(timeout=2.0)
+
+        async def poll_with_observation_write() -> None:
+            await spot_api._write_spot_observation_fact_async({"poll_seq": 1})
+
+        poll_task: asyncio.Task[None] | None = None
+        try:
+            with patch.object(
+                spot_api,
+                "_write_spot_observation_fact_safely",
+                side_effect=blocking_write,
+            ):
+                poll_task = asyncio.create_task(poll_with_observation_write())
+                spot_api._spot_diagnostics_task = None
+                spot_api._spot_poll_task = poll_task
+                spot_api._internal_temperature_task = None
+                self.assertTrue(
+                    await asyncio.to_thread(write_started.wait, 1.0)
+                )
+
+                with (
+                    patch.object(
+                        spot_api,
+                        "_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC",
+                        0.01,
+                    ),
+                    patch.object(
+                        spot_api,
+                        "_stop_spot_image_refresh_for_shutdown",
+                        new=AsyncMock(return_value=True),
+                    ),
+                    patch.object(
+                        spot_api,
+                        "_stop_spot_http_transport",
+                        new=AsyncMock(return_value=True),
+                    ),
+                ):
+                    stopped = await spot_api.stop_spot_poll_loop()
+
+                self.assertFalse(stopped)
+                self.assertIs(spot_api._spot_poll_task, poll_task)
+                self.assertFalse(
+                    spot_api.spot_observation_fact_writes_drained()
+                )
+                self.assertEqual(
+                    spot_api.get_spot_observation_fact_health()[
+                        "pending_write_count"
+                    ],
+                    1,
+                )
+
+                release_write.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await poll_task
+                await asyncio.sleep(0)
+
+                self.assertTrue(
+                    spot_api.spot_observation_fact_writes_drained()
+                )
+        finally:
+            release_write.set()
+            if poll_task is not None and not poll_task.done():
+                poll_task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await poll_task
+            spot_api._spot_poll_task = None
+            spot_api._spot_diagnostics_task = None
+            spot_api._internal_temperature_task = None
+
     async def test_connection_test_routes_spot_through_guarded_helper(self) -> None:
         guarded_result = {
             "ok": True,
@@ -1988,6 +2167,70 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response, {"results": {"spot": guarded_result}})
         guarded_test.assert_awaited_once_with("http://spot.local/image.jpg")
+
+    async def test_connection_tcp_probes_run_off_event_loop_in_parallel(self) -> None:
+        both_started = threading.Event()
+        release_probes = threading.Event()
+        started_targets: list[tuple[str | None, int | None]] = []
+        started_lock = threading.Lock()
+
+        def blocking_tcp_probe(
+            ip: str | None,
+            port: int | None,
+            timeout: float = 1.5,
+        ) -> dict[str, object]:
+            del timeout
+            with started_lock:
+                started_targets.append((ip, port))
+                if len(started_targets) == 2:
+                    both_started.set()
+            release_probes.wait(timeout=0.5)
+            return {
+                "ok": True,
+                "latency_ms": 1,
+                "message": "connected",
+            }
+
+        with patch.object(
+            backend_app,
+            "_test_tcp",
+            side_effect=blocking_tcp_probe,
+        ):
+            request_task = asyncio.create_task(
+                backend_app.test_connection(
+                    backend_app.ConnectionTestPayload(
+                        extruder=backend_app.ConnectionTarget(
+                            ip="192.0.2.10",
+                            port=12289,
+                        ),
+                        ls_plc=backend_app.ConnectionTarget(
+                            ip="192.0.2.20",
+                            port=2004,
+                        ),
+                    )
+                )
+            )
+            try:
+                self.assertTrue(
+                    await asyncio.to_thread(both_started.wait, 1.0)
+                )
+                self.assertFalse(request_task.done())
+            finally:
+                release_probes.set()
+
+            response = await asyncio.wait_for(request_task, timeout=1.0)
+
+        self.assertEqual(
+            set(response["results"]),
+            {"extruder", "ls_plc"},
+        )
+        self.assertEqual(
+            set(started_targets),
+            {
+                ("192.0.2.10", 12289),
+                ("192.0.2.20", 2004),
+            },
+        )
 
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2945,6 +3188,82 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         direct_client.request.assert_not_awaited()
 
+    async def test_transport_start_and_in_progress_shutdown_fail_closed(self) -> None:
+        shutdown_started = asyncio.Event()
+        release_shutdown = asyncio.Event()
+
+        class BlockingCloseTransport(FakeSpotHttpTransport):
+            def start(self) -> bool:
+                self.active = True
+                return True
+
+            async def close(self, timeout_sec: float = 7.0) -> bool:
+                del timeout_sec
+                shutdown_started.set()
+                await release_shutdown.wait()
+                self.active = False
+                return True
+
+        transport = BlockingCloseTransport()
+        direct_client = AsyncMock(spec=httpx.AsyncClient)
+        spot_api._spot_http_transport = transport
+        spot_api._http_client = direct_client
+
+        self.assertTrue(spot_api._start_spot_http_transport())
+        self.assertTrue(spot_api._spot_http_transport_enforcement_required)
+        stop_task = asyncio.create_task(spot_api._stop_spot_http_transport())
+        try:
+            await asyncio.wait_for(shutdown_started.wait(), timeout=1.0)
+            self.assertTrue(spot_api._spot_http_transport_shutdown_started)
+
+            connection_result = await spot_api.test_spot_http_connection(
+                "http://spot.local/status"
+            )
+            self.assertFalse(connection_result["ok"])
+            with (
+                patch.object(spot_api, "urlopen") as focus_urlopen_mock,
+                self.assertRaises(spot_api.SpotFocusControlError),
+            ):
+                spot_api._read_spot_focus_position("http://spot.local/focus")
+            focus_urlopen_mock.assert_not_called()
+            with (
+                patch.object(spot_api, "urlopen") as actuator_urlopen_mock,
+                self.assertRaises(spot_api.SpotActuatorControlError),
+            ):
+                spot_api._read_spot_actuator_position(
+                    "http://spot.local/actuator"
+                )
+            actuator_urlopen_mock.assert_not_called()
+            direct_client.request.assert_not_awaited()
+        finally:
+            release_shutdown.set()
+
+        self.assertTrue(await stop_task)
+        direct_client.aclose.assert_awaited_once()
+        self.assertIsNone(spot_api._spot_http_transport)
+        self.assertTrue(spot_api._spot_http_transport_enforcement_required)
+        self.assertTrue(spot_api._spot_http_transport_shutdown_started)
+
+    async def test_transport_close_failure_still_closes_legacy_client(self) -> None:
+        transport = Mock(supported=True, active=True)
+        transport.close = AsyncMock(side_effect=RuntimeError("close failed"))
+        client = AsyncMock(spec=httpx.AsyncClient)
+        spot_api._spot_http_transport = transport
+        spot_api._http_client = client
+
+        try:
+            with self.assertRaisesRegex(RuntimeError, "close failed"):
+                await spot_api._stop_spot_http_transport()
+
+            transport.close.assert_awaited_once()
+            client.aclose.assert_awaited_once()
+            self.assertIsNone(spot_api._http_client)
+            self.assertIs(spot_api._spot_http_transport, transport)
+            self.assertTrue(spot_api._spot_http_transport_shutdown_started)
+        finally:
+            spot_api._spot_http_transport = None
+            spot_api._http_client = None
+
     async def test_connection_test_reports_guarded_transport_failures(self) -> None:
         missing = await spot_api.test_spot_http_connection(None)
         self.assertEqual(
@@ -2973,6 +3292,16 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 False,
                 "HTTP 503",
             ),
+            (
+                spot_api.SpotHttpResponse(
+                    status_code=302,
+                    headers={},
+                    body=b"",
+                    elapsed_ms=1.0,
+                ),
+                False,
+                "HTTP 302",
+            ),
             (spot_api.SpotTransportConnectTimeout("connect timed out"), False, "connect timed out"),
             (spot_api.SpotTransportError("transport failed"), False, "transport failed"),
         )
@@ -2999,6 +3328,54 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                         request.kind,
                         spot_api.SpotRequestKind.CONNECTION_TEST,
                     )
+                    self.assertEqual(request.method, "HEAD")
+                    self.assertFalse(request.read_response_body)
+        finally:
+            spot_api._spot_http_transport = None
+            spot_api._spot_http_transport_enforcement_required = False
+            spot_api._spot_http_transport_shutdown_started = False
+
+    async def test_connection_test_falls_back_to_bodyless_get_for_head_rejection(
+        self,
+    ) -> None:
+        transport = Mock(supported=True, active=True)
+        transport.request = AsyncMock(
+            side_effect=[
+                spot_api.SpotHttpResponse(
+                    status_code=405,
+                    headers={},
+                    body=b"",
+                    elapsed_ms=1.0,
+                ),
+                spot_api.SpotHttpResponse(
+                    status_code=200,
+                    headers={"content-length": "70000"},
+                    body=b"",
+                    elapsed_ms=1.0,
+                ),
+            ]
+        )
+        spot_api._spot_http_transport = transport
+        spot_api._spot_http_transport_enforcement_required = True
+
+        try:
+            result = await spot_api.test_spot_http_connection(
+                "http://spot.local/image.jpg"
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["message"], "HTTP 200")
+            requests = [
+                call.args[0]
+                for call in transport.request.await_args_list
+            ]
+            self.assertEqual(
+                [request.method for request in requests],
+                ["HEAD", "GET"],
+            )
+            self.assertTrue(
+                all(not request.read_response_body for request in requests)
+            )
         finally:
             spot_api._spot_http_transport = None
             spot_api._spot_http_transport_enforcement_required = False

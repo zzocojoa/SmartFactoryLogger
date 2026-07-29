@@ -27,6 +27,7 @@ from backend.FacilityData.drivers.spot_http_transport import (
     SpotTransportRequestError,
 )
 from backend.FacilityData.drivers.spot_port_quarantine import (
+    POOL_CAPACITY,
     SourcePortLeasePool,
     SpotPortPoolInitError,
     SystemGuardSocketFactory,
@@ -54,6 +55,50 @@ class _UnsupportedSocketFactory:
     def create_guard(self, _local_host: str, port: int = 0) -> tuple[socket.socket, int]:
         del port
         raise AssertionError("unsupported factory must not create guards")
+
+
+class _RecordingGuard:
+    def __init__(
+        self,
+        guard: socket.socket,
+        port: int,
+        closed_ports: list[int],
+    ) -> None:
+        self._guard = guard
+        self._port = port
+        self._closed_ports = closed_ports
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._guard.close()
+        self._closed_ports.append(self._port)
+
+
+class _RecordingSystemGuardSocketFactory:
+    def __init__(self) -> None:
+        self._delegate = SystemGuardSocketFactory()
+        self.created_ports: list[int] = []
+        self.closed_ports: list[int] = []
+
+    @property
+    def supported(self) -> bool:
+        return self._delegate.supported
+
+    def create_guard(
+        self,
+        local_host: str,
+        port: int = 0,
+    ) -> tuple[_RecordingGuard, int]:
+        guard, actual_port = self._delegate.create_guard(local_host, port)
+        if not port:
+            self.created_ports.append(actual_port)
+        return (
+            _RecordingGuard(guard, actual_port, self.closed_ports),
+            actual_port,
+        )
 
 
 class _LoopbackHandler(http.server.BaseHTTPRequestHandler):
@@ -135,6 +180,29 @@ class _BlockingBodyHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
             self.wfile.flush()
         except (OSError, ValueError):
+            pass
+
+    def log_message(self, _format: str, *args: Any) -> None:
+        del args
+
+
+class _SlowHttp10BodyHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"
+    response_started = threading.Event()
+
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.flush()
+        type(self).response_started.set()
+        try:
+            for _index in range(500):
+                self.wfile.write(b"x")
+                self.wfile.flush()
+                time.sleep(0.02)
+        except (BrokenPipeError, ConnectionResetError, OSError, ValueError):
             pass
 
     def log_message(self, _format: str, *args: Any) -> None:
@@ -239,6 +307,7 @@ def _request(
     connect_timeout_sec: float = 1.0,
     read_timeout_sec: float = 2.0,
     max_response_bytes: int = transport_module.DEFAULT_MAX_RESPONSE_BYTES,
+    read_response_body: bool = True,
 ) -> SpotHttpRequest:
     return SpotHttpRequest(
         kind=kind,
@@ -249,6 +318,7 @@ def _request(
         connect_timeout_sec=connect_timeout_sec,
         read_timeout_sec=read_timeout_sec,
         max_response_bytes=max_response_bytes,
+        read_response_body=read_response_body,
     )
 
 
@@ -273,6 +343,56 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                 )
 
     async def test_response_content_length_and_stream_are_bounded(self) -> None:
+        accepted_cases = (
+            _FakeResponse(
+                body=b"1234",
+                headers=[("Content-Length", "4")],
+            ),
+            _FakeResponse(
+                body=b"1234",
+                headers=[],
+            ),
+        )
+        for response in accepted_cases:
+            with self.subTest(accepted_headers=response.getheaders()):
+                transport = SpotHttpTransport(
+                    pool=self.make_pool(capacity=1),
+                    connection_factory=lambda *_args, response=response: _FakeConnection(
+                        response=response
+                    ),
+                )
+                transport.start()
+                try:
+                    result = await transport.request(
+                        _request(max_response_bytes=4)
+                    )
+                    self.assertEqual(result.body, b"1234")
+                finally:
+                    self.assertTrue(await transport.close())
+
+        bodyless_response = _FakeResponse(
+            body=b"x" * 70_000,
+            headers=[("Content-Length", "70000")],
+        )
+        bodyless_transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=lambda *_args: _FakeConnection(
+                response=bodyless_response
+            ),
+        )
+        bodyless_transport.start()
+        try:
+            bodyless_result = await bodyless_transport.request(
+                _request(
+                    method="HEAD",
+                    max_response_bytes=4,
+                    read_response_body=False,
+                )
+            )
+            self.assertEqual(bodyless_result.body, b"")
+        finally:
+            self.assertTrue(await bodyless_transport.close())
+
         cases = (
             _FakeResponse(
                 body=b"x",
@@ -325,9 +445,34 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     self.assertTrue(await transport.close())
 
+        truncated_response = _FakeResponse(
+            body=b"12",
+            headers=[("Content-Length", "3")],
+        )
+        truncated_transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=lambda *_args: _FakeConnection(
+                response=truncated_response
+            ),
+        )
+        truncated_transport.start()
+        try:
+            with self.assertRaisesRegex(
+                SpotTransportProtocolError,
+                "Content-Length",
+            ):
+                await truncated_transport.request(_request())
+        finally:
+            self.assertTrue(await truncated_transport.close())
+
         invalid_requests = (
             _request(max_response_bytes=0),
+            _request(max_response_bytes=-1),
+            _request(max_response_bytes=1.5),  # type: ignore[arg-type]
             _request(max_response_bytes=True),
+            _request(
+                max_response_bytes=transport_module.HARD_MAX_RESPONSE_BYTES + 1
+            ),
             _request(url="http://spot.local/image.jpg#fragment"),
             _request(url="http://spot.local:invalid/image.jpg"),
         )
@@ -352,6 +497,21 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(await transport.close())
                 self.assertEqual(connections_created, 0)
 
+        hard_limit_transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=lambda *_args: _FakeConnection(),
+        )
+        hard_limit_transport.start()
+        try:
+            hard_limit_response = await hard_limit_transport.request(
+                _request(
+                    max_response_bytes=transport_module.HARD_MAX_RESPONSE_BYTES
+                )
+            )
+            self.assertEqual(hard_limit_response.body, b"ok")
+        finally:
+            self.assertTrue(await hard_limit_transport.close())
+
     @unittest.skipUnless(
         sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"),
         "Windows exclusive source-port enforcement only",
@@ -374,14 +534,16 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _LoopbackHandler)
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.start()
+        recording_factory = _RecordingSystemGuardSocketFactory()
         pool = SourcePortLeasePool(
             capacity=1,
             quarantine_seconds=75.0,
             acquire_timeout_seconds=0.1,
+            socket_factory=recording_factory,
         )
         transport = SpotHttpTransport(pool=pool)
         transport.start()
-        leased_port = pool._records[0].port
+        leased_port = recording_factory.created_ports[0]
         try:
             response = await transport.request(
                 _request(url=f"http://127.0.0.1:{server.server_port}/http10")
@@ -396,6 +558,39 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(_LoopbackHandler.peer_ports, [leased_port])
         self.assertEqual(diagnostics["source_port_pool_quarantined_count"], 1)
+
+    @unittest.skipUnless(
+        sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"),
+        "Windows exclusive source-port enforcement only",
+    )
+    def test_windows_production_guard_pool_initializes_atomically(self) -> None:
+        recording_factory = _RecordingSystemGuardSocketFactory()
+        pool = SourcePortLeasePool(socket_factory=recording_factory)
+        try:
+            pool.initialize()
+            diagnostics = pool.diagnostics()
+            self.assertTrue(diagnostics["source_port_enforcement_active"])
+            self.assertEqual(
+                diagnostics["source_port_pool_capacity"],
+                POOL_CAPACITY,
+            )
+            self.assertEqual(
+                diagnostics["source_port_pool_guarded_count"],
+                POOL_CAPACITY,
+            )
+            self.assertEqual(len(recording_factory.created_ports), POOL_CAPACITY)
+            self.assertEqual(
+                len(set(recording_factory.created_ports)),
+                POOL_CAPACITY,
+            )
+        finally:
+            pool.close()
+
+        self.assertEqual(len(recording_factory.closed_ports), POOL_CAPACITY)
+        self.assertEqual(
+            set(recording_factory.closed_ports),
+            set(recording_factory.created_ports),
+        )
 
     async def test_total_response_deadline_interrupts_slow_response(self) -> None:
         release_response = threading.Event()
@@ -427,6 +622,243 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(response_started.is_set())
         self.assertTrue(release_response.is_set())
         self.assertIsNotNone(connection)
+
+    async def test_get_redirect_uses_new_lease_and_same_origin_only(self) -> None:
+        responses = [
+            _FakeResponse(
+                status=302,
+                body=b"",
+                headers=[
+                    ("Location", "/final"),
+                    ("Content-Length", "0"),
+                ],
+            ),
+            _FakeResponse(status=200, body=b"final"),
+        ]
+        requested_urls: list[str] = []
+
+        def connection_factory(*_args: object) -> _FakeConnection:
+            response = responses.pop(0)
+            connection = _FakeConnection(response=response)
+            original_request = connection.request
+
+            def record_request(
+                method: str,
+                url: str,
+                body: bytes | None = None,
+                headers: Mapping[str, str] = {},
+            ) -> None:
+                requested_urls.append(url)
+                original_request(method, url, body, headers)
+
+            connection.request = record_request  # type: ignore[method-assign]
+            return connection
+
+        transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=2),
+            connection_factory=connection_factory,
+        )
+        transport.start()
+        try:
+            response = await transport.request(
+                _request(
+                    kind=SpotRequestKind.ACTUATOR_READ,
+                    url="http://spot.local/redirect",
+                )
+            )
+            diagnostics = transport.diagnostics()
+        finally:
+            self.assertTrue(await transport.close())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.body, b"final")
+        self.assertEqual(requested_urls, ["/redirect", "/final"])
+        self.assertEqual(
+            diagnostics["source_port_pool_quarantined_count"],
+            2,
+        )
+
+        cross_origin_transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=lambda *_args: _FakeConnection(
+                response=_FakeResponse(
+                    status=302,
+                    body=b"",
+                    headers=[
+                        ("Location", "http://other.local/final"),
+                        ("Content-Length", "0"),
+                    ],
+                )
+            ),
+        )
+        cross_origin_transport.start()
+        try:
+            with self.assertRaisesRegex(
+                SpotTransportProtocolError,
+                "outside",
+            ):
+                await cross_origin_transport.request(
+                    _request(url="http://spot.local/redirect")
+                )
+        finally:
+            self.assertTrue(await cross_origin_transport.close())
+
+    async def test_response_deadline_reuses_one_transport_watchdog(self) -> None:
+        transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=2),
+            connection_factory=lambda *_args: _FakeConnection(),
+        )
+        watchdog_name = f"spot-http-deadline-{id(transport):x}"
+        transport.start()
+        try:
+            watchdogs_after_start = [
+                thread
+                for thread in threading.enumerate()
+                if thread.name == watchdog_name
+            ]
+            self.assertEqual(len(watchdogs_after_start), 1)
+
+            await transport.request(_request())
+            await transport.request(_request())
+
+            watchdogs_after_requests = [
+                thread
+                for thread in threading.enumerate()
+                if thread.name == watchdog_name
+            ]
+            self.assertEqual(watchdogs_after_requests, watchdogs_after_start)
+            self.assertTrue(watchdogs_after_requests[0].is_alive())
+        finally:
+            self.assertTrue(await transport.close())
+
+        self.assertFalse(watchdogs_after_start[0].is_alive())
+
+    async def test_real_body_stall_deadline_quarantines_lease_and_reuses_worker(
+        self,
+    ) -> None:
+        _BlockingBodyHandler.response_started = threading.Event()
+        _BlockingBodyHandler.release_body = threading.Event()
+        server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            _BlockingBodyHandler,
+        )
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        transport = SpotHttpTransport(pool=self.make_pool(capacity=2))
+        transport.start()
+        started_at = time.monotonic()
+        try:
+            with self.assertRaises(SpotTransportReadTimeout):
+                await transport.request(
+                    _request(
+                        url=f"http://127.0.0.1:{server.server_port}/blocking",
+                        read_timeout_sec=0.05,
+                    )
+                )
+            elapsed = time.monotonic() - started_at
+            diagnostics = transport.diagnostics()
+            self.assertLess(elapsed, 1.0)
+            self.assertTrue(_BlockingBodyHandler.response_started.is_set())
+            self.assertEqual(
+                diagnostics["source_port_pool_quarantined_count"],
+                1,
+            )
+            self.assertEqual(
+                diagnostics["source_port_transport_pending_count"],
+                0,
+            )
+
+            _BlockingBodyHandler.release_body.set()
+            response = await transport.request(
+                _request(
+                    url=f"http://127.0.0.1:{server.server_port}/blocking",
+                    read_timeout_sec=1.0,
+                )
+            )
+            self.assertEqual(response.body, b"guarded-image")
+        finally:
+            _BlockingBodyHandler.release_body.set()
+            self.assertTrue(await transport.close())
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=1.0)
+
+    async def test_http_10_slow_body_deadline_interrupts_response_owned_socket(
+        self,
+    ) -> None:
+        _SlowHttp10BodyHandler.response_started = threading.Event()
+        server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            _SlowHttp10BodyHandler,
+        )
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        transport = SpotHttpTransport(pool=self.make_pool(capacity=1))
+        transport.start()
+        started_at = time.monotonic()
+        try:
+            with self.assertRaises(SpotTransportReadTimeout):
+                await transport.request(
+                    _request(
+                        url=f"http://127.0.0.1:{server.server_port}/slow",
+                        read_timeout_sec=0.05,
+                    )
+                )
+            elapsed = time.monotonic() - started_at
+            self.assertTrue(_SlowHttp10BodyHandler.response_started.is_set())
+            self.assertLess(elapsed, 0.5)
+            self.assertTrue(await transport.close(timeout_sec=0.5))
+        finally:
+            await transport.close(timeout_sec=0.5)
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=1.0)
+
+    async def test_shutdown_interrupts_http_10_response_owned_socket(self) -> None:
+        _SlowHttp10BodyHandler.response_started = threading.Event()
+        server = http.server.ThreadingHTTPServer(
+            ("127.0.0.1", 0),
+            _SlowHttp10BodyHandler,
+        )
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        transport = SpotHttpTransport(pool=self.make_pool(capacity=1))
+        transport.start()
+        request_task = asyncio.create_task(
+            transport.request(
+                _request(
+                    url=f"http://127.0.0.1:{server.server_port}/slow",
+                    read_timeout_sec=30.0,
+                )
+            )
+        )
+        try:
+            self.assertTrue(
+                await asyncio.to_thread(
+                    _SlowHttp10BodyHandler.response_started.wait,
+                    1.0,
+                )
+            )
+            started_at = time.monotonic()
+            self.assertTrue(await transport.close(timeout_sec=0.5))
+            self.assertLess(time.monotonic() - started_at, 0.5)
+            with self.assertRaises(
+                (
+                    SpotTransportClosedError,
+                    SpotTransportProtocolError,
+                    SpotTransportRequestError,
+                )
+            ):
+                await request_task
+        finally:
+            if not request_task.done():
+                request_task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await request_task
+            await transport.close(timeout_sec=0.5)
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=1.0)
 
     async def test_unsupported_enforcement_fails_closed_on_windows(self) -> None:
         transport = SpotHttpTransport(

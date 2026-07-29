@@ -370,6 +370,7 @@ class CSVLoggerService:
         self._shutdown_flush_succeeded: Optional[bool] = None
         self._runtime_write_failure_observed = False
         self._finalize_spot_image_manifest_on_stop = True
+        self._finalize_spot_observation_manifest_on_stop = True
 
     def start(self) -> None:
         with self._lifecycle_lock:
@@ -389,6 +390,7 @@ class CSVLoggerService:
             self._shutdown_flush_succeeded = False
             self._runtime_write_failure_observed = False
             self._finalize_spot_image_manifest_on_stop = True
+            self._finalize_spot_observation_manifest_on_stop = True
             self.running = True
             self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
             self.thread.start()
@@ -398,6 +400,7 @@ class CSVLoggerService:
         *,
         timeout_sec: Optional[float] = 2.0,
         finalize_spot_image_manifest: bool = True,
+        finalize_spot_observation_manifest: bool = True,
     ) -> bool:
         with self._lifecycle_lock:
             retiring_thread = self.thread
@@ -409,6 +412,12 @@ class CSVLoggerService:
                 # Once closeout is unsafe for a logger generation, a repeated
                 # stop must not re-enable its final manifest.
                 self._finalize_spot_image_manifest_on_stop = False
+            if (
+                retiring_thread is not None
+                and retiring_thread.is_alive()
+                and not finalize_spot_observation_manifest
+            ):
+                self._finalize_spot_observation_manifest_on_stop = False
             if self.running:
                 self.running = False
                 try:
@@ -961,6 +970,42 @@ class CSVLoggerService:
             temp_path.replace(metadata_path)
         except OSError as exc:
             self.logger.warning("Failed to write refreshed CSV v2 observation fact manifest: %s", exc)
+            return None
+        return metadata_path
+
+    def _suppress_spot_observation_fact_manifest_for_csv(
+        self,
+        csv_path: Path,
+    ) -> Optional[Path]:
+        metadata_path = csv_path.with_suffix(".metadata.json")
+        if not metadata_path.exists():
+            return None
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.warning(
+                "Failed to read CSV v2 sidecar for observation fact suppression: %s",
+                exc,
+            )
+            return None
+        payload.pop("spot_observation_fact_manifest", None)
+        payload["spot_observation_fact_closeout"] = {
+            "finalized": False,
+            "writes_drained": False,
+            "reason": "shutdown-write-drain-timeout",
+        }
+        temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
+        try:
+            temp_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            temp_path.replace(metadata_path)
+        except OSError as exc:
+            self.logger.warning(
+                "Failed to suppress unsafe CSV v2 observation fact manifest: %s",
+                exc,
+            )
             return None
         return metadata_path
 
@@ -2257,7 +2302,13 @@ class CSVLoggerService:
             except Exception as exc:
                 self.logger.warning("Failed to flush CSV v2 log file before close: %s", exc)
         if csv_path is not None and self.csv_v2_sidecar_enabled:
-            self.refresh_spot_observation_fact_manifest_for_csv(csv_path)
+            if self._finalize_spot_observation_manifest_on_stop:
+                self.refresh_spot_observation_fact_manifest_for_csv(csv_path)
+            else:
+                self._suppress_spot_observation_fact_manifest_for_csv(csv_path)
+                self.logger.warning(
+                    "Skipped SPOT observation fact manifest because writes did not drain."
+                )
         self._close_file(handle)
         self._current_v2_csv_path = None
 
