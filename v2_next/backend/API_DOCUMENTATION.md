@@ -75,9 +75,10 @@ const data = await response.json();
 }
 ```
 
-`current_v2_csv_file_name`은 실행 중인 logger가 현재 기록하는 파일의 basename입니다.
-종료 QA는 이 값과 종료 시 sidecar의 `csv_closeout`을 함께 사용해 같은 프로세스의
-이전 CSV로 fallback하지 않습니다. 절대 경로와 CSV 내용은 `/health`에 노출하지
+`current_v2_csv_file_name`은 실행 중인 logger가 현재 기록하는 파일의 basename이며,
+관찰 시 활성 CSV 존재 확인과 증거 기록에 사용합니다. 종료 QA의 최종 파일 선택은
+동일 logger instance와 build commit의 `closeout_reason=shutdown` sidecar 및
+persisted sequence를 기준으로 합니다. 절대 경로와 CSV 내용은 `/health`에 노출하지
 않습니다.
 
 `csv_closeout`은 파일이 닫힌 이유를 `closeout_reason`으로 기록합니다.

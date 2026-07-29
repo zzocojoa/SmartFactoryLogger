@@ -79,10 +79,11 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 - [x] A LogPath fallback or live path change preserves v2 CSV recording while
   marking unmatched runtime fact manifests incomplete and failing closeout
   closed.
-- [x] One-command QA binds the selected metadata sidecar to the exact live
-  logger-service instance, build commit, current CSV basename, and finalized
-  sidecar sample sequence, and requires repeated health failure plus zero
-  product processes before treating UI shutdown as complete.
+- [x] One-command QA records the observed current CSV basename for active-file
+  evidence, then selects the final metadata sidecar by the exact live
+  logger-service instance, build commit, shutdown closeout reason, and persisted
+  sample sequence. It also requires repeated health failure plus zero product
+  processes before treating UI shutdown as complete.
 - [x] Observation and image closeout reject earlier writer failures or pending
   observation spool work, including unreadable, malformed, and schema-mismatched
   restarted spools, instead of emitting a falsely clean final manifest.
