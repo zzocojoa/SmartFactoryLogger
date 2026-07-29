@@ -56,6 +56,17 @@ jobs:
         working-directory: v2_next/frontend
         run: npm ci
 
+      - name: Prepare backend validation environment
+        run: |
+          python -m venv backend\.venv
+          .\backend\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --require-virtualenv -r backend\requirements-build.txt ruff mypy
+
+      - name: Validate backend before packaging
+        run: |
+          npm run health:backend:lint
+          npm run health:backend:typecheck
+          npm run health:backend:test
+
       - name: Build portable package
         run: powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
 

@@ -29,6 +29,7 @@ from backend.FacilityData.drivers.spot_http_transport import (
 from backend.FacilityData.drivers.spot_port_quarantine import (
     SourcePortLeasePool,
     SpotPortPoolInitError,
+    SystemGuardSocketFactory,
 )
 
 
@@ -301,6 +302,100 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                         )
                 finally:
                     self.assertTrue(await transport.close())
+
+    async def test_response_protocol_and_request_validation_fail_closed(self) -> None:
+        response_cases = (
+            [("Content-Length", "2"), ("Content-Length", "3")],
+            [("Content-Length", "invalid")],
+            [("Content-Length", "-1")],
+        )
+        for headers in response_cases:
+            with self.subTest(headers=headers):
+                response = _FakeResponse(body=b"ok", headers=headers)
+                transport = SpotHttpTransport(
+                    pool=self.make_pool(capacity=1),
+                    connection_factory=lambda *_args, response=response: _FakeConnection(
+                        response=response
+                    ),
+                )
+                transport.start()
+                try:
+                    with self.assertRaises(SpotTransportProtocolError):
+                        await transport.request(_request())
+                finally:
+                    self.assertTrue(await transport.close())
+
+        invalid_requests = (
+            _request(max_response_bytes=0),
+            _request(max_response_bytes=True),
+            _request(url="http://spot.local/image.jpg#fragment"),
+            _request(url="http://spot.local:invalid/image.jpg"),
+        )
+        for request in invalid_requests:
+            with self.subTest(request=request):
+                connections_created = 0
+
+                def connection_factory(*_args: object) -> _FakeConnection:
+                    nonlocal connections_created
+                    connections_created += 1
+                    return _FakeConnection()
+
+                transport = SpotHttpTransport(
+                    pool=self.make_pool(capacity=1),
+                    connection_factory=connection_factory,
+                )
+                transport.start()
+                try:
+                    with self.assertRaises(SpotTransportProtocolError):
+                        await transport.request(request)
+                finally:
+                    self.assertTrue(await transport.close())
+                self.assertEqual(connections_created, 0)
+
+    @unittest.skipUnless(
+        sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"),
+        "Windows exclusive source-port enforcement only",
+    )
+    async def test_windows_system_guard_is_exclusive_and_used_by_transport(
+        self,
+    ) -> None:
+        factory = SystemGuardSocketFactory()
+        guard, guarded_port = factory.create_guard("127.0.0.1")
+        contender = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            contender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            with self.assertRaises(OSError):
+                contender.bind(("127.0.0.1", guarded_port))
+        finally:
+            contender.close()
+            guard.close()
+
+        _LoopbackHandler.peer_ports = []
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _LoopbackHandler)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+        pool = SourcePortLeasePool(
+            capacity=1,
+            quarantine_seconds=75.0,
+            acquire_timeout_seconds=0.1,
+        )
+        transport = SpotHttpTransport(pool=pool)
+        transport.start()
+        leased_port = pool._records[0].port
+        try:
+            response = await transport.request(
+                _request(url=f"http://127.0.0.1:{server.server_port}/http10")
+            )
+            diagnostics = transport.diagnostics()
+        finally:
+            self.assertTrue(await transport.close())
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=1.0)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(_LoopbackHandler.peer_ports, [leased_port])
+        self.assertEqual(diagnostics["source_port_pool_quarantined_count"], 1)
 
     async def test_total_response_deadline_interrupts_slow_response(self) -> None:
         release_response = threading.Event()

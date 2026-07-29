@@ -2898,11 +2898,111 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_transport_test_reset_closes_and_clears_module_state(self) -> None:
         transport = FakeSpotHttpTransport()
         spot_api._spot_http_transport = transport
+        spot_api._spot_http_transport_enforcement_required = True
 
         await spot_api._reset_spot_http_transport_state_for_tests()
 
         self.assertIsNone(spot_api._spot_http_transport)
         self.assertFalse(transport.active)
+        self.assertFalse(spot_api._spot_http_transport_enforcement_required)
+        self.assertFalse(spot_api._spot_http_transport_shutdown_started)
+
+    async def test_transport_shutdown_never_falls_back_to_direct_clients(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+        spot_api._spot_http_transport_enforcement_required = True
+        direct_client = AsyncMock(spec=httpx.AsyncClient)
+
+        self.assertTrue(await spot_api._stop_spot_http_transport())
+
+        with self.assertRaises(httpx.RequestError):
+            await spot_api._request_spot_http_response(
+                direct_client,
+                kind=spot_api.SpotRequestKind.CONNECTION_TEST,
+                method="GET",
+                url="http://spot.local/status",
+            )
+        with self.assertRaises(spot_api.SpotTransportClosedError):
+            spot_api._request_spot_http_response_sync(
+                kind=spot_api.SpotRequestKind.FOCUS_READ,
+                method="GET",
+                url="http://spot.local/focus",
+            )
+        with (
+            patch.object(spot_api, "urlopen") as focus_urlopen_mock,
+            self.assertRaises(spot_api.SpotFocusControlError),
+        ):
+            spot_api._read_spot_focus_position("http://spot.local/focus")
+        focus_urlopen_mock.assert_not_called()
+        with (
+            patch.object(spot_api, "urlopen") as actuator_urlopen_mock,
+            self.assertRaises(spot_api.SpotActuatorControlError),
+        ):
+            spot_api._read_spot_actuator_position(
+                "http://spot.local/actuator"
+            )
+        actuator_urlopen_mock.assert_not_called()
+
+        direct_client.request.assert_not_awaited()
+
+    async def test_connection_test_reports_guarded_transport_failures(self) -> None:
+        missing = await spot_api.test_spot_http_connection(None)
+        self.assertEqual(
+            missing,
+            {"ok": False, "latency_ms": None, "message": "URL missing"},
+        )
+
+        cases = (
+            (
+                spot_api.SpotHttpResponse(
+                    status_code=200,
+                    headers={},
+                    body=b"ok",
+                    elapsed_ms=1.0,
+                ),
+                True,
+                "HTTP 200",
+            ),
+            (
+                spot_api.SpotHttpResponse(
+                    status_code=503,
+                    headers={},
+                    body=b"unavailable",
+                    elapsed_ms=1.0,
+                ),
+                False,
+                "HTTP 503",
+            ),
+            (spot_api.SpotTransportConnectTimeout("connect timed out"), False, "connect timed out"),
+            (spot_api.SpotTransportError("transport failed"), False, "transport failed"),
+        )
+        try:
+            for guarded_result, expected_ok, expected_message in cases:
+                with self.subTest(expected_message=expected_message):
+                    transport = Mock(supported=True, active=True)
+                    if isinstance(guarded_result, BaseException):
+                        transport.request = AsyncMock(side_effect=guarded_result)
+                    else:
+                        transport.request = AsyncMock(return_value=guarded_result)
+                    spot_api._spot_http_transport = transport
+                    spot_api._spot_http_transport_enforcement_required = True
+                    spot_api._spot_http_transport_shutdown_started = False
+
+                    result = await spot_api.test_spot_http_connection(
+                        "http://spot.local/status"
+                    )
+
+                    self.assertEqual(result["ok"], expected_ok)
+                    self.assertEqual(result["message"], expected_message)
+                    request = transport.request.await_args.args[0]
+                    self.assertEqual(
+                        request.kind,
+                        spot_api.SpotRequestKind.CONNECTION_TEST,
+                    )
+        finally:
+            spot_api._spot_http_transport = None
+            spot_api._spot_http_transport_enforcement_required = False
+            spot_api._spot_http_transport_shutdown_started = False
 
     def test_guarded_transport_routes_focus_and_actuator_operations(self) -> None:
         transport = FakeSpotHttpTransport()

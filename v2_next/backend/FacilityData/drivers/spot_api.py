@@ -177,6 +177,8 @@ _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "i
 # Async HTTP client reused for connection pooling.
 _http_client: Optional[httpx.AsyncClient] = None
 _spot_http_transport: Optional[SpotHttpTransport] = None
+_spot_http_transport_enforcement_required = False
+_spot_http_transport_shutdown_started = False
 _logger = logging.getLogger("spot_control")
 
 
@@ -2289,16 +2291,25 @@ def _get_http_client() -> httpx.AsyncClient:
 
 def _start_spot_http_transport() -> bool:
     global _spot_http_transport
+    global _spot_http_transport_enforcement_required
+    global _spot_http_transport_shutdown_started
 
     if _spot_http_transport is None:
         _spot_http_transport = SpotHttpTransport()
-    return _spot_http_transport.start()
+    started = _spot_http_transport.start()
+    _spot_http_transport_enforcement_required = bool(
+        _spot_http_transport.supported
+    )
+    _spot_http_transport_shutdown_started = False
+    return started
 
 
 async def _stop_spot_http_transport(timeout_sec: float = 7.0) -> bool:
     global _http_client
     global _spot_http_transport
+    global _spot_http_transport_shutdown_started
 
+    _spot_http_transport_shutdown_started = True
     transport = _spot_http_transport
     drained = True
     if transport is not None:
@@ -2317,10 +2328,14 @@ async def _reset_spot_http_transport_state_for_tests(
     timeout_sec: float = 2.0,
 ) -> None:
     global _spot_http_transport
+    global _spot_http_transport_enforcement_required
+    global _spot_http_transport_shutdown_started
 
     if not await _stop_spot_http_transport(timeout_sec=timeout_sec):
         raise RuntimeError("SPOT HTTP transport test reset timed out")
     _spot_http_transport = None
+    _spot_http_transport_enforcement_required = False
+    _spot_http_transport_shutdown_started = False
 
 
 def _spot_source_port_diagnostics() -> Dict[str, Any]:
@@ -2352,7 +2367,19 @@ def _spot_source_port_diagnostics() -> Dict[str, Any]:
 
 def _active_spot_http_transport() -> SpotHttpTransport | None:
     transport = _spot_http_transport
-    if transport is None or not transport.supported:
+    if _spot_http_transport_shutdown_started:
+        raise SpotTransportClosedError("SPOT transport shutdown has started")
+    if transport is None:
+        if _spot_http_transport_enforcement_required:
+            raise SpotTransportClosedError(
+                "SPOT source-port enforcement transport is unavailable"
+            )
+        return None
+    if not transport.supported:
+        if _spot_http_transport_enforcement_required:
+            raise SpotTransportClosedError(
+                "SPOT source-port enforcement is unavailable"
+            )
         return None
     if not transport.active:
         raise SpotTransportClosedError("SPOT source-port enforcement is inactive")
