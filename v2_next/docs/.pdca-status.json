@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-28T10:35:41.553Z",
+  "lastUpdated": "2026-07-29T08:49:01.000Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2025,23 +2025,43 @@
       "actualServerCheckStatus": "passed",
       "fieldCanaryStatus": "FIELD_CANARY_PASS",
       "physicalPathStatus": "PHYSICAL_PATH_PARTIAL",
-      "fieldValidatedAtLocal": "2026-07-28 15:18:26 +09:00",
+      "fieldValidatedAtLocal": "2026-07-29 17:49:01 +09:00",
       "actualServerCanaryMinutes": 120,
       "fieldEvidence": {
-        "runtime_id": "runtime_validation_20260728_131749",
-        "sanitized_artifact": "runtime_validation_20260728_131749_sanitized_share.zip",
-        "sanitized_sha256": "95585ADFD1AACC5371A52AA95454308EC0192B99D5E83E541525071F79781D97",
+        "packaged_source_commit": "0c641b7e7c7ca7c6090bf7e731d5a3c409091f96",
+        "product_version": "1.0.17",
+        "installer_sha256": "67E645701ABFAD1D7A6AD97D527350220887788F03CBC3FEE6648DB34E5EB098",
+        "backend_sha256": "2F164C24D8111658F108C0C3015DA6A0B90177A13B5F12AC352D505B6AAD7C4F",
+        "config_sha256": "24E74BE7B85BCA61974B69775072C2A14269DF93BE6E7EE7B743F39ED666AFAF",
+        "one_command_qa_status": "PASS",
+        "one_command_qa_evidence_sha256": "D30BC85F03A7F500CBC396AB8FA13DD2FE22CC8B19BAF0D00920894317E60C83",
+        "runtime_id": "runtime_validation_20260729_150107",
+        "sanitized_artifact": "runtime_validation_20260729_150107_sanitized_share.zip",
+        "sanitized_sha256": "F10DEE822A4C9BDEBE3A4A2B1E861D1CCF1D4B2EAEF7D1CAA6E47A962040F69F",
+        "server_original_raw_archive_sha256": "22BA5FEA850200AD663890FC9D49A06ECEB670B794E249C74FD626BFB4B15C0C",
+        "raw_manifest_file_count": 4308,
+        "raw_manifest_hash_mismatch_count": 0,
         "collector_exit_code": 2,
         "collector_partial_reason": "switch-evidence-unavailable",
         "new_spot_image_connect_timeout_count": 0,
-        "spot_http_event_count": 22322,
+        "spot_http_event_count": 22297,
+        "spot_http_failure_count": 0,
         "same_4tuple_reuse_under_60_seconds_count": 0,
+        "packet_minimum_reuse_interval_seconds": 74.009593,
         "internal_minimum_reuse_interval_seconds": 75.0,
         "total_spot_opens_60s_p95_per_sec": 3.133333,
         "image_upstream_60s_p95_per_sec": 0.333333,
+        "ping_success_count": 7098,
+        "ping_failure_count": 0,
+        "server_nic_error_or_discard_count": 0,
+        "handled_bind_collision_delta": 931,
+        "handled_rebind_retry_delta": 166,
         "pool_exhaustion_count": 0,
         "reuse_violation_count": 0,
         "transport_failure_count": 0,
+        "packet_capture_coverage_status": "capture-suffix-incomplete_after_observation_window",
+        "final_live_gate_status": "PASS",
+        "final_live_gate_at_local": "2026-07-29 17:49:01 +09:00",
         "managed_switch_evidence_available": false
       },
       "blockingGaps": [],
@@ -2067,11 +2087,11 @@
         },
         "report": {
           "path": "docs/04-report/spot-tcp-source-port-quarantine-v2.report.md",
-          "status": "completed_field_canary_report",
+          "status": "completed_final_release_field_canary_report",
           "match_rate": 100,
           "field_status": "FIELD_CANARY_PASS",
           "physical_path_status": "PHYSICAL_PATH_PARTIAL",
-          "lastUpdated": "2026-07-28T10:35:41.553Z"
+          "lastUpdated": "2026-07-29T08:49:01.000Z"
         }
       },
       "taskChain": [
@@ -2114,7 +2134,7 @@
       ],
       "timestamps": {
         "started": "2026-07-27T01:32:07.127Z",
-        "lastUpdated": "2026-07-28T10:35:41.553Z"
+        "lastUpdated": "2026-07-29T08:49:01.000Z"
       },
       "completedAt": "2026-07-27T02:43:00.858Z"
     }
