@@ -82,9 +82,9 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Full backend tests | all | 533 | PASS |
+| Full backend tests | all | 599 at field commit / 600 at current HEAD | PASS |
 | Electron tests | all | 38 | PASS |
-| Frontend tests | all | 250 / 33 files | PASS |
+| Frontend tests | all | 251 / 33 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
 | Unhandled future warnings | `0` | `0` | PASS |
 | NSIS QA self-test | all checks | all checks | PASS |
