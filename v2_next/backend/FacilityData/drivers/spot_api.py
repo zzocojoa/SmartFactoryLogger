@@ -19,6 +19,8 @@ import httpx
 
 from backend import config
 from backend.FacilityData.drivers.spot_http_transport import (
+    DEFAULT_MAX_RESPONSE_BYTES,
+    HARD_MAX_RESPONSE_BYTES,
     POOL_CAPACITY,
     QUARANTINE_SECONDS,
     SpotHttpRequest,
@@ -83,6 +85,7 @@ _SPOT_FOCUS_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
+_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC = 15.0
 _SPOT_DIAGNOSTIC_OUTPUT_PARAMS = SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 _SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
 _SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
@@ -1169,6 +1172,7 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
                 url=image_url,
                 connect_timeout_sec=2.0,
                 read_timeout_sec=5.0,
+                max_response_bytes=HARD_MAX_RESPONSE_BYTES,
             )
             response.raise_for_status()
     except httpx.TimeoutException as exc:
@@ -2380,6 +2384,7 @@ async def _request_spot_http_response(
     body: bytes | None = None,
     connect_timeout_sec: float = 1.0,
     read_timeout_sec: float = 5.0,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
 ) -> httpx.Response:
     request = httpx.Request(method, url)
     try:
@@ -2387,7 +2392,7 @@ async def _request_spot_http_response(
     except (SpotTransportError, SpotPortPoolError) as exc:
         raise httpx.RequestError(str(exc), request=request) from exc
     if transport is None:
-        return await client.request(
+        response = await client.request(
             method,
             url,
             headers=headers,
@@ -2399,9 +2404,15 @@ async def _request_spot_http_response(
                 pool=5.0,
             ),
         )
+        if len(response.content) > max_response_bytes:
+            raise httpx.RequestError(
+                "SPOT response exceeds the configured byte limit",
+                request=request,
+            )
+        return response
 
     try:
-        response = await transport.request(
+        guarded_response = await transport.request(
             SpotHttpRequest(
                 kind=kind,
                 method=method,
@@ -2410,6 +2421,7 @@ async def _request_spot_http_response(
                 body=body,
                 connect_timeout_sec=connect_timeout_sec,
                 read_timeout_sec=read_timeout_sec,
+                max_response_bytes=max_response_bytes,
             )
         )
     except SpotTransportConnectTimeout as exc:
@@ -2420,7 +2432,49 @@ async def _request_spot_http_response(
         raise httpx.TimeoutException(str(exc), request=request) from exc
     except (SpotTransportError, SpotPortPoolError) as exc:
         raise httpx.RequestError(str(exc), request=request) from exc
-    return _transport_response_as_httpx(response, method=method, url=url)
+    return _transport_response_as_httpx(
+        guarded_response,
+        method=method,
+        url=url,
+    )
+
+
+async def test_spot_http_connection(
+    url: str | None,
+    timeout_sec: float = 1.5,
+) -> dict[str, object]:
+    if not url:
+        return {"ok": False, "latency_ms": None, "message": "URL missing"}
+    started_at = time.perf_counter()
+    try:
+        async with _spot_device_request_lock:
+            response = await _request_spot_http_response(
+                _get_http_client(),
+                kind=SpotRequestKind.CONNECTION_TEST,
+                method="GET",
+                url=url,
+                connect_timeout_sec=timeout_sec,
+                read_timeout_sec=timeout_sec,
+            )
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        if response.status_code >= 400:
+            return {
+                "ok": False,
+                "latency_ms": latency_ms,
+                "message": f"HTTP {response.status_code}",
+            }
+        return {
+            "ok": True,
+            "latency_ms": latency_ms,
+            "message": f"HTTP {response.status_code}",
+        }
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        return {
+            "ok": False,
+            "latency_ms": latency_ms,
+            "message": _format_exception_message(exc),
+        }
 
 
 def _request_spot_http_response_sync(
@@ -2444,6 +2498,7 @@ def _request_spot_http_response_sync(
             body=body,
             connect_timeout_sec=timeout_sec,
             read_timeout_sec=timeout_sec,
+            max_response_bytes=DEFAULT_MAX_RESPONSE_BYTES,
         )
     )
 
@@ -2707,21 +2762,26 @@ async def stop_spot_poll_loop() -> bool:
         if task is not None and not task.done():
             task.cancel()
 
-    task_results = await asyncio.gather(
-        *(task for _, task in task_entries if task is not None),
-        return_exceptions=True,
-    )
+    active_tasks = {
+        task: task_name
+        for task_name, task in task_entries
+        if task is not None
+    }
     task_shutdown_succeeded = True
-    result_index = 0
-    for task_name, task in task_entries:
-        if task is None:
+    done: set[asyncio.Task[None]] = set()
+    pending: set[asyncio.Task[None]] = set()
+    if active_tasks:
+        done, pending = await asyncio.wait(
+            active_tasks,
+            timeout=_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
+        )
+    for task in done:
+        task_name = active_tasks[task]
+        try:
+            task.result()
+        except asyncio.CancelledError:
             continue
-        result = task_results[result_index]
-        result_index += 1
-        if isinstance(result, BaseException) and not isinstance(
-            result,
-            asyncio.CancelledError,
-        ):
+        except BaseException as result:
             task_shutdown_succeeded = False
             _logger.warning(
                 "SPOT background task failed before shutdown completed",
@@ -2731,6 +2791,18 @@ async def stop_spot_poll_loop() -> bool:
                     "error_type": type(result).__name__,
                 },
             )
+    for task in pending:
+        task_shutdown_succeeded = False
+        task_name = active_tasks[task]
+        task.add_done_callback(_consume_spot_background_shutdown_result)
+        _logger.warning(
+            "SPOT background task did not drain before shutdown deadline",
+            extra={
+                "code": "spot-background-task-shutdown-timeout",
+                "task": task_name,
+                "timeout_sec": _SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
+            },
+        )
 
     _spot_diagnostics_task = None
     _spot_poll_task = None
@@ -2764,6 +2836,17 @@ async def stop_spot_poll_loop() -> bool:
             extra={"code": "spot-http-transport-shutdown-timeout"},
         )
     return task_shutdown_succeeded and image_refresh_stopped and transport_stopped
+
+
+def _consume_spot_background_shutdown_result(
+    task: asyncio.Task[None],
+) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except BaseException:
+        return
 
 
 def get_cached_spot_temp() -> float:

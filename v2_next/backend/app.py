@@ -71,7 +71,6 @@ import threading
 import traceback
 import time
 import uvicorn
-from urllib.request import Request as UrlRequest, urlopen
 from typing import Any, Callable, NamedTuple, TypedDict
 
 # Import Service Layer using absolute imports
@@ -718,31 +717,6 @@ def _test_tcp(ip: str | None, port: int | None, timeout: float = 1.5) -> dict:
     except Exception as exc:
         latency_ms = int((time.perf_counter() - start) * 1000)
         return {"ok": False, "latency_ms": latency_ms, "message": str(exc)}
-
-
-def _test_http(url: str | None, timeout: float = 1.5) -> dict:
-    if not url:
-        return {"ok": False, "latency_ms": None, "message": "URL missing"}
-    start = time.perf_counter()
-    try:
-        request = UrlRequest(url, method="HEAD")
-        with urlopen(request, timeout=timeout) as resp:
-            status = getattr(resp, "status", 200)
-        latency_ms = int((time.perf_counter() - start) * 1000)
-        if status >= 400:
-            return {"ok": False, "latency_ms": latency_ms, "message": f"HTTP {status}"}
-        return {"ok": True, "latency_ms": latency_ms, "message": f"HTTP {status}"}
-    except Exception:
-        try:
-            with urlopen(url, timeout=timeout) as resp:
-                status = getattr(resp, "status", 200)
-            latency_ms = int((time.perf_counter() - start) * 1000)
-            if status >= 400:
-                return {"ok": False, "latency_ms": latency_ms, "message": f"HTTP {status}"}
-            return {"ok": True, "latency_ms": latency_ms, "message": f"HTTP {status}"}
-        except Exception as exc:
-            latency_ms = int((time.perf_counter() - start) * 1000)
-            return {"ok": False, "latency_ms": latency_ms, "message": str(exc)}
 
 
 def _check_path(path_str: str) -> dict:
@@ -2987,7 +2961,7 @@ def reconnect():
 
 
 @app.post("/api/control/test-connection")
-def test_connection(payload: ConnectionTestPayload):
+async def test_connection(payload: ConnectionTestPayload):
     try:
         results: dict[str, dict] = {}
         if payload.extruder is not None:
@@ -2995,7 +2969,9 @@ def test_connection(payload: ConnectionTestPayload):
         if payload.ls_plc is not None:
             results["ls_plc"] = _test_tcp(payload.ls_plc.ip, payload.ls_plc.port)
         if payload.spot is not None:
-            results["spot"] = _test_http(payload.spot.url)
+            results["spot"] = await spot_control.test_spot_http_connection(
+                payload.spot.url
+            )
         if not results:
             raise HTTPException(status_code=400, detail="No targets provided")
         return {"results": results}

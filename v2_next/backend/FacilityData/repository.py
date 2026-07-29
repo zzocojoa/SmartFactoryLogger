@@ -430,7 +430,10 @@ class CSVLoggerService:
             else:
                 flush_succeeded = False
             return stopped and flush_succeeded
-        return True
+        with self._lifecycle_lock:
+            if self._shutdown_flush_succeeded is None:
+                return True
+            return self._shutdown_flush_succeeded is True
 
     def enqueue(self, data: FactoryData) -> None:
         payload_bytes = self._estimate_factory_data_bytes(data)

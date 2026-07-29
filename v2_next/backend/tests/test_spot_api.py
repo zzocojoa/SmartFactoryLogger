@@ -1924,6 +1924,71 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         stop_image_refresh.assert_awaited_once_with()
         stop_transport.assert_awaited_once_with()
 
+    async def test_stop_spot_poll_loop_bounds_stubborn_cancelled_task(self) -> None:
+        release_task = asyncio.Event()
+
+        async def stubborn_poll_task() -> None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release_task.wait()
+                raise
+
+        poll_task = asyncio.create_task(stubborn_poll_task())
+        await asyncio.sleep(0)
+        spot_api._spot_diagnostics_task = None
+        spot_api._spot_poll_task = poll_task
+        spot_api._internal_temperature_task = None
+
+        with (
+            patch.object(
+                spot_api,
+                "_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC",
+                0.01,
+            ),
+            patch.object(
+                spot_api,
+                "_stop_spot_image_refresh_for_shutdown",
+                new=AsyncMock(return_value=True),
+            ) as stop_image_refresh,
+            patch.object(
+                spot_api,
+                "_stop_spot_http_transport",
+                new=AsyncMock(return_value=True),
+            ) as stop_transport,
+        ):
+            stopped = await spot_api.stop_spot_poll_loop()
+
+        self.assertFalse(stopped)
+        self.assertFalse(poll_task.done())
+        stop_image_refresh.assert_awaited_once_with()
+        stop_transport.assert_awaited_once_with()
+        release_task.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await poll_task
+
+    async def test_connection_test_routes_spot_through_guarded_helper(self) -> None:
+        guarded_result = {
+            "ok": True,
+            "latency_ms": 12,
+            "message": "HTTP 200",
+        }
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            new=AsyncMock(return_value=guarded_result),
+        ) as guarded_test:
+            response = await backend_app.test_connection(
+                backend_app.ConnectionTestPayload(
+                    spot=backend_app.ConnectionTarget(
+                        url="http://spot.local/image.jpg"
+                    )
+                )
+            )
+
+        self.assertEqual(response, {"results": {"spot": guarded_result}})
+        guarded_test.assert_awaited_once_with("http://spot.local/image.jpg")
+
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)

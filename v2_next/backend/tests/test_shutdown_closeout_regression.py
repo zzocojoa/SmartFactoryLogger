@@ -165,6 +165,61 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 ):
                     summarize_spot_observation_fact(fact_path=fact_path)
 
+    def test_observation_manifest_fails_closed_on_invalid_utf8(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            fact_path.write_bytes(
+                b"spot_observation_key,spot_poll_seq\nservice-1:1,\xff\n"
+            )
+
+            with self.assertRaises(UnicodeDecodeError):
+                summarize_spot_observation_fact(fact_path=fact_path)
+
+    def test_observation_manifest_propagates_csv_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            fact_path.write_text(
+                "spot_observation_key,spot_poll_seq\nservice-1:1,1\n",
+                encoding="utf-8-sig",
+            )
+
+            with (
+                patch(
+                    "backend.FacilityData.spot_observation_fact.csv.DictReader",
+                    side_effect=csv.Error("malformed fact"),
+                ),
+                self.assertRaisesRegex(csv.Error, "malformed fact"),
+            ):
+                summarize_spot_observation_fact(fact_path=fact_path)
+
+    def test_observation_manifest_propagates_transient_open_oserror(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            fact_path.write_text(
+                "spot_observation_key,spot_poll_seq\nservice-1:1,1\n",
+                encoding="utf-8-sig",
+            )
+            original_open = Path.open
+            failure_injected = False
+
+            def fail_first_text_open(
+                path: Path,
+                mode: str = "r",
+                *args: object,
+                **kwargs: object,
+            ):
+                nonlocal failure_injected
+                if path == fact_path and mode == "r" and not failure_injected:
+                    failure_injected = True
+                    raise OSError("transient fact read failure")
+                return original_open(path, mode, *args, **kwargs)
+
+            with (
+                patch.object(Path, "open", new=fail_first_text_open),
+                self.assertRaisesRegex(OSError, "transient fact read failure"),
+            ):
+                summarize_spot_observation_fact(fact_path=fact_path)
+
     def test_observation_manifest_handles_missing_and_empty_fact_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -222,6 +277,35 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             with patch(
                 "backend.FacilityData.spot_observation_fact.sqlite3.connect",
                 side_effect=sqlite3.OperationalError("temporary storage unavailable"),
+            ):
+                refreshed = service.refresh_spot_observation_fact_manifest_for_csv(
+                    csv_path
+                )
+
+            self.assertIsNone(refreshed)
+            self.assertEqual(metadata_path.read_bytes(), original_metadata)
+
+    def test_manifest_refresh_preserves_sidecar_on_invalid_fact_utf8(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            csv_path = log_path / "Factory_Integrated_Log_v2_test.csv"
+            csv_path.write_text(
+                "spot_observation_key\nservice-1:1\n",
+                encoding="utf-8-sig",
+            )
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            original_metadata = b'{"sentinel":"preserved"}\n'
+            metadata_path.write_bytes(original_metadata)
+            fact_path = log_path / "spot_observation_fact.csv"
+            fact_path.write_bytes(
+                b"spot_observation_key,spot_poll_seq\nservice-1:1,\xff\n"
+            )
+            service = CSVLoggerService()
+
+            with patch(
+                "backend.FacilityData.drivers.spot_api."
+                "get_spot_observation_fact_health",
+                return_value={"enabled": False},
             ):
                 refreshed = service.refresh_spot_observation_fact_manifest_for_csv(
                     csv_path

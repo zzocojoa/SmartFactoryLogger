@@ -28,10 +28,16 @@ class _Guard:
 class _SocketFactory:
     supported = True
 
-    def __init__(self, *, fail_create_at: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_create_at: int | None = None,
+        fixed_port: int | None = None,
+    ) -> None:
         self._next_port = 41000
         self._create_count = 0
         self.fail_create_at = fail_create_at
+        self.fixed_port = fixed_port
         self.fail_rebind_count = 0
         self.guards: list[_Guard] = []
 
@@ -42,8 +48,8 @@ class _SocketFactory:
         if port and self.fail_rebind_count:
             self.fail_rebind_count -= 1
             raise OSError("simulated rebind failure")
-        actual_port = port or self._next_port
-        if not port:
+        actual_port = port or self.fixed_port or self._next_port
+        if not port and self.fixed_port is None:
             self._next_port += 1
         guard = _Guard()
         self.guards.append(guard)
@@ -51,6 +57,24 @@ class _SocketFactory:
 
 
 class SourcePortLeasePoolTests(unittest.TestCase):
+    def test_invalid_pool_configuration_is_rejected(self) -> None:
+        invalid_cases = (
+            {"capacity": 0},
+            {"capacity": -1},
+            {"capacity": 0.5},
+            {"capacity": True},
+            {"quarantine_seconds": 0.0},
+            {"quarantine_seconds": float("nan")},
+            {"acquire_timeout_seconds": -1.0},
+            {"acquire_timeout_seconds": float("inf")},
+            {"rebind_retry_interval_seconds": 0.0},
+            {"rebind_retry_interval_seconds": float("nan")},
+        )
+
+        for kwargs in invalid_cases:
+            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
+                SourcePortLeasePool(socket_factory=_SocketFactory(), **kwargs)
+
     def make_pool(
         self,
         *,
@@ -162,6 +186,24 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         )
 
         with self.assertRaises(SpotPortPoolInitError):
+            pool.initialize()
+
+        self.assertEqual(len(factory.guards), 2)
+        self.assertTrue(all(guard.closed for guard in factory.guards))
+        self.assertFalse(pool.active)
+
+    def test_duplicate_guard_port_closes_every_created_guard(self) -> None:
+        factory = _SocketFactory(fixed_port=41000)
+        pool = SourcePortLeasePool(
+            capacity=2,
+            socket_factory=factory,
+            monotonic=_Clock(),
+        )
+
+        with self.assertRaisesRegex(
+            SpotPortPoolInitError,
+            "duplicate source port",
+        ):
             pool.initialize()
 
         self.assertEqual(len(factory.guards), 2)

@@ -25,6 +25,9 @@ from backend.FacilityData.drivers.spot_port_quarantine import (
 )
 
 BIND_RETRY_LIMIT = 8
+DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024
+HARD_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+_RESPONSE_READ_CHUNK_BYTES = 64 * 1024
 _ALLOWED_METHODS = frozenset({"GET", "PUT"})
 _BIND_COLLISION_ERRNOS = frozenset({98, 10048})
 _logger = logging.getLogger("spot_control")
@@ -35,6 +38,7 @@ class SpotRequestKind(str, Enum):
     TEMPERATURE = "temperature"
     INTERNAL_TEMPERATURE = "internal_temperature"
     DIAGNOSTIC = "diagnostic"
+    CONNECTION_TEST = "connection_test"
     FOCUS_READ = "focus_read"
     FOCUS_WRITE = "focus_write"
     ACTUATOR_READ = "actuator_read"
@@ -50,6 +54,7 @@ class SpotHttpRequest:
     body: bytes | None
     connect_timeout_sec: float
     read_timeout_sec: float
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
 
 
 @dataclass(frozen=True)
@@ -251,11 +256,16 @@ class SpotHttpTransport:
         bind_retry_limit: int = BIND_RETRY_LIMIT,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
-        if bind_retry_limit <= 0:
+        normalized_bind_retry_limit = int(bind_retry_limit)
+        if (
+            isinstance(bind_retry_limit, bool)
+            or normalized_bind_retry_limit != bind_retry_limit
+            or normalized_bind_retry_limit <= 0
+        ):
             raise ValueError("bind_retry_limit must be positive")
         self._pool = pool or SourcePortLeasePool()
         self._connection_factory = connection_factory
-        self._bind_retry_limit = int(bind_retry_limit)
+        self._bind_retry_limit = normalized_bind_retry_limit
         self._monotonic = monotonic
         self._executor: _DaemonSingleWorker | None = None
         self._state_lock = threading.RLock()
@@ -407,32 +417,36 @@ class SpotHttpTransport:
         with self._state_lock:
             connections = list(self._active_connections.values())
         for connection in connections:
-            sock = getattr(connection, "sock", None)
-            socket_interrupt_attempted = False
-            if sock is not None:
-                shutdown = getattr(sock, "shutdown", None)
-                if callable(shutdown):
-                    socket_interrupt_attempted = True
-                    try:
-                        shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
-                close_socket = getattr(sock, "close", None)
-                if callable(close_socket):
-                    socket_interrupt_attempted = True
-                    try:
-                        close_socket()
-                    except OSError:
-                        pass
-            if socket_interrupt_attempted:
-                # HTTPConnection.close() also closes its HTTPResponse. Calling it
-                # here can block on the buffered reader lock held by the worker.
-                # The interrupted worker owns final connection cleanup.
-                continue
-            try:
-                connection.close()
-            except OSError:
-                pass
+            self._interrupt_connection(connection)
+
+    @staticmethod
+    def _interrupt_connection(connection: _Connection) -> None:
+        sock = getattr(connection, "sock", None)
+        socket_interrupt_attempted = False
+        if sock is not None:
+            shutdown = getattr(sock, "shutdown", None)
+            if callable(shutdown):
+                socket_interrupt_attempted = True
+                try:
+                    shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            close_socket = getattr(sock, "close", None)
+            if callable(close_socket):
+                socket_interrupt_attempted = True
+                try:
+                    close_socket()
+                except OSError:
+                    pass
+        if socket_interrupt_attempted:
+            # HTTPConnection.close() also closes its HTTPResponse. Calling it
+            # here can block on the buffered reader lock held by the worker.
+            # The interrupted worker owns final connection cleanup.
+            return
+        try:
+            connection.close()
+        except OSError:
+            pass
 
     def _register_connection(self, connection: _Connection) -> None:
         with self._state_lock:
@@ -482,6 +496,8 @@ class SpotHttpTransport:
         for attempt in range(self._bind_retry_limit):
             lease = self._pool.acquire(ACQUIRE_TIMEOUT_SECONDS)
             connection: _Connection | None = None
+            response_timer: threading.Timer | None = None
+            response_deadline_expired = threading.Event()
             started_at = self._monotonic()
             request_phase = "connect"
             try:
@@ -498,6 +514,13 @@ class SpotHttpTransport:
                 request_phase = "response"
                 if connection.sock is not None:
                     connection.sock.settimeout(request.read_timeout_sec)
+                response_timer = threading.Timer(
+                    request.read_timeout_sec,
+                    self._expire_response_deadline,
+                    args=(connection, response_deadline_expired),
+                )
+                response_timer.daemon = True
+                response_timer.start()
                 connection.request(
                     request.method.upper(),
                     origin_form,
@@ -505,8 +528,17 @@ class SpotHttpTransport:
                     headers=dict(request.headers),
                 )
                 upstream = connection.getresponse()
-                body = upstream.read()
-                headers = {key.lower(): value for key, value in upstream.getheaders()}
+                raw_headers = list(upstream.getheaders())
+                body = self._read_bounded_response(
+                    upstream,
+                    raw_headers=raw_headers,
+                    max_response_bytes=request.max_response_bytes,
+                )
+                if response_deadline_expired.is_set():
+                    raise SpotTransportReadTimeout(
+                        "SPOT transport response deadline expired"
+                    )
+                headers = {key.lower(): value for key, value in raw_headers}
                 return SpotHttpResponse(
                     status_code=int(upstream.status),
                     headers=headers,
@@ -514,7 +546,7 @@ class SpotHttpTransport:
                     elapsed_ms=max(0.0, (self._monotonic() - started_at) * 1000.0),
                 )
             except (socket.timeout, TimeoutError) as exc:
-                if request_phase == "connect":
+                if request_phase == "connect" and not response_deadline_expired.is_set():
                     raise SpotTransportConnectTimeout(
                         "SPOT transport connect timed out"
                     ) from exc
@@ -522,6 +554,10 @@ class SpotHttpTransport:
                     "SPOT transport response timed out"
                 ) from exc
             except OSError as exc:
+                if response_deadline_expired.is_set():
+                    raise SpotTransportReadTimeout(
+                        "SPOT transport response deadline expired"
+                    ) from exc
                 if self._is_bind_collision(exc):
                     with self._state_lock:
                         self._bind_collision_count += 1
@@ -532,12 +568,18 @@ class SpotHttpTransport:
                     continue
                 raise SpotTransportRequestError(self._safe_os_error(exc)) from exc
             except http.client.HTTPException as exc:
+                if response_deadline_expired.is_set():
+                    raise SpotTransportReadTimeout(
+                        "SPOT transport response deadline expired"
+                    ) from exc
                 raise SpotTransportProtocolError(
                     f"SPOT HTTP protocol failed: {exc.__class__.__name__}"
                 ) from exc
             except SpotPortPoolError:
                 raise
             finally:
+                if response_timer is not None:
+                    response_timer.cancel()
                 if connection is not None:
                     self._discard_connection(connection)
                     try:
@@ -546,6 +588,64 @@ class SpotHttpTransport:
                         pass
                 self._release_lease(lease)
         raise SpotPortBindError("SPOT source-port bind retry limit was exhausted")
+
+    @staticmethod
+    def _expire_response_deadline(
+        connection: _Connection,
+        expired: threading.Event,
+    ) -> None:
+        expired.set()
+        SpotHttpTransport._interrupt_connection(connection)
+
+    @staticmethod
+    def _read_bounded_response(
+        upstream: http.client.HTTPResponse,
+        *,
+        raw_headers: list[tuple[str, str]],
+        max_response_bytes: int,
+    ) -> bytes:
+        content_lengths = {
+            value.strip()
+            for key, value in raw_headers
+            if key.lower() == "content-length"
+        }
+        if len(content_lengths) > 1:
+            raise SpotTransportProtocolError(
+                "SPOT response has conflicting Content-Length headers"
+            )
+        if content_lengths:
+            content_length_text = next(iter(content_lengths))
+            try:
+                content_length = int(content_length_text, 10)
+            except ValueError as exc:
+                raise SpotTransportProtocolError(
+                    "SPOT response Content-Length is invalid"
+                ) from exc
+            if content_length < 0:
+                raise SpotTransportProtocolError(
+                    "SPOT response Content-Length is invalid"
+                )
+            if content_length > max_response_bytes:
+                raise SpotTransportProtocolError(
+                    "SPOT response exceeds the configured byte limit"
+                )
+
+        chunks: list[bytes] = []
+        total_bytes = 0
+        while True:
+            remaining_with_sentinel = max_response_bytes - total_bytes + 1
+            chunk = upstream.read(
+                min(_RESPONSE_READ_CHUNK_BYTES, remaining_with_sentinel)
+            )
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > max_response_bytes:
+                raise SpotTransportProtocolError(
+                    "SPOT response exceeds the configured byte limit"
+                )
+            chunks.append(bytes(chunk))
+        return b"".join(chunks)
 
     def _record_started(self, kind: SpotRequestKind) -> None:
         with self._state_lock:
@@ -568,6 +668,14 @@ class SpotHttpTransport:
             raise SpotTransportProtocolError("SPOT HTTP method is not allowed")
         if request.connect_timeout_sec <= 0.0 or request.read_timeout_sec <= 0.0:
             raise SpotTransportProtocolError("SPOT HTTP timeouts must be positive")
+        if (
+            isinstance(request.max_response_bytes, bool)
+            or not isinstance(request.max_response_bytes, int)
+            or not 1 <= request.max_response_bytes <= HARD_MAX_RESPONSE_BYTES
+        ):
+            raise SpotTransportProtocolError(
+                "SPOT HTTP response byte limit is invalid"
+            )
         SpotHttpTransport._parse_url(request.url)
 
     @staticmethod

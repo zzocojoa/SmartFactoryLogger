@@ -317,6 +317,7 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
                 service.start()
                 service.enqueue(create_factory_data())
                 self.assertFalse(service.stop(timeout_sec=2.0))
+                self.assertFalse(service.stop(timeout_sec=2.0))
 
         self.assertFalse(service._shutdown_flush_succeeded)
 

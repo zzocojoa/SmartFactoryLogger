@@ -30,6 +30,7 @@ SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.3.0"
 SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION = "1.2.1"
 SPOT_OBSERVATION_FACT_FILENAME = "spot_observation_fact.csv"
 _SPOT_OBSERVATION_FACT_FILE_LOCK = threading.Lock()
+_MANIFEST_SQL_BATCH_SIZE = 4096
 LOW_SIGNAL_ALARM_BIT_MASK = LOW_SIGNAL_ALARM_BIT
 SPOT_DIAGNOSTIC_EVIDENCE_CODES = frozenset(
     {
@@ -414,88 +415,75 @@ def summarize_spot_observation_fact(
                 continue
             realtime_row_count += 1
             realtime_key_batch.append((key, 1))
-            if len(realtime_key_batch) >= 4096:
+            if len(realtime_key_batch) >= _MANIFEST_SQL_BATCH_SIZE:
                 flush_distinct_state()
         flush_distinct_state()
 
-        fact_scan_succeeded = True
-        try:
-            if fact_path.exists() and fact_path.stat().st_size > 0:
-                with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                    reader = csv.DictReader(handle)
-                    header = list(reader.fieldnames or [])
-                    for row in reader:
-                        row_count += 1
-                        key = _text(row.get("spot_observation_key")).strip()
-                        if key:
-                            observation_key_batch.append((key,))
-                        poll_sequence = _positive_int_or_none(row.get("spot_poll_seq"))
-                        if poll_sequence is not None:
-                            poll_sequence_batch.append((poll_sequence,))
-                        if (
-                            len(observation_key_batch) >= 4096
-                            or len(poll_sequence_batch) >= 4096
-                        ):
-                            flush_distinct_state()
-                        capture_status_counts[
-                            _text(row.get("diagnostics_capture_status")).strip() or "missing"
-                        ] += 1
-                        binding_status_counts[
-                            _text(row.get("diagnostics_binding_status")).strip() or "missing"
-                        ] += 1
-                        missing_field_counts.update(
-                            parse_diagnostics_missing_fields(
-                                row.get("diagnostics_missing_fields")
-                            )
+        if fact_path.exists() and fact_path.stat().st_size > 0:
+            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                header = list(reader.fieldnames or [])
+                for row in reader:
+                    row_count += 1
+                    key = _text(row.get("spot_observation_key")).strip()
+                    if key:
+                        observation_key_batch.append((key,))
+                    poll_sequence = _positive_int_or_none(row.get("spot_poll_seq"))
+                    if poll_sequence is not None:
+                        poll_sequence_batch.append((poll_sequence,))
+                    if (
+                        len(observation_key_batch) >= _MANIFEST_SQL_BATCH_SIZE
+                        or len(poll_sequence_batch) >= _MANIFEST_SQL_BATCH_SIZE
+                    ):
+                        flush_distinct_state()
+                    capture_status_counts[
+                        _text(row.get("diagnostics_capture_status")).strip() or "missing"
+                    ] += 1
+                    binding_status_counts[
+                        _text(row.get("diagnostics_binding_status")).strip() or "missing"
+                    ] += 1
+                    missing_field_counts.update(
+                        parse_diagnostics_missing_fields(
+                            row.get("diagnostics_missing_fields")
                         )
-                        for fact_column in (
-                            SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS
-                        ):
-                            if _text(row.get(fact_column)).strip():
-                                diagnostic_field_counts[fact_column] += 1
-                        evidence_codes = set(
-                            parse_spot_diagnostic_evidence_codes(
-                                row.get("spot_diagnostic_evidence_codes")
-                            )
+                    )
+                    for fact_column in (
+                        SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS
+                    ):
+                        if _text(row.get(fact_column)).strip():
+                            diagnostic_field_counts[fact_column] += 1
+                    evidence_codes = set(
+                        parse_spot_diagnostic_evidence_codes(
+                            row.get("spot_diagnostic_evidence_codes")
                         )
-                        provenance = _json_object(row.get("evidence_provenance_json"))
-                        evidence_code_count += len(evidence_codes)
-                        provenance_code_count += len(
-                            evidence_codes.intersection(provenance)
-                        )
-        except (OSError, UnicodeError, csv.Error):
-            fact_scan_succeeded = False
-            header = []
-            row_count = 0
-            capture_status_counts.clear()
-            binding_status_counts.clear()
-            missing_field_counts.clear()
-            diagnostic_field_counts.clear()
-            evidence_code_count = 0
-            provenance_code_count = 0
+                    )
+                    provenance = _json_object(row.get("evidence_provenance_json"))
+                    evidence_code_count += len(evidence_codes)
+                    provenance_code_count += len(
+                        evidence_codes.intersection(provenance)
+                    )
 
-        if fact_scan_succeeded:
-            flush_distinct_state()
-            distinct_observation_key_count = int(
-                distinct_state.execute(
-                    "SELECT COUNT(*) FROM observation_keys"
-                ).fetchone()[0]
-            )
-            poll_sequence_summary = distinct_state.execute(
-                "SELECT MIN(value), MAX(value), COUNT(*) FROM poll_sequences"
-            ).fetchone()
-            if poll_sequence_summary is not None:
-                first_poll_seq = poll_sequence_summary[0]
-                last_poll_seq = poll_sequence_summary[1]
-                distinct_poll_sequence_count = int(poll_sequence_summary[2])
-            linked_summary = distinct_state.execute(
-                "SELECT COALESCE(SUM(realtime_keys.occurrence_count), 0) "
-                "FROM realtime_keys "
-                "INNER JOIN observation_keys "
-                "ON observation_keys.value = realtime_keys.value"
-            ).fetchone()
-            if linked_summary is not None:
-                linked_rows = int(linked_summary[0] or 0)
+        flush_distinct_state()
+        distinct_observation_key_count = int(
+            distinct_state.execute(
+                "SELECT COUNT(*) FROM observation_keys"
+            ).fetchone()[0]
+        )
+        poll_sequence_summary = distinct_state.execute(
+            "SELECT MIN(value), MAX(value), COUNT(*) FROM poll_sequences"
+        ).fetchone()
+        if poll_sequence_summary is not None:
+            first_poll_seq = poll_sequence_summary[0]
+            last_poll_seq = poll_sequence_summary[1]
+            distinct_poll_sequence_count = int(poll_sequence_summary[2])
+        linked_summary = distinct_state.execute(
+            "SELECT COALESCE(SUM(realtime_keys.occurrence_count), 0) "
+            "FROM realtime_keys "
+            "INNER JOIN observation_keys "
+            "ON observation_keys.value = realtime_keys.value"
+        ).fetchone()
+        if linked_summary is not None:
+            linked_rows = int(linked_summary[0] or 0)
     finally:
         if distinct_state is not None:
             distinct_state.close()

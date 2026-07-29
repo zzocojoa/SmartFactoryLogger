@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import textwrap
+import time
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
@@ -157,14 +158,19 @@ class _FakeResponse:
     ) -> None:
         self.status = status
         self._body = body
+        self._offset = 0
         self._headers = (
             headers
             if headers is not None
             else [("Content-Length", str(len(body)))]
         )
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, amount: int | None = None) -> bytes:
+        if amount is None:
+            amount = len(self._body) - self._offset
+        start = self._offset
+        self._offset = min(len(self._body), self._offset + max(0, amount))
+        return self._body[start : self._offset]
 
     def getheaders(self) -> list[tuple[str, str]]:
         return list(self._headers)
@@ -231,6 +237,7 @@ def _request(
     body: bytes | None = None,
     connect_timeout_sec: float = 1.0,
     read_timeout_sec: float = 2.0,
+    max_response_bytes: int = transport_module.DEFAULT_MAX_RESPONSE_BYTES,
 ) -> SpotHttpRequest:
     return SpotHttpRequest(
         kind=kind,
@@ -240,6 +247,7 @@ def _request(
         body=body,
         connect_timeout_sec=connect_timeout_sec,
         read_timeout_sec=read_timeout_sec,
+        max_response_bytes=max_response_bytes,
     )
 
 
@@ -251,6 +259,79 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
             acquire_timeout_seconds=0.1,
             socket_factory=_GuardSocketFactory(),
         )
+
+    def test_invalid_bind_retry_limit_is_rejected(self) -> None:
+        for bind_retry_limit in (0, -1, 0.5, True):
+            with (
+                self.subTest(bind_retry_limit=bind_retry_limit),
+                self.assertRaises(ValueError),
+            ):
+                SpotHttpTransport(
+                    pool=self.make_pool(),
+                    bind_retry_limit=bind_retry_limit,
+                )
+
+    async def test_response_content_length_and_stream_are_bounded(self) -> None:
+        cases = (
+            _FakeResponse(
+                body=b"x",
+                headers=[("Content-Length", "5")],
+            ),
+            _FakeResponse(
+                body=b"12345",
+                headers=[],
+            ),
+        )
+        for response in cases:
+            with self.subTest(headers=response.getheaders()):
+                transport = SpotHttpTransport(
+                    pool=self.make_pool(capacity=1),
+                    connection_factory=lambda *_args, response=response: _FakeConnection(
+                        response=response
+                    ),
+                )
+                transport.start()
+                try:
+                    with self.assertRaisesRegex(
+                        SpotTransportProtocolError,
+                        "byte limit",
+                    ):
+                        await transport.request(
+                            _request(max_response_bytes=4)
+                        )
+                finally:
+                    self.assertTrue(await transport.close())
+
+    async def test_total_response_deadline_interrupts_slow_response(self) -> None:
+        release_response = threading.Event()
+        response_started = threading.Event()
+        connection: _FakeConnection | None = None
+
+        def connection_factory(*_args: object) -> _FakeConnection:
+            nonlocal connection
+            connection = _FakeConnection(
+                release_response=release_response,
+                release_response_on_close=True,
+                response_started=response_started,
+            )
+            return connection
+
+        transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=connection_factory,
+        )
+        transport.start()
+        started_at = time.monotonic()
+        try:
+            with self.assertRaises(SpotTransportReadTimeout):
+                await transport.request(_request(read_timeout_sec=0.05))
+        finally:
+            self.assertTrue(await transport.close())
+
+        self.assertLess(time.monotonic() - started_at, 1.0)
+        self.assertTrue(response_started.is_set())
+        self.assertTrue(release_response.is_set())
+        self.assertIsNotNone(connection)
 
     async def test_unsupported_enforcement_fails_closed_on_windows(self) -> None:
         transport = SpotHttpTransport(

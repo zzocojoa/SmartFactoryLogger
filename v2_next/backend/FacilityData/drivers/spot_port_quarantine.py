@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import socket
 import sys
 import threading
@@ -91,19 +92,38 @@ class SourcePortLeasePool:
         socket_factory: GuardSocketFactory | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
-        if capacity <= 0:
+        normalized_capacity = int(capacity)
+        normalized_quarantine_seconds = float(quarantine_seconds)
+        normalized_acquire_timeout_seconds = float(acquire_timeout_seconds)
+        normalized_rebind_retry_interval_seconds = float(
+            rebind_retry_interval_seconds
+        )
+        if (
+            isinstance(capacity, bool)
+            or normalized_capacity != capacity
+            or normalized_capacity <= 0
+        ):
             raise ValueError("capacity must be positive")
-        if quarantine_seconds <= 0.0:
+        if (
+            not math.isfinite(normalized_quarantine_seconds)
+            or normalized_quarantine_seconds <= 0.0
+        ):
             raise ValueError("quarantine_seconds must be positive")
-        if acquire_timeout_seconds < 0.0:
+        if (
+            not math.isfinite(normalized_acquire_timeout_seconds)
+            or normalized_acquire_timeout_seconds < 0.0
+        ):
             raise ValueError("acquire_timeout_seconds must not be negative")
-        if rebind_retry_interval_seconds <= 0.0:
+        if (
+            not math.isfinite(normalized_rebind_retry_interval_seconds)
+            or normalized_rebind_retry_interval_seconds <= 0.0
+        ):
             raise ValueError("rebind_retry_interval_seconds must be positive")
 
-        self._capacity = int(capacity)
-        self._quarantine_seconds = float(quarantine_seconds)
-        self._acquire_timeout_seconds = float(acquire_timeout_seconds)
-        self._rebind_retry_interval_seconds = float(rebind_retry_interval_seconds)
+        self._capacity = normalized_capacity
+        self._quarantine_seconds = normalized_quarantine_seconds
+        self._acquire_timeout_seconds = normalized_acquire_timeout_seconds
+        self._rebind_retry_interval_seconds = normalized_rebind_retry_interval_seconds
         self._local_host = local_host
         self._socket_factory = socket_factory or SystemGuardSocketFactory()
         self._monotonic = monotonic
