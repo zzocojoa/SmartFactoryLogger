@@ -79,6 +79,77 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             f"observation manifest peak memory was {peak_bytes} bytes",
         )
 
+    def test_large_realtime_csv_closeout_is_streamed_with_bounded_memory(self) -> None:
+        realtime_row_total = 200_000
+        distinct_key_total = realtime_row_total // 2
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            csv_path = log_path / "Factory_Integrated_Log_v2_large.csv"
+            with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["spot_observation_key"])
+                writer.writeheader()
+                for sequence in range(realtime_row_total):
+                    writer.writerow(
+                        {
+                            "spot_observation_key": (
+                                f"service-1:{(sequence % distinct_key_total) + 1}"
+                            )
+                        }
+                    )
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            metadata_path.write_text("{}\n", encoding="utf-8")
+
+            fact_path = log_path / "spot_observation_fact.csv"
+            with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(
+                    handle,
+                    fieldnames=SPOT_OBSERVATION_FACT_COLUMNS,
+                )
+                writer.writeheader()
+                for sequence in range(1, distinct_key_total + 1):
+                    writer.writerow(
+                        {
+                            "spot_observation_key": f"service-1:{sequence}",
+                            "spot_poll_seq": sequence,
+                        }
+                    )
+
+            service = CSVLoggerService()
+            tracemalloc.start()
+            try:
+                with patch(
+                    "backend.FacilityData.drivers.spot_api."
+                    "get_spot_observation_fact_health",
+                    return_value={
+                        "enabled": True,
+                        "write_failure_count": 0,
+                        "spool_pending_count": 0,
+                    },
+                ):
+                    refreshed = service.refresh_spot_observation_fact_manifest_for_csv(
+                        csv_path
+                    )
+                _, peak_bytes = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            coverage = payload["spot_observation_fact_manifest"]["link_coverage"]
+
+        self.assertEqual(refreshed, metadata_path)
+        self.assertEqual(
+            coverage["realtime_rows_with_observation_key"],
+            realtime_row_total,
+        )
+        self.assertEqual(coverage["linked_rows"], realtime_row_total)
+        self.assertEqual(coverage["missing_fact_key_rows"], 0)
+        self.assertEqual(coverage["coverage_pct"], 100.0)
+        self.assertLess(
+            peak_bytes,
+            64 * 1024 * 1024,
+            f"realtime CSV closeout peak memory was {peak_bytes} bytes",
+        )
+
     def test_observation_manifest_fails_closed_when_temporary_sqlite_is_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             fact_path = Path(temp_dir) / "spot_observation_fact.csv"
@@ -93,6 +164,40 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     "temporary storage unavailable",
                 ):
                     summarize_spot_observation_fact(fact_path=fact_path)
+
+    def test_observation_manifest_handles_missing_and_empty_fact_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            missing_path = root / "missing.csv"
+            empty_path = root / "empty.csv"
+            empty_path.write_bytes(b"")
+
+            for fact_path in (missing_path, empty_path):
+                with self.subTest(fact_path=fact_path.name):
+                    summary = summarize_spot_observation_fact(
+                        fact_path=fact_path,
+                        realtime_rows=(
+                            {"spot_observation_key": "service-1:1"},
+                        ),
+                    )
+
+                    self.assertEqual(summary["row_count"], 0)
+                    self.assertEqual(summary["distinct_observation_key_count"], 0)
+                    self.assertEqual(
+                        summary["link_coverage"],
+                        {
+                            "realtime_rows_with_observation_key": 1,
+                            "linked_rows": 0,
+                            "missing_fact_key_rows": 1,
+                            "coverage_pct": 0.0,
+                        },
+                    )
+                    self.assertEqual(
+                        summary["sha256"],
+                        hashlib.sha256(b"").hexdigest()
+                        if fact_path.exists()
+                        else "",
+                    )
 
     def test_manifest_refresh_preserves_sidecar_when_temporary_sqlite_is_unavailable(
         self,

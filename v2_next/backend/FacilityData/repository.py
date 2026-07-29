@@ -916,12 +916,6 @@ class CSVLoggerService:
             self.logger.warning("Failed to read CSV v2 sidecar for observation fact refresh: %s", exc)
             return None
         try:
-            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
-                realtime_rows = list(csv.DictReader(handle))
-        except Exception as exc:
-            self.logger.warning("Failed to read CSV v2 rows for observation fact manifest refresh: %s", exc)
-            return None
-        try:
             from backend.FacilityData.drivers import spot_api
 
             health = spot_api.get_spot_observation_fact_health()
@@ -934,17 +928,20 @@ class CSVLoggerService:
             enabled=enabled,
         )
         try:
-            observation_fact_manifest = build_spot_observation_fact_manifest(
-                fact_path=fact_path,
-                enabled=enabled,
-                write_failure_count=(
-                    int(health.get("write_failure_count", 0) or 0)
-                    + initialization_failure_count
-                ),
-                spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
-                realtime_rows=realtime_rows,
-                path=SPOT_OBSERVATION_FACT_FILENAME,
-            )
+            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                observation_fact_manifest = build_spot_observation_fact_manifest(
+                    fact_path=fact_path,
+                    enabled=enabled,
+                    write_failure_count=(
+                        int(health.get("write_failure_count", 0) or 0)
+                        + initialization_failure_count
+                    ),
+                    spool_pending_count=int(
+                        health.get("spool_pending_count", 0) or 0
+                    ),
+                    realtime_rows=csv.DictReader(handle),
+                    path=SPOT_OBSERVATION_FACT_FILENAME,
+                )
         except Exception as exc:
             self.logger.warning(
                 "Failed to build refreshed CSV v2 observation fact manifest: %s",

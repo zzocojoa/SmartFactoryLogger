@@ -351,13 +351,8 @@ def summarize_spot_observation_fact(
     fact_path: Path,
     realtime_rows: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    realtime_keys = [
-        _text(row.get("spot_observation_key")).strip()
-        for row in (realtime_rows or ())
-        if _text(row.get("spot_observation_key")).strip()
-    ]
-    realtime_key_targets = set(realtime_keys)
-    linked_fact_keys: set[str] = set()
+    realtime_row_count = 0
+    linked_rows = 0
     header: list[str] = []
     row_count = 0
     distinct_observation_key_count = 0
@@ -383,8 +378,13 @@ def summarize_spot_observation_fact(
         distinct_state.execute(
             "CREATE TABLE poll_sequences (value INTEGER PRIMARY KEY) WITHOUT ROWID"
         )
+        distinct_state.execute(
+            "CREATE TABLE realtime_keys "
+            "(value TEXT PRIMARY KEY, occurrence_count INTEGER NOT NULL) WITHOUT ROWID"
+        )
         observation_key_batch: list[tuple[str]] = []
         poll_sequence_batch: list[tuple[int]] = []
+        realtime_key_batch: list[tuple[str, int]] = []
 
         def flush_distinct_state() -> None:
             if observation_key_batch:
@@ -399,69 +399,103 @@ def summarize_spot_observation_fact(
                     poll_sequence_batch,
                 )
                 poll_sequence_batch.clear()
+            if realtime_key_batch:
+                distinct_state.executemany(
+                    "INSERT INTO realtime_keys(value, occurrence_count) VALUES (?, ?) "
+                    "ON CONFLICT(value) DO UPDATE SET "
+                    "occurrence_count = occurrence_count + excluded.occurrence_count",
+                    realtime_key_batch,
+                )
+                realtime_key_batch.clear()
 
-        if fact_path.exists() and fact_path.stat().st_size > 0:
-            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
-                reader = csv.DictReader(handle)
-                header = list(reader.fieldnames or [])
-                for row in reader:
-                    row_count += 1
-                    key = _text(row.get("spot_observation_key")).strip()
-                    if key:
-                        observation_key_batch.append((key,))
-                        if key in realtime_key_targets:
-                            linked_fact_keys.add(key)
-                    poll_sequence = _positive_int_or_none(row.get("spot_poll_seq"))
-                    if poll_sequence is not None:
-                        poll_sequence_batch.append((poll_sequence,))
-                    if (
-                        len(observation_key_batch) >= 4096
-                        or len(poll_sequence_batch) >= 4096
-                    ):
-                        flush_distinct_state()
-                    capture_status_counts[
-                        _text(row.get("diagnostics_capture_status")).strip() or "missing"
-                    ] += 1
-                    binding_status_counts[
-                        _text(row.get("diagnostics_binding_status")).strip() or "missing"
-                    ] += 1
-                    missing_field_counts.update(
-                        parse_diagnostics_missing_fields(row.get("diagnostics_missing_fields"))
-                    )
-                    for fact_column in SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS:
-                        if _text(row.get(fact_column)).strip():
-                            diagnostic_field_counts[fact_column] += 1
-                    evidence_codes = set(
-                        parse_spot_diagnostic_evidence_codes(row.get("spot_diagnostic_evidence_codes"))
-                    )
-                    provenance = _json_object(row.get("evidence_provenance_json"))
-                    evidence_code_count += len(evidence_codes)
-                    provenance_code_count += len(evidence_codes.intersection(provenance))
+        for row in realtime_rows or ():
+            key = _text(row.get("spot_observation_key")).strip()
+            if not key:
+                continue
+            realtime_row_count += 1
+            realtime_key_batch.append((key, 1))
+            if len(realtime_key_batch) >= 4096:
+                flush_distinct_state()
         flush_distinct_state()
-        distinct_observation_key_count = int(
-            distinct_state.execute("SELECT COUNT(*) FROM observation_keys").fetchone()[0]
-        )
-        poll_sequence_summary = distinct_state.execute(
-            "SELECT MIN(value), MAX(value), COUNT(*) FROM poll_sequences"
-        ).fetchone()
-        if poll_sequence_summary is not None:
-            first_poll_seq = poll_sequence_summary[0]
-            last_poll_seq = poll_sequence_summary[1]
-            distinct_poll_sequence_count = int(poll_sequence_summary[2])
-    except (OSError, UnicodeError, csv.Error):
-        header = []
-        row_count = 0
-        distinct_observation_key_count = 0
-        distinct_poll_sequence_count = 0
-        first_poll_seq = None
-        last_poll_seq = None
-        linked_fact_keys.clear()
-        capture_status_counts.clear()
-        binding_status_counts.clear()
-        missing_field_counts.clear()
-        diagnostic_field_counts.clear()
-        evidence_code_count = 0
-        provenance_code_count = 0
+
+        fact_scan_succeeded = True
+        try:
+            if fact_path.exists() and fact_path.stat().st_size > 0:
+                with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    header = list(reader.fieldnames or [])
+                    for row in reader:
+                        row_count += 1
+                        key = _text(row.get("spot_observation_key")).strip()
+                        if key:
+                            observation_key_batch.append((key,))
+                        poll_sequence = _positive_int_or_none(row.get("spot_poll_seq"))
+                        if poll_sequence is not None:
+                            poll_sequence_batch.append((poll_sequence,))
+                        if (
+                            len(observation_key_batch) >= 4096
+                            or len(poll_sequence_batch) >= 4096
+                        ):
+                            flush_distinct_state()
+                        capture_status_counts[
+                            _text(row.get("diagnostics_capture_status")).strip() or "missing"
+                        ] += 1
+                        binding_status_counts[
+                            _text(row.get("diagnostics_binding_status")).strip() or "missing"
+                        ] += 1
+                        missing_field_counts.update(
+                            parse_diagnostics_missing_fields(
+                                row.get("diagnostics_missing_fields")
+                            )
+                        )
+                        for fact_column in (
+                            SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS
+                        ):
+                            if _text(row.get(fact_column)).strip():
+                                diagnostic_field_counts[fact_column] += 1
+                        evidence_codes = set(
+                            parse_spot_diagnostic_evidence_codes(
+                                row.get("spot_diagnostic_evidence_codes")
+                            )
+                        )
+                        provenance = _json_object(row.get("evidence_provenance_json"))
+                        evidence_code_count += len(evidence_codes)
+                        provenance_code_count += len(
+                            evidence_codes.intersection(provenance)
+                        )
+        except (OSError, UnicodeError, csv.Error):
+            fact_scan_succeeded = False
+            header = []
+            row_count = 0
+            capture_status_counts.clear()
+            binding_status_counts.clear()
+            missing_field_counts.clear()
+            diagnostic_field_counts.clear()
+            evidence_code_count = 0
+            provenance_code_count = 0
+
+        if fact_scan_succeeded:
+            flush_distinct_state()
+            distinct_observation_key_count = int(
+                distinct_state.execute(
+                    "SELECT COUNT(*) FROM observation_keys"
+                ).fetchone()[0]
+            )
+            poll_sequence_summary = distinct_state.execute(
+                "SELECT MIN(value), MAX(value), COUNT(*) FROM poll_sequences"
+            ).fetchone()
+            if poll_sequence_summary is not None:
+                first_poll_seq = poll_sequence_summary[0]
+                last_poll_seq = poll_sequence_summary[1]
+                distinct_poll_sequence_count = int(poll_sequence_summary[2])
+            linked_summary = distinct_state.execute(
+                "SELECT COALESCE(SUM(realtime_keys.occurrence_count), 0) "
+                "FROM realtime_keys "
+                "INNER JOIN observation_keys "
+                "ON observation_keys.value = realtime_keys.value"
+            ).fetchone()
+            if linked_summary is not None:
+                linked_rows = int(linked_summary[0] or 0)
     finally:
         if distinct_state is not None:
             distinct_state.close()
@@ -475,9 +509,10 @@ def summarize_spot_observation_fact(
     provenance_coverage_pct = (
         provenance_code_count / evidence_code_count * 100.0 if evidence_code_count else 100.0
     )
-    linked_rows = sum(1 for key in realtime_keys if key in linked_fact_keys)
-    missing_rows = len(realtime_keys) - linked_rows
-    link_coverage_pct = linked_rows / len(realtime_keys) * 100.0 if realtime_keys else 0.0
+    missing_rows = realtime_row_count - linked_rows
+    link_coverage_pct = (
+        linked_rows / realtime_row_count * 100.0 if realtime_row_count else 0.0
+    )
     return {
         "header": header,
         "row_count": row_count,
@@ -487,7 +522,7 @@ def summarize_spot_observation_fact(
         "poll_seq_gap_count": max(0, poll_seq_gap_count),
         "sha256": _file_sha256(fact_path),
         "link_coverage": {
-            "realtime_rows_with_observation_key": len(realtime_keys),
+            "realtime_rows_with_observation_key": realtime_row_count,
             "linked_rows": linked_rows,
             "missing_fact_key_rows": missing_rows,
             "coverage_pct": round(link_coverage_pct, 6),

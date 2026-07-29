@@ -257,6 +257,10 @@ _NETWORK_WARN_MS = 200
 _SPOT_IMAGE_PATH = "/api/spot/image.jpg"
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 _SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
+_SPOT_IMAGE_AT_HEADER = "X-Spot-Image-At"
+_SPOT_IMAGE_SOURCE_HEADER = "X-Spot-Image-Source"
+_SPOT_IMAGE_LATENCY_HEADER = "X-Spot-Image-Latency-Ms"
+_SPOT_IMAGE_AGE_HEADER = "X-Spot-Image-Age-Ms"
 _SPOT_INTERNAL_TEMPERATURE_HEADER = "X-Spot-Internal-Temperature"
 _SPOT_INTERNAL_TEMPERATURE_AT_HEADER = "X-Spot-Internal-Temperature-At"
 _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER = "X-Spot-Internal-Temperature-Status"
@@ -1782,10 +1786,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=[
-        "X-Spot-Image-At",
-        "X-Spot-Image-Source",
-        "X-Spot-Image-Latency-Ms",
-        "X-Spot-Image-Age-Ms",
+        _SPOT_IMAGE_AT_HEADER,
+        _SPOT_IMAGE_SOURCE_HEADER,
+        _SPOT_IMAGE_LATENCY_HEADER,
+        _SPOT_IMAGE_AGE_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_AT_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER,
@@ -3181,7 +3185,7 @@ def _is_spot_payload_rejection_response(
 
 @app.get(_SPOT_IMAGE_PATH)
 async def spot_image():
-    """Bridge one official SPOT /image.jpg response to the desktop UI."""
+    """Return the shared fresh JPEG, coalescing upstream refreshes when needed."""
     headers: dict[str, str] = {
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
@@ -3191,13 +3195,13 @@ async def spot_image():
         data, meta = await spot_control.fetch_image_async()
         captured_at = meta.get("captured_at") or 0.0
         if captured_at:
-            headers["X-Spot-Image-At"] = str(int(float(captured_at) * 1000))
+            headers[_SPOT_IMAGE_AT_HEADER] = str(int(float(captured_at) * 1000))
         if meta.get("source"):
-            headers["X-Spot-Image-Source"] = str(meta["source"])
+            headers[_SPOT_IMAGE_SOURCE_HEADER] = str(meta["source"])
         if meta.get("latency_ms") is not None:
-            headers["X-Spot-Image-Latency-Ms"] = f"{float(meta['latency_ms']):.1f}"
+            headers[_SPOT_IMAGE_LATENCY_HEADER] = f"{float(meta['latency_ms']):.1f}"
         if meta.get("age_ms") is not None:
-            headers["X-Spot-Image-Age-Ms"] = f"{float(meta['age_ms']):.1f}"
+            headers[_SPOT_IMAGE_AGE_HEADER] = f"{float(meta['age_ms']):.1f}"
         headers.update(_spot_internal_temperature_headers())
         observability_service.record_spot_image_result(200)
         return Response(content=data, media_type="image/jpeg", headers=headers)

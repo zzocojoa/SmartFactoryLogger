@@ -12,7 +12,7 @@ from contextlib import ExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.request import Request as UrlRequest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import httpx
 from fastapi import HTTPException
@@ -1802,7 +1802,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         def blocking_stopper() -> bool:
             events.append("stopper-start")
-            release_stopper.wait(timeout=0.5)
+            release_stopper.wait()
             events.append("stopper-end")
             return True
 
@@ -1811,16 +1811,39 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             events.append("heartbeat")
             release_stopper.set()
 
-        stopped, _ = await asyncio.gather(
-            backend_app._run_lifespan_stop_stage(
-                "blocking-test-service",
-                blocking_stopper,
+        stopped, _ = await asyncio.wait_for(
+            asyncio.gather(
+                backend_app._run_lifespan_stop_stage(
+                    "blocking-test-service",
+                    blocking_stopper,
+                ),
+                heartbeat(),
             ),
-            heartbeat(),
+            timeout=5.0,
         )
 
         self.assertTrue(stopped)
         self.assertLess(events.index("heartbeat"), events.index("stopper-end"))
+
+    async def test_lifespan_stop_stage_contains_stopper_exception(self) -> None:
+        from backend import app as backend_app
+
+        def failing_stopper() -> bool:
+            raise RuntimeError("stopper failed")
+
+        with patch.object(backend_app._logger, "warning") as warning_mock:
+            stopped = await backend_app._run_lifespan_stop_stage(
+                "failing-test-service",
+                failing_stopper,
+            )
+
+        self.assertFalse(stopped)
+        warning_mock.assert_called_once_with(
+            "[Main] Lifespan shutdown stage failed stage=%s error_type=%s %s",
+            "failing-test-service",
+            "RuntimeError",
+            ANY,
+        )
 
     async def test_stop_spot_poll_loop_reports_transport_drain_and_skips_sync_writer_join(
         self,
