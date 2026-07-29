@@ -3,6 +3,7 @@ import unittest
 from backend.FacilityData.drivers.spot_port_quarantine import (
     POLICY_VERSION,
     SourcePortLeasePool,
+    SpotPortPoolError,
     SpotPortPoolExhausted,
     SpotPortPoolInitError,
     SpotPortReuseViolation,
@@ -20,8 +21,11 @@ class _Clock:
 class _Guard:
     def __init__(self) -> None:
         self.closed = False
+        self.close_error: Exception | None = None
 
     def close(self) -> None:
+        if self.close_error is not None:
+            raise self.close_error
         self.closed = True
 
 
@@ -114,6 +118,27 @@ class SourcePortLeasePoolTests(unittest.TestCase):
                         pool.acquire(timeout_seconds)
         finally:
             pool.release(lease)
+
+    def test_guard_close_failure_fails_pool_without_losing_guard(self) -> None:
+        pool, factory, _clock = self.make_pool()
+        guard = factory.guards[0]
+        guard.close_error = OSError("simulated close failure")
+
+        with self.assertRaisesRegex(
+            SpotPortPoolError,
+            "failed to release source-port guard socket",
+        ):
+            pool.acquire()
+
+        diagnostics = pool.diagnostics()
+        self.assertEqual(diagnostics["source_port_pool_guarded_count"], 1)
+        self.assertEqual(diagnostics["source_port_pool_leased_count"], 0)
+        with self.assertRaises(SpotPortPoolError):
+            pool.acquire()
+
+        guard.close_error = None
+        pool.close()
+        self.assertTrue(guard.closed)
 
     def test_exact_quarantine_boundary_controls_reuse(self) -> None:
         pool, _factory, clock = self.make_pool()

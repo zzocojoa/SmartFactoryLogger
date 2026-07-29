@@ -208,11 +208,18 @@ class SourcePortLeasePool:
                     if guard is None:
                         self._fatal = True
                         raise SpotPortPoolError("guarded source-port record has no guard socket")
+                    try:
+                        guard.close()
+                    except Exception as exc:
+                        self._fatal = True
+                        self._condition.notify_all()
+                        raise SpotPortPoolError(
+                            "failed to release source-port guard socket"
+                        ) from exc
                     record.guard = None
                     record.state = "leased"
                     record.quarantine_until = None
                     record.retry_at = None
-                    guard.close()
                     return SourcePortLease(port=record.port, _record_id=record.record_id)
 
                 if not counted_wait:

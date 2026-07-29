@@ -71,12 +71,16 @@ attestation 도구를 다시 실행한다. 도구는 `spot_config_fingerprint_sh
 
 ```text
 Finalizing SmartFactoryLogger CSV files safely.
-Press Enter to stop backend logging safely and continue validation
+[ACTION] Close SmartFactoryLogger with the window X button.
+Do not use Task Manager and do not stop SmartFactoryBackend.exe directly.
+After closing the SmartFactoryLogger window, press Enter to continue
 ```
 
-이때 SmartFactoryLogger 창을 먼저 닫지 말고 Enter만 누른다. QA가 백엔드의 내장
-graceful shutdown API로 CSV와 manifest를 마무리하고 validator까지 계속 실행한다.
-장비 설정과 `config.ini`는 변경하지 않는다.
+이때 SmartFactoryLogger 창의 X 버튼으로 정상 종료하고 backend가 완전히 종료될 때까지
+기다린 뒤 Enter를 누른다. QA는 backend 종료를 직접 요청하지 않으며, 정상 UI 종료가
+CSV와 manifest를 마무리한 뒤 validator를 계속 실행한다. 작업 관리자나
+`SmartFactoryBackend.exe` 직접 종료는 사용하지 않는다. 장비 설정과 `config.ini`는
+변경하지 않는다.
 
 마지막에 다음 문구가 나오면 검증 완료다.
 
@@ -84,7 +88,7 @@ graceful shutdown API로 CSV와 manifest를 마무리하고 validator까지 계�
 FINAL RESULT: PASS
 ```
 
-PASS 또는 FAIL 결과가 나온 뒤 남아 있는 SmartFactoryLogger 창을 닫는다.
+PASS 또는 FAIL 결과가 나온 뒤 운영이 필요하면 SmartFactoryLogger를 다시 실행한다.
 
 ## FAIL인 경우
 
@@ -97,8 +101,9 @@ attestation을 반복하지 않는다. 로그 경로를 자동으로 찾지 못�
 
 ## 안전 범위
 
-QA는 loopback 주소의 현재 백엔드만 정상 종료할 수 있다. 원격 BackendBaseUrl에는 종료
-요청을 보내지 않는다. SPOT 설정, 네트워크, CSV 내용 또는 config 값을 변경하지 않는다.
+QA는 백엔드 종료 API를 호출하지 않는다. 운영자가 SmartFactoryLogger 창의 X 버튼으로
+정상 종료한 사실과 backend process drain만 확인한다. SPOT 설정, 네트워크, CSV 내용
+또는 config 값을 변경하지 않는다.
 
 ## 검증 기록
 

@@ -1482,8 +1482,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     )
                     return True
 
-            async def stop_poll_without_waiting_for_capture() -> None:
+            async def stop_poll_without_waiting_for_capture() -> bool:
                 spot_api.stop_spot_image_capture_writer(timeout_sec=0.0)
+                return True
 
             final_manifest_logger = FinalManifestLogger()
 
@@ -1641,10 +1642,68 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             ),
         ):
             with self.assertLogs("SmartFactoryLoggerV2", level="ERROR"):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "spot_image_capture",
+                ):
+                    async with backend_app.lifespan(backend_app.app):
+                        pass
+
+        self.assertFalse(logger_stub.finalize_requested)
+
+    async def test_lifespan_shutdown_fails_when_csv_logger_does_not_close(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        async def stop_stage(stage: str, _stopper: Any) -> bool:
+            return stage != "csv_logger"
+
+        release_lock = Mock()
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app,
+                "release_single_instance_lock",
+                release_lock,
+            ),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(
+                backend_app,
+                "_run_lifespan_stop_stage",
+                side_effect=stop_stage,
+            ),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                return_value=True,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "csv_logger"):
                 async with backend_app.lifespan(backend_app.app):
                     pass
 
-        self.assertFalse(logger_stub.finalize_requested)
+        release_lock.assert_called_once_with()
 
     async def test_lifespan_shutdown_fails_when_observation_writes_do_not_drain(
         self,
@@ -1732,7 +1791,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaisesRegex(
                 RuntimeError,
-                "observation fact writes did not drain",
+                "spot_observation_fact",
             ):
                 async with backend_app.lifespan(backend_app.app):
                     pass

@@ -1675,6 +1675,8 @@ async def lifespan(app: FastAPI):
     finally:
         try:
             _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
+            shutdown_has_primary_error = sys.exc_info()[0] is not None
+            shutdown_failures: list[str] = []
             image_capture_drained = True
             observation_fact_drained = True
             if spot_start_attempted:
@@ -1689,6 +1691,7 @@ async def lifespan(app: FastAPI):
                         _lifecycle_log_fields(),
                     )
                 if not spot_poll_stopped:
+                    shutdown_failures.append("spot_poll")
                     _logger.error(
                         "SPOT poll or transport did not drain before lifespan shutdown"
                     )
@@ -1696,6 +1699,7 @@ async def lifespan(app: FastAPI):
                     spot_control.spot_observation_fact_writes_drained()
                 )
                 if not observation_fact_drained:
+                    shutdown_failures.append("spot_observation_fact")
                     _logger.error(
                         "SPOT observation fact writes did not drain before lifespan "
                         "shutdown; the observation manifest will be suppressed"
@@ -1713,28 +1717,46 @@ async def lifespan(app: FastAPI):
                         _lifecycle_log_fields(),
                     )
                 if not image_capture_drained:
+                    shutdown_failures.append("spot_image_capture")
                     _logger.error(
                         "SPOT image capture queue did not drain before lifespan shutdown; "
                         "the final image fact manifest will be suppressed"
                     )
             if "comm_metrics" in started_services:
                 print("[Main] Stopping Comm Metrics Logger...")
-                await _run_lifespan_stop_stage(
+                if not await _run_lifespan_stop_stage(
                     "comm_metrics",
                     comm_metrics_logger_service.stop,
-                )
+                ):
+                    shutdown_failures.append("comm_metrics")
             if "memory_service" in started_services:
                 print("[Main] Stopping Memory Service...")
-                await _run_lifespan_stop_stage("memory_service", memory_service.stop)
+                if not await _run_lifespan_stop_stage(
+                    "memory_service",
+                    memory_service.stop,
+                ):
+                    shutdown_failures.append("memory_service")
             if "plc_service" in started_services:
                 print("[Main] Stopping PLC Service...")
-                await _run_lifespan_stop_stage("plc_service", plc_service.stop)
+                if not await _run_lifespan_stop_stage(
+                    "plc_service",
+                    plc_service.stop,
+                ):
+                    shutdown_failures.append("plc_service")
             if "config_sync" in started_services:
                 print("[Main] Stopping Config Sync Agent...")
-                await _run_lifespan_stop_stage("config_sync", config_sync_agent.stop)
+                if not await _run_lifespan_stop_stage(
+                    "config_sync",
+                    config_sync_agent.stop,
+                ):
+                    shutdown_failures.append("config_sync")
             if "config_watch" in started_services:
                 print("[Main] Stopping Config Watcher...")
-                await _run_lifespan_stop_stage("config_watch", config_watch_service.stop)
+                if not await _run_lifespan_stop_stage(
+                    "config_watch",
+                    config_watch_service.stop,
+                ):
+                    shutdown_failures.append("config_watch")
             if "csv_logger" in started_services:
                 print("[Main] Stopping CSV Logger...")
                 if not await _run_lifespan_stop_stage(
@@ -1745,13 +1767,21 @@ async def lifespan(app: FastAPI):
                         finalize_spot_observation_manifest=observation_fact_drained,
                     ),
                 ):
+                    shutdown_failures.append("csv_logger")
                     _logger.warning(
                         "CSV logger did not stop cleanly during lifespan shutdown"
                     )
-            if not observation_fact_drained:
+            if shutdown_failures and not shutdown_has_primary_error:
                 raise RuntimeError(
-                    "SPOT observation fact writes did not drain before lifespan "
-                    "shutdown"
+                    "lifespan shutdown incomplete: "
+                    + ", ".join(shutdown_failures)
+                )
+            if shutdown_failures:
+                _logger.error(
+                    "[Main] Lifespan shutdown incomplete while preserving primary "
+                    "error stages=%s %s",
+                    ",".join(shutdown_failures),
+                    _lifecycle_log_fields(),
                 )
         finally:
             release_single_instance_lock()
