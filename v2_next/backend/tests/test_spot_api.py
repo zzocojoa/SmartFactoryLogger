@@ -1705,6 +1705,61 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         release_lock.assert_called_once_with()
 
+    async def test_lifespan_preserves_primary_error_when_shutdown_also_fails(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        async def stop_stage(stage: str, _stopper: Any) -> bool:
+            return stage != "csv_logger"
+
+        release_lock = Mock()
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app,
+                "release_single_instance_lock",
+                release_lock,
+            ),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(
+                backend_app,
+                "_run_lifespan_stop_stage",
+                side_effect=stop_stage,
+            ),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                return_value=True,
+            ),
+        ):
+            with self.assertLogs("SmartFactoryLoggerV2", level="ERROR"):
+                with self.assertRaisesRegex(RuntimeError, "primary failure"):
+                    async with backend_app.lifespan(backend_app.app):
+                        raise RuntimeError("primary failure")
+
+        release_lock.assert_called_once_with()
+
     async def test_lifespan_shutdown_fails_when_observation_writes_do_not_drain(
         self,
     ) -> None:

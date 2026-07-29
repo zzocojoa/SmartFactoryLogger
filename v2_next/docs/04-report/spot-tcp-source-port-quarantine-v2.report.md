@@ -82,7 +82,7 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Full backend tests | all | 599 at field commit / 600 at current HEAD | PASS |
+| Full backend tests | all | 599 at field commit / 606 at current HEAD | PASS |
 | Electron tests | all | 38 | PASS |
 | Frontend tests | all | 251 / 33 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
@@ -259,3 +259,4 @@ range separately from this closed TCP remediation.
 | 1.1 | 2026-07-28 | Actual-server 15-minute smoke and 120-minute field canary closure |
 | 1.2 | 2026-07-28 | Scoped field evidence to packaged commit `931c869`; final `1.0.17` promotion remains gated |
 | 1.3 | 2026-07-29 | Final `0c641b7` package QA, 15-minute smoke, 120-minute canary, and final live-gate closure |
+| 1.4 | 2026-07-29 | Kept `0c641b7` field evidence separate from later current-HEAD promotion gates and refreshed automated test totals |

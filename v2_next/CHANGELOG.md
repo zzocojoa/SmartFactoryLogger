@@ -2,7 +2,7 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
-## [1.0.17] - 2026-07-28
+## [1.0.17] - 2026-07-29
 
 ### Added
 
@@ -36,10 +36,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Passed the complete Electron, frontend, backend, lint, type-check, QA
   self-test, production-build, transport-race, and socket-interrupt suites.
 - Passed commit-bound re-attestation, one-command QA, the approved 15-minute
-  smoke, and the 120-minute canary using the exact packaged `1.0.17` backend.
-  Managed-switch evidence remains unavailable, so the software field gate is
-  `FIELD_CANARY_PASS` while physical-path attribution is
-  `PHYSICAL_PATH_PARTIAL`.
+  smoke, and the 120-minute canary for packaged commit `0c641b7`.
+  Managed-switch evidence remains unavailable, so that package's software
+  field gate is `FIELD_CANARY_PASS` while physical-path attribution is
+  `PHYSICAL_PATH_PARTIAL`. Production promotion of a later commit still
+  requires an identity-matched field validation.
 
 ### Compatibility
 

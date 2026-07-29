@@ -348,6 +348,22 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                     bind_retry_limit=bind_retry_limit,
                 )
 
+    async def test_request_uses_injected_pool_acquire_timeout(self) -> None:
+        pool = self.make_pool(capacity=1)
+        transport = SpotHttpTransport(
+            pool=pool,
+            connection_factory=lambda *_args: _FakeConnection(),
+        )
+
+        with patch.object(pool, "acquire", wraps=pool.acquire) as acquire:
+            transport.start()
+            try:
+                await transport.request(_request())
+            finally:
+                self.assertTrue(await transport.close())
+
+        acquire.assert_called_once_with()
+
     async def test_response_interrupt_target_uses_public_connection_socket(
         self,
     ) -> None:

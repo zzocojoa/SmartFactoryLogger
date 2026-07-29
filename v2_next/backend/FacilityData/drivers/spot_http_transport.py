@@ -16,7 +16,6 @@ from typing import Callable, Mapping, Protocol
 from urllib.parse import SplitResult, urljoin, urlsplit
 
 from backend.FacilityData.drivers.spot_port_quarantine import (
-    ACQUIRE_TIMEOUT_SECONDS,
     POOL_CAPACITY,
     QUARANTINE_SECONDS,
     SourcePortLease,
@@ -673,7 +672,7 @@ class SpotHttpTransport:
     def _request_with_bind_retries(self, request: SpotHttpRequest) -> SpotHttpResponse:
         parts, host, port, origin_form = self._parse_url(request.url)
         for attempt in range(self._bind_retry_limit):
-            lease = self._pool.acquire(ACQUIRE_TIMEOUT_SECONDS)
+            lease = self._pool.acquire()
             connection: _Connection | None = None
             upstream: http.client.HTTPResponse | None = None
             response_deadline_token: int | None = None
