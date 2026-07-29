@@ -51,6 +51,24 @@ def create_factory_data() -> FactoryData:
 
 
 class CSVLoggerRuntimeTests(unittest.TestCase):
+    def test_stop_suppresses_image_manifest_when_capture_did_not_drain(self) -> None:
+        service = CSVLoggerService()
+        service.csv_v2_enabled = True
+        service.csv_v2_sidecar_enabled = True
+
+        with patch.object(
+            service,
+            "_write_spot_image_fact_final_manifest_safely",
+        ) as write_manifest:
+            service.start()
+            stopped = service.stop(
+                timeout_sec=2.0,
+                finalize_spot_image_manifest=False,
+            )
+
+        self.assertTrue(stopped)
+        write_manifest.assert_not_called()
+
     def test_stop_sentinel_is_ordered_after_an_accepted_concurrent_enqueue(self) -> None:
         enqueue_entered = threading.Event()
         release_enqueue = threading.Event()
@@ -231,9 +249,16 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
     def test_control_shutdown_waits_for_csv_logger_stop_timeout(self) -> None:
         class LoggerStub:
             timeout_sec: float | None = None
+            finalize_spot_image_manifest: bool | None = None
 
-            def stop(self, *, timeout_sec: float | None = None) -> bool:
+            def stop(
+                self,
+                *,
+                timeout_sec: float | None = None,
+                finalize_spot_image_manifest: bool = True,
+            ) -> bool:
                 self.timeout_sec = timeout_sec
+                self.finalize_spot_image_manifest = finalize_spot_image_manifest
                 return True
 
         logger_stub = LoggerStub()
@@ -258,6 +283,7 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         status["spot_poll_loop_stopped"] = True
         self.assertTrue(status["logger_service_stopped"])
         stop_image_capture.assert_called_once_with(timeout_sec=30.0)
+        self.assertTrue(logger_stub.finalize_spot_image_manifest)
         self.assertEqual(logger_stub.timeout_sec, 123.0)
         self.assertIn("logger_service_elapsed_ms", status)
         self.assertIn("total_elapsed_ms", status)

@@ -369,6 +369,7 @@ class CSVLoggerService:
         self._current_v2_csv_path: Optional[Path] = None
         self._shutdown_flush_succeeded: Optional[bool] = None
         self._runtime_write_failure_observed = False
+        self._finalize_spot_image_manifest_on_stop = True
 
     def start(self) -> None:
         with self._lifecycle_lock:
@@ -376,13 +377,22 @@ class CSVLoggerService:
                 return
             self._shutdown_flush_succeeded = False
             self._runtime_write_failure_observed = False
+            self._finalize_spot_image_manifest_on_stop = True
             self.running = True
             self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
             self.thread.start()
 
-    def stop(self, *, timeout_sec: Optional[float] = 2.0) -> bool:
+    def stop(
+        self,
+        *,
+        timeout_sec: Optional[float] = 2.0,
+        finalize_spot_image_manifest: bool = True,
+    ) -> bool:
         with self._lifecycle_lock:
             if self.running:
+                self._finalize_spot_image_manifest_on_stop = bool(
+                    finalize_spot_image_manifest
+                )
                 self.running = False
                 try:
                     self.queue.put_nowait(None)
@@ -2562,8 +2572,16 @@ class CSVLoggerService:
         self._buffer_size = 0
         self._close_file(f_handle)
         self._close_v2_file(v2_handle)
-        if self.csv_v2_enabled and self.csv_v2_sidecar_enabled:
+        if (
+            self.csv_v2_enabled
+            and self.csv_v2_sidecar_enabled
+            and self._finalize_spot_image_manifest_on_stop
+        ):
             self._write_spot_image_fact_final_manifest_safely()
+        elif self.csv_v2_enabled and self.csv_v2_sidecar_enabled:
+            self.logger.warning(
+                "Skipped SPOT image fact final manifest because image capture did not drain."
+            )
         self.logger.info("CSV logger thread stopped.")
 
 

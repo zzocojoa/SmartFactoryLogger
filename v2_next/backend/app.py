@@ -1667,6 +1667,15 @@ async def lifespan(app: FastAPI):
         _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
         print("[Main] Stopping SPOT temperature and diagnostics polling...")
         await spot_control.stop_spot_poll_loop()
+        image_capture_drained = await asyncio.to_thread(
+            spot_control.stop_spot_image_capture_for_shutdown,
+            timeout_sec=config.SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC,
+        )
+        if not image_capture_drained:
+            _logger.error(
+                "SPOT image capture queue did not drain before lifespan shutdown; "
+                "the final image fact manifest will be suppressed"
+            )
         print("[Main] Stopping Comm Metrics Logger...")
         comm_metrics_logger_service.stop()
         print("[Main] Stopping Memory Service...")
@@ -1678,7 +1687,10 @@ async def lifespan(app: FastAPI):
         print("[Main] Stopping Config Watcher...")
         config_watch_service.stop()
         print("[Main] Stopping CSV Logger...")
-        if not logger_service.stop(timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC):
+        if not logger_service.stop(
+            timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+            finalize_spot_image_manifest=image_capture_drained,
+        ):
             _logger.warning(
                 "CSV logger did not stop within %.1f seconds during lifespan shutdown",
                 config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
@@ -1830,7 +1842,8 @@ def _stop_services_for_control_shutdown() -> dict[str, Any]:
         stage="logger_service",
         status_key="logger_service_stopped",
         stopper=lambda: logger_service.stop(
-            timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC
+            timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+            finalize_spot_image_manifest=image_capture_drained,
         ),
         status=status,
     )

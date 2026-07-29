@@ -1375,7 +1375,14 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             class FinalManifestLogger:
                 final_manifest: dict[str, Any] | None = None
 
-                def stop(self, *, timeout_sec: float | None = None) -> bool:
+                def stop(
+                    self,
+                    *,
+                    timeout_sec: float | None = None,
+                    finalize_spot_image_manifest: bool = True,
+                ) -> bool:
+                    if not finalize_spot_image_manifest:
+                        return True
                     service = CSVLoggerService()
                     service.fallback_log_dir = log_path
                     service.apply_config(log_path=log_path, auto_save=True, csv_v2_enabled=True)
@@ -1414,6 +1421,222 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(final_manifest_logger.final_manifest)
         self.assertEqual(final_manifest_logger.final_manifest["row_count"], 1)
         self.assertEqual(final_manifest_logger.final_manifest["sha256"], fact_sha)
+
+    async def test_lifespan_shutdown_drains_image_writer_before_final_manifest(self) -> None:
+        from backend import app as backend_app
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            spot_api.config.SPOT_IP = "spot.local"
+            self.set_spot_temperature_snapshot(
+                spot_poll_seq=44,
+                _spot_last_poll_completed_at_epoch=time.time(),
+            )
+            image_bytes = b"\xff\xd8lifespan-shutdown-drain\xff\xd9"
+            write_started = threading.Event()
+            release_write = threading.Event()
+            original_write_capture = SpotImageCaptureWriter.write_capture
+
+            def delayed_write_capture(
+                writer: SpotImageCaptureWriter,
+                *args: Any,
+                **kwargs: Any,
+            ) -> dict[str, str]:
+                write_started.set()
+                release_write.wait(timeout=1.0)
+                return original_write_capture(writer, *args, **kwargs)
+
+            class FinalManifestLogger:
+                final_manifest: dict[str, Any] | None = None
+                finalize_requested: bool | None = None
+
+                def start(self) -> None:
+                    return None
+
+                def stop(
+                    self,
+                    *,
+                    timeout_sec: float | None = None,
+                    finalize_spot_image_manifest: bool = True,
+                ) -> bool:
+                    self.finalize_requested = finalize_spot_image_manifest
+                    if not finalize_spot_image_manifest:
+                        return True
+                    service = CSVLoggerService()
+                    service.fallback_log_dir = log_path
+                    service.apply_config(
+                        log_path=log_path,
+                        auto_save=True,
+                        csv_v2_enabled=True,
+                    )
+                    final_path = service.write_spot_image_fact_final_manifest(log_path)
+                    self.final_manifest = json.loads(
+                        final_path.read_text(encoding="utf-8")
+                    )
+                    return True
+
+            async def stop_poll_without_waiting_for_capture() -> None:
+                spot_api.stop_spot_image_capture_writer(timeout_sec=0.0)
+
+            final_manifest_logger = FinalManifestLogger()
+
+            with (
+                patch.object(
+                    SpotImageCaptureWriter,
+                    "write_capture",
+                    delayed_write_capture,
+                ),
+                patch.object(
+                    spot_api,
+                    "_request_spot_image",
+                    AsyncMock(return_value=image_bytes),
+                ),
+                patch.object(
+                    backend_app,
+                    "acquire_single_instance_lock",
+                    return_value=True,
+                ),
+                patch.object(backend_app, "release_single_instance_lock"),
+                patch.object(backend_app, "_run_lifespan_start_stage"),
+                patch.object(backend_app, "_start_backend_access_log_thread"),
+                patch.object(
+                    backend_app.spot_control,
+                    "start_spot_poll_loop",
+                    new=AsyncMock(),
+                ),
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_poll_loop",
+                    side_effect=stop_poll_without_waiting_for_capture,
+                ),
+                patch.object(backend_app, "logger_service", final_manifest_logger),
+                patch.object(
+                    backend_app.comm_metrics_logger_service,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.memory_service,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.plc_service,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.config_sync_agent,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.config_watch_service,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+            ):
+                async with backend_app.lifespan(backend_app.app):
+                    await spot_api.fetch_image_async()
+                    self.assertTrue(write_started.wait(timeout=1.0))
+                    release_thread = threading.Thread(
+                        target=lambda: (
+                            time.sleep(0.05),
+                            release_write.set(),
+                        )
+                    )
+                    release_thread.start()
+                release_thread.join(timeout=1.0)
+
+            rows = self.read_spot_image_fact_rows(log_path)
+            fact_path = log_path / "spot_image_fact.csv"
+            fact_sha = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+
+        self.assertTrue(final_manifest_logger.finalize_requested)
+        self.assertEqual(len(rows), 1)
+        self.assertIsNotNone(final_manifest_logger.final_manifest)
+        self.assertEqual(final_manifest_logger.final_manifest["row_count"], 1)
+        self.assertEqual(final_manifest_logger.final_manifest["sha256"], fact_sha)
+
+    async def test_lifespan_shutdown_suppresses_manifest_when_image_drain_fails(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        class LoggerStub:
+            finalize_requested: bool | None = None
+
+            def start(self) -> None:
+                return None
+
+            def stop(
+                self,
+                *,
+                timeout_sec: float | None = None,
+                finalize_spot_image_manifest: bool = True,
+            ) -> bool:
+                self.finalize_requested = finalize_spot_image_manifest
+                return True
+
+        logger_stub = LoggerStub()
+
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(backend_app, "release_single_instance_lock"),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                return_value=False,
+            ),
+            patch.object(backend_app, "logger_service", logger_stub),
+            patch.object(
+                backend_app.comm_metrics_logger_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.memory_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.plc_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.config_sync_agent,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.config_watch_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+        ):
+            with self.assertLogs("SmartFactoryLoggerV2", level="ERROR"):
+                async with backend_app.lifespan(backend_app.app):
+                    pass
+
+        self.assertFalse(logger_stub.finalize_requested)
 
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

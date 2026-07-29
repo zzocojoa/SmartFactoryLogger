@@ -155,7 +155,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     mark("spot_poll_loop")
 
                 class LoggerStub:
-                    def stop(self, *, timeout_sec=None):
+                    def stop(self, *, timeout_sec=None, finalize_spot_image_manifest=True):
                         return mark("logger_service")
 
                 backend_app.spot_control.stop_spot_poll_loop = stop_spot_poll_loop
