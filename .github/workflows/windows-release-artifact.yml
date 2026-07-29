@@ -30,10 +30,21 @@ jobs:
 
     env:
       PYTHONNOUSERSITE: "1"
+      EXPECTED_BUILD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify source identity
+        run: |
+          $actualCommit = (git rev-parse HEAD).Trim()
+          if ($actualCommit -ne $env:EXPECTED_BUILD_COMMIT) {
+            throw "Checkout commit mismatch: expected=$env:EXPECTED_BUILD_COMMIT actual=$actualCommit"
+          }
+          Write-Host "Building source commit: $actualCommit"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -69,6 +80,30 @@ jobs:
 
       - name: Build portable package
         run: powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
+
+      - name: Verify packaged source identity
+        run: |
+          $bundleRoot = "backend\dist\SmartFactoryBackend"
+          $manifestPath = Join-Path $bundleRoot "bundle-manifest.json"
+          $provenancePath = Join-Path $bundleRoot "_internal\backend\build_provenance.json"
+
+          foreach ($path in @($manifestPath, $provenancePath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Packaged identity file not found: $path"
+            }
+          }
+
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
+
+          if ($manifest.build_git_commit -ne $env:EXPECTED_BUILD_COMMIT) {
+            throw "Bundle manifest commit mismatch: expected=$env:EXPECTED_BUILD_COMMIT actual=$($manifest.build_git_commit)"
+          }
+          if ($provenance.git_commit -ne $env:EXPECTED_BUILD_COMMIT) {
+            throw "Build provenance commit mismatch: expected=$env:EXPECTED_BUILD_COMMIT actual=$($provenance.git_commit)"
+          }
+
+          Write-Host "Packaged source identity verified: $env:EXPECTED_BUILD_COMMIT"
 
       - name: Preserve portable artifact
         run: |
