@@ -976,6 +976,9 @@ class CSVLoggerService:
     def _suppress_spot_observation_fact_manifest_for_csv(
         self,
         csv_path: Path,
+        *,
+        writes_drained: bool = False,
+        reason: str = "shutdown-write-drain-timeout",
     ) -> Optional[Path]:
         metadata_path = csv_path.with_suffix(".metadata.json")
         if not metadata_path.exists():
@@ -991,8 +994,8 @@ class CSVLoggerService:
         payload.pop("spot_observation_fact_manifest", None)
         payload["spot_observation_fact_closeout"] = {
             "finalized": False,
-            "writes_drained": False,
-            "reason": "shutdown-write-drain-timeout",
+            "writes_drained": writes_drained,
+            "reason": reason,
         }
         temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
         try:
@@ -2294,23 +2297,47 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to close CSV log file handle: %s", exc)
 
-    def _close_v2_file(self, handle: Optional[object]) -> None:
+    def _close_v2_file(self, handle: Optional[object]) -> bool:
         csv_path = self._current_v2_csv_path
+        closeout_succeeded = True
         if handle is not None:
             try:
                 handle.flush()
             except Exception as exc:
+                closeout_succeeded = False
                 self.logger.warning("Failed to flush CSV v2 log file before close: %s", exc)
         if csv_path is not None and self.csv_v2_sidecar_enabled:
             if self._finalize_spot_observation_manifest_on_stop:
-                self.refresh_spot_observation_fact_manifest_for_csv(csv_path)
+                refreshed_path = self.refresh_spot_observation_fact_manifest_for_csv(csv_path)
+                if refreshed_path is None:
+                    closeout_succeeded = False
+                    suppressed_path = self._suppress_spot_observation_fact_manifest_for_csv(
+                        csv_path,
+                        writes_drained=True,
+                        reason="manifest-refresh-failed",
+                    )
+                    if suppressed_path is None:
+                        self.logger.warning(
+                            "Failed to invalidate stale SPOT observation fact manifest."
+                        )
+                    else:
+                        self.logger.warning(
+                            "Invalidated stale SPOT observation fact manifest after refresh failure."
+                        )
             else:
-                self._suppress_spot_observation_fact_manifest_for_csv(csv_path)
+                suppressed_path = self._suppress_spot_observation_fact_manifest_for_csv(
+                    csv_path
+                )
+                if suppressed_path is None:
+                    closeout_succeeded = False
                 self.logger.warning(
                     "Skipped SPOT observation fact manifest because writes did not drain."
                 )
         self._close_file(handle)
         self._current_v2_csv_path = None
+        if not closeout_succeeded:
+            self._runtime_write_failure_observed = True
+        return closeout_succeeded
 
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
@@ -2615,7 +2642,8 @@ class CSVLoggerService:
                 )
             elif self.auto_save:
                 self._close_file(f_handle)
-                self._close_v2_file(v2_handle)
+                if not self._close_v2_file(v2_handle):
+                    shutdown_flush_succeeded = False
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
                 try:
@@ -2652,10 +2680,11 @@ class CSVLoggerService:
                 except Exception as exc:
                     shutdown_flush_succeeded = False
                     self.logger.warning("CSV deferred shutdown row write failed: %s", exc)
-        self._shutdown_flush_succeeded = shutdown_flush_succeeded
         self._buffer_size = 0
         self._close_file(f_handle)
-        self._close_v2_file(v2_handle)
+        if not self._close_v2_file(v2_handle):
+            shutdown_flush_succeeded = False
+        self._shutdown_flush_succeeded = shutdown_flush_succeeded
         if (
             self.csv_v2_enabled
             and self.csv_v2_sidecar_enabled

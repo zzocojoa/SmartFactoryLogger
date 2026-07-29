@@ -314,6 +314,104 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             self.assertIsNone(refreshed)
             self.assertEqual(metadata_path.read_bytes(), original_metadata)
 
+    def test_close_invalidates_stale_manifest_when_temporary_sqlite_is_unavailable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            csv_path = log_path / "Factory_Integrated_Log_v2_test.csv"
+            csv_path.write_text(
+                "spot_observation_key\nservice-1:1\n",
+                encoding="utf-8-sig",
+            )
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "spot_observation_fact_manifest": {
+                            "row_count": 1,
+                            "sha256": "unsafe-stale-hash",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fact_path = log_path / "spot_observation_fact.csv"
+            fact_path.write_text(
+                "spot_observation_key,spot_poll_seq\nservice-1:1,1\n",
+                encoding="utf-8-sig",
+            )
+            service = CSVLoggerService()
+            service._current_v2_csv_path = csv_path
+
+            with patch(
+                "backend.FacilityData.spot_observation_fact.sqlite3.connect",
+                side_effect=sqlite3.OperationalError("temporary storage unavailable"),
+            ):
+                closed_cleanly = service._close_v2_file(None)
+
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+        self.assertFalse(closed_cleanly)
+        self.assertTrue(service._runtime_write_failure_observed)
+        self.assertNotIn("spot_observation_fact_manifest", payload)
+        self.assertEqual(
+            payload["spot_observation_fact_closeout"],
+            {
+                "finalized": False,
+                "writes_drained": True,
+                "reason": "manifest-refresh-failed",
+            },
+        )
+
+    def test_close_invalidates_stale_manifest_on_invalid_fact_utf8(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            csv_path = log_path / "Factory_Integrated_Log_v2_test.csv"
+            csv_path.write_text(
+                "spot_observation_key\nservice-1:1\n",
+                encoding="utf-8-sig",
+            )
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "spot_observation_fact_manifest": {
+                            "row_count": 1,
+                            "sha256": "unsafe-stale-hash",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fact_path = log_path / "spot_observation_fact.csv"
+            fact_path.write_bytes(
+                b"spot_observation_key,spot_poll_seq\nservice-1:1,\xff\n"
+            )
+            service = CSVLoggerService()
+            service._current_v2_csv_path = csv_path
+
+            with patch(
+                "backend.FacilityData.drivers.spot_api."
+                "get_spot_observation_fact_health",
+                return_value={"enabled": False},
+            ):
+                closed_cleanly = service._close_v2_file(None)
+
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+        self.assertFalse(closed_cleanly)
+        self.assertTrue(service._runtime_write_failure_observed)
+        self.assertNotIn("spot_observation_fact_manifest", payload)
+        self.assertEqual(
+            payload["spot_observation_fact_closeout"],
+            {
+                "finalized": False,
+                "writes_drained": True,
+                "reason": "manifest-refresh-failed",
+            },
+        )
+
     def test_closeout_header_initialization_does_not_index_historical_fact_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             fact_path = Path(temp_dir) / "spot_observation_fact.csv"

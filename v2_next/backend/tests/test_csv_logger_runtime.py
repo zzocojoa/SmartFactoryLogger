@@ -381,6 +381,60 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_stop_rejects_clean_shutdown_when_observation_manifest_refresh_fails(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = CSVLoggerService()
+            log_path = Path(temp_dir)
+            service.fallback_log_dir = log_path
+            service.apply_config(
+                log_path=log_path,
+                auto_save=True,
+                csv_v1_enabled=False,
+                csv_v2_enabled=True,
+            )
+            service.start()
+            service.enqueue(create_factory_data())
+            deadline = time.time() + 2.0
+            while service._current_v2_csv_path is None and time.time() < deadline:
+                time.sleep(0.01)
+            csv_path = service._current_v2_csv_path
+            self.assertIsNotNone(csv_path)
+            assert csv_path is not None
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            payload = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+            payload["spot_observation_fact_manifest"] = {
+                "row_count": 1,
+                "sha256": "unsafe-stale-hash",
+            }
+            metadata_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with patch.object(
+                service,
+                "refresh_spot_observation_fact_manifest_for_csv",
+                return_value=None,
+            ):
+                self.assertFalse(service.stop(timeout_sec=2.0))
+
+            closeout_payload = json.loads(
+                metadata_path.read_text(encoding="utf-8")
+            )
+
+        self.assertFalse(service._shutdown_flush_succeeded)
+        self.assertNotIn(
+            "spot_observation_fact_manifest",
+            closeout_payload,
+        )
+        self.assertEqual(
+            closeout_payload["spot_observation_fact_closeout"],
+            {
+                "finalized": False,
+                "writes_drained": True,
+                "reason": "manifest-refresh-failed",
+            },
+        )
+
     def test_control_shutdown_waits_for_csv_logger_stop_timeout(self) -> None:
         class LoggerStub:
             timeout_sec: float | None = None
