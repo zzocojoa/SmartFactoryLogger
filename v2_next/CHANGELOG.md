@@ -35,9 +35,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 - Passed the complete Electron, frontend, backend, lint, type-check, QA
   self-test, production-build, transport-race, and socket-interrupt suites.
-- Exact `1.0.17` installer field promotion remains gated on the approved
-  15-minute smoke and 120-minute canary using the packaged backend from this
-  release commit.
+- Passed commit-bound re-attestation, one-command QA, the approved 15-minute
+  smoke, and the 120-minute canary using the exact packaged `1.0.17` backend.
+  Managed-switch evidence remains unavailable, so the software field gate is
+  `FIELD_CANARY_PASS` while physical-path attribution is
+  `PHYSICAL_PATH_PARTIAL`.
 
 ### Compatibility
 

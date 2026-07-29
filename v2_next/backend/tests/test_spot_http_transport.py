@@ -726,6 +726,51 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.assertTrue(await cross_origin_transport.close())
 
+    async def test_redirect_limit_fails_closed_after_bounded_hops(self) -> None:
+        connection_count = 0
+
+        def connection_factory(*_args: object) -> _FakeConnection:
+            nonlocal connection_count
+            connection_count += 1
+            return _FakeConnection(
+                response=_FakeResponse(
+                    status=302,
+                    body=b"",
+                    headers=[
+                        ("Location", "/loop"),
+                        ("Content-Length", "0"),
+                    ],
+                )
+            )
+
+        transport = SpotHttpTransport(
+            pool=self.make_pool(
+                capacity=transport_module.MAX_REDIRECT_HOPS + 1,
+            ),
+            connection_factory=connection_factory,
+        )
+        transport.start()
+        try:
+            with self.assertRaisesRegex(
+                SpotTransportProtocolError,
+                "redirect limit",
+            ):
+                await transport.request(
+                    _request(url="http://spot.local/loop")
+                )
+            diagnostics = transport.diagnostics()
+        finally:
+            self.assertTrue(await transport.close())
+
+        self.assertEqual(
+            connection_count,
+            transport_module.MAX_REDIRECT_HOPS + 1,
+        )
+        self.assertEqual(
+            diagnostics["source_port_pool_quarantined_count"],
+            transport_module.MAX_REDIRECT_HOPS + 1,
+        )
+
     async def test_response_deadline_reuses_one_transport_watchdog(self) -> None:
         transport = SpotHttpTransport(
             pool=self.make_pool(capacity=2),
@@ -1197,6 +1242,7 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancelled_waiter_does_not_release_worker_or_overlap_next_request(self) -> None:
         first_release = threading.Event()
+        first_response_started = threading.Event()
         created_count = 0
 
         def connection_factory(
@@ -1210,6 +1256,9 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
             created_count += 1
             return _FakeConnection(
                 release_response=first_release if created_count == 1 else None,
+                response_started=(
+                    first_response_started if created_count == 1 else None
+                ),
             )
 
         transport = SpotHttpTransport(
@@ -1218,7 +1267,12 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         )
         transport.start()
         first = asyncio.create_task(transport.request(_request()))
-        await asyncio.sleep(0.02)
+        self.assertTrue(
+            await asyncio.wait_for(
+                asyncio.to_thread(first_response_started.wait),
+                timeout=1.0,
+            )
+        )
         first.cancel()
         second = asyncio.create_task(
             transport.request(_request(kind=SpotRequestKind.TEMPERATURE))
