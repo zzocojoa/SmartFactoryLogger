@@ -245,6 +245,12 @@ class _FakeResponse:
         return list(self._headers)
 
 
+class _PrivateLayoutTrapResponse(_FakeResponse):
+    @property
+    def fp(self) -> object:
+        raise AssertionError("transport accessed HTTPResponse private layout")
+
+
 class _FakeConnection:
     def __init__(
         self,
@@ -341,6 +347,23 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                     pool=self.make_pool(),
                     bind_retry_limit=bind_retry_limit,
                 )
+
+    async def test_response_interrupt_target_uses_public_connection_socket(
+        self,
+    ) -> None:
+        transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=lambda *_args: _FakeConnection(
+                response=_PrivateLayoutTrapResponse(body=b"public-socket")
+            ),
+        )
+        transport.start()
+        try:
+            response = await transport.request(_request())
+        finally:
+            self.assertTrue(await transport.close())
+
+        self.assertEqual(response.body, b"public-socket")
 
     async def test_response_content_length_and_stream_are_bounded(self) -> None:
         accepted_cases = (

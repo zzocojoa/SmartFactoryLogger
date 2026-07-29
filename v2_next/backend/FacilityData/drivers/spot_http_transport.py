@@ -504,17 +504,6 @@ class SpotHttpTransport:
                 pass
         return socket_interrupt_attempted
 
-    @staticmethod
-    def _response_socket(upstream: http.client.HTTPResponse) -> object | None:
-        response_file = getattr(upstream, "fp", None)
-        raw_file = getattr(response_file, "raw", None)
-        response_socket = getattr(raw_file, "_sock", None)
-        if response_socket is None:
-            return None
-        if not callable(getattr(response_socket, "close", None)):
-            return None
-        return response_socket
-
     def _retarget_response_deadline(
         self,
         token: int,
@@ -717,10 +706,15 @@ class SpotHttpTransport:
                     body=request.body,
                     headers=dict(request.headers),
                 )
+                # HTTPConnection.getresponse() clears connection.sock for
+                # connection-close responses. Retain the public socket before
+                # that ownership transfer so the watchdog never depends on
+                # HTTPResponse's private fp/raw implementation layout.
+                response_socket = connection.sock
                 upstream = connection.getresponse()
                 response_target = _ConnectionInterruptTarget(
                     connection=connection,
-                    response_socket=self._response_socket(upstream),
+                    response_socket=response_socket,
                 )
                 if not self._retarget_response_deadline(
                     response_deadline_token,
