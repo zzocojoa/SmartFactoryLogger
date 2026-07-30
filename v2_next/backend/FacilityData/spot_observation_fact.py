@@ -505,11 +505,11 @@ class SpotObservationFactWriter:
     def _extend_manifest_digest(self, previous_size: int) -> None:
         if not self._manifest_state_ready:
             return
-        current_size = self._output_size()
-        if previous_size != self._manifest_tracked_size or current_size < previous_size:
-            self._manifest_state_ready = False
-            return
         try:
+            current_size = self._output_size()
+            if previous_size != self._manifest_tracked_size or current_size < previous_size:
+                self._manifest_state_ready = False
+                return
             with self.output_path.open("rb") as handle:
                 handle.seek(previous_size)
                 remaining = current_size - previous_size

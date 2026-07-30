@@ -439,6 +439,50 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             ):
                 runtime_writer.manifest_summary()
 
+    def test_observation_post_append_stat_failure_does_not_spool_or_duplicate_durable_row(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            runtime_writer = SpotObservationFactWriter(fact_path)
+            original_stat = Path.stat
+            fact_stat_count = 0
+
+            def fail_first_post_append_stat(
+                path: Path,
+                *args: object,
+                **kwargs: object,
+            ):
+                nonlocal fact_stat_count
+                if path == fact_path:
+                    fact_stat_count += 1
+                    if fact_stat_count == 3:
+                        raise OSError("stat failed after durable append")
+                return original_stat(path, *args, **kwargs)
+
+            snapshot = {
+                "spot_service_instance_id": "service-1",
+                "spot_poll_seq": 1,
+                "spot_last_poll_completed_at": "2026-07-29T05:00:00Z",
+            }
+            with patch.object(Path, "stat", new=fail_first_post_append_stat):
+                first_write = runtime_writer.write_fact(snapshot)
+
+            duplicate_write = runtime_writer.write_fact(snapshot)
+            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+
+            self.assertIsNotNone(first_write)
+            self.assertIsNone(duplicate_write)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(runtime_writer.failure_count, 0)
+            self.assertEqual(runtime_writer.spool_pending_count(), 0)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime manifest state is unavailable",
+            ):
+                runtime_writer.manifest_summary()
+
     def test_observation_header_initialization_uses_runtime_manifest_owner(
         self,
     ) -> None:
