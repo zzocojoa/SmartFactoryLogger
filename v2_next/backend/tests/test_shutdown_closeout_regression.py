@@ -1147,6 +1147,74 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             ):
                 _ = runtime_writer.fact_sha256
 
+    def test_image_manifest_fails_closed_when_external_append_interleaves_digest(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            fact_path = log_path / "spot_image_fact.csv"
+            runtime_writer = SpotImageCaptureWriter(
+                log_path=log_path,
+                capture_root=log_path / "spot_images",
+            )
+            first_fact = runtime_writer.write_capture(
+                image_bytes=b"\xff\xd8first-capture\xff\xd9",
+                captured_at=1782910800.123456,
+                source_url="http://spot.local/image.jpg",
+                source="test",
+                image_age_ms=0.0,
+                link_checked_at=None,
+                observation_snapshot=None,
+            )
+            external_fact = {
+                **first_fact,
+                "spot_image_capture_id": "external-interleaved-capture",
+            }
+            original_extend = runtime_writer._extend_manifest_digest
+
+            def append_then_extend(
+                previous_size: int,
+                *,
+                expected_size: int,
+            ) -> None:
+                with fact_path.open(
+                    "a",
+                    encoding="utf-8-sig",
+                    newline="",
+                ) as handle:
+                    csv.DictWriter(
+                        handle,
+                        fieldnames=SPOT_IMAGE_FACT_COLUMNS,
+                    ).writerow(external_fact)
+                original_extend(
+                    previous_size,
+                    expected_size=expected_size,
+                )
+
+            with patch.object(
+                runtime_writer,
+                "_extend_manifest_digest",
+                side_effect=append_then_extend,
+            ):
+                runtime_writer.write_capture(
+                    image_bytes=b"\xff\xd8second-capture\xff\xd9",
+                    captured_at=1782910801.123456,
+                    source_url="http://spot.local/image.jpg",
+                    source="test",
+                    image_age_ms=0.0,
+                    link_checked_at=None,
+                    observation_snapshot=None,
+                )
+
+            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                self.assertEqual(len(list(csv.DictReader(handle))), 3)
+            self.assertEqual(runtime_writer.fact_row_count, 2)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime manifest state is unavailable",
+            ):
+                _ = runtime_writer.fact_sha256
+
     def test_control_shutdown_subprocess_quiesces_spot_before_logger_closeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             marker_path = Path(temp_dir) / "shutdown-order.txt"

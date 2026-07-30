@@ -1842,6 +1842,8 @@ _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
 )
 _control_shutdown_tasks: set[asyncio.Task[None]] = set()
 _spot_connection_test_lock = asyncio.Lock()
+_spot_connection_test_next_allowed_at = 0.0
+_SPOT_CONNECTION_TEST_COOLDOWN_SECONDS = 30.0
 
 
 def _run_control_shutdown_stage(
@@ -2180,12 +2182,23 @@ def _require_operator_metadata_write_access(request: Request) -> None:
 
 def _require_local_connection_test_access(request: Request) -> None:
     client_host = request.client.host if request.client else ""
-    if _is_loopback_hostname(client_host):
-        return
-    raise HTTPException(
-        status_code=403,
-        detail="Connection tests require a local request",
-    )
+    if not _is_loopback_hostname(client_host):
+        raise HTTPException(
+            status_code=403,
+            detail="Connection tests require a local request",
+        )
+    origin = request.headers.get("origin", "").strip()
+    referer = request.headers.get("referer", "").strip()
+    if origin and origin != "null":
+        raise HTTPException(
+            status_code=403,
+            detail="Connection tests require the embedded application origin",
+        )
+    if referer and urlsplit(referer).scheme.lower() != "file":
+        raise HTTPException(
+            status_code=403,
+            detail="Connection tests require the embedded application origin",
+        )
 
 
 @app.get("/api/facility/operator-metadata", response_model=OperatorMetadata)
@@ -3038,14 +3051,24 @@ def reconnect():
 
 @app.post("/api/control/test-connection")
 async def test_connection(payload: ConnectionTestPayload, request: Request):
+    global _spot_connection_test_next_allowed_at
+
     _require_local_connection_test_access(request)
     spot_probe_admitted = False
     if payload.spot is not None:
-        if _spot_connection_test_lock.locked():
+        now = time.monotonic()
+        retry_after = max(
+            1,
+            math.ceil(_spot_connection_test_next_allowed_at - now),
+        )
+        if (
+            _spot_connection_test_lock.locked()
+            or now < _spot_connection_test_next_allowed_at
+        ):
             raise HTTPException(
                 status_code=429,
-                detail="SPOT connection test already in progress",
-                headers={"Retry-After": "1"},
+                detail="SPOT connection test is busy or cooling down",
+                headers={"Retry-After": str(retry_after)},
             )
         await _spot_connection_test_lock.acquire()
         spot_probe_admitted = True
@@ -3087,6 +3110,9 @@ async def test_connection(payload: ConnectionTestPayload, request: Request):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
         if spot_probe_admitted:
+            _spot_connection_test_next_allowed_at = (
+                time.monotonic() + _SPOT_CONNECTION_TEST_COOLDOWN_SECONDS
+            )
             _spot_connection_test_lock.release()
 
 

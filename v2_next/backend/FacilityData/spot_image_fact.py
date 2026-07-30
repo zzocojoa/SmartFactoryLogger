@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 import threading
 import time
@@ -194,12 +195,21 @@ class SpotImageCaptureWriter:
             self.log_path.mkdir(parents=True, exist_ok=True)
             write_header = self._prepare_fact_file_for_append()
             previous_size = self._fact_file_size()
-            with self.fact_path.open("a", encoding="utf-8-sig", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=SPOT_IMAGE_FACT_COLUMNS)
-                if write_header:
-                    writer.writeheader()
-                writer.writerow(fact)
-            self._extend_manifest_digest(previous_size)
+            buffer = io.StringIO(newline="")
+            writer = csv.DictWriter(buffer, fieldnames=SPOT_IMAGE_FACT_COLUMNS)
+            if write_header:
+                writer.writeheader()
+            writer.writerow(fact)
+            encoding = "utf-8-sig" if write_header and previous_size == 0 else "utf-8"
+            payload = buffer.getvalue().encode(encoding)
+            expected_size = previous_size + len(payload)
+            with self.fact_path.open("ab") as handle:
+                if handle.write(payload) != len(payload):
+                    raise OSError("SPOT image fact append was truncated")
+            self._extend_manifest_digest(
+                previous_size,
+                expected_size=expected_size,
+            )
             self._fact_row_count = int(self._fact_row_count or 0) + 1
 
     def _prepare_fact_file_for_append(self) -> bool:
@@ -314,12 +324,20 @@ class SpotImageCaptureWriter:
         except FileNotFoundError:
             return 0
 
-    def _extend_manifest_digest(self, previous_size: int) -> None:
+    def _extend_manifest_digest(
+        self,
+        previous_size: int,
+        *,
+        expected_size: int,
+    ) -> None:
         self._fact_has_content = True
         if not self._manifest_state_ready:
             return
         current_size = self._fact_file_size()
-        if previous_size != self._manifest_tracked_size or current_size < previous_size:
+        if (
+            previous_size != self._manifest_tracked_size
+            or current_size != expected_size
+        ):
             self._manifest_state_ready = False
             return
         try:

@@ -48,9 +48,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Failed image-fact closeout closed when another writer changes the durable fact
   file outside the active writer's tracked byte range, preventing stale row
   counts or SHA-256 values from being trusted.
-- Restricted device connection tests to local clients and admitted only one
-  SPOT probe at a time so unauthenticated LAN traffic cannot queue probes ahead
-  of operational temperature, image, or diagnostic requests.
+- Restricted device connection tests to local embedded-app requests and
+  admitted only one SPOT probe per 30-second cooldown so unauthenticated LAN or
+  browser traffic cannot queue or continuously repeat probes ahead of
+  operational temperature, image, or diagnostic requests.
 - Kept v2 CSV logging available when the configured LogPath falls back or
   changes before runtime fact writers can follow it, while marking the fact
   manifests incomplete and rejecting a falsely clean shutdown.

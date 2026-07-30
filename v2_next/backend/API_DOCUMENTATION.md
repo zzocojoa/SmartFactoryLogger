@@ -607,10 +607,11 @@ PLC 서비스에 다시 연결합니다.
 
 ### POST `/api/control/test-connection`
 
-This endpoint accepts loopback clients only. Non-local requests return `403`.
-Only one SPOT connection probe is admitted at a time; concurrent SPOT probes
-return `429` with `Retry-After: 1` instead of queueing behind operational SPOT
-traffic.
+This endpoint accepts loopback clients from the embedded application origin
+only. Non-local or untrusted browser-origin requests return `403`. Only one
+SPOT connection probe is admitted at a time, followed by a 30-second cooldown;
+busy or rate-limited SPOT probes return `429` with `Retry-After` instead of
+queueing behind operational SPOT traffic.
 
 설정된 장치에 대한 연결을 테스트합니다.
 

@@ -33,13 +33,21 @@ FocusUrlopenTarget = str | UrlRequest
 
 def build_connection_test_request(
     client_host: str = "127.0.0.1",
+    *,
+    origin: str | None = None,
+    referer: str | None = None,
 ) -> StarletteRequest:
+    headers: list[tuple[bytes, bytes]] = []
+    if origin is not None:
+        headers.append((b"origin", origin.encode("ascii")))
+    if referer is not None:
+        headers.append((b"referer", referer.encode("ascii")))
     return StarletteRequest(
         {
             "type": "http",
             "method": "POST",
             "path": "/api/control/test-connection",
-            "headers": [],
+            "headers": headers,
             "client": (client_host, 50000),
             "scheme": "http",
             "server": ("127.0.0.1", 8000),
@@ -190,6 +198,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api._reset_spot_diagnostics_request_state_for_tests()
         spot_api._spot_device_request_lock = asyncio.Lock()
         backend_app._spot_connection_test_lock = asyncio.Lock()
+        backend_app._spot_connection_test_next_allowed_at = 0.0
         spot_api._temperature_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._internal_temp_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._img_last_error = 0.0
@@ -2486,6 +2495,28 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 403)
         guarded_test.assert_not_awaited()
 
+    async def test_connection_test_rejects_hostile_browser_origin(self) -> None:
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            new=AsyncMock(),
+        ) as guarded_test:
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.test_connection(
+                    backend_app.ConnectionTestPayload(
+                        spot=backend_app.ConnectionTarget(
+                            url="http://spot.local/image.jpg"
+                        )
+                    ),
+                    build_connection_test_request(
+                        origin="https://untrusted.example",
+                        referer="https://untrusted.example/settings",
+                    ),
+                )
+
+        self.assertEqual(raised.exception.status_code, 403)
+        guarded_test.assert_not_awaited()
+
     async def test_connection_test_rejects_concurrent_admission(self) -> None:
         probe_started = asyncio.Event()
         release_probe = asyncio.Event()
@@ -2530,6 +2561,40 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 release_probe.set()
                 await first_request
+
+    async def test_connection_test_rate_limits_sequential_spot_probes(self) -> None:
+        guarded_result = {
+            "ok": True,
+            "latency_ms": 1,
+            "message": "HTTP 200",
+        }
+        payload = backend_app.ConnectionTestPayload(
+            spot=backend_app.ConnectionTarget(
+                url="http://spot.local/image.jpg"
+            )
+        )
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            new=AsyncMock(return_value=guarded_result),
+        ) as guarded_test:
+            first = await backend_app.test_connection(
+                payload,
+                build_connection_test_request(origin="null"),
+            )
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.test_connection(
+                    payload,
+                    build_connection_test_request(origin="null"),
+                )
+
+        self.assertEqual(first, {"results": {"spot": guarded_result}})
+        self.assertEqual(raised.exception.status_code, 429)
+        self.assertGreaterEqual(
+            int(raised.exception.headers["Retry-After"]),
+            29,
+        )
+        guarded_test.assert_awaited_once()
 
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
