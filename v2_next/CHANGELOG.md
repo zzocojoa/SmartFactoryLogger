@@ -45,22 +45,36 @@ All notable changes to Smart Factory Logger V2 are documented here.
   observation/image writer recorded a failure earlier in the runtime, including
   fail-closed handling when a restarted writer cannot read its spool and
   persistent quarantine of malformed or schema-mismatched spool rows.
+- Failed image-fact closeout closed when another writer changes the durable fact
+  file outside the active writer's tracked byte range, preventing stale row
+  counts or SHA-256 values from being trusted.
+- Restricted device connection tests to local clients and admitted only one
+  SPOT probe at a time so unauthenticated LAN traffic cannot queue probes ahead
+  of operational temperature, image, or diagnostic requests.
 - Kept v2 CSV logging available when the configured LogPath falls back or
   changes before runtime fact writers can follow it, while marking the fact
   manifests incomplete and rejecting a falsely clean shutdown.
 - Preserved focus and actuator API compatibility while routing eligible
   background requests through the guarded transport.
+- Bound Windows release artifacts and their packaged backend provenance to the
+  pull-request head commit so CI cannot publish a synthetic merge build under a
+  source-commit identity.
 
 ### Validation
 
 - Passed the complete Electron, frontend, backend, lint, type-check, QA
   self-test, production-build, transport-race, and socket-interrupt suites.
 - Passed commit-bound re-attestation, one-command QA, the approved 15-minute
-  smoke, and the 120-minute canary for packaged commit `0c641b7`.
-  Managed-switch evidence remains unavailable, so that package's software
-  field gate is `FIELD_CANARY_PASS` while physical-path attribution is
-  `PHYSICAL_PATH_PARTIAL`. Production promotion of a later commit still
-  requires an identity-matched field validation.
+  smoke, and the 120-minute canary for packaged commit `163d31b`. The final
+  live gate retained the expected backend and config hashes, verified
+  attestation, active source-port quarantine, zero reuse, exhaustion, and
+  transport failures, and healthy image capture.
+- Added direct regression coverage for the valid, backward-compatible, and
+  fail-closed CSV shutdown-closeout validation paths.
+- Managed-switch evidence remains unavailable, so the validated package's
+  software field gate is `FIELD_CANARY_PASS` while physical-path attribution is
+  `PHYSICAL_PATH_PARTIAL`. Production promotion of a later runtime commit still
+  requires identity-matched field validation.
 
 ### Compatibility
 

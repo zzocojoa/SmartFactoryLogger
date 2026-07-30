@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from backend import app as backend_app
 from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.spot_image_fact import (
+    SPOT_IMAGE_FACT_COLUMNS,
     SpotImageCaptureWriter,
     build_spot_image_fact_manifest,
 )
@@ -232,6 +233,127 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             "csv_closeout.final_persisted_sample_seq does not match the maximum CSV sample_seq",
             failures,
         )
+
+    def test_validator_covers_csv_closeout_contract_failures(self) -> None:
+        csv_path = Path("Factory_Integrated_Log_v2_closeout.csv")
+        logger_id = "11111111-1111-1111-1111-111111111111"
+        base_closeout = {
+            "finalized": True,
+            "closeout_reason": "shutdown",
+            "csv_file_name": csv_path.name,
+            "logger_service_instance_id": logger_id,
+            "final_persisted_sample_seq": 41,
+            "persisted_at": "2026-07-29T05:00:00Z",
+        }
+
+        def build_metadata(**closeout_overrides: object) -> dict[str, object]:
+            return {
+                "schema_metadata": {
+                    "logger_service_instance_id": logger_id,
+                },
+                "csv_closeout": {
+                    **base_closeout,
+                    **closeout_overrides,
+                },
+            }
+
+        valid_rows = [[logger_id, "41"]]
+        valid_header = ["logger_service_instance_id", "sample_seq"]
+        self.assertEqual(
+            validate_csv_closeout(
+                build_metadata(),
+                csv_path,
+                valid_rows,
+                valid_header,
+            ),
+            [],
+        )
+        self.assertEqual(
+            validate_csv_closeout({}, csv_path, valid_rows, valid_header),
+            [],
+        )
+
+        malformed_cases = (
+            (
+                {"csv_closeout": "invalid"},
+                "csv_closeout must be an object",
+            ),
+            (
+                build_metadata(finalized=False),
+                "csv_closeout.finalized must be true",
+            ),
+            (
+                build_metadata(closeout_reason="unexpected"),
+                "csv_closeout.closeout_reason is not recognized",
+            ),
+            (
+                build_metadata(csv_file_name="other.csv"),
+                "csv_closeout.csv_file_name does not match the v2 CSV",
+            ),
+            (
+                build_metadata(logger_service_instance_id="other-logger"),
+                "csv_closeout.logger_service_instance_id does not match schema metadata",
+            ),
+        )
+        for metadata, expected_failure in malformed_cases:
+            with self.subTest(expected_failure=expected_failure):
+                self.assertIn(
+                    expected_failure,
+                    validate_csv_closeout(
+                        metadata,
+                        csv_path,
+                        valid_rows,
+                        valid_header,
+                    ),
+                )
+
+        csv_cases = (
+            (
+                valid_rows,
+                ["logger_service_instance_id"],
+                "csv_closeout cannot verify a CSV without sample_seq",
+            ),
+            (
+                [[logger_id]],
+                valid_header,
+                "csv_closeout cannot verify invalid CSV sample_seq values",
+            ),
+            (
+                [[logger_id, "invalid"]],
+                valid_header,
+                "csv_closeout cannot verify invalid CSV sample_seq values",
+            ),
+            (
+                [],
+                valid_header,
+                "csv_closeout cannot verify a CSV without data rows",
+            ),
+        )
+        for rows, header, expected_failure in csv_cases:
+            with self.subTest(expected_failure=expected_failure):
+                self.assertIn(
+                    expected_failure,
+                    validate_csv_closeout(
+                        build_metadata(),
+                        csv_path,
+                        rows,
+                        header,
+                    ),
+                )
+
+        for persisted_value in (True, "41", None):
+            with self.subTest(persisted_value=persisted_value):
+                self.assertIn(
+                    "csv_closeout.final_persisted_sample_seq must be an integer",
+                    validate_csv_closeout(
+                        build_metadata(
+                            final_persisted_sample_seq=persisted_value,
+                        ),
+                        csv_path,
+                        valid_rows,
+                        valid_header,
+                    ),
+                )
 
     def test_runtime_observation_manifest_does_not_reread_historical_fact(self) -> None:
         row_total = 50_000
@@ -972,6 +1094,53 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             self.assertEqual(duplicate_fact, first_fact)
             self.assertEqual(len(rows), 1)
             self.assertEqual(runtime_writer.fact_row_count, 1)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "runtime manifest state is unavailable",
+            ):
+                _ = runtime_writer.fact_sha256
+
+    def test_image_manifest_fails_closed_after_external_fact_append(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            fact_path = log_path / "spot_image_fact.csv"
+            runtime_writer = SpotImageCaptureWriter(
+                log_path=log_path,
+                capture_root=log_path / "spot_images",
+            )
+            first_fact = runtime_writer.write_capture(
+                image_bytes=b"\xff\xd8first-capture\xff\xd9",
+                captured_at=1782910800.123456,
+                source_url="http://spot.local/image.jpg",
+                source="test",
+                image_age_ms=0.0,
+                link_checked_at=None,
+                observation_snapshot=None,
+            )
+            external_fact = {
+                **first_fact,
+                "spot_image_capture_id": "external-interleaved-capture",
+            }
+            with fact_path.open("a", encoding="utf-8-sig", newline="") as handle:
+                csv.DictWriter(
+                    handle,
+                    fieldnames=SPOT_IMAGE_FACT_COLUMNS,
+                ).writerow(external_fact)
+
+            runtime_writer.write_capture(
+                image_bytes=b"\xff\xd8second-capture\xff\xd9",
+                captured_at=1782910801.123456,
+                source_url="http://spot.local/image.jpg",
+                source="test",
+                image_age_ms=0.0,
+                link_checked_at=None,
+                observation_snapshot=None,
+            )
+
+            with fact_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(runtime_writer.fact_row_count, 2)
             with self.assertRaisesRegex(
                 RuntimeError,
                 "runtime manifest state is unavailable",

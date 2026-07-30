@@ -1841,6 +1841,7 @@ _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
     "config_watch_service_stopped",
 )
 _control_shutdown_tasks: set[asyncio.Task[None]] = set()
+_spot_connection_test_lock = asyncio.Lock()
 
 
 def _run_control_shutdown_stage(
@@ -2175,6 +2176,16 @@ def _require_operator_metadata_write_access(request: Request) -> None:
     if _is_loopback_hostname(client_host):
         return
     raise HTTPException(status_code=403, detail="Operator metadata updates require a local request")
+
+
+def _require_local_connection_test_access(request: Request) -> None:
+    client_host = request.client.host if request.client else ""
+    if _is_loopback_hostname(client_host):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Connection tests require a local request",
+    )
 
 
 @app.get("/api/facility/operator-metadata", response_model=OperatorMetadata)
@@ -3026,7 +3037,18 @@ def reconnect():
 
 
 @app.post("/api/control/test-connection")
-async def test_connection(payload: ConnectionTestPayload):
+async def test_connection(payload: ConnectionTestPayload, request: Request):
+    _require_local_connection_test_access(request)
+    spot_probe_admitted = False
+    if payload.spot is not None:
+        if _spot_connection_test_lock.locked():
+            raise HTTPException(
+                status_code=429,
+                detail="SPOT connection test already in progress",
+                headers={"Retry-After": "1"},
+            )
+        await _spot_connection_test_lock.acquire()
+        spot_probe_admitted = True
     try:
         result_keys: list[str] = []
         probes = []
@@ -3063,6 +3085,9 @@ async def test_connection(payload: ConnectionTestPayload):
     except Exception as exc:
         _logger.error("Connection test failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if spot_probe_admitted:
+            _spot_connection_test_lock.release()
 
 
 @app.post("/api/control/path-health")

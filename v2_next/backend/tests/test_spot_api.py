@@ -17,6 +17,7 @@ from unittest.mock import ANY, AsyncMock, Mock, patch
 import httpx
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request as StarletteRequest
 
 from backend import app as backend_app
 from backend.FacilityData.drivers import spot_api
@@ -28,6 +29,23 @@ from backend.FacilityData.spot_image_fact import (
 from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
 
 FocusUrlopenTarget = str | UrlRequest
+
+
+def build_connection_test_request(
+    client_host: str = "127.0.0.1",
+) -> StarletteRequest:
+    return StarletteRequest(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/control/test-connection",
+            "headers": [],
+            "client": (client_host, 50000),
+            "scheme": "http",
+            "server": ("127.0.0.1", 8000),
+            "query_string": b"",
+        }
+    )
 
 
 class UrlopenResponse:
@@ -171,6 +189,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         spot_api._reset_spot_image_request_state_for_tests()
         spot_api._reset_spot_diagnostics_request_state_for_tests()
         spot_api._spot_device_request_lock = asyncio.Lock()
+        backend_app._spot_connection_test_lock = asyncio.Lock()
         spot_api._temperature_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._internal_temp_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._img_last_error = 0.0
@@ -2376,7 +2395,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     spot=backend_app.ConnectionTarget(
                         url="http://spot.local/image.jpg"
                     )
-                )
+                ),
+                build_connection_test_request(),
             )
 
         self.assertEqual(response, {"results": {"spot": guarded_result}})
@@ -2421,7 +2441,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                             ip="192.0.2.20",
                             port=2004,
                         ),
-                    )
+                    ),
+                    build_connection_test_request(),
                 )
             )
             try:
@@ -2445,6 +2466,70 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 ("192.0.2.20", 2004),
             },
         )
+
+    async def test_connection_test_rejects_nonlocal_callers(self) -> None:
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            new=AsyncMock(),
+        ) as guarded_test:
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.test_connection(
+                    backend_app.ConnectionTestPayload(
+                        spot=backend_app.ConnectionTarget(
+                            url="http://spot.local/image.jpg"
+                        )
+                    ),
+                    build_connection_test_request("192.0.2.50"),
+                )
+
+        self.assertEqual(raised.exception.status_code, 403)
+        guarded_test.assert_not_awaited()
+
+    async def test_connection_test_rejects_concurrent_admission(self) -> None:
+        probe_started = asyncio.Event()
+        release_probe = asyncio.Event()
+
+        async def blocking_probe(_: str | None) -> dict[str, object]:
+            probe_started.set()
+            await release_probe.wait()
+            return {
+                "ok": True,
+                "latency_ms": 1,
+                "message": "HTTP 200",
+            }
+
+        payload = backend_app.ConnectionTestPayload(
+            spot=backend_app.ConnectionTarget(
+                url="http://spot.local/image.jpg"
+            )
+        )
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            side_effect=blocking_probe,
+        ):
+            first_request = asyncio.create_task(
+                backend_app.test_connection(
+                    payload,
+                    build_connection_test_request(),
+                )
+            )
+            await asyncio.wait_for(probe_started.wait(), timeout=1.0)
+            try:
+                with self.assertRaises(HTTPException) as raised:
+                    await backend_app.test_connection(
+                        payload,
+                        build_connection_test_request(),
+                    )
+                self.assertEqual(raised.exception.status_code, 429)
+                self.assertEqual(
+                    raised.exception.headers,
+                    {"Retry-After": "1"},
+                )
+            finally:
+                release_probe.set()
+                await first_request
 
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
