@@ -2402,14 +2402,14 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             response = await backend_app.test_connection(
                 backend_app.ConnectionTestPayload(
                     spot=backend_app.ConnectionTarget(
-                        url="http://spot.local/image.jpg"
+                        url="http://spot.invalid/image.jpg"
                     )
                 ),
                 build_connection_test_request(),
             )
 
         self.assertEqual(response, {"results": {"spot": guarded_result}})
-        guarded_test.assert_awaited_once_with("http://spot.local/image.jpg")
+        guarded_test.assert_awaited_once_with("http://spot.invalid/image.jpg")
 
     async def test_connection_tcp_probes_run_off_event_loop_in_parallel(self) -> None:
         both_started = threading.Event()
@@ -2486,10 +2486,10 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 await backend_app.test_connection(
                     backend_app.ConnectionTestPayload(
                         spot=backend_app.ConnectionTarget(
-                            url="http://spot.local/image.jpg"
+                            url="http://spot.invalid/image.jpg"
                         )
                     ),
-                    build_connection_test_request("192.0.2.50"),
+                    build_connection_test_request("remote.invalid"),
                 )
 
         self.assertEqual(raised.exception.status_code, 403)
@@ -2505,7 +2505,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 await backend_app.test_connection(
                     backend_app.ConnectionTestPayload(
                         spot=backend_app.ConnectionTarget(
-                            url="http://spot.local/image.jpg"
+                            url="http://spot.invalid/image.jpg"
                         )
                     ),
                     build_connection_test_request(
@@ -2532,7 +2532,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         payload = backend_app.ConnectionTestPayload(
             spot=backend_app.ConnectionTarget(
-                url="http://spot.local/image.jpg"
+                url="http://spot.invalid/image.jpg"
             )
         )
         with patch.object(
@@ -2570,7 +2570,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         }
         payload = backend_app.ConnectionTestPayload(
             spot=backend_app.ConnectionTarget(
-                url="http://spot.local/image.jpg"
+                url="http://spot.invalid/image.jpg"
             )
         )
         with patch.object(

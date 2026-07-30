@@ -203,7 +203,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
 
     def test_validator_rejects_closeout_ahead_of_final_csv_row(self) -> None:
         csv_path = Path("Factory_Integrated_Log_v2_closeout.csv")
-        logger_id = "11111111-1111-1111-1111-111111111111"
+        logger_id = "logger-service-closeout-test"
         metadata = {
             "schema_metadata": {
                 "logger_service_instance_id": logger_id,
@@ -1111,7 +1111,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             first_fact = runtime_writer.write_capture(
                 image_bytes=b"\xff\xd8first-capture\xff\xd9",
                 captured_at=1782910800.123456,
-                source_url="http://spot.local/image.jpg",
+                source_url="http://spot.invalid/image.jpg",
                 source="test",
                 image_age_ms=0.0,
                 link_checked_at=None,
@@ -1130,7 +1130,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             runtime_writer.write_capture(
                 image_bytes=b"\xff\xd8second-capture\xff\xd9",
                 captured_at=1782910801.123456,
-                source_url="http://spot.local/image.jpg",
+                source_url="http://spot.invalid/image.jpg",
                 source="test",
                 image_age_ms=0.0,
                 link_checked_at=None,
@@ -1160,7 +1160,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
             first_fact = runtime_writer.write_capture(
                 image_bytes=b"\xff\xd8first-capture\xff\xd9",
                 captured_at=1782910800.123456,
-                source_url="http://spot.local/image.jpg",
+                source_url="http://spot.invalid/image.jpg",
                 source="test",
                 image_age_ms=0.0,
                 link_checked_at=None,
@@ -1199,7 +1199,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 runtime_writer.write_capture(
                     image_bytes=b"\xff\xd8second-capture\xff\xd9",
                     captured_at=1782910801.123456,
-                    source_url="http://spot.local/image.jpg",
+                    source_url="http://spot.invalid/image.jpg",
                     source="test",
                     image_age_ms=0.0,
                     link_checked_at=None,
