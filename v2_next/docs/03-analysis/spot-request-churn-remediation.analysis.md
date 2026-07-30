@@ -1,5 +1,10 @@
 # Gap Analysis: spot-request-churn-remediation
 
+> **Historical snapshot — superseded.** This document records the failed
+> pre-quarantine candidate and its rollback decision. The final production
+> decision is the `f101d88` `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL` closure
+> in `docs/04-report/spot-tcp-source-port-quarantine-v2.report.md`.
+>
 > Date: 2026-07-27 | Design: `docs/02-design/features/spot-request-churn-remediation.design.md`
 > Failed package baseline: `45263ff46ce184ef0cb63f1cec7658f929167b2e` | Act iteration: 3 | Analysis iteration: 4
 > Verdict: **Field Act local Check passed / actual-server recheck required / rollback remains active**
@@ -120,7 +125,7 @@ sample에서 유지됐다. 운영 `config.ini` SHA-256은 설치 전후 동일�
 - Current operational UI: EX·LS recovered, SPOT normal, CSV queue/drop 정상,
   memory leak suspect/warning/error `0`
 - Evidence:
-  `C:\Users\user\Desktop\SmartFactory\server_check_after_rollback_20260727_082507.json`
+  `server_check_after_rollback_20260727_082507.json` (private server evidence)
 
 오류 큐 `7`항목과 repeat `187`, 누적 HTTP 5xx `1`은 지우지 않은 v1.0.16의
 운영 이력이다. 마지막 source는 `spot_image`이며 현재 60초 HTTP window에는

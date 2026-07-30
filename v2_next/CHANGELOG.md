@@ -45,9 +45,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
   observation/image writer recorded a failure earlier in the runtime, including
   fail-closed handling when a restarted writer cannot read its spool and
   persistent quarantine of malformed or schema-mismatched spool rows.
-- Failed image-fact closeout closed when another writer changes the durable fact
+- Made image-fact closeout fail closed when another writer changes the durable fact
   file outside the active writer's tracked byte range, preventing stale row
   counts or SHA-256 values from being trusted.
+- Preserved observation-fact deduplication after a durable append when a
+  subsequent file-size probe fails, so the same fact is not spooled and
+  appended twice while manifest closeout still fails closed.
 - Routed packaged device connection tests through trusted Electron main IPC
   with a per-launch control token, and admitted only one SPOT probe per
   30-second cooldown so unauthenticated LAN or browser traffic cannot queue or
@@ -67,7 +70,7 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Passed the complete Electron, frontend, backend, lint, type-check, QA
   self-test, production-build, transport-race, and socket-interrupt suites.
 - Passed commit-bound re-attestation, one-command QA, the approved 15-minute
-  smoke, and the 120-minute canary for packaged commit `163d31b`. The final
+  smoke, and the 120-minute canary for packaged commit `f101d88`. The final
   live gate retained the expected backend and config hashes, verified
   attestation, active source-port quarantine, zero reuse, exhaustion, and
   transport failures, and healthy image capture.
@@ -75,8 +78,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
   fail-closed CSV shutdown-closeout validation paths.
 - Managed-switch evidence remains unavailable, so the validated package's
   software field gate is `FIELD_CANARY_PASS` while physical-path attribution is
-  `PHYSICAL_PATH_PARTIAL`. Production promotion of a later runtime commit still
-  requires identity-matched field validation.
+  `PHYSICAL_PATH_PARTIAL`. The identity-matched `f101d88` package remains the
+  verified production runtime. A later observation-fact durability fix changes
+  the candidate runtime and therefore requires a new commit-bound package,
+  re-attestation, QA, smoke, and canary before that later HEAD can replace it.
 
 ### Compatibility
 

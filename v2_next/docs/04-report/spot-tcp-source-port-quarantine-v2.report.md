@@ -1,9 +1,10 @@
 # Completion Report: SPOT TCP Source-Port Quarantine v2
 
-> Date: 2026-07-30 | Level: Dynamic | Match Rate: 100%
-> Status: `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL`
-> Closure: `DONE_WITH_CONCERNS`
-> Evidence scope: packaged source commit `163d31bf9fafa86171432fa470b84e2a1c8e14b4`
+> Date: 2026-07-31 | Level: Dynamic | Match Rate: 100%
+> Validated package: `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL`
+> Current PR HEAD: `FIELD_REVALIDATION_REQUIRED`
+> Closure: `F101D88_DONE_WITH_CONCERNS / CURRENT_HEAD_OPEN`
+> Evidence scope: packaged source commit `f101d8842bfbcc422007465f49a5f8391e4704b4`
 
 ---
 
@@ -18,15 +19,19 @@ The implementation closes the field-observed same 4-tuple reuse risk without
 changing public routes, configuration, CSV, or database contracts. It
 intentionally reduces background request cadence and extends backward-compatible
 image metadata and `/api/spot/config.image` diagnostics. The final `1.0.17`
-package from commit `163d31b` passed commit-bound operator re-attestation, the
+package from commit `f101d88` passed commit-bound operator re-attestation, the
 full one-command CSV QA, the approved 15-minute smoke, a 120-minute passive
 canary, and the final live gate on the actual server. No new `spot_image`
 ConnectTimeout, SPOT handshake failure, HTTP error, pool exhaustion, transport
 failure, or reuse violation occurred.
 
 Managed-switch evidence was unavailable, so the software promotion gate passes
-while physical-path attribution remains partial. This limitation does not
-require rollback or another immediate canary.
+for the exact `f101d88` package while physical-path attribution remains partial.
+This limitation does not require rollback of the server. A post-field
+adversarial review subsequently found and fixed a rare observation-fact
+post-append `stat()` failure path in commit `70b9339`; because that is a runtime
+change, its eventual package must repeat the commit-bound field gates before
+promotion.
 
 ```text
 Completion rate: 100%
@@ -101,16 +106,16 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Full backend tests | all | 599 at field commit / 628 at current HEAD | PASS |
-| Electron tests | all | 38 | PASS |
-| Frontend tests | all | 251 / 33 files | PASS |
+| Full backend tests | all | 637 | PASS |
+| Electron tests | all | 40 | PASS |
+| Frontend tests | all | 253 / 34 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
 | Unhandled future warnings | `0` | `0` | PASS |
 | NSIS QA self-test | all checks | all checks | PASS |
 | Actual source-port values emitted | `false` | `false` | PASS |
-| Actual-server canary duration | `120 min` | `7,204.733s` | PASS |
+| Actual-server canary duration | `120 min` | `7,201.944s` | PASS |
 | New `spot_image` ConnectTimeout | `0` | `0` | PASS |
-| SPOT handshakes / HTTP bodies | all | `22,369 / 22,369` | PASS |
+| SPOT handshakes / HTTP bodies | all | `22,184 / 22,184` | PASS |
 | SPOT handshake/HTTP/RST failures | `0` | `0` | PASS |
 | Same 4-tuple reuse under 5s | `0` | `0` | PASS |
 | Same 4-tuple reuse under 60s | `0` | `0` | PASS |
@@ -126,50 +131,49 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 ### 5.1 Package and live gate
 
 - Source commit:
-  `163d31bf9fafa86171432fa470b84e2a1c8e14b4`
+  `f101d8842bfbcc422007465f49a5f8391e4704b4`
 - Product version: `1.0.17`
 - Candidate installer SHA-256:
-  `36B0972E4434DF7BD161C79BD32AB62561C60F63B94A38C6736E562A24ECD41B`
+  `98A6CC5FC8BFBDC94B6A379D332F2D0C57EAC44F65490EF9193AA08DE554B4F8`
 - Installed backend SHA-256:
-  `C651FE78B78B8EDD41FC845A2F651C4F7247EC37BECC7FAEED1E0A60E315E016`
+  `FAE64D4BBAF86184308B96E42E1B30EFF906B7A03F4B2CDA35584CB50BFDF18F`
 - Attested config SHA-256:
-  `EB4188C67E53C6CF14005FFB73DD443E3434B9E4F55552806541DA5CD758698C`
+  `117A79AE9E79C0032D73E7E0425DFD26B3DD2BD44B6FC913C9E68AA1C849B592`
 - The one-command SPOT Temperature v2.5 QA passed all runtime, attestation,
   finalized CSV, fact-manifest, and repository-validator checks. Its evidence
   SHA-256 is
-  `4E6E2BC768547959E7D9ED28664C4E0656C1ABE6A7A58E6A94BE95EA710CA1FB`.
+  `D570376BC3D406EB5F1F0617E9F71900AD66CA436C43FF59E42D410ACC1469B7`.
 - Attestation remained verified, operator-verified, fingerprint-matched, and
   free of configuration drift.
 - `spot-source-port-quarantine-v2`, the 768-record pool, 75-second quarantine,
   `spot-background-request-budget-v2`, and `spot-image-demand-shaping-v2`
   remained active.
-- The post-canary live gate at 2026-07-30 13:25:44 KST reconfirmed the exact
+- The post-canary live gate at 2026-07-31 00:33:08 KST reconfirmed the exact
   backend and config hashes, source commit, HTTP 200 health, one backend
   process, four Electron processes, verified attestation, no drift, an active
   source-port policy, and zero reuse, exhaustion, or transport failures.
 
 ### 5.2 15-minute passive smoke
 
-The actual-server run `runtime_validation_20260730_101540` observed normal-screen
-operation for `902.365s` and stopped at the fixed deadline without a trigger.
-Bidirectional packet preflight passed with 125 outbound and 152 inbound
-packets. All 2,797 SPOT HTTP events completed their TCP handshake, header, and
+The actual-server run `runtime_validation_20260730_170609` observed normal-screen
+operation for `901.308s` and stopped at the fixed deadline without a trigger.
+Bidirectional packet preflight passed with 120 outbound and 142 inbound
+packets. All 2,807 SPOT HTTP events completed their TCP handshake, header, and
 body; failed connections, retransmitted SYNs, reset-before-response events, and
-same 4-tuple reuse under 60 seconds were zero. All 875 ping probes succeeded.
+same 4-tuple reuse under 60 seconds were zero. All 891 ping probes succeeded.
 
-The dedicated trigger monitor completed 899 polls. One monitor request failed
-transiently and recovered without an error-queue change or correlated SPOT,
-HTTP, TCP, NIC, or process failure. The smoke remained
+The dedicated trigger monitor completed 900 polls with zero monitor errors, a
+maximum poll gap of `1,044.332ms`, and no error-queue change. The smoke remained
 `PHYSICAL_PATH_PARTIAL` because managed-switch evidence was unavailable.
 
 ### 5.3 120-minute passive canary
 
-The actual-server run `runtime_validation_20260730_105743` observed normal-screen
-operation for `7,204.733s` and stopped at the fixed deadline without a trigger.
+The actual-server run `runtime_validation_20260730_221516` observed normal-screen
+operation for `7,201.944s` and stopped at the fixed deadline without a trigger.
 
-- Bidirectional packet preflight passed with 120 outbound and 136 inbound
+- Bidirectional packet preflight passed with 115 outbound and 142 inbound
   packets before the full capture.
-- All 22,369 captured SPOT HTTP events completed their TCP handshake, HTTP
+- All 22,184 captured SPOT HTTP events completed their TCP handshake, HTTP
   header, and response body. All responses used the device's expected
   `HTTP/1.0` framing.
 - HTTP non-200, 5xx, retransmitted SYN, RST-before-response, unresolved flow,
@@ -179,12 +183,14 @@ operation for `7,204.733s` and stopped at the fixed deadline without a trigger.
   reuse-violation counter remained zero.
 - The fixed 60-second total-open rate had p95 `3.1333/s`; the image rate had
   p95 `0.3333/s`.
-- The dedicated error trigger monitor completed 7,198 polls with zero monitor
-  errors and no new `spot_image` ConnectTimeout.
-- All 7,089 ping probes succeeded. Server NIC receive/transmit errors and
+- The dedicated error trigger monitor completed 7,166 polls with 17 transient
+  localhost polling errors. The maximum poll gap was `3,381.210ms`, below the
+  5-second detection warning threshold; the full error snapshots did not
+  change and no new `spot_image` ConnectTimeout occurred.
+- All 7,062 ping probes succeeded. Server NIC receive/transmit errors and
   discards remained zero.
-- The final live gate reported cumulative handled totals of 823 bind
-  collisions and 266 rebind retries. Pool exhaustion, reuse violations, and
+- The final live gate reported cumulative handled totals of 3,992 bind
+  collisions and 170 rebind retries. Pool exhaustion, reuse violations, and
   transport failures remained zero, demonstrating bounded recovery rather
   than fallback.
 - Image status remained `ok`, accepted requests, and recorded zero refresh
@@ -193,42 +199,37 @@ operation for `7,204.733s` and stopped at the fixed deadline without a trigger.
 ### 5.4 Evidence integrity
 
 - Canonical sanitized artifact:
-  `runtime_validation_20260730_105743_sanitized_share.zip`
+  `runtime_validation_20260730_221516_sanitized_share.zip`
 - Canonical sanitized SHA-256:
-  `16CFAD103D8F24D9F4842039EE6E23F0264B73B8D2AC058395321DF55CEFD03C`
+  `9C11F91D414C246EC715E2B142061B6442185D7E2F3632094EEF14EBF1349C40`
 - Transferred full run archive:
-  `runtime_validation_20260730_105743.zip`
+  `runtime_validation_20260730_221516.zip`
 - Transferred full run archive SHA-256:
-  `3AB4B26623FCBB835C0FFFFE2DB51365861297F174EE069211C2397EBA99D79B`
+  `33B0550B84496201A9CD9D0D5741FD700F13DAA547C4B984D8A66FC0292C20D7`
 - Final live-gate evidence:
-  `server_check_after_163d31b_120min_canary_final_20260730_132544.json`
+  `server_check_after_f101d88_120min_canary_final_20260731_003308.json`
 - Final live-gate evidence SHA-256:
-  `D2E0EB9D418765F96159355BAD3CEC3F407655FC2015386F34C9D4DB0B7F4271`
+  `60E858924B6A3EC2FE3CC9C1FE8A3142FD346487B975C06D84F333274CEA5BA5`
+- Pre-canary live-gate evidence
+  `server_check_before_f101d88_120min_canary_20260730_221230.json` has SHA-256
+  `412AE69246B5A1325F52E6650DB1700361E0186C3018AD06FE01C3E547AF2FE1`.
 - The transferred 15-minute run archive
-  `runtime_validation_20260730_101540.zip` has SHA-256
-  `AE817BF017D27D1A247CC8C17C6F2BF3A27A3F026D0D658A1F2BCF59EFB3CBA7`;
+  `runtime_validation_20260730_170609.zip` has SHA-256
+  `7224BC7E801D2C3349C58D1943F61FB1CD839686076425D1BFD02470850BD0FF`;
   its canonical sanitized artifact has SHA-256
-  `8829231B119A54CAEF5114313CC7BA9973784EFB3C343BBB8FEA3C22514336BC`.
+  `BFA1291A76FE05AAEA90A9983ED7F2F6E5317337450AC50CD6D64A0CF66C2CD6`.
 - The raw-private archive contains sensitive operational paths and network
   details and must not be published or attached to public issues.
 
 ### 5.5 Validation expression normalization
 
-The final live-gate JSON serialized `Checks.DriftFieldsClear` as an empty JSON
-object (`{}`). The one-off PowerShell wrapper applied a generic boolean cast to
-all check values, so the empty object produced a false-negative
-`DriftFieldsClear` failure even though:
-
-- `ConfigDriftDetected` was `false`;
-- the drift-field object had zero properties;
-- `FingerprintsMatch` was `true`; and
-- all other live-gate checks were `true`.
-
-The evidence was re-evaluated by treating drift-field clearance as
-`@($value.PSObject.Properties).Count -eq 0`. This normalization yields 28 of 28
-passing checks. The manually printed `[PASS]` line after the thrown exception
-was not used as evidence. Future wrappers must normalize structured values
-before applying a generic boolean gate.
+An earlier `163d31b` one-off wrapper applied a generic boolean cast to a
+structured drift-field value and produced a reporting-only false negative.
+The `f101d88` pre-canary and final wrappers normalized drift fields before
+building their boolean `Checks` object. The canonical final evidence therefore
+records `DriftFieldsClear: true` directly, with all 32 checks passing. No
+manually printed pass line or post-hoc value coercion is used for the final
+promotion decision.
 
 ## 6. Security and Operations
 
@@ -241,11 +242,18 @@ before applying a generic boolean gate.
 - Rollback requires the already verified v1.0.16 installer; no data repair or
   schema rollback is needed.
 - The actual server remains on the verified `1.0.17` package built from
-  `163d31b`. Current evidence does not indicate rollback.
+  `f101d88`. Current evidence does not indicate rollback.
 - The final package, backend, config, attestation, QA, canary, and live-gate
-  identities are bound to the same `163d31b` source commit.
-- Error-queue deletion, configuration changes, forced image-load tests, and an
-  additional 15-minute or 120-minute collection are not required.
+  identities are bound to the same `f101d88` source commit.
+- Error-queue deletion, configuration changes, and forced image-load tests are
+  not required for the running package.
+- Commit `70b9339` preserves observation-fact deduplication when the row append
+  succeeds but the immediate file-size probe fails. Its manifest still fails
+  closed, and a regression test proves the durable row is neither spooled nor
+  duplicated.
+- The post-field runtime fix cannot inherit `f101d88` package evidence. Its
+  final package must pass re-attestation, QA, 15-minute smoke, 120-minute
+  canary, and the final live gate before promotion.
 
 ## 7. Lessons Learned
 
@@ -285,15 +293,17 @@ counters were unavailable. Therefore faults between the SPOT device and the
 managed-switch path cannot be fully excluded. Server-side SPOT TCP, HTTP, ping,
 NIC, application, process, source-port, and image evidence passed.
 
-The PowerShell structured-value normalization defect in Section 5.5 is a
-non-product reporting defect. It did not change server state or the underlying
-28-check live-gate result, but the wrapper must be corrected before reuse.
+The earlier PowerShell structured-value normalization defect in Section 5.5
+was a non-product reporting defect. The `f101d88` wrappers corrected it before
+the final promotion gate.
 
 ## 9. Next Action
 
-Keep the verified `1.0.17` package from commit `163d31b` running on
-`DESKTOP-CIIT7LK`. Do not rollback, clear the error queue, change SPOT settings,
-or repeat the 15-minute or 120-minute collection based on the current evidence.
+Keep the verified `1.0.17` package from commit `f101d88` running on
+the verified target server. Do not rollback, clear the error queue, or change
+SPOT settings based on the current evidence. Build the final PR HEAD only after
+local and CI gates pass, then repeat commit-bound re-attestation, QA, 15-minute
+smoke, 120-minute canary, and final live-gate verification for that new package.
 If governance later requires full physical-path sign-off, collect managed-switch
 port counters and logs as a separate operational evidence task. If the SPOT
 under-range state returns unexpectedly, inspect the physical process and device
@@ -314,3 +324,5 @@ range separately from this closed TCP remediation.
 | 1.8 | 2026-07-29 | Bound QA to the exact live CSV closeout and rejected malformed, mismatched, unreadable, or pending spool work |
 | 1.9 | 2026-07-29 | Bound QA to the actual shutdown closeout and verified persisted sample sequence against the finalized CSV |
 | 2.0 | 2026-07-30 | Froze final `163d31b` QA, smoke, 120-minute canary, live-gate evidence, and structured-value normalization finding |
+| 2.1 | 2026-07-31 | Froze identity-matched `f101d88` QA, 15-minute smoke, 120-minute canary, corrected live-gate evidence, and production operating decision |
+| 2.2 | 2026-07-31 | Kept `f101d88` as the verified runtime and reopened current-HEAD field promotion after the post-field observation-fact durability fix |

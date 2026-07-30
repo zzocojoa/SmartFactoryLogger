@@ -1,6 +1,6 @@
 # Smart Factory Logger V2 - 백엔드 API 문서
 
-> **버전:** 2.1.0\
+> **버전:** 1.0.17\
 > **기본 URL:** `http://localhost:8000` (기본값)\
 > **프레임워크:** FastAPI
 
@@ -640,19 +640,19 @@ with `Retry-After` instead of queueing behind operational SPOT traffic.
 {
     "results": {
         "extruder": {
-            "connected": true,
+            "ok": true,
             "latency_ms": 25,
-            "message": "OK"
+            "message": "connected"
         },
         "ls_plc": {
-            "connected": false,
-            "latency_ms": 0,
-            "message": "연결 시간 초과"
+            "ok": false,
+            "latency_ms": 1501,
+            "message": "timed out"
         },
         "spot": {
-            "connected": true,
+            "ok": true,
             "latency_ms": 150,
-            "status_code": 200
+            "message": "HTTP 200"
         }
     }
 }
@@ -753,6 +753,9 @@ with `Retry-After` instead of queueing behind operational SPOT traffic.
 
 ### POST `/api/control/shutdown`
 
+The packaged Electron application supplies its per-launch
+`X-SFL-Control-Token`; direct embedded requests without the token return `403`.
+
 백엔드 서버를 정상적으로 종료합니다.
 
 **요청 본문:**
@@ -767,8 +770,7 @@ with `Retry-After` instead of queueing behind operational SPOT traffic.
 
 ```json
 {
-    "ok": true,
-    "message": "종료 시작됨"
+    "ok": true
 }
 ```
 
@@ -1009,6 +1011,7 @@ response remains `no-store`; that header does not disable the backend cache.
 | **400**   | 잘못된 요청 (Bad Request - 유효하지 않은 파라미터)   |
 | **403**   | 금지됨 (Forbidden - 권한 없음, 잘못된 비밀번호)      |
 | **404**   | 찾을 수 없음 (Not Found - 리소스 없음)               |
+| **429**   | 요청 제한 (Too Many Requests - SPOT probe busy/cooldown) |
 | **500**   | 내부 서버 오류 (Internal Server Error)               |
 | **502**   | 불량 게이트웨이 (Bad Gateway - 업스트림 서비스 실패) |
 
@@ -1024,8 +1027,10 @@ response remains `no-store`; that header does not disable the backend cache.
 
 ## Authentication
 
-현재 API는 토큰 기반 인증을 구현하지 않습니다. 오버라이드 토글이나 설정 복원과
-같은 일부 작업은 요청 본문에 비밀번호 확인이 필요합니다.
+전체 API에 적용되는 사용자용 bearer-token 인증은 구현하지 않습니다. 다만 packaged
+Electron의 connection-test 및 shutdown 제어 경로는 실행마다 생성되는
+`X-SFL-Control-Token`을 요구합니다. 오버라이드 토글이나 설정 복원과 같은 일부
+작업은 요청 본문에 비밀번호 확인이 필요합니다.
 
 ---
 
@@ -1072,7 +1077,8 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ## Notes
 
-- 모든 타임스탬프는 Unix 에포크 초 (float) 단위입니다.
+- 별도 명시가 없는 타임스탬프는 Unix 에포크 초 (float) 단위입니다.
+  `X-Spot-Image-At` 응답 헤더는 Unix 에포크 밀리초 단위입니다.
 - 경로는 절대 윈도우 경로입니다 (예: `C:\\Logs\\...`).
 - 네트워크 경로는 UNC 표기법을 사용합니다 (예: `\\\\NAS\\Share`).
 - 이미지 데이터는 선택적 데이터 URI 접두사가 있는 base64 인코딩입니다.
@@ -1082,7 +1088,7 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ## API Versioning
 
-현재 버전: **2.1.0**
+현재 버전: **1.0.17**
 
 API 버전은 FastAPI 앱 정의에 지정되어 있으며 `/docs`의 OpenAPI 문서에서 확인할
 수 있습니다.
