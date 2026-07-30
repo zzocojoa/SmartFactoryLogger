@@ -236,7 +236,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
 
     def test_validator_covers_csv_closeout_contract_failures(self) -> None:
         csv_path = Path("Factory_Integrated_Log_v2_closeout.csv")
-        logger_id = "11111111-1111-1111-1111-111111111111"
+        logger_id = "logger-service-closeout-fixture"
         base_closeout = {
             "finalized": True,
             "closeout_reason": "shutdown",
