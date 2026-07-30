@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('smartFactoryElectron', {
   retryStartup: () => ipcRenderer.invoke('sfl:retry-startup'),
   continueStartupOffline: () => ipcRenderer.invoke('sfl:continue-startup-offline'),
   exitStartup: () => ipcRenderer.invoke('sfl:exit-startup'),
+  testConnection: (payload) => ipcRenderer.invoke('sfl:test-connection', payload),
   recordStartupEvent: (name, payload) => recordPreloadStartupEvent(name, payload),
 });
 

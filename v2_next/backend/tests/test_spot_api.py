@@ -2517,6 +2517,50 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 403)
         guarded_test.assert_not_awaited()
 
+    async def test_embedded_connection_test_requires_launch_control_token(
+        self,
+    ) -> None:
+        guarded_result = {
+            "ok": True,
+            "latency_ms": 1,
+            "message": "HTTP 200",
+        }
+        payload = backend_app.ConnectionTestPayload(
+            spot=backend_app.ConnectionTarget(
+                url="http://spot.invalid/image.jpg"
+            )
+        )
+        with (
+            patch.object(
+                backend_app,
+                "is_embedded_electron",
+                return_value=True,
+            ),
+            patch.dict(
+                backend_app.os.environ,
+                {"SFL_CONTROL_TOKEN": "launch-secret"},
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "test_spot_http_connection",
+                new=AsyncMock(return_value=guarded_result),
+            ) as guarded_test,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.test_connection(
+                    payload,
+                    build_connection_test_request(origin="null"),
+                )
+            accepted = await backend_app.test_connection(
+                payload,
+                build_connection_test_request(origin="null"),
+                "launch-secret",
+            )
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(accepted, {"results": {"spot": guarded_result}})
+        guarded_test.assert_awaited_once()
+
     async def test_connection_test_rejects_concurrent_admission(self) -> None:
         probe_started = asyncio.Event()
         release_probe = asyncio.Event()
@@ -2580,12 +2624,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         ) as guarded_test:
             first = await backend_app.test_connection(
                 payload,
-                build_connection_test_request(origin="null"),
+                build_connection_test_request(),
             )
             with self.assertRaises(HTTPException) as raised:
                 await backend_app.test_connection(
                     payload,
-                    build_connection_test_request(origin="null"),
+                    build_connection_test_request(),
                 )
 
         self.assertEqual(first, {"results": {"spot": guarded_result}})

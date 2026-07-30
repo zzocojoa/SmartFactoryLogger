@@ -16,7 +16,12 @@ const {
   buildBackendProgressEnvironment,
   createBackendProgressFileTransport,
 } = require('./backendStartupProgress');
-const { createStartupIpcHandlers, normalizeDocumentUrl } = require('./startupIpc');
+const {
+  createStartupIpcHandlers,
+  isTrustedStartupSender,
+  normalizeDocumentUrl,
+} = require('./startupIpc');
+const { createBackendControlIpcHandlers } = require('./backendControlIpc');
 
 const startupOriginNs = process.hrtime.bigint();
 const startupSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -54,6 +59,8 @@ const STARTUP_PAYLOAD_MAX_KEY_LENGTH = 64;
 const STARTUP_PAYLOAD_MAX_STRING_LENGTH = 200;
 const MAX_RENDERER_STARTUP_EVENTS_PER_NAME = 4;
 const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;
+const BACKEND_CONTROL_RESPONSE_MAX_BYTES = 1024 * 1024;
+const BACKEND_CONNECTION_TEST_TIMEOUT_MS = 10_000;
 
 let mainWindow;
 let backendProcess;
@@ -300,6 +307,78 @@ function registerStartupIpcHandlers() {
   ipcMain.handle('sfl:retry-startup', handlers.retryStartup);
   ipcMain.handle('sfl:continue-startup-offline', handlers.continueStartupOffline);
   ipcMain.handle('sfl:exit-startup', handlers.exitStartup);
+}
+
+function resolveBackendPort() {
+  const configuredPort = Number.parseInt(process.env.BACKEND_PORT || '8000', 10);
+  return Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65_535
+    ? configuredPort
+    : 8000;
+}
+
+function requestBackendConnectionTest(serializedPayload) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: '127.0.0.1',
+      port: resolveBackendPort(),
+      path: '/api/control/test-connection',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(serializedPayload),
+        'X-SFL-Control-Token': backendControlToken,
+      },
+    }, (response) => {
+      const chunks = [];
+      let responseBytes = 0;
+      let responseRejected = false;
+      response.on('data', (chunk) => {
+        responseBytes += chunk.length;
+        if (responseBytes > BACKEND_CONTROL_RESPONSE_MAX_BYTES) {
+          responseRejected = true;
+          response.destroy();
+          reject(new Error('Backend connection-test response exceeded the size limit.'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.once('end', () => {
+        if (responseRejected) {
+          return;
+        }
+        const body = Buffer.concat(chunks).toString('utf8');
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch (_error) {
+          reject(new Error('Backend connection-test response was not valid JSON.'));
+          return;
+        }
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          resolve(parsed);
+          return;
+        }
+        reject(new Error(`Backend connection-test endpoint returned HTTP ${response.statusCode}.`));
+      });
+    });
+    request.setTimeout(BACKEND_CONNECTION_TEST_TIMEOUT_MS, () => {
+      request.destroy(new Error('Backend connection-test request timed out.'));
+    });
+    request.once('error', reject);
+    request.end(serializedPayload);
+  });
+}
+
+function registerBackendControlIpcHandlers() {
+  const handlers = createBackendControlIpcHandlers({
+    isTrustedSender: (event) => isTrustedStartupSender(
+      event,
+      mainWindow,
+      trustedMainDocumentUrl
+    ),
+    requestConnectionTest: requestBackendConnectionTest,
+  });
+  ipcMain.handle('sfl:test-connection', handlers.testConnection);
 }
 
 function createWindow() {
@@ -620,16 +699,12 @@ function startBackend() {
 }
 
 function requestBackendGracefulShutdown() {
-  const configuredPort = Number.parseInt(process.env.BACKEND_PORT || '8000', 10);
-  const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65_535
-    ? configuredPort
-    : 8000;
   const body = JSON.stringify({ reason: applicationQuitting ? 'electron_exit' : 'electron_retry' });
 
   return new Promise((resolve, reject) => {
     const request = http.request({
       hostname: '127.0.0.1',
-      port,
+      port: resolveBackendPort(),
       path: '/api/control/shutdown',
       method: 'POST',
       headers: {
@@ -724,6 +799,7 @@ app.whenReady().then(() => {
   log("App ready, preparing startup window...");
   registerMemoryIpcHandlers();
   registerStartupIpcHandlers();
+  registerBackendControlIpcHandlers();
   startupCoordinator.start();
   createWindow();
   logStartupEvent('electron.ready-flow-complete');

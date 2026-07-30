@@ -462,13 +462,18 @@ class ElectronPreloadContractTests(unittest.TestCase):
             "sfl:exit-startup",
         ):
             self.assertIn(f"ipcRenderer.invoke('{channel}')", preload_text)
+        self.assertIn(
+            "testConnection: (payload) => ipcRenderer.invoke('sfl:test-connection', payload)",
+            preload_text,
+        )
         self.assertIn("ipcRenderer.on('sfl:startup-state-changed'", preload_text)
         self.assertIn("ipcRenderer.removeListener('sfl:startup-state-changed'", preload_text)
-        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 6)
+        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 7)
         self.assertEqual(preload_text.count("ipcRenderer.on("), 1)
         self.assertNotIn("ipcRenderer.send", preload_text)
         self.assertNotIn("ipcRenderer.once", preload_text)
         self.assertNotIn("...args", preload_text)
+        self.assertNotIn("SFL_CONTROL_TOKEN", preload_text)
 
     def test_main_registers_memory_ipc_and_packaged_files_include_preload(self) -> None:
         main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")

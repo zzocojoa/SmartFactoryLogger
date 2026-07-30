@@ -2180,24 +2180,42 @@ def _require_operator_metadata_write_access(request: Request) -> None:
     raise HTTPException(status_code=403, detail="Operator metadata updates require a local request")
 
 
-def _require_local_connection_test_access(request: Request) -> None:
+def _require_embedded_control_token(control_token: str | None) -> None:
+    expected_token = os.environ.get("SFL_CONTROL_TOKEN", "")
+    if (
+        not expected_token
+        or control_token is None
+        or not secrets.compare_digest(control_token, expected_token)
+    ):
+        raise HTTPException(status_code=403, detail="Invalid embedded control token")
+
+
+def _require_connection_test_access(
+    request: Request,
+    control_token: str | None,
+) -> None:
     client_host = request.client.host if request.client else ""
     if not _is_loopback_hostname(client_host):
         raise HTTPException(
             status_code=403,
             detail="Connection tests require a local request",
         )
+    if is_embedded_electron():
+        _require_embedded_control_token(control_token)
+        return
     origin = request.headers.get("origin", "").strip()
     referer = request.headers.get("referer", "").strip()
-    if origin and origin != "null":
+    origin_host = urlsplit(origin).hostname if origin else None
+    referer_host = urlsplit(referer).hostname if referer else None
+    if origin and not _is_loopback_hostname(origin_host or ""):
         raise HTTPException(
             status_code=403,
-            detail="Connection tests require the embedded application origin",
+            detail="Connection tests require a local development origin",
         )
-    if referer and urlsplit(referer).scheme.lower() != "file":
+    if referer and not _is_loopback_hostname(referer_host or ""):
         raise HTTPException(
             status_code=403,
-            detail="Connection tests require the embedded application origin",
+            detail="Connection tests require a local development origin",
         )
 
 
@@ -3050,10 +3068,14 @@ def reconnect():
 
 
 @app.post("/api/control/test-connection")
-async def test_connection(payload: ConnectionTestPayload, request: Request):
+async def test_connection(
+    payload: ConnectionTestPayload,
+    request: Request,
+    control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
+):
     global _spot_connection_test_next_allowed_at
 
-    _require_local_connection_test_access(request)
+    _require_connection_test_access(request, control_token)
     spot_probe_admitted = False
     if payload.spot is not None:
         now = time.monotonic()
@@ -3485,13 +3507,7 @@ async def shutdown(
     control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
 ):
     if is_embedded_electron():
-        expected_token = os.environ.get("SFL_CONTROL_TOKEN", "")
-        if (
-            not expected_token
-            or control_token is None
-            or not secrets.compare_digest(control_token, expected_token)
-        ):
-            raise HTTPException(status_code=403, detail="Invalid embedded control token")
+        _require_embedded_control_token(control_token)
 
     _schedule_control_shutdown(payload.reason or "api_request")
     return {"ok": True}
