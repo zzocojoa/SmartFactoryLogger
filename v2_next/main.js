@@ -1,7 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const http = require('http');
 const { randomBytes } = require('crypto');
 const { spawn } = require('child_process');
 const kill = require('tree-kill');
@@ -22,6 +21,9 @@ const {
   normalizeDocumentUrl,
 } = require('./startupIpc');
 const { createBackendControlIpcHandlers } = require('./backendControlIpc');
+const {
+  requestBackendConnectionTest: sendBackendConnectionTest,
+} = require('./backendControlClient');
 
 const startupOriginNs = process.hrtime.bigint();
 const startupSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -317,55 +319,11 @@ function resolveBackendPort() {
 }
 
 function requestBackendConnectionTest(serializedPayload) {
-  return new Promise((resolve, reject) => {
-    const request = http.request({
-      hostname: '127.0.0.1',
-      port: resolveBackendPort(),
-      path: '/api/control/test-connection',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(serializedPayload),
-        'X-SFL-Control-Token': backendControlToken,
-      },
-    }, (response) => {
-      const chunks = [];
-      let responseBytes = 0;
-      let responseRejected = false;
-      response.on('data', (chunk) => {
-        responseBytes += chunk.length;
-        if (responseBytes > BACKEND_CONTROL_RESPONSE_MAX_BYTES) {
-          responseRejected = true;
-          response.destroy();
-          reject(new Error('Backend connection-test response exceeded the size limit.'));
-          return;
-        }
-        chunks.push(chunk);
-      });
-      response.once('end', () => {
-        if (responseRejected) {
-          return;
-        }
-        const body = Buffer.concat(chunks).toString('utf8');
-        let parsed;
-        try {
-          parsed = JSON.parse(body);
-        } catch (_error) {
-          reject(new Error('Backend connection-test response was not valid JSON.'));
-          return;
-        }
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          resolve(parsed);
-          return;
-        }
-        reject(new Error(`Backend connection-test endpoint returned HTTP ${response.statusCode}.`));
-      });
-    });
-    request.setTimeout(BACKEND_CONNECTION_TEST_TIMEOUT_MS, () => {
-      request.destroy(new Error('Backend connection-test request timed out.'));
-    });
-    request.once('error', reject);
-    request.end(serializedPayload);
+  return sendBackendConnectionTest(serializedPayload, {
+    controlToken: backendControlToken,
+    port: resolveBackendPort(),
+    maxResponseBytes: BACKEND_CONTROL_RESPONSE_MAX_BYTES,
+    timeoutMs: BACKEND_CONNECTION_TEST_TIMEOUT_MS,
   });
 }
 

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-30T16:10:38.419Z",
+  "lastUpdated": "2026-07-31T07:33:35.402Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2016,73 +2016,95 @@
       "reportAuthorization": "approved_by_user",
       "packageAuthorization": "approved_by_user",
       "parentFeature": "spot-request-churn-remediation",
-      "checkStatus": "current_head_70b9339_local_check_pass_field_revalidation_required",
-      "codeCompletionStatus": "completed_with_post_field_observation_fact_fix",
+      "checkStatus": "current_head_full_local_validation_passed_field_revalidation_required",
+      "codeCompletionStatus": "adversarial_fixes_local_validation_passed",
       "draftPrReady": false,
-      "currentHeadPromotionStatus": "field_revalidation_required_after_runtime_fix_70b9339",
+      "currentHeadPromotionStatus": "FIELD_REVALIDATION_REQUIRED",
       "packageBlocked": false,
-      "packageStatus": "f101d88_field_validated_current_head_package_pending_after_docs_commit",
+      "packageStatus": "ready_to_build_current_head_release",
       "actualServerCheckBlocked": true,
       "canaryBlocked": true,
-      "actualWindowsSocketCheck": "passed",
-      "actualServerCheckStatus": "passed_for_f101d88_only",
-      "fieldCanaryStatus": "FIELD_CANARY_PASS_FOR_F101D88_ONLY",
+      "actualWindowsSocketCheck": "passed_for_575e869_only",
+      "actualServerCheckStatus": "passed_for_575e869_current_head_required",
+      "fieldCanaryStatus": "FIELD_CANARY_PASS_FOR_575E869_ONLY",
       "physicalPathStatus": "PHYSICAL_PATH_PARTIAL",
       "fieldEvidenceAppliesToPackagedSourceCommitOnly": true,
-      "fieldValidatedAtLocal": "2026-07-31 00:33:08 +09:00",
+      "fieldValidatedAtLocal": "2026-07-31 15:18:48 +09:00",
       "actualServerCanaryMinutes": 120,
       "fieldEvidence": {
-        "packaged_source_commit": "f101d8842bfbcc422007465f49a5f8391e4704b4",
+        "packaged_source_commit": "575e869b63d3052156624886fe0358fb39d6c98a",
         "product_version": "1.0.17",
-        "installer_sha256": "98A6CC5FC8BFBDC94B6A379D332F2D0C57EAC44F65490EF9193AA08DE554B4F8",
-        "backend_sha256": "FAE64D4BBAF86184308B96E42E1B30EFF906B7A03F4B2CDA35584CB50BFDF18F",
-        "config_sha256": "117A79AE9E79C0032D73E7E0425DFD26B3DD2BD44B6FC913C9E68AA1C849B592",
+        "installer_sha256": "23F455A7C4D2D021BE5864D78496285A5C289880BC00048CD4E072CC9BA9E016",
+        "backend_sha256": "294C228EF4B8D99730F14A40C1EB438695611FA816BDF6B1E17270DA3CD3FB0D",
+        "config_sha256": "36F86150C50BDAD4449AB09DFAD528313326119DC0AE61CDE59DEFDFF7BB3EDE",
         "one_command_qa_status": "PASS",
-        "one_command_qa_evidence_sha256": "D570376BC3D406EB5F1F0617E9F71900AD66CA436C43FF59E42D410ACC1469B7",
-        "runtime_id": "runtime_validation_20260730_221516",
-        "sanitized_artifact": "runtime_validation_20260730_221516_sanitized_share.zip",
-        "sanitized_sha256": "9C11F91D414C246EC715E2B142061B6442185D7E2F3632094EEF14EBF1349C40",
-        "transferred_run_archive_sha256": "33B0550B84496201A9CD9D0D5741FD700F13DAA547C4B984D8A66FC0292C20D7",
-        "raw_manifest_file_count": 4565,
+        "one_command_qa_evidence_sha256": "613A9D69AE82CF3C4496E7AFD777EF64E3E967E5052CA1784D53C42C8E2CCEE1",
+        "runtime_id": "runtime_validation_20260731_104647",
+        "sanitized_artifact": "runtime_validation_20260731_104647_sanitized_share.zip",
+        "sanitized_sha256": "3393C32C8C248704448E10DD5BC38A49012E8FA07B89362CFE7306B70BFA6350",
+        "transferred_run_archive_sha256": "295F7C278B71174DF2FDAB247C489BD7BEA21F29733B7172BC91011AC1F24BC1",
+        "raw_manifest_file_count": 4652,
         "raw_manifest_hash_mismatch_count": 0,
         "collector_exit_code": 2,
         "collector_partial_reason": "switch-evidence-unavailable",
         "new_spot_image_connect_timeout_count": 0,
-        "spot_http_event_count": 22184,
+        "spot_http_event_count": 22321,
         "spot_http_failure_count": 0,
         "same_4tuple_reuse_under_60_seconds_count": 0,
-        "packet_minimum_reuse_interval_seconds": 74.044999,
+        "packet_minimum_reuse_interval_seconds": 74.039191,
         "internal_minimum_reuse_interval_seconds": 75.0,
         "total_spot_opens_60s_p95_per_sec": 3.133333,
         "image_upstream_60s_p95_per_sec": 0.333333,
-        "ping_success_count": 7062,
+        "ping_success_count": 7101,
         "ping_failure_count": 0,
         "server_nic_error_or_discard_count": 0,
-        "handled_bind_collision_total": 3992,
-        "handled_rebind_retry_total": 170,
+        "handled_bind_collision_total": 2869,
+        "handled_rebind_retry_total": 247,
         "pool_exhaustion_count": 0,
         "reuse_violation_count": 0,
         "transport_failure_count": 0,
         "packet_capture_coverage_status": "capture-window-retained",
         "final_live_gate_status": "PASS",
-        "final_live_gate_check_count": 32,
-        "final_live_gate_evidence_sha256": "60E858924B6A3EC2FE3CC9C1FE8A3142FD346487B975C06D84F333274CEA5BA5",
-        "final_live_gate_at_local": "2026-07-31 00:33:08 +09:00",
+        "final_live_gate_check_count": 39,
+        "final_live_gate_helper_sha256": "C0AE075633A9FD48E437A8605124A0067CB445709B1CBFE8A5CD5C0A3672277B",
+        "final_live_gate_evidence_sha256": "68F784B611DA7334356B039BF5B794761F3B8C27C6A9F4A401BD3D2FD83356D5",
+        "final_live_gate_at_local": "2026-07-31 15:18:48 +09:00",
         "managed_switch_evidence_available": false
       },
       "currentHeadLocalValidation": {
-        "runtime_fix_commit": "70b9339549c52a4659a2b9fdc78af1c4951ad6ec",
-        "targeted_post_append_tests_passed": 2,
-        "electron_tests_passed": 40,
+        "field_validated_commit": "575e869b63d3052156624886fe0358fb39d6c98a",
+        "adversarial_fix_scope": [
+          "csv_v2_prewrite_persistence_validation",
+          "qa_exact_shutdown_csv_binding",
+          "electron_partial_response_settlement",
+          "electron_packaging_allowlist",
+          "observation_spool_pending_count_cache"
+        ],
+        "targeted_fix_tests_status": "PASS",
+        "full_health_status": "PASS",
+        "electron_pack_allowlist_check_status": "PASS",
+        "electron_pack_release_identity_bound": false,
+        "electron_tests_passed": 45,
         "frontend_test_files_passed": 34,
         "frontend_tests_passed": 253,
-        "backend_tests_passed": 637,
+        "backend_tests_passed": 641,
         "ruff_status": "PASS",
         "mypy_status": "PASS",
-        "qa_self_test_status": "PASS"
+        "nsis_qa_selftest_status": "PASS",
+        "health_stdout_sha256": "F0905734E53860F5400D9B6E0EBC19D41AB9D5C3E32BAB02A1B2890B0D7D4CF2",
+        "health_stderr_sha256": "A246E31DFA721D1C767CDB06B2B09FC02BFDA639B616E9131E3F969A7AD963AD"
       },
       "blockingGaps": [
-        "current_head_after_70b9339_runtime_fix_not_packaged_or_field_validated"
+        "current_head_release_package_not_built",
+        "current_head_operator_reattestation_not_run",
+        "current_head_one_command_qa_not_run",
+        "current_head_15_minute_smoke_not_run",
+        "current_head_120_minute_canary_not_run",
+        "current_head_final_live_gate_not_run"
+      ],
+      "nonBlockingRisks": [
+        "first_observation_spool_pending_count_call_scans_all_schema_mismatch_archives",
+        "observation_seen_poll_sequences_grows_for_process_lifetime"
       ],
       "resolvedActGaps": [
         "windows_unsupported_enforcement_does_not_fail_startup",
@@ -2101,16 +2123,16 @@
         },
         "analysis": {
           "path": "docs/03-analysis/spot-tcp-source-port-quarantine-v2.analysis.md",
-          "status": "act_recheck_passed_local",
+          "status": "575e869_field_validated_current_head_revalidation_required",
           "match_rate": 100
         },
         "report": {
           "path": "docs/04-report/spot-tcp-source-port-quarantine-v2.report.md",
-          "status": "f101d88_field_report_current_head_revalidation_required",
+          "status": "575e869_baseline_frozen_current_head_open",
           "match_rate": 100,
           "field_status": "FIELD_CANARY_PASS",
           "physical_path_status": "PHYSICAL_PATH_PARTIAL",
-          "lastUpdated": "2026-07-30T16:10:38.419Z"
+          "lastUpdated": "2026-07-31T07:33:35.402Z"
         }
       },
       "taskChain": [
@@ -2152,15 +2174,20 @@
         },
         {
           "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-07-30T16:10:38.419Z",
+          "completedAt": "2026-07-31T06:18:48.885Z"
+        },
+        {
+          "phase": "check",
           "status": "active",
-          "createdAt": "2026-07-30T16:10:38.419Z"
+          "createdAt": "2026-07-31T07:17:43.839Z"
         }
       ],
       "timestamps": {
         "started": "2026-07-27T01:32:07.127Z",
-        "lastUpdated": "2026-07-30T16:10:38.419Z"
-      },
-      "completedAt": null
+        "lastUpdated": "2026-07-31T07:33:35.402Z"
+      }
     }
   },
   "pipeline": {

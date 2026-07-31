@@ -2,9 +2,10 @@
 
 > Date: 2026-07-31 | Level: Dynamic | Match Rate: 100%
 > Validated package: `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL`
+> Validated runtime source: `575e869b63d3052156624886fe0358fb39d6c98a`
 > Current PR HEAD: `FIELD_REVALIDATION_REQUIRED`
-> Closure: `F101D88_DONE_WITH_CONCERNS / CURRENT_HEAD_OPEN`
-> Evidence scope: packaged source commit `f101d8842bfbcc422007465f49a5f8391e4704b4`
+> Closure: `575E869_DONE_WITH_CONCERNS / CURRENT_HEAD_OPEN`
+> Post-validation delta: CSV durability, QA identity, Electron response, and health hot paths
 
 ---
 
@@ -19,27 +20,38 @@ The implementation closes the field-observed same 4-tuple reuse risk without
 changing public routes, configuration, CSV, or database contracts. It
 intentionally reduces background request cadence and extends backward-compatible
 image metadata and `/api/spot/config.image` diagnostics. The final `1.0.17`
-package from commit `f101d88` passed commit-bound operator re-attestation, the
+package from commit `575e869` passed commit-bound operator re-attestation, the
 full one-command CSV QA, the approved 15-minute smoke, a 120-minute passive
 canary, and the final live gate on the actual server. No new `spot_image`
 ConnectTimeout, SPOT handshake failure, HTTP error, pool exhaustion, transport
 failure, or reuse violation occurred.
 
 Managed-switch evidence was unavailable, so the software promotion gate passes
-for the exact `f101d88` package while physical-path attribution remains partial.
-This limitation does not require rollback of the server. A post-field
-adversarial review subsequently found and fixed a rare observation-fact
-post-append `stat()` failure path in commit `70b9339`; because that is a runtime
-change, its eventual package must repeat the commit-bound field gates before
-promotion.
+for the exact `575e869` package while physical-path attribution remains partial.
+This limitation does not require rollback of the server. The package includes
+the observation-fact post-append durability fix from commit `70b9339`.
+
+A final adversarial review found three additional failure paths after the
+`575e869` canary: v2 persistence validation occurred after the durable write,
+the QA helper did not compare the shutdown CSV basename with the expected
+current-session basename, and Electron did not settle a connection-test request
+when a backend HTTP response ended prematurely. The same review found that each
+health request rescanned the active observation spool and every quarantined
+archive. The current PR fixes those paths with direct regression coverage and
+a mutation-aware pending-count cache. Because the changes affect runtime code
+and the QA bundle, they cannot inherit the `575e869` field evidence.
+The extracted Electron connection-test client is also explicitly included in
+the packaging allowlist so the next installer cannot omit a startup dependency.
 
 ```text
-Completion rate: 100%
+Implementation completion rate: 100%
 Design checkpoints: 32 / 32
 Blocking local gaps: 0
+Blocking promotion gaps: 6
 Act iterations: 1
 Field result: FIELD_CANARY_PASS
 Physical-path result: PHYSICAL_PATH_PARTIAL
+Current PR HEAD: FIELD_REVALIDATION_REQUIRED
 ```
 
 ## 2. Related Documents
@@ -98,6 +110,9 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 
 ## 4. Quality Metrics
 
+Local-suite rows below apply to the post-validation current HEAD. Field and
+transport rows apply only to the packaged `575e869` baseline.
+
 | Metric | Target | Final | Status |
 |---|---:|---:|---|
 | Design match rate | `>=90%` | `100%` | PASS |
@@ -106,16 +121,16 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Full backend tests | all | 637 | PASS |
-| Electron tests | all | 40 | PASS |
-| Frontend tests | all | 253 / 34 files | PASS |
+| Current HEAD full backend tests | all | 641 | PASS |
+| Current HEAD Electron tests | all | 45 | PASS |
+| Current HEAD frontend tests | all | 253 / 34 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
 | Unhandled future warnings | `0` | `0` | PASS |
 | NSIS QA self-test | all checks | all checks | PASS |
 | Actual source-port values emitted | `false` | `false` | PASS |
-| Actual-server canary duration | `120 min` | `7,201.944s` | PASS |
+| Actual-server canary duration | `120 min` | `7,202.847s` | PASS |
 | New `spot_image` ConnectTimeout | `0` | `0` | PASS |
-| SPOT handshakes / HTTP bodies | all | `22,184 / 22,184` | PASS |
+| SPOT handshakes / HTTP bodies | all | `22,321 / 22,321` | PASS |
 | SPOT handshake/HTTP/RST failures | `0` | `0` | PASS |
 | Same 4-tuple reuse under 5s | `0` | `0` | PASS |
 | Same 4-tuple reuse under 60s | `0` | `0` | PASS |
@@ -131,49 +146,49 @@ Physical-path result: PHYSICAL_PATH_PARTIAL
 ### 5.1 Package and live gate
 
 - Source commit:
-  `f101d8842bfbcc422007465f49a5f8391e4704b4`
+  `575e869b63d3052156624886fe0358fb39d6c98a`
 - Product version: `1.0.17`
 - Candidate installer SHA-256:
-  `98A6CC5FC8BFBDC94B6A379D332F2D0C57EAC44F65490EF9193AA08DE554B4F8`
+  `23F455A7C4D2D021BE5864D78496285A5C289880BC00048CD4E072CC9BA9E016`
 - Installed backend SHA-256:
-  `FAE64D4BBAF86184308B96E42E1B30EFF906B7A03F4B2CDA35584CB50BFDF18F`
+  `294C228EF4B8D99730F14A40C1EB438695611FA816BDF6B1E17270DA3CD3FB0D`
 - Attested config SHA-256:
-  `117A79AE9E79C0032D73E7E0425DFD26B3DD2BD44B6FC913C9E68AA1C849B592`
+  `36F86150C50BDAD4449AB09DFAD528313326119DC0AE61CDE59DEFDFF7BB3EDE`
 - The one-command SPOT Temperature v2.5 QA passed all runtime, attestation,
   finalized CSV, fact-manifest, and repository-validator checks. Its evidence
   SHA-256 is
-  `D570376BC3D406EB5F1F0617E9F71900AD66CA436C43FF59E42D410ACC1469B7`.
+  `613A9D69AE82CF3C4496E7AFD777EF64E3E967E5052CA1784D53C42C8E2CCEE1`.
 - Attestation remained verified, operator-verified, fingerprint-matched, and
   free of configuration drift.
 - `spot-source-port-quarantine-v2`, the 768-record pool, 75-second quarantine,
   `spot-background-request-budget-v2`, and `spot-image-demand-shaping-v2`
   remained active.
-- The post-canary live gate at 2026-07-31 00:33:08 KST reconfirmed the exact
+- The post-canary live gate at 2026-07-31 15:18:48 KST reconfirmed the exact
   backend and config hashes, source commit, HTTP 200 health, one backend
   process, four Electron processes, verified attestation, no drift, an active
   source-port policy, and zero reuse, exhaustion, or transport failures.
 
 ### 5.2 15-minute passive smoke
 
-The actual-server run `runtime_validation_20260730_170609` observed normal-screen
-operation for `901.308s` and stopped at the fixed deadline without a trigger.
-Bidirectional packet preflight passed with 120 outbound and 142 inbound
-packets. All 2,807 SPOT HTTP events completed their TCP handshake, header, and
+The actual-server run `runtime_validation_20260731_092800` observed normal-screen
+operation for `903.055s` and stopped at the fixed deadline without a trigger.
+Bidirectional packet preflight passed with 129 outbound and 148 inbound
+packets. All 2,816 SPOT HTTP events completed their TCP handshake, header, and
 body; failed connections, retransmitted SYNs, reset-before-response events, and
-same 4-tuple reuse under 60 seconds were zero. All 891 ping probes succeeded.
+same 4-tuple reuse under 60 seconds were zero. All 895 ping probes succeeded.
 
 The dedicated trigger monitor completed 900 polls with zero monitor errors, a
-maximum poll gap of `1,044.332ms`, and no error-queue change. The smoke remained
+maximum poll gap of `1,071.953ms`, and no error-queue change. The smoke remained
 `PHYSICAL_PATH_PARTIAL` because managed-switch evidence was unavailable.
 
 ### 5.3 120-minute passive canary
 
-The actual-server run `runtime_validation_20260730_221516` observed normal-screen
-operation for `7,201.944s` and stopped at the fixed deadline without a trigger.
+The actual-server run `runtime_validation_20260731_104647` observed normal-screen
+operation for `7,202.847s` and stopped at the fixed deadline without a trigger.
 
-- Bidirectional packet preflight passed with 115 outbound and 142 inbound
+- Bidirectional packet preflight passed with 115 outbound and 138 inbound
   packets before the full capture.
-- All 22,184 captured SPOT HTTP events completed their TCP handshake, HTTP
+- All 22,321 captured SPOT HTTP events completed their TCP handshake, HTTP
   header, and response body. All responses used the device's expected
   `HTTP/1.0` framing.
 - HTTP non-200, 5xx, retransmitted SYN, RST-before-response, unresolved flow,
@@ -183,14 +198,14 @@ operation for `7,201.944s` and stopped at the fixed deadline without a trigger.
   reuse-violation counter remained zero.
 - The fixed 60-second total-open rate had p95 `3.1333/s`; the image rate had
   p95 `0.3333/s`.
-- The dedicated error trigger monitor completed 7,166 polls with 17 transient
-  localhost polling errors. The maximum poll gap was `3,381.210ms`, below the
+- The dedicated error trigger monitor completed 7,197 polls with zero polling
+  errors. The maximum poll gap was `2,230.561ms`, below the
   5-second detection warning threshold; the full error snapshots did not
   change and no new `spot_image` ConnectTimeout occurred.
-- All 7,062 ping probes succeeded. Server NIC receive/transmit errors and
+- All 7,101 ping probes succeeded. Server NIC receive/transmit errors and
   discards remained zero.
-- The final live gate reported cumulative handled totals of 3,992 bind
-  collisions and 170 rebind retries. Pool exhaustion, reuse violations, and
+- The final live gate reported cumulative handled totals of 2,869 bind
+  collisions and 247 rebind retries. Pool exhaustion, reuse violations, and
   transport failures remained zero, demonstrating bounded recovery rather
   than fallback.
 - Image status remained `ok`, accepted requests, and recorded zero refresh
@@ -199,37 +214,37 @@ operation for `7,201.944s` and stopped at the fixed deadline without a trigger.
 ### 5.4 Evidence integrity
 
 - Canonical sanitized artifact:
-  `runtime_validation_20260730_221516_sanitized_share.zip`
+  `runtime_validation_20260731_104647_sanitized_share.zip`
 - Canonical sanitized SHA-256:
-  `9C11F91D414C246EC715E2B142061B6442185D7E2F3632094EEF14EBF1349C40`
+  `3393C32C8C248704448E10DD5BC38A49012E8FA07B89362CFE7306B70BFA6350`
 - Transferred full run archive:
-  `runtime_validation_20260730_221516.zip`
+  `runtime_validation_20260731_104647.zip`
 - Transferred full run archive SHA-256:
-  `33B0550B84496201A9CD9D0D5741FD700F13DAA547C4B984D8A66FC0292C20D7`
+  `295F7C278B71174DF2FDAB247C489BD7BEA21F29733B7172BC91011AC1F24BC1`
 - Final live-gate evidence:
-  `server_check_after_f101d88_120min_canary_final_20260731_003308.json`
+  `server_check_after_575e869_120min_canary_final_20260731_151848.json`
 - Final live-gate evidence SHA-256:
-  `60E858924B6A3EC2FE3CC9C1FE8A3142FD346487B975C06D84F333274CEA5BA5`
-- Pre-canary live-gate evidence
-  `server_check_before_f101d88_120min_canary_20260730_221230.json` has SHA-256
-  `412AE69246B5A1325F52E6650DB1700361E0186C3018AD06FE01C3E547AF2FE1`.
+  `68F784B611DA7334356B039BF5B794761F3B8C27C6A9F4A401BD3D2FD83356D5`
+- The corrected final read-only helper has SHA-256
+  `C0AE075633A9FD48E437A8605124A0067CB445709B1CBFE8A5CD5C0A3672277B`.
 - The transferred 15-minute run archive
-  `runtime_validation_20260730_170609.zip` has SHA-256
-  `7224BC7E801D2C3349C58D1943F61FB1CD839686076425D1BFD02470850BD0FF`;
+  `runtime_validation_20260731_092800.zip` has SHA-256
+  `B17B0EA762753D380994D90E987073F208683FE1967EE1C7FA760188960C03AE`;
   its canonical sanitized artifact has SHA-256
-  `BFA1291A76FE05AAEA90A9983ED7F2F6E5317337450AC50CD6D64A0CF66C2CD6`.
+  `7623781C82FFAE1935ADE77AC0A0A198B193581E09AD0196C7BC0840231E44E1`.
 - The raw-private archive contains sensitive operational paths and network
   details and must not be published or attached to public issues.
 
 ### 5.5 Validation expression normalization
 
-An earlier `163d31b` one-off wrapper applied a generic boolean cast to a
-structured drift-field value and produced a reporting-only false negative.
-The `f101d88` pre-canary and final wrappers normalized drift fields before
-building their boolean `Checks` object. The canonical final evidence therefore
-records `DriftFieldsClear: true` directly, with all 32 checks passing. No
-manually printed pass line or post-hoc value coercion is used for the final
-promotion decision.
+An earlier wrapper read `build_git_commit` from the `/api/spot/config` root even
+though the commit is exposed under `image.build_git_commit`. The first final
+gate therefore stopped with `PropertyNotFoundStrict` after its live sample
+passed. The corrected helper reads the documented nested field and was
+SHA-256-verified before execution. The canonical final evidence records all
+39 checks as `true`, including `SpotConfigCommitMatch` and
+`DriftFieldsClear`; no manually printed pass line or post-hoc value coercion is
+used for the final promotion decision.
 
 ## 6. Security and Operations
 
@@ -242,18 +257,27 @@ promotion decision.
 - Rollback requires the already verified v1.0.16 installer; no data repair or
   schema rollback is needed.
 - The actual server remains on the verified `1.0.17` package built from
-  `f101d88`. Current evidence does not indicate rollback.
+  `575e869`. Current evidence does not indicate rollback.
 - The final package, backend, config, attestation, QA, canary, and live-gate
-  identities are bound to the same `f101d88` source commit.
+  identities are bound to the same `575e869` source commit.
 - Error-queue deletion, configuration changes, and forced image-load tests are
   not required for the running package.
-- Commit `70b9339` preserves observation-fact deduplication when the row append
+- Commit `70b9339`, included in the validated package, preserves
+  observation-fact deduplication when the row append
   succeeds but the immediate file-size probe fails. Its manifest still fails
   closed, and a regression test proves the durable row is neither spooled nor
   duplicated.
-- The post-field runtime fix cannot inherit `f101d88` package evidence. Its
-  final package must pass re-attestation, QA, 15-minute smoke, 120-minute
-  canary, and the final live gate before promotion.
+- The current PR validates v2 batch persistence metadata before `writerows`,
+  binds QA to the exact shutdown CSV basename, and handles backend response
+  `aborted`, `error`, and premature `close` events with a single-settlement
+  Electron client. These changes require a new package and field validation.
+- Observation spool/archive pending rows are scanned once per writer lifecycle
+  and then tracked on spool append and drain, removing archive-size-dependent
+  filesystem work from the recurring health path.
+- The first pending-count call still scans existing schema-mismatch archives,
+  and the in-memory set used for poll-sequence gap diagnostics grows for the
+  process lifetime. These are non-blocking long-run follow-ups; recurring
+  health requests no longer rescan the archives.
 
 ## 7. Lessons Learned
 
@@ -293,17 +317,18 @@ counters were unavailable. Therefore faults between the SPOT device and the
 managed-switch path cannot be fully excluded. Server-side SPOT TCP, HTTP, ping,
 NIC, application, process, source-port, and image evidence passed.
 
-The earlier PowerShell structured-value normalization defect in Section 5.5
-was a non-product reporting defect. The `f101d88` wrappers corrected it before
-the final promotion gate.
+The earlier PowerShell property-path defect in Section 5.5 was a non-product
+reporting defect. The corrected `575e869` wrapper passed before the final
+promotion decision.
 
 ## 9. Next Action
 
-Keep the verified `1.0.17` package from commit `f101d88` running on
+Keep the verified `1.0.17` package from commit `575e869` running on
 the verified target server. Do not rollback, clear the error queue, or change
-SPOT settings based on the current evidence. Build the final PR HEAD only after
-local and CI gates pass, then repeat commit-bound re-attestation, QA, 15-minute
-smoke, 120-minute canary, and final live-gate verification for that new package.
+SPOT settings based on the current evidence. Build the current PR HEAD only
+after local and CI gates pass, then repeat commit-bound re-attestation, QA,
+15-minute smoke, 120-minute canary, and final live-gate verification for that
+new package.
 If governance later requires full physical-path sign-off, collect managed-switch
 port counters and logs as a separate operational evidence task. If the SPOT
 under-range state returns unexpectedly, inspect the physical process and device
@@ -326,3 +351,5 @@ range separately from this closed TCP remediation.
 | 2.0 | 2026-07-30 | Froze final `163d31b` QA, smoke, 120-minute canary, live-gate evidence, and structured-value normalization finding |
 | 2.1 | 2026-07-31 | Froze identity-matched `f101d88` QA, 15-minute smoke, 120-minute canary, corrected live-gate evidence, and production operating decision |
 | 2.2 | 2026-07-31 | Kept `f101d88` as the verified runtime and reopened current-HEAD field promotion after the post-field observation-fact durability fix |
+| 2.3 | 2026-07-31 | Froze identity-matched `575e869` re-attestation, QA, smoke, 120-minute canary, corrected 39-check final gate, and production operating decision |
+| 2.4 | 2026-07-31 | Preserved `575e869` as the operating baseline and reopened current-HEAD promotion for adversarial CSV, QA identity, Electron partial-response, and health hot-path fixes |

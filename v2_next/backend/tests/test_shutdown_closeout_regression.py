@@ -201,6 +201,76 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         )
         self.assertNotIn(str(csv_path), service._v2_persisted_at_by_path)
 
+    def test_v2_persistence_validation_rejects_rows_before_csv_write(self) -> None:
+        service = CSVLoggerService()
+        csv_path = Path("Factory_Integrated_Log_v2_prewrite_validation.csv")
+        service._current_v2_csv_path = csv_path
+        service._v2_persisted_sample_seq_by_path[str(csv_path)] = 41
+        contract = service._get_active_v2_contract()
+        row = [""] * len(contract.columns)
+        row[contract.columns.index("sample_seq")] = "41"
+        writer = MagicMock()
+        handle = MagicMock()
+
+        with self.assertRaisesRegex(RuntimeError, "did not advance"):
+            service._flush_v2_buffer(
+                writer,
+                handle,
+                [(row, datetime.now().astimezone())],
+            )
+
+        writer.writerows.assert_not_called()
+        handle.flush.assert_not_called()
+        self.assertEqual(
+            service._v2_persisted_sample_seq_by_path[str(csv_path)],
+            41,
+        )
+
+    def test_v2_persistence_rejects_non_monotonic_batch_before_csv_write(self) -> None:
+        service = CSVLoggerService()
+        csv_path = Path("Factory_Integrated_Log_v2_non_monotonic.csv")
+        service._current_v2_csv_path = csv_path
+        contract = service._get_active_v2_contract()
+        rows = []
+        for sample_seq in ("42", "41"):
+            row = [""] * len(contract.columns)
+            row[contract.columns.index("sample_seq")] = sample_seq
+            rows.append((row, datetime.now().astimezone()))
+        writer = MagicMock()
+        handle = MagicMock()
+
+        with self.assertRaisesRegex(RuntimeError, "not strictly increasing"):
+            service._flush_v2_buffer(writer, handle, rows)
+
+        writer.writerows.assert_not_called()
+        handle.flush.assert_not_called()
+
+    def test_v2_persistence_commit_occurs_only_after_successful_flush(self) -> None:
+        service = CSVLoggerService()
+        csv_path = Path("Factory_Integrated_Log_v2_successful_flush.csv")
+        service._current_v2_csv_path = csv_path
+        contract = service._get_active_v2_contract()
+        row = [""] * len(contract.columns)
+        row[contract.columns.index("sample_seq")] = "42"
+        writer = MagicMock()
+        handle = MagicMock()
+
+        self.assertTrue(
+            service._flush_v2_buffer(
+                writer,
+                handle,
+                [(row, datetime.now().astimezone())],
+            )
+        )
+
+        writer.writerows.assert_called_once_with([row])
+        handle.flush.assert_called_once_with()
+        self.assertEqual(
+            service._v2_persisted_sample_seq_by_path[str(csv_path)],
+            42,
+        )
+        self.assertIn(str(csv_path), service._v2_persisted_at_by_path)
+
     def test_validator_rejects_closeout_ahead_of_final_csv_row(self) -> None:
         csv_path = Path("Factory_Integrated_Log_v2_closeout.csv")
         logger_id = "logger-service-closeout-test"
@@ -1600,6 +1670,12 @@ $missing = Find-LatestMetadata `
     -ExpectedBuildCommit ("c" * 40) `
     -ExpectedMinimumSampleSeq ([long]$args[4]) `
     -ExpectedCsvFileName $args[5]
+$wrongCsv = Find-LatestMetadata `
+    -Directories @($args[1]) `
+    -ExpectedLoggerServiceInstanceId $args[2] `
+    -ExpectedBuildCommit $args[3] `
+    -ExpectedMinimumSampleSeq ([long]$args[4]) `
+    -ExpectedCsvFileName "Factory_Integrated_Log_v2_wrong.csv"
 
 Set-Content -LiteralPath $args[6] -Value "{" -Encoding UTF8
 $corruptCurrent = Find-LatestMetadata `
@@ -1621,7 +1697,13 @@ $corruptCurrent = Find-LatestMetadata `
     } else {
         0
     }
+    matched_observed_csv_file_name = if ($null -ne $matched) {
+        [string]$matched.observed_csv_file_name
+    } else {
+        ""
+    }
     missing_is_null = ($null -eq $missing)
+    wrong_csv_is_null = ($null -eq $wrongCsv)
     corrupt_observed_still_matches_shutdown = (
         $null -ne $corruptCurrent -and
         $corruptCurrent.file.Name -eq $matched.file.Name
@@ -1723,7 +1805,7 @@ $corruptCurrent = Find-LatestMetadata `
                 expected_instance,
                 expected_commit,
                 "200",
-                current_path.name.replace(".metadata.json", ".csv"),
+                shutdown_path.name.replace(".metadata.json", ".csv"),
                 str(current_path),
             ]
             if sys.platform == "win32":
@@ -1742,7 +1824,12 @@ $corruptCurrent = Find-LatestMetadata `
         self.assertEqual(result["matched_name"], shutdown_path.name)
         self.assertEqual(result["matched_instance"], expected_instance)
         self.assertEqual(result["matched_final_sample_seq"], 202)
+        self.assertEqual(
+            result["matched_observed_csv_file_name"],
+            shutdown_path.name.replace(".metadata.json", ".csv"),
+        )
         self.assertTrue(result["missing_is_null"])
+        self.assertTrue(result["wrong_csv_is_null"])
         self.assertTrue(result["corrupt_observed_still_matches_shutdown"])
 
 

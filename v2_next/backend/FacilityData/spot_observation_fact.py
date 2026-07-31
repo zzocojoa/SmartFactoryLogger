@@ -190,6 +190,16 @@ class SpotObservationFactWriter:
     )
     _evidence_code_count: int = field(default=0, init=False, repr=False)
     _provenance_code_count: int = field(default=0, init=False, repr=False)
+    _spool_pending_count_cache: int | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _spool_state_lock: threading.RLock = field(
+        default_factory=threading.RLock,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if self.load_existing_keys:
@@ -279,32 +289,55 @@ class SpotObservationFactWriter:
         raise FileExistsError(f"Could not allocate archive path for {source_path}")
 
     def _flush_spool(self) -> None:
-        spool_path = self._effective_spool_path()
-        if not spool_path.exists() or spool_path.stat().st_size == 0:
-            return
-        pending: list[dict[str, str]] = []
-        with spool_path.open("r", encoding="utf-8") as handle:
-            spool_lines = list(handle)
-        for line in spool_lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError as exc:
-                self._quarantine_invalid_spool(spool_path, "malformed-json", exc)
-            if not isinstance(raw, dict):
-                self._quarantine_invalid_spool(spool_path, "non-object-row")
-            if raw.get("spot_observation_fact_schema_version") != SPOT_OBSERVATION_FACT_SCHEMA_VERSION or not set(
-                SPOT_OBSERVATION_FACT_COLUMNS
-            ).issubset(raw):
-                self._quarantine_invalid_spool(spool_path, "schema-mismatch")
-            pending.append({column: _text(raw.get(column)) for column in SPOT_OBSERVATION_FACT_COLUMNS})
-        for fact in pending:
-            key = fact["spot_observation_key"]
-            if key and key not in self._seen_keys:
-                self._append_fact(fact)
-        spool_path.unlink(missing_ok=True)
+        with self._spool_state_lock:
+            spool_path = self._effective_spool_path()
+            if not spool_path.exists() or spool_path.stat().st_size == 0:
+                return
+            pending: list[dict[str, str]] = []
+            with spool_path.open("r", encoding="utf-8") as handle:
+                spool_lines = list(handle)
+            for line in spool_lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    self._quarantine_invalid_spool(
+                        spool_path,
+                        "malformed-json",
+                        exc,
+                    )
+                if not isinstance(raw, dict):
+                    self._quarantine_invalid_spool(
+                        spool_path,
+                        "non-object-row",
+                    )
+                if (
+                    raw.get("spot_observation_fact_schema_version")
+                    != SPOT_OBSERVATION_FACT_SCHEMA_VERSION
+                    or not set(SPOT_OBSERVATION_FACT_COLUMNS).issubset(raw)
+                ):
+                    self._quarantine_invalid_spool(
+                        spool_path,
+                        "schema-mismatch",
+                    )
+                pending.append(
+                    {
+                        column: _text(raw.get(column))
+                        for column in SPOT_OBSERVATION_FACT_COLUMNS
+                    }
+                )
+            for fact in pending:
+                key = fact["spot_observation_key"]
+                if key and key not in self._seen_keys:
+                    self._append_fact(fact)
+            spool_path.unlink(missing_ok=True)
+            if self._spool_pending_count_cache is not None:
+                self._spool_pending_count_cache = max(
+                    0,
+                    self._spool_pending_count_cache - len(pending),
+                )
 
     def _quarantine_invalid_spool(
         self,
@@ -323,11 +356,20 @@ class SpotObservationFactWriter:
 
     def _spool_fact(self, fact: Mapping[str, str]) -> None:
         try:
-            spool_path = self._effective_spool_path()
-            spool_path.parent.mkdir(parents=True, exist_ok=True)
-            with spool_path.open("a", encoding="utf-8", newline="") as handle:
-                handle.write(json.dumps(dict(fact), sort_keys=True, ensure_ascii=False))
-                handle.write("\n")
+            with self._spool_state_lock:
+                spool_path = self._effective_spool_path()
+                spool_path.parent.mkdir(parents=True, exist_ok=True)
+                with spool_path.open("a", encoding="utf-8", newline="") as handle:
+                    handle.write(
+                        json.dumps(
+                            dict(fact),
+                            sort_keys=True,
+                            ensure_ascii=False,
+                        )
+                    )
+                    handle.write("\n")
+                if self._spool_pending_count_cache is not None:
+                    self._spool_pending_count_cache += 1
         except Exception:
             return
 
@@ -337,17 +379,33 @@ class SpotObservationFactWriter:
         return self.output_path.with_name(f"{self.output_path.name}.failed.jsonl")
 
     def spool_pending_count(self) -> int:
-        spool_path = self._effective_spool_path()
-        suffix = spool_path.suffix
-        archive_pattern = f"{spool_path.stem}.*.schema-mismatch{suffix}"
-        spool_paths = [spool_path, *sorted(spool_path.parent.glob(archive_pattern))]
-        pending_count = 0
-        for pending_path in spool_paths:
-            if not pending_path.exists() or pending_path.stat().st_size == 0:
-                continue
-            with pending_path.open("r", encoding="utf-8") as handle:
-                pending_count += sum(1 for line in handle if line.strip())
-        return pending_count
+        with self._spool_state_lock:
+            if self._spool_pending_count_cache is not None:
+                return self._spool_pending_count_cache
+            spool_path = self._effective_spool_path()
+            suffix = spool_path.suffix
+            archive_pattern = (
+                f"{spool_path.stem}.*.schema-mismatch{suffix}"
+            )
+            spool_paths = [
+                spool_path,
+                *sorted(spool_path.parent.glob(archive_pattern)),
+            ]
+            pending_count = 0
+            for pending_path in spool_paths:
+                if (
+                    not pending_path.exists()
+                    or pending_path.stat().st_size == 0
+                ):
+                    continue
+                with pending_path.open("r", encoding="utf-8") as handle:
+                    pending_count += sum(
+                        1
+                        for line in handle
+                        if line.strip()
+                    )
+            self._spool_pending_count_cache = pending_count
+            return pending_count
 
     def manifest_summary(
         self,

@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_COLUMNS,
@@ -390,6 +391,40 @@ class SpotObservationFactTests(unittest.TestCase):
                 spool_path=spool_path,
             )
             self.assertEqual(restarted_writer.spool_pending_count(), 2)
+
+    def test_spool_pending_count_caches_archives_and_tracks_active_spool(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            output_path = tmp_path / "spot_observation_fact.csv"
+            spool_path = tmp_path / "spot_observation_fact.failed.jsonl"
+            archive_path = (
+                tmp_path
+                / "spot_observation_fact.failed.20260731T000000Z.schema-mismatch.jsonl"
+            )
+            first_fact = self.current_fact_row(1)
+            second_fact = self.current_fact_row(2)
+            spool_path.write_text(
+                json.dumps(first_fact) + "\n",
+                encoding="utf-8",
+            )
+            archive_path.write_text("legacy-one\nlegacy-two\n", encoding="utf-8")
+            writer = SpotObservationFactWriter(
+                output_path,
+                spool_path=spool_path,
+            )
+
+            self.assertEqual(writer.spool_pending_count(), 3)
+            with patch.object(
+                Path,
+                "open",
+                side_effect=AssertionError("cached health read rescanned spool files"),
+            ):
+                self.assertEqual(writer.spool_pending_count(), 3)
+
+            writer._spool_fact(second_fact)
+            self.assertEqual(writer.spool_pending_count(), 4)
+            writer._flush_spool()
+            self.assertEqual(writer.spool_pending_count(), 2)
 
     def test_spool_flush_quarantines_invalid_rows_and_fails_closed(self) -> None:
         success_snapshot = {

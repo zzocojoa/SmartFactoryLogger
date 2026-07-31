@@ -1,6 +1,6 @@
 # spot-tcp-source-port-quarantine-v2 - Design Document
 
-> Version: 1.0.0 | Date: 2026-07-27 | Status: Design approved, Do pending
+> Version: 1.2.0 | Date: 2026-07-31 | Status: Implemented; current HEAD field revalidation pending
 > Level: Dynamic
 > Plan: `docs/01-plan/features/spot-tcp-source-port-quarantine-v2.plan.md`
 

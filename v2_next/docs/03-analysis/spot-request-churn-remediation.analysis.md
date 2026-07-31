@@ -2,8 +2,11 @@
 
 > **Historical snapshot — superseded.** This document records the failed
 > pre-quarantine candidate and its rollback decision. The final production
-> decision is the `f101d88` `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL` closure
-> in `docs/04-report/spot-tcp-source-port-quarantine-v2.report.md`.
+> operating baseline is the
+> `575e869b63d3052156624886fe0358fb39d6c98a`
+> `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL` package. A later adversarial
+> failure-path delta is `FIELD_REVALIDATION_REQUIRED` as recorded in
+> `docs/04-report/spot-tcp-source-port-quarantine-v2.report.md`.
 >
 > Date: 2026-07-27 | Design: `docs/02-design/features/spot-request-churn-remediation.design.md`
 > Failed package baseline: `45263ff46ce184ef0cb63f1cec7658f929167b2e` | Act iteration: 3 | Analysis iteration: 4

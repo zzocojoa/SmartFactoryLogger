@@ -306,6 +306,7 @@ function Find-LatestMetadata {
                 )) -eq "shutdown" -and
                 [System.IO.Path]::GetFileName($closeoutCsvFileName) -eq
                     $closeoutCsvFileName -and
+                $closeoutCsvFileName -ceq $ExpectedCsvFileName -and
                 $closeoutCsvFileName -match "\.csv$" -and
                 ([string](
                     Get-ObjectProperty $csvCloseout "logger_service_instance_id" ""
@@ -319,7 +320,7 @@ function Find-LatestMetadata {
                     metadata = $metadata
                     csv_file = $csvPath
                     csv_final_sample_seq = $closeoutSampleSeq
-                    observed_csv_file_name = $ExpectedCsvFileName
+                    observed_csv_file_name = $closeoutCsvFileName
                 }
             }
             } catch {

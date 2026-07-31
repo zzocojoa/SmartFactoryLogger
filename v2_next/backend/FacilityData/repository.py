@@ -2424,35 +2424,58 @@ class CSVLoggerService:
             return True
         if writer is None or handle is None:
             return False
+        persistence = self._prepare_v2_rows_persisted(rows)
         writer.writerows([row for row, _ in rows])
         handle.flush()
-        self._mark_v2_rows_persisted(rows)
+        self._commit_v2_rows_persisted(persistence)
         self._mark_write_completed()
         return True
 
-    def _mark_v2_rows_persisted(
+    def _prepare_v2_rows_persisted(
         self,
         rows: list[Tuple[list, datetime]],
-    ) -> None:
+    ) -> tuple[str, int, str]:
         csv_path = self._current_v2_csv_path
         if csv_path is None:
             raise RuntimeError("CSV v2 persisted rows have no active file identity.")
         sample_seq_index = self._get_active_v2_contract().columns.index("sample_seq")
         try:
-            persisted_sample_seq = max(int(row[sample_seq_index]) for row, _ in rows)
+            persisted_sample_seqs = [
+                int(row[sample_seq_index])
+                for row, _ in rows
+            ]
         except (IndexError, TypeError, ValueError) as exc:
             raise RuntimeError("CSV v2 persisted rows have an invalid sample_seq.") from exc
+        if any(
+            current <= previous
+            for previous, current in zip(
+                persisted_sample_seqs,
+                persisted_sample_seqs[1:],
+            )
+        ):
+            raise RuntimeError(
+                "CSV v2 persisted sample_seq is not strictly increasing."
+            )
+        persisted_sample_seq = persisted_sample_seqs[-1]
         csv_path_key = str(csv_path)
         persisted_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         with self._runtime_lock:
             previous_sample_seq = self._v2_persisted_sample_seq_by_path.get(csv_path_key)
             if (
                 previous_sample_seq is not None
-                and persisted_sample_seq <= previous_sample_seq
+                and persisted_sample_seqs[0] <= previous_sample_seq
             ):
                 raise RuntimeError(
                     "CSV v2 persisted sample_seq did not advance for the active file."
                 )
+        return csv_path_key, persisted_sample_seq, persisted_at
+
+    def _commit_v2_rows_persisted(
+        self,
+        persistence: tuple[str, int, str],
+    ) -> None:
+        csv_path_key, persisted_sample_seq, persisted_at = persistence
+        with self._runtime_lock:
             self._v2_persisted_sample_seq_by_path[csv_path_key] = (
                 persisted_sample_seq
             )

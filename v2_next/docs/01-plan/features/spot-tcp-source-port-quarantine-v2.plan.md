@@ -1,6 +1,6 @@
 # spot-tcp-source-port-quarantine-v2 - Plan Document
 
-> Version: 1.0.0 | Date: 2026-07-27 | Status: Plan and Design approved, Do pending
+> Version: 1.2.0 | Date: 2026-07-31 | Status: Current HEAD field revalidation required
 > Level: Dynamic | Parent: `spot-request-churn-remediation`
 
 ---
@@ -59,16 +59,16 @@ source port만 명시한다.
 
 ### 2.1 필수 목표
 
-- [ ] 동일 SPOT 4-tuple의 connect start 간격을 최소 `75.0s`로 보장한다.
-- [ ] image, temperature, internal temperature, diagnostic, focus, actuator의 모든
+- [x] 동일 SPOT 4-tuple의 connect start 간격을 최소 `75.0s`로 보장한다.
+- [x] image, temperature, internal temperature, diagnostic, focus, actuator의 모든
       공식 SPOT 연결이 동일 lease 정책을 통과한다.
-- [ ] 기존 `spot-background-request-budget-v2`와
+- [x] 기존 `spot-background-request-budget-v2`와
       `spot-image-demand-shaping-v2` 정책을 유지한다.
-- [ ] HTTP response parsing과 framing은 `http.client`가 담당한다.
-- [ ] source-port pool 고갈 또는 초기화 실패 시 OS 자동 포트로 우회하지 않는다.
-- [ ] 실제 port 번호, 4-tuple, IP, URL 및 payload를 제품 diagnostics에 노출하지
+- [x] HTTP response parsing과 framing은 `http.client`가 담당한다.
+- [x] source-port pool 고갈 또는 초기화 실패 시 OS 자동 포트로 우회하지 않는다.
+- [x] 실제 port 번호, 4-tuple, IP, URL 및 payload를 제품 diagnostics에 노출하지
       않는다.
-- [ ] 실제 서버 15분 smoke의 모든 기존 gate와 60초 미만 재사용 0건을 통과한다.
+- [x] 실제 서버 15분 smoke의 모든 기존 gate와 60초 미만 재사용 0건을 통과한다.
 
 ### 2.2 비목표
 
@@ -162,33 +162,35 @@ source port만 명시한다.
 
 ### 6.1 개발 환경
 
-- [ ] lease pool exact-boundary, exhaustion, bind race, delayed rebind 테스트 통과
-- [ ] HTTP/1.0 close loopback에서 표준 parser와 명시적 source port 검증
-- [ ] cancellation 후에도 worker 완료와 lease quarantine 검증
-- [ ] image, temperature, diagnostic 및 PUT control 회귀 테스트 통과
-- [ ] actual port 번호가 API/log/sanitized diagnostics에 없음
-- [ ] Ruff, mypy, backend tests, Electron tests 및 `npm run health` 통과
-- [ ] retired raw transport code가 source/import/diff에 없음
+- [x] lease pool exact-boundary, exhaustion, bind race, delayed rebind 테스트 통과
+- [x] HTTP/1.0 close loopback에서 표준 parser와 명시적 source port 검증
+- [x] cancellation 후에도 worker 완료와 lease quarantine 검증
+- [x] image, temperature, diagnostic 및 PUT control 회귀 테스트 통과
+- [x] actual port 번호가 API/log/sanitized diagnostics에 없음
+- [x] Ruff, mypy, backend tests, Electron tests 및 `npm run health` 통과
+- [x] retired raw transport code가 source/import/diff에 없음
 
 ### 6.2 실제 서버 15분 smoke
 
-- [ ] candidate/backend/config/package identity 확인
-- [ ] 전체 SPOT 신규 연결 60초 p95 `<=6/s`
-- [ ] image upstream 60초 p95 `<=0.5/s`
-- [ ] baseline 대비 연결 감소 `>=80%`
-- [ ] 동일 4-tuple 5초 미만 및 60초 미만 재사용 `0건`
-- [ ] internal minimum reuse interval `>=75.0s`
-- [ ] pool exhaustion, bind retry exhaustion, transport failure `0건`
-- [ ] ConnectTimeout, SPOT HTTP 5xx, RST 및 handshake 실패 `0건`
-- [ ] image/temperature/diagnostic/focus/actuator 회귀 `0건`
-- [ ] ping loss와 server NIC error/discard `0`
+- [x] candidate/backend/config/package identity 확인
+- [x] 전체 SPOT 신규 연결 60초 p95 `<=6/s`
+- [x] image upstream 60초 p95 `<=0.5/s`
+- [x] baseline 대비 연결 감소 `>=80%`
+- [x] 동일 4-tuple 5초 미만 및 60초 미만 재사용 `0건`
+- [x] internal minimum reuse interval `>=75.0s`
+- [x] pool exhaustion, bind retry exhaustion, transport failure `0건`
+- [x] ConnectTimeout, SPOT HTTP 5xx, RST 및 handshake 실패 `0건`
+- [x] image/temperature/diagnostic/focus/actuator 회귀 `0건`
+- [x] ping loss와 server NIC error/discard `0`
 
 관리형 스위치 자료가 없으면 물리 원인 세분화는 `PARTIAL`로 남을 수 있지만,
 제품 promotion gate는 packet과 app 증거로 모두 통과해야 한다.
 
 ### 6.3 120분 canary
 
-15분 smoke가 모두 통과하고 별도 승인을 받기 전까지 실행하지 않는다.
+15분 smoke 통과 후 승인된 120분 canary와 최종 read-only live gate가
+`575e869` package identity로 통과했다. 관리형 스위치 증거 부재만
+`PHYSICAL_PATH_PARTIAL`로 남는다.
 
 ## 7. 위험과 완화
 
@@ -204,12 +206,16 @@ source port만 명시한다.
 
 ## 8. Rollback과 운영 경계
 
-- 현재 실제 서버는 검증된 rollback v1.0.16을 계속 운영한다.
-- Do 승인 전 제품 코드는 수정하지 않는다.
+- 현재 실제 서버는 검증된 `575e869` v1.0.17 package를 계속 운영한다.
+- v1.0.16 rollback installer와 SHA-256은 비상 복구용으로 유지한다.
+- adversarial review 후 추가된 CSV pre-write 검증, exact QA CSV binding,
+  Electron partial-response 처리, observation spool health-count cache는 새
+  product-runtime/QA delta이므로 `575e869` field 증거를 상속하지 않는다.
 - 후보 설치 전 기존 installer/backend/config SHA-256을 다시 확인한다.
 - field gate 하나라도 실패하면 정상 종료 후 검증된 v1.0.16 installer로 복귀한다.
 - 오류 큐를 clear하거나 Windows/SPOT/network 설정을 변경하지 않는다.
-- 120분 canary는 15분 smoke 통과 전까지 차단한다.
+- 이후 product-runtime 변경은 re-attestation, QA, 15분 smoke, 120분 canary를
+  다시 통과해야 한다.
 
 ## 9. 일정과 승인
 
@@ -217,10 +223,10 @@ source port만 명시한다.
 |---|---|
 | Plan | 완료 |
 | Design | 완료 |
-| Do | 별도 승인 필요 |
-| Local Check | Do 이후 |
-| Package/actual server 15분 Check | 별도 승인 필요 |
-| 120분 canary | 15분 전체 PASS 이후 별도 승인 |
+| Do | 완료 |
+| Local Check | 현재 HEAD 전체 health PASS |
+| Package/actual server 15분 Check | 새 commit package 필요 |
+| 120분 canary | `575e869` 완료, 현재 HEAD 재검증 필요 |
 
 ## 10. 참고
 

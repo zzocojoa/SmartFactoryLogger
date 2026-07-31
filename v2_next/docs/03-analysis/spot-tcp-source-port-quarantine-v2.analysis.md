@@ -2,8 +2,10 @@
 
 > **Historical local-Check snapshot — superseded.** The package, actual-server
 > smoke, 120-minute canary, and final live gate were subsequently completed for
-> commit `f101d88`. The authoritative production decision is
-> `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL` in
+> commit `575e869b63d3052156624886fe0358fb39d6c98a`, which remains the
+> authoritative `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL` operating
+> baseline. The later adversarial failure-path delta is
+> `FIELD_REVALIDATION_REQUIRED` in
 > `docs/04-report/spot-tcp-source-port-quarantine-v2.report.md`.
 >
 > Date: 2026-07-27

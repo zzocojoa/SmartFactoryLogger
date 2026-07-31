@@ -65,12 +65,34 @@ All notable changes to Smart Factory Logger V2 are documented here.
   pull-request head commit so CI cannot publish a synthetic merge build under a
   source-commit identity.
 
+### Post-validation changes — field revalidation required
+
+- Rejected truncated, aborted, and errored backend connection-test responses so
+  the trusted Electron IPC request always settles instead of waiting
+  indefinitely after a partial HTTP response.
+- Included the extracted connection-test client in the Electron Builder file
+  allowlist so packaged startup cannot fail with `MODULE_NOT_FOUND`.
+- Validated v2 `sample_seq` persistence bookkeeping before writing a batch so
+  a rejected non-advancing batch cannot already be durable and then be appended
+  again on retry.
+- Bound one-command QA shutdown selection to the exact current-session CSV
+  basename and recorded the observed basename rather than echoing the expected
+  value.
+- Cached observation-fact spool/archive pending counts and updated them on
+  spool mutation so frequent health requests do not repeatedly rescan every
+  quarantined archive row.
+
 ### Validation
 
-- Passed the complete Electron, frontend, backend, lint, type-check, QA
-  self-test, production-build, transport-race, and socket-interrupt suites.
+- The packaged `575e869` baseline passed the complete Electron, frontend,
+  backend, lint, type-check, QA self-test, production-build, transport-race,
+  and socket-interrupt suites.
+- The post-validation current HEAD passed the complete local health suite:
+  45 Electron tests, 253 frontend tests across 34 files, 641 backend tests,
+  Ruff, mypy, and the NSIS QA self-test. A new commit-bound installer and field
+  validation are still required.
 - Passed commit-bound re-attestation, one-command QA, the approved 15-minute
-  smoke, and the 120-minute canary for packaged commit `f101d88`. The final
+  smoke, and the 120-minute canary for packaged commit `575e869`. The final
   live gate retained the expected backend and config hashes, verified
   attestation, active source-port quarantine, zero reuse, exhaustion, and
   transport failures, and healthy image capture.
@@ -78,10 +100,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
   fail-closed CSV shutdown-closeout validation paths.
 - Managed-switch evidence remains unavailable, so the validated package's
   software field gate is `FIELD_CANARY_PASS` while physical-path attribution is
-  `PHYSICAL_PATH_PARTIAL`. The identity-matched `f101d88` package remains the
-  verified production runtime. A later observation-fact durability fix changes
-  the candidate runtime and therefore requires a new commit-bound package,
-  re-attestation, QA, smoke, and canary before that later HEAD can replace it.
+  `PHYSICAL_PATH_PARTIAL`. The identity-matched `575e869` package remains the
+  verified production runtime and includes the observation-fact durability fix.
+- The post-validation CSV and Electron failure-path fixes change the current PR
+  runtime and QA bundle. They must pass a new commit-bound package build,
+  re-attestation, QA, 15-minute smoke, 120-minute canary, and final live gate
+  before replacing `575e869`.
 
 ### Compatibility
 
