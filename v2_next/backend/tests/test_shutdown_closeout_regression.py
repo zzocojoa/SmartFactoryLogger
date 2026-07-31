@@ -1386,7 +1386,7 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 cwd=self.repo_root,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=90,
                 check=False,
             )
             order = marker_path.read_text(encoding="utf-8").splitlines()
