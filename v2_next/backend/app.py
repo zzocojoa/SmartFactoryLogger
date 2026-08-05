@@ -2190,15 +2190,16 @@ def _require_embedded_control_token(control_token: str | None) -> None:
         raise HTTPException(status_code=403, detail="Invalid embedded control token")
 
 
-def _require_connection_test_access(
+def _require_local_control_access(
     request: Request,
     control_token: str | None,
+    action: str,
 ) -> None:
     client_host = request.client.host if request.client else ""
     if not _is_loopback_hostname(client_host):
         raise HTTPException(
             status_code=403,
-            detail="Connection tests require a local request",
+            detail=f"{action} require a local request",
         )
     if is_embedded_electron():
         _require_embedded_control_token(control_token)
@@ -2210,13 +2211,27 @@ def _require_connection_test_access(
     if origin and not _is_loopback_hostname(origin_host or ""):
         raise HTTPException(
             status_code=403,
-            detail="Connection tests require a local development origin",
+            detail=f"{action} require a local development origin",
         )
     if referer and not _is_loopback_hostname(referer_host or ""):
         raise HTTPException(
             status_code=403,
-            detail="Connection tests require a local development origin",
+            detail=f"{action} require a local development origin",
         )
+
+
+def _require_connection_test_access(
+    request: Request,
+    control_token: str | None,
+) -> None:
+    _require_local_control_access(request, control_token, "Connection tests")
+
+
+def _require_control_shutdown_access(
+    request: Request,
+    control_token: str | None,
+) -> None:
+    _require_local_control_access(request, control_token, "Control shutdown requests")
 
 
 @app.get("/api/facility/operator-metadata", response_model=OperatorMetadata)
@@ -3504,10 +3519,10 @@ def _schedule_control_shutdown(reason: str) -> None:
 @app.post("/api/control/shutdown")
 async def shutdown(
     payload: ShutdownRequest,
+    request: Request,
     control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
 ):
-    if is_embedded_electron():
-        _require_embedded_control_token(control_token)
+    _require_control_shutdown_access(request, control_token)
 
     _schedule_control_shutdown(payload.reason or "api_request")
     return {"ok": True}

@@ -265,11 +265,20 @@ class ElectronPreloadContractTests(unittest.TestCase):
             patch.dict(backend_app.os.environ, {"SFL_CONTROL_TOKEN": "launch-secret"}),
             patch.object(backend_app, "_schedule_control_shutdown") as schedule_shutdown,
         ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            client = TestClient(
+                backend_app.app,
+                raise_server_exceptions=False,
+                client=("127.0.0.1", 50000),
+            )
             try:
                 rejected = client.post(
                     "/api/control/shutdown",
                     json={"reason": "electron_retry"},
+                )
+                wrong_token = client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "electron_retry"},
+                    headers={"X-SFL-Control-Token": "wrong-secret"},
                 )
                 accepted = client.post(
                     "/api/control/shutdown",
@@ -280,8 +289,47 @@ class ElectronPreloadContractTests(unittest.TestCase):
                 client.close()
 
         self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(wrong_token.status_code, 403)
         self.assertEqual(accepted.status_code, 200)
         schedule_shutdown.assert_called_once_with("electron_retry")
+
+    def test_standalone_shutdown_requires_a_trusted_loopback_request(self) -> None:
+        with (
+            patch.object(backend_app, "is_embedded_electron", return_value=False),
+            patch.object(backend_app, "_schedule_control_shutdown") as schedule_shutdown,
+        ):
+            remote_client = TestClient(
+                backend_app.app,
+                raise_server_exceptions=False,
+                client=("203.0.113.10", 50000),
+            )
+            local_client = TestClient(
+                backend_app.app,
+                raise_server_exceptions=False,
+                client=("127.0.0.1", 50000),
+            )
+            try:
+                remote = remote_client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "remote_request"},
+                )
+                untrusted_origin = local_client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "browser_request"},
+                    headers={"Origin": "https://untrusted.example"},
+                )
+                accepted = local_client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "local_operator"},
+                )
+            finally:
+                remote_client.close()
+                local_client.close()
+
+        self.assertEqual(remote.status_code, 403)
+        self.assertEqual(untrusted_origin.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        schedule_shutdown.assert_called_once_with("local_operator")
 
     def test_main_correlates_and_allowlists_operational_startup_events(self) -> None:
         main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")

@@ -755,6 +755,8 @@ with `Retry-After` instead of queueing behind operational SPOT traffic.
 
 The packaged Electron application supplies its per-launch
 `X-SFL-Control-Token`; direct embedded requests without the token return `403`.
+Standalone mode accepts shutdown requests only from a loopback client and rejects
+non-loopback browser origins or referrers with `403`.
 
 백엔드 서버를 정상적으로 종료합니다.
 
