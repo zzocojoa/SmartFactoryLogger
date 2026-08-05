@@ -113,7 +113,7 @@ jobs:
 
           $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
           $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
-          Import-Module scripts\backend_bundle_integrity.psm1 -Force -ErrorAction Stop
+          Import-Module .\scripts\backend_bundle_integrity.psm1 -Force -ErrorAction Stop
           $integrity = Test-BackendBundleIntegrity -BackendRoot $bundleRoot
           if (-not $integrity.ok) {
             throw "Backend bundle integrity failed: $($integrity | ConvertTo-Json -Depth 6 -Compress)"
@@ -157,7 +157,7 @@ jobs:
 
           $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
           $provenance = Get-Content -LiteralPath $provenancePath -Raw | ConvertFrom-Json
-          Import-Module scripts\backend_bundle_integrity.psm1 -Force -ErrorAction Stop
+          Import-Module .\scripts\backend_bundle_integrity.psm1 -Force -ErrorAction Stop
           $integrity = Test-BackendBundleIntegrity -BackendRoot $bundleRoot
           if (-not $integrity.ok) {
             throw "Packaged application bundle integrity failed: $($integrity | ConvertTo-Json -Depth 6 -Compress)"
