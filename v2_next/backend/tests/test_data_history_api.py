@@ -477,6 +477,9 @@ class ElectronPreloadContractTests(unittest.TestCase):
 
     def test_main_registers_memory_ipc_and_packaged_files_include_preload(self) -> None:
         main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")
+        backend_control_client_text = (
+            self.repo_root / "backendControlClient.js"
+        ).read_text(encoding="utf-8")
         package_payload = json.loads((self.repo_root / "package.json").read_text(encoding="utf-8"))
 
         self.assertIn("preload: resolvePreloadPath()", main_text)
@@ -491,15 +494,21 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("triggerInitialBackendStart('splash_first_paint')", main_text)
         self.assertIn("armInitialBackendStartFallback();", main_text)
         self.assertIn("requestBackendGracefulShutdown", main_text)
+        self.assertIn(
+            "requestBackendGracefulShutdown: sendBackendGracefulShutdown",
+            main_text,
+        )
+        self.assertNotIn("http.request", main_text)
         self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;", main_text)
         self.assertIn("backend.shutdown-complete", main_text)
-        self.assertIn("X-SFL-Control-Token", main_text)
+        self.assertIn("X-SFL-Control-Token", backend_control_client_text)
         self.assertIn("STARTUP_RENDERER_EVENT_NAMES", main_text)
         self.assertIn("preload.js", package_payload["build"]["files"])
         self.assertIn("startupCoordinator.js", package_payload["build"]["files"])
         self.assertIn("startupIpc.js", package_payload["build"]["files"])
         self.assertIn("backendStartupProgress.js", package_payload["build"]["files"])
         self.assertIn("backendProcessLifecycle.js", package_payload["build"]["files"])
+        self.assertIn("backendControlClient.js", package_payload["build"]["files"])
 
     def test_default_shutdown_budgets_fit_electron_grace(self) -> None:
         main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")

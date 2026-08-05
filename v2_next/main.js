@@ -23,6 +23,7 @@ const {
 const { createBackendControlIpcHandlers } = require('./backendControlIpc');
 const {
   requestBackendConnectionTest: sendBackendConnectionTest,
+  requestBackendGracefulShutdown: sendBackendGracefulShutdown,
 } = require('./backendControlClient');
 
 const startupOriginNs = process.hrtime.bigint();
@@ -63,6 +64,7 @@ const MAX_RENDERER_STARTUP_EVENTS_PER_NAME = 4;
 const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;
 const BACKEND_CONTROL_RESPONSE_MAX_BYTES = 1024 * 1024;
 const BACKEND_CONNECTION_TEST_TIMEOUT_MS = 10_000;
+const BACKEND_SHUTDOWN_REQUEST_TIMEOUT_MS = 2_000;
 
 let mainWindow;
 let backendProcess;
@@ -657,34 +659,11 @@ function startBackend() {
 }
 
 function requestBackendGracefulShutdown() {
-  const body = JSON.stringify({ reason: applicationQuitting ? 'electron_exit' : 'electron_retry' });
-
-  return new Promise((resolve, reject) => {
-    const request = http.request({
-      hostname: '127.0.0.1',
-      port: resolveBackendPort(),
-      path: '/api/control/shutdown',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-        'X-SFL-Control-Token': backendControlToken,
-      },
-    }, (response) => {
-      response.resume();
-      response.once('end', () => {
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          resolve();
-          return;
-        }
-        reject(new Error(`Backend shutdown endpoint returned HTTP ${response.statusCode}.`));
-      });
-    });
-    request.setTimeout(2_000, () => {
-      request.destroy(new Error('Backend shutdown request timed out.'));
-    });
-    request.once('error', reject);
-    request.end(body);
+  return sendBackendGracefulShutdown({
+    controlToken: backendControlToken,
+    port: resolveBackendPort(),
+    reason: applicationQuitting ? 'electron_exit' : 'electron_retry',
+    timeoutMs: BACKEND_SHUTDOWN_REQUEST_TIMEOUT_MS,
   });
 }
 

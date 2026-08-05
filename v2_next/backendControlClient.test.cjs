@@ -2,11 +2,16 @@
 
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const http = require('node:http');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
   requestBackendConnectionTest,
+  requestBackendGracefulShutdown,
 } = require('./backendControlClient');
+const { stopProcessTree } = require('./backendProcessLifecycle');
 
 function createRequestHarness() {
   const request = new EventEmitter();
@@ -33,6 +38,9 @@ function createRequestHarness() {
     respond(statusCode = 200) {
       const response = new EventEmitter();
       response.statusCode = statusCode;
+      response.resume = () => {
+        response.resumed = true;
+      };
       response.destroy = () => {
         response.emit('aborted');
         response.emit('close');
@@ -48,6 +56,17 @@ function requestWith(harness, overrides = {}) {
     controlToken: 'test-control-token',
     port: 8000,
     maxResponseBytes: 64,
+    timeoutMs: 50,
+    requestImpl: harness.requestImpl,
+    ...overrides,
+  });
+}
+
+function shutdownWith(harness, overrides = {}) {
+  return requestBackendGracefulShutdown({
+    controlToken: 'test-control-token',
+    port: 8000,
+    reason: 'electron_exit',
     timeoutMs: 50,
     requestImpl: harness.requestImpl,
     ...overrides,
@@ -116,4 +135,132 @@ test('backend connection-test client rejects request timeout and socket errors',
   const errorPromise = requestWith(errorHarness);
   errorHarness.request.emit('error', new Error('connect refused'));
   await assert.rejects(errorPromise, /connect refused/);
+});
+
+test('backend graceful-shutdown client sends the authenticated closeout request', async () => {
+  const harness = createRequestHarness();
+  const resultPromise = shutdownWith(harness);
+  const response = harness.respond(202);
+  response.emit('end');
+  response.emit('close');
+
+  await resultPromise;
+  assert.equal(harness.request.options.hostname, '127.0.0.1');
+  assert.equal(harness.request.options.port, 8000);
+  assert.equal(harness.request.options.path, '/api/control/shutdown');
+  assert.equal(harness.request.options.method, 'POST');
+  assert.equal(harness.request.options.headers['X-SFL-Control-Token'], 'test-control-token');
+  assert.deepEqual(JSON.parse(harness.request.body), { reason: 'electron_exit' });
+  assert.equal(response.resumed, true);
+});
+
+test('backend graceful-shutdown client rejects HTTP, timeout, and socket failures', async () => {
+  const httpHarness = createRequestHarness();
+  const httpPromise = shutdownWith(httpHarness);
+  const httpResponse = httpHarness.respond(503);
+  httpResponse.emit('end');
+  await assert.rejects(httpPromise, /HTTP 503/);
+
+  const timeoutHarness = createRequestHarness();
+  const timeoutPromise = shutdownWith(timeoutHarness);
+  timeoutHarness.request.timeoutCallback();
+  await assert.rejects(timeoutPromise, /timed out/);
+
+  const errorHarness = createRequestHarness();
+  const errorPromise = shutdownWith(errorHarness);
+  errorHarness.request.emit('error', new Error('connect refused'));
+  await assert.rejects(errorPromise, /connect refused/);
+
+  const setupHarness = createRequestHarness();
+  await assert.rejects(
+    shutdownWith(setupHarness, {
+      requestImpl: () => {
+        throw new ReferenceError('transport dependency unavailable');
+      },
+    }),
+    /transport dependency unavailable/
+  );
+});
+
+test('backend graceful-shutdown client rejects every premature response termination mode', async () => {
+  for (const eventName of ['aborted', 'error', 'close']) {
+    const harness = createRequestHarness();
+    const resultPromise = shutdownWith(harness);
+    const response = harness.respond();
+    if (eventName === 'error') {
+      response.emit(eventName, new Error('socket reset'));
+    } else {
+      response.emit(eventName);
+    }
+    await assert.rejects(resultPromise, /aborted|failed|closed before completion/);
+  }
+});
+
+test('authenticated shutdown request completes the process lifecycle without force', async (t) => {
+  const child = new EventEmitter();
+  child.pid = 4321;
+  child.exitCode = null;
+  child.signalCode = null;
+  const observed = {};
+  const server = http.createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      observed.method = request.method;
+      observed.path = request.url;
+      observed.token = request.headers['x-sfl-control-token'];
+      observed.body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end('{"ok":true}');
+      setImmediate(() => {
+        child.exitCode = 0;
+        child.emit('close', 0, null);
+      });
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const address = server.address();
+  assert.notEqual(address, null);
+  assert.equal(typeof address, 'object');
+
+  const result = await stopProcessTree(child, {
+    killTree: () => assert.fail('force kill must not run after authenticated shutdown'),
+    requestGracefulStop: () => requestBackendGracefulShutdown({
+      controlToken: 'integration-control-token',
+      port: address.port,
+      reason: 'electron_exit',
+      timeoutMs: 500,
+    }),
+    graceMs: 1_000,
+    forceCloseMs: 100,
+  });
+
+  assert.deepEqual(result, {
+    stopped: true,
+    reason: 'close',
+    exitCode: 0,
+    signalCode: null,
+    forced: false,
+  });
+  assert.deepEqual(observed, {
+    method: 'POST',
+    path: '/api/control/shutdown',
+    token: 'integration-control-token',
+    body: { reason: 'electron_exit' },
+  });
+});
+
+test('Electron before-quit delegates shutdown transport to the tested control client', () => {
+  const mainText = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+
+  assert.match(
+    mainText,
+    /requestBackendGracefulShutdown:\s*sendBackendGracefulShutdown/
+  );
+  assert.match(mainText, /return sendBackendGracefulShutdown\(\{/);
+  assert.doesNotMatch(mainText, /\bhttp\.request\b/);
 });

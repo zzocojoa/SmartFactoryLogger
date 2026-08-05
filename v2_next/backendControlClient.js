@@ -88,6 +88,69 @@ function requestBackendConnectionTest(serializedPayload, options) {
   });
 }
 
+function requestBackendGracefulShutdown(options) {
+  const {
+    controlToken,
+    port,
+    reason,
+    timeoutMs,
+    requestImpl = http.request,
+  } = options;
+  const serializedPayload = JSON.stringify({ reason });
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      callback(value);
+    };
+    const fail = (error) => finish(reject, error);
+
+    const request = requestImpl({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/control/shutdown',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(serializedPayload),
+        'X-SFL-Control-Token': controlToken,
+      },
+    }, (response) => {
+      let responseEnded = false;
+      response.once('aborted', () => {
+        fail(new Error('Backend shutdown response was aborted.'));
+      });
+      response.once('error', () => {
+        fail(new Error('Backend shutdown response failed.'));
+      });
+      response.once('close', () => {
+        if (!responseEnded) {
+          fail(new Error('Backend shutdown response closed before completion.'));
+        }
+      });
+      response.once('end', () => {
+        responseEnded = true;
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          finish(resolve);
+          return;
+        }
+        fail(new Error(`Backend shutdown endpoint returned HTTP ${response.statusCode}.`));
+      });
+      response.resume();
+    });
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error('Backend shutdown request timed out.'));
+    });
+    request.once('error', fail);
+    request.end(serializedPayload);
+  });
+}
+
 module.exports = {
   requestBackendConnectionTest,
+  requestBackendGracefulShutdown,
 };
