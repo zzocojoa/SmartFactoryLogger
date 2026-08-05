@@ -1,0 +1,4 @@
+# Production Windows signing input.
+# Compile on Windows/Python 3.12 with pip-tools and commit the hash-locked output.
+-r requirements-build.txt
+-r requirements-dev.txt

@@ -14,6 +14,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
   the effective request rate.
 - Added an exclusive source-port pool with a 75-second quarantine window so
   SPOT connections cannot quickly reuse the same TCP four-tuple.
+- Added a separate production-signing GitHub Environment workflow that keeps
+  certificate secrets out of PR builds and refuses release artifacts unless
+  the exact published installer and its extracted application, complete backend
+  bundle, signer thumbprint, timestamp, and build provenance all verify. Windows
+  release Python dependencies are pinned transitively with SHA-256 hashes, and
+  workflow action references are parsed as YAML and restricted to exact commit
+  allowlist entries.
 
 ### Changed
 
@@ -96,7 +103,7 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Code candidate `d8ca5c4` passed the complete local health suite: 51 Electron
   tests, 253 frontend tests across 34 files, 642 backend tests, frontend
   type-check and lint, Ruff, mypy, and the NSIS QA self-test. The subsequent
-  `7d44ad2` packaged development build passed an isolated native X-button close:
+  `c1845e9` packaged development build passed an isolated native X-button close:
   startup health reached `200`, all product processes and health stopped, and
   its commit-bound metadata recorded `csv_closeout.finalized=true`.
 - Passed commit-bound re-attestation, one-command QA, the approved 15-minute

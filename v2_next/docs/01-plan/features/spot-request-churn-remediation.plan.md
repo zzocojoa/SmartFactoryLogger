@@ -1,9 +1,18 @@
 # spot-request-churn-remediation - Plan Document
 
-> Version: 1.0.0 | Date: 2026-07-24 | Status: Plan and Design complete, Do approval required
+> Version: 1.2.0 | Date: 2026-08-05 | Status: Implementation complete, signed field revalidation pending
 > Level: Dynamic
 > Branch: `codex/spot-request-churn-remediation`
 > Base: `master` / `v1.0.16` / `834ed85`
+
+> Implementation update (2026-08-05): Do와 로컬 Check가 완료됐다. 후속 승인된
+> `spot-tcp-source-port-quarantine-v2` 설계로 source-port lifecycle 범위가
+> 확장됐고, packaged native X 종료도 검증됐다. 운영 서버는 `49fbf6b` 종료
+> closeout 실패를 재현한 뒤 검증된 v1.0.16으로 rollback됐다. 현재 commit의
+> trusted Authenticode 서명, exact-commit field QA, smoke, canary는 아직 보류다.
+> Windows signing gate는 정확한 Node/Python 버전과 hash-locked 전이 의존성만
+> 허용하고, 업로드할 NSIS installer 자체를 추출해 Electron 서명, 전체 backend
+> bundle manifest와 provenance를 검증하도록 강화됐다.
 
 ---
 
@@ -37,12 +46,9 @@ SmartFactoryLogger의 정상 운영 화면이 SPOT 장비에 만드는 신규 TC
 cadence를 변경하며, 잘못 구현하면 영상 정지, 오래된 영상 표시, 온도·진단 지연 또는
 제어 요청 starvation이 발생할 수 있다.
 
-현재 승인 범위는 다음과 같다.
-
-- 완료 승인: 새 브랜치 생성, 현장 근거 정리, Plan, Design
-- 미승인: 제품 source 수정, installer 생성, 실제 서버 설치, canary, master 병합
-
-Do는 Plan·Design 완료 뒤 사용자의 별도 명시적 승인을 받아야 한다.
+Plan, Design, Do, 로컬 Check와 이전 commit의 통제된 field 검증은 이후 명시적
+승인으로 진행됐다. 현재 승인 경계는 새 final commit에 대한 trusted signing과
+서버 재검증이다. 서명되지 않은 개발 artifact는 서버로 옮기거나 설치하지 않는다.
 
 ## 2. 확정 근거와 문제 정의
 
@@ -128,36 +134,37 @@ pre-smoke에서 image 12건, temperature 7건, diagnostic 7건의 transport fail
 
 ### 3.1 P0 필수 목표
 
-- [ ] **P0-01:** frontend 이미지 성공 완료 후 즉시 재요청을 제거하고
+- [x] **P0-01:** frontend 이미지 성공 완료 후 즉시 재요청을 제거하고
   `SPOT_REFRESH_INTERVAL`에 맞춰 다음 요청을 예약한다.
-- [ ] **P0-02:** backend에서 같은 freshness window 안의 복수 이미지 요청을
+- [x] **P0-02:** backend에서 같은 freshness window 안의 복수 이미지 요청을
   한 번의 upstream `/image.jpg` 요청으로 합친다.
-- [ ] **P0-03:** 성공한 최신 JPEG를 bounded in-memory cache로 보관하고,
+- [x] **P0-03:** 성공한 최신 JPEG를 bounded in-memory cache로 보관하고,
   freshness window 안에서만 downstream caller에게 공유한다.
-- [ ] **P0-04:** cache가 만료된 상태에서 동시에 들어온 caller는 하나의
+- [x] **P0-04:** cache가 만료된 상태에서 동시에 들어온 caller는 하나의
   single-flight refresh 결과만 기다리며 새 TCP 연결을 각각 만들지 않는다.
-- [ ] **P0-05:** stale frame을 현재 영상처럼 HTTP 200으로 반환하지 않는다.
+- [x] **P0-05:** stale frame을 현재 영상처럼 HTTP 200으로 반환하지 않는다.
   만료 뒤 refresh가 실패하면 기존 502 오류 계약을 유지한다.
-- [ ] **P0-06:** 기존 `httpx.AsyncClient`, response validation, timeout,
-  `_spot_device_request_lock`을 유지하고 custom transport를 만들지 않는다.
-- [ ] **P0-07:** image 개선이 temperature, diagnostics, focus, actuator 요청을
+- [x] **P0-06:** 기존 response validation, timeout과
+  `_spot_device_request_lock`을 유지한다. 후속 source-port 설계는 수동 socket
+  framing/parser 대신 표준 `http.client` parser 경계를 사용한다.
+- [x] **P0-07:** image 개선이 temperature, diagnostics, focus, actuator 요청을
   굶기거나 의미를 바꾸지 않아야 한다.
-- [ ] **P0-08:** 신규 TCP 연결률, upstream image 요청률, downstream 요청률,
+- [x] **P0-08:** 신규 TCP 연결률, upstream image 요청률, downstream 요청률,
   cache hit, coalesced waiter, cache age와 failure를 구분해서 관측한다.
-- [ ] **P0-09:** DB, CSV, config migration 없이 기존 installer로 즉시 rollback할
+- [x] **P0-09:** DB, CSV, config migration 없이 기존 installer로 즉시 rollback할
   수 있어야 한다.
 
 ### 3.2 P1 검증 목표
 
-- [ ] **P1-01:** HTTP/1.0 close 모의 SPOT에서 다중 caller가 있어도 upstream image
+- [x] **P1-01:** HTTP/1.0 close 모의 SPOT에서 다중 caller가 있어도 upstream image
   시작률이 설정 주기를 넘지 않는지 자동 검증한다.
-- [ ] **P1-02:** cache hit, cache expiry, concurrent miss, refresh failure,
+- [x] **P1-02:** cache hit, cache expiry, concurrent miss, refresh failure,
   cancellation, shutdown을 deterministic test로 검증한다.
-- [ ] **P1-03:** frontend timer가 initial, success, failure retry, manual retry,
+- [x] **P1-03:** frontend timer가 initial, success, failure retry, manual retry,
   visibility/unmount lifecycle에서 중복 실행되지 않는지 검증한다.
 - [ ] **P1-04:** 실제 서버 15분 smoke 후 120분 event-trigger canary를 수행하고
   TCP, 앱, ping, NIC와 가능하면 switch counter를 같은 시각 기준으로 판정한다.
-- [ ] **P1-05:** field gate가 실패하면 증거를 보존하고 검증된 v1.0.16 installer로
+- [x] **P1-05:** field gate가 실패하면 증거를 보존하고 검증된 v1.0.16 installer로
   rollback한다.
 
 ### 3.3 P2 후속 목표
@@ -300,15 +307,19 @@ Plan·승인을 거친다.
 
 ### 7.1 개발 환경
 
-- [ ] Plan의 모든 P0/FR/NFR이 Design test case로 추적된다.
-- [ ] backend focused test와 전체 unittest가 통과한다.
-- [ ] frontend cadence, lifecycle, auto-retry, Blob tests가 통과한다.
-- [ ] frontend typecheck와 lint가 통과한다.
-- [ ] Ruff, mypy와 repository `npm run health`가 통과한다.
-- [ ] HTTP/1.0 close 모의 장비에서 복수 caller가 한 freshness window당 upstream
+- [x] Plan의 모든 P0/FR/NFR이 Design test case로 추적된다.
+- [x] backend focused test와 전체 unittest가 통과한다.
+- [x] frontend cadence, lifecycle, auto-retry, Blob tests가 통과한다.
+- [x] frontend typecheck와 lint가 통과한다.
+- [x] Ruff, mypy와 repository `npm run health`가 통과한다.
+- [x] HTTP/1.0 close 모의 장비에서 복수 caller가 한 freshness window당 upstream
   1건만 만든다.
-- [ ] cache TTL 경계, 동시 miss, failure, cancellation, shutdown test가 통과한다.
-- [ ] `git diff --check`, secret/internal address scan, clean build provenance가 통과한다.
+- [x] cache TTL 경계, 동시 miss, failure, cancellation, shutdown test가 통과한다.
+- [x] `git diff --check`, secret/internal address scan, clean build provenance가 통과한다.
+- [x] Windows release Python 전이 의존성이 버전과 SHA-256으로 고정되며 signing
+  workflow는 `--require-hashes`와 binary-only 설치만 허용한다.
+- [x] signing verifier가 업로드 대상 installer의 추출 payload에서 Electron 서명,
+  backend 전체 파일/길이/SHA-256/집계 hash와 provenance를 fail-closed로 검증한다.
 
 ### 7.2 실제 서버 15분 smoke
 
@@ -350,6 +361,9 @@ ConnectTimeout이 한 건이라도 재발하면 물리 원인은 더 세분화�
 - temperature/diagnostic/focus/actuator 회귀
 - EX·LS, CSV, memory 또는 browser 신규 회귀
 - package/backend identity 불일치
+- installer evidence hash와 최종 업로드 파일 hash 불일치
+- installer 추출 payload의 Electron 서명, backend manifest 또는 provenance 불일치
+- Windows release dependency lock의 미고정·무해시 package 또는 source distribution
 - field collector 무결성 또는 packet 방향 preflight 실패
 
 롤백은 검증된 v1.0.16 installer로 복귀하고 backend SHA-256, EX·LS·SPOT·HTTP·CSV·
@@ -362,10 +376,10 @@ downgrade는 필요 없다.
 |---|---|---|
 | Plan | 근거, 목표, 범위, 요구사항, 성공/rollback 기준 | Complete |
 | Design | timer/cache/single-flight/lifecycle/API/test 상세 설계 | Complete |
-| Do | 최소 제품 패치와 자동 테스트 | 별도 승인 전 Pending |
-| Check | local health, clean package, 15분 smoke, 120분 canary | Pending |
-| Act | 실패 gap 수정 또는 rollback/폐기 결정 | Pending |
-| Report | 최종 판정과 잔여 물리 한계 기록 | Pending |
+| Do | 최소 제품 패치와 자동 테스트 | Complete |
+| Check | local health, clean package, 15분 smoke, 120분 canary | Local complete; final signed field run pending |
+| Act | 실패 gap 수정 또는 rollback/폐기 결정 | 49fbf6b failure preserved and rollback complete |
+| Report | 최종 판정과 잔여 물리 한계 기록 | Partial; final signed field evidence pending |
 
 ## 9. 위험과 완화
 
@@ -383,6 +397,8 @@ downgrade는 필요 없다.
 | 이전 실패 transport가 다시 섞임 | 높음 | 낮음 | clean master base, prohibited-components review |
 | config가 비정상 값 | 높음 | 낮음 | bounded normalization과 tight-loop 금지 test |
 | rollback package가 혼동됨 | 높음 | 낮음 | installer/backend SHA-256과 build provenance 강제 |
+| 서명된 installer와 별도 loose payload가 다름 | 높음 | 낮음 | 최종 업로드 복사본을 먼저 고정하고 installer 내부를 추출해 전체 bundle 검증 |
+| 같은 commit이 다른 Python package를 서명 | 높음 | 낮음 | exact Node/Python과 hash-locked binary-only dependency 설치 |
 
 ## 10. 대안 평가
 
@@ -430,3 +446,5 @@ downgrade는 필요 없다.
 | Version | Date | Changes | Author |
 |---|---|---|---|
 | 1.0.0 | 2026-07-24 | 최종 trigger evidence와 v1.0.16 코드 구조 기반 신규 연결 churn 개선 계획 | Codex |
+| 1.1.0 | 2026-08-05 | 구현·rollback 상태와 exact-commit signed field revalidation 경계 동기화 | Codex |
+| 1.2.0 | 2026-08-05 | installer 내부 payload·TOCTOU·dependency supply-chain signing gate 강화 | Codex |

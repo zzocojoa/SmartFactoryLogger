@@ -48,6 +48,7 @@ SPOT Temperature v2.5 서버 검증은 다음 문서를 사용합니다.
 - [Backend API reference](backend/API_DOCUMENTATION.md)
 - [SPOT source-port quarantine 설계](docs/02-design/features/spot-tcp-source-port-quarantine-v2.design.md)
 - [SPOT source-port field/report 상태](docs/04-report/spot-tcp-source-port-quarantine-v2.report.md)
+- [Windows Authenticode 서명 운영](docs/V2/05_운영_배포/windows_authenticode_signing.md)
 - [배포 체크리스트](docs/V2/DEPLOYMENT_CHECKLIST.md)
 
 ## Build commit provenance

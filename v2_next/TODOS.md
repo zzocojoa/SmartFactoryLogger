@@ -8,11 +8,39 @@
 
 **Why:** Earlier field evidence belongs to different commits, and packaged commit `49fbf6b` failed CSV shutdown-closeout QA before the verified v1.0.16 rollback.
 
-**Context:** Start only after CI and packaged native X-close validation pass for the exact final commit. Then run the read-only preinstall gate, install, commit-bound re-attestation, one-command QA, 15-minute smoke, 120-minute canary, and final read-only live gate. Do not reuse `575e869`, `49fbf6b`, or `949ef38` field evidence.
+**Context:** CI and packaged native X-close validation passed for commit `c1845e9`. The fail-closed signed-release workflow now hash-locks Windows Python dependencies, extracts the exact installer selected for upload, verifies every backend bundle entry and Authenticode identity, and rechecks the final installer hash before upload. The `production-signing` environment still needs the approved certificate, password, thumbprint, and protection rules. After a signed artifact passes, run the read-only preinstall gate, install, commit-bound re-attestation, one-command QA, 15-minute smoke, 120-minute canary, and final read-only live gate. Do not reuse `575e869`, `49fbf6b`, or `949ef38` field evidence.
 
 **Effort:** XL
 **Priority:** P0
-**Depends on:** Production Authenticode signing and exact-commit CI artifacts
+**Depends on:** Production Authenticode credentials and protected GitHub Environment configuration
+
+### Sign portable Windows distribution before promotion
+
+**What:** Add independent Authenticode signing and verification for the portable
+backend executable before publishing a portable ZIP as an operational release.
+
+**Why:** The protected signed-release workflow intentionally publishes only the
+verified NSIS installer. A portable ZIP must not inherit the word "signed" from a
+different artifact while its executable has not been independently verified.
+
+**Context:** PR CI may continue producing an explicitly named unsigned portable
+artifact for internal validation. This does not block NSIS-based server validation.
+
+**Effort:** M
+**Priority:** P1
+**Depends on:** Approved portable-distribution requirement and production signing method
+
+### Move production signing to non-exportable key custody
+
+**What:** Replace the exportable PFX secret with an approved HSM, EV token, or remote signing service that never exposes private-key material to the build process.
+
+**Why:** The current protected workflow limits PFX access to the approved exact-commit signing job and deletes the ephemeral file, but electron-builder and its child processes can access that key while `npm run dist` is running.
+
+**Context:** This is a key-custody hardening item. It does not weaken the current exact-commit, protected-environment, signer-thumbprint, timestamp, extracted-payload, or final-hash gates. Revoke the PFX and disable the environment immediately if exposure is suspected.
+
+**Effort:** L
+**Priority:** P1
+**Depends on:** Approved organization signing service or hardware-backed certificate
 
 ## Engineering Debt
 

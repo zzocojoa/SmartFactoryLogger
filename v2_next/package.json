@@ -17,7 +17,7 @@
     "health:backend:lint": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m ruff check backend",
     "health:backend:typecheck": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m mypy",
     "health:backend:test": "node scripts/run_backend_unittest.cjs",
-    "health:qa:selftest": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/measure_nsis_operational_ready.ps1 -SelfTest"
+    "health:qa:selftest": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/measure_nsis_operational_ready.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_release_signature.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_release_workflow_contract.ps1 -SelfTest"
   },
   "keywords": [],
   "author": "",
@@ -25,6 +25,7 @@
   "devDependencies": {
     "electron": "^41.10.1",
     "electron-builder": "^26.15.3",
+    "js-yaml": "4.3.0",
     "playwright": "^1.60.0"
   },
   "dependencies": {
@@ -78,6 +79,10 @@
       {
         "from": "scripts/measure_nsis_operational_ready.ps1",
         "to": "qa/measure_nsis_operational_ready.ps1"
+      },
+      {
+        "from": "scripts/backend_bundle_integrity.psm1",
+        "to": "qa/backend_bundle_integrity.psm1"
       }
     ]
   }

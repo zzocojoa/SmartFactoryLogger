@@ -444,6 +444,13 @@ class ElectronPreloadContractTests(unittest.TestCase):
             },
             packaged_resources,
         )
+        self.assertIn(
+            {
+                "from": "scripts/backend_bundle_integrity.psm1",
+                "to": "qa/backend_bundle_integrity.psm1",
+            },
+            packaged_resources,
+        )
 
     def test_measurement_script_has_strict_failure_and_session_contract(self) -> None:
         script_text = (
