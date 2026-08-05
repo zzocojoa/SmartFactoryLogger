@@ -28,5 +28,7 @@ monitoring capabilities.
 
 **Documentation**:
 
-- [V2 Implementation Roadmap](./v2_next/docs/V2/V2_Implementation_Phases.md)
-- [V2 Git Strategy](./v2_next/docs/V2/V2_0_Migration_Strategy.md)
+- [V2 development and validation guide](./v2_next/README.md)
+- [V2 deployment checklist](./v2_next/docs/V2/DEPLOYMENT_CHECKLIST.md)
+- [Backend API reference](./v2_next/backend/API_DOCUMENTATION.md)
+- [SPOT source-port validation report](./v2_next/docs/04-report/spot-tcp-source-port-quarantine-v2.report.md)

@@ -2,6 +2,10 @@
 
 > Version: 1.2.0 | Date: 2026-07-31 | Status: Current HEAD field revalidation required
 > Level: Dynamic | Parent: `spot-request-churn-remediation`
+> Operational update (2026-08-05): packaged commit `49fbf6b` reproduced the
+> shutdown-closeout QA failure and the server was restored to verified v1.0.16.
+> Historical `575e869` field evidence remains valid only for that exact package;
+> no later development package is approved or installed on the server.
 
 ---
 
@@ -206,11 +210,12 @@ source port만 명시한다.
 
 ## 8. Rollback과 운영 경계
 
-- 현재 실제 서버는 검증된 `575e869` v1.0.17 package를 계속 운영한다.
+- 현재 실제 서버는 검증된 v1.0.16 rollback package를 운영한다.
 - v1.0.16 rollback installer와 SHA-256은 비상 복구용으로 유지한다.
 - adversarial review 후 추가된 CSV pre-write 검증, exact QA CSV binding,
-  Electron partial-response 처리, observation spool health-count cache는 새
-  product-runtime/QA delta이므로 `575e869` field 증거를 상속하지 않는다.
+  Electron partial-response 처리, authenticated X-button shutdown, loopback-only
+  shutdown control, observation spool health-count cache는 새 product-runtime/QA
+  delta이므로 `575e869` field 증거를 상속하지 않는다.
 - 후보 설치 전 기존 installer/backend/config SHA-256을 다시 확인한다.
 - field gate 하나라도 실패하면 정상 종료 후 검증된 v1.0.16 installer로 복귀한다.
 - 오류 큐를 clear하거나 Windows/SPOT/network 설정을 변경하지 않는다.
@@ -224,9 +229,9 @@ source port만 명시한다.
 | Plan | 완료 |
 | Design | 완료 |
 | Do | 완료 |
-| Local Check | 현재 HEAD 전체 health PASS |
-| Package/actual server 15분 Check | 새 commit package 필요 |
-| 120분 canary | `575e869` 완료, 현재 HEAD 재검증 필요 |
+| Local Check | code candidate 전체 health 및 개발 package native X-close PASS |
+| Package/actual server 15분 Check | signed final-commit package 필요 |
+| 120분 canary | `575e869` historical PASS, final package 재검증 필요 |
 
 ## 10. 참고
 

@@ -122,5 +122,14 @@ QA는 백엔드 종료 API를 호출하지 않는다. 운영자가 SmartFactoryL
 SmartFactoryLogger 1.0.13과 실장비 SPOT을 사용한 최종 서버 검증은 `31/31 PASS`,
 warning `0`, full CSV validator PASS로 완료됐다.
 
+### v1.0.17 릴리스 상태 (2026-08-05)
+
+`575e869` 패키지의 re-attestation, QA, 15분 smoke, 120분 canary 결과는 그
+commit에만 유효하다. 이후 `49fbf6b` 패키지는 X 버튼 종료 뒤 현재 session의
+`csv_closeout.finalized=true` sidecar를 만들지 못해 QA가 fail closed 처리했고,
+서버는 검증된 v1.0.16 installer로 rollback됐다. 이후 개발 패키지의 local native
+X-close 검증은 통과했지만 서버에 설치되지 않았다. 최종 서명 package는 자신의
+commit-bound re-attestation과 이 QA 전체를 새로 통과해야 한다.
+
 - [서버 검증 보고서](../../04-report/spot-temperature-v2-5-server-validation.md)
 - [Sanitized evidence](../../04-report/evidence/sfl-spot-temperature-v25-qa-20260713-233141.sanitized.json)

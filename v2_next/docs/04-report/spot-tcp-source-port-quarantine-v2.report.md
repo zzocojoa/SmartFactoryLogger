@@ -1,11 +1,13 @@
 # Completion Report: SPOT TCP Source-Port Quarantine v2
 
-> Date: 2026-07-31 | Level: Dynamic | Match Rate: 100%
+> Date: 2026-08-05 | Level: Dynamic | Match Rate: 100%
 > Validated package: `FIELD_CANARY_PASS / PHYSICAL_PATH_PARTIAL`
 > Validated runtime source: `575e869b63d3052156624886fe0358fb39d6c98a`
+> Current server runtime: verified v1.0.16 rollback
 > Current PR HEAD: `FIELD_REVALIDATION_REQUIRED`
-> Closure: `575E869_DONE_WITH_CONCERNS / CURRENT_HEAD_OPEN`
-> Post-validation delta: CSV durability, QA identity, Electron response, and health hot paths
+> Closure: `575E869_HISTORICAL_EVIDENCE / CURRENT_HEAD_OPEN`
+> Post-validation delta: CSV durability, QA identity, authenticated Electron shutdown,
+> loopback control access, partial-response handling, and health hot paths
 
 ---
 
@@ -26,10 +28,12 @@ canary, and the final live gate on the actual server. No new `spot_image`
 ConnectTimeout, SPOT handshake failure, HTTP error, pool exhaustion, transport
 failure, or reuse violation occurred.
 
-Managed-switch evidence was unavailable, so the software promotion gate passes
-for the exact `575e869` package while physical-path attribution remains partial.
-This limitation does not require rollback of the server. The package includes
-the observation-fact post-append durability fix from commit `70b9339`.
+Managed-switch evidence was unavailable, so the software promotion gate passed
+for the exact `575e869` package while physical-path attribution remained partial.
+That historical result was later superseded operationally: packaged commit
+`49fbf6b` reproduced a missing shutdown-closeout QA failure, and the server was
+restored to the verified v1.0.16 installer. The `575e869` package includes the
+observation-fact post-append durability fix from commit `70b9339`.
 
 A final adversarial review found three additional failure paths after the
 `575e869` canary: v2 persistence validation occurred after the durable write,
@@ -42,6 +46,8 @@ a mutation-aware pending-count cache. Because the changes affect runtime code
 and the QA bundle, they cannot inherit the `575e869` field evidence.
 The extracted Electron connection-test client is also explicitly included in
 the packaging allowlist so the next installer cannot omit a startup dependency.
+Later development commits restore the authenticated Electron X-button shutdown
+request and restrict standalone shutdown control to trusted loopback clients.
 
 ```text
 Implementation completion rate: 100%
@@ -121,8 +127,8 @@ transport rows apply only to the packaged `575e869` baseline.
 | Reuse at 74.999 seconds | blocked | blocked | PASS |
 | Reuse at 75.000 seconds | allowed | allowed | PASS |
 | Focused backend tests | all | 112 tests + 2 subtests | PASS |
-| Current HEAD full backend tests | all | 641 | PASS |
-| Current HEAD Electron tests | all | 45 | PASS |
+| Current code candidate full backend tests | all | 642 | PASS |
+| Current code candidate Electron tests | all | 51 | PASS |
 | Current HEAD frontend tests | all | 253 / 34 files | PASS |
 | Ruff / mypy | no errors | no errors | PASS |
 | Unhandled future warnings | `0` | `0` | PASS |
@@ -256,10 +262,11 @@ used for the final promotion decision.
   SPOT polling instead of silently violating the quarantine invariant.
 - Rollback requires the already verified v1.0.16 installer; no data repair or
   schema rollback is needed.
-- The actual server remains on the verified `1.0.17` package built from
-  `575e869`. Current evidence does not indicate rollback.
-- The final package, backend, config, attestation, QA, canary, and live-gate
-  identities are bound to the same `575e869` source commit.
+- The actual server is restored to the verified v1.0.16 rollback package after
+  `49fbf6b` reproduced the shutdown-closeout QA failure.
+- The historical package, backend, config, attestation, QA, canary, and live-gate
+  identities remain bound to the same `575e869` source commit and cannot be
+  reused for a later candidate.
 - Error-queue deletion, configuration changes, and forced image-load tests are
   not required for the running package.
 - Commit `70b9339`, included in the validated package, preserves
@@ -270,7 +277,9 @@ used for the final promotion decision.
 - The current PR validates v2 batch persistence metadata before `writerows`,
   binds QA to the exact shutdown CSV basename, and handles backend response
   `aborted`, `error`, and premature `close` events with a single-settlement
-  Electron client. These changes require a new package and field validation.
+  Electron client. It also restores the authenticated Electron X-button
+  shutdown request and restricts standalone shutdown control to loopback.
+  These changes require a new signed package and field validation.
 - Observation spool/archive pending rows are scanned once per writer lifecycle
   and then tracked on spool append and drain, removing archive-size-dependent
   filesystem work from the recurring health path.
@@ -323,12 +332,11 @@ promotion decision.
 
 ## 9. Next Action
 
-Keep the verified `1.0.17` package from commit `575e869` running on
-the verified target server. Do not rollback, clear the error queue, or change
-SPOT settings based on the current evidence. Build the current PR HEAD only
-after local and CI gates pass, then repeat commit-bound re-attestation, QA,
-15-minute smoke, 120-minute canary, and final live-gate verification for that
-new package.
+Keep the verified v1.0.16 rollback package running on the target server. Do not
+clear the error queue, change SPOT settings, or install an unsigned development
+package. Build and sign the final PR HEAD only after local and CI gates pass,
+then repeat commit-bound preinstall verification, re-attestation, QA, 15-minute
+smoke, 120-minute canary, and final live-gate verification for that package.
 If governance later requires full physical-path sign-off, collect managed-switch
 port counters and logs as a separate operational evidence task. If the SPOT
 under-range state returns unexpectedly, inspect the physical process and device
@@ -353,3 +361,4 @@ range separately from this closed TCP remediation.
 | 2.2 | 2026-07-31 | Kept `f101d88` as the verified runtime and reopened current-HEAD field promotion after the post-field observation-fact durability fix |
 | 2.3 | 2026-07-31 | Froze identity-matched `575e869` re-attestation, QA, smoke, 120-minute canary, corrected 39-check final gate, and production operating decision |
 | 2.4 | 2026-07-31 | Preserved `575e869` as the operating baseline and reopened current-HEAD promotion for adversarial CSV, QA identity, Electron partial-response, and health hot-path fixes |
+| 2.5 | 2026-08-05 | Recorded the `49fbf6b` shutdown-closeout QA failure, verified v1.0.16 rollback, authenticated Electron X-close restoration, loopback shutdown control, and final-commit field revalidation boundary |

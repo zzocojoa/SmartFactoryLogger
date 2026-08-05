@@ -93,11 +93,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - The packaged `575e869` baseline passed the complete Electron, frontend,
   backend, lint, type-check, QA self-test, production-build, transport-race,
   and socket-interrupt suites.
-- Current commit `d8ca5c4` passed the complete local health suite: 51 Electron
+- Code candidate `d8ca5c4` passed the complete local health suite: 51 Electron
   tests, 253 frontend tests across 34 files, 642 backend tests, frontend
-  type-check and lint, Ruff, mypy, and the NSIS QA self-test. A new exact-commit
-  signed installer, packaged native X-close validation, and field validation
-  are still required.
+  type-check and lint, Ruff, mypy, and the NSIS QA self-test. The subsequent
+  `7d44ad2` packaged development build passed an isolated native X-button close:
+  startup health reached `200`, all product processes and health stopped, and
+  its commit-bound metadata recorded `csv_closeout.finalized=true`.
 - Passed commit-bound re-attestation, one-command QA, the approved 15-minute
   smoke, and the 120-minute canary for packaged commit `575e869`. The final
   live gate retained the expected backend and config hashes, verified
@@ -110,11 +111,12 @@ All notable changes to Smart Factory Logger V2 are documented here.
   `PHYSICAL_PATH_PARTIAL`; it cannot be reused for the current commit.
 - Packaged commit `49fbf6b` reproduced the missing CSV shutdown-closeout failure
   during one-command QA and was rolled back to the verified v1.0.16 installer.
-  Neither the unsigned `949ef38` candidate nor current commit `d8ca5c4` has been
-  installed on the server.
-- The current commit must pass a new signed exact-commit package build, native
-  X-close validation, preinstall gate, re-attestation, QA, 15-minute smoke,
-  120-minute canary, and final live gate before production promotion.
+  Neither the unsigned `949ef38` candidate nor the later development packages
+  have been installed on the server.
+- Production promotion remains blocked until a signed package bound to the
+  final post-documentation commit passes its exact-commit identity and native
+  X-close checks, then the server preinstall gate, re-attestation, QA,
+  15-minute smoke, 120-minute canary, and final live gate.
 
 ### Compatibility
 
