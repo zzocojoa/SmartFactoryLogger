@@ -125,6 +125,13 @@ export const postOpenCommLogFile = async () => apiClient.post('/api/logs/comm-me
 export const postConnectionTest = async (
   payload: Record<string, unknown> = {}
 ): Promise<ConnectionTestData> => {
+  const electronTestConnection =
+    typeof window !== 'undefined'
+      ? window.smartFactoryElectron?.testConnection
+      : undefined;
+  if (electronTestConnection) {
+    return await electronTestConnection(payload) as ConnectionTestData;
+  }
   const response = await apiClient.post<ConnectionTestData>('/api/control/test-connection', payload);
   return response.data;
 };

@@ -1,7 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const http = require('http');
 const { randomBytes } = require('crypto');
 const { spawn } = require('child_process');
 const kill = require('tree-kill');
@@ -16,7 +15,16 @@ const {
   buildBackendProgressEnvironment,
   createBackendProgressFileTransport,
 } = require('./backendStartupProgress');
-const { createStartupIpcHandlers, normalizeDocumentUrl } = require('./startupIpc');
+const {
+  createStartupIpcHandlers,
+  isTrustedStartupSender,
+  normalizeDocumentUrl,
+} = require('./startupIpc');
+const { createBackendControlIpcHandlers } = require('./backendControlIpc');
+const {
+  requestBackendConnectionTest: sendBackendConnectionTest,
+  requestBackendGracefulShutdown: sendBackendGracefulShutdown,
+} = require('./backendControlClient');
 
 const startupOriginNs = process.hrtime.bigint();
 const startupSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -54,6 +62,9 @@ const STARTUP_PAYLOAD_MAX_KEY_LENGTH = 64;
 const STARTUP_PAYLOAD_MAX_STRING_LENGTH = 200;
 const MAX_RENDERER_STARTUP_EVENTS_PER_NAME = 4;
 const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;
+const BACKEND_CONTROL_RESPONSE_MAX_BYTES = 1024 * 1024;
+const BACKEND_CONNECTION_TEST_TIMEOUT_MS = 10_000;
+const BACKEND_SHUTDOWN_REQUEST_TIMEOUT_MS = 2_000;
 
 let mainWindow;
 let backendProcess;
@@ -300,6 +311,34 @@ function registerStartupIpcHandlers() {
   ipcMain.handle('sfl:retry-startup', handlers.retryStartup);
   ipcMain.handle('sfl:continue-startup-offline', handlers.continueStartupOffline);
   ipcMain.handle('sfl:exit-startup', handlers.exitStartup);
+}
+
+function resolveBackendPort() {
+  const configuredPort = Number.parseInt(process.env.BACKEND_PORT || '8000', 10);
+  return Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65_535
+    ? configuredPort
+    : 8000;
+}
+
+function requestBackendConnectionTest(serializedPayload) {
+  return sendBackendConnectionTest(serializedPayload, {
+    controlToken: backendControlToken,
+    port: resolveBackendPort(),
+    maxResponseBytes: BACKEND_CONTROL_RESPONSE_MAX_BYTES,
+    timeoutMs: BACKEND_CONNECTION_TEST_TIMEOUT_MS,
+  });
+}
+
+function registerBackendControlIpcHandlers() {
+  const handlers = createBackendControlIpcHandlers({
+    isTrustedSender: (event) => isTrustedStartupSender(
+      event,
+      mainWindow,
+      trustedMainDocumentUrl
+    ),
+    requestConnectionTest: requestBackendConnectionTest,
+  });
+  ipcMain.handle('sfl:test-connection', handlers.testConnection);
 }
 
 function createWindow() {
@@ -620,38 +659,11 @@ function startBackend() {
 }
 
 function requestBackendGracefulShutdown() {
-  const configuredPort = Number.parseInt(process.env.BACKEND_PORT || '8000', 10);
-  const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65_535
-    ? configuredPort
-    : 8000;
-  const body = JSON.stringify({ reason: applicationQuitting ? 'electron_exit' : 'electron_retry' });
-
-  return new Promise((resolve, reject) => {
-    const request = http.request({
-      hostname: '127.0.0.1',
-      port,
-      path: '/api/control/shutdown',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-        'X-SFL-Control-Token': backendControlToken,
-      },
-    }, (response) => {
-      response.resume();
-      response.once('end', () => {
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          resolve();
-          return;
-        }
-        reject(new Error(`Backend shutdown endpoint returned HTTP ${response.statusCode}.`));
-      });
-    });
-    request.setTimeout(2_000, () => {
-      request.destroy(new Error('Backend shutdown request timed out.'));
-    });
-    request.once('error', reject);
-    request.end(body);
+  return sendBackendGracefulShutdown({
+    controlToken: backendControlToken,
+    port: resolveBackendPort(),
+    reason: applicationQuitting ? 'electron_exit' : 'electron_retry',
+    timeoutMs: BACKEND_SHUTDOWN_REQUEST_TIMEOUT_MS,
   });
 }
 
@@ -724,6 +736,7 @@ app.whenReady().then(() => {
   log("App ready, preparing startup window...");
   registerMemoryIpcHandlers();
   registerStartupIpcHandlers();
+  registerBackendControlIpcHandlers();
   startupCoordinator.start();
   createWindow();
   logStartupEvent('electron.ready-flow-complete');

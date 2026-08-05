@@ -55,6 +55,8 @@ class CommMetricsLoggerService:
         self.running = False
         self._stop_event = threading.Event()
         self._file_path: Optional[str] = None
+        self.listener: Optional[QueueListener] = None
+        self._listener_running = False
         self.logger = self._build_logger()
         self._last_ex_connected: Optional[bool] = None
         self._last_ls_connected: Optional[bool] = None
@@ -109,8 +111,13 @@ class CommMetricsLoggerService:
         logger.addHandler(queue_handler)
         logger.propagate = False
         
-        self.listener = QueueListener(log_queue, file_handler, respect_handler_level=True)
+        self.listener = QueueListener(
+            log_queue,
+            file_handler,
+            respect_handler_level=True,
+        )
         self.listener.start()
+        self._listener_running = True
         
         return logger
 
@@ -120,6 +127,9 @@ class CommMetricsLoggerService:
     def start(self) -> None:
         if self.running:
             return
+        if self.listener is not None and not self._listener_running:
+            self.listener.start()
+            self._listener_running = True
         self._stop_event.clear()
         self.running = True
         self.thread = threading.Thread(target=self._loop, name="CommMetricsLogger", daemon=True)
@@ -137,11 +147,13 @@ class CommMetricsLoggerService:
         if stopped:
             self.thread = None
         listener_stopped = True
-        if hasattr(self, "listener") and self.listener:
+        if self.listener is not None and self._listener_running:
             try:
                 self.listener.stop()
             except Exception:
                 listener_stopped = False
+            else:
+                self._listener_running = False
         if stopped and listener_stopped:
             self.logger.info("Comm metrics logger stopped.")
         else:

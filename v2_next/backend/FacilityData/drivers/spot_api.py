@@ -6,6 +6,7 @@ import queue
 import re
 import threading
 import time
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,25 @@ from uuid import uuid4
 import httpx
 
 from backend import config
+from backend.FacilityData.drivers.spot_http_transport import (
+    DEFAULT_MAX_RESPONSE_BYTES,
+    HARD_MAX_RESPONSE_BYTES,
+    MAX_REDIRECT_HOPS,
+    SpotHttpRequest,
+    SpotHttpResponse,
+    SpotHttpTransport,
+    SpotRequestKind,
+    SpotTransportConnectTimeout,
+    SpotTransportClosedError,
+    SpotTransportError,
+    SpotTransportReadTimeout,
+    SpotTransportTimeout,
+    empty_spot_http_transport_diagnostics,
+    resolve_spot_redirect_url,
+)
+from backend.FacilityData.drivers.spot_port_quarantine import (
+    SpotPortPoolError,
+)
 from backend.FacilityData.spot_observation import (
     SPOT_INVALID_SENTINEL_VALUES,
     SpotPollStatus,
@@ -65,6 +85,7 @@ _SPOT_FOCUS_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
+_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC = 15.0
 _SPOT_DIAGNOSTIC_OUTPUT_PARAMS = SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 _SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
 _SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
@@ -73,8 +94,41 @@ _SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
 )
 _SPOT_RUNTIME_GIT_COMMIT = resolve_runtime_git_commit()
 _ACTUATOR_POS_PATTERN = re.compile(rb"Pos-->\s*(\d+)")
+
+
+@dataclass(frozen=True)
+class _SpotImageCacheEntry:
+    image_bytes: bytes
+    captured_at_epoch: float
+    captured_at_monotonic: float
+    upstream_latency_ms: float
+    image_url: str = ""
+
+
 _img_fetch_lock = asyncio.Lock()
 _spot_device_request_lock = asyncio.Lock()
+_SPOT_REQUEST_BUDGET_POLICY_VERSION = "spot-background-request-budget-v2"
+_SPOT_BACKGROUND_REQUEST_BUDGET_TARGET_PER_SEC = 6.0
+_SPOT_IMAGE_POLICY_VERSION = "spot-image-demand-shaping-v2"
+_SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC = 3.0
+_SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC = 3.0
+_SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC = 10.0
+_SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC = 7.0
+_SPOT_DIAGNOSTICS_REFRESH_INTERVAL_MIN_SEC = 10.0
+_img_cache_entry: Optional[_SpotImageCacheEntry] = None
+_img_refresh_task: Optional[asyncio.Task[_SpotImageCacheEntry]] = None
+_img_accepting_requests = True
+_img_last_source: Optional[str] = None
+_img_downstream_request_count = 0
+_img_upstream_request_count = 0
+_img_cache_hit_count = 0
+_img_singleflight_leader_count = 0
+_img_coalesced_waiter_count = 0
+_img_refresh_success_count = 0
+_img_refresh_failure_count = 0
+_img_cache_clock_anomaly_count = 0
+_img_last_upstream_started_at = 0.0
+_img_last_upstream_completed_at = 0.0
 _img_last_error = 0.0
 _img_failure_count = 0
 _img_last_error_code: Optional[str] = None
@@ -97,6 +151,13 @@ _spot_diagnostics_snapshot: Optional[Dict[str, Any]] = None
 _spot_diagnostics_last_error_code: Optional[str] = None
 _spot_diagnostics_last_error_message: Optional[str] = None
 _spot_diagnostics_seq = 0
+_spot_diagnostics_last_started_at = 0.0
+_spot_diagnostics_last_started_monotonic: Optional[float] = None
+_spot_diagnostics_last_completed_at = 0.0
+_spot_diagnostics_sweep_started_count = 0
+_spot_diagnostics_upstream_request_count = 0
+_spot_diagnostics_suppressed_poll_count = 0
+_spot_diagnostics_inflight_suppressed_count = 0
 _spot_config_provenance_lock = threading.Lock()
 _spot_config_drift_detected_count = 0
 _spot_config_active_drift_signature: Optional[str] = None
@@ -107,16 +168,19 @@ _spot_service_started_at = datetime.now(timezone.utc).isoformat().replace("+00:0
 _spot_poll_seq = 0
 _spot_observation_seq = 0
 _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
+_spot_observation_fact_writer_lock = threading.Lock()
 _spot_observation_fact_writer: Optional[SpotObservationFactWriter] = None
+_spot_observation_fact_write_tasks: set[asyncio.Task[None]] = set()
 _spot_diagnostics_task: Optional[asyncio.Task[None]] = None
 _spot_last_valid_value_at: Optional[float] = None
 _spot_last_valid_value_monotonic: Optional[float] = None
 _spot_temperature_cache_suppressed_until_valid = False
 _INVALID_IMAGE_PAYLOAD_REJECTION_CODES = {"empty-body", "invalid-image-html", "invalid-image-payload"}
-_SPOT_IMAGE_REQUEST_TIMEOUT = httpx.Timeout(connect=2.0, read=5.0, write=1.0, pool=5.0)
-
 # Async HTTP client reused for connection pooling.
 _http_client: Optional[httpx.AsyncClient] = None
+_spot_http_transport: Optional[SpotHttpTransport] = None
+_spot_http_transport_enforcement_required = False
+_spot_http_transport_shutdown_started = False
 _logger = logging.getLogger("spot_control")
 
 
@@ -396,7 +460,6 @@ def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
     with _spot_image_capture_lock:
         _spot_poll_running = False
         _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.set()
-        failure_count_before = _spot_image_capture_failure_count
     thread = _spot_image_capture_thread
     if getattr(_SPOT_IMAGE_CAPTURE_QUEUE, "unfinished_tasks", 0) > 0 and (
         thread is None or not thread.is_alive()
@@ -405,7 +468,7 @@ def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
     stopped = stop_spot_image_capture_writer(timeout_sec=timeout_sec)
     with _spot_image_capture_lock:
         failure_count_after = _spot_image_capture_failure_count
-    return stopped and failure_count_after == failure_count_before
+    return stopped and failure_count_after == 0
 
 
 def _reset_spot_image_capture_state_for_tests() -> None:
@@ -439,17 +502,78 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     _SPOT_IMAGE_CAPTURE_STOP.clear()
 
 
+def _reset_spot_image_request_state_for_tests() -> None:
+    global _img_fetch_lock, _img_cache_entry, _img_refresh_task, _img_accepting_requests, _img_last_source
+    global _img_downstream_request_count, _img_upstream_request_count, _img_cache_hit_count
+    global _img_singleflight_leader_count, _img_coalesced_waiter_count
+    global _img_refresh_success_count, _img_refresh_failure_count
+    global _img_cache_clock_anomaly_count
+    global _img_last_upstream_started_at, _img_last_upstream_completed_at
+    global _img_last_error, _img_failure_count, _img_last_error_code, _img_last_error_message
+    global _img_last_success_at
+
+    refresh_task = _img_refresh_task
+    if refresh_task is not None and not refresh_task.done():
+        refresh_task.cancel()
+    _img_fetch_lock = asyncio.Lock()
+    _img_cache_entry = None
+    _img_refresh_task = None
+    _img_accepting_requests = True
+    _img_last_source = None
+    _img_downstream_request_count = 0
+    _img_upstream_request_count = 0
+    _img_cache_hit_count = 0
+    _img_singleflight_leader_count = 0
+    _img_coalesced_waiter_count = 0
+    _img_refresh_success_count = 0
+    _img_refresh_failure_count = 0
+    _img_cache_clock_anomaly_count = 0
+    _img_last_upstream_started_at = 0.0
+    _img_last_upstream_completed_at = 0.0
+    _img_last_error = 0.0
+    _img_failure_count = 0
+    _img_last_error_code = None
+    _img_last_error_message = None
+    _img_last_success_at = 0.0
+
+
+def _reset_spot_diagnostics_request_state_for_tests() -> None:
+    global _spot_diagnostics_task
+    global _spot_diagnostics_last_started_at, _spot_diagnostics_last_started_monotonic
+    global _spot_diagnostics_last_completed_at, _spot_diagnostics_sweep_started_count
+    global _spot_diagnostics_upstream_request_count, _spot_diagnostics_suppressed_poll_count
+    global _spot_diagnostics_inflight_suppressed_count
+
+    diagnostics_task = _spot_diagnostics_task
+    if diagnostics_task is not None and not diagnostics_task.done():
+        diagnostics_task.cancel()
+    _spot_diagnostics_task = None
+    _spot_diagnostics_last_started_at = 0.0
+    _spot_diagnostics_last_started_monotonic = None
+    _spot_diagnostics_last_completed_at = 0.0
+    _spot_diagnostics_sweep_started_count = 0
+    _spot_diagnostics_upstream_request_count = 0
+    _spot_diagnostics_suppressed_poll_count = 0
+    _spot_diagnostics_inflight_suppressed_count = 0
+
+
 def get_latest_spot_image_capture_fact() -> Dict[str, str]:
     with _spot_image_capture_lock:
         return dict(_spot_image_capture_last_fact or {})
 
 
-def _spot_image_capture_fact_row_count() -> int:
-    return _get_spot_image_capture_writer().fact_row_count
+def _spot_image_capture_fact_stats() -> tuple[int, Optional[str], bool]:
+    writer = _get_spot_image_capture_writer()
+    try:
+        return writer.fact_row_count, writer.fact_sha256, True
+    except RuntimeError:
+        return writer.fact_row_count, None, False
 
 
 def get_spot_image_capture_health() -> Dict[str, Any]:
-    fact_row_count = _spot_image_capture_fact_row_count()
+    fact_row_count, fact_sha256, fact_manifest_state_ready = (
+        _spot_image_capture_fact_stats()
+    )
     with _spot_image_capture_lock:
         last_fact = _spot_image_capture_last_fact or {}
         return {
@@ -460,6 +584,8 @@ def get_spot_image_capture_health() -> Dict[str, Any]:
             "enqueued_count": _spot_image_capture_enqueued_count,
             "written_count": _spot_image_capture_written_count,
             "fact_row_count": fact_row_count,
+            "fact_sha256": fact_sha256,
+            "fact_manifest_state_ready": fact_manifest_state_ready,
             "dropped_count": _spot_image_capture_dropped_count,
             "failure_count": _spot_image_capture_failure_count,
             "last_enqueue_at": _spot_image_capture_last_enqueue_at or None,
@@ -473,6 +599,21 @@ def get_spot_image_capture_health() -> Dict[str, Any]:
             "last_capture_link_age_ms": last_fact.get("spot_image_link_age_ms"),
             "last_capture_linked_observation_key": last_fact.get("spot_image_linked_observation_key"),
         }
+
+
+def get_spot_image_capture_manifest_stats(
+    *,
+    fact_path: Path,
+) -> Dict[str, Any] | None:
+    writer = _get_spot_image_capture_writer()
+    if writer.fact_path.resolve() != fact_path.resolve():
+        return None
+    fact_row_count, fact_sha256, state_ready = _spot_image_capture_fact_stats()
+    return {
+        "fact_row_count": fact_row_count,
+        "fact_sha256": fact_sha256,
+        "fact_manifest_state_ready": state_ready,
+    }
 
 
 def _spot_image_capture_evidence_codes(snapshot: Dict[str, Any]) -> set[str]:
@@ -692,6 +833,118 @@ def _resolve_spot_image_url() -> str:
     return f"http://{spot_ip}/image.jpg"
 
 
+def _spot_image_refresh_interval_sec() -> float:
+    try:
+        configured_interval = float(config.SPOT_REFRESH_INTERVAL)
+    except (TypeError, ValueError):
+        return _SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC
+    if not math.isfinite(configured_interval) or configured_interval <= 0.0:
+        return _SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC
+    return min(
+        _SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC,
+        max(_SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC, configured_interval),
+    )
+
+
+def _spot_poll_interval_sec() -> float:
+    try:
+        configured_interval = float(config.SPOT_REFRESH_INTERVAL)
+    except (TypeError, ValueError):
+        configured_interval = 1.0
+    if not math.isfinite(configured_interval) or configured_interval <= 0.0:
+        configured_interval = 1.0
+    return max(0.5, configured_interval)
+
+
+def _spot_diagnostics_refresh_interval_sec() -> float:
+    return max(
+        _SPOT_DIAGNOSTICS_REFRESH_INTERVAL_MIN_SEC,
+        _spot_poll_interval_sec(),
+    )
+
+
+def _spot_background_request_budget() -> Dict[str, float | bool | str]:
+    poll_interval = _spot_poll_interval_sec()
+    image_rate = 1.0 / _spot_image_refresh_interval_sec() if str(config.SPOT_IP or "").strip() else 0.0
+    temperature_rate = 1.0 / poll_interval if str(config.SPOT_URL or "").strip() else 0.0
+    internal_temperature_rate = (
+        1.0 / poll_interval
+        if str(config.SPOT_INTERNAL_TEMPERATURE_URL or "").strip()
+        else 0.0
+    )
+    diagnostics_rate = (
+        len(_SPOT_DIAGNOSTIC_OUTPUT_PARAMS) / _spot_diagnostics_refresh_interval_sec()
+        if str(config.SPOT_URL or "").strip()
+        else 0.0
+    )
+    total_rate = image_rate + temperature_rate + internal_temperature_rate + diagnostics_rate
+    return {
+        "request_budget_policy_version": _SPOT_REQUEST_BUDGET_POLICY_VERSION,
+        "request_budget_target_max_per_sec": _SPOT_BACKGROUND_REQUEST_BUDGET_TARGET_PER_SEC,
+        "request_budget_image_max_per_sec": round(image_rate, 6),
+        "request_budget_temperature_max_per_sec": round(temperature_rate, 6),
+        "request_budget_internal_temperature_max_per_sec": round(
+            internal_temperature_rate,
+            6,
+        ),
+        "request_budget_diagnostics_max_per_sec": round(diagnostics_rate, 6),
+        "request_budget_total_background_max_per_sec": round(total_rate, 6),
+        "request_budget_within_target": total_rate
+        <= _SPOT_BACKGROUND_REQUEST_BUDGET_TARGET_PER_SEC,
+    }
+
+
+def _spot_image_cache_age_ms(
+    entry: _SpotImageCacheEntry,
+    *,
+    now_monotonic: Optional[float] = None,
+) -> float:
+    now_value = time.monotonic() if now_monotonic is None else now_monotonic
+    return max(0.0, (now_value - entry.captured_at_monotonic) * 1000.0)
+
+
+def _is_spot_image_cache_fresh(
+    entry: Optional[_SpotImageCacheEntry],
+    *,
+    now_monotonic: Optional[float] = None,
+    record_clock_anomaly: bool = False,
+    expected_image_url: Optional[str] = None,
+) -> bool:
+    global _img_cache_clock_anomaly_count
+    if entry is None:
+        return False
+    if expected_image_url is not None and entry.image_url != expected_image_url:
+        return False
+    now_value = time.monotonic() if now_monotonic is None else now_monotonic
+    age_seconds = now_value - entry.captured_at_monotonic
+    if age_seconds < 0.0:
+        if record_clock_anomaly:
+            _img_cache_clock_anomaly_count += 1
+            _logger.warning(
+                "SPOT image cache monotonic clock moved backwards",
+                extra={"code": "spot-image-cache-clock-anomaly"},
+            )
+        return False
+    return age_seconds < _spot_image_refresh_interval_sec()
+
+
+def _spot_image_response(
+    entry: _SpotImageCacheEntry,
+    *,
+    source: str,
+) -> tuple[bytes, Dict[str, Any]]:
+    global _img_last_source
+    _img_last_source = source
+    return entry.image_bytes, {
+        "status": "ok",
+        "source": source,
+        "captured_at": entry.captured_at_epoch,
+        "latency_ms": entry.upstream_latency_ms,
+        "age_ms": _spot_image_cache_age_ms(entry),
+        "image_path": "/image.jpg",
+    }
+
+
 def _resolve_spot_temperature_url() -> str:
     temp_url = str(config.SPOT_URL or "").strip()
     if not temp_url:
@@ -728,7 +981,13 @@ def _resolve_spot_diagnostic_url(param: str) -> str:
 
 
 def _spot_diagnostics_max_age_sec() -> float:
-    return configured_diagnostics_max_age_ms(config.SPOT_REFRESH_INTERVAL) / 1000.0
+    configured_max_age_sec = (
+        configured_diagnostics_max_age_ms(config.SPOT_REFRESH_INTERVAL) / 1000.0
+    )
+    return max(
+        configured_max_age_sec,
+        _spot_diagnostics_refresh_interval_sec() * 2.0,
+    )
 
 
 def _spot_configuration_snapshot() -> Dict[str, Any]:
@@ -761,9 +1020,17 @@ def _spot_configuration_snapshot() -> Dict[str, Any]:
 
 
 async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str) -> tuple[str, str]:
+    global _spot_diagnostics_upstream_request_count
+
     url = _resolve_spot_diagnostic_url(param)
     async with _spot_device_request_lock:
-        response = await client.get(url)
+        _spot_diagnostics_upstream_request_count += 1
+        response = await _request_spot_http_response(
+            client,
+            kind=SpotRequestKind.DIAGNOSTIC,
+            method="GET",
+            url=url,
+        )
         response.raise_for_status()
     return param, response.text.strip()[:_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS]
 
@@ -883,6 +1150,8 @@ async def _refresh_spot_diagnostics_safely(
     *,
     collection_mode: str = _SPOT_DIAGNOSTICS_COLLECTION_MODE,
 ) -> None:
+    global _spot_diagnostics_last_completed_at
+
     try:
         await _refresh_spot_diagnostics(client, poll_context, collection_mode=collection_mode)
     except Exception as exc:
@@ -913,6 +1182,8 @@ async def _refresh_spot_diagnostics_safely(
             "Spot diagnostics fetch failed",
             extra={"code": "spot-diagnostics-fetch-error", "error": _format_exception_message(exc)},
         )
+    finally:
+        _spot_diagnostics_last_completed_at = time.time()
 
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
@@ -920,7 +1191,15 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
     try:
         async with _spot_device_request_lock:
             request_started_at = time.monotonic()
-            response = await client.get(image_url, timeout=_SPOT_IMAGE_REQUEST_TIMEOUT)
+            response = await _request_spot_http_response(
+                client,
+                kind=SpotRequestKind.IMAGE,
+                method="GET",
+                url=image_url,
+                connect_timeout_sec=2.0,
+                read_timeout_sec=5.0,
+                max_response_bytes=HARD_MAX_RESPONSE_BYTES,
+            )
             response.raise_for_status()
     except httpx.TimeoutException as exc:
         request_elapsed_ms = (
@@ -978,10 +1257,17 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
 async def _request_spot_temperature_observation(
     client: httpx.AsyncClient,
     temp_url: str,
+    *,
+    request_kind: SpotRequestKind = SpotRequestKind.TEMPERATURE,
 ) -> tuple[float, SpotRawClassification]:
     try:
         async with _spot_device_request_lock:
-            response = await client.get(temp_url)
+            response = await _request_spot_http_response(
+                client,
+                kind=request_kind,
+                method="GET",
+                url=temp_url,
+            )
             response.raise_for_status()
     except httpx.TimeoutException as exc:
         classification = classify_spot_raw_response(
@@ -1133,7 +1419,12 @@ async def _request_spot_temperature(client: httpx.AsyncClient, temp_url: str) ->
 
 async def _request_spot_internal_temperature(client: httpx.AsyncClient, temp_url: str) -> float:
     try:
-        return await _request_spot_temperature(client, temp_url)
+        temperature, _classification = await _request_spot_temperature_observation(
+            client,
+            temp_url,
+            request_kind=SpotRequestKind.INTERNAL_TEMPERATURE,
+        )
+        return temperature
     except SpotTemperatureFetchError as exc:
         code = exc.code
         if code.startswith("temperature-"):
@@ -1346,9 +1637,12 @@ def _spot_observation_fact_path() -> Path:
 def _get_spot_observation_fact_writer() -> SpotObservationFactWriter:
     global _spot_observation_fact_writer
 
-    if _spot_observation_fact_writer is None:
-        _spot_observation_fact_writer = SpotObservationFactWriter(_spot_observation_fact_path())
-    return _spot_observation_fact_writer
+    with _spot_observation_fact_writer_lock:
+        if _spot_observation_fact_writer is None:
+            _spot_observation_fact_writer = SpotObservationFactWriter(
+                _spot_observation_fact_path()
+            )
+        return _spot_observation_fact_writer
 
 
 def _write_spot_observation_fact_safely(snapshot: Dict[str, Any]) -> None:
@@ -1365,11 +1659,25 @@ async def _write_spot_observation_fact_async(snapshot: Dict[str, Any]) -> None:
     write_task = asyncio.create_task(
         asyncio.to_thread(_write_spot_observation_fact_safely, snapshot)
     )
+    _spot_observation_fact_write_tasks.add(write_task)
+    write_task.add_done_callback(_spot_observation_fact_write_tasks.discard)
     try:
         await asyncio.shield(write_task)
     except asyncio.CancelledError:
         await write_task
         raise
+
+
+def spot_observation_fact_writes_drained() -> bool:
+    if any(not task.done() for task in _spot_observation_fact_write_tasks):
+        return False
+    writer = _spot_observation_fact_writer
+    if writer is None:
+        return True
+    try:
+        return writer.failure_count == 0 and writer.spool_pending_count() == 0
+    except Exception:
+        return False
 
 
 def get_spot_observation_fact_health() -> Dict[str, Any]:
@@ -1393,6 +1701,11 @@ def get_spot_observation_fact_health() -> Dict[str, Any]:
         "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
         "write_failure_count": int(writer.failure_count) if writer is not None else 0,
         "spool_pending_count": int(writer.spool_pending_count()) if writer is not None else 0,
+        "pending_write_count": sum(
+            not task.done()
+            for task in _spot_observation_fact_write_tasks
+        ),
+        "writes_drained": spot_observation_fact_writes_drained(),
         "diagnostics_capture_status": diagnostics_status,
         "diagnostics_binding_status": diagnostics_binding_status,
         "diagnostics_last_error_code": _spot_diagnostics_last_error_code,
@@ -1742,11 +2055,28 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
 def _schedule_spot_diagnostics_for_poll(
     client: httpx.AsyncClient,
     poll_context: SpotPollContext,
-) -> None:
+) -> bool:
     global _spot_diagnostics_task
+    global _spot_diagnostics_last_started_at, _spot_diagnostics_last_started_monotonic
+    global _spot_diagnostics_sweep_started_count, _spot_diagnostics_suppressed_poll_count
+    global _spot_diagnostics_inflight_suppressed_count
 
     if _spot_diagnostics_task is not None and not _spot_diagnostics_task.done():
-        return
+        _spot_diagnostics_inflight_suppressed_count += 1
+        return False
+
+    now_monotonic = time.monotonic()
+    if (
+        _spot_diagnostics_last_started_monotonic is not None
+        and now_monotonic - _spot_diagnostics_last_started_monotonic
+        < _spot_diagnostics_refresh_interval_sec()
+    ):
+        _spot_diagnostics_suppressed_poll_count += 1
+        return False
+
+    _spot_diagnostics_last_started_at = time.time()
+    _spot_diagnostics_last_started_monotonic = now_monotonic
+    _spot_diagnostics_sweep_started_count += 1
     _spot_diagnostics_task = asyncio.create_task(
         _refresh_spot_diagnostics_safely(
             client,
@@ -1755,6 +2085,7 @@ def _schedule_spot_diagnostics_for_poll(
             collection_mode=_SPOT_DIAGNOSTICS_COLLECTION_MODE,
         )
     )
+    return True
 
 
 async def _refresh_spot_temperature(
@@ -1856,16 +2187,71 @@ async def _refresh_spot_internal_temperature_safely(client: httpx.AsyncClient, l
 
 def get_spot_diagnostics() -> Dict[str, Any]:
     now = time.time()
+    cache_entry = _img_cache_entry
+    cache_age_ms = _spot_image_cache_age_ms(cache_entry) if cache_entry is not None else None
+    refresh_task = _img_refresh_task
+    try:
+        configured_image_url: Optional[str] = _resolve_spot_image_url()
+    except SpotImageConfigError:
+        configured_image_url = None
     payload = {
         "image_status": "error" if _img_last_error_code else ("ok" if _img_last_success_at else "idle"),
-        "image_source": "upstream" if _img_last_success_at else None,
+        "image_source": _img_last_source,
         "failure_count": int(_img_failure_count),
         "last_error_at": float(_img_last_error) if _img_last_error else None,
         "last_error_code": _img_last_error_code,
         "last_error_message": _img_last_error_message,
         "last_success_at": float(_img_last_success_at) if _img_last_success_at else None,
+        "image_request_policy_version": _SPOT_IMAGE_POLICY_VERSION,
+        "image_refresh_interval_sec_effective": _spot_image_refresh_interval_sec(),
+        "image_cache_present": cache_entry is not None,
+        "image_cache_fresh": (
+            _is_spot_image_cache_fresh(
+                cache_entry,
+                expected_image_url=configured_image_url,
+            )
+            if configured_image_url is not None
+            else False
+        ),
+        "image_cache_age_ms": cache_age_ms,
+        "image_refresh_in_flight": bool(refresh_task is not None and not refresh_task.done()),
+        "image_accepting_requests": bool(_img_accepting_requests),
+        "image_downstream_request_count": int(_img_downstream_request_count),
+        "image_upstream_request_count": int(_img_upstream_request_count),
+        "image_cache_hit_count": int(_img_cache_hit_count),
+        "image_singleflight_leader_count": int(_img_singleflight_leader_count),
+        "image_coalesced_waiter_count": int(_img_coalesced_waiter_count),
+        "image_refresh_success_count": int(_img_refresh_success_count),
+        "image_refresh_failure_count": int(_img_refresh_failure_count),
+        "image_cache_clock_anomaly_count": int(_img_cache_clock_anomaly_count),
+        "image_last_upstream_started_at": (
+            float(_img_last_upstream_started_at) if _img_last_upstream_started_at else None
+        ),
+        "image_last_upstream_completed_at": (
+            float(_img_last_upstream_completed_at) if _img_last_upstream_completed_at else None
+        ),
         "image_url_configured": bool(str(config.SPOT_IP or "").strip()),
         "image_path": "/image.jpg",
+        "diagnostics_refresh_interval_sec_effective": _spot_diagnostics_refresh_interval_sec(),
+        "diagnostics_refresh_in_flight": bool(
+            _spot_diagnostics_task is not None and not _spot_diagnostics_task.done()
+        ),
+        "diagnostics_sweep_started_count": int(_spot_diagnostics_sweep_started_count),
+        "diagnostics_upstream_request_count": int(_spot_diagnostics_upstream_request_count),
+        "diagnostics_suppressed_poll_count": int(_spot_diagnostics_suppressed_poll_count),
+        "diagnostics_inflight_suppressed_count": int(
+            _spot_diagnostics_inflight_suppressed_count
+        ),
+        "diagnostics_last_started_at": (
+            float(_spot_diagnostics_last_started_at)
+            if _spot_diagnostics_last_started_at
+            else None
+        ),
+        "diagnostics_last_completed_at": (
+            float(_spot_diagnostics_last_completed_at)
+            if _spot_diagnostics_last_completed_at
+            else None
+        ),
         "temperature_url_configured": bool(str(config.SPOT_URL or "").strip()),
         "temperature_cache_status": _temperature_cache_status(now),
         "temperature_cache_age_sec": _temperature_cache_age_sec(now),
@@ -1876,9 +2262,44 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         "temperature_last_upstream_status": _temp_last_upstream_status,
         "temperature_last_url": _temp_last_url,
     }
+    payload.update(_spot_background_request_budget())
+    payload.update(_spot_source_port_diagnostics())
     payload.update(_build_spot_temperature_snapshot_diagnostics(now))
     payload.update(_build_internal_temperature_diagnostics(now, include_cached_at=False))
     return payload
+
+
+def get_spot_observation_fact_manifest_summary(
+    *,
+    fact_path: Path | None = None,
+    realtime_rows: Iterable[Mapping[str, Any]] | None = None,
+    allow_offline_rebuild: bool = True,
+) -> Dict[str, Any]:
+    writer = _get_spot_observation_fact_writer()
+    if fact_path is not None and writer.output_path.resolve() != fact_path.resolve():
+        if not allow_offline_rebuild:
+            raise RuntimeError(
+                "SPOT observation fact runtime manifest path does not match closeout path"
+            )
+        writer = SpotObservationFactWriter(fact_path)
+    return writer.manifest_summary(
+        realtime_rows=realtime_rows,
+    )
+
+
+def ensure_spot_observation_fact_initialized(
+    *,
+    fact_path: Path,
+    allow_offline_rebuild: bool = True,
+) -> bool:
+    writer = _get_spot_observation_fact_writer()
+    if writer.output_path.resolve() != fact_path.resolve():
+        if not allow_offline_rebuild:
+            raise RuntimeError(
+                "SPOT observation fact runtime manifest path does not match initialization path"
+            )
+        writer = SpotObservationFactWriter(fact_path)
+    return writer.ensure_initialized()
 
 
 def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
@@ -1886,12 +2307,20 @@ def get_spot_internal_temperature_diagnostics() -> Dict[str, Any]:
 
 
 def get_image_state_summary() -> Dict[str, Any]:
+    cache_entry = _img_cache_entry
     return {
-        "image_bytes": 0,
+        "image_bytes": len(cache_entry.image_bytes) if cache_entry is not None else 0,
         "image_failure_count": int(_img_failure_count),
         "image_last_success_at": float(_img_last_success_at) if _img_last_success_at else None,
+        "image_cache_age_ms": (
+            _spot_image_cache_age_ms(cache_entry) if cache_entry is not None else None
+        ),
+        "image_cache_fresh": _is_spot_image_cache_fresh(cache_entry),
+        "image_refresh_in_flight": bool(_img_refresh_task is not None and not _img_refresh_task.done()),
+        "image_upstream_request_count": int(_img_upstream_request_count),
+        "image_downstream_request_count": int(_img_downstream_request_count),
         "image_url_present": bool(str(config.SPOT_IP or "").strip()),
-        "total_bytes": 0,
+        "total_bytes": len(cache_entry.image_bytes) if cache_entry is not None else 0,
     }
 
 
@@ -1939,44 +2368,470 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
-async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
-    """Read one current JPEG from the official SPOT /image.jpg resource."""
-    global _img_failure_count
+def _start_spot_http_transport() -> bool:
+    global _spot_http_transport
+    global _spot_http_transport_enforcement_required
+    global _spot_http_transport_shutdown_started
+
+    if _spot_http_transport is None:
+        _spot_http_transport = SpotHttpTransport()
+    started = _spot_http_transport.start()
+    _spot_http_transport_enforcement_required = bool(
+        _spot_http_transport.supported
+    )
+    _spot_http_transport_shutdown_started = False
+    return started
+
+
+async def _stop_spot_http_transport(timeout_sec: float = 7.0) -> bool:
+    global _http_client
+    global _spot_http_transport
+    global _spot_http_transport_shutdown_started
+
+    _spot_http_transport_shutdown_started = True
+    transport = _spot_http_transport
+    drained = True
+    transport_error: BaseException | None = None
+    if transport is not None:
+        try:
+            drained = await transport.close(timeout_sec=timeout_sec)
+        except BaseException as exc:
+            transport_error = exc
+        else:
+            if drained:
+                _spot_http_transport = None
+
+    client = _http_client
+    client_error: BaseException | None = None
+    if client is not None:
+        try:
+            await client.aclose()
+        except BaseException as exc:
+            client_error = exc
+        finally:
+            _http_client = None
+    if transport_error is not None:
+        raise transport_error
+    if client_error is not None:
+        raise client_error
+    return drained
+
+
+async def _reset_spot_http_transport_state_for_tests(
+    timeout_sec: float = 2.0,
+) -> None:
+    global _spot_http_transport
+    global _spot_http_transport_enforcement_required
+    global _spot_http_transport_shutdown_started
+
+    if not await _stop_spot_http_transport(timeout_sec=timeout_sec):
+        raise RuntimeError("SPOT HTTP transport test reset timed out")
+    _spot_http_transport = None
+    _spot_http_transport_enforcement_required = False
+    _spot_http_transport_shutdown_started = False
+
+
+def _spot_source_port_diagnostics() -> Dict[str, Any]:
+    transport = _spot_http_transport
+    if transport is not None:
+        return dict(transport.diagnostics())
+    return dict(empty_spot_http_transport_diagnostics())
+
+
+def _active_spot_http_transport() -> SpotHttpTransport | None:
+    transport = _spot_http_transport
+    if _spot_http_transport_shutdown_started:
+        raise SpotTransportClosedError("SPOT transport shutdown has started")
+    if transport is None:
+        if _spot_http_transport_enforcement_required:
+            raise SpotTransportClosedError(
+                "SPOT source-port enforcement transport is unavailable"
+            )
+        return None
+    if not transport.supported:
+        if _spot_http_transport_enforcement_required:
+            raise SpotTransportClosedError(
+                "SPOT source-port enforcement is unavailable"
+            )
+        return None
+    if not transport.active:
+        raise SpotTransportClosedError("SPOT source-port enforcement is inactive")
+    return transport
+
+
+def _transport_response_as_httpx(
+    response: SpotHttpResponse,
+    *,
+    method: str,
+    url: str,
+) -> httpx.Response:
+    request = httpx.Request(method, url)
+    return httpx.Response(
+        response.status_code,
+        headers=dict(response.headers),
+        content=response.body,
+        request=request,
+    )
+
+
+async def _request_spot_http_response(
+    client: httpx.AsyncClient,
+    *,
+    kind: SpotRequestKind,
+    method: str,
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    body: bytes | None = None,
+    connect_timeout_sec: float = 1.0,
+    read_timeout_sec: float = 5.0,
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
+    read_response_body: bool = True,
+) -> httpx.Response:
+    request = httpx.Request(method, url)
+    try:
+        transport = _active_spot_http_transport()
+    except (SpotTransportError, SpotPortPoolError) as exc:
+        raise httpx.RequestError(str(exc), request=request) from exc
+    if transport is None:
+        timeout = httpx.Timeout(
+            connect=connect_timeout_sec,
+            read=read_timeout_sec,
+            write=1.0,
+            pool=5.0,
+        )
+        if read_response_body:
+            response = await client.request(
+                method,
+                url,
+                headers=headers,
+                content=body,
+                timeout=timeout,
+            )
+            if len(response.content) > max_response_bytes:
+                raise httpx.RequestError(
+                    "SPOT response exceeds the configured byte limit",
+                    request=request,
+                )
+            return response
+        async with client.stream(
+            method,
+            url,
+            headers=headers,
+            content=body,
+            timeout=timeout,
+        ) as response:
+            return httpx.Response(
+                response.status_code,
+                headers=dict(response.headers),
+                content=b"",
+                request=request,
+            )
 
     try:
-        image_url = _resolve_spot_image_url()
-    except SpotImageConfigError as exc:
-        _record_image_error("config-missing", str(exc))
+        guarded_response = await transport.request(
+            SpotHttpRequest(
+                kind=kind,
+                method=method,
+                url=url,
+                headers=headers or {},
+                body=body,
+                connect_timeout_sec=connect_timeout_sec,
+                read_timeout_sec=read_timeout_sec,
+                max_response_bytes=max_response_bytes,
+                read_response_body=read_response_body,
+            )
+        )
+    except SpotTransportConnectTimeout as exc:
+        raise httpx.ConnectTimeout(str(exc), request=request) from exc
+    except SpotTransportReadTimeout as exc:
+        raise httpx.ReadTimeout(str(exc), request=request) from exc
+    except SpotTransportTimeout as exc:
+        raise httpx.TimeoutException(str(exc), request=request) from exc
+    except (SpotTransportError, SpotPortPoolError) as exc:
+        raise httpx.RequestError(str(exc), request=request) from exc
+    return _transport_response_as_httpx(
+        guarded_response,
+        method=method,
+        url=url,
+    )
+
+
+async def test_spot_http_connection(
+    url: str | None,
+    timeout_sec: float = 1.5,
+) -> dict[str, object]:
+    if not url:
+        return {"ok": False, "latency_ms": None, "message": "URL missing"}
+    started_at = time.perf_counter()
+    try:
+        async with _spot_device_request_lock:
+            client = _get_http_client()
+            response = await _request_spot_connection_probe(
+                client,
+                url=url,
+                method="HEAD",
+                timeout_sec=timeout_sec,
+            )
+            if response.status_code in {405, 501}:
+                response = await _request_spot_connection_probe(
+                    client,
+                    url=url,
+                    method="GET",
+                    timeout_sec=timeout_sec,
+                )
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        if not 200 <= response.status_code < 300:
+            return {
+                "ok": False,
+                "latency_ms": latency_ms,
+                "message": f"HTTP {response.status_code}",
+            }
+        return {
+            "ok": True,
+            "latency_ms": latency_ms,
+            "message": f"HTTP {response.status_code}",
+        }
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        return {
+            "ok": False,
+            "latency_ms": latency_ms,
+            "message": _format_exception_message(exc),
+        }
+
+
+async def _request_spot_connection_probe(
+    client: httpx.AsyncClient,
+    *,
+    url: str,
+    method: str,
+    timeout_sec: float,
+) -> httpx.Response:
+    current_url = url
+    for hop in range(MAX_REDIRECT_HOPS + 1):
+        response = await _request_spot_http_response(
+            client,
+            kind=SpotRequestKind.CONNECTION_TEST,
+            method=method,
+            url=current_url,
+            connect_timeout_sec=timeout_sec,
+            read_timeout_sec=timeout_sec,
+            read_response_body=False,
+        )
+        location = response.headers.get("location")
+        if response.status_code not in {301, 302, 303, 307, 308} or not location:
+            return response
+        if hop >= MAX_REDIRECT_HOPS:
+            raise httpx.RequestError(
+                "SPOT HTTP redirect limit was exceeded",
+                request=httpx.Request(method, current_url),
+            )
+        try:
+            current_url = resolve_spot_redirect_url(current_url, location)
+        except SpotTransportError as exc:
+            raise httpx.RequestError(
+                str(exc),
+                request=httpx.Request(method, current_url),
+            ) from exc
+    raise httpx.RequestError(
+        "SPOT HTTP redirect limit was exceeded",
+        request=httpx.Request(method, current_url),
+    )
+
+
+def _request_spot_http_response_sync(
+    *,
+    kind: SpotRequestKind,
+    method: str,
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    body: bytes | None = None,
+    timeout_sec: float = 3.0,
+) -> SpotHttpResponse | None:
+    transport = _active_spot_http_transport()
+    if transport is None:
+        return None
+    return transport.request_sync(
+        SpotHttpRequest(
+            kind=kind,
+            method=method,
+            url=url,
+            headers=headers or {},
+            body=body,
+            connect_timeout_sec=timeout_sec,
+            read_timeout_sec=timeout_sec,
+            max_response_bytes=DEFAULT_MAX_RESPONSE_BYTES,
+        )
+    )
+
+
+def _consume_spot_image_refresh_result(task: asyncio.Task[_SpotImageCacheEntry]) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        return
+
+
+async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
+    global _img_cache_entry, _img_failure_count
+    global _img_upstream_request_count, _img_refresh_success_count, _img_refresh_failure_count
+    global _img_last_upstream_started_at, _img_last_upstream_completed_at
+
+    client = _get_http_client()
+    started_at_epoch = time.time()
+    started_at_monotonic = time.monotonic()
+    _img_upstream_request_count += 1
+    _img_last_upstream_started_at = started_at_epoch
+    try:
+        data = await _request_spot_image(client, image_url)
+    except SpotImageFetchError as exc:
+        _record_image_error(exc.code, str(exc))
         _img_failure_count = min(_img_failure_count + 1, 10)
+        _img_refresh_failure_count += 1
+        _img_last_upstream_completed_at = time.time()
         raise
 
-    async with _img_fetch_lock:
-        client = _get_http_client()
-        started_at = time.monotonic()
+    captured_at_epoch = time.time()
+    captured_at_monotonic = time.monotonic()
+    entry = _SpotImageCacheEntry(
+        image_bytes=bytes(data),
+        captured_at_epoch=captured_at_epoch,
+        captured_at_monotonic=captured_at_monotonic,
+        upstream_latency_ms=max(0.0, (captured_at_monotonic - started_at_monotonic) * 1000.0),
+        image_url=image_url,
+    )
+    _img_cache_entry = entry
+    _img_refresh_success_count += 1
+    _img_last_upstream_completed_at = captured_at_epoch
+    _record_image_success()
+    _maybe_enqueue_spot_image_capture(
+        image_bytes=entry.image_bytes,
+        captured_at=entry.captured_at_epoch,
+        image_url=image_url,
+        source="official_image_jpg",
+        image_age_ms=0.0,
+    )
+    return entry
+
+
+async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
+    """Return a fresh process-local JPEG, coalescing concurrent upstream refreshes."""
+    global _img_downstream_request_count, _img_cache_hit_count
+    global _img_singleflight_leader_count, _img_coalesced_waiter_count
+    global _img_refresh_task, _img_failure_count
+
+    _img_downstream_request_count += 1
+    if not _img_accepting_requests:
+        raise SpotImageFetchError(
+            "shutdown",
+            "SPOT image service is stopping",
+            image_url="",
+            upstream_status=None,
+        )
+
+    while True:
         try:
-            data = await _request_spot_image(client, image_url)
-        except SpotImageFetchError as exc:
-            _record_image_error(exc.code, str(exc))
+            image_url = _resolve_spot_image_url()
+        except SpotImageConfigError as exc:
+            _record_image_error("config-missing", str(exc))
             _img_failure_count = min(_img_failure_count + 1, 10)
             raise
 
-        captured_at = time.time()
-        latency_ms = max(0.0, (time.monotonic() - started_at) * 1000.0)
-        _record_image_success()
-        _maybe_enqueue_spot_image_capture(
-            image_bytes=data,
-            captured_at=captured_at,
-            image_url=image_url,
-            source="official_image_jpg",
-            image_age_ms=0.0,
+        cache_entry = _img_cache_entry
+        if _is_spot_image_cache_fresh(
+            cache_entry,
+            record_clock_anomaly=True,
+            expected_image_url=image_url,
+        ):
+            assert cache_entry is not None
+            _img_cache_hit_count += 1
+            return _spot_image_response(cache_entry, source="cache")
+
+        is_leader = False
+        async with _img_fetch_lock:
+            if not _img_accepting_requests:
+                raise SpotImageFetchError(
+                    "shutdown",
+                    "SPOT image service is stopping",
+                    image_url=image_url,
+                    upstream_status=None,
+                )
+            cache_entry = _img_cache_entry
+            if _is_spot_image_cache_fresh(
+                cache_entry,
+                expected_image_url=image_url,
+            ):
+                assert cache_entry is not None
+                _img_cache_hit_count += 1
+                return _spot_image_response(cache_entry, source="cache")
+
+            refresh_task = _img_refresh_task
+            if refresh_task is None or refresh_task.done():
+                refresh_task = asyncio.create_task(_refresh_spot_image_cache(image_url))
+                refresh_task.add_done_callback(_consume_spot_image_refresh_result)
+                _img_refresh_task = refresh_task
+                _img_singleflight_leader_count += 1
+                is_leader = True
+            else:
+                _img_coalesced_waiter_count += 1
+
+        try:
+            refreshed_entry = await asyncio.shield(refresh_task)
+        except SpotImageFetchError:
+            try:
+                current_image_url = _resolve_spot_image_url()
+            except SpotImageConfigError:
+                continue
+            if current_image_url != image_url:
+                continue
+            raise
+        finally:
+            async with _img_fetch_lock:
+                if _img_refresh_task is refresh_task and refresh_task.done():
+                    _img_refresh_task = None
+
+        try:
+            current_image_url = _resolve_spot_image_url()
+        except SpotImageConfigError:
+            continue
+        if refreshed_entry.image_url != current_image_url:
+            continue
+
+        return _spot_image_response(
+            refreshed_entry,
+            source="upstream" if is_leader else "coalesced",
         )
-        return data, {
-            "status": "ok",
-            "source": "upstream",
-            "captured_at": captured_at,
-            "latency_ms": latency_ms,
-            "image_path": "/image.jpg",
-        }
+
+
+async def _stop_spot_image_refresh_for_shutdown(
+    timeout_sec: float = _SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC,
+) -> bool:
+    global _img_accepting_requests, _img_refresh_task
+
+    _img_accepting_requests = False
+    refresh_task = _img_refresh_task
+    if refresh_task is None:
+        return True
+    if not refresh_task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(refresh_task), timeout=max(0.0, timeout_sec))
+        except asyncio.TimeoutError:
+            _logger.warning(
+                "SPOT image refresh exceeded the shutdown timeout and will be cancelled",
+                extra={"code": "spot-image-refresh-shutdown-timeout"},
+            )
+            refresh_task.cancel()
+            await asyncio.gather(refresh_task, return_exceptions=True)
+        except SpotImageFetchError:
+            pass
+        except asyncio.CancelledError:
+            refresh_task.cancel()
+            await asyncio.gather(refresh_task, return_exceptions=True)
+            raise
+    _img_refresh_task = None
+    return refresh_task.done()
 
 # --- Temperature and diagnostics polling ---
 _spot_poll_task: Optional[asyncio.Task] = None
@@ -1990,7 +2845,7 @@ async def _spot_poll_loop():
     global _spot_diagnostics_task
     _spot_poll_running = True
 
-    interval = max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
+    interval = _spot_poll_interval_sec()
     next_tick = time.time()
 
     while _spot_poll_running:
@@ -2045,42 +2900,135 @@ async def _spot_poll_loop():
 
 async def start_spot_poll_loop():
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ??뽰삂."""
-    global _spot_poll_task, _spot_poll_running
+    global _img_accepting_requests, _spot_poll_task, _spot_poll_running
     if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
 
+    _start_spot_http_transport()
+    _img_accepting_requests = True
     _spot_poll_running = True
     _spot_poll_task = asyncio.create_task(_spot_poll_loop())
 
 
-async def stop_spot_poll_loop():
+async def stop_spot_poll_loop() -> bool:
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф 餓λ쵐?."""
     global _internal_temperature_task, _spot_poll_task, _spot_poll_running, _spot_diagnostics_task
     _spot_poll_running = False
 
-    if _spot_diagnostics_task:
-        _spot_diagnostics_task.cancel()
-        try:
-            await _spot_diagnostics_task
-        except asyncio.CancelledError:
-            pass
-        _spot_diagnostics_task = None
+    task_entries = (
+        ("diagnostics", _spot_diagnostics_task),
+        ("poll", _spot_poll_task),
+        ("internal_temperature", _internal_temperature_task),
+    )
+    for _, task in task_entries:
+        if task is not None and not task.done():
+            task.cancel()
 
-    if _spot_poll_task:
-        _spot_poll_task.cancel()
+    active_tasks = {
+        task: task_name
+        for task_name, task in task_entries
+        if task is not None
+    }
+    task_shutdown_succeeded = True
+    done: set[asyncio.Task[None]] = set()
+    pending: set[asyncio.Task[None]] = set()
+    if active_tasks:
+        done, pending = await asyncio.wait(
+            active_tasks,
+            timeout=_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
+        )
+    for task in done:
+        task_name = active_tasks[task]
         try:
-            await _spot_poll_task
+            task.result()
         except asyncio.CancelledError:
-            pass
+            continue
+        except BaseException as result:
+            task_shutdown_succeeded = False
+            _logger.warning(
+                "SPOT background task failed before shutdown completed",
+                extra={
+                    "code": "spot-background-task-shutdown-failed",
+                    "task": task_name,
+                    "error_type": type(result).__name__,
+                },
+            )
+    for task in pending:
+        task_shutdown_succeeded = False
+        task_name = active_tasks[task]
+        task.add_done_callback(_consume_spot_background_shutdown_result)
+        _logger.warning(
+            "SPOT background task did not drain before shutdown deadline",
+            extra={
+                "code": "spot-background-task-shutdown-timeout",
+                "task": task_name,
+                "timeout_sec": _SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
+            },
+        )
+
+    if _spot_diagnostics_task is None or _spot_diagnostics_task.done():
+        _spot_diagnostics_task = None
+    if _spot_poll_task is None or _spot_poll_task.done():
         _spot_poll_task = None
-    if _internal_temperature_task:
-        _internal_temperature_task.cancel()
-        try:
-            await _internal_temperature_task
-        except asyncio.CancelledError:
-            pass
+    if _internal_temperature_task is None or _internal_temperature_task.done():
         _internal_temperature_task = None
-    stop_spot_image_capture_writer()
+
+    try:
+        image_refresh_stopped = await _stop_spot_image_refresh_for_shutdown()
+    except Exception as exc:
+        image_refresh_stopped = False
+        _logger.warning(
+            "SPOT image refresh shutdown failed",
+            extra={
+                "code": "spot-image-refresh-shutdown-failed",
+                "error_type": type(exc).__name__,
+            },
+        )
+    try:
+        transport_stopped = await _stop_spot_http_transport()
+    except Exception as exc:
+        transport_stopped = False
+        _logger.warning(
+            "SPOT HTTP transport shutdown failed",
+            extra={
+                "code": "spot-http-transport-shutdown-failed",
+                "error_type": type(exc).__name__,
+            },
+        )
+    if not transport_stopped:
+        _logger.warning(
+            "SPOT HTTP transport did not drain before shutdown timeout",
+            extra={"code": "spot-http-transport-shutdown-timeout"},
+        )
+    observation_fact_drained = spot_observation_fact_writes_drained()
+    if not observation_fact_drained:
+        _logger.warning(
+            "SPOT observation fact writes did not drain before shutdown timeout",
+            extra={
+                "code": "spot-observation-fact-shutdown-timeout",
+                "pending_write_count": sum(
+                    not task.done()
+                    for task in _spot_observation_fact_write_tasks
+                ),
+            },
+        )
+    return (
+        task_shutdown_succeeded
+        and observation_fact_drained
+        and image_refresh_stopped
+        and transport_stopped
+    )
+
+
+def _consume_spot_background_shutdown_result(
+    task: asyncio.Task[None],
+) -> None:
+    if task.cancelled():
+        return
+    try:
+        task.exception()
+    except BaseException:
+        return
 
 
 def get_cached_spot_temp() -> float:
@@ -2163,9 +3111,18 @@ def _raise_spot_focus_request_error(action: str, focus_url: str, exc: BaseExcept
 
 def _read_spot_focus_position(focus_url: str) -> int:
     try:
-        with urlopen(focus_url, timeout=3) as resp:
-            code = resp.getcode()
-            content = resp.read()
+        guarded_response = _request_spot_http_response_sync(
+            kind=SpotRequestKind.FOCUS_READ,
+            method="GET",
+            url=focus_url,
+        )
+        if guarded_response is None:
+            with urlopen(focus_url, timeout=3) as resp:
+                code = resp.getcode()
+                content = resp.read()
+        else:
+            code = guarded_response.status_code
+            content = guarded_response.body
     except HTTPError as exc:
         body = _preview_spot_focus_body(exc.read())
         raise SpotFocusControlError(
@@ -2173,7 +3130,7 @@ def _read_spot_focus_position(focus_url: str) -> int:
             focus_url=focus_url,
             upstream_status=exc.code,
         ) from exc
-    except (TimeoutError, URLError, ValueError) as exc:
+    except (TimeoutError, URLError, ValueError, SpotTransportError, SpotPortPoolError) as exc:
         _raise_spot_focus_request_error("read", focus_url, exc)
 
     if code != 200:
@@ -2195,9 +3152,20 @@ def _write_spot_focus_position(focus_url: str, new_val: int) -> None:
         method="PUT",
     )
     try:
-        with urlopen(request, timeout=3) as resp:
-            code = resp.getcode()
-            content = resp.read()
+        guarded_response = _request_spot_http_response_sync(
+            kind=SpotRequestKind.FOCUS_WRITE,
+            method="PUT",
+            url=focus_url,
+            headers={"Content-Type": "application/json;charset=utf-8"},
+            body=str(new_val).encode("ascii"),
+        )
+        if guarded_response is None:
+            with urlopen(request, timeout=3) as resp:
+                code = resp.getcode()
+                content = resp.read()
+        else:
+            code = guarded_response.status_code
+            content = guarded_response.body
     except HTTPError as exc:
         body = _preview_spot_focus_body(exc.read())
         raise SpotFocusControlError(
@@ -2206,7 +3174,7 @@ def _write_spot_focus_position(focus_url: str, new_val: int) -> None:
             focus_url=focus_url,
             upstream_status=exc.code,
         ) from exc
-    except (TimeoutError, URLError, ValueError) as exc:
+    except (TimeoutError, URLError, ValueError, SpotTransportError, SpotPortPoolError) as exc:
         _raise_spot_focus_request_error("write", focus_url, exc)
 
     if code != 200:
@@ -2313,9 +3281,18 @@ def _resolve_spot_actuator_url() -> str:
 def _read_spot_actuator_position(actuator_url: str) -> int:
     read_url = f"{actuator_url}?scan=3"
     try:
-        with urlopen(read_url, timeout=3) as resp:
-            code = resp.getcode()
-            content = resp.read()
+        guarded_response = _request_spot_http_response_sync(
+            kind=SpotRequestKind.ACTUATOR_READ,
+            method="GET",
+            url=read_url,
+        )
+        if guarded_response is None:
+            with urlopen(read_url, timeout=3) as resp:
+                code = resp.getcode()
+                content = resp.read()
+        else:
+            code = guarded_response.status_code
+            content = guarded_response.body
     except HTTPError as exc:
         body = _preview_spot_focus_body(exc.read())
         raise SpotActuatorControlError(
@@ -2323,7 +3300,7 @@ def _read_spot_actuator_position(actuator_url: str) -> int:
             actuator_url=actuator_url,
             upstream_status=exc.code,
         ) from exc
-    except (TimeoutError, URLError, ValueError) as exc:
+    except (TimeoutError, URLError, ValueError, SpotTransportError, SpotPortPoolError) as exc:
         raise SpotActuatorControlError(
             "SPOT actuator request failed; "
             f"action=read; url={read_url}; error_type={exc.__class__.__name__}; "
@@ -2352,9 +3329,18 @@ def _read_spot_actuator_position(actuator_url: str) -> int:
 def _write_spot_actuator_position(actuator_url: str, new_val: int) -> None:
     write_url = f"{actuator_url}?scan=3&move={new_val}"
     try:
-        with urlopen(write_url, timeout=3) as resp:
-            code = resp.getcode()
-            content = resp.read()
+        guarded_response = _request_spot_http_response_sync(
+            kind=SpotRequestKind.ACTUATOR_WRITE,
+            method="GET",
+            url=write_url,
+        )
+        if guarded_response is None:
+            with urlopen(write_url, timeout=3) as resp:
+                code = resp.getcode()
+                content = resp.read()
+        else:
+            code = guarded_response.status_code
+            content = guarded_response.body
     except HTTPError as exc:
         body = _preview_spot_focus_body(exc.read())
         raise SpotActuatorControlError(
@@ -2362,7 +3348,7 @@ def _write_spot_actuator_position(actuator_url: str, new_val: int) -> None:
             actuator_url=actuator_url,
             upstream_status=exc.code,
         ) from exc
-    except (TimeoutError, URLError, ValueError) as exc:
+    except (TimeoutError, URLError, ValueError, SpotTransportError, SpotPortPoolError) as exc:
         raise SpotActuatorControlError(
             "SPOT actuator request failed; "
             f"action=write; url={write_url}; error_type={exc.__class__.__name__}; "

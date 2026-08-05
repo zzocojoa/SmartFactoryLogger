@@ -3,6 +3,7 @@ import type { SpotConfig } from '../../../shared/types';
 export interface SpotImageResponseMetadata {
   source: string | null;
   captured_at: number | null;
+  age_ms?: number | null;
   internal_temperature?: number | null;
   internal_temperature_at?: number | null;
   internal_temperature_status?: string | null;

@@ -2,6 +2,134 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.17] - 2026-08-05
+
+### Added
+
+- Added SPOT image request shaping with shared caching and single-flight
+  refreshes so multiple dashboard consumers no longer create duplicate device
+  connections.
+- Added a unified background request budget for image, target-temperature,
+  internal-temperature, and diagnostic traffic, with live diagnostics showing
+  the effective request rate.
+- Added an exclusive source-port pool with a 75-second quarantine window so
+  SPOT connections cannot quickly reuse the same TCP four-tuple.
+- Added a separate production-signing GitHub Environment workflow that keeps
+  certificate secrets out of PR builds and refuses release artifacts unless
+  the exact published installer and its extracted application, complete backend
+  bundle, signer thumbprint, timestamp, and build provenance all verify. Windows
+  release Python dependencies are pinned transitively with SHA-256 hashes, and
+  workflow action references are parsed as YAML and restricted to exact commit
+  allowlist entries.
+
+### Changed
+
+- Reduced normal SPOT image and diagnostic refresh rates while keeping the
+  dashboard responsive after visibility changes, errors, and route changes.
+- Expanded privacy-safe SPOT transport diagnostics without exposing raw source
+  port values or retaining packet payloads in shared evidence.
+
+### Fixed
+
+- Prevented cancelled requests, shutdown races, and blocked Windows sockets from
+  reopening SPOT transport intake or delaying application exit.
+- Kept source-port leases unavailable until their quarantine guard is
+  successfully rebound, including exhaustion and recovery behavior.
+- Preserved primary shutdown failures when drain probes fail, made partial guard
+  cleanup retryable, and kept source-port diagnostics schema-stable after
+  transport shutdown.
+- Kept observation and image fact closeout bounded by maintaining exact
+  row-count and SHA-256 manifest state while facts are appended instead of
+  rescanning indefinitely growing historical files during shutdown.
+- Bound one-command QA to the exact logger-service session and build commit
+  observed before operator shutdown and to the sidecar explicitly finalized by
+  that service shutdown. The closeout now records only the per-file sample
+  sequence persisted after a successful CSV flush, and the validator compares
+  it with the actual final and maximum CSV sequence. Daily rollover files,
+  multiline CSV values, stale same-process sidecars, failed final flushes, and
+  transient health failures therefore cannot misdirect or falsely pass QA.
+- Rejected clean fact closeout when an observation spool remains pending or an
+  observation/image writer recorded a failure earlier in the runtime, including
+  fail-closed handling when a restarted writer cannot read its spool and
+  persistent quarantine of malformed or schema-mismatched spool rows.
+- Made image-fact closeout fail closed when another writer changes the durable fact
+  file outside the active writer's tracked byte range, preventing stale row
+  counts or SHA-256 values from being trusted.
+- Preserved observation-fact deduplication after a durable append when a
+  subsequent file-size probe fails, so the same fact is not spooled and
+  appended twice while manifest closeout still fails closed.
+- Routed packaged device connection tests through trusted Electron main IPC
+  with a per-launch control token, and admitted only one SPOT probe per
+  30-second cooldown so unauthenticated LAN or browser traffic cannot queue or
+  continuously repeat probes ahead of operational temperature, image, or
+  diagnostic requests.
+- Kept v2 CSV logging available when the configured LogPath falls back or
+  changes before runtime fact writers can follow it, while marking the fact
+  manifests incomplete and rejecting a falsely clean shutdown.
+- Preserved focus and actuator API compatibility while routing eligible
+  background requests through the guarded transport.
+- Bound Windows release artifacts and their packaged backend provenance to the
+  pull-request head commit so CI cannot publish a synthetic merge build under a
+  source-commit identity.
+
+### Post-validation changes — field revalidation required
+
+- Restored the packaged Electron X-button shutdown request through the tested,
+  authenticated backend control client, including bounded fallback when the
+  request fails synchronously or the backend exits non-zero.
+- Restricted backend shutdown control to trusted loopback requests. Packaged
+  Electron requests still require the per-launch token, while standalone mode
+  rejects remote clients and non-loopback browser origins or referrers.
+- Rejected truncated, aborted, and errored backend connection-test responses so
+  the trusted Electron IPC request always settles instead of waiting
+  indefinitely after a partial HTTP response.
+- Included the extracted connection-test client in the Electron Builder file
+  allowlist so packaged startup cannot fail with `MODULE_NOT_FOUND`.
+- Validated v2 `sample_seq` persistence bookkeeping before writing a batch so
+  a rejected non-advancing batch cannot already be durable and then be appended
+  again on retry.
+- Bound one-command QA shutdown selection to the exact current-session CSV
+  basename and recorded the observed basename rather than echoing the expected
+  value.
+- Cached observation-fact spool/archive pending counts and updated them on
+  spool mutation so frequent health requests do not repeatedly rescan every
+  quarantined archive row.
+
+### Validation
+
+- The packaged `575e869` baseline passed the complete Electron, frontend,
+  backend, lint, type-check, QA self-test, production-build, transport-race,
+  and socket-interrupt suites.
+- Code candidate `d8ca5c4` passed the complete local health suite: 51 Electron
+  tests, 253 frontend tests across 34 files, 642 backend tests, frontend
+  type-check and lint, Ruff, mypy, and the NSIS QA self-test. The subsequent
+  `c1845e9` packaged development build passed an isolated native X-button close:
+  startup health reached `200`, all product processes and health stopped, and
+  its commit-bound metadata recorded `csv_closeout.finalized=true`.
+- Passed commit-bound re-attestation, one-command QA, the approved 15-minute
+  smoke, and the 120-minute canary for packaged commit `575e869`. The final
+  live gate retained the expected backend and config hashes, verified
+  attestation, active source-port quarantine, zero reuse, exhaustion, and
+  transport failures, and healthy image capture.
+- Added direct regression coverage for the valid, backward-compatible, and
+  fail-closed CSV shutdown-closeout validation paths.
+- Managed-switch evidence remains unavailable for the earlier `575e869` canary,
+  so that historical result is `FIELD_CANARY_PASS` with
+  `PHYSICAL_PATH_PARTIAL`; it cannot be reused for the current commit.
+- Packaged commit `49fbf6b` reproduced the missing CSV shutdown-closeout failure
+  during one-command QA and was rolled back to the verified v1.0.16 installer.
+  Neither the unsigned `949ef38` candidate nor the later development packages
+  have been installed on the server.
+- Production promotion remains blocked until a signed package bound to the
+  final post-documentation commit passes its exact-commit identity and native
+  X-close checks, then the server preinstall gate, re-attestation, QA,
+  15-minute smoke, 120-minute canary, and final live gate.
+
+### Compatibility
+
+- No persistent schema, CSV format, SPOT device configuration, operator
+  attestation value, or API route migration is required.
+
 ## [1.0.16] - 2026-07-17
 
 ### Added

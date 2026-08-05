@@ -265,11 +265,20 @@ class ElectronPreloadContractTests(unittest.TestCase):
             patch.dict(backend_app.os.environ, {"SFL_CONTROL_TOKEN": "launch-secret"}),
             patch.object(backend_app, "_schedule_control_shutdown") as schedule_shutdown,
         ):
-            client = TestClient(backend_app.app, raise_server_exceptions=False)
+            client = TestClient(
+                backend_app.app,
+                raise_server_exceptions=False,
+                client=("127.0.0.1", 50000),
+            )
             try:
                 rejected = client.post(
                     "/api/control/shutdown",
                     json={"reason": "electron_retry"},
+                )
+                wrong_token = client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "electron_retry"},
+                    headers={"X-SFL-Control-Token": "wrong-secret"},
                 )
                 accepted = client.post(
                     "/api/control/shutdown",
@@ -280,8 +289,47 @@ class ElectronPreloadContractTests(unittest.TestCase):
                 client.close()
 
         self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(wrong_token.status_code, 403)
         self.assertEqual(accepted.status_code, 200)
         schedule_shutdown.assert_called_once_with("electron_retry")
+
+    def test_standalone_shutdown_requires_a_trusted_loopback_request(self) -> None:
+        with (
+            patch.object(backend_app, "is_embedded_electron", return_value=False),
+            patch.object(backend_app, "_schedule_control_shutdown") as schedule_shutdown,
+        ):
+            remote_client = TestClient(
+                backend_app.app,
+                raise_server_exceptions=False,
+                client=("203.0.113.10", 50000),
+            )
+            local_client = TestClient(
+                backend_app.app,
+                raise_server_exceptions=False,
+                client=("127.0.0.1", 50000),
+            )
+            try:
+                remote = remote_client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "remote_request"},
+                )
+                untrusted_origin = local_client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "browser_request"},
+                    headers={"Origin": "https://untrusted.example"},
+                )
+                accepted = local_client.post(
+                    "/api/control/shutdown",
+                    json={"reason": "local_operator"},
+                )
+            finally:
+                remote_client.close()
+                local_client.close()
+
+        self.assertEqual(remote.status_code, 403)
+        self.assertEqual(untrusted_origin.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        schedule_shutdown.assert_called_once_with("local_operator")
 
     def test_main_correlates_and_allowlists_operational_startup_events(self) -> None:
         main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")
@@ -367,9 +415,9 @@ class ElectronPreloadContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertEqual(root_package["version"], "1.0.16")
-        self.assertEqual(frontend_package["version"], "1.0.16")
-        self.assertIn('__version__ = "1.0.16"', backend_version)
+        self.assertEqual(root_package["version"], "1.0.17")
+        self.assertEqual(frontend_package["version"], "1.0.17")
+        self.assertIn('__version__ = "1.0.17"', backend_version)
         self.assertEqual(
             root_package["build"]["nsis"]["artifactName"],
             "smart-factory-logger-v2 Setup ${version}.${ext}",
@@ -393,6 +441,13 @@ class ElectronPreloadContractTests(unittest.TestCase):
             {
                 "from": "scripts/measure_nsis_operational_ready.ps1",
                 "to": "qa/measure_nsis_operational_ready.ps1",
+            },
+            packaged_resources,
+        )
+        self.assertIn(
+            {
+                "from": "scripts/backend_bundle_integrity.psm1",
+                "to": "qa/backend_bundle_integrity.psm1",
             },
             packaged_resources,
         )
@@ -462,16 +517,24 @@ class ElectronPreloadContractTests(unittest.TestCase):
             "sfl:exit-startup",
         ):
             self.assertIn(f"ipcRenderer.invoke('{channel}')", preload_text)
+        self.assertIn(
+            "testConnection: (payload) => ipcRenderer.invoke('sfl:test-connection', payload)",
+            preload_text,
+        )
         self.assertIn("ipcRenderer.on('sfl:startup-state-changed'", preload_text)
         self.assertIn("ipcRenderer.removeListener('sfl:startup-state-changed'", preload_text)
-        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 6)
+        self.assertEqual(preload_text.count("ipcRenderer.invoke"), 7)
         self.assertEqual(preload_text.count("ipcRenderer.on("), 1)
         self.assertNotIn("ipcRenderer.send", preload_text)
         self.assertNotIn("ipcRenderer.once", preload_text)
         self.assertNotIn("...args", preload_text)
+        self.assertNotIn("SFL_CONTROL_TOKEN", preload_text)
 
     def test_main_registers_memory_ipc_and_packaged_files_include_preload(self) -> None:
         main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")
+        backend_control_client_text = (
+            self.repo_root / "backendControlClient.js"
+        ).read_text(encoding="utf-8")
         package_payload = json.loads((self.repo_root / "package.json").read_text(encoding="utf-8"))
 
         self.assertIn("preload: resolvePreloadPath()", main_text)
@@ -486,15 +549,21 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("triggerInitialBackendStart('splash_first_paint')", main_text)
         self.assertIn("armInitialBackendStartFallback();", main_text)
         self.assertIn("requestBackendGracefulShutdown", main_text)
+        self.assertIn(
+            "requestBackendGracefulShutdown: sendBackendGracefulShutdown",
+            main_text,
+        )
+        self.assertNotIn("http.request", main_text)
         self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;", main_text)
         self.assertIn("backend.shutdown-complete", main_text)
-        self.assertIn("X-SFL-Control-Token", main_text)
+        self.assertIn("X-SFL-Control-Token", backend_control_client_text)
         self.assertIn("STARTUP_RENDERER_EVENT_NAMES", main_text)
         self.assertIn("preload.js", package_payload["build"]["files"])
         self.assertIn("startupCoordinator.js", package_payload["build"]["files"])
         self.assertIn("startupIpc.js", package_payload["build"]["files"])
         self.assertIn("backendStartupProgress.js", package_payload["build"]["files"])
         self.assertIn("backendProcessLifecycle.js", package_payload["build"]["files"])
+        self.assertIn("backendControlClient.js", package_payload["build"]["files"])
 
     def test_default_shutdown_budgets_fit_electron_grace(self) -> None:
         main_text = (self.repo_root / "main.js").read_text(encoding="utf-8")

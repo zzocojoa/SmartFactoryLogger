@@ -11,12 +11,15 @@ v2_next/backend/tests/*
 !v2_next/backend/tests/test_memory_service.py
 !v2_next/backend/tests/test_real_plc.py
 !v2_next/backend/tests/test_spot_api.py
+!v2_next/backend/tests/test_spot_http_transport.py
+!v2_next/backend/tests/test_spot_port_quarantine.py
 !v2_next/backend/tests/test_spot_observation.py
 !v2_next/backend/tests/test_spot_config_provenance.py
 !v2_next/backend/tests/test_spot_temperature_stage5_verification.py
 !v2_next/backend/tests/test_data_history_api.py
 !v2_next/backend/tests/test_csv_logger_service.py
 !v2_next/backend/tests/test_csv_logger_runtime.py
+!v2_next/backend/tests/test_shutdown_closeout_regression.py
 !v2_next/backend/tests/test_frontend_routing_health.py
 !v2_next/backend/tests/test_spot_image_linkage_fact.py
 mes_data/

@@ -91,7 +91,7 @@ class _OperationalObservabilityHandler(BaseHTTPRequestHandler):
 
 class OperationalObservabilityExportTests(unittest.TestCase):
     def test_sanitized_summary_scrubs_spot_image_fact_manifest_paths(self) -> None:
-        powershell = shutil.which("powershell") or shutil.which("pwsh")
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
         if powershell is None:
             self.skipTest("PowerShell is required for collect_operational_observability.ps1")
 

@@ -10,6 +10,7 @@ describe('SPOT image response selectors', () => {
     const headers = new Headers({
       'X-Spot-Image-Source': 'upstream',
       'X-Spot-Image-At': '1700000004000',
+      'X-Spot-Image-Age-Ms': '250.5',
       'X-Spot-Internal-Temperature': '41.250',
       'X-Spot-Internal-Temperature-At': '1700000003500',
       'X-Spot-Internal-Temperature-Status': 'ok',
@@ -20,6 +21,7 @@ describe('SPOT image response selectors', () => {
     expect(metadata).toEqual({
       source: 'upstream',
       captured_at: 1_700_000_004_000,
+      age_ms: 250.5,
       internal_temperature: 41.25,
       internal_temperature_at: 1_700_000_003_500,
       internal_temperature_status: 'ok',
@@ -35,6 +37,7 @@ describe('SPOT image response selectors', () => {
     expect(metadata.internal_temperature).toBeNull();
     expect(metadata.internal_temperature_at).toBeNull();
     expect(metadata.internal_temperature_status).toBeNull();
+    expect(metadata.age_ms).toBeNull();
   });
 
   it('maps upstream failures without cache or backoff states', () => {

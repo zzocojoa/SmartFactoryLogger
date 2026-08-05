@@ -18,7 +18,7 @@ $checks = New-Object "System.Collections.Generic.List[object]"
 $warnings = New-Object "System.Collections.Generic.List[string]"
 $samples = New-Object "System.Collections.Generic.List[object]"
 $attestationCanBeApplied = $false
-$qaShutdownRequested = $false
+$operatorShutdownRequested = $false
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     if (-not [string]::IsNullOrWhiteSpace($env:SFL_CONFIG_PATH)) {
@@ -44,6 +44,83 @@ function Test-BackendReachable {
     }
 }
 
+# BEGIN QA SHUTDOWN HELPERS
+function Invoke-OperatorShutdownCheckpoint {
+    param(
+        [int]$TimeoutSeconds,
+        [int]$PollIntervalSeconds = 2,
+        [int]$ConsecutiveFailuresRequired = 3,
+        [scriptblock]$ReachabilityProbe = { Test-BackendReachable },
+        [scriptblock]$ProductProcessProbe = {
+            $backendProcesses = @(
+                Get-Process -Name "SmartFactoryBackend" -ErrorAction SilentlyContinue
+            )
+            $electronProcesses = @(
+                Get-Process -Name "smart-factory" -ErrorAction SilentlyContinue
+            )
+            return ($backendProcesses.Count + $electronProcesses.Count) -gt 0
+        },
+        [scriptblock]$PromptAction = {
+            Write-Host "[ACTION] Close SmartFactoryLogger with the window X button." -ForegroundColor Yellow
+            Write-Host "Do not use Task Manager and do not stop SmartFactoryBackend.exe directly."
+            [void](Read-Host "After closing the SmartFactoryLogger window, press Enter to continue")
+        },
+        [scriptblock]$SleepAction = {
+            param([int]$Seconds)
+            Start-Sleep -Seconds $Seconds
+        }
+    )
+
+    $requiredFailures = [math]::Max(1, $ConsecutiveFailuresRequired)
+    $reachable = [bool](& $ReachabilityProbe)
+    $productProcessPresent = [bool](& $ProductProcessProbe)
+    $operatorRequested = $false
+    if ($reachable -or $productProcessPresent) {
+        & $PromptAction
+        $operatorRequested = $true
+    }
+
+    $consecutiveFailures = if (-not $reachable -and -not $productProcessPresent) {
+        1
+    } else {
+        0
+    }
+    if ($consecutiveFailures -ge $requiredFailures) {
+        return [PSCustomObject]@{
+            backend_stopped = $true
+            operator_shutdown_requested = $operatorRequested
+            consecutive_unreachable_count = $consecutiveFailures
+        }
+    }
+
+    $deadline = (Get-Date).AddSeconds([math]::Max(0, $TimeoutSeconds))
+    while ((Get-Date) -lt $deadline) {
+        & $SleepAction ([math]::Max(0, $PollIntervalSeconds))
+        $reachable = [bool](& $ReachabilityProbe)
+        $productProcessPresent = [bool](& $ProductProcessProbe)
+        if (-not $reachable -and -not $productProcessPresent) {
+            $consecutiveFailures += 1
+        } else {
+            $consecutiveFailures = 0
+        }
+        if ($consecutiveFailures -ge $requiredFailures) {
+            return [PSCustomObject]@{
+                backend_stopped = $true
+                operator_shutdown_requested = $operatorRequested
+                consecutive_unreachable_count = $consecutiveFailures
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        backend_stopped = $false
+        operator_shutdown_requested = $operatorRequested
+        consecutive_unreachable_count = $consecutiveFailures
+    }
+}
+# END QA SHUTDOWN HELPERS
+
+# BEGIN QA METADATA HELPERS
 function Get-ObjectProperty {
     param(
         [object]$Object,
@@ -160,17 +237,100 @@ function Get-LogDirectoryCandidates {
 }
 
 function Find-LatestMetadata {
-    param([string[]]$Directories)
-    $found = New-Object "System.Collections.Generic.List[object]"
+    param(
+        [string[]]$Directories,
+        [string]$ExpectedLoggerServiceInstanceId,
+        [string]$ExpectedBuildCommit,
+        [long]$ExpectedMinimumSampleSeq,
+        [string]$ExpectedCsvFileName
+    )
+    if (
+        [string]::IsNullOrWhiteSpace($ExpectedCsvFileName) -or
+        [System.IO.Path]::GetFileName($ExpectedCsvFileName) -ne
+            $ExpectedCsvFileName -or
+        $ExpectedCsvFileName -notmatch "\.csv$"
+    ) {
+        return $null
+    }
     foreach ($directory in $Directories) {
         if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
             continue
         }
-        Get-ChildItem -LiteralPath $directory -Filter "Factory_Integrated_Log_v2_*.metadata.json" -File -ErrorAction SilentlyContinue |
-            ForEach-Object { $found.Add($_) }
+        $candidates = @(
+            Get-ChildItem `
+                -LiteralPath $directory `
+                -File `
+                -Filter "Factory_Integrated_Log_v2_*.metadata.json" `
+                -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTimeUtc -Descending
+        )
+        foreach ($candidate in $candidates) {
+            try {
+            $metadata = Get-Content -LiteralPath $candidate.FullName -Raw -Encoding UTF8 |
+                ConvertFrom-Json
+            $schemaMetadata = Get-ObjectProperty $metadata "schema_metadata"
+            $configSnapshot = Get-ObjectProperty $metadata "spot_configuration_snapshot"
+            $csvCloseout = Get-ObjectProperty $metadata "csv_closeout"
+            $loggerServiceInstanceId = [string](
+                Get-ObjectProperty $schemaMetadata "logger_service_instance_id" ""
+            )
+            $schemaBuildCommit = [string](
+                Get-ObjectProperty $schemaMetadata "git_commit" ""
+            )
+            $configBuildCommit = [string](
+                Get-ObjectProperty $configSnapshot "build_git_commit" ""
+            )
+            $closeoutSampleSeq = 0L
+            $closeoutSampleSeqValid = [long]::TryParse(
+                [string](
+                    Get-ObjectProperty `
+                        $csvCloseout `
+                        "final_persisted_sample_seq" `
+                        ""
+                ),
+                [ref]$closeoutSampleSeq
+            )
+            $closeoutCsvFileName = [string](
+                Get-ObjectProperty $csvCloseout "csv_file_name" ""
+            )
+            $csvPath = Join-Path $directory $closeoutCsvFileName
+            if (
+                $loggerServiceInstanceId -eq $ExpectedLoggerServiceInstanceId -and
+                $schemaBuildCommit -eq $ExpectedBuildCommit -and
+                $configBuildCommit -eq $ExpectedBuildCommit -and
+                (Convert-ToBoolean (
+                    Get-ObjectProperty $csvCloseout "finalized" $false
+                )) -and
+                ([string](
+                    Get-ObjectProperty $csvCloseout "closeout_reason" ""
+                )) -eq "shutdown" -and
+                [System.IO.Path]::GetFileName($closeoutCsvFileName) -eq
+                    $closeoutCsvFileName -and
+                $closeoutCsvFileName -ceq $ExpectedCsvFileName -and
+                $closeoutCsvFileName -match "\.csv$" -and
+                ([string](
+                    Get-ObjectProperty $csvCloseout "logger_service_instance_id" ""
+                )) -eq $ExpectedLoggerServiceInstanceId -and
+                $closeoutSampleSeqValid -and
+                $closeoutSampleSeq -ge $ExpectedMinimumSampleSeq -and
+                (Test-Path -LiteralPath $csvPath -PathType Leaf)
+            ) {
+                return [PSCustomObject]@{
+                    file = $candidate
+                    metadata = $metadata
+                    csv_file = $csvPath
+                    csv_final_sample_seq = $closeoutSampleSeq
+                    observed_csv_file_name = $closeoutCsvFileName
+                }
+            }
+            } catch {
+                continue
+            }
+        }
     }
-    return $found | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    return $null
 }
+# END QA METADATA HELPERS
 
 function Save-QaArtifact {
     param(
@@ -203,7 +363,7 @@ function Save-QaArtifact {
 Write-Host ""
 Write-Host "SPOT Temperature v2.5 one-command QA" -ForegroundColor Cyan
 Write-Host "This tool does not change SPOT device or application settings."
-Write-Host "It uses the backend's built-in graceful shutdown to finalize CSV metadata before validation."
+Write-Host "It requires a normal UI close to finalize CSV metadata before validation."
 Write-Host ""
 Write-Host "[1/5] Checking the running backend..." -ForegroundColor Cyan
 
@@ -223,6 +383,9 @@ try {
 
 $initialSpot = Get-ObjectProperty -Object $initialHealth -Name "spot_temperature"
 $initialOperational = Get-ObjectProperty -Object $initialSpot -Name "v2_4_operational"
+$expectedLoggerServiceInstanceId = [string](
+    Get-ObjectProperty $initialOperational "logger_service_instance_id" ""
+)
 Add-QaCheck -Name "Runtime mode" -Passed (([string](Get-ObjectProperty $initialHealth "mode")) -eq "REAL") `
     -Actual ([string](Get-ObjectProperty $initialHealth "mode" "missing")) -Expected "REAL"
 Add-QaCheck -Name "SPOT diagnostics" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialSpot "diagnostics_available" $false)) `
@@ -235,6 +398,10 @@ Add-QaCheck -Name "Temperature hardening" -Passed (Convert-ToBoolean (Get-Object
     -Actual ([string](Get-ObjectProperty $initialOperational "temperature_hardening_enabled" "missing")) -Expected "true"
 Add-QaCheck -Name "Observation fact writer" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialOperational "observation_fact_enabled" $false)) `
     -Actual ([string](Get-ObjectProperty $initialOperational "observation_fact_enabled" "missing")) -Expected "true"
+Add-QaCheck -Name "Logger service instance" `
+    -Passed ($expectedLoggerServiceInstanceId -match "^[0-9a-fA-F-]{32,36}$") `
+    -Actual $(if ($expectedLoggerServiceInstanceId) { $expectedLoggerServiceInstanceId } else { "missing" }) `
+    -Expected "current logger service instance id"
 
 Write-Host ""
 Write-Host "[2/5] Observing SPOT for $ObservationSeconds seconds..." -ForegroundColor Cyan
@@ -271,6 +438,16 @@ try {
 }
 $finalSpot = Get-ObjectProperty $finalHealth "spot_temperature"
 $finalOperational = Get-ObjectProperty $finalSpot "v2_4_operational"
+$finalLoggerServiceInstanceId = [string](
+    Get-ObjectProperty $finalOperational "logger_service_instance_id" ""
+)
+$expectedBuildCommit = [string](Get-ObjectProperty $finalSpot "build_git_commit" "")
+$expectedMinimumSampleSeq = Convert-ToInt64 (
+    Get-ObjectProperty $finalOperational "last_sample_seq" 0
+)
+$expectedCsvFileName = [string](
+    Get-ObjectProperty $finalOperational "current_v2_csv_file_name" ""
+)
 $finalRows = Convert-ToInt64 (Get-ObjectProperty $finalOperational "rows_total" 0)
 $successfulPollObserved = @($samples | Where-Object { $_.poll_status -eq "success" }).Count -gt 0
 $currentOriginObserved = @($samples | Where-Object { $_.temperature_value_origin -eq "current_observation" }).Count -gt 0
@@ -293,49 +470,43 @@ Add-QaCheck -Name "Origin decision mismatches" `
 Add-QaCheck -Name "Value age clock anomalies" `
     -Passed ((Convert-ToInt64 (Get-ObjectProperty $finalOperational "value_age_clock_anomaly_count" 0)) -eq 0) `
     -Actual ([string](Get-ObjectProperty $finalOperational "value_age_clock_anomaly_count" "missing")) -Expected "0"
+Add-QaCheck -Name "Logger service instance remained stable" `
+    -Passed (
+        $expectedLoggerServiceInstanceId -ne "" -and
+        $finalLoggerServiceInstanceId -eq $expectedLoggerServiceInstanceId
+    ) `
+    -Actual "$expectedLoggerServiceInstanceId -> $finalLoggerServiceInstanceId" `
+    -Expected "unchanged"
+Add-QaCheck -Name "Runtime build commit" `
+    -Passed ($expectedBuildCommit -match "^[0-9a-f]{40}$") `
+    -Actual $(if ($expectedBuildCommit) { $expectedBuildCommit } else { "missing" }) `
+    -Expected "40-character lowercase Git commit"
+Add-QaCheck -Name "Final operational sample sequence" `
+    -Passed ($expectedMinimumSampleSeq -gt 0) `
+    -Actual ([string]$expectedMinimumSampleSeq) `
+    -Expected "positive current-session sample_seq"
+Add-QaCheck -Name "Current CSV file identity" `
+    -Passed (
+        $expectedCsvFileName -match
+            "^Factory_Integrated_Log_v2_[A-Za-z0-9_.-]+\.csv$"
+    ) `
+    -Actual $(if ($expectedCsvFileName) { $expectedCsvFileName } else { "missing" }) `
+    -Expected "current v2 CSV basename"
 
 if (-not $SkipStopPrompt) {
     Write-Host ""
     Write-Host "[3/5] Finalizing SmartFactoryLogger CSV files safely." -ForegroundColor Yellow
-    Write-Host "Do not close the app or use Task Manager yet."
-    [void](Read-Host "Press Enter to stop backend logging safely and continue validation")
-
-    $backendStopped = $false
-    if (-not (Test-BackendReachable)) {
-        $backendStopped = $true
-        Add-QaWarning "The backend had already stopped before QA requested graceful shutdown."
-    } else {
-        $backendUri = [uri]$backend
-        if ($backendUri.IsLoopback) {
-            Write-Host "[INFO] Requesting the built-in graceful shutdown. This may take several minutes."
-            try {
-                $shutdownBody = @{ reason = "spot_temperature_v25_qa_closeout" } | ConvertTo-Json -Compress
-                $shutdownResponse = Invoke-RestMethod -Uri "$backend/api/control/shutdown" -Method Post `
-                    -ContentType "application/json" -Body $shutdownBody -TimeoutSec 5
-                if ([bool](Get-ObjectProperty $shutdownResponse "ok" $false)) {
-                    $qaShutdownRequested = $true
-                } else {
-                    Add-QaWarning "The backend graceful shutdown endpoint did not acknowledge the request."
-                }
-            } catch {
-                Add-QaWarning "The backend graceful shutdown request failed: $($_.Exception.Message)"
-            }
-        } else {
-            Add-QaWarning "QA-assisted shutdown was skipped because BackendBaseUrl is not loopback."
-        }
+    $shutdownCheckpoint = Invoke-OperatorShutdownCheckpoint `
+        -TimeoutSeconds $GracefulShutdownTimeoutSeconds
+    $backendStopped = [bool]$shutdownCheckpoint.backend_stopped
+    $operatorShutdownRequested = [bool]$shutdownCheckpoint.operator_shutdown_requested
+    if ($backendStopped -and -not $operatorShutdownRequested) {
+        Add-QaWarning "The backend had already stopped before the operator shutdown step."
     }
 
-    $shutdownDeadline = (Get-Date).AddSeconds($GracefulShutdownTimeoutSeconds)
-    while ((Get-Date) -lt $shutdownDeadline) {
-        if (-not (Test-BackendReachable)) {
-            $backendStopped = $true
-            break
-        }
-        Start-Sleep -Seconds 2
-    }
     Add-QaCheck -Name "Backend stopped for finalized CSV validation" -Passed $backendStopped `
         -Actual $(if ($backendStopped) {
-            if ($qaShutdownRequested) { "stopped after QA graceful shutdown" } else { "already stopped" }
+            if ($operatorShutdownRequested) { "stopped after operator UI shutdown" } else { "already stopped" }
         } else { "still reachable after graceful shutdown timeout" }) `
         -Expected "stopped"
     if (-not $backendStopped) {
@@ -345,7 +516,9 @@ if (-not $SkipStopPrompt) {
             sample_count = $samples.Count
             poll_statuses = @($samples.poll_status | Sort-Object -Unique)
             value_origins = @($samples.temperature_value_origin | Sort-Object -Unique)
-            qa_shutdown_requested = $qaShutdownRequested
+            # Compatibility field: QA no longer calls the authenticated shutdown API.
+            qa_shutdown_requested = $false
+            operator_shutdown_requested = $operatorShutdownRequested
         }
         Add-QaWarning "Finalized CSV validation was skipped because the backend is still running."
         Save-QaArtifact -Verdict "FAIL" -RuntimeSummary $runtimeSummary -FileSummary $null -ValidatorOutput ""
@@ -363,10 +536,20 @@ if (-not $SkipStopPrompt) {
 Write-Host ""
 Write-Host "[4/5] Checking the finalized CSV and config attestation..." -ForegroundColor Cyan
 $directories = Get-LogDirectoryCandidates -ExplicitLogPath $LogPath -SettingsPath $ConfigPath
-$metadataFile = Find-LatestMetadata -Directories $directories
+$metadataMatch = Find-LatestMetadata `
+    -Directories $directories `
+    -ExpectedLoggerServiceInstanceId $expectedLoggerServiceInstanceId `
+    -ExpectedBuildCommit $expectedBuildCommit `
+    -ExpectedMinimumSampleSeq $expectedMinimumSampleSeq `
+    -ExpectedCsvFileName $expectedCsvFileName
+$metadataFile = if ($null -ne $metadataMatch) { $metadataMatch.file } else { $null }
 $fileSummary = [ordered]@{
     config_path = $ConfigPath
     searched_log_directories = $directories
+    expected_logger_service_instance_id = $expectedLoggerServiceInstanceId
+    expected_build_commit = $expectedBuildCommit
+    expected_minimum_sample_seq = $expectedMinimumSampleSeq
+    observed_csv_file_name = $expectedCsvFileName
     log_directory = $null
     metadata_file = $null
     csv_file = $null
@@ -376,20 +559,50 @@ $fileSummary = [ordered]@{
 $validatorOutput = ""
 
 if ($null -eq $metadataFile) {
-    Add-QaCheck -Name "Latest metadata sidecar" -Passed $false -Actual "not found" `
-        -Expected "Factory_Integrated_Log_v2_*.metadata.json; use -LogPath if auto-detection is wrong"
+    Add-QaCheck -Name "Current-session metadata sidecar" -Passed $false -Actual "not found" `
+        -Expected "sidecar matching the observed logger instance and build commit"
 } else {
     try {
         $fileSummary.log_directory = $metadataFile.DirectoryName
         $fileSummary.metadata_file = $metadataFile.FullName
-        Add-QaCheck -Name "Latest metadata sidecar" -Passed $true -Actual $metadataFile.Name -Expected "found"
-        # Metadata is UTF-8 without a BOM. Windows PowerShell 5.1 otherwise reads
-        # it with the active ANSI code page and can corrupt Korean JSON strings.
-        $metadataJson = Get-Content -LiteralPath $metadataFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        Add-QaCheck -Name "Current-session metadata sidecar" -Passed $true `
+            -Actual $metadataFile.Name -Expected "matching sidecar found"
+        $metadataJson = $metadataMatch.metadata
         $schemaMetadata = Get-ObjectProperty $metadataJson "schema_metadata"
         $configSnapshot = Get-ObjectProperty $metadataJson "spot_configuration_snapshot"
         $factManifest = Get-ObjectProperty $metadataJson "spot_observation_fact_manifest"
 
+        Add-QaCheck -Name "Sidecar logger service instance" `
+        -Passed (
+            ([string](Get-ObjectProperty $schemaMetadata "logger_service_instance_id" "")) -eq
+            $expectedLoggerServiceInstanceId
+        ) `
+        -Actual ([string](Get-ObjectProperty $schemaMetadata "logger_service_instance_id" "missing")) `
+        -Expected $expectedLoggerServiceInstanceId
+        Add-QaCheck -Name "Sidecar build commit" `
+        -Passed (
+            ([string](Get-ObjectProperty $schemaMetadata "git_commit" "")) -eq
+            $expectedBuildCommit -and
+            ([string](Get-ObjectProperty $configSnapshot "build_git_commit" "")) -eq
+            $expectedBuildCommit
+        ) `
+        -Actual (
+            "{0}/{1}" -f
+                [string](Get-ObjectProperty $schemaMetadata "git_commit" "missing"),
+                [string](Get-ObjectProperty $configSnapshot "build_git_commit" "missing")
+        ) `
+        -Expected "$expectedBuildCommit/$expectedBuildCommit"
+        Add-QaCheck -Name "Matching CSV final sample sequence" `
+        -Passed ($metadataMatch.csv_final_sample_seq -ge $expectedMinimumSampleSeq) `
+        -Actual ([string]$metadataMatch.csv_final_sample_seq) `
+        -Expected ">= $expectedMinimumSampleSeq"
+        Add-QaCheck -Name "Shutdown CSV file identity" `
+        -Passed (
+            (Split-Path -Leaf $metadataMatch.csv_file) -match
+                "^Factory_Integrated_Log_v2_[A-Za-z0-9_.-]+\.csv$"
+        ) `
+        -Actual (Split-Path -Leaf $metadataMatch.csv_file) `
+        -Expected "current-session shutdown closeout CSV"
         Add-QaCheck -Name "Sidecar schema" `
         -Passed (([string](Get-ObjectProperty $schemaMetadata "active_schema_version")) -eq "2.5.0") `
         -Actual ([string](Get-ObjectProperty $schemaMetadata "active_schema_version" "missing")) -Expected "2.5.0"
@@ -440,7 +653,7 @@ if ($null -eq $metadataFile) {
         -Passed ((Convert-ToInt64 (Get-ObjectProperty $factManifest "spool_pending_count" 0)) -eq 0) `
         -Actual ([string](Get-ObjectProperty $factManifest "spool_pending_count" "missing")) -Expected "0"
 
-        $csvPath = $metadataFile.FullName -replace "\.metadata\.json$", ".csv"
+        $csvPath = $metadataMatch.csv_file
         $fileSummary.csv_file = $csvPath
         Add-QaCheck -Name "Matching v2 CSV" -Passed (Test-Path -LiteralPath $csvPath -PathType Leaf) `
         -Actual (Split-Path -Leaf $csvPath) -Expected "found"
@@ -512,12 +725,23 @@ if ($null -eq $metadataFile) {
 $failedChecks = @($checks | Where-Object { -not $_.passed })
 $verdict = if ($failedChecks.Count -eq 0) { "PASS" } else { "FAIL" }
 $runtimeSummary = [ordered]@{
+    logger_service_instance_id = $expectedLoggerServiceInstanceId
+    build_commit = $expectedBuildCommit
+    minimum_sample_seq = $expectedMinimumSampleSeq
+    observed_csv_file_name = $expectedCsvFileName
+    finalized_csv_file_name = if ($null -ne $metadataMatch) {
+        Split-Path -Leaf $metadataMatch.csv_file
+    } else {
+        ""
+    }
     initial_rows_total = $initialRows
     final_rows_total = $finalRows
     sample_count = $samples.Count
     poll_statuses = @($samples.poll_status | Sort-Object -Unique)
     value_origins = @($samples.temperature_value_origin | Sort-Object -Unique)
-    qa_shutdown_requested = $qaShutdownRequested
+    # Compatibility field: QA no longer calls the authenticated shutdown API.
+    qa_shutdown_requested = $false
+    operator_shutdown_requested = $operatorShutdownRequested
 }
 Save-QaArtifact -Verdict $verdict -RuntimeSummary $runtimeSummary -FileSummary $fileSummary `
     -ValidatorOutput $validatorOutput

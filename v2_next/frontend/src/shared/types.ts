@@ -625,6 +625,7 @@ export interface SmartFactoryElectronBridge {
   retryStartup?: () => Promise<SmartFactoryStartupEventResult>;
   continueStartupOffline?: () => Promise<SmartFactoryStartupEventResult>;
   exitStartup?: () => Promise<SmartFactoryStartupEventResult>;
+  testConnection?: (payload: Record<string, unknown>) => Promise<unknown>;
   recordStartupEvent: (
     name: SmartFactoryStartupEventName,
     payload?: SmartFactoryStartupEventPayload

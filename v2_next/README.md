@@ -2,43 +2,32 @@
 
 릴리스 노트는 [CHANGELOG.md](CHANGELOG.md)를 확인하세요.
 
-cd frontend; npm start
+## 실행과 종료
 
-cd backend; python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+개발 실행은 저장소 루트에서 시작합니다. 활성 Python 환경에는
+`backend/requirements.txt` 의존성이 설치되어 있어야 합니다.
 
-# 1. JSON 마이그레이션 + 서버 시작 (권장)
+```powershell
+npm start
+```
 
-.\SmartFactory_v1.0.4.exe --migrate-json
+패키지 앱은 창의 X 버튼으로 정상 종료하고 backend와 Electron 프로세스가 모두
+종료될 때까지 기다립니다. `taskkill /F`, 작업 관리자 강제 종료,
+`Stop-Process -Force`, `SmartFactoryBackend.exe` 직접 종료는 CSV와 fact closeout을
+우회하므로 사용하지 않습니다.
 
-# 2. 마이그레이션만 실행 (GUI 없이)
+개발 터미널에서 시작한 프로세스는 해당 터미널의 `Ctrl+C`로 종료합니다. 포트 충돌이
+있으면 소유 프로세스를 먼저 확인하고, 다른 Python 또는 Node 프로세스를 일괄 종료하지
+않습니다. lock 파일은 모든 SmartFactoryLogger 프로세스와 health endpoint가 종료된
+것을 확인한 뒤 실제 stale lock일 때만 제거합니다.
 
-.\SmartFactory_v1.0.4.exe --migrate-only
+현재 패키지 빌드는 다음 명령을 사용합니다. 서버에는 서명과 exact-commit 검증을
+통과한 NSIS installer만 배포합니다.
 
-# 3. 일반 실행 (마이그레이션 없이)
-
-.\SmartFactory_v1.0.4.exe
-
-# 권장 워크플로우 (한 번에 실행)
-
-## 1. 기존 프로세스 모두 종료
-
-taskkill /F /IM python.exe 2>$null
-
-Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force;
-Write-Host "모든 Node 프로세스 종료됨"
-
-## 2. Lock 파일 삭제
-
-Remove-Item -Path "$env:APPDATA\SmartFactoryLogger\sfl_v2.lock" -ErrorAction
-SilentlyContinue
-
-## 3. 백엔드 재시작
-
-python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-
-## 4. EXE 빌드
-
+```powershell
 powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
+npm run dist
+```
 
 ## 검증
 
@@ -53,6 +42,14 @@ SPOT Temperature v2.5 서버 검증은 다음 문서를 사용합니다.
 
 - [한 번에 실행하는 QA 절차](docs/V2/04_검증/spot_temperature_v25_one_command_qa.md)
 - [1.0.13 실장비 서버 검증 결과](docs/04-report/spot-temperature-v2-5-server-validation.md)
+
+현재 API와 v1.0.17 운영 경계는 다음 문서에서 확인합니다.
+
+- [Backend API reference](backend/API_DOCUMENTATION.md)
+- [SPOT source-port quarantine 설계](docs/02-design/features/spot-tcp-source-port-quarantine-v2.design.md)
+- [SPOT source-port field/report 상태](docs/04-report/spot-tcp-source-port-quarantine-v2.report.md)
+- [Windows Authenticode 서명 운영](docs/V2/05_운영_배포/windows_authenticode_signing.md)
+- [배포 체크리스트](docs/V2/DEPLOYMENT_CHECKLIST.md)
 
 ## Build commit provenance
 

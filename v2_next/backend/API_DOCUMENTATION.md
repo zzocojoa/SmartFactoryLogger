@@ -1,6 +1,6 @@
 # Smart Factory Logger V2 - 백엔드 API 문서
 
-> **버전:** 2.1.0\
+> **버전:** 1.0.17\
 > **기본 URL:** `http://localhost:8000` (기본값)\
 > **프레임워크:** FastAPI
 
@@ -63,9 +63,31 @@ const data = await response.json();
   "running": true,
   "plc_connected": true,
   "last_update": 1704528000.0,
+  "spot_temperature": {
+    "build_git_commit": "0123456789abcdef0123456789abcdef01234567",
+    "v2_4_operational": {
+      "logger_service_instance_id": "00000000-0000-0000-0000-000000000000",
+      "current_v2_csv_file_name": "Factory_Integrated_Log_v2_20260729_140502.csv",
+      "last_sample_seq": 977
+    }
+  },
   ...
 }
 ```
+
+`current_v2_csv_file_name`은 실행 중인 logger가 현재 기록하는 파일의 basename이며,
+관찰 시 활성 CSV 존재 확인과 증거 기록에 사용합니다. 종료 QA의 최종 파일 선택은
+동일 logger instance와 build commit의 `closeout_reason=shutdown` sidecar 및
+persisted sequence를 기준으로 합니다. 절대 경로와 CSV 내용은 `/health`에 노출하지
+않습니다.
+
+`csv_closeout`은 파일이 닫힌 이유를 `closeout_reason`으로 기록합니다.
+종료 QA는 동일 logger instance와 build commit 중
+`closeout_reason=shutdown`인 sidecar만 선택합니다.
+`final_persisted_sample_seq`는 `writerows`와 `flush`가 모두 성공한 뒤에만
+증가하며, validator는 이 값이 실제 CSV의 마지막 및 최댓값 `sample_seq`와
+같은지 확인합니다. 따라서 daily rollover sidecar나 실패한 최종 flush는
+정상 종료 증거가 될 수 없습니다.
 
 ### GET `/stats`
 
@@ -585,6 +607,13 @@ PLC 서비스에 다시 연결합니다.
 
 ### POST `/api/control/test-connection`
 
+The packaged Electron application invokes this endpoint through a trusted
+main-process IPC bridge and a per-launch `X-SFL-Control-Token`. Direct embedded
+requests without the token, non-local requests, and untrusted browser-origin
+requests return `403`. Only one SPOT connection probe is admitted at a time,
+followed by a 30-second cooldown; busy or rate-limited SPOT probes return `429`
+with `Retry-After` instead of queueing behind operational SPOT traffic.
+
 설정된 장치에 대한 연결을 테스트합니다.
 
 **요청 본문:**
@@ -611,19 +640,19 @@ PLC 서비스에 다시 연결합니다.
 {
     "results": {
         "extruder": {
-            "connected": true,
+            "ok": true,
             "latency_ms": 25,
-            "message": "OK"
+            "message": "connected"
         },
         "ls_plc": {
-            "connected": false,
-            "latency_ms": 0,
-            "message": "연결 시간 초과"
+            "ok": false,
+            "latency_ms": 1501,
+            "message": "timed out"
         },
         "spot": {
-            "connected": true,
+            "ok": true,
             "latency_ms": 150,
-            "status_code": 200
+            "message": "HTTP 200"
         }
     }
 }
@@ -724,6 +753,11 @@ PLC 서비스에 다시 연결합니다.
 
 ### POST `/api/control/shutdown`
 
+The packaged Electron application supplies its per-launch
+`X-SFL-Control-Token`; direct embedded requests without the token return `403`.
+Standalone mode accepts shutdown requests only from a loopback client and rejects
+non-loopback browser origins or referrers with `403`.
+
 백엔드 서버를 정상적으로 종료합니다.
 
 **요청 본문:**
@@ -738,8 +772,7 @@ PLC 서비스에 다시 연결합니다.
 
 ```json
 {
-    "ok": true,
-    "message": "종료 시작됨"
+    "ok": true
 }
 ```
 
@@ -844,7 +877,7 @@ SPOT 카메라 위젯 설정을 가져옵니다.
 ```json
 {
     "image_url": "/api/spot/image.jpg",
-    "refresh_interval": 1000,
+    "refresh_interval": 3.0,
     "crosshair_x": 50,
     "crosshair_y": 50,
     "crosshair_color": "#00FF00",
@@ -854,9 +887,34 @@ SPOT 카메라 위젯 설정을 가져옵니다.
     "widget_width": 640,
     "widget_height": 480,
     "focus_step": 10,
-    "focus_enabled": true
+    "focus_enabled": true,
+    "image": {
+        "image_request_policy_version": "spot-image-demand-shaping-v2",
+        "image_refresh_interval_sec_effective": 3.0,
+        "image_cache_present": true,
+        "image_cache_fresh": true,
+        "image_cache_age_ms": 250.5,
+        "image_refresh_in_flight": false,
+        "diagnostics_refresh_interval_sec_effective": 10.0,
+        "request_budget_policy_version": "spot-background-request-budget-v2",
+        "request_budget_target_max_per_sec": 6.0,
+        "request_budget_total_background_max_per_sec": 3.133333,
+        "request_budget_within_target": true,
+        "source_port_policy_version": "spot-source-port-quarantine-v2",
+        "source_port_enforcement_active": true,
+        "source_port_pool_capacity": 768,
+        "source_port_quarantine_seconds": 75.0,
+        "source_port_pool_exhaustion_count": 0,
+        "source_port_reuse_violation_count": 0
+    }
 }
 ```
+
+The `image` object is a backward-compatible diagnostics extension. It reports
+cache and single-flight state, the calculated background budget for image,
+target-temperature, internal-temperature, and diagnostic requests, plus
+aggregate source-port quarantine health. It never exposes source-port values.
+`refresh_interval` and the effective refresh interval fields use seconds.
 
 ### POST `/api/spot/focus`
 
@@ -884,13 +942,19 @@ POST /api/spot/focus?steps=10
 
 ### GET `/api/spot/image.jpg`
 
-Electron `file:` UI가 SPOT Web Server의 공식 `GET /image.jpg` 리소스를 사용할 수 있도록
-동일한 JPEG 응답을 한 번씩 전달합니다. 서버 캐시, 대체 이미지 경로, 자동 backoff는 사용하지 않습니다.
+The backend bridges the official SPOT `GET /image.jpg` resource to the Electron
+`file:` UI. It uses a shared process cache and single-flight refreshes so
+concurrent dashboard consumers reuse one upstream image request. The client
+response remains `no-store`; that header does not disable the backend cache.
 
 **응답:**
 
 - **Content-Type:** `image/jpeg`
 - **Cache-Control:** `no-store, no-cache, must-revalidate, max-age=0`
+- **X-Spot-Image-At:** backend cache capture/completion time in Unix milliseconds, when known
+- **X-Spot-Image-Source:** `upstream`, `cache`, or `coalesced`
+- **X-Spot-Image-Latency-Ms:** upstream request latency, when known
+- **X-Spot-Image-Age-Ms:** current shared-cache age, including cached responses
 - **Body:** 바이너리 JPEG 데이터
 
 **에러 응답 (404):**
@@ -949,6 +1013,7 @@ Electron `file:` UI가 SPOT Web Server의 공식 `GET /image.jpg` 리소스를 �
 | **400**   | 잘못된 요청 (Bad Request - 유효하지 않은 파라미터)   |
 | **403**   | 금지됨 (Forbidden - 권한 없음, 잘못된 비밀번호)      |
 | **404**   | 찾을 수 없음 (Not Found - 리소스 없음)               |
+| **429**   | 요청 제한 (Too Many Requests - SPOT probe busy/cooldown) |
 | **500**   | 내부 서버 오류 (Internal Server Error)               |
 | **502**   | 불량 게이트웨이 (Bad Gateway - 업스트림 서비스 실패) |
 
@@ -964,8 +1029,10 @@ Electron `file:` UI가 SPOT Web Server의 공식 `GET /image.jpg` 리소스를 �
 
 ## Authentication
 
-현재 API는 토큰 기반 인증을 구현하지 않습니다. 오버라이드 토글이나 설정 복원과
-같은 일부 작업은 요청 본문에 비밀번호 확인이 필요합니다.
+전체 API에 적용되는 사용자용 bearer-token 인증은 구현하지 않습니다. 다만 packaged
+Electron의 connection-test 및 shutdown 제어 경로는 실행마다 생성되는
+`X-SFL-Control-Token`을 요구합니다. 오버라이드 토글이나 설정 복원과 같은 일부
+작업은 요청 본문에 비밀번호 확인이 필요합니다.
 
 ---
 
@@ -1012,7 +1079,8 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ## Notes
 
-- 모든 타임스탬프는 Unix 에포크 초 (float) 단위입니다.
+- 별도 명시가 없는 타임스탬프는 Unix 에포크 초 (float) 단위입니다.
+  `X-Spot-Image-At` 응답 헤더는 Unix 에포크 밀리초 단위입니다.
 - 경로는 절대 윈도우 경로입니다 (예: `C:\\Logs\\...`).
 - 네트워크 경로는 UNC 표기법을 사용합니다 (예: `\\\\NAS\\Share`).
 - 이미지 데이터는 선택적 데이터 URI 접두사가 있는 base64 인코딩입니다.
@@ -1022,7 +1090,7 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ## API Versioning
 
-현재 버전: **2.1.0**
+현재 버전: **1.0.17**
 
 API 버전은 FastAPI 앱 정의에 지정되어 있으며 `/docs`의 OpenAPI 문서에서 확인할
 수 있습니다.

@@ -29,6 +29,7 @@ import {
   getNextSpotImageRetryDelayMs,
   isSpotImageFailureRetryable,
 } from '../utils/spotImageRecoveryPolicy.pure';
+import { resolveSpotImageRefreshIntervalMs } from '../utils/spotImageRefreshPolicy.pure';
 import type { UseSpotViewModel } from './useSpotViewModel.types';
 
 interface SpotImageState {
@@ -191,6 +192,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   const inFlightRef = useRef(false);
   const automaticRetryAttemptRef = useRef(0);
   const automaticRetryTimerRef = useRef<number | null>(null);
+  const normalRefreshTimerRef = useRef<number | null>(null);
   const runSpotFetchRef = useRef<(reason: string) => Promise<void>>(async () => undefined);
   const configRef = useRef<SpotConfig | null>(null);
   const imageStateRef = useRef<SpotImageState>({
@@ -224,7 +226,56 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       window.clearTimeout(automaticRetryTimerRef.current);
       automaticRetryTimerRef.current = null;
     }
+    setDiagnostics((prev) => (
+      !prev.automatic_retry_pending && prev.next_retry_scheduled_at === null
+        ? prev
+        : {
+            ...prev,
+            automatic_retry_pending: false,
+            next_retry_scheduled_at: null,
+          }
+    ));
   }, []);
+
+  const cancelNormalImageRefresh = useCallback((): void => {
+    if (normalRefreshTimerRef.current !== null) {
+      window.clearTimeout(normalRefreshTimerRef.current);
+      normalRefreshTimerRef.current = null;
+    }
+    setDiagnostics((prev) => (
+      prev.next_fetch_scheduled_at === null
+        ? prev
+        : { ...prev, next_fetch_scheduled_at: null }
+    ));
+  }, []);
+
+  const scheduleNormalImageRefresh = useCallback((): void => {
+    cancelNormalImageRefresh();
+    const currentConfig = configRef.current;
+    if (
+      !currentConfig?.image_url ||
+      automaticRetryTimerRef.current !== null ||
+      (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+    ) {
+      return;
+    }
+
+    const intervalMs = resolveSpotImageRefreshIntervalMs(currentConfig.refresh_interval);
+    const scheduledAt = Date.now() + intervalMs;
+    normalRefreshTimerRef.current = window.setTimeout(() => {
+      normalRefreshTimerRef.current = null;
+      setDiagnostics((prev) => ({
+        ...prev,
+        next_fetch_scheduled_at: null,
+      }));
+      void runSpotFetchRef.current('scheduled');
+    }, intervalMs);
+    setDiagnostics((prev) => ({
+      ...prev,
+      refresh_interval_ms: intervalMs,
+      next_fetch_scheduled_at: scheduledAt,
+    }));
+  }, [cancelNormalImageRefresh]);
 
   const resetImageRecovery = useCallback((): void => {
     cancelPendingImageRetry();
@@ -243,6 +294,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     if (automaticRetryTimerRef.current !== null) {
       return;
     }
+    cancelNormalImageRefresh();
 
     const delayMs = getNextSpotImageRetryDelayMs(automaticRetryAttemptRef.current);
     if (delayMs === null) {
@@ -276,7 +328,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       next_retry_scheduled_at: scheduledAt,
       last_failure_retryable: true,
     }));
-  }, []);
+  }, [cancelNormalImageRefresh]);
 
   const applySpotConfig = useCallback(
     (nextConfig: SpotConfig): void => {
@@ -285,17 +337,35 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         return;
       }
       if (previousConfig?.image_url !== nextConfig.image_url) {
+        cancelNormalImageRefresh();
         resetImageRecovery();
+      } else if (previousConfig?.refresh_interval !== nextConfig.refresh_interval) {
+        cancelNormalImageRefresh();
       }
+      configRef.current = nextConfig;
       setConfig(nextConfig);
       setDashboardSpotConfig(nextConfig);
       setDiagnostics((prev) => ({
         ...prev,
-        refresh_interval_ms: null,
+        refresh_interval_ms: resolveSpotImageRefreshIntervalMs(nextConfig.refresh_interval),
         next_fetch_scheduled_at: null,
       }));
+      if (
+        previousConfig?.image_url === nextConfig.image_url &&
+        previousConfig.refresh_interval !== nextConfig.refresh_interval &&
+        hasImageRef.current &&
+        !inFlightRef.current &&
+        automaticRetryTimerRef.current === null
+      ) {
+        scheduleNormalImageRefresh();
+      }
     },
-    [resetImageRecovery, setDashboardSpotConfig]
+    [
+      cancelNormalImageRefresh,
+      resetImageRecovery,
+      scheduleNormalImageRefresh,
+      setDashboardSpotConfig,
+    ]
   );
 
   const loadConfig = useCallback(async (): Promise<SpotConfig | null> => {
@@ -365,9 +435,13 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       if (!currentConfig?.image_url) {
         return;
       }
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       if (inFlightRef.current) {
         return;
       }
+      cancelNormalImageRefresh();
 
       const startedAt = Date.now();
       const currentImageState = imageStateRef.current;
@@ -377,7 +451,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       setDiagnostics((prev) => ({
         ...prev,
         in_flight: true,
-        refresh_interval_ms: null,
+        refresh_interval_ms: resolveSpotImageRefreshIntervalMs(currentConfig.refresh_interval),
+        next_fetch_scheduled_at: null,
         fetch_count: prev.fetch_count + 1,
         last_fetch_started_at: startedAt,
         last_fetch_reason: reason,
@@ -493,19 +568,35 @@ export const useSpotViewModel = (): UseSpotViewModel => {
         }));
       }
     },
-    [publishImageFailure, syncDashboardSpotImageState]
+    [cancelNormalImageRefresh, publishImageFailure, syncDashboardSpotImageState]
   );
 
   runSpotFetchRef.current = runSpotFetch;
 
   const fetchInitialImage = useCallback(async (): Promise<void> => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return;
+    }
     await runSpotFetch('initial');
   }, [runSpotFetch]);
 
   const refreshImage = useCallback(() => {
+    cancelNormalImageRefresh();
     resetImageRecovery();
     void runSpotFetch('manual');
-  }, [resetImageRecovery, runSpotFetch]);
+  }, [cancelNormalImageRefresh, resetImageRecovery, runSpotFetch]);
+
+  const resumeImageRefreshWhenVisible = useCallback((): void => {
+    if (
+      !configRef.current?.image_url ||
+      inFlightRef.current ||
+      automaticRetryTimerRef.current !== null ||
+      normalRefreshTimerRef.current !== null
+    ) {
+      return;
+    }
+    void runSpotFetchRef.current('visible-resume');
+  }, []);
 
   const controlSpot = useCallback(async (action: string, value?: number) => {
     try {
@@ -561,12 +652,13 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   useEffect(() => {
     return () => {
       cancelPendingImageRetry();
+      cancelNormalImageRefresh();
       const pendingPreviousUrl = pendingPreviousImageStateRef.current?.imageUrl ?? null;
       if (pendingPreviousUrl && pendingPreviousUrl !== prevUrlRef.current) {
         URL.revokeObjectURL(pendingPreviousUrl);
       }
     };
-  }, [cancelPendingImageRetry]);
+  }, [cancelNormalImageRefresh, cancelPendingImageRetry]);
 
   useSpotViewModelEffects({
     config,
@@ -575,6 +667,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     applySpotConfig,
     prevUrlRef,
     cancelPendingImageRetry,
+    cancelNormalImageRefresh,
+    resumeImageRefreshWhenVisible,
   });
 
   const handleImageLoad = useCallback((displayedImageUrl?: string) => {
@@ -602,9 +696,9 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       currentImageState.metadata
     );
     if (shouldRequestNext) {
-      void runSpotFetch('completed');
+      scheduleNormalImageRefresh();
     }
-  }, [resetImageRecovery, runSpotFetch, syncDashboardSpotImageState]);
+  }, [resetImageRecovery, scheduleNormalImageRefresh, syncDashboardSpotImageState]);
 
   const handleImageError = useCallback((displayedImageUrl?: string) => {
     setImageLoading(false);

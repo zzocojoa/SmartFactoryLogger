@@ -84,6 +84,17 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
 v2-only 모드에서는 v1 CSV 파일이 생성되지 않는다.
 기존 Excel 작업, replay runner, downstream parser가 v1 파일명을 기대한다면 v2-only를 켜면 안 된다.
 
+## v2 종료 closeout 계약
+
+- `csv_closeout.closeout_reason`은 `shutdown`, `daily-rollover`,
+  `config-change`, `runtime-error`, `runtime-close`를 구분한다.
+- `final_persisted_sample_seq`는 해당 파일에 대해 `writerows`와 `flush`가
+  모두 성공한 뒤에만 갱신한다. row 생성 시점의 sequence를 사용하지 않는다.
+- 종료 QA는 동일 logger instance와 build commit의 `shutdown` closeout만
+  선택한다. 관찰 중 daily rollover가 발생해도 이전 파일로 fallback하지 않는다.
+- validator는 closeout sequence가 실제 CSV의 마지막 및 최댓값
+  `sample_seq`와 모두 일치하는지 확인한다.
+
 ## hot reload 보존 정책
 
 운영 중 `csv_v1_enabled=true`에서 `csv_v1_enabled=false`로 전환할 수 있다.

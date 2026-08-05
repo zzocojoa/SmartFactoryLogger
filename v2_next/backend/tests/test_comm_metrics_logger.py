@@ -1,9 +1,13 @@
+from __future__ import annotations
+
+import logging
 import threading
 import time
 import unittest
 from unittest.mock import Mock, patch
 
 from backend.FacilityData.service import plc_service
+from backend.Observability import metrics_logger
 from backend.Observability.metrics_logger import CommMetricsLoggerService
 
 
@@ -33,6 +37,29 @@ class CommMetricsLoggerServiceTests(unittest.TestCase):
         self.assertTrue(stopped)
         self.assertLess(elapsed, 0.5)
         self.assertIsNone(service.thread)
+
+    def test_listener_restarts_after_clean_service_stop(self) -> None:
+        logger = logging.Logger("comm-metrics-restart-test")
+        listener = Mock()
+
+        with patch.object(
+            metrics_logger.CommMetricsLoggerService,
+            "_build_logger",
+            return_value=logger,
+        ):
+            service = metrics_logger.CommMetricsLoggerService(interval_sec=5.0)
+
+        service.listener = listener
+        service._listener_running = True
+
+        service.start()
+        self.assertTrue(service.stop())
+        service.start()
+        self.assertTrue(service.stop())
+
+        self.assertEqual(listener.start.call_count, 1)
+        self.assertEqual(listener.stop.call_count, 2)
+        self.assertFalse(service._listener_running)
 
 
 if __name__ == "__main__":

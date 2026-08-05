@@ -45,13 +45,13 @@ from backend.FacilityData.process_phase import (
 )
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_FILENAME,
-    SpotObservationFactWriter,
     build_spot_observation_fact_manifest,
     build_spot_observation_key,
     parse_spot_diagnostic_evidence_codes,
 )
 from backend.FacilityData.spot_config_provenance import build_spot_configuration_snapshot
 from backend.FacilityData.spot_image_fact import (
+    SPOT_IMAGE_FACT_FILENAME,
     SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME,
     build_spot_image_fact_manifest,
 )
@@ -303,7 +303,7 @@ def _v2_column_hash(columns: Iterable[str]) -> str:
 
 
 class CSVLoggerService:
-    def __init__(self) -> None:
+    def __init__(self, *, require_runtime_manifest_state: bool = False) -> None:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.queue: queue.Queue[Optional[FactoryData]] = queue.Queue(maxsize=5000)
@@ -367,36 +367,85 @@ class CSVLoggerService:
         self._v2_4_last_sample_seq: Optional[int] = None
         self._v2_4_last_updated_at: Optional[str] = None
         self._current_v2_csv_path: Optional[Path] = None
+        self._v2_persisted_sample_seq_by_path: dict[str, int] = {}
+        self._v2_persisted_at_by_path: dict[str, str] = {}
         self._shutdown_flush_succeeded: Optional[bool] = None
         self._runtime_write_failure_observed = False
+        self._finalize_spot_image_manifest_on_stop = True
+        self._finalize_spot_observation_manifest_on_stop = True
+        self._require_runtime_manifest_state = bool(require_runtime_manifest_state)
 
     def start(self) -> None:
         with self._lifecycle_lock:
+            existing_thread = self.thread
             if self.running:
+                if existing_thread is None or not existing_thread.is_alive():
+                    raise RuntimeError(
+                        "CSV logger is marked running without a live worker thread."
+                    )
                 return
+            if existing_thread is not None:
+                raise RuntimeError(
+                    "CSV logger cannot start until the previous worker generation "
+                    "has completed stop()."
+                )
+            self.thread = None
             self._shutdown_flush_succeeded = False
             self._runtime_write_failure_observed = False
+            self._finalize_spot_image_manifest_on_stop = True
+            self._finalize_spot_observation_manifest_on_stop = True
             self.running = True
             self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
             self.thread.start()
 
-    def stop(self, *, timeout_sec: Optional[float] = 2.0) -> bool:
+    def stop(
+        self,
+        *,
+        timeout_sec: Optional[float] = 2.0,
+        finalize_spot_image_manifest: bool = True,
+        finalize_spot_observation_manifest: bool = True,
+    ) -> bool:
         with self._lifecycle_lock:
+            retiring_thread = self.thread
+            if (
+                retiring_thread is not None
+                and retiring_thread.is_alive()
+                and not finalize_spot_image_manifest
+            ):
+                # Once closeout is unsafe for a logger generation, a repeated
+                # stop must not re-enable its final manifest.
+                self._finalize_spot_image_manifest_on_stop = False
+            if (
+                retiring_thread is not None
+                and retiring_thread.is_alive()
+                and not finalize_spot_observation_manifest
+            ):
+                self._finalize_spot_observation_manifest_on_stop = False
             if self.running:
                 self.running = False
                 try:
                     self.queue.put_nowait(None)
                 except queue.Full:
                     pass
-        if self.thread:
-            self.thread.join(timeout=timeout_sec)
-            stopped = not self.thread.is_alive()
+        if retiring_thread:
+            retiring_thread.join(timeout=timeout_sec)
+            stopped = not retiring_thread.is_alive()
             if not stopped:
                 self.logger.warning("CSV logger thread did not stop within %.1f seconds.", timeout_sec)
             elif self._shutdown_flush_succeeded is not True:
                 self.logger.warning("CSV logger stopped without a durable final flush.")
-            return stopped and self._shutdown_flush_succeeded is True
-        return True
+            if stopped:
+                with self._lifecycle_lock:
+                    flush_succeeded = self._shutdown_flush_succeeded is True
+                    if self.thread is retiring_thread:
+                        self.thread = None
+            else:
+                flush_succeeded = False
+            return stopped and flush_succeeded
+        with self._lifecycle_lock:
+            if self._shutdown_flush_succeeded is None:
+                return True
+            return self._shutdown_flush_succeeded is True
 
     def enqueue(self, data: FactoryData) -> None:
         payload_bytes = self._estimate_factory_data_bytes(data)
@@ -799,8 +848,20 @@ class CSVLoggerService:
             from backend.FacilityData.drivers import spot_api
 
             health = spot_api.get_spot_image_capture_health()
-        except Exception:
+            runtime_stats = spot_api.get_spot_image_capture_manifest_stats(
+                fact_path=log_path / SPOT_IMAGE_FACT_FILENAME,
+            )
+        except Exception as exc:
+            if self._require_runtime_manifest_state:
+                raise RuntimeError(
+                    "SPOT image fact runtime manifest state is unavailable"
+                ) from exc
             health = {}
+            runtime_stats = None
+        if runtime_stats is None and self._require_runtime_manifest_state:
+            raise RuntimeError(
+                "SPOT image fact runtime manifest path does not match closeout path"
+            )
         mode = str(health.get("mode") or getattr(config, "SPOT_IMAGE_CAPTURE_MODE", "off") or "off")
         enabled = bool(health.get("enabled", getattr(config, "SPOT_IMAGE_CAPTURE_ENABLED", False)))
         return build_spot_image_fact_manifest(
@@ -809,6 +870,7 @@ class CSVLoggerService:
             enabled=enabled,
             mode=mode,
             health=health,
+            runtime_stats=runtime_stats,
         )
 
     def write_spot_image_fact_final_manifest(self, log_path: Optional[Path] = None) -> Path:
@@ -824,11 +886,16 @@ class CSVLoggerService:
         temp_path.replace(final_path)
         return final_path
 
-    def _write_spot_image_fact_final_manifest_safely(self, log_path: Optional[Path] = None) -> None:
+    def _write_spot_image_fact_final_manifest_safely(
+        self,
+        log_path: Optional[Path] = None,
+    ) -> bool:
         try:
             self.write_spot_image_fact_final_manifest(log_path)
         except Exception as exc:
             self.logger.warning("Failed to write SPOT image fact final manifest: %s", exc)
+            return False
+        return True
 
     def _changeover_candidate_resolution_fact_manifest(self, log_path: Path) -> dict[str, Any]:
         return build_changeover_candidate_resolution_fact_manifest(
@@ -841,10 +908,12 @@ class CSVLoggerService:
         )
 
     def _spot_observation_fact_manifest(self, log_path: Path) -> dict[str, Any]:
+        spot_api_module: Any | None = None
         try:
-            from backend.FacilityData.drivers import spot_api
+            from backend.FacilityData.drivers import spot_api as imported_spot_api
 
-            health = spot_api.get_spot_observation_fact_health()
+            spot_api_module = imported_spot_api
+            health = spot_api_module.get_spot_observation_fact_health()
         except Exception:
             health = {}
         enabled = bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)))
@@ -853,6 +922,18 @@ class CSVLoggerService:
             fact_path,
             enabled=enabled,
         )
+        runtime_summary = (
+            spot_api_module.get_spot_observation_fact_manifest_summary(
+                fact_path=fact_path,
+                allow_offline_rebuild=not self._require_runtime_manifest_state,
+            )
+            if spot_api_module is not None
+            else None
+        )
+        if runtime_summary is None and self._require_runtime_manifest_state:
+            raise RuntimeError(
+                "SPOT observation fact runtime manifest state is unavailable"
+            )
         return build_spot_observation_fact_manifest(
             fact_path=fact_path,
             enabled=enabled,
@@ -861,18 +942,36 @@ class CSVLoggerService:
             ),
             spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
             path=SPOT_OBSERVATION_FACT_FILENAME,
+            summary=runtime_summary,
         )
 
     def _ensure_spot_observation_fact_file(self, fact_path: Path, *, enabled: bool) -> int:
         if not enabled:
             return 0
-        writer = SpotObservationFactWriter(fact_path)
-        if writer.ensure_initialized():
-            return 0
-        self.logger.warning("Failed to initialize enabled SPOT observation fact: %s", fact_path.name)
-        return max(1, writer.failure_count)
+        try:
+            from backend.FacilityData.drivers import spot_api
 
-    def refresh_spot_observation_fact_manifest_for_csv(self, csv_path: Path) -> Optional[Path]:
+            initialized = spot_api.ensure_spot_observation_fact_initialized(
+                fact_path=fact_path,
+                allow_offline_rebuild=not self._require_runtime_manifest_state,
+            )
+            if initialized:
+                return 0
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to initialize enabled SPOT observation fact: %s",
+                exc,
+            )
+            return 1
+        self.logger.warning("Failed to initialize enabled SPOT observation fact: %s", fact_path.name)
+        return 1
+
+    def refresh_spot_observation_fact_manifest_for_csv(
+        self,
+        csv_path: Path,
+        *,
+        closeout_reason: str = "runtime-close",
+    ) -> Optional[Path]:
         metadata_path = csv_path.with_suffix(".metadata.json")
         if not metadata_path.exists():
             return None
@@ -881,16 +980,12 @@ class CSVLoggerService:
         except (OSError, json.JSONDecodeError) as exc:
             self.logger.warning("Failed to read CSV v2 sidecar for observation fact refresh: %s", exc)
             return None
+        spot_api_module: Any | None = None
         try:
-            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
-                realtime_rows = list(csv.DictReader(handle))
-        except Exception as exc:
-            self.logger.warning("Failed to read CSV v2 rows for observation fact manifest refresh: %s", exc)
-            return None
-        try:
-            from backend.FacilityData.drivers import spot_api
+            from backend.FacilityData.drivers import spot_api as imported_spot_api
 
-            health = spot_api.get_spot_observation_fact_health()
+            spot_api_module = imported_spot_api
+            health = spot_api_module.get_spot_observation_fact_health()
         except Exception:
             health = {}
         enabled = bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)))
@@ -899,16 +994,78 @@ class CSVLoggerService:
             fact_path,
             enabled=enabled,
         )
-        payload["spot_observation_fact_manifest"] = build_spot_observation_fact_manifest(
-            fact_path=fact_path,
-            enabled=enabled,
-            write_failure_count=(
-                int(health.get("write_failure_count", 0) or 0) + initialization_failure_count
-            ),
-            spool_pending_count=int(health.get("spool_pending_count", 0) or 0),
-            realtime_rows=realtime_rows,
-            path=SPOT_OBSERVATION_FACT_FILENAME,
-        )
+        try:
+            if spot_api_module is None:
+                raise RuntimeError(
+                    "SPOT observation fact runtime summary is unavailable"
+                )
+            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                runtime_summary = (
+                    spot_api_module.get_spot_observation_fact_manifest_summary(
+                        fact_path=fact_path,
+                        realtime_rows=csv.DictReader(handle),
+                        allow_offline_rebuild=not self._require_runtime_manifest_state,
+                    )
+                )
+                observation_fact_manifest = build_spot_observation_fact_manifest(
+                    fact_path=fact_path,
+                    enabled=enabled,
+                    write_failure_count=(
+                        int(health.get("write_failure_count", 0) or 0)
+                        + initialization_failure_count
+                    ),
+                    spool_pending_count=int(
+                        health.get("spool_pending_count", 0) or 0
+                    ),
+                    path=SPOT_OBSERVATION_FACT_FILENAME,
+                    summary=runtime_summary,
+                )
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to build refreshed CSV v2 observation fact manifest: %s",
+                exc,
+            )
+            return None
+        csv_path_key = str(csv_path)
+        with self._runtime_lock:
+            final_persisted_sample_seq = self._v2_persisted_sample_seq_by_path.get(
+                csv_path_key
+            )
+            persisted_at = self._v2_persisted_at_by_path.get(csv_path_key)
+        if (
+            (final_persisted_sample_seq is None or persisted_at is None)
+            and not self._require_runtime_manifest_state
+        ):
+            try:
+                with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                    final_row: Optional[dict[str, str]] = None
+                    for final_row in csv.DictReader(handle):
+                        pass
+                if final_row is not None:
+                    final_persisted_sample_seq = int(final_row["sample_seq"])
+                    persisted_at = datetime.fromtimestamp(
+                        csv_path.stat().st_mtime,
+                        timezone.utc,
+                    ).isoformat().replace("+00:00", "Z")
+            except (KeyError, OSError, TypeError, ValueError):
+                final_persisted_sample_seq = None
+                persisted_at = None
+        if final_persisted_sample_seq is None or persisted_at is None:
+            self.logger.warning(
+                "Refusing CSV v2 closeout without a file-specific persisted sample: %s",
+                csv_path.name,
+            )
+            return None
+        payload.pop("spot_observation_fact_closeout", None)
+        payload["spot_observation_fact_manifest"] = observation_fact_manifest
+        payload["csv_closeout"] = {
+            "finalized": True,
+            "closeout_reason": closeout_reason,
+            "csv_file_name": csv_path.name,
+            "logger_service_instance_id": self.logger_service_instance_id,
+            "final_persisted_sample_seq": final_persisted_sample_seq,
+            "persisted_at": persisted_at,
+        }
         temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
         try:
             temp_path.write_text(
@@ -918,6 +1075,46 @@ class CSVLoggerService:
             temp_path.replace(metadata_path)
         except OSError as exc:
             self.logger.warning("Failed to write refreshed CSV v2 observation fact manifest: %s", exc)
+            return None
+        return metadata_path
+
+    def _suppress_spot_observation_fact_manifest_for_csv(
+        self,
+        csv_path: Path,
+        *,
+        writes_drained: bool = False,
+        reason: str = "shutdown-write-drain-timeout",
+    ) -> Optional[Path]:
+        metadata_path = csv_path.with_suffix(".metadata.json")
+        if not metadata_path.exists():
+            return None
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self.logger.warning(
+                "Failed to read CSV v2 sidecar for observation fact suppression: %s",
+                exc,
+            )
+            return None
+        payload.pop("spot_observation_fact_manifest", None)
+        payload.pop("csv_closeout", None)
+        payload["spot_observation_fact_closeout"] = {
+            "finalized": False,
+            "writes_drained": writes_drained,
+            "reason": reason,
+        }
+        temp_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
+        try:
+            temp_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            temp_path.replace(metadata_path)
+        except OSError as exc:
+            self.logger.warning(
+                "Failed to suppress unsafe CSV v2 observation fact manifest: %s",
+                exc,
+            )
             return None
         return metadata_path
 
@@ -1005,8 +1202,6 @@ class CSVLoggerService:
             },
             "spot_temperature_shadow_metadata": self._spot_temperature_shadow_metadata(active_contract),
             "spot_configuration_snapshot": self._spot_configuration_snapshot(runtime_git_commit),
-            "spot_observation_fact_manifest": self._spot_observation_fact_manifest(sidecar_path.parent),
-            "spot_image_fact_manifest": self._spot_image_fact_manifest(sidecar_path.parent),
             "changeover_candidate_resolution_fact_manifest": (
                 self._changeover_candidate_resolution_fact_manifest(sidecar_path.parent)
             ),
@@ -1215,6 +1410,39 @@ class CSVLoggerService:
                 ),
             },
         }
+        runtime_manifests = (
+            (
+                "spot_observation_fact_manifest",
+                "spot_observation_fact_closeout",
+                lambda: self._spot_observation_fact_manifest(sidecar_path.parent),
+            ),
+            (
+                "spot_image_fact_manifest",
+                "spot_image_fact_closeout",
+                lambda: self._spot_image_fact_manifest(sidecar_path.parent),
+            ),
+        )
+        for manifest_key, closeout_key, build_manifest in runtime_manifests:
+            try:
+                payload[manifest_key] = build_manifest()
+            except Exception as exc:
+                # A runtime fact writer can remain bound to the previous configured
+                # directory while the CSV logger has already selected its durable
+                # fallback or a newly configured LogPath. Preserve the realtime CSV
+                # in that situation, but make the incomplete fact closeout explicit
+                # and reject a clean shutdown until the manifests can be reconciled.
+                self._runtime_write_failure_observed = True
+                payload[closeout_key] = {
+                    "finalized": False,
+                    "writes_drained": False,
+                    "reason": "runtime-manifest-unavailable-at-open",
+                    "error_type": exc.__class__.__name__,
+                }
+                self.logger.warning(
+                    "CSV v2 logging will continue without %s: %s",
+                    manifest_key,
+                    exc,
+                )
         try:
             sidecar_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             self._sidecar_paths_written.add(sidecar_key)
@@ -1821,6 +2049,13 @@ class CSVLoggerService:
                     if temperature_hardening_enabled
                     else CSV_SCHEMA_VERSION_V2_4
                 ),
+                "logger_service_instance_id": self.logger_service_instance_id,
+                "logger_service_started_at": self.logger_service_started_at,
+                "current_v2_csv_file_name": (
+                    self._current_v2_csv_path.name
+                    if self._current_v2_csv_path is not None
+                    else None
+                ),
                 "temperature_hardening_enabled": temperature_hardening_enabled,
                 "rows_total": self._v2_4_operational_rows_total,
                 "rows_by_temperature_output_status": dict(self._v2_4_temperature_output_status_counts),
@@ -2189,10 +2424,62 @@ class CSVLoggerService:
             return True
         if writer is None or handle is None:
             return False
+        persistence = self._prepare_v2_rows_persisted(rows)
         writer.writerows([row for row, _ in rows])
         handle.flush()
+        self._commit_v2_rows_persisted(persistence)
         self._mark_write_completed()
         return True
+
+    def _prepare_v2_rows_persisted(
+        self,
+        rows: list[Tuple[list, datetime]],
+    ) -> tuple[str, int, str]:
+        csv_path = self._current_v2_csv_path
+        if csv_path is None:
+            raise RuntimeError("CSV v2 persisted rows have no active file identity.")
+        sample_seq_index = self._get_active_v2_contract().columns.index("sample_seq")
+        try:
+            persisted_sample_seqs = [
+                int(row[sample_seq_index])
+                for row, _ in rows
+            ]
+        except (IndexError, TypeError, ValueError) as exc:
+            raise RuntimeError("CSV v2 persisted rows have an invalid sample_seq.") from exc
+        if any(
+            current <= previous
+            for previous, current in zip(
+                persisted_sample_seqs,
+                persisted_sample_seqs[1:],
+            )
+        ):
+            raise RuntimeError(
+                "CSV v2 persisted sample_seq is not strictly increasing."
+            )
+        persisted_sample_seq = persisted_sample_seqs[-1]
+        csv_path_key = str(csv_path)
+        persisted_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        with self._runtime_lock:
+            previous_sample_seq = self._v2_persisted_sample_seq_by_path.get(csv_path_key)
+            if (
+                previous_sample_seq is not None
+                and persisted_sample_seqs[0] <= previous_sample_seq
+            ):
+                raise RuntimeError(
+                    "CSV v2 persisted sample_seq did not advance for the active file."
+                )
+        return csv_path_key, persisted_sample_seq, persisted_at
+
+    def _commit_v2_rows_persisted(
+        self,
+        persistence: tuple[str, int, str],
+    ) -> None:
+        csv_path_key, persisted_sample_seq, persisted_at = persistence
+        with self._runtime_lock:
+            self._v2_persisted_sample_seq_by_path[csv_path_key] = (
+                persisted_sample_seq
+            )
+            self._v2_persisted_at_by_path[csv_path_key] = persisted_at
 
     def _mark_write_completed(self) -> None:
         with self._runtime_lock:
@@ -2206,17 +2493,76 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to close CSV log file handle: %s", exc)
 
-    def _close_v2_file(self, handle: Optional[object]) -> None:
+    def _close_v2_file(
+        self,
+        handle: Optional[object],
+        *,
+        closeout_reason: str = "runtime-close",
+        finalize_closeout: bool = True,
+    ) -> bool:
         csv_path = self._current_v2_csv_path
+        closeout_succeeded = True
         if handle is not None:
             try:
                 handle.flush()
             except Exception as exc:
+                closeout_succeeded = False
                 self.logger.warning("Failed to flush CSV v2 log file before close: %s", exc)
         if csv_path is not None and self.csv_v2_sidecar_enabled:
-            self.refresh_spot_observation_fact_manifest_for_csv(csv_path)
+            if (
+                closeout_succeeded
+                and finalize_closeout
+                and self._finalize_spot_observation_manifest_on_stop
+            ):
+                refreshed_path = self.refresh_spot_observation_fact_manifest_for_csv(
+                    csv_path,
+                    closeout_reason=closeout_reason,
+                )
+                if refreshed_path is None:
+                    closeout_succeeded = False
+                    suppressed_path = self._suppress_spot_observation_fact_manifest_for_csv(
+                        csv_path,
+                        writes_drained=True,
+                        reason="manifest-refresh-failed",
+                    )
+                    if suppressed_path is None:
+                        self.logger.warning(
+                            "Failed to invalidate stale SPOT observation fact manifest."
+                        )
+                    else:
+                        self.logger.warning(
+                            "Invalidated stale SPOT observation fact manifest after refresh failure."
+                        )
+            else:
+                suppression_reason = (
+                    "close-flush-failed"
+                    if not closeout_succeeded
+                    else (
+                        "closeout-not-finalized"
+                        if not finalize_closeout
+                        else "shutdown-write-drain-timeout"
+                    )
+                )
+                suppressed_path = self._suppress_spot_observation_fact_manifest_for_csv(
+                    csv_path,
+                    writes_drained=closeout_succeeded,
+                    reason=suppression_reason,
+                )
+                if suppressed_path is None:
+                    closeout_succeeded = False
+                self.logger.warning(
+                    "Skipped SPOT observation fact manifest because writes did not drain."
+                )
         self._close_file(handle)
+        if csv_path is not None:
+            csv_path_key = str(csv_path)
+            with self._runtime_lock:
+                self._v2_persisted_sample_seq_by_path.pop(csv_path_key, None)
+                self._v2_persisted_at_by_path.pop(csv_path_key, None)
         self._current_v2_csv_path = None
+        if not closeout_succeeded:
+            self._runtime_write_failure_observed = True
+        return closeout_succeeded
 
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
@@ -2318,7 +2664,10 @@ class CSVLoggerService:
                             )
                             v2_buffer.clear()
                     self._close_file(f_handle)
-                    self._close_v2_file(v2_handle)
+                    self._close_v2_file(
+                        v2_handle,
+                        closeout_reason="config-change",
+                    )
                     f_handle = None
                     writer = None
                     v2_handle = None
@@ -2374,7 +2723,10 @@ class CSVLoggerService:
                                 )
                         if rollover_ready:
                             self._close_file(f_handle)
-                            self._close_v2_file(v2_handle)
+                            self._close_v2_file(
+                                v2_handle,
+                                closeout_reason="daily-rollover",
+                            )
                             f_handle = None
                             writer = None
                             v2_handle = None
@@ -2470,7 +2822,10 @@ class CSVLoggerService:
                             "Current row deferred to preserve daily file boundary."
                         )
                 self._close_file(f_handle)
-                self._close_v2_file(v2_handle)
+                self._close_v2_file(
+                    v2_handle,
+                    closeout_reason="runtime-error",
+                )
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
                 self._buffer_size = len(buffer)
@@ -2521,7 +2876,12 @@ class CSVLoggerService:
                 )
             elif self.auto_save:
                 self._close_file(f_handle)
-                self._close_v2_file(v2_handle)
+                if not self._close_v2_file(
+                    v2_handle,
+                    closeout_reason="daily-rollover",
+                    finalize_closeout=shutdown_flush_succeeded,
+                ):
+                    shutdown_flush_succeeded = False
                 f_handle, writer = None, None
                 v2_handle, v2_writer = None, None
                 try:
@@ -2558,13 +2918,27 @@ class CSVLoggerService:
                 except Exception as exc:
                     shutdown_flush_succeeded = False
                     self.logger.warning("CSV deferred shutdown row write failed: %s", exc)
-        self._shutdown_flush_succeeded = shutdown_flush_succeeded
         self._buffer_size = 0
         self._close_file(f_handle)
-        self._close_v2_file(v2_handle)
-        if self.csv_v2_enabled and self.csv_v2_sidecar_enabled:
-            self._write_spot_image_fact_final_manifest_safely()
+        if not self._close_v2_file(
+            v2_handle,
+            closeout_reason="shutdown",
+            finalize_closeout=shutdown_flush_succeeded,
+        ):
+            shutdown_flush_succeeded = False
+        if (
+            self.csv_v2_enabled
+            and self.csv_v2_sidecar_enabled
+            and self._finalize_spot_image_manifest_on_stop
+        ):
+            if not self._write_spot_image_fact_final_manifest_safely():
+                shutdown_flush_succeeded = False
+        elif self.csv_v2_enabled and self.csv_v2_sidecar_enabled:
+            self.logger.warning(
+                "Skipped SPOT image fact final manifest because image capture did not drain."
+            )
+        self._shutdown_flush_succeeded = shutdown_flush_succeeded
         self.logger.info("CSV logger thread stopped.")
 
 
-logger_service = CSVLoggerService()
+logger_service = CSVLoggerService(require_runtime_manifest_state=True)

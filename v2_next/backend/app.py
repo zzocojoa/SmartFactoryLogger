@@ -71,7 +71,6 @@ import threading
 import traceback
 import time
 import uvicorn
-from urllib.request import Request as UrlRequest, urlopen
 from typing import Any, Callable, NamedTuple, TypedDict
 
 # Import Service Layer using absolute imports
@@ -257,6 +256,10 @@ _NETWORK_WARN_MS = 200
 _SPOT_IMAGE_PATH = "/api/spot/image.jpg"
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 _SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
+_SPOT_IMAGE_AT_HEADER = "X-Spot-Image-At"
+_SPOT_IMAGE_SOURCE_HEADER = "X-Spot-Image-Source"
+_SPOT_IMAGE_LATENCY_HEADER = "X-Spot-Image-Latency-Ms"
+_SPOT_IMAGE_AGE_HEADER = "X-Spot-Image-Age-Ms"
 _SPOT_INTERNAL_TEMPERATURE_HEADER = "X-Spot-Internal-Temperature"
 _SPOT_INTERNAL_TEMPERATURE_AT_HEADER = "X-Spot-Internal-Temperature-At"
 _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER = "X-Spot-Internal-Temperature-Status"
@@ -431,6 +434,42 @@ def _run_lifespan_start_stage(stage: str, starter: Callable[[], Any]) -> None:
         _lifecycle_log_fields(),
     )
     _emit_embedded_startup_progress(f"{stage}_ready")
+
+
+async def _run_lifespan_stop_stage(stage: str, stopper: Callable[[], Any]) -> bool:
+    started_perf = time.perf_counter()
+    try:
+        result = await asyncio.to_thread(stopper)
+        succeeded = result is not False
+    except Exception as exc:
+        succeeded = False
+        _logger.warning(
+            "[Main] Lifespan shutdown stage failed stage=%s error_type=%s %s",
+            stage,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+    _logger.info(
+        "[Main] Lifespan shutdown stage complete stage=%s success=%s elapsed_ms=%.1f %s",
+        stage,
+        succeeded,
+        (time.perf_counter() - started_perf) * 1000.0,
+        _lifecycle_log_fields(),
+    )
+    return succeeded
+
+
+def _probe_spot_observation_fact_drained(shutdown_kind: str) -> bool:
+    try:
+        return bool(spot_control.spot_observation_fact_writes_drained())
+    except Exception as exc:
+        _logger.warning(
+            "[Main] %s SPOT observation drain probe failed error_type=%s %s",
+            shutdown_kind,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+        return False
 
 
 def _log_backend_access_urls() -> None:
@@ -691,31 +730,6 @@ def _test_tcp(ip: str | None, port: int | None, timeout: float = 1.5) -> dict:
     except Exception as exc:
         latency_ms = int((time.perf_counter() - start) * 1000)
         return {"ok": False, "latency_ms": latency_ms, "message": str(exc)}
-
-
-def _test_http(url: str | None, timeout: float = 1.5) -> dict:
-    if not url:
-        return {"ok": False, "latency_ms": None, "message": "URL missing"}
-    start = time.perf_counter()
-    try:
-        request = UrlRequest(url, method="HEAD")
-        with urlopen(request, timeout=timeout) as resp:
-            status = getattr(resp, "status", 200)
-        latency_ms = int((time.perf_counter() - start) * 1000)
-        if status >= 400:
-            return {"ok": False, "latency_ms": latency_ms, "message": f"HTTP {status}"}
-        return {"ok": True, "latency_ms": latency_ms, "message": f"HTTP {status}"}
-    except Exception:
-        try:
-            with urlopen(url, timeout=timeout) as resp:
-                status = getattr(resp, "status", 200)
-            latency_ms = int((time.perf_counter() - start) * 1000)
-            if status >= 400:
-                return {"ok": False, "latency_ms": latency_ms, "message": f"HTTP {status}"}
-            return {"ok": True, "latency_ms": latency_ms, "message": f"HTTP {status}"}
-        except Exception as exc:
-            latency_ms = int((time.perf_counter() - start) * 1000)
-            return {"ok": False, "latency_ms": latency_ms, "message": str(exc)}
 
 
 def _check_path(path_str: str) -> dict:
@@ -1627,63 +1641,163 @@ async def lifespan(app: FastAPI):
     # Startup
     if not acquire_single_instance_lock():
         raise RuntimeError("Instance already running")
-    _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
-    _emit_embedded_startup_progress("lifespan_begin")
-    print("[Main] Starting CSV Logger...")
-    _run_lifespan_start_stage("csv_logger", logger_service.start)
-    print("[Main] Starting Config Sync Agent...")
-    _run_lifespan_start_stage("config_sync", config_sync_agent.start)
-    print("[Main] Starting Config Watcher...")
-    _run_lifespan_start_stage("config_watch", config_watch_service.start)
-    print("[Main] Starting PLC Service...")
-    _run_lifespan_start_stage("plc_service", plc_service.start)
-    print("[Main] Starting Comm Metrics Logger...")
-    _run_lifespan_start_stage("comm_metrics", comm_metrics_logger_service.start)
-    print("[Main] Starting Memory Service...")
-    _run_lifespan_start_stage("memory_service", memory_service.start)
-
-    # Start SPOT temperature and diagnostics polling.
-    print("[Main] Starting SPOT temperature and diagnostics polling...")
-    spot_started_perf = time.perf_counter()
-    await spot_control.start_spot_poll_loop()
-    _logger.info(
-        "[Main] Lifespan startup stage complete stage=spot_poll elapsed_ms=%.1f %s",
-        (time.perf_counter() - spot_started_perf) * 1000.0,
-        _lifecycle_log_fields(),
-    )
-    _emit_embedded_startup_progress("spot_poll_ready")
-    
-    # Address discovery is diagnostic-only. Some Windows hosts take tens of
-    # seconds to resolve their own hostname, so it must not gate Uvicorn
-    # readiness.
-    _start_backend_access_log_thread()
-    _logger.info("[Main] Lifespan startup complete %s", _lifecycle_log_fields())
-    _emit_embedded_startup_progress("lifespan_complete")
-
+    started_services: set[str] = set()
+    spot_start_attempted = False
     try:
+        _logger.info("[Main] Lifespan startup begin %s", _lifecycle_log_fields())
+        _emit_embedded_startup_progress("lifespan_begin")
+        print("[Main] Starting CSV Logger...")
+        started_services.add("csv_logger")
+        _run_lifespan_start_stage("csv_logger", logger_service.start)
+        print("[Main] Starting Config Sync Agent...")
+        started_services.add("config_sync")
+        _run_lifespan_start_stage("config_sync", config_sync_agent.start)
+        print("[Main] Starting Config Watcher...")
+        started_services.add("config_watch")
+        _run_lifespan_start_stage("config_watch", config_watch_service.start)
+        print("[Main] Starting PLC Service...")
+        started_services.add("plc_service")
+        _run_lifespan_start_stage("plc_service", plc_service.start)
+        print("[Main] Starting Comm Metrics Logger...")
+        started_services.add("comm_metrics")
+        _run_lifespan_start_stage("comm_metrics", comm_metrics_logger_service.start)
+        print("[Main] Starting Memory Service...")
+        started_services.add("memory_service")
+        _run_lifespan_start_stage("memory_service", memory_service.start)
+
+        # Start SPOT temperature and diagnostics polling.
+        print("[Main] Starting SPOT temperature and diagnostics polling...")
+        spot_started_perf = time.perf_counter()
+        spot_start_attempted = True
+        await spot_control.start_spot_poll_loop()
+        _logger.info(
+            "[Main] Lifespan startup stage complete stage=spot_poll elapsed_ms=%.1f %s",
+            (time.perf_counter() - spot_started_perf) * 1000.0,
+            _lifecycle_log_fields(),
+        )
+        _emit_embedded_startup_progress("spot_poll_ready")
+
+        # Address discovery is diagnostic-only. Some Windows hosts take tens of
+        # seconds to resolve their own hostname, so it must not gate Uvicorn
+        # readiness.
+        _start_backend_access_log_thread()
+        _logger.info("[Main] Lifespan startup complete %s", _lifecycle_log_fields())
+        _emit_embedded_startup_progress("lifespan_complete")
+
         yield
     finally:
-        # Shutdown
-        _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
-        print("[Main] Stopping SPOT temperature and diagnostics polling...")
-        await spot_control.stop_spot_poll_loop()
-        print("[Main] Stopping Comm Metrics Logger...")
-        comm_metrics_logger_service.stop()
-        print("[Main] Stopping Memory Service...")
-        memory_service.stop()
-        print("[Main] Stopping PLC Service...")
-        plc_service.stop()
-        print("[Main] Stopping Config Sync Agent...")
-        config_sync_agent.stop()
-        print("[Main] Stopping Config Watcher...")
-        config_watch_service.stop()
-        print("[Main] Stopping CSV Logger...")
-        if not logger_service.stop(timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC):
-            _logger.warning(
-                "CSV logger did not stop within %.1f seconds during lifespan shutdown",
-                config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
-            )
-        release_single_instance_lock()
+        try:
+            _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
+            shutdown_has_primary_error = sys.exc_info()[0] is not None
+            shutdown_failures: list[str] = []
+            image_capture_drained = True
+            observation_fact_drained = True
+            if spot_start_attempted:
+                print("[Main] Stopping SPOT temperature and diagnostics polling...")
+                try:
+                    spot_poll_stopped = await spot_control.stop_spot_poll_loop()
+                except Exception as exc:
+                    spot_poll_stopped = False
+                    _logger.warning(
+                        "[Main] Lifespan SPOT poll shutdown failed error_type=%s %s",
+                        type(exc).__name__,
+                        _lifecycle_log_fields(),
+                    )
+                if not spot_poll_stopped:
+                    shutdown_failures.append("spot_poll")
+                    _logger.error(
+                        "SPOT poll or transport did not drain before lifespan shutdown"
+                    )
+                observation_fact_drained = _probe_spot_observation_fact_drained(
+                    "Lifespan"
+                )
+                if not observation_fact_drained:
+                    shutdown_failures.append("spot_observation_fact")
+                    _logger.error(
+                        "SPOT observation fact writes did not drain before lifespan "
+                        "shutdown; the observation manifest will be suppressed"
+                    )
+                try:
+                    image_capture_drained = await asyncio.to_thread(
+                        spot_control.stop_spot_image_capture_for_shutdown,
+                        timeout_sec=config.SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC,
+                    )
+                except Exception as exc:
+                    image_capture_drained = False
+                    _logger.warning(
+                        "[Main] Lifespan image capture shutdown failed error_type=%s %s",
+                        type(exc).__name__,
+                        _lifecycle_log_fields(),
+                    )
+                if not image_capture_drained:
+                    shutdown_failures.append("spot_image_capture")
+                    _logger.error(
+                        "SPOT image capture queue did not drain before lifespan shutdown; "
+                        "the final image fact manifest will be suppressed"
+                    )
+            if "comm_metrics" in started_services:
+                print("[Main] Stopping Comm Metrics Logger...")
+                if not await _run_lifespan_stop_stage(
+                    "comm_metrics",
+                    comm_metrics_logger_service.stop,
+                ):
+                    shutdown_failures.append("comm_metrics")
+            if "memory_service" in started_services:
+                print("[Main] Stopping Memory Service...")
+                if not await _run_lifespan_stop_stage(
+                    "memory_service",
+                    memory_service.stop,
+                ):
+                    shutdown_failures.append("memory_service")
+            if "plc_service" in started_services:
+                print("[Main] Stopping PLC Service...")
+                if not await _run_lifespan_stop_stage(
+                    "plc_service",
+                    plc_service.stop,
+                ):
+                    shutdown_failures.append("plc_service")
+            if "config_sync" in started_services:
+                print("[Main] Stopping Config Sync Agent...")
+                if not await _run_lifespan_stop_stage(
+                    "config_sync",
+                    config_sync_agent.stop,
+                ):
+                    shutdown_failures.append("config_sync")
+            if "config_watch" in started_services:
+                print("[Main] Stopping Config Watcher...")
+                if not await _run_lifespan_stop_stage(
+                    "config_watch",
+                    config_watch_service.stop,
+                ):
+                    shutdown_failures.append("config_watch")
+            if "csv_logger" in started_services:
+                print("[Main] Stopping CSV Logger...")
+                if not await _run_lifespan_stop_stage(
+                    "csv_logger",
+                    lambda: logger_service.stop(
+                        timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+                        finalize_spot_image_manifest=image_capture_drained,
+                        finalize_spot_observation_manifest=observation_fact_drained,
+                    ),
+                ):
+                    shutdown_failures.append("csv_logger")
+                    _logger.warning(
+                        "CSV logger did not stop cleanly during lifespan shutdown"
+                    )
+            if shutdown_failures and not shutdown_has_primary_error:
+                raise RuntimeError(
+                    "lifespan shutdown incomplete: "
+                    + ", ".join(shutdown_failures)
+                )
+            if shutdown_failures:
+                _logger.error(
+                    "[Main] Lifespan shutdown incomplete while preserving primary "
+                    "error stages=%s %s",
+                    ",".join(shutdown_failures),
+                    _lifecycle_log_fields(),
+                )
+        finally:
+            release_single_instance_lock()
 
 # --- App Definition ---
 app = FastAPI(
@@ -1704,6 +1818,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=[
+        _SPOT_IMAGE_AT_HEADER,
+        _SPOT_IMAGE_SOURCE_HEADER,
+        _SPOT_IMAGE_LATENCY_HEADER,
+        _SPOT_IMAGE_AGE_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_AT_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER,
@@ -1712,6 +1830,8 @@ app.add_middleware(
 
 
 _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
+    "spot_poll_loop_stopped",
+    "spot_observation_fact_drained",
     "spot_image_capture_drained",
     "plc_service_stopped",
     "logger_service_stopped",
@@ -1720,6 +1840,10 @@ _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
     "config_sync_agent_stopped",
     "config_watch_service_stopped",
 )
+_control_shutdown_tasks: set[asyncio.Task[None]] = set()
+_spot_connection_test_lock = asyncio.Lock()
+_spot_connection_test_next_allowed_at = 0.0
+_SPOT_CONNECTION_TEST_COOLDOWN_SECONDS = 30.0
 
 
 def _run_control_shutdown_stage(
@@ -1760,8 +1884,51 @@ def _run_control_shutdown_stage(
     return succeeded
 
 
-def _stop_services_for_control_shutdown() -> dict[str, Any]:
-    status: dict[str, Any] = {}
+async def _run_async_control_shutdown_stage(
+    *,
+    stage: str,
+    status_key: str,
+    stopper: Callable[[], Any],
+    status: dict[str, Any],
+) -> bool:
+    started_perf = time.perf_counter()
+    _logger.info(
+        "[Main] Control shutdown stage begin stage=%s %s",
+        stage,
+        _lifecycle_log_fields(),
+    )
+    try:
+        result = await stopper()
+        succeeded = result is True
+    except Exception as exc:
+        succeeded = False
+        _logger.warning(
+            "[Main] Control shutdown stage failed stage=%s error_type=%s %s",
+            stage,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+
+    elapsed_ms = round((time.perf_counter() - started_perf) * 1000.0, 1)
+    status[status_key] = succeeded
+    status[f"{stage}_elapsed_ms"] = elapsed_ms
+    _logger.info(
+        "[Main] Control shutdown stage complete stage=%s success=%s elapsed_ms=%.1f %s",
+        stage,
+        succeeded,
+        elapsed_ms,
+        _lifecycle_log_fields(),
+    )
+    return succeeded
+
+
+def _stop_services_for_control_shutdown(
+    *,
+    observation_fact_drained: bool,
+) -> dict[str, Any]:
+    status: dict[str, Any] = {
+        "spot_observation_fact_drained": observation_fact_drained,
+    }
     shutdown_started_perf = time.perf_counter()
 
     image_capture_drained = _run_control_shutdown_stage(
@@ -1786,7 +1953,9 @@ def _stop_services_for_control_shutdown() -> dict[str, Any]:
         stage="logger_service",
         status_key="logger_service_stopped",
         stopper=lambda: logger_service.stop(
-            timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC
+            timeout_sec=config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+            finalize_spot_image_manifest=image_capture_drained,
+            finalize_spot_observation_manifest=observation_fact_drained,
         ),
         status=status,
     )
@@ -2009,6 +2178,60 @@ def _require_operator_metadata_write_access(request: Request) -> None:
     if _is_loopback_hostname(client_host):
         return
     raise HTTPException(status_code=403, detail="Operator metadata updates require a local request")
+
+
+def _require_embedded_control_token(control_token: str | None) -> None:
+    expected_token = os.environ.get("SFL_CONTROL_TOKEN", "")
+    if (
+        not expected_token
+        or control_token is None
+        or not secrets.compare_digest(control_token, expected_token)
+    ):
+        raise HTTPException(status_code=403, detail="Invalid embedded control token")
+
+
+def _require_local_control_access(
+    request: Request,
+    control_token: str | None,
+    action: str,
+) -> None:
+    client_host = request.client.host if request.client else ""
+    if not _is_loopback_hostname(client_host):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{action} require a local request",
+        )
+    if is_embedded_electron():
+        _require_embedded_control_token(control_token)
+        return
+    origin = request.headers.get("origin", "").strip()
+    referer = request.headers.get("referer", "").strip()
+    origin_host = urlsplit(origin).hostname if origin else None
+    referer_host = urlsplit(referer).hostname if referer else None
+    if origin and not _is_loopback_hostname(origin_host or ""):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{action} require a local development origin",
+        )
+    if referer and not _is_loopback_hostname(referer_host or ""):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{action} require a local development origin",
+        )
+
+
+def _require_connection_test_access(
+    request: Request,
+    control_token: str | None,
+) -> None:
+    _require_local_control_access(request, control_token, "Connection tests")
+
+
+def _require_control_shutdown_access(
+    request: Request,
+    control_token: str | None,
+) -> None:
+    _require_local_control_access(request, control_token, "Control shutdown requests")
 
 
 @app.get("/api/facility/operator-metadata", response_model=OperatorMetadata)
@@ -2860,23 +3083,74 @@ def reconnect():
 
 
 @app.post("/api/control/test-connection")
-def test_connection(payload: ConnectionTestPayload):
+async def test_connection(
+    payload: ConnectionTestPayload,
+    request: Request,
+    control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
+):
+    global _spot_connection_test_next_allowed_at
+
+    _require_connection_test_access(request, control_token)
+    spot_probe_admitted = False
+    if payload.spot is not None:
+        now = time.monotonic()
+        retry_after = max(
+            1,
+            math.ceil(_spot_connection_test_next_allowed_at - now),
+        )
+        if (
+            _spot_connection_test_lock.locked()
+            or now < _spot_connection_test_next_allowed_at
+        ):
+            raise HTTPException(
+                status_code=429,
+                detail="SPOT connection test is busy or cooling down",
+                headers={"Retry-After": str(retry_after)},
+            )
+        await _spot_connection_test_lock.acquire()
+        spot_probe_admitted = True
     try:
-        results: dict[str, dict] = {}
+        result_keys: list[str] = []
+        probes = []
         if payload.extruder is not None:
-            results["extruder"] = _test_tcp(payload.extruder.ip, payload.extruder.port)
+            result_keys.append("extruder")
+            probes.append(
+                asyncio.to_thread(
+                    _test_tcp,
+                    payload.extruder.ip,
+                    payload.extruder.port,
+                )
+            )
         if payload.ls_plc is not None:
-            results["ls_plc"] = _test_tcp(payload.ls_plc.ip, payload.ls_plc.port)
+            result_keys.append("ls_plc")
+            probes.append(
+                asyncio.to_thread(
+                    _test_tcp,
+                    payload.ls_plc.ip,
+                    payload.ls_plc.port,
+                )
+            )
         if payload.spot is not None:
-            results["spot"] = _test_http(payload.spot.url)
-        if not results:
+            result_keys.append("spot")
+            probes.append(
+                spot_control.test_spot_http_connection(payload.spot.url)
+            )
+        if not probes:
             raise HTTPException(status_code=400, detail="No targets provided")
+        probe_results = await asyncio.gather(*probes)
+        results = dict(zip(result_keys, probe_results, strict=True))
         return {"results": results}
     except HTTPException:
         raise
     except Exception as exc:
         _logger.error("Connection test failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if spot_probe_admitted:
+            _spot_connection_test_next_allowed_at = (
+                time.monotonic() + _SPOT_CONNECTION_TEST_COOLDOWN_SECONDS
+            )
+            _spot_connection_test_lock.release()
 
 
 @app.post("/api/control/path-health")
@@ -3058,7 +3332,7 @@ def _is_spot_payload_rejection_response(
 
 @app.get(_SPOT_IMAGE_PATH)
 async def spot_image():
-    """Bridge one official SPOT /image.jpg response to the desktop UI."""
+    """Return the shared fresh JPEG, coalescing upstream refreshes when needed."""
     headers: dict[str, str] = {
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
@@ -3068,11 +3342,13 @@ async def spot_image():
         data, meta = await spot_control.fetch_image_async()
         captured_at = meta.get("captured_at") or 0.0
         if captured_at:
-            headers["X-Spot-Image-At"] = str(int(float(captured_at) * 1000))
+            headers[_SPOT_IMAGE_AT_HEADER] = str(int(float(captured_at) * 1000))
         if meta.get("source"):
-            headers["X-Spot-Image-Source"] = str(meta["source"])
+            headers[_SPOT_IMAGE_SOURCE_HEADER] = str(meta["source"])
         if meta.get("latency_ms") is not None:
-            headers["X-Spot-Image-Latency-Ms"] = f"{float(meta['latency_ms']):.1f}"
+            headers[_SPOT_IMAGE_LATENCY_HEADER] = f"{float(meta['latency_ms']):.1f}"
+        if meta.get("age_ms") is not None:
+            headers[_SPOT_IMAGE_AGE_HEADER] = f"{float(meta['age_ms']):.1f}"
         headers.update(_spot_internal_temperature_headers())
         observability_service.record_spot_image_result(200)
         return Response(content=data, media_type="image/jpeg", headers=headers)
@@ -3185,45 +3461,70 @@ async def log_status_change(payload: StatusLogRequest):
         return {"ok": False, "error": str(e)}
 
 
-def _schedule_control_shutdown(reason: str) -> None:
-    def _shutdown() -> None:
-        try:
-            _logger.info("Shutdown requested: reason=%s %s", reason, _lifecycle_log_fields())
-        except Exception:
-            pass
-        status = _stop_services_for_control_shutdown()
-        exit_code = _control_shutdown_exit_code(status)
-        try:
-            _logger.info(
-                "[Main] Control shutdown complete success=%s exit_code=%d total_elapsed_ms=%.1f %s",
-                exit_code == 0,
-                exit_code,
-                float(status.get("total_elapsed_ms", 0.0)),
-                _lifecycle_log_fields(),
-            )
-        except Exception:
-            pass
-        time.sleep(0.2)
-        os._exit(exit_code)
+async def _run_control_shutdown(reason: str) -> None:
+    shutdown_started_perf = time.perf_counter()
+    try:
+        _logger.info("Shutdown requested: reason=%s %s", reason, _lifecycle_log_fields())
+    except Exception:
+        pass
 
-    threading.Thread(target=_shutdown, daemon=True).start()
+    status: dict[str, Any] = {}
+
+    async def _stop_spot_poll_loop() -> bool:
+        return await spot_control.stop_spot_poll_loop()
+
+    await _run_async_control_shutdown_stage(
+        stage="spot_poll_loop",
+        status_key="spot_poll_loop_stopped",
+        stopper=_stop_spot_poll_loop,
+        status=status,
+    )
+    observation_fact_drained = _probe_spot_observation_fact_drained(
+        "Control shutdown"
+    )
+    status["spot_observation_fact_drained"] = observation_fact_drained
+    status.update(
+        await asyncio.to_thread(
+            _stop_services_for_control_shutdown,
+            observation_fact_drained=observation_fact_drained,
+        )
+    )
+    status["total_elapsed_ms"] = round(
+        (time.perf_counter() - shutdown_started_perf) * 1000.0,
+        1,
+    )
+    exit_code = _control_shutdown_exit_code(status)
+    try:
+        _logger.info(
+            "[Main] Control shutdown complete success=%s exit_code=%d total_elapsed_ms=%.1f %s",
+            exit_code == 0,
+            exit_code,
+            float(status.get("total_elapsed_ms", 0.0)),
+            _lifecycle_log_fields(),
+        )
+    except Exception:
+        pass
+    await asyncio.sleep(0.2)
+    os._exit(exit_code)
+
+
+def _schedule_control_shutdown(reason: str) -> None:
+    if _control_shutdown_tasks:
+        return
+    task = asyncio.create_task(_run_control_shutdown(reason))
+    _control_shutdown_tasks.add(task)
+    task.add_done_callback(_control_shutdown_tasks.discard)
 
 
 @app.post("/api/control/shutdown")
-def shutdown(
+async def shutdown(
     payload: ShutdownRequest,
+    request: Request,
     control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
 ):
-    if is_embedded_electron():
-        expected_token = os.environ.get("SFL_CONTROL_TOKEN", "")
-        if (
-            not expected_token
-            or control_token is None
-            or not secrets.compare_digest(control_token, expected_token)
-        ):
-            raise HTTPException(status_code=403, detail="Invalid embedded control token")
+    _require_control_shutdown_access(request, control_token)
 
-    _schedule_control_shutdown(payload.reason)
+    _schedule_control_shutdown(payload.reason or "api_request")
     return {"ok": True}
 
 # --- Static File Serving (Frontend) ---

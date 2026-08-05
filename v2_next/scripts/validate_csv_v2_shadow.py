@@ -2435,6 +2435,74 @@ def validate_sample_seq(rows: list[list[str]], header: list[str]) -> tuple[bool,
     return True, f"{sequences[0]}..{sequences[-1]}"
 
 
+def validate_csv_closeout(
+    metadata: dict,
+    v2_path: Path,
+    rows: list[list[str]],
+    header: list[str],
+) -> list[str]:
+    closeout = metadata.get("csv_closeout")
+    if closeout is None:
+        return []
+    if not isinstance(closeout, dict):
+        return ["csv_closeout must be an object"]
+
+    failures: list[str] = []
+    if closeout.get("finalized") is not True:
+        failures.append("csv_closeout.finalized must be true")
+    closeout_reason = str(closeout.get("closeout_reason") or "")
+    if closeout_reason not in {
+        "shutdown",
+        "daily-rollover",
+        "config-change",
+        "runtime-error",
+        "runtime-close",
+    }:
+        failures.append("csv_closeout.closeout_reason is not recognized")
+    if closeout.get("csv_file_name") != v2_path.name:
+        failures.append("csv_closeout.csv_file_name does not match the v2 CSV")
+
+    schema_metadata = metadata.get("schema_metadata")
+    expected_logger_id = (
+        str(schema_metadata.get("logger_service_instance_id") or "")
+        if isinstance(schema_metadata, dict)
+        else ""
+    )
+    if closeout.get("logger_service_instance_id") != expected_logger_id:
+        failures.append(
+            "csv_closeout.logger_service_instance_id does not match schema metadata"
+        )
+
+    if "sample_seq" not in header:
+        failures.append("csv_closeout cannot verify a CSV without sample_seq")
+        return failures
+    sample_seq_index = header.index("sample_seq")
+    try:
+        actual_sequences = [int(row[sample_seq_index]) for row in rows]
+    except (IndexError, TypeError, ValueError):
+        failures.append("csv_closeout cannot verify invalid CSV sample_seq values")
+        return failures
+    if not actual_sequences:
+        failures.append("csv_closeout cannot verify a CSV without data rows")
+        return failures
+
+    persisted_value = closeout.get("final_persisted_sample_seq")
+    if isinstance(persisted_value, bool) or not isinstance(persisted_value, int):
+        failures.append(
+            "csv_closeout.final_persisted_sample_seq must be an integer"
+        )
+        return failures
+    if persisted_value != actual_sequences[-1]:
+        failures.append(
+            "csv_closeout.final_persisted_sample_seq does not match the final CSV row"
+        )
+    if persisted_value != max(actual_sequences):
+        failures.append(
+            "csv_closeout.final_persisted_sample_seq does not match the maximum CSV sample_seq"
+        )
+    return failures
+
+
 def position_summary(rows: list[list[str]], header: list[str], column: str) -> str:
     values = parse_float_values(rows, header, column)
     if not values:
@@ -2484,6 +2552,7 @@ def validate(
         v1_header, v1_rows = read_csv(v1_path)
     v2_header, v2_rows = read_csv(v2_path)
     metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+    failures.extend(validate_csv_closeout(metadata, v2_path, v2_rows, v2_header))
 
     if v1_path is not None:
         if v1_header != REQUIRED_V1_COLUMNS:

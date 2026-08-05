@@ -1,6 +1,6 @@
 {
   "name": "smart-factory-logger-v2",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Smart Factory Logger V2 Dashboard",
   "main": "main.js",
   "scripts": {
@@ -10,14 +10,14 @@
     "profile:react": "node scripts/collect_react_profiler.cjs",
     "profile:react:mock": "node scripts/react_profiler_mock_backend.cjs",
     "health": "npm run health:electron-startup && npm run health:frontend:typecheck && npm run health:frontend:lint && npm run health:frontend:test && npm run health:backend:lint && npm run health:backend:typecheck && npm run health:backend:test && npm run health:qa:selftest",
-    "health:electron-startup": "node --test startupCoordinator.test.cjs startupIpc.test.cjs backendStartupProgress.test.cjs backendProcessLifecycle.test.cjs",
+    "health:electron-startup": "node --test startupCoordinator.test.cjs startupIpc.test.cjs backendControlIpc.test.cjs backendControlClient.test.cjs backendStartupProgress.test.cjs backendProcessLifecycle.test.cjs",
     "health:frontend:typecheck": "npm --prefix frontend run typecheck",
     "health:frontend:lint": "npm --prefix frontend run lint",
     "health:frontend:test": "npm --prefix frontend run test",
     "health:backend:lint": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m ruff check backend",
     "health:backend:typecheck": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m mypy",
     "health:backend:test": "node scripts/run_backend_unittest.cjs",
-    "health:qa:selftest": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/measure_nsis_operational_ready.ps1 -SelfTest"
+    "health:qa:selftest": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/measure_nsis_operational_ready.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_release_signature.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_release_workflow_contract.ps1 -SelfTest"
   },
   "keywords": [],
   "author": "",
@@ -25,6 +25,7 @@
   "devDependencies": {
     "electron": "^41.10.1",
     "electron-builder": "^26.15.3",
+    "js-yaml": "4.3.0",
     "playwright": "^1.60.0"
   },
   "dependencies": {
@@ -37,6 +38,8 @@
       "preload.js",
       "startupCoordinator.js",
       "startupIpc.js",
+      "backendControlIpc.js",
+      "backendControlClient.js",
       "backendStartupProgress.js",
       "backendProcessLifecycle.js",
       "package.json",
@@ -76,6 +79,10 @@
       {
         "from": "scripts/measure_nsis_operational_ready.ps1",
         "to": "qa/measure_nsis_operational_ready.ps1"
+      },
+      {
+        "from": "scripts/backend_bundle_integrity.psm1",
+        "to": "qa/backend_bundle_integrity.psm1"
       }
     ]
   }

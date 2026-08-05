@@ -44,8 +44,14 @@ class FrontendRoutingHealthTests(unittest.TestCase):
                 "/factory/line/1/manifest.json",
             )
 
-            self.assertEqual(nested_asset, dist_path / "assets" / "index-test.js")
-            self.assertEqual(nested_manifest, dist_path / "manifest.json")
+            self.assertIsNotNone(nested_asset)
+            self.assertIsNotNone(nested_manifest)
+            assert nested_asset is not None
+            assert nested_manifest is not None
+            self.assertTrue(
+                nested_asset.samefile(dist_path / "assets" / "index-test.js")
+            )
+            self.assertTrue(nested_manifest.samefile(dist_path / "manifest.json"))
 
     def test_frontend_file_and_api_route_classification_prevents_spa_fallback(self) -> None:
         self.assertTrue(backend_app.is_frontend_file_request("/factory/line/1/assets/index-test.js"))

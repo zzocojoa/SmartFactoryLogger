@@ -113,6 +113,50 @@ test('graceful request failure escalates to SIGKILL and still waits for close', 
   assert.deepEqual(signals, ['SIGKILL']);
 });
 
+test('synchronous graceful request errors stay inside the lifecycle until forced close', async () => {
+  const child = createChild();
+  const logs = [];
+  let outerSettled = false;
+  const resultPromise = stopProcessTree(child, {
+    killTree: (_pid, signal, callback) => {
+      assert.equal(signal, 'SIGKILL');
+      callback(null);
+      setImmediate(() => {
+        child.signalCode = 'SIGKILL';
+        child.emit('close', null, 'SIGKILL');
+      });
+    },
+    requestGracefulStop: () => {
+      throw new ReferenceError('http is not defined');
+    },
+    log: (message) => logs.push(message),
+    graceMs: 20,
+    forceCloseMs: 50,
+  });
+  resultPromise.then(
+    () => {
+      outerSettled = true;
+    },
+    () => {
+      outerSettled = true;
+    }
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(outerSettled, false);
+  assert.deepEqual(await resultPromise, {
+    stopped: true,
+    reason: 'forced_close',
+    exitCode: null,
+    signalCode: 'SIGKILL',
+    forced: true,
+  });
+  assert.equal(
+    logs.some((message) => message.includes('http is not defined')),
+    true
+  );
+});
+
 test('forced termination errors reject instead of permitting replacement', async () => {
   const child = createChild();
   await assert.rejects(

@@ -153,11 +153,14 @@ function stopProcessTree(child, options) {
     child.once('close', onClose);
     graceTimer = setTimer(forceStop, graceMs);
     if (typeof requestGracefulStop === 'function') {
-      Promise.resolve(requestGracefulStop()).catch((error) => {
-        if (!settled) {
-          log(`Backend graceful shutdown request failed for PID ${child.pid}: ${error.message}`);
-        }
-      });
+      Promise.resolve()
+        .then(() => requestGracefulStop())
+        .catch((error) => {
+          if (!settled) {
+            const message = error instanceof Error ? error.message : String(error);
+            log(`Backend graceful shutdown request failed for PID ${child.pid}: ${message}`);
+          }
+        });
     }
   });
 }

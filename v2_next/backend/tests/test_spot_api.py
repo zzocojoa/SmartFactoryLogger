@@ -8,15 +8,16 @@ import threading
 import time
 import unittest
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.request import Request as UrlRequest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import httpx
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request as StarletteRequest
 
 from backend import app as backend_app
 from backend.FacilityData.drivers import spot_api
@@ -25,8 +26,34 @@ from backend.FacilityData.spot_image_fact import (
     SpotImageCaptureWriter,
     _under_range_cause_candidate,
 )
+from backend.FacilityData.spot_observation_fact import SpotObservationFactWriter
 
 FocusUrlopenTarget = str | UrlRequest
+
+
+def build_connection_test_request(
+    client_host: str = "127.0.0.1",
+    *,
+    origin: str | None = None,
+    referer: str | None = None,
+) -> StarletteRequest:
+    headers: list[tuple[bytes, bytes]] = []
+    if origin is not None:
+        headers.append((b"origin", origin.encode("ascii")))
+    if referer is not None:
+        headers.append((b"referer", referer.encode("ascii")))
+    return StarletteRequest(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/control/test-connection",
+            "headers": headers,
+            "client": (client_host, 50000),
+            "scheme": "http",
+            "server": ("127.0.0.1", 8000),
+            "query_string": b"",
+        }
+    )
 
 
 class UrlopenResponse:
@@ -45,6 +72,74 @@ class UrlopenResponse:
 
     def getcode(self) -> int:
         return self.status_code
+
+
+class FakeSpotHttpTransport:
+    supported = True
+    active = True
+
+    def __init__(self) -> None:
+        self.requests: list[spot_api.SpotHttpRequest] = []
+
+    async def request(self, request: spot_api.SpotHttpRequest) -> spot_api.SpotHttpResponse:
+        return self.request_sync(request)
+
+    async def close(self, timeout_sec: float = 7.0) -> bool:
+        del timeout_sec
+        self.active = False
+        return True
+
+    def request_sync(self, request: spot_api.SpotHttpRequest) -> spot_api.SpotHttpResponse:
+        self.requests.append(request)
+        if request.kind == spot_api.SpotRequestKind.IMAGE:
+            body = b"\xff\xd8guarded-image\xff\xd9"
+            headers = {"content-type": "image/jpeg"}
+        elif request.kind in {
+            spot_api.SpotRequestKind.TEMPERATURE,
+            spot_api.SpotRequestKind.INTERNAL_TEMPERATURE,
+        }:
+            body = b"451.25"
+            headers = {"content-type": "text/plain"}
+        elif request.kind == spot_api.SpotRequestKind.DIAGNOSTIC:
+            body = b"7"
+            headers = {"content-type": "text/plain"}
+        elif request.kind in {
+            spot_api.SpotRequestKind.FOCUS_READ,
+            spot_api.SpotRequestKind.FOCUS_WRITE,
+        }:
+            body = b"600" if request.kind == spot_api.SpotRequestKind.FOCUS_READ else b"OK"
+            headers = {"content-type": "text/plain"}
+        else:
+            body = b"Pos--> 321"
+            headers = {"content-type": "text/plain"}
+        return spot_api.SpotHttpResponse(
+            status_code=200,
+            headers=headers,
+            body=body,
+            elapsed_ms=1.0,
+        )
+
+    def diagnostics(self) -> dict[str, object]:
+        return {
+            "source_port_policy_version": "spot-source-port-quarantine-v2",
+            "source_port_enforcement_supported": True,
+            "source_port_enforcement_active": True,
+            "source_port_quarantine_seconds": 75.0,
+            "source_port_pool_capacity": 768,
+            "source_port_pool_guarded_count": 767,
+            "source_port_pool_leased_count": 0,
+            "source_port_pool_quarantined_count": 1,
+            "source_port_pool_rebind_pending_count": 0,
+            "source_port_pool_acquire_wait_count": 0,
+            "source_port_pool_exhaustion_count": 0,
+            "source_port_bind_collision_count": 0,
+            "source_port_rebind_retry_count": 0,
+            "source_port_reuse_violation_count": 0,
+            "source_port_minimum_reuse_interval_seconds": None,
+            "source_port_transport_started_count": len(self.requests),
+            "source_port_transport_success_count": len(self.requests),
+            "source_port_transport_failure_count": 0,
+        }
 
 
 class SpotApiTests(unittest.IsolatedAsyncioTestCase):
@@ -73,6 +168,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.reset_spot_state()
 
+    async def asyncSetUp(self) -> None:
+        await spot_api._reset_spot_http_transport_state_for_tests()
+
+    async def asyncTearDown(self) -> None:
+        await spot_api._reset_spot_http_transport_state_for_tests()
+
     def tearDown(self) -> None:
         spot_api.config.SPOT_URL = self.original_spot_url
         spot_api.config.SPOT_IP = self.original_spot_ip
@@ -93,7 +194,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.reset_spot_state()
 
     def reset_spot_state(self) -> None:
+        spot_api._reset_spot_image_request_state_for_tests()
+        spot_api._reset_spot_diagnostics_request_state_for_tests()
         spot_api._spot_device_request_lock = asyncio.Lock()
+        backend_app._spot_connection_test_lock = asyncio.Lock()
+        backend_app._spot_connection_test_next_allowed_at = 0.0
         spot_api._temperature_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._internal_temp_cache = {"temp": 0.0, "temp_time": 0.0}
         spot_api._img_last_error = 0.0
@@ -118,7 +223,6 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_diagnostics_last_error_code = None
             spot_api._spot_diagnostics_last_error_message = None
             spot_api._spot_diagnostics_seq = 0
-        spot_api._spot_diagnostics_task = None
         with spot_api._spot_temperature_snapshot_lock:
             spot_api._spot_service_instance_id = "test-spot-service-instance"
             spot_api._spot_service_started_at = "2026-06-22T00:00:00Z"
@@ -528,6 +632,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         fact = spot_api.get_spot_temperature_poll_snapshot()
 
         self.assertEqual(diagnostics["diagnostics_capture_status"], "async_complete")
+        self.assertEqual(diagnostics["diagnostics_upstream_request_count"], 8)
         self.assertEqual(diagnostics["diagnostics_binding_status"], "unbound")
         self.assertEqual(diagnostics["diagnostics_collection_mode"], "async_fact_only")
         self.assertIsNone(diagnostics["diagnostics_source_poll_seq"])
@@ -598,6 +703,88 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(spot_api.time, "monotonic", return_value=captured_monotonic + 7.0):
             refreshed = spot_api._build_spot_temperature_snapshot_diagnostics(time.time())
         self.assertEqual(refreshed["diagnostics_age_ms"], "7000.000")
+
+    async def test_diagnostics_scheduler_enforces_the_device_request_budget(self) -> None:
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=1,
+            started_at_epoch=time.time(),
+            started_monotonic=100.0,
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+
+        with patch.object(
+            spot_api,
+            "_refresh_spot_diagnostics_safely",
+            AsyncMock(),
+        ) as refresh_mock:
+            with patch.object(spot_api.time, "monotonic", return_value=100.0):
+                self.assertTrue(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            first_task = spot_api._spot_diagnostics_task
+            assert first_task is not None
+            await first_task
+
+            with patch.object(spot_api.time, "monotonic", return_value=109.999):
+                self.assertFalse(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            with patch.object(spot_api.time, "monotonic", return_value=110.0):
+                self.assertTrue(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            second_task = spot_api._spot_diagnostics_task
+            assert second_task is not None
+            await second_task
+
+        self.assertEqual(refresh_mock.await_count, 2)
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["diagnostics_refresh_interval_sec_effective"], 10.0)
+        self.assertEqual(diagnostics["diagnostics_sweep_started_count"], 2)
+        self.assertEqual(diagnostics["diagnostics_suppressed_poll_count"], 1)
+        self.assertEqual(diagnostics["diagnostics_inflight_suppressed_count"], 0)
+
+    async def test_diagnostics_scheduler_does_not_overlap_a_slow_sweep(self) -> None:
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        context = spot_api.SpotPollContext(
+            service_instance_id="test-spot-service-instance",
+            poll_seq=1,
+            started_at_epoch=time.time(),
+            started_monotonic=100.0,
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_refresh(*_args: object, **_kwargs: object) -> None:
+            started.set()
+            await release.wait()
+
+        with patch.object(
+            spot_api,
+            "_refresh_spot_diagnostics_safely",
+            side_effect=slow_refresh,
+        ) as refresh_mock:
+            with patch.object(spot_api.time, "monotonic", return_value=100.0):
+                self.assertTrue(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            await started.wait()
+            with patch.object(spot_api.time, "monotonic", return_value=120.0):
+                self.assertFalse(
+                    spot_api._schedule_spot_diagnostics_for_poll(client, context)
+                )
+            release.set()
+            task = spot_api._spot_diagnostics_task
+            assert task is not None
+            await task
+
+        self.assertEqual(refresh_mock.await_count, 1)
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["diagnostics_sweep_started_count"], 1)
+        self.assertEqual(diagnostics["diagnostics_inflight_suppressed_count"], 1)
 
     async def test_late_diagnostics_do_not_block_temperature_or_bind_to_next_poll(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
@@ -1217,7 +1404,16 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             class FinalManifestLogger:
                 final_manifest: dict[str, Any] | None = None
 
-                def stop(self, *, timeout_sec: float | None = None) -> bool:
+                def stop(
+                    self,
+                    *,
+                    timeout_sec: float | None = None,
+                    finalize_spot_image_manifest: bool = True,
+                    finalize_spot_observation_manifest: bool = True,
+                ) -> bool:
+                    del finalize_spot_observation_manifest
+                    if not finalize_spot_image_manifest:
+                        return True
                     service = CSVLoggerService()
                     service.fallback_log_dir = log_path
                     service.apply_config(log_path=log_path, auto_save=True, csv_v2_enabled=True)
@@ -1244,7 +1440,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(backend_app.config_sync_agent, "stop", Mock(return_value=True)),
                     patch.object(backend_app.config_watch_service, "stop", Mock(return_value=True)),
                 ):
-                    shutdown_status = backend_app._stop_services_for_control_shutdown()
+                    shutdown_status = backend_app._stop_services_for_control_shutdown(
+                        observation_fact_drained=True
+                    )
                 release_thread.join(timeout=1.0)
 
             rows = self.read_spot_image_fact_rows(log_path)
@@ -1256,6 +1454,1191 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(final_manifest_logger.final_manifest)
         self.assertEqual(final_manifest_logger.final_manifest["row_count"], 1)
         self.assertEqual(final_manifest_logger.final_manifest["sha256"], fact_sha)
+
+    async def test_lifespan_shutdown_drains_image_writer_before_final_manifest(self) -> None:
+        from backend import app as backend_app
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            spot_api.config.SPOT_IP = "spot.local"
+            self.set_spot_temperature_snapshot(
+                spot_poll_seq=44,
+                _spot_last_poll_completed_at_epoch=time.time(),
+            )
+            image_bytes = b"\xff\xd8lifespan-shutdown-drain\xff\xd9"
+            write_started = threading.Event()
+            release_write = threading.Event()
+            original_write_capture = SpotImageCaptureWriter.write_capture
+
+            def delayed_write_capture(
+                writer: SpotImageCaptureWriter,
+                *args: Any,
+                **kwargs: Any,
+            ) -> dict[str, str]:
+                write_started.set()
+                release_write.wait(timeout=1.0)
+                return original_write_capture(writer, *args, **kwargs)
+
+            class FinalManifestLogger:
+                final_manifest: dict[str, Any] | None = None
+                finalize_requested: bool | None = None
+
+                def start(self) -> None:
+                    return None
+
+                def stop(
+                    self,
+                    *,
+                    timeout_sec: float | None = None,
+                    finalize_spot_image_manifest: bool = True,
+                    finalize_spot_observation_manifest: bool = True,
+                ) -> bool:
+                    del finalize_spot_observation_manifest
+                    self.finalize_requested = finalize_spot_image_manifest
+                    if not finalize_spot_image_manifest:
+                        return True
+                    service = CSVLoggerService()
+                    service.fallback_log_dir = log_path
+                    service.apply_config(
+                        log_path=log_path,
+                        auto_save=True,
+                        csv_v2_enabled=True,
+                    )
+                    final_path = service.write_spot_image_fact_final_manifest(log_path)
+                    self.final_manifest = json.loads(
+                        final_path.read_text(encoding="utf-8")
+                    )
+                    return True
+
+            async def stop_poll_without_waiting_for_capture() -> bool:
+                spot_api.stop_spot_image_capture_writer(timeout_sec=0.0)
+                return True
+
+            final_manifest_logger = FinalManifestLogger()
+
+            with (
+                patch.object(
+                    SpotImageCaptureWriter,
+                    "write_capture",
+                    delayed_write_capture,
+                ),
+                patch.object(
+                    spot_api,
+                    "_request_spot_image",
+                    AsyncMock(return_value=image_bytes),
+                ),
+                patch.object(
+                    backend_app,
+                    "acquire_single_instance_lock",
+                    return_value=True,
+                ),
+                patch.object(backend_app, "release_single_instance_lock"),
+                patch.object(backend_app, "_run_lifespan_start_stage"),
+                patch.object(backend_app, "_start_backend_access_log_thread"),
+                patch.object(
+                    backend_app.spot_control,
+                    "start_spot_poll_loop",
+                    new=AsyncMock(),
+                ),
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_poll_loop",
+                    side_effect=stop_poll_without_waiting_for_capture,
+                ),
+                patch.object(backend_app, "logger_service", final_manifest_logger),
+                patch.object(
+                    backend_app.comm_metrics_logger_service,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.memory_service,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.plc_service,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.config_sync_agent,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+                patch.object(
+                    backend_app.config_watch_service,
+                    "stop",
+                    Mock(return_value=True),
+                ),
+            ):
+                async with backend_app.lifespan(backend_app.app):
+                    await spot_api.fetch_image_async()
+                    self.assertTrue(write_started.wait(timeout=1.0))
+                    release_thread = threading.Thread(
+                        target=lambda: (
+                            time.sleep(0.05),
+                            release_write.set(),
+                        )
+                    )
+                    release_thread.start()
+                release_thread.join(timeout=1.0)
+
+            rows = self.read_spot_image_fact_rows(log_path)
+            fact_path = log_path / "spot_image_fact.csv"
+            fact_sha = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+
+        self.assertTrue(final_manifest_logger.finalize_requested)
+        self.assertEqual(len(rows), 1)
+        self.assertIsNotNone(final_manifest_logger.final_manifest)
+        self.assertEqual(final_manifest_logger.final_manifest["row_count"], 1)
+        self.assertEqual(final_manifest_logger.final_manifest["sha256"], fact_sha)
+
+    async def test_lifespan_shutdown_suppresses_manifest_when_image_drain_fails(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        class LoggerStub:
+            finalize_requested: bool | None = None
+
+            def start(self) -> None:
+                return None
+
+            def stop(
+                self,
+                *,
+                timeout_sec: float | None = None,
+                finalize_spot_image_manifest: bool = True,
+                finalize_spot_observation_manifest: bool = True,
+            ) -> bool:
+                del finalize_spot_observation_manifest
+                self.finalize_requested = finalize_spot_image_manifest
+                return True
+
+        logger_stub = LoggerStub()
+
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(backend_app, "release_single_instance_lock"),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                return_value=False,
+            ),
+            patch.object(backend_app, "logger_service", logger_stub),
+            patch.object(
+                backend_app.comm_metrics_logger_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.memory_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.plc_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.config_sync_agent,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.config_watch_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+        ):
+            with self.assertLogs("SmartFactoryLoggerV2", level="ERROR"):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "spot_image_capture",
+                ):
+                    async with backend_app.lifespan(backend_app.app):
+                        pass
+
+        self.assertFalse(logger_stub.finalize_requested)
+
+    async def test_lifespan_shutdown_fails_when_csv_logger_does_not_close(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        async def stop_stage(stage: str, _stopper: Any) -> bool:
+            return stage != "csv_logger"
+
+        release_lock = Mock()
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app,
+                "release_single_instance_lock",
+                release_lock,
+            ),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(
+                backend_app,
+                "_run_lifespan_stop_stage",
+                side_effect=stop_stage,
+            ),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                return_value=True,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "csv_logger"):
+                async with backend_app.lifespan(backend_app.app):
+                    pass
+
+        release_lock.assert_called_once_with()
+
+    async def test_lifespan_preserves_primary_error_when_shutdown_also_fails(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        async def stop_stage(stage: str, _stopper: Any) -> bool:
+            return stage != "csv_logger"
+
+        release_lock = Mock()
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app,
+                "release_single_instance_lock",
+                release_lock,
+            ),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(
+                backend_app,
+                "_run_lifespan_stop_stage",
+                side_effect=stop_stage,
+            ),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                return_value=True,
+            ),
+        ):
+            with self.assertLogs("SmartFactoryLoggerV2", level="ERROR"):
+                with self.assertRaisesRegex(RuntimeError, "primary failure"):
+                    async with backend_app.lifespan(backend_app.app):
+                        raise RuntimeError("primary failure")
+
+        release_lock.assert_called_once_with()
+
+    async def test_lifespan_preserves_primary_error_when_drain_probe_raises(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        release_lock = Mock()
+        image_stop = Mock(return_value=True)
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app,
+                "release_single_instance_lock",
+                release_lock,
+            ),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(
+                backend_app,
+                "_run_lifespan_stop_stage",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                side_effect=ValueError("cleanup probe failed"),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                image_stop,
+            ),
+        ):
+            with self.assertLogs("SmartFactoryLoggerV2", level="WARNING") as logs:
+                with self.assertRaisesRegex(RuntimeError, "primary failure"):
+                    async with backend_app.lifespan(backend_app.app):
+                        raise RuntimeError("primary failure")
+
+        self.assertIn(
+            "Lifespan SPOT observation drain probe failed",
+            "\n".join(logs.output),
+        )
+        image_stop.assert_called_once()
+        release_lock.assert_called_once_with()
+
+    async def test_lifespan_shutdown_fails_when_observation_writes_do_not_drain(
+        self,
+    ) -> None:
+        class LoggerStub:
+            finalize_observation_requested: bool | None = None
+
+            def start(self) -> None:
+                return None
+
+            def stop(
+                self,
+                *,
+                timeout_sec: float | None = None,
+                finalize_spot_image_manifest: bool = True,
+                finalize_spot_observation_manifest: bool = True,
+            ) -> bool:
+                del timeout_sec, finalize_spot_image_manifest
+                self.finalize_observation_requested = (
+                    finalize_spot_observation_manifest
+                )
+                return True
+
+        logger_stub = LoggerStub()
+        release_lock = Mock()
+        with (
+            patch.object(
+                backend_app,
+                "acquire_single_instance_lock",
+                return_value=True,
+            ),
+            patch.object(
+                backend_app,
+                "release_single_instance_lock",
+                release_lock,
+            ),
+            patch.object(backend_app, "_run_lifespan_start_stage"),
+            patch.object(backend_app, "_start_backend_access_log_thread"),
+            patch.object(
+                backend_app.spot_control,
+                "start_spot_poll_loop",
+                new=AsyncMock(),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_poll_loop",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                return_value=False,
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                return_value=True,
+            ),
+            patch.object(backend_app, "logger_service", logger_stub),
+            patch.object(
+                backend_app.comm_metrics_logger_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.memory_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.plc_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.config_sync_agent,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.config_watch_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "spot_observation_fact",
+            ):
+                async with backend_app.lifespan(backend_app.app):
+                    pass
+
+        self.assertFalse(logger_stub.finalize_observation_requested)
+        release_lock.assert_called_once_with()
+
+    async def test_lifespan_startup_failure_unwinds_started_services_and_lock(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        service_pairs = (
+            (backend_app.logger_service, "start", "stop"),
+            (backend_app.config_sync_agent, "start", "stop"),
+            (backend_app.config_watch_service, "start", "stop"),
+            (backend_app.plc_service, "start", "stop"),
+            (backend_app.comm_metrics_logger_service, "start", "stop"),
+            (backend_app.memory_service, "start", "stop"),
+        )
+        start_mocks = [Mock() for _ in service_pairs]
+        stop_mocks = [Mock(return_value=True) for _ in service_pairs]
+
+        patches = [
+            patch.object(service, start_name, start_mock)
+            for (service, start_name, _), start_mock in zip(
+                service_pairs,
+                start_mocks,
+                strict=True,
+            )
+        ]
+        patches.extend(
+            patch.object(service, stop_name, stop_mock)
+            for (service, _, stop_name), stop_mock in zip(
+                service_pairs,
+                stop_mocks,
+                strict=True,
+            )
+        )
+
+        with ExitStack() as stack:
+            for service_patch in patches:
+                stack.enter_context(service_patch)
+            stack.enter_context(
+                patch.object(
+                    backend_app,
+                    "acquire_single_instance_lock",
+                    return_value=True,
+                )
+            )
+            release_lock = stack.enter_context(
+                patch.object(backend_app, "release_single_instance_lock")
+            )
+            stack.enter_context(
+                patch.object(
+                    backend_app.spot_control,
+                    "start_spot_poll_loop",
+                    new=AsyncMock(side_effect=RuntimeError("port pool init failed")),
+                )
+            )
+            stop_spot_poll = stack.enter_context(
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_poll_loop",
+                    new=AsyncMock(return_value=True),
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_image_capture_for_shutdown",
+                    return_value=True,
+                )
+            )
+            with self.assertRaisesRegex(RuntimeError, "port pool init failed"):
+                async with backend_app.lifespan(backend_app.app):
+                    self.fail("lifespan startup unexpectedly succeeded")
+
+        for start_mock in start_mocks:
+            start_mock.assert_called_once_with()
+        for stop_mock in stop_mocks:
+            stop_mock.assert_called_once()
+        stop_spot_poll.assert_awaited_once_with()
+        release_lock.assert_called_once_with()
+
+    async def test_lifespan_intermediate_start_failure_stops_partial_service_and_predecessors(
+        self,
+    ) -> None:
+        from backend import app as backend_app
+
+        service_entries = (
+            ("csv_logger", backend_app.logger_service, "start", "stop"),
+            ("config_sync", backend_app.config_sync_agent, "start", "stop"),
+            ("config_watch", backend_app.config_watch_service, "start", "stop"),
+            ("plc_service", backend_app.plc_service, "start", "stop"),
+            (
+                "comm_metrics",
+                backend_app.comm_metrics_logger_service,
+                "start",
+                "stop",
+            ),
+            ("memory_service", backend_app.memory_service, "start", "stop"),
+        )
+
+        for failure_index, (failure_stage, _, _, _) in enumerate(service_entries):
+            with self.subTest(failure_stage=failure_stage), ExitStack() as stack:
+                start_mocks = [Mock() for _ in service_entries]
+                start_mocks[failure_index].side_effect = RuntimeError(
+                    f"{failure_stage} partial start failed"
+                )
+                stop_mocks = [Mock(return_value=True) for _ in service_entries]
+                if failure_stage == "plc_service":
+                    stop_mocks[failure_index].side_effect = RuntimeError(
+                        "partial PLC cleanup failed"
+                    )
+
+                for (_, service, start_name, stop_name), start_mock, stop_mock in zip(
+                    service_entries,
+                    start_mocks,
+                    stop_mocks,
+                    strict=True,
+                ):
+                    stack.enter_context(patch.object(service, start_name, start_mock))
+                    stack.enter_context(patch.object(service, stop_name, stop_mock))
+
+                stack.enter_context(
+                    patch.object(
+                        backend_app,
+                        "acquire_single_instance_lock",
+                        return_value=True,
+                    )
+                )
+                release_lock = stack.enter_context(
+                    patch.object(backend_app, "release_single_instance_lock")
+                )
+                start_spot_poll = stack.enter_context(
+                    patch.object(
+                        backend_app.spot_control,
+                        "start_spot_poll_loop",
+                        new=AsyncMock(),
+                    )
+                )
+
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"{failure_stage} partial start failed",
+                ):
+                    async with backend_app.lifespan(backend_app.app):
+                        self.fail("lifespan startup unexpectedly succeeded")
+
+                for index, start_mock in enumerate(start_mocks):
+                    if index <= failure_index:
+                        start_mock.assert_called_once_with()
+                    else:
+                        start_mock.assert_not_called()
+                for index, stop_mock in enumerate(stop_mocks):
+                    if index <= failure_index:
+                        stop_mock.assert_called_once()
+                    else:
+                        stop_mock.assert_not_called()
+                start_spot_poll.assert_not_awaited()
+                release_lock.assert_called_once_with()
+
+    async def test_lifespan_stop_stage_keeps_event_loop_responsive(self) -> None:
+        from backend import app as backend_app
+
+        release_stopper = threading.Event()
+        events: list[str] = []
+
+        def blocking_stopper() -> bool:
+            events.append("stopper-start")
+            release_stopper.wait()
+            events.append("stopper-end")
+            return True
+
+        async def heartbeat() -> None:
+            await asyncio.sleep(0.01)
+            events.append("heartbeat")
+            release_stopper.set()
+
+        stopped, _ = await asyncio.wait_for(
+            asyncio.gather(
+                backend_app._run_lifespan_stop_stage(
+                    "blocking-test-service",
+                    blocking_stopper,
+                ),
+                heartbeat(),
+            ),
+            timeout=5.0,
+        )
+
+        self.assertTrue(stopped)
+        self.assertLess(events.index("heartbeat"), events.index("stopper-end"))
+
+    async def test_lifespan_stop_stage_contains_stopper_exception(self) -> None:
+        from backend import app as backend_app
+
+        def failing_stopper() -> bool:
+            raise RuntimeError("stopper failed")
+
+        with patch.object(backend_app._logger, "warning") as warning_mock:
+            stopped = await backend_app._run_lifespan_stop_stage(
+                "failing-test-service",
+                failing_stopper,
+            )
+
+        self.assertFalse(stopped)
+        warning_mock.assert_called_once_with(
+            "[Main] Lifespan shutdown stage failed stage=%s error_type=%s %s",
+            "failing-test-service",
+            "RuntimeError",
+            ANY,
+        )
+
+    async def test_stop_spot_poll_loop_reports_transport_drain_and_skips_sync_writer_join(
+        self,
+    ) -> None:
+        with (
+            patch.object(
+                spot_api,
+                "_stop_spot_image_refresh_for_shutdown",
+                new=AsyncMock(return_value=True),
+            ),
+            patch.object(
+                spot_api,
+                "_stop_spot_http_transport",
+                new=AsyncMock(return_value=False),
+            ),
+            patch.object(spot_api, "stop_spot_image_capture_writer") as stop_writer,
+        ):
+            stopped = await spot_api.stop_spot_poll_loop()
+
+        self.assertFalse(stopped)
+        stop_writer.assert_not_called()
+
+    async def test_stop_spot_poll_loop_continues_cleanup_after_task_failure(
+        self,
+    ) -> None:
+        async def fail_before_shutdown() -> None:
+            raise RuntimeError("diagnostics failed")
+
+        failed_task = asyncio.create_task(fail_before_shutdown())
+        await asyncio.sleep(0)
+        spot_api._spot_diagnostics_task = failed_task
+        spot_api._spot_poll_task = None
+        spot_api._internal_temperature_task = None
+
+        with (
+            patch.object(
+                spot_api,
+                "_stop_spot_image_refresh_for_shutdown",
+                new=AsyncMock(return_value=True),
+            ) as stop_image_refresh,
+            patch.object(
+                spot_api,
+                "_stop_spot_http_transport",
+                new=AsyncMock(return_value=True),
+            ) as stop_transport,
+        ):
+            stopped = await spot_api.stop_spot_poll_loop()
+
+        self.assertFalse(stopped)
+        stop_image_refresh.assert_awaited_once_with()
+        stop_transport.assert_awaited_once_with()
+        self.assertIsNone(spot_api._spot_diagnostics_task)
+        self.assertIsNone(spot_api._spot_poll_task)
+        self.assertIsNone(spot_api._internal_temperature_task)
+
+    async def test_stop_spot_poll_loop_continues_after_shutdown_helper_exceptions(
+        self,
+    ) -> None:
+        spot_api._spot_diagnostics_task = None
+        spot_api._spot_poll_task = None
+        spot_api._internal_temperature_task = None
+
+        with (
+            patch.object(
+                spot_api,
+                "_stop_spot_image_refresh_for_shutdown",
+                new=AsyncMock(side_effect=RuntimeError("image stop failed")),
+            ) as stop_image_refresh,
+            patch.object(
+                spot_api,
+                "_stop_spot_http_transport",
+                new=AsyncMock(side_effect=RuntimeError("transport stop failed")),
+            ) as stop_transport,
+        ):
+            stopped = await spot_api.stop_spot_poll_loop()
+
+        self.assertFalse(stopped)
+        stop_image_refresh.assert_awaited_once_with()
+        stop_transport.assert_awaited_once_with()
+
+    async def test_stop_spot_poll_loop_bounds_stubborn_cancelled_task(self) -> None:
+        release_task = asyncio.Event()
+
+        async def stubborn_poll_task() -> None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release_task.wait()
+                raise
+
+        poll_task = asyncio.create_task(stubborn_poll_task())
+        await asyncio.sleep(0)
+        spot_api._spot_diagnostics_task = None
+        spot_api._spot_poll_task = poll_task
+        spot_api._internal_temperature_task = None
+
+        with (
+            patch.object(
+                spot_api,
+                "_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC",
+                0.01,
+            ),
+            patch.object(
+                spot_api,
+                "_stop_spot_image_refresh_for_shutdown",
+                new=AsyncMock(return_value=True),
+            ) as stop_image_refresh,
+            patch.object(
+                spot_api,
+                "_stop_spot_http_transport",
+                new=AsyncMock(return_value=True),
+            ) as stop_transport,
+        ):
+            stopped = await spot_api.stop_spot_poll_loop()
+
+        self.assertFalse(stopped)
+        self.assertFalse(poll_task.done())
+        stop_image_refresh.assert_awaited_once_with()
+        stop_transport.assert_awaited_once_with()
+        release_task.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await poll_task
+
+    async def test_stop_retains_pending_observation_writer_until_it_drains(
+        self,
+    ) -> None:
+        write_started = threading.Event()
+        release_write = threading.Event()
+
+        def blocking_write(_snapshot: dict[str, Any]) -> None:
+            write_started.set()
+            release_write.wait(timeout=2.0)
+
+        async def poll_with_observation_write() -> None:
+            await spot_api._write_spot_observation_fact_async({"poll_seq": 1})
+
+        poll_task: asyncio.Task[None] | None = None
+        try:
+            with patch.object(
+                spot_api,
+                "_write_spot_observation_fact_safely",
+                side_effect=blocking_write,
+            ):
+                poll_task = asyncio.create_task(poll_with_observation_write())
+                spot_api._spot_diagnostics_task = None
+                spot_api._spot_poll_task = poll_task
+                spot_api._internal_temperature_task = None
+                self.assertTrue(
+                    await asyncio.to_thread(write_started.wait, 1.0)
+                )
+
+                with (
+                    patch.object(
+                        spot_api,
+                        "_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC",
+                        0.01,
+                    ),
+                    patch.object(
+                        spot_api,
+                        "_stop_spot_image_refresh_for_shutdown",
+                        new=AsyncMock(return_value=True),
+                    ),
+                    patch.object(
+                        spot_api,
+                        "_stop_spot_http_transport",
+                        new=AsyncMock(return_value=True),
+                    ),
+                ):
+                    stopped = await spot_api.stop_spot_poll_loop()
+
+                self.assertFalse(stopped)
+                self.assertIs(spot_api._spot_poll_task, poll_task)
+                self.assertFalse(
+                    spot_api.spot_observation_fact_writes_drained()
+                )
+                self.assertEqual(
+                    spot_api.get_spot_observation_fact_health()[
+                        "pending_write_count"
+                    ],
+                    1,
+                )
+
+                release_write.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await poll_task
+                await asyncio.sleep(0)
+
+                self.assertTrue(
+                    spot_api.spot_observation_fact_writes_drained()
+                )
+        finally:
+            release_write.set()
+            if poll_task is not None and not poll_task.done():
+                poll_task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await poll_task
+            spot_api._spot_poll_task = None
+            spot_api._spot_diagnostics_task = None
+            spot_api._internal_temperature_task = None
+
+    def test_observation_fact_closeout_rejects_completed_failures_and_spool(self) -> None:
+        writer = Mock()
+        writer.failure_count = 1
+        writer.spool_pending_count.return_value = 0
+        with patch.object(spot_api, "_spot_observation_fact_writer", writer):
+            self.assertFalse(spot_api.spot_observation_fact_writes_drained())
+
+        writer.failure_count = 0
+        writer.spool_pending_count.return_value = 1
+        with patch.object(spot_api, "_spot_observation_fact_writer", writer):
+            self.assertFalse(spot_api.spot_observation_fact_writes_drained())
+
+        writer.spool_pending_count.side_effect = OSError("unreadable spool")
+        with patch.object(spot_api, "_spot_observation_fact_writer", writer):
+            self.assertFalse(spot_api.spot_observation_fact_writes_drained())
+
+    def test_observation_fact_closeout_rejects_unreadable_restarted_spool(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fact_path = Path(temp_dir) / "spot_observation_fact.csv"
+            spool_path = Path(temp_dir) / "spot_observation_fact.csv.failed.jsonl"
+            writer = SpotObservationFactWriter(fact_path, spool_path=spool_path)
+            spool_path.write_text('{"spot_observation_key":"pending"}\n', encoding="utf-8")
+            original_open = Path.open
+
+            def fail_spool_read(
+                path: Path,
+                mode: str = "r",
+                *args: object,
+                **kwargs: object,
+            ):
+                if path == spool_path and mode == "r":
+                    raise OSError("unreadable restarted spool")
+                return original_open(path, mode, *args, **kwargs)
+
+            self.assertEqual(writer.failure_count, 0)
+            with (
+                patch.object(Path, "open", new=fail_spool_read),
+                patch.object(spot_api, "_spot_observation_fact_writer", writer),
+            ):
+                self.assertFalse(spot_api.spot_observation_fact_writes_drained())
+
+    async def test_connection_test_routes_spot_through_guarded_helper(self) -> None:
+        guarded_result = {
+            "ok": True,
+            "latency_ms": 12,
+            "message": "HTTP 200",
+        }
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            new=AsyncMock(return_value=guarded_result),
+        ) as guarded_test:
+            response = await backend_app.test_connection(
+                backend_app.ConnectionTestPayload(
+                    spot=backend_app.ConnectionTarget(
+                        url="http://spot.invalid/image.jpg"
+                    )
+                ),
+                build_connection_test_request(),
+            )
+
+        self.assertEqual(response, {"results": {"spot": guarded_result}})
+        guarded_test.assert_awaited_once_with("http://spot.invalid/image.jpg")
+
+    async def test_connection_tcp_probes_run_off_event_loop_in_parallel(self) -> None:
+        both_started = threading.Event()
+        release_probes = threading.Event()
+        started_targets: list[tuple[str | None, int | None]] = []
+        started_lock = threading.Lock()
+
+        def blocking_tcp_probe(
+            ip: str | None,
+            port: int | None,
+            timeout: float = 1.5,
+        ) -> dict[str, object]:
+            del timeout
+            with started_lock:
+                started_targets.append((ip, port))
+                if len(started_targets) == 2:
+                    both_started.set()
+            release_probes.wait(timeout=0.5)
+            return {
+                "ok": True,
+                "latency_ms": 1,
+                "message": "connected",
+            }
+
+        with patch.object(
+            backend_app,
+            "_test_tcp",
+            side_effect=blocking_tcp_probe,
+        ):
+            request_task = asyncio.create_task(
+                backend_app.test_connection(
+                    backend_app.ConnectionTestPayload(
+                        extruder=backend_app.ConnectionTarget(
+                            ip="192.0.2.10",
+                            port=12289,
+                        ),
+                        ls_plc=backend_app.ConnectionTarget(
+                            ip="192.0.2.20",
+                            port=2004,
+                        ),
+                    ),
+                    build_connection_test_request(),
+                )
+            )
+            try:
+                self.assertTrue(
+                    await asyncio.to_thread(both_started.wait, 1.0)
+                )
+                self.assertFalse(request_task.done())
+            finally:
+                release_probes.set()
+
+            response = await asyncio.wait_for(request_task, timeout=1.0)
+
+        self.assertEqual(
+            set(response["results"]),
+            {"extruder", "ls_plc"},
+        )
+        self.assertEqual(
+            set(started_targets),
+            {
+                ("192.0.2.10", 12289),
+                ("192.0.2.20", 2004),
+            },
+        )
+
+    async def test_connection_test_rejects_nonlocal_callers(self) -> None:
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            new=AsyncMock(),
+        ) as guarded_test:
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.test_connection(
+                    backend_app.ConnectionTestPayload(
+                        spot=backend_app.ConnectionTarget(
+                            url="http://spot.invalid/image.jpg"
+                        )
+                    ),
+                    build_connection_test_request("remote.invalid"),
+                )
+
+        self.assertEqual(raised.exception.status_code, 403)
+        guarded_test.assert_not_awaited()
+
+    async def test_connection_test_rejects_hostile_browser_origin(self) -> None:
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            new=AsyncMock(),
+        ) as guarded_test:
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.test_connection(
+                    backend_app.ConnectionTestPayload(
+                        spot=backend_app.ConnectionTarget(
+                            url="http://spot.invalid/image.jpg"
+                        )
+                    ),
+                    build_connection_test_request(
+                        origin="https://untrusted.example",
+                        referer="https://untrusted.example/settings",
+                    ),
+                )
+
+        self.assertEqual(raised.exception.status_code, 403)
+        guarded_test.assert_not_awaited()
+
+    async def test_embedded_connection_test_requires_launch_control_token(
+        self,
+    ) -> None:
+        guarded_result = {
+            "ok": True,
+            "latency_ms": 1,
+            "message": "HTTP 200",
+        }
+        payload = backend_app.ConnectionTestPayload(
+            spot=backend_app.ConnectionTarget(
+                url="http://spot.invalid/image.jpg"
+            )
+        )
+        with (
+            patch.object(
+                backend_app,
+                "is_embedded_electron",
+                return_value=True,
+            ),
+            patch.dict(
+                backend_app.os.environ,
+                {"SFL_CONTROL_TOKEN": "launch-secret"},
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "test_spot_http_connection",
+                new=AsyncMock(return_value=guarded_result),
+            ) as guarded_test,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.test_connection(
+                    payload,
+                    build_connection_test_request(origin="null"),
+                )
+            accepted = await backend_app.test_connection(
+                payload,
+                build_connection_test_request(origin="null"),
+                "launch-secret",
+            )
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(accepted, {"results": {"spot": guarded_result}})
+        guarded_test.assert_awaited_once()
+
+    async def test_connection_test_rejects_concurrent_admission(self) -> None:
+        probe_started = asyncio.Event()
+        release_probe = asyncio.Event()
+
+        async def blocking_probe(_: str | None) -> dict[str, object]:
+            probe_started.set()
+            await release_probe.wait()
+            return {
+                "ok": True,
+                "latency_ms": 1,
+                "message": "HTTP 200",
+            }
+
+        payload = backend_app.ConnectionTestPayload(
+            spot=backend_app.ConnectionTarget(
+                url="http://spot.invalid/image.jpg"
+            )
+        )
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            side_effect=blocking_probe,
+        ):
+            first_request = asyncio.create_task(
+                backend_app.test_connection(
+                    payload,
+                    build_connection_test_request(),
+                )
+            )
+            await asyncio.wait_for(probe_started.wait(), timeout=1.0)
+            try:
+                with self.assertRaises(HTTPException) as raised:
+                    await backend_app.test_connection(
+                        payload,
+                        build_connection_test_request(),
+                    )
+                self.assertEqual(raised.exception.status_code, 429)
+                self.assertEqual(
+                    raised.exception.headers,
+                    {"Retry-After": "1"},
+                )
+            finally:
+                release_probe.set()
+                await first_request
+
+    async def test_connection_test_rate_limits_sequential_spot_probes(self) -> None:
+        guarded_result = {
+            "ok": True,
+            "latency_ms": 1,
+            "message": "HTTP 200",
+        }
+        payload = backend_app.ConnectionTestPayload(
+            spot=backend_app.ConnectionTarget(
+                url="http://spot.invalid/image.jpg"
+            )
+        )
+        with patch.object(
+            backend_app.spot_control,
+            "test_spot_http_connection",
+            new=AsyncMock(return_value=guarded_result),
+        ) as guarded_test:
+            first = await backend_app.test_connection(
+                payload,
+                build_connection_test_request(),
+            )
+            with self.assertRaises(HTTPException) as raised:
+                await backend_app.test_connection(
+                    payload,
+                    build_connection_test_request(),
+                )
+
+        self.assertEqual(first, {"results": {"spot": guarded_result}})
+        self.assertEqual(raised.exception.status_code, 429)
+        self.assertGreaterEqual(
+            int(raised.exception.headers["Retry-After"]),
+            29,
+        )
+        guarded_test.assert_awaited_once()
 
     async def test_shutdown_helper_drains_capture_event_queued_before_worker_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1338,6 +2721,16 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health["failure_count"], 1)
         self.assertTrue(outcome_and_task_done_are_atomic)
 
+    async def test_shutdown_helper_rejects_capture_failures_from_before_shutdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            with spot_api._spot_image_capture_lock:
+                spot_api._spot_image_capture_failure_count = 1
+
+            drained = spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2.0)
+
+        self.assertFalse(drained)
+
     def test_image_capture_health_separates_worker_writes_from_fact_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             log_path = Path(temp_dir)
@@ -1357,10 +2750,26 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
             rows = self.read_spot_image_fact_rows(log_path)
             health = spot_api.get_spot_image_capture_health()
+            manifest_stats = spot_api.get_spot_image_capture_manifest_stats(
+                fact_path=log_path / "spot_image_fact.csv",
+            )
 
             self.assertEqual(len(rows), 1)
             self.assertEqual(health["written_count"], 2)
             self.assertEqual(health["fact_row_count"], 1)
+            self.assertIsNotNone(manifest_stats)
+            assert manifest_stats is not None
+            self.assertTrue(manifest_stats["fact_manifest_state_ready"])
+            self.assertEqual(
+                health["fact_sha256"],
+                hashlib.sha256(
+                    (log_path / "spot_image_fact.csv").read_bytes()
+                ).hexdigest(),
+            )
+            self.assertEqual(
+                manifest_stats["fact_sha256"],
+                health["fact_sha256"],
+            )
 
     def test_image_capture_writer_dedupes_same_capture_id_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1601,25 +3010,177 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stale_lookalike_outside_date_tree.exists())
             self.assertTrue(fresh_managed.exists())
 
-    async def test_official_image_resource_is_requested_without_cache_or_alternate_path(self) -> None:
+    async def test_official_image_resource_is_cached_for_the_configured_interval(self) -> None:
         spot_api.config.SPOT_IP = "spot.local"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 3.0
         image_bytes = b"\xff\xd8official-image\xff\xd9"
         request_mock = AsyncMock(return_value=image_bytes)
 
         with patch.object(spot_api, "_request_spot_image", request_mock):
             first_data, first_meta = await spot_api.fetch_image_async()
-            second_data, second_meta = await spot_api.fetch_image_async()
+            cached_results = await asyncio.gather(
+                *(spot_api.fetch_image_async() for _ in range(20))
+            )
 
         self.assertEqual(first_data, image_bytes)
-        self.assertEqual(second_data, image_bytes)
-        self.assertEqual(request_mock.await_count, 2)
+        self.assertTrue(all(data == image_bytes for data, _meta in cached_results))
+        self.assertEqual(request_mock.await_count, 1)
         self.assertEqual(request_mock.await_args_list[0].args[1], "http://spot.local/image.jpg")
-        self.assertEqual(request_mock.await_args_list[1].args[1], "http://spot.local/image.jpg")
         self.assertEqual(first_meta["image_path"], "/image.jpg")
+        self.assertEqual(first_meta["source"], "upstream")
+        self.assertTrue(all(meta["source"] == "cache" for _data, meta in cached_results))
+        self.assertTrue(
+            all(meta["captured_at"] == first_meta["captured_at"] for _data, meta in cached_results)
+        )
+        self.assertTrue(all(meta["age_ms"] >= 0.0 for _data, meta in cached_results))
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["image_cache_hit_count"], 20)
+        self.assertEqual(diagnostics["image_downstream_request_count"], 21)
+
+    async def test_image_cache_is_not_reused_after_spot_ip_changes(self) -> None:
+        spot_api.config.SPOT_IP = "spot-a.local"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 10.0
+
+        async def request_image(_client: httpx.AsyncClient, image_url: str) -> bytes:
+            if image_url == "http://spot-a.local/image.jpg":
+                return b"\xff\xd8spot-a\xff\xd9"
+            if image_url == "http://spot-b.local/image.jpg":
+                return b"\xff\xd8spot-b\xff\xd9"
+            self.fail(f"unexpected image URL: {image_url}")
+
+        with patch.object(
+            spot_api,
+            "_request_spot_image",
+            side_effect=request_image,
+        ) as request_mock:
+            first_data, _first_meta = await spot_api.fetch_image_async()
+            spot_api.config.SPOT_IP = "spot-b.local"
+            second_data, second_meta = await spot_api.fetch_image_async()
+
+        self.assertEqual(first_data, b"\xff\xd8spot-a\xff\xd9")
+        self.assertEqual(second_data, b"\xff\xd8spot-b\xff\xd9")
         self.assertEqual(second_meta["source"], "upstream")
+        self.assertEqual(
+            [call.args[1] for call in request_mock.await_args_list],
+            [
+                "http://spot-a.local/image.jpg",
+                "http://spot-b.local/image.jpg",
+            ],
+        )
+        self.assertIsNotNone(spot_api._img_cache_entry)
+        assert spot_api._img_cache_entry is not None
+        self.assertEqual(
+            spot_api._img_cache_entry.image_url,
+            "http://spot-b.local/image.jpg",
+        )
+
+    async def test_inflight_image_refresh_does_not_cross_spot_ip_changes(self) -> None:
+        spot_api.config.SPOT_IP = "spot-a.local"
+        first_refresh_started = asyncio.Event()
+        release_first_refresh = asyncio.Event()
+
+        async def request_image(_client: httpx.AsyncClient, image_url: str) -> bytes:
+            if image_url == "http://spot-a.local/image.jpg":
+                first_refresh_started.set()
+                await release_first_refresh.wait()
+                return b"\xff\xd8spot-a\xff\xd9"
+            if image_url == "http://spot-b.local/image.jpg":
+                return b"\xff\xd8spot-b\xff\xd9"
+            self.fail(f"unexpected image URL: {image_url}")
+
+        with patch.object(
+            spot_api,
+            "_request_spot_image",
+            side_effect=request_image,
+        ) as request_mock:
+            first_caller = asyncio.create_task(spot_api.fetch_image_async())
+            await first_refresh_started.wait()
+            spot_api.config.SPOT_IP = "spot-b.local"
+            second_caller = asyncio.create_task(spot_api.fetch_image_async())
+            await asyncio.sleep(0)
+            release_first_refresh.set()
+            results = await asyncio.gather(first_caller, second_caller)
+
+        self.assertEqual(
+            [data for data, _meta in results],
+            [b"\xff\xd8spot-b\xff\xd9", b"\xff\xd8spot-b\xff\xd9"],
+        )
+        self.assertEqual(
+            [call.args[1] for call in request_mock.await_args_list],
+            [
+                "http://spot-a.local/image.jpg",
+                "http://spot-b.local/image.jpg",
+            ],
+        )
+        self.assertEqual(
+            {meta["source"] for _data, meta in results},
+            {"upstream", "coalesced"},
+        )
+
+    def test_image_cache_freshness_uses_normalized_interval_and_strict_boundary(self) -> None:
+        entry = spot_api._SpotImageCacheEntry(
+            image_bytes=b"\xff\xd8boundary\xff\xd9",
+            captured_at_epoch=100.0,
+            captured_at_monotonic=10.0,
+            upstream_latency_ms=5.0,
+        )
+
+        spot_api.config.SPOT_REFRESH_INTERVAL = 0.25
+        self.assertEqual(spot_api._spot_image_refresh_interval_sec(), 3.0)
+        self.assertTrue(spot_api._is_spot_image_cache_fresh(entry, now_monotonic=12.999))
+        self.assertFalse(spot_api._is_spot_image_cache_fresh(entry, now_monotonic=13.0))
+
+        spot_api.config.SPOT_REFRESH_INTERVAL = 30.0
+        self.assertEqual(spot_api._spot_image_refresh_interval_sec(), 10.0)
+
+        spot_api.config.SPOT_REFRESH_INTERVAL = float("nan")
+        self.assertEqual(spot_api._spot_image_refresh_interval_sec(), 3.0)
+        self.assertFalse(
+            spot_api._is_spot_image_cache_fresh(
+                entry,
+                now_monotonic=9.0,
+                record_clock_anomaly=True,
+            )
+        )
+        self.assertEqual(spot_api.get_spot_diagnostics()["image_cache_clock_anomaly_count"], 1)
+
+    def test_background_request_budget_stays_below_field_gate_at_fastest_poll(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        spot_api.config.SPOT_URL = "http://spot.local/output?p=temperature"
+        spot_api.config.SPOT_INTERNAL_TEMPERATURE_URL = (
+            "http://spot.local/output?p=itemperature"
+        )
+        spot_api.config.SPOT_REFRESH_INTERVAL = 0.25
+
+        diagnostics = spot_api.get_spot_diagnostics()
+
+        self.assertEqual(
+            diagnostics["request_budget_policy_version"],
+            "spot-background-request-budget-v2",
+        )
+        self.assertEqual(
+            diagnostics["image_request_policy_version"],
+            "spot-image-demand-shaping-v2",
+        )
+        self.assertEqual(diagnostics["image_refresh_interval_sec_effective"], 3.0)
+        self.assertEqual(diagnostics["diagnostics_refresh_interval_sec_effective"], 10.0)
+        self.assertEqual(spot_api._spot_diagnostics_max_age_sec(), 20.0)
+        self.assertEqual(diagnostics["request_budget_image_max_per_sec"], 0.333333)
+        self.assertEqual(diagnostics["request_budget_temperature_max_per_sec"], 2.0)
+        self.assertEqual(
+            diagnostics["request_budget_internal_temperature_max_per_sec"],
+            2.0,
+        )
+        self.assertEqual(diagnostics["request_budget_diagnostics_max_per_sec"], 0.8)
+        self.assertEqual(
+            diagnostics["request_budget_total_background_max_per_sec"],
+            5.133333,
+        )
+        self.assertTrue(diagnostics["request_budget_within_target"])
 
     async def test_official_image_requests_are_single_flight(self) -> None:
         spot_api.config.SPOT_IP = "spot.local"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 3.0
         image_bytes = b"\xff\xd8single-flight\xff\xd9"
         active_requests = 0
         maximum_active_requests = 0
@@ -1633,16 +3194,743 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             active_requests -= 1
             return image_bytes
 
-        with patch.object(spot_api, "_request_spot_image", side_effect=request_image) as request_mock:
-            first, second = await asyncio.gather(
-                spot_api.fetch_image_async(),
-                spot_api.fetch_image_async(),
+        with (
+            patch.object(spot_api, "_request_spot_image", side_effect=request_image) as request_mock,
+            patch.object(spot_api, "_maybe_enqueue_spot_image_capture") as enqueue_mock,
+        ):
+            results = await asyncio.gather(
+                *(spot_api.fetch_image_async() for _ in range(20))
             )
 
-        self.assertEqual(first[0], image_bytes)
-        self.assertEqual(second[0], image_bytes)
-        self.assertEqual(request_mock.await_count, 2)
+        self.assertTrue(all(data == image_bytes for data, _meta in results))
+        self.assertEqual(request_mock.await_count, 1)
         self.assertEqual(maximum_active_requests, 1)
+        sources = [meta["source"] for _data, meta in results]
+        self.assertEqual(sources.count("upstream"), 1)
+        self.assertEqual(sources.count("coalesced"), 19)
+        enqueue_mock.assert_called_once()
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["image_singleflight_leader_count"], 1)
+        self.assertEqual(diagnostics["image_coalesced_waiter_count"], 19)
+        self.assertEqual(diagnostics["image_upstream_request_count"], 1)
+        self.assertEqual(diagnostics["image_downstream_request_count"], 20)
+
+    async def test_expired_image_cache_refreshes_without_serving_stale_on_error(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        image_bytes = b"\xff\xd8first-image\xff\xd9"
+        upstream_error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "timed out",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=None,
+        )
+        request_mock = AsyncMock(side_effect=[image_bytes, upstream_error])
+
+        with patch.object(spot_api, "_request_spot_image", request_mock):
+            first_data, _first_meta = await spot_api.fetch_image_async()
+            cached = spot_api._img_cache_entry
+            self.assertIsNotNone(cached)
+            assert cached is not None
+            spot_api._img_cache_entry = spot_api._SpotImageCacheEntry(
+                image_bytes=cached.image_bytes,
+                captured_at_epoch=cached.captured_at_epoch,
+                captured_at_monotonic=cached.captured_at_monotonic - 4.0,
+                upstream_latency_ms=cached.upstream_latency_ms,
+            )
+            with self.assertRaises(spot_api.SpotImageFetchError):
+                await spot_api.fetch_image_async()
+
+        self.assertEqual(first_data, image_bytes)
+        self.assertEqual(request_mock.await_count, 2)
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertFalse(diagnostics["image_cache_fresh"])
+        self.assertEqual(diagnostics["image_refresh_success_count"], 1)
+        self.assertEqual(diagnostics["image_refresh_failure_count"], 1)
+        self.assertEqual(diagnostics["failure_count"], 1)
+
+    async def test_failed_image_refresh_recovers_with_the_next_shared_refresh(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        spot_api.config.SPOT_REFRESH_INTERVAL = 1.0
+        first_image = b"\xff\xd8first-image\xff\xd9"
+        recovered_image = b"\xff\xd8recovered-image\xff\xd9"
+        recovery_started = asyncio.Event()
+        release_recovery = asyncio.Event()
+        upstream_error = spot_api.SpotImageFetchError(
+            "upstream-timeout",
+            "timed out",
+            image_url="http://spot.local/image.jpg",
+            upstream_status=None,
+        )
+
+        async def request_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+            call_number = request_mock.await_count
+            if call_number == 1:
+                return first_image
+            if call_number == 2:
+                raise upstream_error
+            recovery_started.set()
+            await release_recovery.wait()
+            return recovered_image
+
+        request_mock = AsyncMock(side_effect=request_image)
+
+        with patch.object(spot_api, "_request_spot_image", request_mock):
+            await spot_api.fetch_image_async()
+            cached = spot_api._img_cache_entry
+            self.assertIsNotNone(cached)
+            assert cached is not None
+            spot_api._img_cache_entry = spot_api._SpotImageCacheEntry(
+                image_bytes=cached.image_bytes,
+                captured_at_epoch=cached.captured_at_epoch,
+                captured_at_monotonic=cached.captured_at_monotonic - 4.0,
+                upstream_latency_ms=cached.upstream_latency_ms,
+            )
+
+            with self.assertRaises(spot_api.SpotImageFetchError):
+                await spot_api.fetch_image_async()
+            recovery_leader = asyncio.create_task(spot_api.fetch_image_async())
+            await recovery_started.wait()
+            recovery_waiter = asyncio.create_task(spot_api.fetch_image_async())
+            await asyncio.sleep(0)
+            release_recovery.set()
+            recovered_results = await asyncio.gather(recovery_leader, recovery_waiter)
+
+        self.assertEqual([result[0] for result in recovered_results], [recovered_image] * 2)
+        self.assertEqual(
+            {result[1]["source"] for result in recovered_results},
+            {"upstream", "coalesced"},
+        )
+        self.assertEqual(request_mock.await_count, 3)
+        self.assertIsNotNone(spot_api._img_cache_entry)
+        assert spot_api._img_cache_entry is not None
+        self.assertEqual(spot_api._img_cache_entry.image_bytes, recovered_image)
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["image_refresh_success_count"], 2)
+        self.assertEqual(diagnostics["image_refresh_failure_count"], 1)
+        self.assertEqual(diagnostics["image_coalesced_waiter_count"], 1)
+        self.assertEqual(diagnostics["failure_count"], 0)
+
+    async def test_second_cache_check_is_not_counted_as_a_coalesced_waiter(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        cached_entry = spot_api._SpotImageCacheEntry(
+            image_bytes=b"\xff\xd8racing-cache-hit\xff\xd9",
+            captured_at_epoch=time.time(),
+            captured_at_monotonic=time.monotonic(),
+            upstream_latency_ms=4.0,
+        )
+        spot_api._img_cache_entry = cached_entry
+
+        with (
+            patch.object(
+                spot_api,
+                "_is_spot_image_cache_fresh",
+                side_effect=[False, True],
+            ) as freshness_mock,
+            patch.object(spot_api, "_request_spot_image", AsyncMock()) as request_mock,
+        ):
+            image_data, metadata = await spot_api.fetch_image_async()
+
+        self.assertEqual(image_data, cached_entry.image_bytes)
+        self.assertEqual(metadata["source"], "cache")
+        self.assertEqual(freshness_mock.call_count, 2)
+        request_mock.assert_not_awaited()
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["image_cache_hit_count"], 1)
+        self.assertEqual(diagnostics["image_coalesced_waiter_count"], 0)
+        self.assertEqual(diagnostics["image_upstream_request_count"], 0)
+
+    async def test_shared_image_refresh_failure_is_recorded_once_for_all_waiters(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        refresh_started = asyncio.Event()
+        release_refresh = asyncio.Event()
+
+        async def fail_refresh(client: httpx.AsyncClient, image_url: str) -> bytes:
+            refresh_started.set()
+            await release_refresh.wait()
+            raise spot_api.SpotImageFetchError(
+                "upstream-timeout",
+                "timed out",
+                image_url=image_url,
+                upstream_status=None,
+            )
+
+        with patch.object(spot_api, "_request_spot_image", side_effect=fail_refresh) as request_mock:
+            first_task = asyncio.create_task(spot_api.fetch_image_async())
+            await refresh_started.wait()
+            waiter_tasks = [
+                asyncio.create_task(spot_api.fetch_image_async())
+                for _ in range(19)
+            ]
+            await asyncio.sleep(0)
+            release_refresh.set()
+            results = await asyncio.gather(first_task, *waiter_tasks, return_exceptions=True)
+
+        self.assertTrue(all(isinstance(result, spot_api.SpotImageFetchError) for result in results))
+        self.assertEqual(request_mock.await_count, 1)
+        diagnostics = spot_api.get_spot_diagnostics()
+        self.assertEqual(diagnostics["image_refresh_failure_count"], 1)
+        self.assertEqual(diagnostics["failure_count"], 1)
+        self.assertEqual(diagnostics["image_coalesced_waiter_count"], 19)
+
+    async def test_cancelling_one_image_waiter_does_not_cancel_shared_refresh(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        image_bytes = b"\xff\xd8shielded-image\xff\xd9"
+        refresh_started = asyncio.Event()
+        release_refresh = asyncio.Event()
+
+        async def request_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+            refresh_started.set()
+            await release_refresh.wait()
+            return image_bytes
+
+        with patch.object(spot_api, "_request_spot_image", side_effect=request_image) as request_mock:
+            cancelled_waiter = asyncio.create_task(spot_api.fetch_image_async())
+            await refresh_started.wait()
+            surviving_waiter = asyncio.create_task(spot_api.fetch_image_async())
+            await asyncio.sleep(0)
+            cancelled_waiter.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await cancelled_waiter
+            release_refresh.set()
+            surviving_result = await surviving_waiter
+
+        self.assertEqual(surviving_result[0], image_bytes)
+        self.assertEqual(surviving_result[1]["source"], "coalesced")
+        self.assertEqual(request_mock.await_count, 1)
+        self.assertEqual(spot_api.get_spot_diagnostics()["image_refresh_success_count"], 1)
+
+    async def test_cancelling_all_image_waiters_still_publishes_the_shared_result(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        image_bytes = b"\xff\xd8background-result\xff\xd9"
+        refresh_started = asyncio.Event()
+        release_refresh = asyncio.Event()
+
+        async def request_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+            refresh_started.set()
+            await release_refresh.wait()
+            return image_bytes
+
+        with patch.object(spot_api, "_request_spot_image", side_effect=request_image) as request_mock:
+            leader = asyncio.create_task(spot_api.fetch_image_async())
+            await refresh_started.wait()
+            waiters = [
+                asyncio.create_task(spot_api.fetch_image_async())
+                for _ in range(4)
+            ]
+            await asyncio.sleep(0)
+            for task in (leader, *waiters):
+                task.cancel()
+            cancelled_results = await asyncio.gather(leader, *waiters, return_exceptions=True)
+            self.assertTrue(all(isinstance(result, asyncio.CancelledError) for result in cancelled_results))
+
+            refresh_task = spot_api._img_refresh_task
+            self.assertIsNotNone(refresh_task)
+            release_refresh.set()
+            assert refresh_task is not None
+            published_entry = await refresh_task
+            cached_data, cached_meta = await spot_api.fetch_image_async()
+
+        self.assertEqual(published_entry.image_bytes, image_bytes)
+        self.assertEqual(cached_data, image_bytes)
+        self.assertEqual(cached_meta["source"], "cache")
+        self.assertEqual(request_mock.await_count, 1)
+        self.assertEqual(spot_api.get_spot_diagnostics()["image_refresh_success_count"], 1)
+
+    async def test_completed_refresh_cleanup_preserves_a_replacement_task(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        image_bytes = b"\xff\xd8completed-refresh\xff\xd9"
+        refresh_started = asyncio.Event()
+        release_refresh = asyncio.Event()
+        release_replacement = asyncio.Event()
+
+        async def request_image(client: httpx.AsyncClient, image_url: str) -> bytes:
+            refresh_started.set()
+            await release_refresh.wait()
+            return image_bytes
+
+        async def replacement_refresh() -> spot_api._SpotImageCacheEntry:
+            await release_replacement.wait()
+            return spot_api._SpotImageCacheEntry(
+                image_bytes=b"\xff\xd8replacement\xff\xd9",
+                captured_at_epoch=time.time(),
+                captured_at_monotonic=time.monotonic(),
+                upstream_latency_ms=1.0,
+            )
+
+        with patch.object(spot_api, "_request_spot_image", side_effect=request_image):
+            first_caller = asyncio.create_task(spot_api.fetch_image_async())
+            await refresh_started.wait()
+            first_refresh = spot_api._img_refresh_task
+            self.assertIsNotNone(first_refresh)
+
+            await spot_api._img_fetch_lock.acquire()
+            try:
+                release_refresh.set()
+                assert first_refresh is not None
+                await asyncio.wait_for(asyncio.shield(first_refresh), timeout=1.0)
+                replacement_task = asyncio.create_task(replacement_refresh())
+                spot_api._img_refresh_task = replacement_task
+            finally:
+                spot_api._img_fetch_lock.release()
+
+            first_result = await first_caller
+            self.assertEqual(first_result[0], image_bytes)
+            self.assertIs(spot_api._img_refresh_task, replacement_task)
+            release_replacement.set()
+            await replacement_task
+
+    async def test_image_refresh_shutdown_is_bounded_and_rejects_new_work(self) -> None:
+        spot_api.config.SPOT_IP = "spot.local"
+        refresh_started = asyncio.Event()
+
+        async def never_complete(client: httpx.AsyncClient, image_url: str) -> bytes:
+            refresh_started.set()
+            await asyncio.Event().wait()
+            return b"unreachable"
+
+        with patch.object(spot_api, "_request_spot_image", side_effect=never_complete) as request_mock:
+            caller_task = asyncio.create_task(spot_api.fetch_image_async())
+            await refresh_started.wait()
+            drained = await spot_api._stop_spot_image_refresh_for_shutdown(timeout_sec=0.01)
+            with self.assertRaises(asyncio.CancelledError):
+                await caller_task
+            with self.assertRaises(spot_api.SpotImageFetchError) as stopped_context:
+                await spot_api.fetch_image_async()
+
+        self.assertTrue(drained)
+        self.assertEqual(stopped_context.exception.code, "shutdown")
+        self.assertEqual(request_mock.await_count, 1)
+        self.assertFalse(spot_api.get_spot_diagnostics()["image_accepting_requests"])
+
+    async def test_guarded_transport_routes_background_requests_by_kind(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+        client = AsyncMock(spec=httpx.AsyncClient)
+
+        image = await spot_api._request_spot_image(
+            client,
+            "http://spot.local/image.jpg",
+        )
+        temperature = await spot_api._request_spot_temperature(
+            client,
+            "http://spot.local/output?p=temperature",
+        )
+        internal_temperature = await spot_api._request_spot_internal_temperature(
+            client,
+            "http://spot.local/output?p=internal",
+        )
+        param, diagnostic = await spot_api._request_spot_diagnostic_output(
+            client,
+            "alarmstatus",
+        )
+
+        self.assertEqual(image, b"\xff\xd8guarded-image\xff\xd9")
+        self.assertEqual(temperature, 451.25)
+        self.assertEqual(internal_temperature, 451.25)
+        self.assertEqual((param, diagnostic), ("alarmstatus", "7"))
+        self.assertEqual(
+            [request.kind for request in transport.requests],
+            [
+                spot_api.SpotRequestKind.IMAGE,
+                spot_api.SpotRequestKind.TEMPERATURE,
+                spot_api.SpotRequestKind.INTERNAL_TEMPERATURE,
+                spot_api.SpotRequestKind.DIAGNOSTIC,
+            ],
+        )
+        client.request.assert_not_awaited()
+
+    async def test_guarded_transport_preserves_connect_and_read_timeout_types(self) -> None:
+        client = AsyncMock(spec=httpx.AsyncClient)
+        cases = (
+            (
+                spot_api.SpotTransportConnectTimeout("connect timed out"),
+                httpx.ConnectTimeout,
+            ),
+            (
+                spot_api.SpotTransportReadTimeout("response timed out"),
+                httpx.ReadTimeout,
+            ),
+        )
+
+        try:
+            for transport_error, expected_httpx_error in cases:
+                with self.subTest(expected_httpx_error=expected_httpx_error.__name__):
+                    transport = Mock(supported=True, active=True)
+                    transport.request = AsyncMock(side_effect=transport_error)
+                    spot_api._spot_http_transport = transport
+
+                    with self.assertRaises(expected_httpx_error):
+                        await spot_api._request_spot_http_response(
+                            client,
+                            kind=spot_api.SpotRequestKind.IMAGE,
+                            method="GET",
+                            url="http://spot.local/image.jpg",
+                        )
+        finally:
+            spot_api._spot_http_transport = None
+
+        client.request.assert_not_awaited()
+
+    async def test_transport_test_reset_closes_and_clears_module_state(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+        spot_api._spot_http_transport_enforcement_required = True
+
+        await spot_api._reset_spot_http_transport_state_for_tests()
+
+        self.assertIsNone(spot_api._spot_http_transport)
+        self.assertFalse(transport.active)
+        self.assertFalse(spot_api._spot_http_transport_enforcement_required)
+        self.assertFalse(spot_api._spot_http_transport_shutdown_started)
+
+    async def test_transport_shutdown_never_falls_back_to_direct_clients(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+        spot_api._spot_http_transport_enforcement_required = True
+        direct_client = AsyncMock(spec=httpx.AsyncClient)
+
+        self.assertTrue(await spot_api._stop_spot_http_transport())
+
+        with self.assertRaises(httpx.RequestError):
+            await spot_api._request_spot_http_response(
+                direct_client,
+                kind=spot_api.SpotRequestKind.CONNECTION_TEST,
+                method="GET",
+                url="http://spot.local/status",
+            )
+        with self.assertRaises(spot_api.SpotTransportClosedError):
+            spot_api._request_spot_http_response_sync(
+                kind=spot_api.SpotRequestKind.FOCUS_READ,
+                method="GET",
+                url="http://spot.local/focus",
+            )
+        with (
+            patch.object(spot_api, "urlopen") as focus_urlopen_mock,
+            self.assertRaises(spot_api.SpotFocusControlError),
+        ):
+            spot_api._read_spot_focus_position("http://spot.local/focus")
+        focus_urlopen_mock.assert_not_called()
+        with (
+            patch.object(spot_api, "urlopen") as actuator_urlopen_mock,
+            self.assertRaises(spot_api.SpotActuatorControlError),
+        ):
+            spot_api._read_spot_actuator_position(
+                "http://spot.local/actuator"
+            )
+        actuator_urlopen_mock.assert_not_called()
+
+        direct_client.request.assert_not_awaited()
+
+    async def test_transport_start_and_in_progress_shutdown_fail_closed(self) -> None:
+        shutdown_started = asyncio.Event()
+        release_shutdown = asyncio.Event()
+
+        class BlockingCloseTransport(FakeSpotHttpTransport):
+            def start(self) -> bool:
+                self.active = True
+                return True
+
+            async def close(self, timeout_sec: float = 7.0) -> bool:
+                del timeout_sec
+                shutdown_started.set()
+                await release_shutdown.wait()
+                self.active = False
+                return True
+
+        transport = BlockingCloseTransport()
+        direct_client = AsyncMock(spec=httpx.AsyncClient)
+        spot_api._spot_http_transport = transport
+        spot_api._http_client = direct_client
+
+        self.assertTrue(spot_api._start_spot_http_transport())
+        self.assertTrue(spot_api._spot_http_transport_enforcement_required)
+        stop_task = asyncio.create_task(spot_api._stop_spot_http_transport())
+        try:
+            await asyncio.wait_for(shutdown_started.wait(), timeout=1.0)
+            self.assertTrue(spot_api._spot_http_transport_shutdown_started)
+
+            connection_result = await spot_api.test_spot_http_connection(
+                "http://spot.local/status"
+            )
+            self.assertFalse(connection_result["ok"])
+            with (
+                patch.object(spot_api, "urlopen") as focus_urlopen_mock,
+                self.assertRaises(spot_api.SpotFocusControlError),
+            ):
+                spot_api._read_spot_focus_position("http://spot.local/focus")
+            focus_urlopen_mock.assert_not_called()
+            with (
+                patch.object(spot_api, "urlopen") as actuator_urlopen_mock,
+                self.assertRaises(spot_api.SpotActuatorControlError),
+            ):
+                spot_api._read_spot_actuator_position(
+                    "http://spot.local/actuator"
+                )
+            actuator_urlopen_mock.assert_not_called()
+            direct_client.request.assert_not_awaited()
+        finally:
+            release_shutdown.set()
+
+        self.assertTrue(await stop_task)
+        direct_client.aclose.assert_awaited_once()
+        self.assertIsNone(spot_api._spot_http_transport)
+        self.assertTrue(spot_api._spot_http_transport_enforcement_required)
+        self.assertTrue(spot_api._spot_http_transport_shutdown_started)
+
+    async def test_transport_close_failure_still_closes_legacy_client(self) -> None:
+        transport = Mock(supported=True, active=True)
+        transport.close = AsyncMock(side_effect=RuntimeError("close failed"))
+        client = AsyncMock(spec=httpx.AsyncClient)
+        spot_api._spot_http_transport = transport
+        spot_api._http_client = client
+
+        try:
+            with self.assertRaisesRegex(RuntimeError, "close failed"):
+                await spot_api._stop_spot_http_transport()
+
+            transport.close.assert_awaited_once()
+            client.aclose.assert_awaited_once()
+            self.assertIsNone(spot_api._http_client)
+            self.assertIs(spot_api._spot_http_transport, transport)
+            self.assertTrue(spot_api._spot_http_transport_shutdown_started)
+        finally:
+            spot_api._spot_http_transport = None
+            spot_api._http_client = None
+
+    async def test_connection_test_reports_guarded_transport_failures(self) -> None:
+        missing = await spot_api.test_spot_http_connection(None)
+        self.assertEqual(
+            missing,
+            {"ok": False, "latency_ms": None, "message": "URL missing"},
+        )
+
+        cases = (
+            (
+                spot_api.SpotHttpResponse(
+                    status_code=200,
+                    headers={},
+                    body=b"ok",
+                    elapsed_ms=1.0,
+                ),
+                True,
+                "HTTP 200",
+            ),
+            (
+                spot_api.SpotHttpResponse(
+                    status_code=503,
+                    headers={},
+                    body=b"unavailable",
+                    elapsed_ms=1.0,
+                ),
+                False,
+                "HTTP 503",
+            ),
+            (
+                spot_api.SpotHttpResponse(
+                    status_code=302,
+                    headers={},
+                    body=b"",
+                    elapsed_ms=1.0,
+                ),
+                False,
+                "HTTP 302",
+            ),
+            (spot_api.SpotTransportConnectTimeout("connect timed out"), False, "connect timed out"),
+            (spot_api.SpotTransportError("transport failed"), False, "transport failed"),
+        )
+        try:
+            for guarded_result, expected_ok, expected_message in cases:
+                with self.subTest(expected_message=expected_message):
+                    transport = Mock(supported=True, active=True)
+                    if isinstance(guarded_result, BaseException):
+                        transport.request = AsyncMock(side_effect=guarded_result)
+                    else:
+                        transport.request = AsyncMock(return_value=guarded_result)
+                    spot_api._spot_http_transport = transport
+                    spot_api._spot_http_transport_enforcement_required = True
+                    spot_api._spot_http_transport_shutdown_started = False
+
+                    result = await spot_api.test_spot_http_connection(
+                        "http://spot.local/status"
+                    )
+
+                    self.assertEqual(result["ok"], expected_ok)
+                    self.assertEqual(result["message"], expected_message)
+                    request = transport.request.await_args.args[0]
+                    self.assertEqual(
+                        request.kind,
+                        spot_api.SpotRequestKind.CONNECTION_TEST,
+                    )
+                    self.assertEqual(request.method, "HEAD")
+                    self.assertFalse(request.read_response_body)
+        finally:
+            spot_api._spot_http_transport = None
+            spot_api._spot_http_transport_enforcement_required = False
+            spot_api._spot_http_transport_shutdown_started = False
+
+    async def test_connection_test_falls_back_to_bodyless_get_for_head_rejection(
+        self,
+    ) -> None:
+        transport = Mock(supported=True, active=True)
+        transport.request = AsyncMock(
+            side_effect=[
+                spot_api.SpotHttpResponse(
+                    status_code=405,
+                    headers={},
+                    body=b"",
+                    elapsed_ms=1.0,
+                ),
+                spot_api.SpotHttpResponse(
+                    status_code=200,
+                    headers={"content-length": "70000"},
+                    body=b"",
+                    elapsed_ms=1.0,
+                ),
+            ]
+        )
+        spot_api._spot_http_transport = transport
+        spot_api._spot_http_transport_enforcement_required = True
+
+        try:
+            result = await spot_api.test_spot_http_connection(
+                "http://spot.local/image.jpg"
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["message"], "HTTP 200")
+            requests = [
+                call.args[0]
+                for call in transport.request.await_args_list
+            ]
+            self.assertEqual(
+                [request.method for request in requests],
+                ["HEAD", "GET"],
+            )
+            self.assertTrue(
+                all(not request.read_response_body for request in requests)
+            )
+        finally:
+            spot_api._spot_http_transport = None
+            spot_api._spot_http_transport_enforcement_required = False
+            spot_api._spot_http_transport_shutdown_started = False
+
+    def test_guarded_transport_routes_focus_and_actuator_operations(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+
+        focus = spot_api._read_spot_focus_position("http://spot.local/focus")
+        spot_api._write_spot_focus_position("http://spot.local/focus", 620)
+        actuator = spot_api._read_spot_actuator_position("http://spot.local/actuator")
+        spot_api._write_spot_actuator_position("http://spot.local/actuator", 400)
+
+        self.assertEqual(focus, 600)
+        self.assertEqual(actuator, 321)
+        self.assertEqual(
+            [request.kind for request in transport.requests],
+            [
+                spot_api.SpotRequestKind.FOCUS_READ,
+                spot_api.SpotRequestKind.FOCUS_WRITE,
+                spot_api.SpotRequestKind.ACTUATOR_READ,
+                spot_api.SpotRequestKind.ACTUATOR_WRITE,
+            ],
+        )
+
+    def test_spot_diagnostics_include_aggregate_source_port_policy(self) -> None:
+        transport = FakeSpotHttpTransport()
+        spot_api._spot_http_transport = transport
+        diagnostics = spot_api.get_spot_diagnostics()
+
+        self.assertEqual(
+            diagnostics["source_port_policy_version"],
+            "spot-source-port-quarantine-v2",
+        )
+        self.assertTrue(diagnostics["source_port_enforcement_supported"])
+        self.assertTrue(diagnostics["source_port_enforcement_active"])
+        self.assertEqual(diagnostics["source_port_quarantine_seconds"], 75.0)
+        self.assertEqual(diagnostics["source_port_pool_capacity"], 768)
+        self.assertNotIn("source_port_values", diagnostics)
+
+    def test_source_port_diagnostics_schema_is_stable_without_transport(self) -> None:
+        spot_api._spot_http_transport = None
+
+        inactive_diagnostics = spot_api._spot_source_port_diagnostics()
+        live_schema = spot_api.SpotHttpTransport().diagnostics()
+
+        expected_keys = {
+            "source_port_policy_version",
+            "source_port_enforcement_supported",
+            "source_port_enforcement_active",
+            "source_port_quarantine_seconds",
+            "source_port_pool_capacity",
+            "source_port_pool_guarded_count",
+            "source_port_pool_leased_count",
+            "source_port_pool_quarantined_count",
+            "source_port_pool_rebind_pending_count",
+            "source_port_pool_acquire_wait_count",
+            "source_port_pool_exhaustion_count",
+            "source_port_rebind_retry_count",
+            "source_port_reuse_violation_count",
+            "source_port_minimum_reuse_interval_seconds",
+            "source_port_transport_started_count",
+            "source_port_transport_success_count",
+            "source_port_transport_failure_count",
+            "source_port_bind_collision_count",
+            "source_port_transport_pending_count",
+            "source_port_image_started_count",
+            "source_port_image_success_count",
+            "source_port_image_failure_count",
+            "source_port_temperature_started_count",
+            "source_port_temperature_success_count",
+            "source_port_temperature_failure_count",
+            "source_port_internal_temperature_started_count",
+            "source_port_internal_temperature_success_count",
+            "source_port_internal_temperature_failure_count",
+            "source_port_diagnostic_started_count",
+            "source_port_diagnostic_success_count",
+            "source_port_diagnostic_failure_count",
+            "source_port_connection_test_started_count",
+            "source_port_connection_test_success_count",
+            "source_port_connection_test_failure_count",
+            "source_port_focus_read_started_count",
+            "source_port_focus_read_success_count",
+            "source_port_focus_read_failure_count",
+            "source_port_focus_write_started_count",
+            "source_port_focus_write_success_count",
+            "source_port_focus_write_failure_count",
+            "source_port_actuator_read_started_count",
+            "source_port_actuator_read_success_count",
+            "source_port_actuator_read_failure_count",
+            "source_port_actuator_write_started_count",
+            "source_port_actuator_write_success_count",
+            "source_port_actuator_write_failure_count",
+        }
+        self.assertEqual(set(inactive_diagnostics), expected_keys)
+        self.assertEqual(set(live_schema), expected_keys)
+        self.assertEqual(inactive_diagnostics["source_port_transport_pending_count"], 0)
+        for kind in spot_api.SpotRequestKind:
+            for outcome in ("started", "success", "failure"):
+                self.assertEqual(
+                    inactive_diagnostics[
+                        f"source_port_{kind.value}_{outcome}_count"
+                    ],
+                    0,
+                )
+
+    async def test_supported_but_inactive_transport_fails_closed(self) -> None:
+        transport = FakeSpotHttpTransport()
+        transport.active = False
+        spot_api._spot_http_transport = transport
+        client = AsyncMock(spec=httpx.AsyncClient)
+
+        with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+            await spot_api._request_spot_image(
+                client,
+                "http://spot.local/image.jpg",
+            )
+
+        self.assertEqual(raised.exception.code, "upstream-request-error")
+        client.request.assert_not_awaited()
 
     async def test_all_spot_device_http_requests_are_serialized(self) -> None:
         active_requests = 0
@@ -1736,6 +4024,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             "source": "upstream",
             "captured_at": time.time(),
             "latency_ms": 12.5,
+            "age_ms": 4.5,
             "image_path": "/image.jpg",
         }
         internal_temperature_at = time.time()
@@ -1765,6 +4054,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.content, image_bytes)
         self.assertEqual(response.headers["content-type"], "image/jpeg")
         self.assertEqual(response.headers["cache-control"], "no-store, no-cache, must-revalidate, max-age=0")
+        self.assertEqual(response.headers["x-spot-image-age-ms"], "4.5")
         self.assertEqual(response.headers["x-spot-internal-temperature"], "41.250")
         self.assertEqual(
             response.headers["x-spot-internal-temperature-at"],
@@ -1780,6 +4070,10 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 "x-spot-internal-temperature",
                 "x-spot-internal-temperature-at",
                 "x-spot-internal-temperature-status",
+                "x-spot-image-at",
+                "x-spot-image-source",
+                "x-spot-image-latency-ms",
+                "x-spot-image-age-ms",
             }.issubset(exposed_headers)
         )
         self.assertEqual(config_response.status_code, 200)

@@ -28,6 +28,8 @@ interface UseSpotViewModelEffectsParams {
   applySpotConfig: (config: SpotConfig) => void;
   prevUrlRef: MutableRefObject<string | null>;
   cancelPendingImageRetry: () => void;
+  cancelNormalImageRefresh: () => void;
+  resumeImageRefreshWhenVisible: () => void;
 }
 
 const readStoredSpotConfig = (): SpotConfigBroadcastPayload | null => {
@@ -52,6 +54,8 @@ export const useSpotViewModelEffects = ({
   applySpotConfig,
   prevUrlRef,
   cancelPendingImageRetry,
+  cancelNormalImageRefresh,
+  resumeImageRefreshWhenVisible,
 }: UseSpotViewModelEffectsParams) => {
   useEffect(() => {
     if (!config || !config.image_url) {
@@ -61,6 +65,7 @@ export const useSpotViewModelEffects = ({
 
     return () => {
       cancelPendingImageRetry();
+      cancelNormalImageRefresh();
       if (prevUrlRef.current) {
         URL.revokeObjectURL(prevUrlRef.current);
         prevUrlRef.current = null;
@@ -71,6 +76,31 @@ export const useSpotViewModelEffects = ({
     fetchInitialImage,
     prevUrlRef,
     cancelPendingImageRetry,
+    cancelNormalImageRefresh,
+  ]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const handleImageVisibility = (): void => {
+      if (document.visibilityState === 'hidden') {
+        cancelPendingImageRetry();
+        cancelNormalImageRefresh();
+        return;
+      }
+      resumeImageRefreshWhenVisible();
+    };
+
+    document.addEventListener('visibilitychange', handleImageVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleImageVisibility);
+    };
+  }, [
+    cancelPendingImageRetry,
+    cancelNormalImageRefresh,
+    resumeImageRefreshWhenVisible,
   ]);
 
   useEffect(() => {

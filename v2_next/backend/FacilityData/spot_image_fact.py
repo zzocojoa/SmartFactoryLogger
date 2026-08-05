@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -51,6 +53,7 @@ SPOT_IMAGE_FACT_FILENAME = "spot_image_fact.csv"
 SPOT_IMAGE_FACT_FINAL_MANIFEST_FILENAME = "spot_image_fact_manifest.final.json"
 
 _MANAGED_IMAGE_EXTENSIONS = {".jpg", ".png", ".gif", ".bmp", ".webp", ".bin"}
+_SPOT_IMAGE_FACT_FILE_LOCK = threading.RLock()
 
 
 @dataclass
@@ -66,6 +69,10 @@ class SpotImageCaptureWriter:
     _known_facts_by_capture_id: Optional[dict[str, dict[str, str]]] = field(default=None, init=False, repr=False)
     _known_facts_complete: bool = field(default=False, init=False, repr=False)
     _fact_row_count: Optional[int] = field(default=None, init=False, repr=False)
+    _fact_digest: Any = field(default_factory=hashlib.sha256, init=False, repr=False)
+    _fact_has_content: bool = field(default=False, init=False, repr=False)
+    _manifest_state_ready: bool = field(default=True, init=False, repr=False)
+    _manifest_tracked_size: int = field(default=0, init=False, repr=False)
     _historical_fact_mtime: Optional[float] = field(default=None, init=False, repr=False)
     _historical_fact_metadata_readable: bool = field(default=True, init=False, repr=False)
 
@@ -77,6 +84,7 @@ class SpotImageCaptureWriter:
         except OSError:
             # Unknown history must preserve the conservative deduplication path.
             self._historical_fact_metadata_readable = False
+        self._initialize_manifest_state()
 
     @property
     def fact_path(self) -> Path:
@@ -84,9 +92,19 @@ class SpotImageCaptureWriter:
 
     @property
     def fact_row_count(self) -> int:
-        if self._fact_row_count is None:
-            self._load_fact_row_count()
-        return int(self._fact_row_count or 0)
+        with _SPOT_IMAGE_FACT_FILE_LOCK:
+            self._validate_manifest_tracked_size()
+            return int(self._fact_row_count or 0)
+
+    @property
+    def fact_sha256(self) -> Optional[str]:
+        with _SPOT_IMAGE_FACT_FILE_LOCK:
+            self._validate_manifest_tracked_size()
+            if not self._manifest_state_ready:
+                raise RuntimeError("SPOT image fact runtime manifest state is unavailable")
+            if not self._fact_has_content:
+                return None
+            return self._fact_digest.copy().hexdigest()
 
     def write_capture(
         self,
@@ -173,13 +191,26 @@ class SpotImageCaptureWriter:
         )
 
     def _append_fact(self, fact: Mapping[str, str]) -> None:
-        self.log_path.mkdir(parents=True, exist_ok=True)
-        write_header = self._prepare_fact_file_for_append()
-        with self.fact_path.open("a", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=SPOT_IMAGE_FACT_COLUMNS)
+        with _SPOT_IMAGE_FACT_FILE_LOCK:
+            self.log_path.mkdir(parents=True, exist_ok=True)
+            write_header = self._prepare_fact_file_for_append()
+            previous_size = self._fact_file_size()
+            buffer = io.StringIO(newline="")
+            writer = csv.DictWriter(buffer, fieldnames=SPOT_IMAGE_FACT_COLUMNS)
             if write_header:
                 writer.writeheader()
             writer.writerow(fact)
+            encoding = "utf-8-sig" if write_header and previous_size == 0 else "utf-8"
+            payload = buffer.getvalue().encode(encoding)
+            expected_size = previous_size + len(payload)
+            with self.fact_path.open("ab") as handle:
+                if handle.write(payload) != len(payload):
+                    raise OSError("SPOT image fact append was truncated")
+            self._extend_manifest_digest(
+                previous_size,
+                expected_size=expected_size,
+            )
+            self._fact_row_count = int(self._fact_row_count or 0) + 1
 
     def _prepare_fact_file_for_append(self) -> bool:
         if not self.fact_path.exists() or self.fact_path.stat().st_size == 0:
@@ -198,6 +229,10 @@ class SpotImageCaptureWriter:
         self._known_facts_by_capture_id = {}
         self._known_facts_complete = True
         self._fact_row_count = 0
+        self._fact_digest = hashlib.sha256()
+        self._fact_has_content = False
+        self._manifest_state_ready = True
+        self._manifest_tracked_size = 0
         return True
 
     def _existing_fact_for_capture_id(self, capture_id: str) -> Optional[dict[str, str]]:
@@ -232,7 +267,8 @@ class SpotImageCaptureWriter:
                 row_count = 0
         self._known_facts_by_capture_id = facts_by_id
         self._known_facts_complete = True
-        self._fact_row_count = row_count
+        if self._fact_row_count is None:
+            self._fact_row_count = row_count
         return facts_by_id
 
     def _load_fact_row_count(self) -> int:
@@ -244,8 +280,11 @@ class SpotImageCaptureWriter:
                     header = next(reader, [])
                     if header == SPOT_IMAGE_FACT_COLUMNS:
                         row_count = sum(1 for row in reader if row)
+                    else:
+                        self._manifest_state_ready = False
             except (OSError, UnicodeError, csv.Error):
                 row_count = 0
+                self._manifest_state_ready = False
         self._fact_row_count = row_count
         return row_count
 
@@ -256,10 +295,77 @@ class SpotImageCaptureWriter:
         if self._known_facts_by_capture_id is None:
             self._known_facts_by_capture_id = {}
         facts_by_id = self._known_facts_by_capture_id
-        was_known = capture_id in facts_by_id
         facts_by_id[capture_id] = dict(fact)
-        if not was_known and self._fact_row_count is not None:
-            self._fact_row_count += 1
+
+    def _initialize_manifest_state(self) -> None:
+        if not self.fact_path.exists() or self.fact_path.stat().st_size == 0:
+            self._fact_row_count = 0
+            self._manifest_tracked_size = 0
+            return
+        try:
+            expected_size = self.fact_path.stat().st_size
+            digest = hashlib.sha256()
+            with self.fact_path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            self._fact_digest = digest
+            self._fact_has_content = True
+            self._load_fact_row_count()
+            if self.fact_path.stat().st_size != expected_size:
+                self._manifest_state_ready = False
+                return
+            self._manifest_tracked_size = expected_size
+        except (OSError, UnicodeError, csv.Error):
+            self._manifest_state_ready = False
+
+    def _fact_file_size(self) -> int:
+        try:
+            return self.fact_path.stat().st_size
+        except FileNotFoundError:
+            return 0
+
+    def _extend_manifest_digest(
+        self,
+        previous_size: int,
+        *,
+        expected_size: int,
+    ) -> None:
+        self._fact_has_content = True
+        if not self._manifest_state_ready:
+            return
+        current_size = self._fact_file_size()
+        if (
+            previous_size != self._manifest_tracked_size
+            or current_size != expected_size
+        ):
+            self._manifest_state_ready = False
+            return
+        try:
+            with self.fact_path.open("rb") as handle:
+                handle.seek(previous_size)
+                remaining = current_size - previous_size
+                while remaining > 0:
+                    chunk = handle.read(min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise OSError("SPOT image fact digest read was truncated")
+                    self._fact_digest.update(chunk)
+                    remaining -= len(chunk)
+            if self._fact_file_size() != current_size:
+                self._manifest_state_ready = False
+                return
+        except OSError:
+            # The fact row is durable. Preserve row/dedupe state and make the
+            # final manifest fail closed rather than writing the same capture twice.
+            self._manifest_state_ready = False
+            return
+        self._manifest_tracked_size = current_size
+
+    def _validate_manifest_tracked_size(self) -> None:
+        if (
+            self._manifest_state_ready
+            and self._fact_file_size() != self._manifest_tracked_size
+        ):
+            self._manifest_state_ready = False
 
     def _cleanup_retention(self, now: float) -> None:
         if self.retention_days <= 0 or now - self.last_cleanup_at < 3600.0:
@@ -391,11 +497,28 @@ def build_spot_image_fact_manifest(
     enabled: bool,
     mode: str,
     health: Optional[Mapping[str, Any]] = None,
+    runtime_stats: Optional[Mapping[str, Any]] = None,
     fact_filename: str = SPOT_IMAGE_FACT_FILENAME,
 ) -> dict[str, Any]:
     fact_path = log_path / fact_filename
-    row_count, sha256 = _fact_file_stats(fact_path)
     health_data = health or {}
+    if runtime_stats is not None:
+        if (
+            runtime_stats.get("fact_manifest_state_ready") is not True
+            or "fact_row_count" not in runtime_stats
+            or "fact_sha256" not in runtime_stats
+        ):
+            raise RuntimeError(
+                "SPOT image fact runtime manifest state is unavailable"
+            )
+        manifest_stats = runtime_stats
+        row_count = int(manifest_stats.get("fact_row_count") or 0)
+        raw_sha256 = manifest_stats.get("fact_sha256")
+        sha256 = str(raw_sha256) if raw_sha256 else None
+    else:
+        # Offline validators may reconstruct a manifest from a stopped fact file.
+        # Production closeout always supplies runtime_stats and must never rescan.
+        row_count, sha256 = _fact_file_stats(fact_path)
     return {
         "enabled": bool(enabled),
         "mode": str(mode or "off"),
@@ -465,7 +588,11 @@ def _fact_file_stats(fact_path: Path) -> tuple[int, Optional[str]]:
     except (OSError, UnicodeError, csv.Error):
         row_count = 0
     try:
-        sha256 = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        with fact_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        sha256 = digest.hexdigest()
     except OSError:
         sha256 = None
     return row_count, sha256
