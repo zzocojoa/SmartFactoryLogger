@@ -3,7 +3,9 @@ param(
   [int]$Samples = 60,
   [int]$IntervalSec = 60,
   [int]$TimeoutSec = 10,
-  [string]$OutputRoot = ".\.tmp_operational_observability"
+  [string]$OutputRoot = ".\.tmp_operational_observability",
+  [ValidateRange(1, 300)]
+  [int]$ProgressIntervalSec = 30
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +21,51 @@ function Join-ApiUrl {
     return "$normalizedBase$Path"
   }
   return "$normalizedBase/$Path"
+}
+
+function Format-ConsoleDuration {
+  param([TimeSpan]$Duration)
+
+  $safeDuration = if ($Duration.TotalSeconds -lt 0) {
+    [TimeSpan]::Zero
+  } else {
+    $Duration
+  }
+  $totalHours = [math]::Floor($safeDuration.TotalHours)
+  return ("{0:00}:{1:00}:{2:00}" -f $totalHours, $safeDuration.Minutes, $safeDuration.Seconds)
+}
+
+function Write-CollectionProgress {
+  param(
+    [int]$CompletedSamples,
+    [int]$TotalSamples,
+    [int]$SampleIntervalSec,
+    [DateTime]$StartedAt,
+    [DateTime]$ReportedAt
+  )
+
+  $percent = [math]::Floor(($CompletedSamples * 100.0) / $TotalSamples)
+  $elapsed = $ReportedAt - $StartedAt
+  $completedWaitSeconds = [math]::Max(0, ($CompletedSamples - 1) * $SampleIntervalSec)
+  $observedWorkSeconds = [math]::Max(0, $elapsed.TotalSeconds - $completedWaitSeconds)
+  $averageWorkSeconds = $observedWorkSeconds / $CompletedSamples
+  $estimatedSecondsPerRemainingSample = $SampleIntervalSec + $averageWorkSeconds
+  $remainingSeconds = [math]::Max(
+    0,
+    ($TotalSamples - $CompletedSamples) * $estimatedSecondsPerRemainingSample
+  )
+  $remaining = [TimeSpan]::FromSeconds($remainingSeconds)
+  $estimatedEnd = $ReportedAt.Add($remaining)
+
+  Write-Host (
+    "[PROGRESS] samples={0}/{1} ({2}%) elapsed={3} remaining_about={4} collection_eta={5}" -f `
+      $CompletedSamples,
+      $TotalSamples,
+      $percent,
+      (Format-ConsoleDuration -Duration $elapsed),
+      (Format-ConsoleDuration -Duration $remaining),
+      $estimatedEnd.ToString("yyyy-MM-dd HH:mm:ss K")
+  ) -ForegroundColor Cyan
 }
 
 function Read-ResponseBody {
@@ -464,6 +511,17 @@ $endpoints = @(
 )
 
 $rawIndex = @()
+$collectionStartedAt = Get-Date
+$plannedCollectionSeconds = [math]::Max(0, ($Samples - 1) * $IntervalSec)
+$plannedCollectionEndAt = $collectionStartedAt.AddSeconds($plannedCollectionSeconds)
+$lastProgressAt = [DateTime]::MinValue
+Write-Host (
+  "[PROGRESS] collection_started={0} planned_collection_end={1} progress_interval={2}s" -f `
+    $collectionStartedAt.ToString("yyyy-MM-dd HH:mm:ss K"),
+    $plannedCollectionEndAt.ToString("yyyy-MM-dd HH:mm:ss K"),
+    $ProgressIntervalSec
+) -ForegroundColor Cyan
+Write-Host '[PROGRESS] The planned end covers timed sampling. Sanitization and ZIP creation follow.' -ForegroundColor Cyan
 for ($sample = 1; $sample -le $Samples; $sample += 1) {
   foreach ($endpoint in $endpoints) {
     $uri = Join-ApiUrl -Base $ApiBase -Path $endpoint.Path
@@ -489,11 +547,26 @@ for ($sample = 1; $sample -le $Samples; $sample += 1) {
     }
   }
 
+  $progressAt = Get-Date
+  $progressDue = $sample -eq 1 -or
+    $sample -eq $Samples -or
+    ($progressAt - $lastProgressAt).TotalSeconds -ge $ProgressIntervalSec
+  if ($progressDue) {
+    Write-CollectionProgress `
+      -CompletedSamples $sample `
+      -TotalSamples $Samples `
+      -SampleIntervalSec $IntervalSec `
+      -StartedAt $collectionStartedAt `
+      -ReportedAt $progressAt
+    $lastProgressAt = $progressAt
+  }
+
   if ($sample -lt $Samples -and $IntervalSec -gt 0) {
     Start-Sleep -Seconds $IntervalSec
   }
 }
 
+Write-Host '[PROGRESS] Timed sampling complete. Post-processing 1/3: build sanitized summaries and hashes.' -ForegroundColor Cyan
 $statsSamples = @()
 $errorSamples = @()
 $spotConfigSamples = @()
@@ -545,12 +618,14 @@ $summary = [ordered]@{
 $summaryPath = Join-Path $sanitizedRoot "operational_observability_summary.json"
 $summary | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 
+Write-Host '[PROGRESS] Post-processing 2/3: create the app observability sanitized ZIP.' -ForegroundColor Cyan
 $zipPath = Join-Path $sessionRoot "operational_observability_sanitized.zip"
 if (Test-Path -LiteralPath $zipPath) {
   Remove-Item -LiteralPath $zipPath -Force
 }
 $sanitizedPathPattern = Join-Path $sanitizedRoot "*"
 Compress-Archive -Path $sanitizedPathPattern -DestinationPath $zipPath -Force
+Write-Host '[PROGRESS] Post-processing 3/3: app observability export complete.' -ForegroundColor Green
 
 $rawHashTxtPath = Join-Path $sanitizedRoot "raw_file_sha256.txt"
 $rawHashBadRows = @(
