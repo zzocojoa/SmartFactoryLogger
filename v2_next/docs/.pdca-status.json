@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-07-31T07:33:35.402Z",
+  "lastUpdated": "2026-08-06T04:20:00.000Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -26,6 +26,7 @@
     "spot-image-auto-recovery",
     "nsis-operational-ready-timing",
     "electron-startup-progress",
+    "runtime-error-root-cause-validation",
     "spot-request-churn-remediation",
     "spot-tcp-source-port-quarantine-v2"
   ],
@@ -1911,6 +1912,85 @@
       },
       "completedAt": "2026-07-16T10:15:22.115Z"
     },
+    "runtime-error-root-cause-validation": {
+      "phase": "completed",
+      "matchRate": 92,
+      "iterationCount": 2,
+      "operationalBoundary": {
+        "historicalValidatedCommit": "575e869b63d3052156624886fe0358fb39d6c98a",
+        "historicalFieldStatus": "FIELD_CANARY_PASS",
+        "physicalPathStatus": "PHYSICAL_PATH_PARTIAL",
+        "currentServerRuntime": "verified_v1.0.16_rollback",
+        "currentReleaseStatus": "FIELD_REVALIDATION_REQUIRED",
+        "unsigned949ef38Deployed": false,
+        "historicalEvidenceReusableForLaterCommit": false
+      },
+      "documents": {
+        "plan": {
+          "path": "docs/01-plan/features/runtime-error-root-cause-validation.plan.md",
+          "status": "completed"
+        },
+        "design": {
+          "path": "docs/02-design/features/runtime-error-root-cause-validation.design.md",
+          "status": "completed"
+        },
+        "do_guide": {
+          "path": "docs/02-design/features/runtime-error-root-cause-validation.do.md",
+          "status": "completed_field_investigation"
+        },
+        "field_guide": {
+          "path": "docs/02-design/features/runtime-error-root-cause-validation.field-guide.md",
+          "status": "historical_15_minute_investigation_only"
+        },
+        "analysis": {
+          "path": "docs/03-analysis/runtime-error-root-cause-validation.analysis.md",
+          "status": "completed_gap_analysis",
+          "match_rate": 92
+        },
+        "report": {
+          "path": "docs/04-report/runtime-error-root-cause-validation.report.md",
+          "status": "historical_field_result_current_release_revalidation_required",
+          "match_rate": 92
+        }
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-07-17T07:01:52.201Z",
+          "completedAt": "2026-07-17T07:06:04.233Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-07-17T07:01:52.201Z",
+          "completedAt": "2026-07-17T07:23:19.621Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-07-17T07:01:52.201Z",
+          "completedAt": "2026-07-20T00:45:05.301Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-07-17T07:01:52.201Z",
+          "completedAt": "2026-07-20T00:45:20.737Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-07-17T07:01:52.201Z",
+          "completedAt": "2026-07-20T00:45:53.004Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-07-17T07:01:52.202Z",
+        "lastUpdated": "2026-08-06T04:20:00.000Z"
+      },
+      "completedAt": "2026-07-20T00:45:52.982Z"
+    },
     "spot-request-churn-remediation": {
       "phase": "act",
       "matchRate": 100,
@@ -3616,6 +3696,15 @@
       "phase": "report",
       "nextPhase": "completed",
       "timestamp": "2026-07-16T10:15:22.116Z"
+    },
+    {
+      "feature": "runtime-error-root-cause-validation",
+      "action": "source_control_record_restored",
+      "phase": "completed",
+      "matchRate": 92,
+      "historicalFieldStatus": "FIELD_CANARY_PASS",
+      "currentReleaseStatus": "FIELD_REVALIDATION_REQUIRED",
+      "timestamp": "2026-08-06T04:20:00.000Z"
     },
     {
       "feature": "spot-request-churn-remediation",

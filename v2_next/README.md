@@ -21,8 +21,11 @@ npm start
 않습니다. lock 파일은 모든 SmartFactoryLogger 프로세스와 health endpoint가 종료된
 것을 확인한 뒤 실제 stale lock일 때만 제거합니다.
 
-현재 패키지 빌드는 다음 명령을 사용합니다. 서버에는 서명과 exact-commit 검증을
-통과한 NSIS installer만 배포합니다.
+현재 패키지 빌드는 다음 명령을 사용합니다. 외부·고객·상용 서버에는 서명과
+exact-commit 검증을 통과한 NSIS installer만 배포합니다. 소유자가 통제하는
+비공개 개인 사용 환경의 미서명 예외는 kit 외부의 신뢰된 출처에서 확보한
+SHA-256 및 commit-bound release identity 검증을 필수로 적용하며,
+[Windows Authenticode 서명 운영](docs/V2/05_운영_배포/windows_authenticode_signing.md)의 유예 조건을 따릅니다.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
@@ -48,6 +51,7 @@ SPOT Temperature v2.5 서버 검증은 다음 문서를 사용합니다.
 - [Backend API reference](backend/API_DOCUMENTATION.md)
 - [SPOT source-port quarantine 설계](docs/02-design/features/spot-tcp-source-port-quarantine-v2.design.md)
 - [SPOT source-port field/report 상태](docs/04-report/spot-tcp-source-port-quarantine-v2.report.md)
+- [운영·관측성 오류 원인 검증 기록](docs/04-report/runtime-error-root-cause-validation.report.md)
 - [Windows Authenticode 서명 운영](docs/V2/05_운영_배포/windows_authenticode_signing.md)
 - [배포 체크리스트](docs/V2/DEPLOYMENT_CHECKLIST.md)
 

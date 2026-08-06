@@ -129,7 +129,13 @@ watch if timezone behavior is expanded.
 
 ## 9. Follow-up Items
 
-- [ ] Sign the installer with the production Authenticode certificate.
+- [ ] Before external, customer, or commercial distribution, sign the installer
+  through a publicly trusted production Authenticode provider. This work is
+  intentionally deferred while distribution remains personal and controlled;
+  unsigned internal artifacts must continue to use release SHA-256 and
+  commit-bound release-kit verification. A self-signed certificate does not
+  satisfy this production requirement, and the future integration must not
+  assume that the provider exposes an exportable PFX.
 - [ ] Handle Grafana and React Router advisories in separate compatibility-led
   work rather than expanding this upgrade set.
 - [ ] Validate elevation only if a future release adds per-machine installation.

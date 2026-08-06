@@ -1,9 +1,15 @@
 param(
   [string]$ApiBase = "http://127.0.0.1:8000",
+  [ValidateRange(1, 100000)]
   [int]$Samples = 60,
+  [ValidateRange(0, 86400)]
   [int]$IntervalSec = 60,
+  [ValidateRange(1, 300)]
   [int]$TimeoutSec = 10,
-  [string]$OutputRoot = ".\.tmp_operational_observability"
+  [string]$OutputRoot = ".\.tmp_operational_observability",
+  [ValidateRange(1, 300)]
+  [int]$ProgressIntervalSec = 30,
+  [switch]$SelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +25,171 @@ function Join-ApiUrl {
     return "$normalizedBase$Path"
   }
   return "$normalizedBase/$Path"
+}
+
+function Format-ConsoleDuration {
+  param([TimeSpan]$Duration)
+
+  $safeDuration = if ($Duration.TotalSeconds -lt 0) {
+    [TimeSpan]::Zero
+  } else {
+    $Duration
+  }
+  $totalHours = [math]::Floor($safeDuration.TotalHours)
+  return ("{0:00}:{1:00}:{2:00}" -f $totalHours, $safeDuration.Minutes, $safeDuration.Seconds)
+}
+
+function Write-CollectionProgress {
+  param(
+    [int]$CompletedSamples,
+    [int]$TotalSamples,
+    [int]$SampleIntervalSec,
+    [DateTime]$StartedAt,
+    [DateTime]$ReportedAt
+  )
+
+  $percent = [math]::Floor(($CompletedSamples * 100.0) / $TotalSamples)
+  $elapsed = $ReportedAt - $StartedAt
+  $completedWaitSeconds = [math]::Max(0, ($CompletedSamples - 1) * $SampleIntervalSec)
+  $observedWorkSeconds = [math]::Max(0, $elapsed.TotalSeconds - $completedWaitSeconds)
+  $averageWorkSeconds = $observedWorkSeconds / $CompletedSamples
+  $estimatedSecondsPerRemainingSample = $SampleIntervalSec + $averageWorkSeconds
+  $remainingSeconds = [math]::Max(
+    0,
+    ($TotalSamples - $CompletedSamples) * $estimatedSecondsPerRemainingSample
+  )
+  $remaining = [TimeSpan]::FromSeconds($remainingSeconds)
+  $estimatedEnd = $ReportedAt.Add($remaining)
+
+  Write-Host (
+    "[PROGRESS] samples={0}/{1} ({2}%) elapsed={3} remaining_about={4} collection_eta={5}" -f `
+      $CompletedSamples,
+      $TotalSamples,
+      $percent,
+      (Format-ConsoleDuration -Duration $elapsed),
+      (Format-ConsoleDuration -Duration $remaining),
+      $estimatedEnd.ToString("yyyy-MM-dd HH:mm:ss K")
+  ) -ForegroundColor Cyan
+}
+
+function Test-CollectionProgressDue {
+  param(
+    [int]$CompletedSamples,
+    [int]$TotalSamples,
+    [DateTime]$ReportedAt,
+    [DateTime]$LastReportedAt,
+    [int]$ProgressIntervalSeconds
+  )
+
+  return $CompletedSamples -eq 1 -or
+    $CompletedSamples -eq $TotalSamples -or
+    ($ReportedAt - $LastReportedAt).TotalSeconds -ge $ProgressIntervalSeconds
+}
+
+function Invoke-SelfTest {
+  if ((Format-ConsoleDuration -Duration ([TimeSpan]::FromSeconds(-1))) -ne '00:00:00') {
+    throw 'Self-test failed: negative duration was not clamped.'
+  }
+  if ((Format-ConsoleDuration -Duration ([TimeSpan]::FromSeconds(90061))) -ne '25:01:01') {
+    throw 'Self-test failed: duration over 24 hours was not formatted correctly.'
+  }
+
+  $startedAt = [DateTime]'2026-01-01T00:00:00'
+  $firstDue = Test-CollectionProgressDue `
+    -CompletedSamples 1 -TotalSamples 4 `
+    -ReportedAt $startedAt -LastReportedAt $startedAt `
+    -ProgressIntervalSeconds 30
+  $middleNotDue = Test-CollectionProgressDue `
+    -CompletedSamples 2 -TotalSamples 4 `
+    -ReportedAt $startedAt.AddSeconds(29) -LastReportedAt $startedAt `
+    -ProgressIntervalSeconds 30
+  $middleDue = Test-CollectionProgressDue `
+    -CompletedSamples 2 -TotalSamples 4 `
+    -ReportedAt $startedAt.AddSeconds(30) -LastReportedAt $startedAt `
+    -ProgressIntervalSeconds 30
+  $finalDue = Test-CollectionProgressDue `
+    -CompletedSamples 4 -TotalSamples 4 `
+    -ReportedAt $startedAt.AddSeconds(3) -LastReportedAt $startedAt `
+    -ProgressIntervalSeconds 30
+  if (-not $firstDue -or $middleNotDue -or -not $middleDue -or -not $finalDue) {
+    throw 'Self-test failed: progress cadence decision.'
+  }
+
+  $progressText = Write-CollectionProgress `
+    -CompletedSamples 2 -TotalSamples 4 -SampleIntervalSec 1 `
+    -StartedAt $startedAt -ReportedAt $startedAt.AddSeconds(3) 6>&1 |
+      Out-String
+  if ($progressText -notmatch 'samples=2/4 \(50%\)' -or
+      $progressText -notmatch 'elapsed=00:00:03' -or
+      $progressText -notmatch 'remaining_about=') {
+    throw 'Self-test failed: progress output.'
+  }
+
+  $sensitiveError = [pscustomobject]@{
+    time_iso = '2026-01-01T00:00:00Z'
+    source = 'plc_driver'
+    error_type = 'ValueError'
+    message = 'secret payload from C:\Users\operator at 10.1.10.50'
+    status_code = 500
+    path = 'C:\Users\operator\private\response.bin'
+    level = 'error'
+    repeat = 1
+  }
+  $safeError = ConvertTo-SafeErrorItem -Item $sensitiveError
+  $safeErrorJson = $safeError | ConvertTo-Json -Compress
+  if ($safeErrorJson -match 'secret|C:\\Users|10\.1\.10\.50|response\.bin' -or
+      $safeError.message -notmatch '^sha256:[a-f0-9]{64}$' -or
+      $safeError.path -notmatch '^sha256:[a-f0-9]{64}$' -or
+      -not $safeError.message_redacted -or
+      -not $safeError.path_redacted) {
+    throw 'Self-test failed: sensitive error fields were not redacted.'
+  }
+  $safeRouteError = ConvertTo-SafeErrorItem -Item ([pscustomobject]@{
+    message = ''; path = '/api/spot/image.jpg'; repeat = 1
+  })
+  if ($safeRouteError.path -ne '/api/spot/image.jpg' -or $safeRouteError.path_redacted) {
+    throw 'Self-test failed: bounded API route was not preserved.'
+  }
+  $safeSummary = ConvertTo-SafeErrorSummary -Summary ([pscustomobject]@{
+    queue_size = 1
+    last_error_message = 'secret summary payload at 10.1.10.50'
+    path_counts = @{ 'C:\Users\operator\private\response.bin' = 1 }
+    top_messages = @(@{ key = 'secret summary payload at 10.1.10.50'; count = 1 })
+    top_paths = @(@{ key = 'C:\Users\operator\private\response.bin'; count = 1 })
+  })
+  $safeSummaryJson = $safeSummary | ConvertTo-Json -Depth 8 -Compress
+  if ($safeSummaryJson -match 'secret|10\.1\.10\.50|C:\\Users|response\.bin' -or
+      $safeSummary.last_error_message -notmatch '^sha256:[a-f0-9]{64}$' -or
+      -not $safeSummary.message_and_path_details_redacted) {
+    throw 'Self-test failed: sensitive error summary fields were not redacted.'
+  }
+  $sensitiveStatsBody = [ordered]@{
+    window = [ordered]@{
+      window_sec = 60
+      top_paths = @([ordered]@{
+        path = 'C:\Users\operator\private\stats-route'
+        count = 1
+      })
+    }
+    errors = [ordered]@{
+      last_error_message = 'secret stats error at 10.1.10.50'
+    }
+    polling = [ordered]@{
+      paths = [ordered]@{
+        'C:\Users\operator\private\polling-route' = [ordered]@{ count = 1 }
+      }
+    }
+  }
+  $safeStats = ConvertTo-SafeStatsSample -Envelope ([pscustomobject]@{
+    body = ($sensitiveStatsBody | ConvertTo-Json -Depth 8 -Compress)
+    status_code = 200
+  }) -SampleIndex 1
+  $safeStatsJson = $safeStats | ConvertTo-Json -Depth 12 -Compress
+  if ($safeStatsJson -match 'secret|10\.1\.10\.50|C:\\Users|stats-route|polling-route') {
+    throw 'Self-test failed: sensitive stats path or error summary remained.'
+  }
+
+  Write-Output 'SELF_TEST_PASS'
 }
 
 function Read-ResponseBody {
@@ -133,18 +304,111 @@ function Get-ObjectEntries {
   return @($Object.PSObject.Properties)
 }
 
+function Get-SafeFingerprintLabel {
+  param([object]$Value)
+
+  $fingerprint = New-Sha256Text -Text ([string]$Value)
+  if ($null -eq $fingerprint) {
+    return $null
+  }
+  return 'sha256:{0}' -f $fingerprint
+}
+
+function Get-SafePathLabel {
+  param([object]$Value)
+
+  $text = [string]$Value
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    return $null
+  }
+  $isBoundedApiRoute = $text.Length -le 256 -and
+    $text -match '^/[A-Za-z0-9._~!$&''()*+,;=:@%/-]+$' -and
+    $text -notmatch '(?:^|/)\.\.(?:/|$)' -and
+    $text -notmatch '//'
+  if ($isBoundedApiRoute) {
+    return $text
+  }
+  return Get-SafeFingerprintLabel -Value $text
+}
+
 function ConvertTo-SafeErrorItem {
   param([object]$Item)
+
+  $messageText = [string](Get-PropertyValue -Object $Item -Name "message")
+  $pathText = [string](Get-PropertyValue -Object $Item -Name "path")
+  $safeMessage = Get-SafeFingerprintLabel -Value $messageText
+  $safePath = Get-SafePathLabel -Value $pathText
 
   return [ordered]@{
     time_iso = Get-PropertyValue -Object $Item -Name "time_iso"
     source = Get-PropertyValue -Object $Item -Name "source"
     error_type = Get-PropertyValue -Object $Item -Name "error_type"
-    message = Get-PropertyValue -Object $Item -Name "message"
+    message = $safeMessage
+    message_redacted = -not [string]::IsNullOrWhiteSpace($messageText)
     status_code = Get-PropertyValue -Object $Item -Name "status_code"
-    path = Get-PropertyValue -Object $Item -Name "path"
+    path = $safePath
+    path_redacted = -not [string]::IsNullOrWhiteSpace($pathText) -and $safePath -ne $pathText
     level = Get-PropertyValue -Object $Item -Name "level"
     repeat = Get-PropertyValue -Object $Item -Name "repeat"
+  }
+}
+
+function ConvertTo-SafeErrorSummary {
+  param([object]$Summary)
+
+  if ($null -eq $Summary) {
+    return $null
+  }
+  return [ordered]@{
+    queue_size = Get-PropertyValue -Object $Summary -Name "queue_size"
+    repeat_total = Get-PropertyValue -Object $Summary -Name "repeat_total"
+    last_error_at = Get-PropertyValue -Object $Summary -Name "last_error_at"
+    last_error_source = Get-PropertyValue -Object $Summary -Name "last_error_source"
+    last_error_message = Get-SafeFingerprintLabel -Value (
+      Get-PropertyValue -Object $Summary -Name "last_error_message"
+    )
+    last_error_repeat = Get-PropertyValue -Object $Summary -Name "last_error_repeat"
+    source_counts = Get-PropertyValue -Object $Summary -Name "source_counts"
+    source_repeat_counts = Get-PropertyValue -Object $Summary -Name "source_repeat_counts"
+    type_counts = Get-PropertyValue -Object $Summary -Name "type_counts"
+    status_counts = Get-PropertyValue -Object $Summary -Name "status_counts"
+    top_sources = Get-PropertyValue -Object $Summary -Name "top_sources"
+    top_types = Get-PropertyValue -Object $Summary -Name "top_types"
+    top_statuses = Get-PropertyValue -Object $Summary -Name "top_statuses"
+    message_and_path_details_redacted = $true
+  }
+}
+
+function ConvertTo-SafeWindowMetrics {
+  param([object]$Window)
+
+  if ($null -eq $Window) {
+    return $null
+  }
+  $safeTopPaths = @()
+  foreach ($item in @((Get-PropertyValue -Object $Window -Name "top_paths"))) {
+    if ($null -eq $item) {
+      continue
+    }
+    $safeTopPaths += [ordered]@{
+      path = Get-SafePathLabel -Value (Get-PropertyValue -Object $item -Name "path")
+      count = Get-PropertyValue -Object $item -Name "count"
+      error_rate = Get-PropertyValue -Object $item -Name "error_rate"
+      avg_latency_ms = Get-PropertyValue -Object $item -Name "avg_latency_ms"
+    }
+  }
+  return [ordered]@{
+    window_sec = Get-PropertyValue -Object $Window -Name "window_sec"
+    request_count = Get-PropertyValue -Object $Window -Name "request_count"
+    error_count = Get-PropertyValue -Object $Window -Name "error_count"
+    http_error_count = Get-PropertyValue -Object $Window -Name "http_error_count"
+    http_4xx_count = Get-PropertyValue -Object $Window -Name "http_4xx_count"
+    http_5xx_count = Get-PropertyValue -Object $Window -Name "http_5xx_count"
+    error_rate = Get-PropertyValue -Object $Window -Name "error_rate"
+    avg_latency_ms = Get-PropertyValue -Object $Window -Name "avg_latency_ms"
+    p95_latency_ms = Get-PropertyValue -Object $Window -Name "p95_latency_ms"
+    requests_per_sec = Get-PropertyValue -Object $Window -Name "requests_per_sec"
+    top_paths = $safeTopPaths
   }
 }
 
@@ -160,7 +424,8 @@ function ConvertTo-SafeStatsSample {
   if ($null -ne $paths) {
     foreach ($pathProperty in (Get-ObjectEntries -Object $paths)) {
       $item = $pathProperty.Value
-      $pollingPaths[$pathProperty.Name] = [ordered]@{
+      $safePath = Get-SafePathLabel -Value $pathProperty.Name
+      $pollingPaths[$safePath] = [ordered]@{
         count = Get-PropertyValue -Object $item -Name "count"
         requests_per_sec = Get-PropertyValue -Object $item -Name "requests_per_sec"
         avg_latency_ms = Get-PropertyValue -Object $item -Name "avg_latency_ms"
@@ -182,8 +447,8 @@ function ConvertTo-SafeStatsSample {
     total_http_5xx_count = Get-PropertyValue -Object $body -Name "total_http_5xx_count"
     total_http_4xx_count = Get-PropertyValue -Object $body -Name "total_http_4xx_count"
     error_count = Get-PropertyValue -Object $body -Name "error_count"
-    window = Get-PropertyValue -Object $body -Name "window"
-    errors = Get-PropertyValue -Object $body -Name "errors"
+    window = ConvertTo-SafeWindowMetrics -Window (Get-PropertyValue -Object $body -Name "window")
+    errors = ConvertTo-SafeErrorSummary -Summary (Get-PropertyValue -Object $body -Name "errors")
     polling_paths = $pollingPaths
   }
 }
@@ -447,6 +712,11 @@ function ConvertTo-RunAnalysis {
   }
 }
 
+if ($SelfTest) {
+  Invoke-SelfTest
+  exit 0
+}
+
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $sessionRoot = Join-Path $OutputRoot "operational_observability_$timestamp"
 $rawRoot = Join-Path $sessionRoot "raw"
@@ -464,6 +734,17 @@ $endpoints = @(
 )
 
 $rawIndex = @()
+$collectionStartedAt = Get-Date
+$plannedCollectionSeconds = [math]::Max(0, ($Samples - 1) * $IntervalSec)
+$plannedCollectionEndAt = $collectionStartedAt.AddSeconds($plannedCollectionSeconds)
+$lastProgressAt = [DateTime]::MinValue
+Write-Host (
+  "[PROGRESS] collection_started={0} planned_collection_end={1} progress_interval={2}s" -f `
+    $collectionStartedAt.ToString("yyyy-MM-dd HH:mm:ss K"),
+    $plannedCollectionEndAt.ToString("yyyy-MM-dd HH:mm:ss K"),
+    $ProgressIntervalSec
+) -ForegroundColor Cyan
+Write-Host '[PROGRESS] The planned end covers timed sampling. Sanitization and ZIP creation follow.' -ForegroundColor Cyan
 for ($sample = 1; $sample -le $Samples; $sample += 1) {
   foreach ($endpoint in $endpoints) {
     $uri = Join-ApiUrl -Base $ApiBase -Path $endpoint.Path
@@ -489,11 +770,29 @@ for ($sample = 1; $sample -le $Samples; $sample += 1) {
     }
   }
 
+  $progressAt = Get-Date
+  $progressDue = Test-CollectionProgressDue `
+    -CompletedSamples $sample `
+    -TotalSamples $Samples `
+    -ReportedAt $progressAt `
+    -LastReportedAt $lastProgressAt `
+    -ProgressIntervalSeconds $ProgressIntervalSec
+  if ($progressDue) {
+    Write-CollectionProgress `
+      -CompletedSamples $sample `
+      -TotalSamples $Samples `
+      -SampleIntervalSec $IntervalSec `
+      -StartedAt $collectionStartedAt `
+      -ReportedAt $progressAt
+    $lastProgressAt = $progressAt
+  }
+
   if ($sample -lt $Samples -and $IntervalSec -gt 0) {
     Start-Sleep -Seconds $IntervalSec
   }
 }
 
+Write-Host '[PROGRESS] Timed sampling complete. Post-processing 1/3: build sanitized summaries and hashes.' -ForegroundColor Cyan
 $statsSamples = @()
 $errorSamples = @()
 $spotConfigSamples = @()
@@ -514,7 +813,7 @@ Get-ChildItem -LiteralPath $rawRoot -Filter "sample_*_observability_errors.json"
   $errorSamples += [ordered]@{
     sample = [int]$envelope.sample
     response_status = $envelope.status_code
-    summary = Get-PropertyValue -Object $body -Name "summary"
+    summary = ConvertTo-SafeErrorSummary -Summary (Get-PropertyValue -Object $body -Name "summary")
     items = $items
   }
 }
@@ -540,17 +839,20 @@ $summary = [ordered]@{
   raw_hash_manifest = @($hashManifest)
   sanitization = [ordered]@{
     spot_image_fact_manifest_paths = "fact_path and capture_root are omitted from sanitized summary; basename and SHA-256 are retained."
+    observability_error_messages = "Error messages are replaced with SHA-256 fingerprints; non-bounded API paths and message/path summary details are omitted or fingerprinted."
   }
 }
 $summaryPath = Join-Path $sanitizedRoot "operational_observability_summary.json"
 $summary | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
 
+Write-Host '[PROGRESS] Post-processing 2/3: create the app observability sanitized ZIP.' -ForegroundColor Cyan
 $zipPath = Join-Path $sessionRoot "operational_observability_sanitized.zip"
 if (Test-Path -LiteralPath $zipPath) {
   Remove-Item -LiteralPath $zipPath -Force
 }
 $sanitizedPathPattern = Join-Path $sanitizedRoot "*"
 Compress-Archive -Path $sanitizedPathPattern -DestinationPath $zipPath -Force
+Write-Host '[PROGRESS] Post-processing 3/3: app observability export complete.' -ForegroundColor Green
 
 $rawHashTxtPath = Join-Path $sanitizedRoot "raw_file_sha256.txt"
 $rawHashBadRows = @(
