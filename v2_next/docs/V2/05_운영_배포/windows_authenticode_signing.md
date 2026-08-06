@@ -2,9 +2,10 @@
 
 ## 목적
 
-Windows 운영 설치본은 정확한 Git commit에서 생성되고, 승인된 게시자 인증서로
-서명되며, 타임스탬프와 build provenance까지 검증된 경우에만 서버 검증으로
-진행한다.
+Windows 외부·고객·상용 운영 설치본은 정확한 Git commit에서 생성되고, 승인된
+게시자 인증서로 서명되며, 타임스탬프와 build provenance까지 검증된 경우에만
+production 서버 검증으로 진행한다. 소유자가 통제하는 비공개 개인 사용 설치본은
+아래 유예 정책에 따른 내부 검증만 허용되며 production 배포 승인을 뜻하지 않는다.
 
 PR 검증용 unsigned artifact와 운영용 signed artifact는 서로 다른 workflow를
 사용한다. PR workflow에는 코드서명 개인키가 전달되지 않는다.
@@ -21,6 +22,34 @@ PR 검증용 unsigned artifact와 운영용 signed artifact는 서로 다른 wor
   provenance commit을 fail-closed 방식으로 검증한다.
 - 현재 개발 PC와 GitHub Environment에는 승인된 운영 인증서가 구성되지 않았다.
   따라서 현재 v1.0.17 artifact는 서버 배포 승인을 받지 않았다.
+
+## 개인 사용 중 서명 유예 정책
+
+Smart Factory Logger가 소유자 본인이 관리하는 장비에서만 비공개로 사용되는
+동안에는 유료 공개 신뢰 Authenticode 인증서의 구매와 등록을 유예할 수 있다.
+이 예외는 unsigned installer를 운영 서명본으로 간주한다는 뜻이 아니다.
+
+서명을 유예한 내부 설치본은 다음 조건을 모두 지켜야 한다.
+
+1. 설치 대상과 파일 전달 경로를 소유자가 직접 통제한다.
+2. installer SHA-256, build commit, release identity, helper SHA-256의 기대값을
+   실행 대상 kit 밖의 신뢰된 Git commit 또는 별도 인증 채널에서 먼저 확보한다.
+   같은 미서명 kit 안의 sidecar만 신뢰 기준으로 사용하지 않는다.
+3. read-only preinstall gate가 통과한 뒤에만 설치를 승인한다.
+4. 각 commit마다 re-attestation, QA, smoke, canary 증거를 새로 만든다.
+5. unsigned 내부 검증본임을 release identity와 배포 기록에 명시한다.
+
+다음 중 하나라도 시작되기 전에는 이 유예를 종료하고 공개 신뢰 코드서명을
+구성해야 한다.
+
+- 고객 또는 제3자에게 installer 제공
+- 공개 다운로드 또는 외부 배포
+- 상업 운영 환경이나 조직 관리 장비에 설치
+- Windows 게시자 신뢰가 배포 승인 조건인 환경으로 전환
+
+CA가 발급한 인증서가 항상 export 가능한 PFX로 제공되는 것은 아니다. 토큰,
+HSM 또는 클라우드 키 저장소 기반 인증서는 개인키 반출을 시도하지 않고 해당
+공급자가 지원하는 원격 서명 workflow를 사용한다.
 
 ## GitHub Environment 준비
 

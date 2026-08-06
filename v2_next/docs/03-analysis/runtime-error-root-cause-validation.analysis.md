@@ -1,16 +1,21 @@
 # Gap Analysis: runtime-error-root-cause-validation
 
-> **Date**: 2026-07-20  
-> **Design**: `docs/02-design/features/runtime-error-root-cause-validation.design.md`  
-> **Implementation**: 실제 서버용 증거 수집 패키지와 2026-07-20 현장 실행 결과  
-> **Scope**: 수집 패키지 정합성, 현장 증거 완전성, 사건별 원인 판정  
-> **PDCA 상태**: Check 완료 — Report 진행 가능
+> **Date**: 2026-07-20
+> **Design**: `docs/02-design/features/runtime-error-root-cause-validation.design.md`
+> **Implementation**: 실제 서버용 증거 수집 패키지와 2026-07-20 현장 실행 결과
+> **Scope**: 수집 패키지 정합성, 현장 증거 완전성, 사건별 원인 판정
+> **PDCA 상태**: Historical Check 완료 — Report 동결
+>
+> **역사적 상태 경계**: 이 분석은 2026-07 현장 증거의 Check 결과를 보존한다. 현재
+> 서버는 검증된 v1.0.16으로 롤백됐으며, 후속 release는
+> [Completion Report](../04-report/runtime-error-root-cause-validation.report.md)의
+> commit-bound 재검증 요구사항을 따른다.
 
 ---
 
 ## 1. Match Rate
 
-**전체 Check 정합률: 92% (23/25)**  
+**전체 Check 정합률: 92% (23/25)**
 **패키지 정적 구현 정합률: 100% (25/25)**
 
 전체 Check 정합률은 Design의 25개 검증 ID를 기준으로 계산했다. 현장 실행 또는 오프라인 직접

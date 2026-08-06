@@ -134,6 +134,28 @@ function Get-PktmonFilterListState {
     return 'Unknown'
 }
 
+function Get-PktmonCaptureState {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return 'Unknown'
+    }
+    $koreanNotRunning = ([string][char]0xC2E4) + ([string][char]0xD589) + `
+        ([string][char]0xB418) + ([string][char]0xACE0) + ' ' + `
+        ([string][char]0xC788) + ([string][char]0xC9C0) + ' ' + `
+        ([string][char]0xC54A) + ([string][char]0xC2B5) + `
+        ([string][char]0xB2C8) + ([string][char]0xB2E4)
+    if ($Text -match '(?i)(?:packet monitor|pktmon).*(?:is not running|not active|stopped)' -or
+        $Text.Contains($koreanNotRunning)) {
+        return 'Inactive'
+    }
+    if ($Text -match '(?im)[a-z]:\\[^\r\n]*\.etl\b' -or
+        $Text -match '(?im)^\s*Collected Data\s*:') {
+        return 'Active'
+    }
+    return 'Unknown'
+}
+
 function Get-PktmonPacketDirectionState {
     param(
         [string]$Text,
@@ -306,6 +328,18 @@ function Protect-Text {
             $safe = $safe -replace [regex]::Escape($serverIp), '<SERVER_IP>'
         }
     }
+    $ipv6CandidatePattern = '(?i)(?<![0-9a-f:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}(?:%[0-9a-z_.-]+)?(?![0-9a-f:])'
+    $safe = [regex]::Replace($safe, $ipv6CandidatePattern, {
+        param($match)
+        $candidate = [string]$match.Value
+        $candidateWithoutZone = $candidate -replace '%[0-9a-z_.-]+$', ''
+        $parsed = $null
+        if ([System.Net.IPAddress]::TryParse($candidateWithoutZone, [ref]$parsed) -and
+            $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6) {
+            return '<IPV6_REDACTED>'
+        }
+        return $candidate
+    })
     $safe = $safe -replace '(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)', '<IP_REDACTED>'
     $safe = $safe -replace '(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])', '<MAC_REDACTED>'
     return $safe
@@ -341,18 +375,53 @@ function Invoke-SelfTest {
         if ($configuredIp -ne '192.0.2.10') {
             throw 'Self-test failed: config parser.'
         }
+        Assert-ValidSpotIp -Value $configuredIp
+
+        $missingConfigPath = Join-Path $tempRoot 'missing.ini'
+        if ($null -ne (Get-ConfiguredSpotIp -Path $missingConfigPath)) {
+            throw 'Self-test failed: missing config must not resolve an address.'
+        }
+        "[OTHER]`nip = 198.51.100.10" |
+            Set-Content -LiteralPath $configPath -Encoding ascii
+        if ($null -ne (Get-ConfiguredSpotIp -Path $configPath)) {
+            throw 'Self-test failed: address outside the SPOT section was accepted.'
+        }
+        "[SPOT]`nmodel = SPOT+ AL" |
+            Set-Content -LiteralPath $configPath -Encoding ascii
+        if ($null -ne (Get-ConfiguredSpotIp -Path $configPath)) {
+            throw 'Self-test failed: SPOT section without an address must return null.'
+        }
+
+        foreach ($invalidIp in @('not-an-ip', '::1', '127.0.0.1')) {
+            $rejected = $false
+            try {
+                Assert-ValidSpotIp -Value $invalidIp
+            } catch {
+                $rejected = $true
+            }
+            if (-not $rejected) {
+                throw ('Self-test failed: unsafe SPOT address was accepted: {0}' -f $invalidIp)
+            }
+        }
 
         $protected = Protect-Text `
-            -Text 'src=192.0.2.10 dst=198.51.100.20 mac=AA-BB-CC-DD-EE-FF other=203.0.113.7' `
+            -Text 'src=192.0.2.10 dst=198.51.100.20 mac=AA-BB-CC-DD-EE-FF other=203.0.113.7 v6=2001:db8:abcd:1::42 zone=fe80::1%12' `
             -TargetIp '192.0.2.10' `
             -ServerIps @('198.51.100.20')
-        if ($protected -match '192\.0\.2\.10|198\.51\.100\.20|203\.0\.113\.7|AA-BB-CC-DD-EE-FF') {
+        if ($protected -match '192\.0\.2\.10|198\.51\.100\.20|203\.0\.113\.7|AA-BB-CC-DD-EE-FF|2001:db8:abcd:1::42|fe80::1%12') {
             throw 'Self-test failed: sensitive network identifier remained.'
         }
-        foreach ($label in @('<SPOT_IP>', '<SERVER_IP>', '<IP_REDACTED>', '<MAC_REDACTED>')) {
+        foreach ($label in @('<SPOT_IP>', '<SERVER_IP>', '<IP_REDACTED>', '<IPV6_REDACTED>', '<MAC_REDACTED>')) {
             if ($protected -notmatch [regex]::Escape($label)) {
                 throw ('Self-test failed: missing redaction label {0}.' -f $label)
             }
+        }
+        if ((Protect-Text -Text $null -TargetIp '192.0.2.10' -ServerIps @()) -ne '') {
+            throw 'Self-test failed: null redaction input must return an empty string.'
+        }
+        $plainText = 'no network identifiers are present'
+        if ((Protect-Text -Text $plainText -TargetIp '' -ServerIps @()) -ne $plainText) {
+            throw 'Self-test failed: plain text changed during redaction.'
         }
 
         $beforePath = Join-Path $tempRoot 'before.csv'
@@ -364,17 +433,27 @@ function Invoke-SelfTest {
             ReceivedDiscardedPackets = 1; OutboundDiscardedPackets = 2
             ReceivedPacketErrors = 3; OutboundPacketErrors = 4
         } | Export-Csv -LiteralPath $beforePath -NoTypeInformation -Encoding utf8
-        [pscustomobject]@{
-            Name = 'NIC1'; ReceivedBytes = 150; SentBytes = 260
-            ReceivedUnicastPackets = 15; SentUnicastPackets = 27
-            ReceivedDiscardedPackets = 1; OutboundDiscardedPackets = 3
-            ReceivedPacketErrors = 3; OutboundPacketErrors = 5
-        } | Export-Csv -LiteralPath $afterPath -NoTypeInformation -Encoding utf8
+        @(
+            [pscustomobject]@{
+                Name = 'NIC1'; ReceivedBytes = 150; SentBytes = 260
+                ReceivedUnicastPackets = 15; SentUnicastPackets = 27
+                ReceivedDiscardedPackets = 1; OutboundDiscardedPackets = 3
+                ReceivedPacketErrors = 3; OutboundPacketErrors = 5
+            }
+            [pscustomobject]@{
+                Name = 'NIC2'; ReceivedBytes = 999; SentBytes = 999
+                ReceivedUnicastPackets = 99; SentUnicastPackets = 99
+                ReceivedDiscardedPackets = 9; OutboundDiscardedPackets = 9
+                ReceivedPacketErrors = 9; OutboundPacketErrors = 9
+            }
+        ) | Export-Csv -LiteralPath $afterPath -NoTypeInformation -Encoding utf8
         New-NicDelta -BeforePath $beforePath -AfterPath $afterPath -OutputPath $deltaPath
-        $delta = Import-Csv -LiteralPath $deltaPath -Encoding utf8
-        if ([long]$delta.ReceivedBytes -ne 50 -or
-            [long]$delta.OutboundDiscardedPackets -ne 1 -or
-            [long]$delta.OutboundPacketErrors -ne 1) {
+        $delta = @(Import-Csv -LiteralPath $deltaPath -Encoding utf8)
+        if ($delta.Count -ne 1 -or
+            $delta[0].Name -ne 'NIC1' -or
+            [long]$delta[0].ReceivedBytes -ne 50 -or
+            [long]$delta[0].OutboundDiscardedPackets -ne 1 -or
+            [long]$delta[0].OutboundPacketErrors -ne 1) {
             throw 'Self-test failed: NIC delta.'
         }
 
@@ -407,6 +486,29 @@ function Invoke-SelfTest {
             throw 'Self-test failed: unknown pktmon filter list.'
         }
 
+        $activeCaptureOutputs = @(
+            "Collected Data:`n    Packet capture`nLog file: C:\Evidence\capture.etl",
+            "localized status`n    C:\Evidence\capture.etl"
+        )
+        foreach ($captureOutput in $activeCaptureOutputs) {
+            if ((Get-PktmonCaptureState -Text $captureOutput) -ne 'Active') {
+                throw 'Self-test failed: active pktmon capture status.'
+            }
+        }
+        $koreanNotRunning = ([string][char]0xC2E4) + ([string][char]0xD589) + `
+            ([string][char]0xB418) + ([string][char]0xACE0) + ' ' + `
+            ([string][char]0xC788) + ([string][char]0xC9C0) + ' ' + `
+            ([string][char]0xC54A) + ([string][char]0xC2B5) + `
+            ([string][char]0xB2C8) + ([string][char]0xB2E4)
+        foreach ($captureOutput in @('Packet Monitor is not running.', $koreanNotRunning)) {
+            if ((Get-PktmonCaptureState -Text $captureOutput) -ne 'Inactive') {
+                throw 'Self-test failed: inactive pktmon capture status.'
+            }
+        }
+        if ((Get-PktmonCaptureState -Text 'Unexpected successful output') -ne 'Unknown') {
+            throw 'Self-test failed: unknown pktmon capture status.'
+        }
+
         $bidirectionalPacketText = @'
 09:00:00.0000000 packet
     Ethernet, IPv4, length 54: 198.51.100.20.51000 > 192.0.2.10.80: tcp 0
@@ -429,6 +531,24 @@ function Invoke-SelfTest {
             $outboundOnlyState.OutboundCount -ne 1 -or
             $outboundOnlyState.InboundCount -ne 0) {
             throw 'Self-test failed: one-way packet direction must not pass.'
+        }
+
+        $emptyPacketState = Get-PktmonPacketDirectionState `
+            -Text '' -TargetIp '192.0.2.10'
+        if ($emptyPacketState.Passed -or
+            $emptyPacketState.OutboundCount -ne 0 -or
+            $emptyPacketState.InboundCount -ne 0) {
+            throw 'Self-test failed: empty packet output must not pass.'
+        }
+
+        $inboundOnlyPacketText = `
+            'Ethernet, IPv4, length 60: 192.0.2.10.80 > 198.51.100.20.51000: tcp 0'
+        $inboundOnlyState = Get-PktmonPacketDirectionState `
+            -Text $inboundOnlyPacketText -TargetIp '192.0.2.10'
+        if ($inboundOnlyState.Passed -or
+            $inboundOnlyState.OutboundCount -ne 0 -or
+            $inboundOnlyState.InboundCount -ne 1) {
+            throw 'Self-test failed: inbound-only packet direction must not pass.'
         }
 
         Write-Output 'SELF_TEST_PASS'
@@ -490,6 +610,15 @@ try {
     }
 } catch {
     throw 'The SmartFactoryLogger backend is not healthy. This script will not start the application.'
+}
+
+$initialCapture = Invoke-PktmonCommand -Arguments @('status')
+$initialCaptureState = Get-PktmonCaptureState -Text $initialCapture.Text
+if ($initialCaptureState -eq 'Active') {
+    throw 'An existing pktmon capture was detected. Do not stop or change it. Stop and report this result.'
+}
+if ($initialCaptureState -ne 'Inactive') {
+    throw 'The pktmon capture status output was not recognized. Do not change pktmon state. Stop and report this result.'
 }
 
 $initialFilters = Invoke-PktmonCommand -Arguments @('filter', 'list')
@@ -784,8 +913,8 @@ try {
         Set-Content -LiteralPath (Join-Path $rawRoot 'log_copy_error_type.txt') -Encoding ascii
 }
 
-$serverIps = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.IPAddress -notmatch '^127\.' } |
+$serverIps = @(Get-NetIPAddress -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -notmatch '^(127\.|::1$)' } |
     ForEach-Object { [string]$_.IPAddress })
 Write-Host '[PROGRESS] Finalization 3/4: redact network identifiers and assemble sanitized evidence.' -ForegroundColor Cyan
 if (Test-Path -LiteralPath $packetTextPath -PathType Leaf) {

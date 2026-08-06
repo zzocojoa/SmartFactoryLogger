@@ -1,12 +1,16 @@
 # 운영 오류 전체 원인 검증 상세 설계
 
-> **Feature**: `runtime-error-root-cause-validation`  
-> **Version**: 1.1.1  
-> **Date**: 2026-07-17  
-> **Status**: Design Complete / Field Execution Pending  
-> **Level**: Dynamic  
-> **Plan**: `docs/01-plan/features/runtime-error-root-cause-validation.plan.md`  
+> **Feature**: `runtime-error-root-cause-validation`
+> **Version**: 1.1.1
+> **Date**: 2026-07-17
+> **Status**: Historical Design Complete / Field Execution Completed
+> **Level**: Dynamic
+> **Plan**: `docs/01-plan/features/runtime-error-root-cause-validation.plan.md`
 > **대상 사건**: 2026-07-16 SmartFactoryLogger 운영 오류 큐
+
+> **역사적 상태 경계**: 이 문서는 당시 현장 실행 설계를 보존한다. 실행은 완료됐으며,
+> 현재 운영 상태와 후속 release 재검증 요구사항은
+> [Completion Report](../../04-report/runtime-error-root-cause-validation.report.md)를 기준으로 한다.
 
 ---
 

@@ -1,11 +1,15 @@
 # 운영 오류 전체 원인 검증 계획
 
-> **Feature**: `runtime-error-root-cause-validation`  
-> **Version**: 1.0.2  
-> **Date**: 2026-07-17  
-> **Status**: Plan Complete / Validation Pending  
-> **Level**: Dynamic  
+> **Feature**: `runtime-error-root-cause-validation`
+> **Version**: 1.0.2
+> **Date**: 2026-07-17
+> **Status**: Historical Plan Complete / Field Validation Completed
+> **Level**: Dynamic
 > **대상 사건**: 2026-07-16 SmartFactoryLogger 운영 오류 큐
+
+> **역사적 상태 경계**: 이 문서는 당시 검증 계획을 보존한다. 실행은 완료됐으며,
+> 현재 운영 상태와 후속 release 재검증 요구사항은
+> [Completion Report](../../04-report/runtime-error-root-cause-validation.report.md)를 기준으로 한다.
 
 ---
 
@@ -37,11 +41,11 @@
 
 ### 1.3 관련 자료
 
-- `C:/Users/user/Desktop/test/system.log`
-- `C:/Users/user/Desktop/test/status.log`
-- `C:/Users/user/Desktop/test/crash.log`
-- `C:/Users/user/Desktop/test/observability_snapshot_20260716_180612.json`
-- `C:/Users/user/Desktop/test/memory_snapshot_20260716_181039.json`
+- `<operator-profile>/Desktop/test/system.log`
+- `<operator-profile>/Desktop/test/status.log`
+- `<operator-profile>/Desktop/test/crash.log`
+- `<operator-profile>/Desktop/test/observability_snapshot_20260716_180612.json`
+- `<operator-profile>/Desktop/test/memory_snapshot_20260716_181039.json`
 - `scripts/collect_operational_observability.ps1`
 - `scripts/qa_spot_image_server.ps1`
 - `docs/02-design/features/spot-camera-rest-api-conformance.design.md`

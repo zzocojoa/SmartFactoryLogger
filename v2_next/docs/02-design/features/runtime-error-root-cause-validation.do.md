@@ -1,11 +1,11 @@
 # 운영 오류 전체 원인 검증 실행 추적
 
-> **Feature**: `runtime-error-root-cause-validation`  
-> **Version**: 1.0.1  
-> **Date**: 2026-08-06  
-> **Status**: Field Investigation and Check Complete  
-> **Plan**: `docs/01-plan/features/runtime-error-root-cause-validation.plan.md`  
-> **Design**: `docs/02-design/features/runtime-error-root-cause-validation.design.md`  
+> **Feature**: `runtime-error-root-cause-validation`
+> **Version**: 1.0.1
+> **Date**: 2026-08-06
+> **Status**: Field Investigation and Check Complete
+> **Plan**: `docs/01-plan/features/runtime-error-root-cause-validation.plan.md`
+> **Design**: `docs/02-design/features/runtime-error-root-cause-validation.design.md`
 > **변경 정책**: 조사 전용, 앱 로직·설정·장비 설정 변경 금지
 
 > **기록 경계**: 이 문서는 2026-07-17~20 조사 실행 기록이다. 2026-07-31의

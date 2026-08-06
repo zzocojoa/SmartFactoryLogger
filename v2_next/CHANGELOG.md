@@ -2,6 +2,43 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [Unreleased]
+
+### Documentation and Operations
+
+- Restored the source-controlled `runtime-error-root-cause-validation` PDCA
+  record, including the original incident split for PLC startup data-shape
+  errors, SPOT TCP four-tuple reuse, duplicate-instance rejection, and the
+  separate 08:10 host-side stall.
+- Preserved the 2026-07-31 `575e869` historical field result: 120-minute
+  canary, 7,197 trigger polls with no new ConnectTimeout, 7,101/7,101 successful
+  pings, 22,321 successful TCP handshakes, and a 74.039-second minimum observed
+  same-four-tuple reuse interval. The sanitized canary SHA-256 remains
+  `3393C32C8C248704448E10DD5BC38A49012E8FA07B89362CFE7306B70BFA6350`.
+- Corrected the operational boundary after the later `49fbf6b`
+  shutdown-closeout QA failure: the actual server was restored to the verified
+  v1.0.16 package, `949ef38` was not deployed, and no historical field evidence
+  authorizes a later release candidate without new commit-bound validation.
+- Added the matching historical 15-minute collector source and marked it
+  explicitly as investigation-only so it cannot be mistaken for the later
+  commit-bound 120-minute promotion gate. Generated packet captures, private
+  raw evidence, and release archives remain outside source control.
+- Hardened the restored collector tooling with boundary self-tests, IPv4/IPv6
+  and zone-index redaction, error-message/path fingerprinting, fail-closed
+  detection of existing pktmon captures, bounded sampling parameters, safe
+  elevation path handling, and propagation of collection failure exit codes.
+
+### Distribution
+
+- Deferred purchase and registration of a publicly trusted Windows
+  Authenticode certificate while Smart Factory Logger remains limited to
+  owner-controlled private use. Unsigned internal installers must still be
+  distributed with SHA-256 verification and a commit-bound release kit.
+- Publicly trusted production signing remains mandatory before any installer is
+  distributed to customers, external users, or commercial environments. Do not
+  assume that a CA-issued certificate can be exported as a PFX; token-, HSM-,
+  or cloud-backed certificates require the matching remote-signing workflow.
+
 ## [1.0.17] - 2026-08-05
 
 ### Added

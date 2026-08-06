@@ -1,9 +1,9 @@
 # runtime-error-root-cause-validation Completion Report
 
-> **Status**: `575E869_HISTORICAL_FIELD_CANARY_PASS / CURRENT_RELEASE_REVALIDATION_REQUIRED / PHYSICAL_PATH_PARTIAL`  
-> **Project**: SmartFactoryLogger v2_next  
-> **Author**: Codex  
-> **Completion Date**: 2026-07-31  
+> **Status**: `575E869_HISTORICAL_FIELD_CANARY_PASS / CURRENT_RELEASE_REVALIDATION_REQUIRED / PHYSICAL_PATH_PARTIAL`
+> **Project**: SmartFactoryLogger v2_next
+> **Author**: Codex
+> **Completion Date**: 2026-07-31
 > **Scope**: 원인 조사, source-port 격리 패치, 실제 서버 QA·smoke·120분 canary 검증
 > **Operational supersession**: 2026-08-05 `49fbf6b` shutdown-closeout QA 실패 후
 > 실제 서버는 검증된 v1.0.16으로 롤백됨
@@ -49,8 +49,9 @@ Gap:             2 (8%)
 ```
 
 `LOAD-01`, `LOAD-02`, `PLC-NET-01`은 P1 수동 증거로 원인이 좁혀져 진입 조건이 성립하지
-않았다. `REG-01`, `REG-02`, `RELEASE-01`은 초기 조사 단계에서는 미래 gate였고, 후속
-source-port remediation 단계에서 QA·smoke·canary로 별도 충족했다.
+않았다. `REG-01`은 PLC 로직을 변경하지 않아 적용 대상이 없었다. `REG-02`와
+`RELEASE-01`은 초기 조사 단계에서는 미래 gate였고, 후속 source-port remediation의
+`575e869` QA·smoke·canary로 역사적으로 충족했다. 이 판정은 현재 release에 재사용하지 않는다.
 
 ### 1.3 575e869 역사적 최종 현장 판정
 
@@ -117,9 +118,9 @@ read-only helper만 수정했고, 수정본 SHA-256
 | LOAD-01 | Match, 조건부 미실행 | 수동 부하 없이 실제 오류와 TCP 충돌을 재현해 위험한 부하 시험 불필요 |
 | LOAD-02 | Match, 조건부 미실행 | raw packet으로 앱 경로 실패 sequence가 확인돼 장비 직접 반복 시험 불필요 |
 | PLC-NET-01 | Match, 조건부 미실행 | 사건 PLC 오류에 EX·LS read failure가 동반되지 않아 진입 조건 불성립 |
-| REG-01 | Match, 미래 gate | PLC 로직 패치가 없어 회귀시험 대상 없음 |
-| REG-02 | Match, 미래 gate | SPOT 로직 패치가 없어 회귀시험 대상 없음 |
-| RELEASE-01 | Match, 미래 gate | 배포 변경이 없어 승인·롤백 gate 대상 없음 |
+| REG-01 | Match, 적용 대상 없음 | PLC 로직을 변경하지 않아 PLC 회귀시험 대상 없음 |
+| REG-02 | Match, 후속 gate 충족 | `575e869`에서 SPOT QA·15분 smoke·120분 canary 통과 |
+| RELEASE-01 | Match, 역사적 승인 | `575e869` commit-bound release gate 통과; 현재 release는 재검증 필요 |
 
 ---
 
