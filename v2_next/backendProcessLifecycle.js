@@ -165,6 +165,77 @@ function stopProcessTree(child, options) {
   });
 }
 
+function createApplicationShutdownController(options) {
+  const {
+    setQuitting,
+    prepareShutdown = () => undefined,
+    shutdown,
+    quitApplication,
+    onFailure = () => undefined,
+  } = options;
+
+  if (typeof setQuitting !== 'function') {
+    throw new TypeError('setQuitting must be a function.');
+  }
+  if (typeof shutdown !== 'function') {
+    throw new TypeError('shutdown must be a function.');
+  }
+  if (typeof quitApplication !== 'function') {
+    throw new TypeError('quitApplication must be a function.');
+  }
+
+  let activeShutdown = null;
+  let shutdownComplete = false;
+
+  const beginShutdown = () => {
+    if (shutdownComplete) {
+      return Promise.resolve(true);
+    }
+    if (activeShutdown) {
+      return activeShutdown;
+    }
+
+    setQuitting(true);
+    activeShutdown = (async () => {
+      try {
+        prepareShutdown();
+        await shutdown();
+        shutdownComplete = true;
+        quitApplication();
+        return true;
+      } catch (error) {
+        shutdownComplete = false;
+        setQuitting(false);
+        onFailure(error);
+        return false;
+      } finally {
+        if (!shutdownComplete) {
+          activeShutdown = null;
+        }
+      }
+    })();
+    return activeShutdown;
+  };
+
+  const handleCloseRequest = (event) => {
+    if (shutdownComplete) {
+      return false;
+    }
+    if (!event || typeof event.preventDefault !== 'function') {
+      throw new TypeError('close event must support preventDefault.');
+    }
+    event.preventDefault();
+    void beginShutdown();
+    return true;
+  };
+
+  return {
+    beginShutdown,
+    handleCloseRequest,
+    isComplete: () => shutdownComplete,
+  };
+}
+
 function createBackendRestartController(options) {
   const {
     getProcess,
@@ -214,6 +285,7 @@ function createBackendRestartController(options) {
 }
 
 module.exports = {
+  createApplicationShutdownController,
   createBackendRestartController,
   hasProcessExited,
   isProcessMissingError,

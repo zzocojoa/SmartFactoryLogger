@@ -205,6 +205,22 @@ Report를 현재 HEAD, `49fbf6b`, `949ef38`이나 다른 설치본의 운영 승
 후속 후보는 exact-commit release identity, preinstall gate, re-attestation, QA, smoke,
 120분 canary와 final live gate를 새로 통과해야 한다.
 
+2026-08-06 실제 서버에 설치한 private unsigned `0695a0f`는 install gate와
+commit-bound re-attestation을 통과했다. 같은 설치본의 첫 Alt+F4 종료에서는
+`csv_closeout.finalized=true`가 확인됐지만, one-command QA가 요청한 실제 X 버튼
+종료에서는 모든 product process가 종료된 뒤에도 동일 logger instance와 commit의
+metadata에 `csv_closeout`, observation fact closeout, image fact closeout이 모두
+없었다. 해당 QA Evidence의 SHA-256은
+`531F1E399B12846F8DD20EC949B7A21260EDDAC7A4E9F231041D81AD98BEB6B6`이다.
+따라서 QA는 정확히 실패한 것이며 사용자가 이후 수동으로 출력한 `[PASS]` 문자열은
+검증 결과가 아니다. 서버는 중지 상태로 유지했고 smoke와 canary는 실행하지 않았다.
+
+코드 조사 결과 기존 Electron 종료 제어는 `app.before-quit`에서만 backend closeout을
+시작했다. native BrowserWindow X 종료는 window 파괴 전에 보호되지 않아 Windows
+현장에서 Electron과 backend가 closeout 없이 사라질 수 있었다. 후속 후보는 window
+`close` event 자체를 먼저 보류하고 인증된 backend shutdown 성공 뒤에만 app 종료를
+허용하며, 실패하면 창을 유지하고 재시도 가능해야 한다.
+
 관리형 스위치 counter가 없어 canary 수집기는 `PARTIAL`로 종료됐다. 이는 앱 canary와 live
 gate 실패가 아니라 물리 경로 미배제 표시다. 따라서 운영 판정은 `FIELD_CANARY_PASS`,
 물리망 판정은 `PHYSICAL_PATH_PARTIAL`로 분리해 유지한다.
@@ -238,6 +254,7 @@ gate 실패가 아니라 물리 경로 미배제 표시다. 따라서 운영 판
 
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
+| 1.3.0 | 2026-08-06 | 0695a0f 실제 서버 X 종료 closeout 재현, QA fail-closed와 native window close 보호 요구사항 반영 | Codex |
 | 1.2.0 | 2026-08-06 | 49fbf6b shutdown-closeout QA 실패, 미배포 949ef38, 검증된 v1.0.16 롤백과 현장 증거 재사용 금지 경계 반영 | Codex |
 | 1.1.0 | 2026-07-31 | 575e869 QA·smoke·120분 canary와 최종 live gate 판정 동결 | Codex |
 | 1.0.0 | 2026-07-20 | 현장 raw 증거 기반 조사 완료 보고서 작성 | Codex |

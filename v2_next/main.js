@@ -10,7 +10,11 @@ const {
   StartupCoordinator,
   createBackendProgressParser,
 } = require('./startupCoordinator');
-const { stopProcessTree, createBackendRestartController } = require('./backendProcessLifecycle');
+const {
+  createApplicationShutdownController,
+  createBackendRestartController,
+  stopProcessTree,
+} = require('./backendProcessLifecycle');
 const {
   buildBackendProgressEnvironment,
   createBackendProgressFileTransport,
@@ -72,8 +76,6 @@ let backendProgressTransport;
 let trustedMainDocumentUrl = null;
 let trustedRendererTimeOriginMs = null;
 let applicationQuitting = false;
-let shutdownInProgress = false;
-let shutdownComplete = false;
 let lastPublishedStartupState = null;
 let backendStartFallbackTimer = null;
 let backendStartTriggered = false;
@@ -448,6 +450,7 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   });
 
+  mainWindow.on('close', handleApplicationCloseRequest);
   mainWindow.on('closed', () => {
     mainWindowReadyToShow = false;
     mainWindowShown = false;
@@ -727,6 +730,43 @@ const backendRestartController = createBackendRestartController({
   },
 });
 
+const applicationShutdownController = createApplicationShutdownController({
+  setQuitting: (value) => {
+    applicationQuitting = value;
+  },
+  prepareShutdown: () => {
+    if (backendStartFallbackTimer !== null) {
+      clearTimeout(backendStartFallbackTimer);
+      backendStartFallbackTimer = null;
+    }
+    startupCoordinator.dispose();
+  },
+  shutdown: async () => {
+    await backendRestartController.waitForActiveRestart();
+    const child = backendProcess;
+    if (child?.pid) {
+      await stopBackendProcess(child);
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
+    }
+  },
+  quitApplication: () => app.quit(),
+  onFailure: (error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    logStartupEvent('backend.shutdown-failed', { message });
+    log(`Backend shutdown failed: ${message}`);
+    dialog.showErrorBox(
+      'Backend Shutdown Error',
+      '백엔드 프로세스를 안전하게 종료하지 못했습니다. 로그를 확인한 뒤 다시 종료하십시오.'
+    );
+  },
+});
+
+function handleApplicationCloseRequest(event) {
+  applicationShutdownController.handleCloseRequest(event);
+}
+
 function restartBackend() {
   return backendRestartController.restart();
 }
@@ -752,43 +792,4 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', (event) => {
-  applicationQuitting = true;
-  if (backendStartFallbackTimer !== null) {
-    clearTimeout(backendStartFallbackTimer);
-    backendStartFallbackTimer = null;
-  }
-  startupCoordinator.dispose();
-  if (shutdownComplete) {
-    return;
-  }
-  event.preventDefault();
-  if (shutdownInProgress) {
-    return;
-  }
-  shutdownInProgress = true;
-  void (async () => {
-    try {
-      await backendRestartController.waitForActiveRestart();
-      const child = backendProcess;
-      if (child?.pid) {
-        await stopBackendProcess(child);
-        if (backendProcess === child) {
-          backendProcess = null;
-        }
-      }
-      shutdownComplete = true;
-      app.quit();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logStartupEvent('backend.shutdown-failed', { message });
-      log(`Backend shutdown failed: ${message}`);
-      applicationQuitting = false;
-      shutdownInProgress = false;
-      dialog.showErrorBox(
-        'Backend Shutdown Error',
-        '백엔드 프로세스를 안전하게 종료하지 못했습니다. 로그를 확인한 뒤 다시 종료하십시오.'
-      );
-    }
-  })();
-});
+app.on('before-quit', handleApplicationCloseRequest);

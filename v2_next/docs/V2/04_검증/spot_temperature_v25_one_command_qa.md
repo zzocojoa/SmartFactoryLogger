@@ -131,5 +131,15 @@ commit에만 유효하다. 이후 `49fbf6b` 패키지는 X 버튼 종료 뒤 현
 X-close 검증은 통과했지만 서버에 설치되지 않았다. 최종 서명 package는 자신의
 commit-bound re-attestation과 이 QA 전체를 새로 통과해야 한다.
 
+### 0695a0f 현장 재검증 (2026-08-06)
+
+Private unsigned `0695a0f`는 서버 install과 re-attestation을 통과했다. 첫 Alt+F4
+종료에서는 finalized closeout이 생성됐으나, 이후 이 QA의 X 버튼 종료에서는 동일한
+current-session metadata에 `csv_closeout`이 생성되지 않았다. QA는
+`Current-session metadata sidecar: not found` 하나로 정상적으로 FAIL했고, Evidence
+SHA-256은 `531F1E399B12846F8DD20EC949B7A21260EDDAC7A4E9F231041D81AD98BEB6B6`이다.
+종료 뒤 별도로 출력한 `[PASS]` 문구는 QA 판정을 변경하지 않는다. 이 commit의 smoke와
+canary는 시작하지 않았으며, 수정된 새 commit은 native X-close부터 다시 검증한다.
+
 - [서버 검증 보고서](../../04-report/spot-temperature-v2-5-server-validation.md)
 - [Sanitized evidence](../../04-report/evidence/sfl-spot-temperature-v25-qa-20260713-233141.sanitized.json)

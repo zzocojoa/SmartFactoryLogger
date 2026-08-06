@@ -19,6 +19,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
   shutdown-closeout QA failure: the actual server was restored to the verified
   v1.0.16 package, `949ef38` was not deployed, and no historical field evidence
   authorizes a later release candidate without new commit-bound validation.
+- Recorded the 2026-08-06 `0695a0f` server comparison without reusing prior
+  evidence: its first Alt+F4 close completed a verified shutdown closeout, but
+  the later native X-button close during one-command QA stopped all product
+  processes without adding `csv_closeout` to the matching current-session
+  metadata. QA therefore failed closed and smoke/canary were not started.
 - Added the matching historical 15-minute collector source and marked it
   explicitly as investigation-only so it cannot be mistaken for the later
   commit-bound 120-minute promotion gate. Generated packet captures, private
@@ -111,6 +116,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ### Post-validation changes — field revalidation required
 
+- Held the native BrowserWindow close event until the existing authenticated
+  backend shutdown and CSV closeout completes. A failed closeout now keeps the
+  application window open and permits a bounded retry instead of allowing the
+  renderer and backend to disappear without finalized metadata.
 - Restored the packaged Electron X-button shutdown request through the tested,
   authenticated backend control client, including bounded fallback when the
   request fails synchronously or the backend exits non-zero.
@@ -157,6 +166,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
   during one-command QA and was rolled back to the verified v1.0.16 installer.
   Neither the unsigned `949ef38` candidate nor the later development packages
   have been installed on the server.
+- Private unsigned commit `0695a0f` passed install, current-session metadata,
+  and commit-bound re-attestation on the server. Its first Alt+F4 close produced
+  a verified finalized closeout, but a later native X-button close reproduced
+  the missing `csv_closeout` failure. The exact QA evidence SHA-256 is
+  `531F1E399B12846F8DD20EC949B7A21260EDDAC7A4E9F231041D81AD98BEB6B6`;
+  the server was left stopped and no smoke or canary evidence exists for this
+  commit.
 - Production promotion remains blocked until a signed package bound to the
   final post-documentation commit passes its exact-commit identity and native
   X-close checks, then the server preinstall gate, re-attestation, QA,
