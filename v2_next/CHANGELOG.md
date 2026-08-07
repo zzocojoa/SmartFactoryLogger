@@ -2,7 +2,7 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
-## [Unreleased]
+## [1.0.18] - 2026-08-07
 
 ### Fixed
 
@@ -11,9 +11,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
   restart can now reuse the verified old-process closeout instead of becoming
   permanently blocked after the process reference is cleared.
 - Kept forced stops, non-zero backend exits, and missing-process states from
-  being accepted as successful CSV closeout. These source changes postdate the
-  `9eaa913` field evidence and therefore require a new commit-bound server
-  validation before any replacement package is deployed.
+  being accepted as successful CSV closeout, including repeated restart
+  attempts after a failed closeout. These source changes postdate the `9eaa913`
+  field evidence and therefore require a new commit-bound server validation
+  before any replacement package is deployed.
 
 ### Documentation and Operations
 

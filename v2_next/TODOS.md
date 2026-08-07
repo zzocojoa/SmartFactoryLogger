@@ -2,17 +2,17 @@
 
 ## Release
 
-### Complete v1.0.17 signed field validation
+### Validate the v1.0.18 private shutdown-closeout release
 
-**What:** Produce a signed release kit bound to the final commit and complete the controlled server validation sequence.
+**What:** Produce an unsigned private release kit bound to the final v1.0.18 commit and complete the controlled server validation sequence.
 
-**Why:** Earlier field evidence belongs to different commits, and packaged commit `49fbf6b` failed CSV shutdown-closeout QA before the verified v1.0.16 rollback.
+**Why:** The `9eaa913` private candidate passed commit-bound re-attestation, native X-close QA, smoke, recovered canary, and the final live gate, but the stricter forced/non-zero/missing-process and restart-race fixes were added afterward and are not covered by that field evidence.
 
-**Context:** CI and packaged native X-close validation passed for commit `c1845e9`. The fail-closed signed-release workflow now hash-locks Windows Python dependencies, extracts the exact installer selected for upload, verifies every backend bundle entry and Authenticode identity, and rechecks the final installer hash before upload. The `production-signing` environment still needs the approved certificate, password, thumbprint, and protection rules. After a signed artifact passes, run the read-only preinstall gate, install, commit-bound re-attestation, one-command QA, 15-minute smoke, 120-minute canary, and final read-only live gate. Do not reuse `575e869`, `49fbf6b`, or `949ef38` field evidence.
+**Context:** Private owner-controlled use does not currently require a publicly trusted Authenticode certificate. The release kit must still verify the exact commit, installer, packaged backend, QA bundle, and SHA-256 values. Run the read-only preinstall gate, install, commit-bound re-attestation, one-command QA, 15-minute smoke, 120-minute canary, and final read-only live gate. Do not reuse evidence from `575e869`, `49fbf6b`, `949ef38`, `0695a0f`, or `9eaa913` for the v1.0.18 candidate.
 
-**Effort:** XL
+**Effort:** L
 **Priority:** P0
-**Depends on:** Production Authenticode credentials and protected GitHub Environment configuration
+**Depends on:** Merged exact commit and a newly built hash-locked private release kit
 
 ### Sign portable Windows distribution before promotion
 
@@ -50,7 +50,7 @@ artifact for internal validation. This does not block NSIS-based server validati
 
 **Why:** Recurring health requests no longer rescan archives, but the first pending-count call can still scale with accumulated historical archive size.
 
-**Context:** Preserve the current fail-closed manifest semantics and mutation-aware cached counts. This is not part of the v1.0.17 promotion gate unless field evidence shows startup or first-health latency regression.
+**Context:** Preserve the current fail-closed manifest semantics and mutation-aware cached counts. This is not part of the v1.0.18 promotion gate unless field evidence shows startup or first-health latency regression.
 
 **Effort:** M
 **Priority:** P2
