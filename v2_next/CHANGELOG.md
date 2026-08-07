@@ -24,6 +24,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
   the later native X-button close during one-command QA stopped all product
   processes without adding `csv_closeout` to the matching current-session
   metadata. QA therefore failed closed and smoke/canary were not started.
+- Recorded the replacement private unsigned `9eaa913` validation separately:
+  commit-bound re-attestation and native X-close one-command QA passed, the
+  15-minute passive smoke found no new ConnectTimeout, and the recovered
+  120-minute canary plus final live gate retained the same backend process with
+  zero transport, source-port reuse, pool-exhaustion, or image failures.
 - Added the matching historical 15-minute collector source and marked it
   explicitly as investigation-only so it cannot be mistaken for the later
   commit-bound 120-minute promotion gate. Generated packet captures, private
@@ -120,6 +125,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
   backend shutdown and CSV closeout completes. A failed closeout now keeps the
   application window open and permits a bounded retry instead of allowing the
   renderer and backend to disappear without finalized metadata.
+- Kept forced, signalled, non-zero, and unverified missing-process shutdowns
+  outside the successful closeout path. A second close request can no longer
+  reinterpret an earlier terminal backend failure as a clean application exit.
 - Restored the packaged Electron X-button shutdown request through the tested,
   authenticated backend control client, including bounded fallback when the
   request fails synchronously or the backend exits non-zero.
@@ -173,10 +181,26 @@ All notable changes to Smart Factory Logger V2 are documented here.
   `531F1E399B12846F8DD20EC949B7A21260EDDAC7A4E9F231041D81AD98BEB6B6`;
   the server was left stopped and no smoke or canary evidence exists for this
   commit.
-- Production promotion remains blocked until a signed package bound to the
-  final post-documentation commit passes its exact-commit identity and native
-  X-close checks, then the server preinstall gate, re-attestation, QA,
-  15-minute smoke, 120-minute canary, and final live gate.
+- Private unsigned commit `9eaa913` then passed commit-bound re-attestation and
+  native X-close one-command QA. The QA evidence SHA-256 is
+  `AA644BA2A2FB90742BCD204A9DE4CA6F53D4E629949900150B66B654E493D294`.
+  Its 15-minute passive smoke completed without a new ConnectTimeout; managed
+  switch counters were unavailable, so physical-path exclusion remained
+  partial and the sanitized evidence SHA-256 is
+  `33B2A238CB0E71D289EB0C3ADFC8014C1329DC370552DED409DE716C8D4B85F5`.
+- The recovered 120-minute `9eaa913` canary and unchanged-runtime final live
+  gate passed with the original backend PID, 7,191 successful trigger polls,
+  zero ConnectTimeout, zero transport failures, a 75-second minimum source-port
+  reuse interval, and bounded memory. The original collector exit-code failure
+  remains preserved as a tooling limitation. The official sanitized ZIP
+  SHA-256 is `5B0E9F486F0CC1E38D1F64DB61A36FFDF4D86E6F6345C9173F02553D8BF4EB14`;
+  the final live-gate evidence SHA-256 is
+  `7F12C87A79774803956B5024520ACB3AA38A79C6350276DD548B7E2AB00AE586`.
+- `9eaa913` authorizes its exact private package only. The later source change
+  that rejects forced or otherwise unverified backend stops has local automated
+  coverage but needs its own commit-bound field validation before deployment.
+  Public, customer, or commercial promotion remains blocked until that final
+  package is publicly trusted, signed, and passes the complete server sequence.
 
 ### Compatibility
 

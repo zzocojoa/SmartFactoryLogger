@@ -141,5 +141,24 @@ SHA-256은 `531F1E399B12846F8DD20EC949B7A21260EDDAC7A4E9F231041D81AD98BEB6B6`이
 종료 뒤 별도로 출력한 `[PASS]` 문구는 QA 판정을 변경하지 않는다. 이 commit의 smoke와
 canary는 시작하지 않았으며, 수정된 새 commit은 native X-close부터 다시 검증한다.
 
+### 9eaa913 현장 재검증 (2026-08-06~07)
+
+Private unsigned `9eaa913`은 새 commit-bound re-attestation 뒤 실제 native X 버튼
+종료로 이 QA를 다시 실행해 PASS했다. 동일 logger instance와 commit의 metadata에
+`csv_closeout.finalized=true`, final sample sequence, observation/image fact closeout이
+기록됐고 portable validator도 exit code 0이었다. QA Evidence SHA-256은
+`AA644BA2A2FB90742BCD204A9DE4CA6F53D4E629949900150B66B654E493D294`이다.
+
+후속 15분 smoke는 새 ConnectTimeout 없이 끝났고, 복구 검토를 포함한 120분 canary와
+final live gate도 동일 backend PID, 정상 CSV 증가, transport/reuse/exhaustion 0건,
+75초 minimum reuse와 정상 image 상태를 확인했다. Managed-switch evidence 부재와 원본
+collector 완료 경합은 각각 physical-path PARTIAL과 tooling limitation으로 보존한다.
+Final live-gate Evidence SHA-256은
+`7F12C87A79774803956B5024520ACB3AA38A79C6350276DD548B7E2AB00AE586`이다.
+
+이 결과는 exact commit `9eaa9135566ad689d98ebcad7b8b40463a5b4e68`에만 유효하다.
+그 뒤 추가된 forced/non-zero/missing-process fail-closed source 변경은 별도 package로
+배포하기 전에 새로운 commit-bound re-attestation과 이 QA를 다시 통과해야 한다.
+
 - [서버 검증 보고서](../../04-report/spot-temperature-v2-5-server-validation.md)
 - [Sanitized evidence](../../04-report/evidence/sfl-spot-temperature-v25-qa-20260713-233141.sanitized.json)
