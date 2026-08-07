@@ -14,6 +14,7 @@ const {
   createApplicationShutdownController,
   createBackendCloseoutGate,
   createBackendRestartController,
+  createCloseoutVerifiedStop,
   stopProcessTree,
 } = require('./backendProcessLifecycle');
 const {
@@ -713,12 +714,17 @@ async function stopBackendProcess(child = backendProcess) {
   }
 }
 
+const stopBackendWithVerifiedCloseout = createCloseoutVerifiedStop({
+  stopProcess: stopBackendProcess,
+  closeoutGate: backendCloseoutGate,
+});
+
 const backendRestartController = createBackendRestartController({
   getProcess: () => backendProcess,
   setProcess: (child) => {
     backendProcess = child;
   },
-  stopProcess: stopBackendProcess,
+  stopProcess: stopBackendWithVerifiedCloseout,
   startProcess: startBackend,
   isQuitting: () => applicationQuitting,
   beforeRestart: async () => {
@@ -751,8 +757,7 @@ const applicationShutdownController = createApplicationShutdownController({
       backendCloseoutGate.assertCanExitWithoutProcess();
       return;
     }
-    const result = await stopBackendProcess(child);
-    backendCloseoutGate.acceptShutdownResult(result);
+    await stopBackendWithVerifiedCloseout(child);
     if (backendProcess === child) {
       backendProcess = null;
     }

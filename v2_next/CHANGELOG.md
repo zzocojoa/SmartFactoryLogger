@@ -4,6 +4,17 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Routed backend restart stops and native application shutdown through the
+  same verified graceful-closeout gate. A window close that overlaps an active
+  restart can now reuse the verified old-process closeout instead of becoming
+  permanently blocked after the process reference is cleared.
+- Kept forced stops, non-zero backend exits, and missing-process states from
+  being accepted as successful CSV closeout. These source changes postdate the
+  `9eaa913` field evidence and therefore require a new commit-bound server
+  validation before any replacement package is deployed.
+
 ### Documentation and Operations
 
 - Restored the source-controlled `runtime-error-root-cause-validation` PDCA

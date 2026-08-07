@@ -10,6 +10,7 @@ const {
   createApplicationShutdownController,
   createBackendCloseoutGate,
   createBackendRestartController,
+  createCloseoutVerifiedStop,
   isVerifiedGracefulShutdownResult,
   stopProcessTree,
 } = require('./backendProcessLifecycle');
@@ -251,6 +252,61 @@ test('backend closeout gate blocks forced or missing-process shutdown bypasses',
   assert.doesNotThrow(() => gate.assertCanExitWithoutProcess());
 });
 
+test('verified stop accepts a graceful restart before concurrent shutdown exits', async () => {
+  const previous = createChild();
+  let current = previous;
+  let quitting = false;
+  let releaseStop;
+  const gate = createBackendCloseoutGate();
+  gate.markBackendStarted();
+  const verifiedStop = createCloseoutVerifiedStop({
+    closeoutGate: gate,
+    stopProcess: async () => new Promise((resolve) => {
+      releaseStop = () => resolve({
+        stopped: true,
+        reason: 'close',
+        exitCode: 0,
+        signalCode: null,
+        forced: false,
+      });
+    }),
+  });
+  const restartController = createBackendRestartController({
+    getProcess: () => current,
+    setProcess: (child) => {
+      current = child;
+    },
+    stopProcess: verifiedStop,
+    startProcess: () => assert.fail('quitting must cancel the replacement'),
+    isQuitting: () => quitting,
+  });
+  let quitCalls = 0;
+  const shutdownController = createApplicationShutdownController({
+    setQuitting: (value) => {
+      quitting = value;
+    },
+    shutdown: async () => {
+      await restartController.waitForActiveRestart();
+      if (!current?.pid) {
+        gate.assertCanExitWithoutProcess();
+      }
+    },
+    quitApplication: () => {
+      quitCalls += 1;
+    },
+  });
+
+  const restart = restartController.restart();
+  const shutdown = shutdownController.beginShutdown();
+  releaseStop();
+
+  assert.equal(await restart, false);
+  assert.equal(await shutdown, true);
+  assert.equal(current, null);
+  assert.equal(gate.isCloseoutRequired(), false);
+  assert.equal(quitCalls, 1);
+});
+
 test('Electron main wires native window close into the guarded shutdown path', () => {
   const mainText = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
 
@@ -265,11 +321,15 @@ test('Electron main wires native window close into the guarded shutdown path', (
   assert.match(mainText, /backendCloseoutGate\.markBackendStarted\(\)/);
   assert.match(
     mainText,
-    /backendCloseoutGate\.acceptShutdownResult\(result\)/
+    /stopProcess:\s*stopBackendWithVerifiedCloseout/
   );
   assert.match(
     mainText,
     /backendCloseoutGate\.assertCanExitWithoutProcess\(\)/
+  );
+  assert.match(
+    mainText,
+    /await stopBackendWithVerifiedCloseout\(child\)/
   );
 });
 

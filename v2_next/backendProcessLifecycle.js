@@ -205,6 +205,22 @@ function createBackendCloseoutGate() {
   };
 }
 
+function createCloseoutVerifiedStop(options) {
+  const { stopProcess, closeoutGate } = options;
+  if (typeof stopProcess !== 'function') {
+    throw new TypeError('stopProcess must be a function.');
+  }
+  if (!closeoutGate || typeof closeoutGate.acceptShutdownResult !== 'function') {
+    throw new TypeError('closeoutGate must accept shutdown results.');
+  }
+
+  return async (child) => {
+    const result = await stopProcess(child);
+    closeoutGate.acceptShutdownResult(result);
+    return result;
+  };
+}
+
 function createApplicationShutdownController(options) {
   const {
     setQuitting,
@@ -331,6 +347,7 @@ module.exports = {
   createApplicationShutdownController,
   createBackendCloseoutGate,
   createBackendRestartController,
+  createCloseoutVerifiedStop,
   hasProcessExited,
   isProcessMissingError,
   isVerifiedGracefulShutdownResult,
