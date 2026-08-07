@@ -162,6 +162,7 @@ class ShutdownRequest(BaseModel):
 class ControlHealthResponse(BaseModel):
     running: bool
     backend_process_id: int
+    backend_generation_id: str
     backend_session_id: str
     started_at: str
 
@@ -221,6 +222,7 @@ _log_dir: Path | None = None
 _app_start_time = time.time()
 _app_started_at_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 _app_session_id = uuid.uuid4().hex[:12]
+_backend_generation_id = os.environ.get("SFL_BACKEND_GENERATION_ID", "") or _app_session_id
 _stats_lock = threading.Lock()
 _stats_total_requests = 0
 _stats_total_latency_ms = 0.0
@@ -3630,6 +3632,7 @@ async def control_health(
     return {
         "running": True,
         "backend_process_id": os.getpid(),
+        "backend_generation_id": _backend_generation_id,
         "backend_session_id": _app_session_id,
         "started_at": _app_started_at_iso,
     }

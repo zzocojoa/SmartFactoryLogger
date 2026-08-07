@@ -234,6 +234,29 @@ test('retry preserves a backend that becomes healthy during the bounded recheck'
   assert.equal(harness.getRecoveredCount(), 1);
 });
 
+test('concurrent retry requests share the complete health and restart flow', async () => {
+  let releaseHealth;
+  let healthChecks = 0;
+  const healthGate = new Promise((resolve) => {
+    releaseHealth = resolve;
+  });
+  const harness = createHarness({
+    recheckBackendHealth: async () => {
+      healthChecks += 1;
+      await healthGate;
+      return false;
+    },
+  });
+
+  const first = harness.handlers.retryStartup(harness.trustedEvent);
+  const second = harness.handlers.retryStartup(harness.trustedEvent);
+  releaseHealth();
+
+  assert.deepEqual(await Promise.all([first, second]), [{ ok: true }, { ok: true }]);
+  assert.equal(healthChecks, 1);
+  assert.equal(harness.getRestartCount(), 1);
+});
+
 test('retry does not stop a backend after renderer gates recover concurrently', async () => {
   let harness;
   harness = createHarness({

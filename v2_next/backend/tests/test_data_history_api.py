@@ -290,6 +290,10 @@ class ElectronPreloadContractTests(unittest.TestCase):
         payload = accepted.json()
         self.assertTrue(payload["running"])
         self.assertEqual(payload["backend_process_id"], backend_app.os.getpid())
+        self.assertEqual(
+            payload["backend_generation_id"],
+            backend_app._backend_generation_id,
+        )
         self.assertEqual(payload["backend_session_id"], backend_app._app_session_id)
         self.assertEqual(payload["started_at"], backend_app._app_started_at_iso)
 
@@ -310,6 +314,7 @@ class ElectronPreloadContractTests(unittest.TestCase):
             {
                 "running",
                 "backend_process_id",
+                "backend_generation_id",
                 "backend_session_id",
                 "started_at",
             },

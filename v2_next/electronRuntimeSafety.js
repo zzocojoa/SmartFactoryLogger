@@ -124,14 +124,19 @@ function installSingleInstanceGuard(app, options) {
   return true;
 }
 
-function isMatchingBackendHealth(health, expectedPid) {
+function isMatchingBackendHealth(health, expectedIdentity) {
+  const expectedPid = expectedIdentity?.processId;
+  const expectedGenerationId = expectedIdentity?.generationId;
   return Boolean(
     health &&
     health.running === true &&
     Number.isSafeInteger(expectedPid) &&
     expectedPid > 0 &&
     Number.isSafeInteger(health.backend_process_id) &&
-    health.backend_process_id === expectedPid
+    health.backend_process_id === expectedPid &&
+    typeof expectedGenerationId === 'string' &&
+    expectedGenerationId.length > 0 &&
+    health.backend_generation_id === expectedGenerationId
   );
 }
 

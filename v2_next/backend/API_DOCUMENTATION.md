@@ -766,6 +766,7 @@ origins or referrers with `403`.
 {
     "running": true,
     "backend_process_id": 12345,
+    "backend_generation_id": "c71f2ac2d30a46e7b4d99a85d9835c45",
     "backend_session_id": "4f43f68e9b2a",
     "started_at": "2026-08-07T10:00:00+00:00"
 }

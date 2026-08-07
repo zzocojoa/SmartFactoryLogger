@@ -61,6 +61,32 @@ function createStartupIpcHandlers(options) {
     getMainWindow(),
     getExpectedDocumentUrl()
   );
+  let activeRetry = null;
+
+  const performRetry = async () => {
+    try {
+      const backendHealthy = await recheckBackendHealth();
+      if (backendHealthy) {
+        if (!coordinator.getState().can_retry) {
+          return { ok: true, recovered: true, restarted: false };
+        }
+        await recoverHealthyBackend();
+        return { ok: true, recovered: true, restarted: false };
+      }
+      if (!coordinator.getState().can_retry) {
+        return { ok: true, recovered: true, restarted: false };
+      }
+      const restarted = await restartBackend();
+      return restarted
+        ? { ok: true }
+        : { ok: false, reason: 'restart_cancelled' };
+    } catch (error) {
+      logStartupEvent('backend.restart-failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return { ok: false, reason: 'backend_stop_failed' };
+    }
+  };
 
   return {
     recordStartupEvent: async (event, name, payload) => {
@@ -134,30 +160,18 @@ function createStartupIpcHandlers(options) {
       if (!trusted(event)) {
         return { ok: false, reason: 'untrusted_sender' };
       }
+      if (activeRetry) {
+        return activeRetry;
+      }
       if (!coordinator.getState().can_retry) {
         return { ok: false, reason: 'not_available' };
       }
       try {
-        const backendHealthy = await recheckBackendHealth();
-        if (backendHealthy) {
-          if (!coordinator.getState().can_retry) {
-            return { ok: true, recovered: true, restarted: false };
-          }
-          await recoverHealthyBackend();
-          return { ok: true, recovered: true, restarted: false };
-        }
-        if (!coordinator.getState().can_retry) {
-          return { ok: true, recovered: true, restarted: false };
-        }
-        const restarted = await restartBackend();
-        return restarted
-          ? { ok: true }
-          : { ok: false, reason: 'restart_cancelled' };
-      } catch (error) {
-        logStartupEvent('backend.restart-failed', {
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return { ok: false, reason: 'backend_stop_failed' };
+        const retry = performRetry();
+        activeRetry = retry;
+        return await retry;
+      } finally {
+        activeRetry = null;
       }
     },
 

@@ -53,17 +53,21 @@ function Convert-StartupLogLine {
         return $null
     }
 
-    $timestamp = [datetime]::Parse(
-        $Matches.timestamp,
-        [System.Globalization.CultureInfo]::InvariantCulture,
-        [System.Globalization.DateTimeStyles]::AdjustToUniversal
-    )
+    try {
+        $timestamp = [datetime]::Parse(
+            $Matches.timestamp,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::AdjustToUniversal
+        )
+        $payload = $Matches.payload | ConvertFrom-Json
+    } catch {
+        return $null
+    }
 
     if ($timestamp.ToUniversalTime() -lt $StartedAtUtc) {
         return $null
     }
 
-    $payload = $Matches.payload | ConvertFrom-Json
     return [pscustomobject]@{
         timestamp = $timestamp.ToUniversalTime().ToString("o")
         event = [string]$payload.event
@@ -93,8 +97,12 @@ function Read-StartupEvents {
                 continue
             }
 
+            try {
+                $lines = Get-Content -LiteralPath $logPath -Tail 1000 -ErrorAction Stop
+            } catch {
+                continue
+            }
             $observedLogPaths.Add($logPath)
-            $lines = Get-Content -LiteralPath $logPath -Tail 1000 -ErrorAction Stop
             foreach ($line in $lines) {
                 $event = Convert-StartupLogLine -Line $line -StartedAtUtc $StartedAtUtc
                 if ($null -ne $event) {
@@ -280,6 +288,14 @@ if ($SelfTest) {
     ) {
         throw "Startup session correlation self-test failed."
     }
+    $malformedLineIgnored = $null -eq (
+        Convert-StartupLogLine `
+            -Line "[not-a-date] STARTUP {not-json}" `
+            -StartedAtUtc ([datetime]::UtcNow)
+    )
+    if (-not $malformedLineIgnored) {
+        throw "Malformed startup log self-test failed."
+    }
     Write-Host "[PASS] NSIS startup trace session-correlation self-tests passed."
     exit 0
 }
@@ -311,7 +327,9 @@ $launchedSessionPrefix = "$($process.Id)-"
 $lastSnapshot = $null
 $dashboardReadySeen = $false
 $startupSessionId = ""
+$launchedCleanupCompleted = $false
 
+try {
 while ((Get-Date) -lt $deadline) {
     $logSnapshot = Read-StartupEvents -CandidateLogPaths $candidateLogPaths -StartedAtUtc $startedAtUtc
     if ($null -ne $logSnapshot) {
@@ -322,6 +340,7 @@ while ((Get-Date) -lt $deadline) {
             -SessionIdPrefix $launchedSessionPrefix
         if ($null -ne $lockDeniedEvent) {
             $cleanup = Stop-LaunchedProcessTree -Process $process
+            $launchedCleanupCompleted = $true
             [pscustomobject]@{
                 status = "SINGLE_INSTANCE_DENIED"
                 exe_path = $resolvedExePath
@@ -360,6 +379,7 @@ while ((Get-Date) -lt $deadline) {
     $traceBytes = if ($traceExists) { (Get-Item -LiteralPath $tracePath).Length } else { 0 }
     if ($dashboardReadySeen -and $traceExists -and $traceBytes -gt 0) {
         $cleanup = Stop-LaunchedProcessTree -Process $process
+        $launchedCleanupCompleted = $true
         $residualCleanup = Stop-ResidualSmartFactoryProcesses
         [pscustomobject]@{
             status = "PASS"
@@ -388,6 +408,7 @@ while ((Get-Date) -lt $deadline) {
 }
 
 $cleanup = Stop-LaunchedProcessTree -Process $process
+$launchedCleanupCompleted = $true
 $residualCleanup = Stop-ResidualSmartFactoryProcesses
 $traceExists = Test-Path -LiteralPath $tracePath
 $traceBytes = if ($traceExists) { (Get-Item -LiteralPath $tracePath).Length } else { 0 }
@@ -410,3 +431,8 @@ $traceBytes = if ($traceExists) { (Get-Item -LiteralPath $tracePath).Length } el
     residual_cleanup = $residualCleanup
 } | ConvertTo-Json -Depth 5
 exit 1
+} finally {
+    if (-not $launchedCleanupCompleted) {
+        $null = Stop-LaunchedProcessTree -Process $process
+    }
+}

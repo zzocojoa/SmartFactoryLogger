@@ -13,19 +13,31 @@ const {
 } = require('./electronRuntimeSafety');
 
 test('backend health recovery requires the authenticated child process identity', () => {
+  const expectedIdentity = {
+    processId: 4321,
+    generationId: 'generation-123',
+  };
   assert.equal(isMatchingBackendHealth({
     running: true,
     backend_process_id: 4321,
-  }, 4321), true);
+    backend_generation_id: 'generation-123',
+  }, expectedIdentity), true);
   assert.equal(isMatchingBackendHealth({
     running: true,
     backend_process_id: 9999,
-  }, 4321), false);
-  assert.equal(isMatchingBackendHealth({ running: true }, 4321), false);
+    backend_generation_id: 'generation-123',
+  }, expectedIdentity), false);
+  assert.equal(isMatchingBackendHealth({
+    running: true,
+    backend_process_id: 4321,
+    backend_generation_id: 'stale-generation',
+  }, expectedIdentity), false);
+  assert.equal(isMatchingBackendHealth({ running: true }, expectedIdentity), false);
   assert.equal(isMatchingBackendHealth({
     running: false,
     backend_process_id: 4321,
-  }, 4321), false);
+    backend_generation_id: 'generation-123',
+  }, expectedIdentity), false);
 });
 
 test('secondary Electron launch exits without creating another runtime', () => {

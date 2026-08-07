@@ -85,6 +85,7 @@ const ELECTRON_LOG_MAX_BACKUPS = 3;
 
 let mainWindow;
 let backendProcess;
+const backendGenerationIds = new WeakMap();
 const backendCloseoutGate = createBackendCloseoutGate();
 let backendProgressTransport;
 let trustedMainDocumentUrl = null;
@@ -613,6 +614,7 @@ function startBackend() {
       });
     }
 
+    const backendGenerationId = randomBytes(16).toString('hex');
     const spawnOptions = {
       cwd: isPackaged ? path.join(process.resourcesPath, 'backend') : __dirname,
       shell: false,
@@ -621,6 +623,7 @@ function startBackend() {
         ...progressEnvironment,
         SFL_EMBEDDED_ELECTRON: '1',
         SFL_CONTROL_TOKEN: backendControlToken,
+        SFL_BACKEND_GENERATION_ID: backendGenerationId,
       }),
     };
 
@@ -631,6 +634,7 @@ function startBackend() {
     log(`CWD: ${spawnOptions.cwd}`);
     
     const child = spawn(backendPath, args, spawnOptions);
+    backendGenerationIds.set(child, backendGenerationId);
     backendProcess = child;
 
     child.on('spawn', () => {
@@ -745,6 +749,11 @@ async function waitForBackendHealthBeforeRetry() {
   let lastError = null;
   while (!applicationQuitting && backendProcess?.pid && Date.now() <= deadline) {
     attempts += 1;
+    const expectedChild = backendProcess;
+    const expectedIdentity = {
+      processId: expectedChild?.pid,
+      generationId: expectedChild ? backendGenerationIds.get(expectedChild) : undefined,
+    };
     try {
       const health = await sendBackendHealth({
         controlToken: backendControlToken,
@@ -752,7 +761,10 @@ async function waitForBackendHealthBeforeRetry() {
         maxResponseBytes: BACKEND_CONTROL_RESPONSE_MAX_BYTES,
         timeoutMs: BACKEND_RETRY_HEALTH_REQUEST_TIMEOUT_MS,
       });
-      if (isMatchingBackendHealth(health, backendProcess.pid)) {
+      if (
+        backendProcess === expectedChild &&
+        isMatchingBackendHealth(health, expectedIdentity)
+      ) {
         logStartupEvent('backend.retry-health-recovered', { attempts });
         return true;
       }
