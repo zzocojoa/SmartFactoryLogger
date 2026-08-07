@@ -21,7 +21,8 @@ PR 검증용 unsigned artifact와 운영용 signed artifact는 서로 다른 wor
   application의 Authenticode signer, timestamp, SHA-256, manifest commit,
   provenance commit을 fail-closed 방식으로 검증한다.
 - 현재 개발 PC와 GitHub Environment에는 승인된 운영 인증서가 구성되지 않았다.
-  따라서 현재 v1.0.17 artifact는 서버 배포 승인을 받지 않았다.
+  따라서 현재 v1.0.18 후보는 신규 exact-commit 서버 검증 전까지 배포 승인을
+  받지 않았다.
 
 ## 개인 사용 중 서명 유예 정책
 
