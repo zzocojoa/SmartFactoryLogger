@@ -78,23 +78,34 @@ function Read-StartupEvents {
     )
 
     foreach ($candidate in $CandidateLogPaths) {
-        if (-not (Test-Path -LiteralPath $candidate)) {
-            continue
-        }
-
         $events = New-Object System.Collections.Generic.List[object]
-        $lines = Get-Content -LiteralPath $candidate -Tail 1000 -ErrorAction Stop
-        foreach ($line in $lines) {
-            $event = Convert-StartupLogLine -Line $line -StartedAtUtc $StartedAtUtc
-            if ($null -ne $event) {
-                $events.Add($event)
+        $observedLogPaths = New-Object System.Collections.Generic.List[string]
+        $candidateFamily = @(
+            $candidate,
+            "$candidate.1",
+            "$candidate.2",
+            "$candidate.3"
+        )
+        foreach ($logPath in $candidateFamily) {
+            if (-not (Test-Path -LiteralPath $logPath -PathType Leaf)) {
+                continue
+            }
+
+            $observedLogPaths.Add($logPath)
+            $lines = Get-Content -LiteralPath $logPath -Tail 1000 -ErrorAction Stop
+            foreach ($line in $lines) {
+                $event = Convert-StartupLogLine -Line $line -StartedAtUtc $StartedAtUtc
+                if ($null -ne $event) {
+                    $events.Add($event)
+                }
             }
         }
 
         if ($events.Count -gt 0) {
             return [pscustomobject]@{
                 log_path = $candidate
-                events = $events.ToArray()
+                log_paths = $observedLogPaths.ToArray()
+                events = @($events.ToArray() | Sort-Object timestamp, event)
             }
         }
     }

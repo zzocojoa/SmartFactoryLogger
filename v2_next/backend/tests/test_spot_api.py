@@ -2408,6 +2408,52 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_diagnostics_task = None
             spot_api._internal_temperature_task = None
 
+    async def test_final_observation_drain_keeps_event_loop_alive_for_pending_write(
+        self,
+    ) -> None:
+        write_completed = asyncio.Event()
+
+        async def delayed_write() -> None:
+            await asyncio.sleep(0.01)
+            write_completed.set()
+
+        write_task = asyncio.create_task(delayed_write())
+        spot_api._spot_observation_fact_write_tasks.add(write_task)
+        write_task.add_done_callback(
+            spot_api._spot_observation_fact_write_tasks.discard
+        )
+        try:
+            self.assertTrue(
+                await spot_api.wait_for_spot_observation_fact_writes_drain(
+                    timeout_sec=0.2
+                )
+            )
+            self.assertTrue(write_completed.is_set())
+        finally:
+            if not write_task.done():
+                write_task.cancel()
+                await asyncio.gather(write_task, return_exceptions=True)
+            spot_api._spot_observation_fact_write_tasks.discard(write_task)
+
+    async def test_final_observation_drain_fails_closed_at_timeout(self) -> None:
+        release_write = asyncio.Event()
+        write_task = asyncio.create_task(release_write.wait())
+        spot_api._spot_observation_fact_write_tasks.add(write_task)
+        write_task.add_done_callback(
+            spot_api._spot_observation_fact_write_tasks.discard
+        )
+        try:
+            self.assertFalse(
+                await spot_api.wait_for_spot_observation_fact_writes_drain(
+                    timeout_sec=0.01
+                )
+            )
+            self.assertFalse(write_task.done())
+        finally:
+            release_write.set()
+            await write_task
+            await asyncio.sleep(0)
+
     def test_observation_fact_closeout_rejects_completed_failures_and_spool(self) -> None:
         writer = Mock()
         writer.failure_count = 1

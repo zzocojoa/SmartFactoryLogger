@@ -472,6 +472,26 @@ def _probe_spot_observation_fact_drained(shutdown_kind: str) -> bool:
         return False
 
 
+async def _wait_for_spot_observation_fact_drain(shutdown_kind: str) -> bool:
+    try:
+        drained = await spot_control.wait_for_spot_observation_fact_writes_drain()
+    except Exception as exc:
+        _logger.warning(
+            "[Main] %s SPOT observation drain probe failed error_type=%s %s",
+            shutdown_kind,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+        return False
+    _logger.info(
+        "[Main] %s SPOT observation final drain complete=%s %s",
+        shutdown_kind,
+        drained,
+        _lifecycle_log_fields(),
+    )
+    return drained
+
+
 def _probe_spot_poll_shutdown_drained(
     shutdown_kind: str,
     initial_result: bool,
@@ -1739,8 +1759,8 @@ async def lifespan(app: FastAPI):
                     _logger.warning(
                         "SPOT poll or transport missed the initial lifespan shutdown deadline"
                     )
-                observation_fact_drained = _probe_spot_observation_fact_drained(
-                    "Lifespan"
+                observation_fact_drained = (
+                    await _wait_for_spot_observation_fact_drain("Lifespan")
                 )
                 if not observation_fact_drained:
                     _logger.warning(
@@ -3537,7 +3557,7 @@ async def _run_control_shutdown(reason: str) -> None:
         stopper=_stop_spot_poll_loop,
         status=status,
     )
-    observation_fact_drained = _probe_spot_observation_fact_drained(
+    observation_fact_drained = await _wait_for_spot_observation_fact_drain(
         "Control shutdown"
     )
     status["spot_observation_fact_drained"] = observation_fact_drained

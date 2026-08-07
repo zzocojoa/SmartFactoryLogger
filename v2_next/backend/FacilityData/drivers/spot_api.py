@@ -87,6 +87,7 @@ _SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC = 15.0
+_SPOT_OBSERVATION_FACT_DRAIN_TIMEOUT_SEC = 5.0
 _SPOT_DIAGNOSTIC_OUTPUT_PARAMS = SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 _SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
 _SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
@@ -115,6 +116,7 @@ _SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC = 3.0
 _SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC = 3.0
 _SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC = 10.0
 _SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC = 7.0
+_SPOT_HTTP_TRANSPORT_SHUTDOWN_TIMEOUT_SEC = 7.0
 _SPOT_DIAGNOSTICS_REFRESH_INTERVAL_MIN_SEC = 10.0
 _img_cache_entry: Optional[_SpotImageCacheEntry] = None
 _img_refresh_task: Optional[asyncio.Task[_SpotImageCacheEntry]] = None
@@ -1681,6 +1683,29 @@ def spot_observation_fact_writes_drained() -> bool:
         return False
 
 
+async def wait_for_spot_observation_fact_writes_drain(
+    timeout_sec: float = _SPOT_OBSERVATION_FACT_DRAIN_TIMEOUT_SEC,
+) -> bool:
+    pending_tasks = tuple(
+        task for task in _spot_observation_fact_write_tasks if not task.done()
+    )
+    if pending_tasks:
+        _done, pending = await asyncio.wait(
+            pending_tasks,
+            timeout=max(0.0, timeout_sec),
+        )
+        if pending:
+            _logger.warning(
+                "SPOT observation fact writes exceeded the final drain timeout",
+                extra={
+                    "code": "spot-observation-fact-final-drain-timeout",
+                    "pending_write_count": len(pending),
+                    "timeout_sec": timeout_sec,
+                },
+            )
+    return spot_observation_fact_writes_drained()
+
+
 def get_spot_observation_fact_health() -> Dict[str, Any]:
     writer = _spot_observation_fact_writer
     with _spot_diagnostics_lock:
@@ -2384,7 +2409,9 @@ def _start_spot_http_transport() -> bool:
     return started
 
 
-async def _stop_spot_http_transport(timeout_sec: float = 7.0) -> bool:
+async def _stop_spot_http_transport(
+    timeout_sec: float = _SPOT_HTTP_TRANSPORT_SHUTDOWN_TIMEOUT_SEC,
+) -> bool:
     global _http_client
     global _spot_http_transport
     global _spot_http_transport_shutdown_started

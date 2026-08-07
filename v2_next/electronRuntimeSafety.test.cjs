@@ -191,4 +191,8 @@ test('shutdown evidence collector prioritizes the packaged Electron userData pat
   assert.notEqual(legacy, -1);
   assert.ok(primary < legacy);
   assert.doesNotMatch(collector, /return \$candidates \| Sort-Object -Unique/);
+  assert.match(collector, /"\$candidate\.1"/);
+  assert.match(collector, /"\$candidate\.3"/);
+  assert.match(collector, /log_paths = \$observedLogPaths\.ToArray\(\)/);
+  assert.match(collector, /Sort-Object timestamp, event/);
 });

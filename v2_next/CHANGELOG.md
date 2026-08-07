@@ -12,9 +12,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Made SPOT shutdown report each background task's final or timed-out state,
   recover metadata finalization when observation writes drain late, and fail
   closed when a completed drain can no longer produce a trustworthy manifest.
+- Kept the event loop active while explicitly awaiting the final bounded SPOT
+  observation drain before CSV manifest closeout.
 - Normalized unavailable SPOT diagnostic ages to JSON `null`, bounded Electron
   debug logs to three 8 MiB backups, and corrected shutdown evidence discovery
-  to prefer the packaged Electron user-data path.
+  to prefer the packaged Electron user-data path and merge its rotated backups.
 
 ### Changed
 

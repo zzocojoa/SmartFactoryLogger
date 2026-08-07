@@ -588,7 +588,7 @@ class ElectronPreloadContractTests(unittest.TestCase):
             main_text,
         )
         self.assertNotIn("http.request", main_text)
-        self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;", main_text)
+        self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 390_000;", main_text)
         self.assertIn("backend.shutdown-complete", main_text)
         self.assertIn("X-SFL-Control-Token", backend_control_client_text)
         self.assertIn("STARTUP_RENDERER_EVENT_NAMES", main_text)
@@ -611,13 +611,17 @@ class ElectronPreloadContractTests(unittest.TestCase):
         grace_ms = int(grace_match.group(1).replace("_", ""))
         backend_budget_ms = int(
             (
-                backend_app.config.MAX_SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC
+                backend_app.spot_control._SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC
+                + backend_app.spot_control._SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC
+                + backend_app.spot_control._SPOT_HTTP_TRANSPORT_SHUTDOWN_TIMEOUT_SEC
+                + backend_app.spot_control._SPOT_OBSERVATION_FACT_DRAIN_TIMEOUT_SEC
+                + backend_app.config.MAX_SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC
                 + backend_app.config.MAX_CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC
             )
             * 1000.0
         )
 
-        self.assertGreaterEqual(grace_ms - backend_budget_ms, 30_000)
+        self.assertGreaterEqual(grace_ms - backend_budget_ms, 20_000)
 
     def test_backend_emits_only_allowlisted_embedded_startup_progress(self) -> None:
         with (
