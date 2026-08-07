@@ -165,6 +165,136 @@ function stopProcessTree(child, options) {
   });
 }
 
+function isVerifiedGracefulShutdownResult(result) {
+  return Boolean(
+    result?.stopped === true &&
+    result.forced !== true &&
+    (result.reason === 'close' || result.reason === 'already_exited') &&
+    result.exitCode === 0 &&
+    (result.signalCode === null || result.signalCode === undefined)
+  );
+}
+
+function createBackendCloseoutGate() {
+  let closeoutRequired = false;
+
+  return {
+    markBackendStarted() {
+      closeoutRequired = true;
+    },
+    assertCanExitWithoutProcess() {
+      if (closeoutRequired) {
+        throw new Error(
+          'Backend process exited before a graceful shutdown closeout was verified.'
+        );
+      }
+    },
+    acceptShutdownResult(result) {
+      if (!isVerifiedGracefulShutdownResult(result)) {
+        const reason = String(result?.reason ?? 'unknown');
+        throw new Error(
+          `Backend shutdown did not verify a graceful closeout (reason=${reason}).`
+        );
+      }
+      closeoutRequired = false;
+      return result;
+    },
+    isCloseoutRequired() {
+      return closeoutRequired;
+    },
+  };
+}
+
+function createCloseoutVerifiedStop(options = {}) {
+  const { stopProcess, closeoutGate } = options;
+  if (typeof stopProcess !== 'function') {
+    throw new TypeError('stopProcess must be a function.');
+  }
+  if (!closeoutGate || typeof closeoutGate.acceptShutdownResult !== 'function') {
+    throw new TypeError('closeoutGate must accept shutdown results.');
+  }
+
+  return async (child) => {
+    const result = await stopProcess(child);
+    closeoutGate.acceptShutdownResult(result);
+    return result;
+  };
+}
+
+function createApplicationShutdownController(options) {
+  const {
+    setQuitting,
+    prepareShutdown = () => undefined,
+    shutdown,
+    quitApplication,
+    onFailure = () => undefined,
+  } = options;
+
+  if (typeof setQuitting !== 'function') {
+    throw new TypeError('setQuitting must be a function.');
+  }
+  if (typeof shutdown !== 'function') {
+    throw new TypeError('shutdown must be a function.');
+  }
+  if (typeof quitApplication !== 'function') {
+    throw new TypeError('quitApplication must be a function.');
+  }
+
+  let activeShutdown = null;
+  let shutdownComplete = false;
+
+  const beginShutdown = () => {
+    if (shutdownComplete) {
+      return Promise.resolve(true);
+    }
+    if (activeShutdown) {
+      return activeShutdown;
+    }
+
+    setQuitting(true);
+    const shutdownAttempt = (async () => {
+      try {
+        prepareShutdown();
+        await shutdown();
+        shutdownComplete = true;
+        quitApplication();
+        return true;
+      } catch (error) {
+        shutdownComplete = false;
+        setQuitting(false);
+        onFailure(error);
+        return false;
+      }
+    })();
+    activeShutdown = shutdownAttempt;
+    const releaseFailedAttempt = () => {
+      if (!shutdownComplete && activeShutdown === shutdownAttempt) {
+        activeShutdown = null;
+      }
+    };
+    void shutdownAttempt.then(releaseFailedAttempt, releaseFailedAttempt);
+    return shutdownAttempt;
+  };
+
+  const handleCloseRequest = (event) => {
+    if (shutdownComplete) {
+      return false;
+    }
+    if (!event || typeof event.preventDefault !== 'function') {
+      throw new TypeError('close event must support preventDefault.');
+    }
+    event.preventDefault();
+    void beginShutdown();
+    return true;
+  };
+
+  return {
+    beginShutdown,
+    handleCloseRequest,
+    isComplete: () => shutdownComplete,
+  };
+}
+
 function createBackendRestartController(options) {
   const {
     getProcess,
@@ -214,8 +344,12 @@ function createBackendRestartController(options) {
 }
 
 module.exports = {
+  createApplicationShutdownController,
+  createBackendCloseoutGate,
   createBackendRestartController,
+  createCloseoutVerifiedStop,
   hasProcessExited,
   isProcessMissingError,
+  isVerifiedGracefulShutdownResult,
   stopProcessTree,
 };

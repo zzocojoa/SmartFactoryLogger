@@ -205,6 +205,46 @@ Report를 현재 HEAD, `49fbf6b`, `949ef38`이나 다른 설치본의 운영 승
 후속 후보는 exact-commit release identity, preinstall gate, re-attestation, QA, smoke,
 120분 canary와 final live gate를 새로 통과해야 한다.
 
+2026-08-06 실제 서버에 설치한 private unsigned `0695a0f`는 install gate와
+commit-bound re-attestation을 통과했다. 같은 설치본의 첫 Alt+F4 종료에서는
+`csv_closeout.finalized=true`가 확인됐지만, one-command QA가 요청한 실제 X 버튼
+종료에서는 모든 product process가 종료된 뒤에도 동일 logger instance와 commit의
+metadata에 `csv_closeout`, observation fact closeout, image fact closeout이 모두
+없었다. 해당 QA Evidence의 SHA-256은
+`531F1E399B12846F8DD20EC949B7A21260EDDAC7A4E9F231041D81AD98BEB6B6`이다.
+따라서 QA는 정확히 실패한 것이며 사용자가 이후 수동으로 출력한 `[PASS]` 문자열은
+검증 결과가 아니다. 서버는 중지 상태로 유지했고 smoke와 canary는 실행하지 않았다.
+
+코드 조사 결과 기존 Electron 종료 제어는 `app.before-quit`에서만 backend closeout을
+시작했다. native BrowserWindow X 종료는 window 파괴 전에 보호되지 않아 Windows
+현장에서 Electron과 backend가 closeout 없이 사라질 수 있었다. 후속 후보는 window
+`close` event 자체를 먼저 보류하고 인증된 backend shutdown 성공 뒤에만 app 종료를
+허용하며, 실패하면 창을 유지하고 재시도 가능해야 한다.
+
+후속 private unsigned `9eaa913`은 별도의 신규 증거로 이 경로를 다시 검증했다.
+commit-bound re-attestation Evidence SHA-256은
+`C1A4C5ECD0C2E8E13290859665A8F4B89ACB639B2ABDED5A562E399019F3CD51`이고,
+실제 native X 종료 one-command QA Evidence SHA-256은
+`AA644BA2A2FB90742BCD204A9DE4CA6F53D4E629949900150B66B654E493D294`이다.
+QA는 동일 logger instance와 commit의 finalized metadata, observation/image fact,
+portable validator를 모두 확인하고 PASS했다.
+
+15분 passive smoke에서는 새 ConnectTimeout이 없었지만 managed-switch counter가 없어
+물리 경로 판정은 PARTIAL이다. Sanitized ZIP SHA-256은
+`33B2A238CB0E71D289EB0C3ADFC8014C1329DC370552DED409DE716C8D4B85F5`이다.
+이어진 120분 canary는 수집기 완료 경합으로 원본 collector exit code 1을 보존했으나,
+복구 검토와 final live gate가 7,191 trigger poll 전부 HTTP 200, ConnectTimeout 0건,
+동일 backend PID, 증가 중인 CSV, 75초 minimum reuse, transport/reuse/exhaustion 0건,
+정상 image와 bounded memory를 확인했다. 공식 sanitized ZIP SHA-256은
+`5B0E9F486F0CC1E38D1F64DB61A36FFDF4D86E6F6345C9173F02553D8BF4EB14`이고 final
+live-gate Evidence SHA-256은
+`7F12C87A79774803956B5024520ACB3AA38A79C6350276DD548B7E2AB00AE586`이다.
+
+`9eaa913` 검증은 그 exact private package에만 유효하다. 이후 review에서 강제 종료
+결과와 비정상 종료 뒤 missing-process 재시도를 clean closeout으로 받아들이지 않는
+추가 fail-closed gate를 source에 반영했다. 이 후속 source는 자동화 테스트 대상이며,
+새 package로 배포하려면 새로운 commit-bound 현장 검증을 받아야 한다.
+
 관리형 스위치 counter가 없어 canary 수집기는 `PARTIAL`로 종료됐다. 이는 앱 canary와 live
 gate 실패가 아니라 물리 경로 미배제 표시다. 따라서 운영 판정은 `FIELD_CANARY_PASS`,
 물리망 판정은 `PHYSICAL_PATH_PARTIAL`로 분리해 유지한다.
@@ -238,6 +278,8 @@ gate 실패가 아니라 물리 경로 미배제 표시다. 따라서 운영 판
 
 | Version | Date | Changes | Author |
 |---------|------|---------|--------|
+| 1.4.0 | 2026-08-07 | 9eaa913 QA·smoke·복구된 120분 canary·final live gate와 후속 forced-stop fail-closed 경계 반영 | Codex |
+| 1.3.0 | 2026-08-06 | 0695a0f 실제 서버 X 종료 closeout 재현, QA fail-closed와 native window close 보호 요구사항 반영 | Codex |
 | 1.2.0 | 2026-08-06 | 49fbf6b shutdown-closeout QA 실패, 미배포 949ef38, 검증된 v1.0.16 롤백과 현장 증거 재사용 금지 경계 반영 | Codex |
 | 1.1.0 | 2026-07-31 | 575e869 QA·smoke·120분 canary와 최종 live gate 판정 동결 | Codex |
 | 1.0.0 | 2026-07-20 | 현장 raw 증거 기반 조사 완료 보고서 작성 | Codex |

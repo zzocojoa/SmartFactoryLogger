@@ -46,7 +46,7 @@ SPOT Temperature v2.5 서버 검증은 다음 문서를 사용합니다.
 - [한 번에 실행하는 QA 절차](docs/V2/04_검증/spot_temperature_v25_one_command_qa.md)
 - [1.0.13 실장비 서버 검증 결과](docs/04-report/spot-temperature-v2-5-server-validation.md)
 
-현재 API와 v1.0.17 운영 경계는 다음 문서에서 확인합니다.
+현재 API와 v1.0.18 릴리스·운영 경계는 다음 문서에서 확인합니다.
 
 - [Backend API reference](backend/API_DOCUMENTATION.md)
 - [SPOT source-port quarantine 설계](docs/02-design/features/spot-tcp-source-port-quarantine-v2.design.md)
