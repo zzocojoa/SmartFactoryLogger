@@ -22,6 +22,8 @@ test('backend environment removes inherited progress credentials', () => {
       PATH: 'test-path',
       SFL_STARTUP_PROGRESS_PATH: 'C:\\untrusted\\progress.jsonl',
       SFL_STARTUP_PROGRESS_TOKEN: 'inherited-token',
+      SFL_BACKEND_GENERATION_ID: 'inherited-generation',
+      SFL_CONTROL_TOKEN: 'inherited-control-token',
     },
     { SFL_EMBEDDED_ELECTRON: '1' }
   );

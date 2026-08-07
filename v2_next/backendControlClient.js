@@ -150,7 +150,82 @@ function requestBackendGracefulShutdown(options) {
   });
 }
 
+function requestBackendHealth(options) {
+  const {
+    controlToken,
+    port,
+    maxResponseBytes,
+    timeoutMs,
+    requestImpl = http.request,
+  } = options;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      callback(value);
+    };
+    const fail = (error) => finish(reject, error);
+    const request = requestImpl({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/control/health',
+      method: 'GET',
+      headers: {
+        'X-SFL-Control-Token': controlToken,
+      },
+    }, (response) => {
+      const chunks = [];
+      let responseBytes = 0;
+      let responseEnded = false;
+      response.on('data', (chunk) => {
+        if (settled) {
+          return;
+        }
+        responseBytes += chunk.length;
+        if (responseBytes > maxResponseBytes) {
+          fail(new Error('Backend health response exceeded the size limit.'));
+          response.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.once('aborted', () => fail(new Error('Backend health response was aborted.')));
+      response.once('error', () => fail(new Error('Backend health response failed.')));
+      response.once('close', () => {
+        if (!responseEnded) {
+          fail(new Error('Backend health response closed before completion.'));
+        }
+      });
+      response.once('end', () => {
+        responseEnded = true;
+        if (settled) {
+          return;
+        }
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          fail(new Error(`Backend health endpoint returned HTTP ${response.statusCode}.`));
+          return;
+        }
+        try {
+          finish(resolve, JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch (_error) {
+          fail(new Error('Backend health response was not valid JSON.'));
+        }
+      });
+    });
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error('Backend health request timed out.'));
+    });
+    request.once('error', fail);
+    request.end();
+  });
+}
+
 module.exports = {
   requestBackendConnectionTest,
   requestBackendGracefulShutdown,
+  requestBackendHealth,
 };

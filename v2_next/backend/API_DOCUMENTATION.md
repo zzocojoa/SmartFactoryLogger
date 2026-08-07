@@ -1,6 +1,6 @@
 # Smart Factory Logger V2 - 백엔드 API 문서
 
-> **버전:** 1.0.18\
+> **버전:** 1.0.19\
 > **기본 URL:** `http://localhost:8000` (기본값)\
 > **프레임워크:** FastAPI
 
@@ -751,6 +751,27 @@ with `Retry-After` instead of queueing behind operational SPOT traffic.
 }
 ```
 
+### GET `/api/control/health`
+
+The packaged Electron application uses this endpoint to verify that the
+backend answering on the configured loopback port is the exact child process
+it spawned. Embedded Electron requests require the per-launch
+`X-SFL-Control-Token`; an absent or incorrect token returns `403`. Standalone
+development mode accepts only loopback clients and rejects non-loopback browser
+origins or referrers with `403`.
+
+**Response:**
+
+```json
+{
+    "running": true,
+    "backend_process_id": 12345,
+    "backend_generation_id": "c71f2ac2d30a46e7b4d99a85d9835c45",
+    "backend_session_id": "4f43f68e9b2a",
+    "started_at": "2026-08-07T10:00:00+00:00"
+}
+```
+
 ### POST `/api/control/shutdown`
 
 The packaged Electron application supplies its per-launch
@@ -1090,7 +1111,7 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ## API Versioning
 
-현재 버전: **1.0.18**
+현재 버전: **1.0.19**
 
 API 버전은 FastAPI 앱 정의에 지정되어 있으며 `/docs`의 OpenAPI 문서에서 확인할
 수 있습니다.

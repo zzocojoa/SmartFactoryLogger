@@ -106,6 +106,8 @@ function buildBackendProgressEnvironment(baseEnvironment = {}, overrides = {}) {
   const environment = { ...baseEnvironment };
   delete environment.SFL_STARTUP_PROGRESS_PATH;
   delete environment.SFL_STARTUP_PROGRESS_TOKEN;
+  delete environment.SFL_BACKEND_GENERATION_ID;
+  delete environment.SFL_CONTROL_TOKEN;
   return { ...environment, ...overrides };
 }
 

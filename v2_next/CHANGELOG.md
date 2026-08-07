@@ -2,6 +2,31 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.19] - 2026-08-07
+
+### Fixed
+
+- Prevented a second Electron launch from creating a competing runtime, and
+  made startup Retry preserve a backend only when a bounded, authenticated
+  health check matches the spawned child process identity.
+- Deferred duplicate-launch focus until the hidden startup window passes its
+  normal show gate, and prevented late Retry health from resetting a dashboard
+  that became ready while the check was in flight.
+- Made SPOT shutdown report each background task's final or timed-out state,
+  recover metadata finalization when observation writes drain late, and fail
+  closed when a completed drain can no longer produce a trustworthy manifest.
+- Kept the event loop active while explicitly awaiting the final bounded SPOT
+  observation drain before CSV manifest closeout.
+- Normalized unavailable SPOT diagnostic ages to JSON `null`, bounded Electron
+  debug logs to three 8 MiB backups, and corrected shutdown evidence discovery
+  to prefer the packaged Electron user-data path and merge its rotated backups.
+
+### Changed
+
+- Expanded regression coverage for duplicate launches, Retry health failures,
+  late SPOT shutdown completion, manifest closeout, log rotation, and evidence
+  path selection.
+
 ## [1.0.18] - 2026-08-07
 
 ### Fixed

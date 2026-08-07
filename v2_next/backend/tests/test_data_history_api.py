@@ -259,6 +259,67 @@ class MemoryApiTests(unittest.TestCase):
 class ElectronPreloadContractTests(unittest.TestCase):
     repo_root = Path(__file__).resolve().parents[2]
 
+    def test_embedded_control_health_requires_token_and_returns_process_identity(
+        self,
+    ) -> None:
+        with (
+            patch.object(backend_app, "is_embedded_electron", return_value=True),
+            patch.dict(backend_app.os.environ, {"SFL_CONTROL_TOKEN": "launch-secret"}),
+        ):
+            client = TestClient(
+                backend_app.app,
+                raise_server_exceptions=False,
+                client=("127.0.0.1", 50000),
+            )
+            try:
+                rejected = client.get("/api/control/health")
+                wrong_token = client.get(
+                    "/api/control/health",
+                    headers={"X-SFL-Control-Token": "wrong-secret"},
+                )
+                accepted = client.get(
+                    "/api/control/health",
+                    headers={"X-SFL-Control-Token": "launch-secret"},
+                )
+            finally:
+                client.close()
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(wrong_token.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        payload = accepted.json()
+        self.assertTrue(payload["running"])
+        self.assertEqual(payload["backend_process_id"], backend_app.os.getpid())
+        self.assertEqual(
+            payload["backend_generation_id"],
+            backend_app._backend_generation_id,
+        )
+        self.assertEqual(payload["backend_session_id"], backend_app._app_session_id)
+        self.assertEqual(payload["started_at"], backend_app._app_started_at_iso)
+
+        operation = backend_app.app.openapi()["paths"]["/api/control/health"]["get"]
+        self.assertIn("403", operation["responses"])
+        response_schema = operation["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+        self.assertEqual(
+            response_schema["$ref"],
+            "#/components/schemas/ControlHealthResponse",
+        )
+        health_schema = backend_app.app.openapi()["components"]["schemas"][
+            "ControlHealthResponse"
+        ]
+        self.assertEqual(
+            set(health_schema["required"]),
+            {
+                "running",
+                "backend_process_id",
+                "backend_generation_id",
+                "backend_session_id",
+                "started_at",
+            },
+        )
+
     def test_embedded_shutdown_requires_the_per_launch_control_token(self) -> None:
         with (
             patch.object(backend_app, "is_embedded_electron", return_value=True),
@@ -415,9 +476,9 @@ class ElectronPreloadContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertEqual(root_package["version"], "1.0.18")
-        self.assertEqual(frontend_package["version"], "1.0.18")
-        self.assertIn('__version__ = "1.0.18"', backend_version)
+        self.assertEqual(root_package["version"], "1.0.19")
+        self.assertEqual(frontend_package["version"], "1.0.19")
+        self.assertIn('__version__ = "1.0.19"', backend_version)
         self.assertEqual(
             root_package["build"]["nsis"]["artifactName"],
             "smart-factory-logger-v2 Setup ${version}.${ext}",
@@ -554,7 +615,7 @@ class ElectronPreloadContractTests(unittest.TestCase):
             main_text,
         )
         self.assertNotIn("http.request", main_text)
-        self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;", main_text)
+        self.assertIn("const BACKEND_GRACEFUL_SHUTDOWN_MS = 390_000;", main_text)
         self.assertIn("backend.shutdown-complete", main_text)
         self.assertIn("X-SFL-Control-Token", backend_control_client_text)
         self.assertIn("STARTUP_RENDERER_EVENT_NAMES", main_text)
@@ -577,13 +638,17 @@ class ElectronPreloadContractTests(unittest.TestCase):
         grace_ms = int(grace_match.group(1).replace("_", ""))
         backend_budget_ms = int(
             (
-                backend_app.config.MAX_SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC
+                backend_app.spot_control._SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC
+                + backend_app.spot_control._SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC
+                + backend_app.spot_control._SPOT_HTTP_TRANSPORT_SHUTDOWN_TIMEOUT_SEC
+                + backend_app.spot_control._SPOT_OBSERVATION_FACT_DRAIN_TIMEOUT_SEC
+                + backend_app.config.MAX_SPOT_IMAGE_CAPTURE_SHUTDOWN_TIMEOUT_SEC
                 + backend_app.config.MAX_CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC
             )
             * 1000.0
         )
 
-        self.assertGreaterEqual(grace_ms - backend_budget_ms, 30_000)
+        self.assertGreaterEqual(grace_ms - backend_budget_ms, 20_000)
 
     def test_backend_emits_only_allowlisted_embedded_startup_progress(self) -> None:
         with (

@@ -9,6 +9,7 @@ import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, TypeVar, TypedDict
 from urllib.error import HTTPError, URLError
@@ -86,6 +87,7 @@ _SPOT_FOCUS_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_ACTUATOR_VERIFY_TIMEOUT_SEC = 4.0
 _SPOT_ACTUATOR_VERIFY_INTERVAL_SEC = 0.25
 _SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC = 15.0
+_SPOT_OBSERVATION_FACT_DRAIN_TIMEOUT_SEC = 5.0
 _SPOT_DIAGNOSTIC_OUTPUT_PARAMS = SPOT_DIAGNOSTIC_OUTPUT_FIELDS
 _SPOT_DIAGNOSTIC_TEXT_MAX_CHARS = 256
 _SPOT_DIAGNOSTICS_COLLECTION_MODE = str(
@@ -114,6 +116,7 @@ _SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC = 3.0
 _SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC = 3.0
 _SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC = 10.0
 _SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC = 7.0
+_SPOT_HTTP_TRANSPORT_SHUTDOWN_TIMEOUT_SEC = 7.0
 _SPOT_DIAGNOSTICS_REFRESH_INTERVAL_MIN_SEC = 10.0
 _img_cache_entry: Optional[_SpotImageCacheEntry] = None
 _img_refresh_task: Optional[asyncio.Task[_SpotImageCacheEntry]] = None
@@ -1680,6 +1683,29 @@ def spot_observation_fact_writes_drained() -> bool:
         return False
 
 
+async def wait_for_spot_observation_fact_writes_drain(
+    timeout_sec: float = _SPOT_OBSERVATION_FACT_DRAIN_TIMEOUT_SEC,
+) -> bool:
+    pending_tasks = tuple(
+        task for task in _spot_observation_fact_write_tasks if not task.done()
+    )
+    if pending_tasks:
+        _done, pending = await asyncio.wait(
+            pending_tasks,
+            timeout=max(0.0, timeout_sec),
+        )
+        if pending:
+            _logger.warning(
+                "SPOT observation fact writes exceeded the final drain timeout",
+                extra={
+                    "code": "spot-observation-fact-final-drain-timeout",
+                    "pending_write_count": len(pending),
+                    "timeout_sec": timeout_sec,
+                },
+            )
+    return spot_observation_fact_writes_drained()
+
+
 def get_spot_observation_fact_health() -> Dict[str, Any]:
     writer = _spot_observation_fact_writer
     with _spot_diagnostics_lock:
@@ -1727,7 +1753,7 @@ def _missing_spot_diagnostics_payload() -> Dict[str, Any]:
         "diagnostics_collection_mode": _SPOT_DIAGNOSTICS_COLLECTION_MODE,
         "diagnostics_source": "spot_output_parameter_get",
         "diagnostics_binding_status": "missing",
-        "diagnostics_age_ms": "",
+        "diagnostics_age_ms": None,
         "diagnostics_max_age_ms": _spot_diagnostics_max_age_sec() * 1000.0,
         "diagnostics_field_status": {
             field: "not_requested" for field in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS
@@ -1772,7 +1798,7 @@ def _latest_spot_diagnostics_for_poll(
     payload["_diagnostics_captured_monotonic"] = captured_monotonic
     payload["diagnostics_binding_status"] = binding_status
     payload["diagnostics_age_ms"] = (
-        f"{age_sec * 1000.0:.3f}" if age_sec is not None and age_sec >= 0 else ""
+        f"{age_sec * 1000.0:.3f}" if age_sec is not None and age_sec >= 0 else None
     )
     return payload
 
@@ -2026,7 +2052,7 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
     if diagnostics_age_sec is not None:
         if diagnostics_age_sec < 0:
             payload["diagnostics_binding_status"] = "future_clock"
-            payload["diagnostics_age_ms"] = ""
+            payload["diagnostics_age_ms"] = None
         else:
             payload["diagnostics_age_ms"] = f"{diagnostics_age_sec * 1000.0:.3f}"
     payload.update(
@@ -2383,7 +2409,9 @@ def _start_spot_http_transport() -> bool:
     return started
 
 
-async def _stop_spot_http_transport(timeout_sec: float = 7.0) -> bool:
+async def _stop_spot_http_transport(
+    timeout_sec: float = _SPOT_HTTP_TRANSPORT_SHUTDOWN_TIMEOUT_SEC,
+) -> bool:
     global _http_client
     global _spot_http_transport
     global _spot_http_transport_shutdown_started
@@ -2837,6 +2865,15 @@ async def _stop_spot_image_refresh_for_shutdown(
 _spot_poll_task: Optional[asyncio.Task] = None
 _internal_temperature_task: Optional[asyncio.Task] = None
 _spot_poll_running = False
+_spot_shutdown_state_lock = threading.Lock()
+_spot_shutdown_task_states: dict[str, str] = {
+    "diagnostics": "not_started",
+    "poll": "not_started",
+    "internal_temperature": "not_started",
+}
+_spot_shutdown_image_refresh_stopped = False
+_spot_shutdown_transport_stopped = False
+_spot_shutdown_started_monotonic: float | None = None
 
 
 async def _spot_poll_loop():
@@ -2901,9 +2938,20 @@ async def _spot_poll_loop():
 async def start_spot_poll_loop():
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф ??뽰삂."""
     global _img_accepting_requests, _spot_poll_task, _spot_poll_running
+    global _spot_shutdown_image_refresh_stopped, _spot_shutdown_started_monotonic
+    global _spot_shutdown_transport_stopped
     if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
 
+    with _spot_shutdown_state_lock:
+        _spot_shutdown_task_states.update(
+            diagnostics="running",
+            poll="running",
+            internal_temperature="running",
+        )
+        _spot_shutdown_image_refresh_stopped = False
+        _spot_shutdown_transport_stopped = False
+        _spot_shutdown_started_monotonic = None
     _start_spot_http_transport()
     _img_accepting_requests = True
     _spot_poll_running = True
@@ -2913,7 +2961,12 @@ async def start_spot_poll_loop():
 async def stop_spot_poll_loop() -> bool:
     """獄쏄퉫???깆뒲???袁ⓥ봺??뤿Ф 餓λ쵐?."""
     global _internal_temperature_task, _spot_poll_task, _spot_poll_running, _spot_diagnostics_task
+    global _spot_shutdown_image_refresh_stopped, _spot_shutdown_started_monotonic
+    global _spot_shutdown_transport_stopped
     _spot_poll_running = False
+    shutdown_started_monotonic = time.monotonic()
+    with _spot_shutdown_state_lock:
+        _spot_shutdown_started_monotonic = shutdown_started_monotonic
 
     task_entries = (
         ("diagnostics", _spot_diagnostics_task),
@@ -2937,16 +2990,30 @@ async def stop_spot_poll_loop() -> bool:
             active_tasks,
             timeout=_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
         )
+    for task_name, task in task_entries:
+        if task is None:
+            _record_spot_background_shutdown_state(
+                task_name,
+                "not_started",
+                shutdown_started_monotonic,
+            )
     for task in done:
         task_name = active_tasks[task]
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            continue
-        except BaseException as result:
+        task_state, result = _spot_background_task_result(task, late=False)
+        _record_spot_background_shutdown_state(
+            task_name,
+            task_state,
+            shutdown_started_monotonic,
+        )
+        if result is not None:
             task_shutdown_succeeded = False
             _logger.warning(
-                "SPOT background task failed before shutdown completed",
+                "SPOT background task shutdown failed task=%s state=%s "
+                "error_type=%s timeout_sec=%.1f",
+                task_name,
+                task_state,
+                type(result).__name__,
+                _SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
                 extra={
                     "code": "spot-background-task-shutdown-failed",
                     "task": task_name,
@@ -2956,9 +3023,20 @@ async def stop_spot_poll_loop() -> bool:
     for task in pending:
         task_shutdown_succeeded = False
         task_name = active_tasks[task]
-        task.add_done_callback(_consume_spot_background_shutdown_result)
+        _record_spot_background_shutdown_state(
+            task_name,
+            "timeout_pending",
+            shutdown_started_monotonic,
+        )
+        task.add_done_callback(
+            partial(_record_late_spot_background_shutdown_result, task_name)
+        )
         _logger.warning(
-            "SPOT background task did not drain before shutdown deadline",
+            "SPOT background task shutdown task=%s state=timeout_pending "
+            "timeout_sec=%.1f elapsed_ms=%.1f",
+            task_name,
+            _SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
+            (time.monotonic() - shutdown_started_monotonic) * 1000.0,
             extra={
                 "code": "spot-background-task-shutdown-timeout",
                 "task": task_name,
@@ -3000,6 +3078,9 @@ async def stop_spot_poll_loop() -> bool:
             "SPOT HTTP transport did not drain before shutdown timeout",
             extra={"code": "spot-http-transport-shutdown-timeout"},
         )
+    with _spot_shutdown_state_lock:
+        _spot_shutdown_image_refresh_stopped = image_refresh_stopped
+        _spot_shutdown_transport_stopped = transport_stopped
     observation_fact_drained = spot_observation_fact_writes_drained()
     if not observation_fact_drained:
         _logger.warning(
@@ -3020,15 +3101,94 @@ async def stop_spot_poll_loop() -> bool:
     )
 
 
-def _consume_spot_background_shutdown_result(
+def _spot_background_task_result(
+    task: asyncio.Task[None],
+    *,
+    late: bool,
+) -> tuple[str, BaseException | None]:
+    suffix = "_late" if late else ""
+    if task.cancelled():
+        return f"cancelled{suffix}", None
+    try:
+        error = task.exception()
+    except BaseException as exc:
+        return f"failed{suffix}", exc
+    if error is not None:
+        return f"failed{suffix}", error
+    return f"completed{suffix}", None
+
+
+def _record_spot_background_shutdown_state(
+    task_name: str,
+    state: str,
+    shutdown_started_monotonic: float,
+) -> None:
+    with _spot_shutdown_state_lock:
+        _spot_shutdown_task_states[task_name] = state
+    _logger.info(
+        "SPOT background task shutdown task=%s state=%s timeout_sec=%.1f elapsed_ms=%.1f",
+        task_name,
+        state,
+        _SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
+        (time.monotonic() - shutdown_started_monotonic) * 1000.0,
+    )
+
+
+def _record_late_spot_background_shutdown_result(
+    task_name: str,
     task: asyncio.Task[None],
 ) -> None:
-    if task.cancelled():
-        return
-    try:
-        task.exception()
-    except BaseException:
-        return
+    state, error = _spot_background_task_result(task, late=True)
+    with _spot_shutdown_state_lock:
+        _spot_shutdown_task_states[task_name] = state
+        started_monotonic = _spot_shutdown_started_monotonic
+    elapsed_ms = (
+        (time.monotonic() - started_monotonic) * 1000.0
+        if started_monotonic is not None
+        else 0.0
+    )
+    _logger.info(
+        "SPOT background task shutdown task=%s state=%s timeout_sec=%.1f elapsed_ms=%.1f",
+        task_name,
+        state,
+        _SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC,
+        elapsed_ms,
+    )
+    if error is not None:
+        _logger.warning(
+            "SPOT background task late shutdown failed task=%s error_type=%s",
+            task_name,
+            type(error).__name__,
+        )
+
+
+def get_spot_poll_shutdown_status() -> Dict[str, Any]:
+    with _spot_shutdown_state_lock:
+        task_states = dict(_spot_shutdown_task_states)
+        image_refresh_stopped = _spot_shutdown_image_refresh_stopped
+        transport_stopped = _spot_shutdown_transport_stopped
+    drained_states = {
+        "not_started",
+        "cancelled",
+        "completed",
+        "cancelled_late",
+        "completed_late",
+    }
+    tasks_drained = all(state in drained_states for state in task_states.values())
+    observation_fact_drained = spot_observation_fact_writes_drained()
+    return {
+        "tasks": task_states,
+        "tasks_drained": tasks_drained,
+        "observation_fact_drained": observation_fact_drained,
+        "image_refresh_stopped": image_refresh_stopped,
+        "transport_stopped": transport_stopped,
+        "complete": (
+            tasks_drained
+            and observation_fact_drained
+            and image_refresh_stopped
+            and transport_stopped
+        ),
+    }
 
 
 def get_cached_spot_temp() -> float:

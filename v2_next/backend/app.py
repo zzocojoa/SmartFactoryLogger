@@ -159,6 +159,14 @@ class ShutdownRequest(BaseModel):
     reason: str | None = None
 
 
+class ControlHealthResponse(BaseModel):
+    running: bool
+    backend_process_id: int
+    backend_generation_id: str
+    backend_session_id: str
+    started_at: str
+
+
 class FrontendErrorPayload(BaseModel):
     time: float
     type: str
@@ -214,6 +222,7 @@ _log_dir: Path | None = None
 _app_start_time = time.time()
 _app_started_at_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 _app_session_id = uuid.uuid4().hex[:12]
+_backend_generation_id = os.environ.get("SFL_BACKEND_GENERATION_ID", "") or _app_session_id
 _stats_lock = threading.Lock()
 _stats_total_requests = 0
 _stats_total_latency_ms = 0.0
@@ -470,6 +479,58 @@ def _probe_spot_observation_fact_drained(shutdown_kind: str) -> bool:
             _lifecycle_log_fields(),
         )
         return False
+
+
+async def _wait_for_spot_observation_fact_drain(shutdown_kind: str) -> bool:
+    try:
+        drained = await spot_control.wait_for_spot_observation_fact_writes_drain()
+    except Exception as exc:
+        _logger.warning(
+            "[Main] %s SPOT observation drain probe failed error_type=%s %s",
+            shutdown_kind,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+        return False
+    _logger.info(
+        "[Main] %s SPOT observation final drain complete=%s %s",
+        shutdown_kind,
+        drained,
+        _lifecycle_log_fields(),
+    )
+    return drained
+
+
+def _probe_spot_poll_shutdown_drained(
+    shutdown_kind: str,
+    initial_result: bool,
+) -> bool:
+    if initial_result:
+        return True
+    try:
+        status = spot_control.get_spot_poll_shutdown_status()
+    except (AttributeError, TypeError):
+        return initial_result
+    except Exception as exc:
+        _logger.warning(
+            "[Main] %s SPOT poll shutdown probe failed error_type=%s %s",
+            shutdown_kind,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+        return False
+    _logger.info(
+        "[Main] %s SPOT poll shutdown final complete=%s tasks=%s "
+        "observation_drained=%s image_refresh_stopped=%s transport_stopped=%s %s",
+        shutdown_kind,
+        bool(status.get("complete")),
+        json.dumps(status.get("tasks", {}), sort_keys=True),
+        bool(status.get("observation_fact_drained")),
+        bool(status.get("image_refresh_stopped")),
+        bool(status.get("transport_stopped")),
+        _lifecycle_log_fields(),
+    )
+    return bool(status.get("complete"))
 
 
 def _log_backend_access_urls() -> None:
@@ -1704,18 +1765,16 @@ async def lifespan(app: FastAPI):
                         _lifecycle_log_fields(),
                     )
                 if not spot_poll_stopped:
-                    shutdown_failures.append("spot_poll")
-                    _logger.error(
-                        "SPOT poll or transport did not drain before lifespan shutdown"
+                    _logger.warning(
+                        "SPOT poll or transport missed the initial lifespan shutdown deadline"
                     )
-                observation_fact_drained = _probe_spot_observation_fact_drained(
-                    "Lifespan"
+                observation_fact_drained = (
+                    await _wait_for_spot_observation_fact_drain("Lifespan")
                 )
                 if not observation_fact_drained:
-                    shutdown_failures.append("spot_observation_fact")
-                    _logger.error(
+                    _logger.warning(
                         "SPOT observation fact writes did not drain before lifespan "
-                        "shutdown; the observation manifest will be suppressed"
+                        "shutdown; closeout will recheck before finalizing"
                     )
                 try:
                     image_capture_drained = await asyncio.to_thread(
@@ -1783,6 +1842,24 @@ async def lifespan(app: FastAPI):
                     shutdown_failures.append("csv_logger")
                     _logger.warning(
                         "CSV logger did not stop cleanly during lifespan shutdown"
+                    )
+            if spot_start_attempted:
+                observation_fact_drained = _probe_spot_observation_fact_drained(
+                    "Lifespan final"
+                )
+                spot_poll_stopped = _probe_spot_poll_shutdown_drained(
+                    "Lifespan final",
+                    spot_poll_stopped,
+                )
+                if not spot_poll_stopped:
+                    shutdown_failures.append("spot_poll")
+                    _logger.error(
+                        "SPOT poll or transport did not drain before lifespan shutdown"
+                    )
+                if not observation_fact_drained:
+                    shutdown_failures.append("spot_observation_fact")
+                    _logger.error(
+                        "SPOT observation fact writes did not drain before lifespan shutdown"
                     )
             if shutdown_failures and not shutdown_has_primary_error:
                 raise RuntimeError(
@@ -1990,6 +2067,9 @@ def _stop_services_for_control_shutdown(
         status=status,
     )
 
+    status["spot_observation_fact_drained"] = (
+        _probe_spot_observation_fact_drained("Control shutdown final")
+    )
     status["total_elapsed_ms"] = round(
         (time.perf_counter() - shutdown_started_perf) * 1000.0,
         1,
@@ -2232,6 +2312,13 @@ def _require_control_shutdown_access(
     control_token: str | None,
 ) -> None:
     _require_local_control_access(request, control_token, "Control shutdown requests")
+
+
+def _require_control_health_access(
+    request: Request,
+    control_token: str | None,
+) -> None:
+    _require_local_control_access(request, control_token, "Control health requests")
 
 
 @app.get("/api/facility/operator-metadata", response_model=OperatorMetadata)
@@ -3479,7 +3566,7 @@ async def _run_control_shutdown(reason: str) -> None:
         stopper=_stop_spot_poll_loop,
         status=status,
     )
-    observation_fact_drained = _probe_spot_observation_fact_drained(
+    observation_fact_drained = await _wait_for_spot_observation_fact_drain(
         "Control shutdown"
     )
     status["spot_observation_fact_drained"] = observation_fact_drained
@@ -3488,6 +3575,10 @@ async def _run_control_shutdown(reason: str) -> None:
             _stop_services_for_control_shutdown,
             observation_fact_drained=observation_fact_drained,
         )
+    )
+    status["spot_poll_loop_stopped"] = _probe_spot_poll_shutdown_drained(
+        "Control shutdown final",
+        bool(status.get("spot_poll_loop_stopped")),
     )
     status["total_elapsed_ms"] = round(
         (time.perf_counter() - shutdown_started_perf) * 1000.0,
@@ -3526,6 +3617,25 @@ async def shutdown(
 
     _schedule_control_shutdown(payload.reason or "api_request")
     return {"ok": True}
+
+
+@app.get(
+    "/api/control/health",
+    response_model=ControlHealthResponse,
+    responses={403: {"description": "Local control access denied"}},
+)
+async def control_health(
+    request: Request,
+    control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
+):
+    _require_control_health_access(request, control_token)
+    return {
+        "running": True,
+        "backend_process_id": os.getpid(),
+        "backend_generation_id": _backend_generation_id,
+        "backend_session_id": _app_session_id,
+        "started_at": _app_started_at_iso,
+    }
 
 # --- Static File Serving (Frontend) ---
 @app.get("/assets/{asset_path:path}")

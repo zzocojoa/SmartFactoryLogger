@@ -10,6 +10,7 @@ const test = require('node:test');
 const {
   requestBackendConnectionTest,
   requestBackendGracefulShutdown,
+  requestBackendHealth,
 } = require('./backendControlClient');
 const { stopProcessTree } = require('./backendProcessLifecycle');
 
@@ -67,6 +68,17 @@ function shutdownWith(harness, overrides = {}) {
     controlToken: 'test-control-token',
     port: 8000,
     reason: 'electron_exit',
+    timeoutMs: 50,
+    requestImpl: harness.requestImpl,
+    ...overrides,
+  });
+}
+
+function healthWith(harness, overrides = {}) {
+  return requestBackendHealth({
+    controlToken: 'test-control-token',
+    port: 8000,
+    maxResponseBytes: 64,
     timeoutMs: 50,
     requestImpl: harness.requestImpl,
     ...overrides,
@@ -152,6 +164,70 @@ test('backend graceful-shutdown client sends the authenticated closeout request'
   assert.equal(harness.request.options.headers['X-SFL-Control-Token'], 'test-control-token');
   assert.deepEqual(JSON.parse(harness.request.body), { reason: 'electron_exit' });
   assert.equal(response.resumed, true);
+});
+
+test('backend health client reads only a bounded local health response', async () => {
+  const harness = createRequestHarness();
+  const resultPromise = healthWith(harness);
+  const response = harness.respond(200);
+  response.emit('data', Buffer.from('{"running":true}'));
+  response.emit('end');
+  response.emit('close');
+
+  assert.deepEqual(await resultPromise, { running: true });
+  assert.equal(harness.request.options.hostname, '127.0.0.1');
+  assert.equal(harness.request.options.path, '/api/control/health');
+  assert.equal(harness.request.options.method, 'GET');
+  assert.equal(
+    harness.request.options.headers['X-SFL-Control-Token'],
+    'test-control-token'
+  );
+  assert.equal(harness.request.body, undefined);
+});
+
+test('backend health client fails closed on malformed and oversized responses', async () => {
+  const malformedHarness = createRequestHarness();
+  const malformedPromise = healthWith(malformedHarness);
+  const malformedResponse = malformedHarness.respond(200);
+  malformedResponse.emit('data', Buffer.from('not-json'));
+  malformedResponse.emit('end');
+  await assert.rejects(malformedPromise, /not valid JSON/);
+
+  const oversizedHarness = createRequestHarness();
+  const oversizedPromise = healthWith(oversizedHarness, { maxResponseBytes: 4 });
+  oversizedHarness.respond(200).emit('data', Buffer.from('{"running":true}'));
+  await assert.rejects(oversizedPromise, /exceeded the size limit/);
+});
+
+test('backend health client fails closed on HTTP, timeout, socket, and premature-close errors', async () => {
+  const httpHarness = createRequestHarness();
+  const httpPromise = healthWith(httpHarness);
+  const httpResponse = httpHarness.respond(503);
+  httpResponse.emit('data', Buffer.from('{"detail":"unavailable"}'));
+  httpResponse.emit('end');
+  await assert.rejects(httpPromise, /HTTP 503/);
+
+  const timeoutHarness = createRequestHarness();
+  const timeoutPromise = healthWith(timeoutHarness);
+  timeoutHarness.request.timeoutCallback();
+  await assert.rejects(timeoutPromise, /timed out/);
+
+  const socketHarness = createRequestHarness();
+  const socketPromise = healthWith(socketHarness);
+  socketHarness.request.emit('error', new Error('connect refused'));
+  await assert.rejects(socketPromise, /connect refused/);
+
+  for (const eventName of ['aborted', 'error', 'close']) {
+    const harness = createRequestHarness();
+    const resultPromise = healthWith(harness);
+    const response = harness.respond();
+    if (eventName === 'error') {
+      response.emit(eventName, new Error('socket reset'));
+    } else {
+      response.emit(eventName);
+    }
+    await assert.rejects(resultPromise, /aborted|failed|closed before completion/);
+  }
 });
 
 test('backend graceful-shutdown client rejects HTTP, timeout, and socket failures', async () => {

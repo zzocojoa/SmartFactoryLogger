@@ -2270,6 +2270,67 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await poll_task
 
+    async def test_spot_shutdown_records_named_timeout_and_late_completion(self) -> None:
+        release_task = asyncio.Event()
+
+        async def stubborn_poll_task() -> None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release_task.wait()
+                raise
+
+        poll_task = asyncio.create_task(stubborn_poll_task())
+        await asyncio.sleep(0)
+        spot_api._spot_diagnostics_task = None
+        spot_api._spot_poll_task = poll_task
+        spot_api._internal_temperature_task = None
+
+        try:
+            with (
+                patch.object(spot_api, "_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC", 0.01),
+                patch.object(
+                    spot_api,
+                    "_stop_spot_image_refresh_for_shutdown",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    spot_api,
+                    "_stop_spot_http_transport",
+                    new=AsyncMock(return_value=True),
+                ),
+                self.assertLogs("spot_control", level="INFO") as captured,
+            ):
+                self.assertFalse(await spot_api.stop_spot_poll_loop())
+                initial = spot_api.get_spot_poll_shutdown_status()
+                self.assertEqual(initial["tasks"]["poll"], "timeout_pending")
+
+                release_task.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await poll_task
+                await asyncio.sleep(0)
+
+                final = spot_api.get_spot_poll_shutdown_status()
+                self.assertEqual(final["tasks"]["poll"], "cancelled_late")
+                self.assertTrue(final["tasks_drained"])
+
+            messages = "\n".join(captured.output)
+            self.assertIn("task=poll state=timeout_pending", messages)
+            self.assertIn("task=poll state=cancelled_late", messages)
+        finally:
+            release_task.set()
+            if not poll_task.done():
+                poll_task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await poll_task
+            spot_api._spot_poll_task = None
+            spot_api._spot_diagnostics_task = None
+            spot_api._internal_temperature_task = None
+
+    def test_missing_diagnostics_age_uses_schema_safe_null(self) -> None:
+        payload = spot_api._missing_spot_diagnostics_payload()
+        self.assertIsNone(payload["diagnostics_age_ms"])
+
     async def test_stop_retains_pending_observation_writer_until_it_drains(
         self,
     ) -> None:
@@ -2346,6 +2407,52 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             spot_api._spot_poll_task = None
             spot_api._spot_diagnostics_task = None
             spot_api._internal_temperature_task = None
+
+    async def test_final_observation_drain_keeps_event_loop_alive_for_pending_write(
+        self,
+    ) -> None:
+        write_completed = asyncio.Event()
+
+        async def delayed_write() -> None:
+            await asyncio.sleep(0.01)
+            write_completed.set()
+
+        write_task = asyncio.create_task(delayed_write())
+        spot_api._spot_observation_fact_write_tasks.add(write_task)
+        write_task.add_done_callback(
+            spot_api._spot_observation_fact_write_tasks.discard
+        )
+        try:
+            self.assertTrue(
+                await spot_api.wait_for_spot_observation_fact_writes_drain(
+                    timeout_sec=0.2
+                )
+            )
+            self.assertTrue(write_completed.is_set())
+        finally:
+            if not write_task.done():
+                write_task.cancel()
+                await asyncio.gather(write_task, return_exceptions=True)
+            spot_api._spot_observation_fact_write_tasks.discard(write_task)
+
+    async def test_final_observation_drain_fails_closed_at_timeout(self) -> None:
+        release_write = asyncio.Event()
+        write_task = asyncio.create_task(release_write.wait())
+        spot_api._spot_observation_fact_write_tasks.add(write_task)
+        write_task.add_done_callback(
+            spot_api._spot_observation_fact_write_tasks.discard
+        )
+        try:
+            self.assertFalse(
+                await spot_api.wait_for_spot_observation_fact_writes_drain(
+                    timeout_sec=0.01
+                )
+            )
+            self.assertFalse(write_task.done())
+        finally:
+            release_write.set()
+            await write_task
+            await asyncio.sleep(0)
 
     def test_observation_fact_closeout_rejects_completed_failures_and_spool(self) -> None:
         writer = Mock()

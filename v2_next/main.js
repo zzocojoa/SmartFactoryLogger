@@ -30,7 +30,13 @@ const { createBackendControlIpcHandlers } = require('./backendControlIpc');
 const {
   requestBackendConnectionTest: sendBackendConnectionTest,
   requestBackendGracefulShutdown: sendBackendGracefulShutdown,
+  requestBackendHealth: sendBackendHealth,
 } = require('./backendControlClient');
+const {
+  createRotatingFileLogger,
+  isMatchingBackendHealth,
+  installSingleInstanceGuard,
+} = require('./electronRuntimeSafety');
 
 const startupOriginNs = process.hrtime.bigint();
 const startupSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -67,13 +73,19 @@ const STARTUP_PAYLOAD_MAX_KEYS = 16;
 const STARTUP_PAYLOAD_MAX_KEY_LENGTH = 64;
 const STARTUP_PAYLOAD_MAX_STRING_LENGTH = 200;
 const MAX_RENDERER_STARTUP_EVENTS_PER_NAME = 4;
-const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;
+const BACKEND_GRACEFUL_SHUTDOWN_MS = 390_000;
 const BACKEND_CONTROL_RESPONSE_MAX_BYTES = 1024 * 1024;
 const BACKEND_CONNECTION_TEST_TIMEOUT_MS = 10_000;
 const BACKEND_SHUTDOWN_REQUEST_TIMEOUT_MS = 2_000;
+const BACKEND_RETRY_HEALTH_GRACE_MS = 12_000;
+const BACKEND_RETRY_HEALTH_REQUEST_TIMEOUT_MS = 750;
+const BACKEND_RETRY_HEALTH_INTERVAL_MS = 500;
+const ELECTRON_LOG_MAX_BYTES = 8 * 1024 * 1024;
+const ELECTRON_LOG_MAX_BACKUPS = 3;
 
 let mainWindow;
 let backendProcess;
+const backendGenerationIds = new WeakMap();
 const backendCloseoutGate = createBackendCloseoutGate();
 let backendProgressTransport;
 let trustedMainDocumentUrl = null;
@@ -85,6 +97,7 @@ let backendStartTriggered = false;
 let mainWindowReadyToShow = false;
 let mainWindowShown = false;
 let splashFirstPaintAccepted = false;
+let deferredSecondInstanceFocus = false;
 const expectedBackendExitPids = new Set();
 const rendererStartupEventCounts = new Map();
 
@@ -101,15 +114,14 @@ try {
   logPath = path.join(app.getPath('temp'), 'debug_electron.log');
 }
 
+const electronLogger = createRotatingFileLogger({
+  logPath,
+  maxBytes: ELECTRON_LOG_MAX_BYTES,
+  maxBackups: ELECTRON_LOG_MAX_BACKUPS,
+});
+
 function log(msg) {
-  try {
-    const timestamp = new Date().toISOString();
-    const formattedMsg = `[${timestamp}] ${msg}\n`;
-    fs.appendFileSync(logPath, formattedMsg);
-    console.log(msg);
-  } catch (e) {
-    console.error("Failed to write to log file:", e);
-  }
+  electronLogger.log(msg);
 }
 
 function getStartupElapsedMs() {
@@ -307,6 +319,8 @@ function registerStartupIpcHandlers() {
         maybeShowSplashAndTriggerInitialBackendStart();
       }
     },
+    recheckBackendHealth: waitForBackendHealthBeforeRetry,
+    recoverHealthyBackend: recoverStartupWithHealthyBackend,
     restartBackend,
     quitApplication: () => setImmediate(() => app.quit()),
   });
@@ -485,6 +499,14 @@ function showStartupWindow() {
     mainWindowShown = true;
     logStartupEvent('electron.window-shown');
   }
+  if (deferredSecondInstanceFocus) {
+    deferredSecondInstanceFocus = false;
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+    logStartupEvent('electron.second-instance-focus-released', {});
+  }
   return true;
 }
 
@@ -592,6 +614,7 @@ function startBackend() {
       });
     }
 
+    const backendGenerationId = randomBytes(16).toString('hex');
     const spawnOptions = {
       cwd: isPackaged ? path.join(process.resourcesPath, 'backend') : __dirname,
       shell: false,
@@ -600,6 +623,7 @@ function startBackend() {
         ...progressEnvironment,
         SFL_EMBEDDED_ELECTRON: '1',
         SFL_CONTROL_TOKEN: backendControlToken,
+        SFL_BACKEND_GENERATION_ID: backendGenerationId,
       }),
     };
 
@@ -610,6 +634,7 @@ function startBackend() {
     log(`CWD: ${spawnOptions.cwd}`);
     
     const child = spawn(backendPath, args, spawnOptions);
+    backendGenerationIds.set(child, backendGenerationId);
     backendProcess = child;
 
     child.on('spawn', () => {
@@ -714,6 +739,70 @@ async function stopBackendProcess(child = backendProcess) {
   }
 }
 
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForBackendHealthBeforeRetry() {
+  const deadline = Date.now() + BACKEND_RETRY_HEALTH_GRACE_MS;
+  let attempts = 0;
+  let lastError = null;
+  while (!applicationQuitting && backendProcess?.pid && Date.now() <= deadline) {
+    attempts += 1;
+    const expectedChild = backendProcess;
+    const expectedIdentity = {
+      processId: expectedChild?.pid,
+      generationId: expectedChild ? backendGenerationIds.get(expectedChild) : undefined,
+    };
+    try {
+      const health = await sendBackendHealth({
+        controlToken: backendControlToken,
+        port: resolveBackendPort(),
+        maxResponseBytes: BACKEND_CONTROL_RESPONSE_MAX_BYTES,
+        timeoutMs: BACKEND_RETRY_HEALTH_REQUEST_TIMEOUT_MS,
+      });
+      if (
+        backendProcess === expectedChild &&
+        isMatchingBackendHealth(health, expectedIdentity)
+      ) {
+        logStartupEvent('backend.retry-health-recovered', { attempts });
+        return true;
+      }
+      lastError = new Error('Backend health identity did not match the spawned process.');
+    } catch (error) {
+      lastError = error;
+    }
+    if (!startupCoordinator.getState().can_retry) {
+      logStartupEvent('backend.retry-renderer-recovered', { attempts });
+      return false;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      break;
+    }
+    await delay(Math.min(BACKEND_RETRY_HEALTH_INTERVAL_MS, remaining));
+  }
+  logStartupEvent('backend.retry-health-not-ready', {
+    attempts,
+    message: lastError instanceof Error ? lastError.message : null,
+  });
+  return false;
+}
+
+function resetStartupForRetry(reason) {
+  rendererStartupEventCounts.clear();
+  trustedRendererTimeOriginMs = null;
+  startupCoordinator.reset(reason);
+  const contents = mainWindow?.webContents;
+  if (contents && !contents.isDestroyed()) {
+    contents.reload();
+  }
+}
+
+async function recoverStartupWithHealthyBackend() {
+  resetStartupForRetry('retry_health_recovered');
+}
+
 const stopBackendWithVerifiedCloseout = createCloseoutVerifiedStop({
   stopProcess: stopBackendProcess,
   closeoutGate: backendCloseoutGate,
@@ -730,13 +819,7 @@ const backendRestartController = createBackendRestartController({
   beforeRestart: async () => {
     backendCloseoutGate.assertCanExitWithoutProcess();
     logStartupEvent('backend.restart-requested');
-    rendererStartupEventCounts.clear();
-    trustedRendererTimeOriginMs = null;
-    startupCoordinator.reset('manual_retry');
-    const contents = mainWindow?.webContents;
-    if (contents && !contents.isDestroyed()) {
-      contents.reload();
-    }
+    resetStartupForRetry('manual_retry');
   },
 });
 
@@ -783,25 +866,36 @@ function restartBackend() {
   return backendRestartController.restart();
 }
 
-app.whenReady().then(() => {
-  logStartupEvent('electron.app-ready');
-  log("App ready, preparing startup window...");
-  registerMemoryIpcHandlers();
-  registerStartupIpcHandlers();
-  registerBackendControlIpcHandlers();
-  startupCoordinator.start();
-  createWindow();
-  logStartupEvent('electron.ready-flow-complete');
+const isPrimaryInstance = installSingleInstanceGuard(app, {
+  getMainWindow: () => mainWindow,
+  logEvent: logStartupEvent,
+  canShowWindow: () => mainWindowShown,
+  deferWindowFocus: () => {
+    deferredSecondInstanceFocus = true;
+  },
+});
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (isPrimaryInstance) {
+  app.whenReady().then(() => {
+    logStartupEvent('electron.app-ready');
+    log("App ready, preparing startup window...");
+    registerMemoryIpcHandlers();
+    registerStartupIpcHandlers();
+    registerBackendControlIpcHandlers();
+    startupCoordinator.start();
+    createWindow();
+    logStartupEvent('electron.ready-flow-complete');
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
 
-app.on('before-quit', handleApplicationCloseRequest);
+  app.on('before-quit', handleApplicationCloseRequest);
+}

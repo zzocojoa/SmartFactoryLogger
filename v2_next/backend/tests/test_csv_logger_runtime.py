@@ -52,6 +52,73 @@ def create_factory_data() -> FactoryData:
 
 
 class CSVLoggerRuntimeTests(unittest.TestCase):
+    def test_closeout_recovers_manifest_when_observation_writes_drain_late(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = CSVLoggerService()
+            csv_path = Path(temp_dir) / "Factory_Integrated_Log_v2_late.csv"
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            csv_path.write_text("sample_seq\n1\n", encoding="utf-8")
+            metadata_path.write_text("{}", encoding="utf-8")
+            service._current_v2_csv_path = csv_path
+            service._finalize_spot_observation_manifest_on_stop = False
+            service._allow_spot_observation_late_drain_on_stop = True
+
+            with (
+                patch(
+                    "backend.FacilityData.drivers.spot_api.spot_observation_fact_writes_drained",
+                    return_value=True,
+                ),
+                patch.object(
+                    service,
+                    "refresh_spot_observation_fact_manifest_for_csv",
+                    return_value=metadata_path,
+                ) as refresh_manifest,
+                patch.object(
+                    service,
+                    "_suppress_spot_observation_fact_manifest_for_csv",
+                ) as suppress_manifest,
+            ):
+                self.assertTrue(service._close_v2_file(None))
+
+            refresh_manifest.assert_called_once_with(
+                csv_path,
+                closeout_reason="runtime-close",
+            )
+            suppress_manifest.assert_not_called()
+
+    def test_closeout_fails_closed_when_observation_manifest_cannot_be_finalized(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = CSVLoggerService()
+            csv_path = Path(temp_dir) / "Factory_Integrated_Log_v2_pending.csv"
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            csv_path.write_text("sample_seq\n1\n", encoding="utf-8")
+            metadata_path.write_text("{}", encoding="utf-8")
+            service._current_v2_csv_path = csv_path
+            service._finalize_spot_observation_manifest_on_stop = False
+            service._allow_spot_observation_late_drain_on_stop = True
+
+            with (
+                patch(
+                    "backend.FacilityData.drivers.spot_api.spot_observation_fact_writes_drained",
+                    return_value=False,
+                ),
+                patch.object(
+                    service,
+                    "_suppress_spot_observation_fact_manifest_for_csv",
+                    return_value=metadata_path,
+                ) as suppress_manifest,
+            ):
+                self.assertFalse(service._close_v2_file(None))
+
+            suppress_manifest.assert_called_once_with(
+                csv_path,
+                writes_drained=False,
+                reason="shutdown-write-drain-timeout",
+            )
+            self.assertTrue(service._runtime_write_failure_observed)
+
     def test_stop_suppresses_image_manifest_when_capture_did_not_drain(self) -> None:
         service = CSVLoggerService()
         service.csv_v2_enabled = True
@@ -529,6 +596,11 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
                 "stop",
                 Mock(return_value=True),
             ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                Mock(return_value=False),
+            ),
         ):
             status = backend_app._stop_services_for_control_shutdown(
                 observation_fact_drained=False
@@ -542,6 +614,47 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         )
         self.assertFalse(status["spot_observation_fact_drained"])
         self.assertEqual(backend_app._control_shutdown_exit_code(status), 2)
+
+    def test_control_shutdown_recovers_observation_drain_after_initial_timeout(
+        self,
+    ) -> None:
+        logger_stop = Mock(return_value=True)
+        with (
+            patch.object(
+                backend_app.spot_control,
+                "stop_spot_image_capture_for_shutdown",
+                Mock(return_value=True),
+            ),
+            patch.object(backend_app.plc_service, "stop", Mock(return_value=True)),
+            patch.object(backend_app.logger_service, "stop", logger_stop),
+            patch.object(
+                backend_app.comm_metrics_logger_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(backend_app.memory_service, "stop", Mock(return_value=True)),
+            patch.object(backend_app.config_sync_agent, "stop", Mock(return_value=True)),
+            patch.object(
+                backend_app.config_watch_service,
+                "stop",
+                Mock(return_value=True),
+            ),
+            patch.object(
+                backend_app.spot_control,
+                "spot_observation_fact_writes_drained",
+                Mock(return_value=True),
+            ),
+        ):
+            status = backend_app._stop_services_for_control_shutdown(
+                observation_fact_drained=False
+            )
+
+        logger_stop.assert_called_once_with(
+            timeout_sec=backend_app.config.CSV_LOGGER_CONTROL_SHUTDOWN_TIMEOUT_SEC,
+            finalize_spot_image_manifest=True,
+            finalize_spot_observation_manifest=False,
+        )
+        self.assertTrue(status["spot_observation_fact_drained"])
 
     def test_control_shutdown_records_failed_stage_and_continues(self) -> None:
         later_stop = Mock(return_value=True)
