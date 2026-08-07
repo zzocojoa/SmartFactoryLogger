@@ -96,6 +96,7 @@ let backendStartTriggered = false;
 let mainWindowReadyToShow = false;
 let mainWindowShown = false;
 let splashFirstPaintAccepted = false;
+let deferredSecondInstanceFocus = false;
 const expectedBackendExitPids = new Set();
 const rendererStartupEventCounts = new Map();
 
@@ -497,6 +498,14 @@ function showStartupWindow() {
     mainWindowShown = true;
     logStartupEvent('electron.window-shown');
   }
+  if (deferredSecondInstanceFocus) {
+    deferredSecondInstanceFocus = false;
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+    logStartupEvent('electron.second-instance-focus-released', {});
+  }
   return true;
 }
 
@@ -848,6 +857,10 @@ function restartBackend() {
 const isPrimaryInstance = installSingleInstanceGuard(app, {
   getMainWindow: () => mainWindow,
   logEvent: logStartupEvent,
+  canShowWindow: () => mainWindowShown,
+  deferWindowFocus: () => {
+    deferredSecondInstanceFocus = true;
+  },
 });
 
 if (isPrimaryInstance) {

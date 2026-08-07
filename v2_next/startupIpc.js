@@ -140,6 +140,9 @@ function createStartupIpcHandlers(options) {
       try {
         const backendHealthy = await recheckBackendHealth();
         if (backendHealthy) {
+          if (!coordinator.getState().can_retry) {
+            return { ok: true, recovered: true, restarted: false };
+          }
           await recoverHealthyBackend();
           return { ok: true, recovered: true, restarted: false };
         }

@@ -89,6 +89,8 @@ function installSingleInstanceGuard(app, options) {
   const {
     getMainWindow,
     logEvent = () => undefined,
+    canShowWindow = () => true,
+    deferWindowFocus = () => undefined,
   } = options;
   const acquired = app.requestSingleInstanceLock();
   if (!acquired) {
@@ -105,6 +107,12 @@ function installSingleInstanceGuard(app, options) {
       window_available: available,
     });
     if (!available) {
+      deferWindowFocus();
+      return;
+    }
+    if (!canShowWindow(window)) {
+      logEvent('electron.second-instance-focus-deferred', {});
+      deferWindowFocus();
       return;
     }
     if (window.isMinimized()) {

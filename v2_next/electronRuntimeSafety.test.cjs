@@ -77,6 +77,7 @@ test('primary Electron instance restores and focuses its window on a second laun
 test('primary Electron instance records a second launch when no window is available', () => {
   const handlers = new Map();
   const events = [];
+  let deferredFocusCount = 0;
   const fakeApp = {
     requestSingleInstanceLock: () => true,
     on: (name, handler) => handlers.set(name, handler),
@@ -85,9 +86,13 @@ test('primary Electron instance records a second launch when no window is availa
   assert.equal(installSingleInstanceGuard(fakeApp, {
     getMainWindow: () => null,
     logEvent: (name, payload) => events.push({ name, payload }),
+    deferWindowFocus: () => {
+      deferredFocusCount += 1;
+    },
   }), true);
   handlers.get('second-instance')();
 
+  assert.equal(deferredFocusCount, 1);
   assert.deepEqual(events, [
     { name: 'electron.single-instance-lock-acquired', payload: {} },
     {
@@ -95,6 +100,38 @@ test('primary Electron instance records a second launch when no window is availa
       payload: { window_available: false },
     },
   ]);
+});
+
+test('primary Electron instance defers focus while its startup window is hidden', () => {
+  const handlers = new Map();
+  const calls = [];
+  const events = [];
+  let deferredFocusCount = 0;
+  const fakeWindow = {
+    isDestroyed: () => false,
+    isMinimized: () => false,
+    restore: () => calls.push('restore'),
+    show: () => calls.push('show'),
+    focus: () => calls.push('focus'),
+  };
+  const fakeApp = {
+    requestSingleInstanceLock: () => true,
+    on: (name, handler) => handlers.set(name, handler),
+  };
+
+  assert.equal(installSingleInstanceGuard(fakeApp, {
+    getMainWindow: () => fakeWindow,
+    canShowWindow: () => false,
+    deferWindowFocus: () => {
+      deferredFocusCount += 1;
+    },
+    logEvent: (name, payload) => events.push({ name, payload }),
+  }), true);
+  handlers.get('second-instance')();
+
+  assert.deepEqual(calls, []);
+  assert.equal(deferredFocusCount, 1);
+  assert.equal(events.at(-1).name, 'electron.second-instance-focus-deferred');
 });
 
 test('Electron logger rejects unsafe rotation bounds', () => {

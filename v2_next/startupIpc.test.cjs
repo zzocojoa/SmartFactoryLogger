@@ -251,6 +251,23 @@ test('retry does not stop a backend after renderer gates recover concurrently', 
   assert.equal(harness.getRecoveredCount(), 0);
 });
 
+test('retry does not reset startup when health recovers after renderer gates complete', async () => {
+  let harness;
+  harness = createHarness({
+    recheckBackendHealth: async () => {
+      harness.state.can_retry = false;
+      return true;
+    },
+  });
+
+  assert.deepEqual(
+    await harness.handlers.retryStartup(harness.trustedEvent),
+    { ok: true, recovered: true, restarted: false }
+  );
+  assert.equal(harness.getRestartCount(), 0);
+  assert.equal(harness.getRecoveredCount(), 0);
+});
+
 test('retry exposes a bounded failure instead of starting through a stop error', async () => {
   const harness = createHarness({
     restartBackend: async () => {
