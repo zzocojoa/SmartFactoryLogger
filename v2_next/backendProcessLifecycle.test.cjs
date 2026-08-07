@@ -8,7 +8,9 @@ const test = require('node:test');
 
 const {
   createApplicationShutdownController,
+  createBackendCloseoutGate,
   createBackendRestartController,
+  isVerifiedGracefulShutdownResult,
   stopProcessTree,
 } = require('./backendProcessLifecycle');
 
@@ -66,6 +68,187 @@ test('native window close is held until application shutdown completes', async (
   };
   assert.equal(controller.handleCloseRequest(completedEvent), false);
   assert.equal(completedEvent.prevented, false);
+
+  assert.equal(await controller.beginShutdown(), true);
+  assert.equal(shutdownCalls, 1);
+  assert.equal(quitCalls, 1);
+  assert.equal(controller.isComplete(), true);
+});
+
+test('application shutdown controller rejects missing required dependencies', () => {
+  const validOptions = {
+    setQuitting: () => undefined,
+    shutdown: async () => undefined,
+    quitApplication: () => undefined,
+  };
+
+  for (const [name, value] of Object.entries(validOptions)) {
+    assert.throws(
+      () => createApplicationShutdownController({
+        ...validOptions,
+        [name]: undefined,
+      }),
+      new RegExp(`${name} must be a function`)
+    );
+  }
+});
+
+test('application shutdown controller rejects malformed close events', () => {
+  let shutdownCalls = 0;
+  const controller = createApplicationShutdownController({
+    setQuitting: () => undefined,
+    shutdown: async () => {
+      shutdownCalls += 1;
+    },
+    quitApplication: () => undefined,
+  });
+
+  assert.throws(
+    () => controller.handleCloseRequest(null),
+    /close event must support preventDefault/
+  );
+  assert.throws(
+    () => controller.handleCloseRequest({}),
+    /close event must support preventDefault/
+  );
+  assert.equal(shutdownCalls, 0);
+});
+
+test('prepare failure keeps shutdown retryable and preserves operation order', async () => {
+  const operations = [];
+  let prepareAttempts = 0;
+  const controller = createApplicationShutdownController({
+    setQuitting: (value) => operations.push(`quitting:${value}`),
+    prepareShutdown: () => {
+      prepareAttempts += 1;
+      operations.push(`prepare:${prepareAttempts}`);
+      if (prepareAttempts === 1) {
+        throw new Error('prepare failed');
+      }
+    },
+    shutdown: async () => operations.push('shutdown'),
+    quitApplication: () => operations.push('quit'),
+    onFailure: (error) => operations.push(`failure:${error.message}`),
+  });
+
+  assert.equal(await controller.beginShutdown(), false);
+  assert.equal(controller.isComplete(), false);
+  assert.deepEqual(operations, [
+    'quitting:true',
+    'prepare:1',
+    'quitting:false',
+    'failure:prepare failed',
+  ]);
+
+  assert.equal(await controller.beginShutdown(), true);
+  assert.equal(controller.isComplete(), true);
+  assert.deepEqual(operations.slice(4), [
+    'quitting:true',
+    'prepare:2',
+    'shutdown',
+    'quit',
+  ]);
+});
+
+test('quit failure resets completion and permits a retry', async () => {
+  let quitAttempts = 0;
+  let shutdownCalls = 0;
+  const quittingStates = [];
+  const failures = [];
+  const controller = createApplicationShutdownController({
+    setQuitting: (value) => quittingStates.push(value),
+    shutdown: async () => {
+      shutdownCalls += 1;
+    },
+    quitApplication: () => {
+      quitAttempts += 1;
+      if (quitAttempts === 1) {
+        throw new Error('quit failed');
+      }
+    },
+    onFailure: (error) => failures.push(error.message),
+  });
+
+  assert.equal(await controller.beginShutdown(), false);
+  assert.equal(controller.isComplete(), false);
+  assert.deepEqual(quittingStates, [true, false]);
+  assert.deepEqual(failures, ['quit failed']);
+
+  assert.equal(await controller.beginShutdown(), true);
+  assert.equal(controller.isComplete(), true);
+  assert.equal(shutdownCalls, 2);
+  assert.equal(quitAttempts, 2);
+  assert.deepEqual(quittingStates, [true, false, true]);
+});
+
+test('backend closeout gate accepts only verified graceful exits', () => {
+  const gracefulClose = {
+    stopped: true,
+    reason: 'close',
+    exitCode: 0,
+    signalCode: null,
+    forced: false,
+  };
+  const alreadyExitedCleanly = {
+    stopped: true,
+    reason: 'already_exited',
+    exitCode: 0,
+    signalCode: null,
+    forced: false,
+  };
+
+  assert.equal(isVerifiedGracefulShutdownResult(gracefulClose), true);
+  assert.equal(isVerifiedGracefulShutdownResult(alreadyExitedCleanly), true);
+  for (const rejected of [
+    { ...gracefulClose, stopped: false },
+    { ...gracefulClose, forced: true },
+    { ...gracefulClose, reason: 'forced_close', forced: true },
+    { ...gracefulClose, reason: 'forced_exit_confirmed', forced: true },
+    { ...gracefulClose, reason: 'missing_after_force' },
+    { ...gracefulClose, exitCode: 2 },
+    { ...gracefulClose, signalCode: 'SIGKILL' },
+    null,
+  ]) {
+    assert.equal(isVerifiedGracefulShutdownResult(rejected), false);
+  }
+});
+
+test('backend closeout gate blocks forced or missing-process shutdown bypasses', () => {
+  const gate = createBackendCloseoutGate();
+  assert.doesNotThrow(() => gate.assertCanExitWithoutProcess());
+
+  gate.markBackendStarted();
+  assert.equal(gate.isCloseoutRequired(), true);
+  assert.throws(
+    () => gate.assertCanExitWithoutProcess(),
+    /before a graceful shutdown closeout was verified/
+  );
+  assert.throws(
+    () => gate.acceptShutdownResult({
+      stopped: true,
+      reason: 'forced_close',
+      exitCode: null,
+      signalCode: 'SIGKILL',
+      forced: true,
+    }),
+    /did not verify a graceful closeout/
+  );
+  assert.equal(gate.isCloseoutRequired(), true);
+  assert.throws(
+    () => gate.assertCanExitWithoutProcess(),
+    /before a graceful shutdown closeout was verified/
+  );
+
+  const accepted = {
+    stopped: true,
+    reason: 'close',
+    exitCode: 0,
+    signalCode: null,
+    forced: false,
+  };
+  assert.equal(gate.acceptShutdownResult(accepted), accepted);
+  assert.equal(gate.isCloseoutRequired(), false);
+  assert.doesNotThrow(() => gate.assertCanExitWithoutProcess());
 });
 
 test('Electron main wires native window close into the guarded shutdown path', () => {
@@ -78,6 +261,15 @@ test('Electron main wires native window close into the guarded shutdown path', (
   assert.match(
     mainText,
     /app\.on\('before-quit',\s*handleApplicationCloseRequest\)/
+  );
+  assert.match(mainText, /backendCloseoutGate\.markBackendStarted\(\)/);
+  assert.match(
+    mainText,
+    /backendCloseoutGate\.acceptShutdownResult\(result\)/
+  );
+  assert.match(
+    mainText,
+    /backendCloseoutGate\.assertCanExitWithoutProcess\(\)/
   );
 });
 

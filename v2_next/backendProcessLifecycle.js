@@ -165,6 +165,46 @@ function stopProcessTree(child, options) {
   });
 }
 
+function isVerifiedGracefulShutdownResult(result) {
+  return Boolean(
+    result?.stopped === true &&
+    result.forced !== true &&
+    (result.reason === 'close' || result.reason === 'already_exited') &&
+    result.exitCode === 0 &&
+    (result.signalCode === null || result.signalCode === undefined)
+  );
+}
+
+function createBackendCloseoutGate() {
+  let closeoutRequired = false;
+
+  return {
+    markBackendStarted() {
+      closeoutRequired = true;
+    },
+    assertCanExitWithoutProcess() {
+      if (closeoutRequired) {
+        throw new Error(
+          'Backend process exited before a graceful shutdown closeout was verified.'
+        );
+      }
+    },
+    acceptShutdownResult(result) {
+      if (!isVerifiedGracefulShutdownResult(result)) {
+        const reason = String(result?.reason ?? 'unknown');
+        throw new Error(
+          `Backend shutdown did not verify a graceful closeout (reason=${reason}).`
+        );
+      }
+      closeoutRequired = false;
+      return result;
+    },
+    isCloseoutRequired() {
+      return closeoutRequired;
+    },
+  };
+}
+
 function createApplicationShutdownController(options) {
   const {
     setQuitting,
@@ -196,7 +236,7 @@ function createApplicationShutdownController(options) {
     }
 
     setQuitting(true);
-    activeShutdown = (async () => {
+    const shutdownAttempt = (async () => {
       try {
         prepareShutdown();
         await shutdown();
@@ -208,13 +248,16 @@ function createApplicationShutdownController(options) {
         setQuitting(false);
         onFailure(error);
         return false;
-      } finally {
-        if (!shutdownComplete) {
-          activeShutdown = null;
-        }
       }
     })();
-    return activeShutdown;
+    activeShutdown = shutdownAttempt;
+    const releaseFailedAttempt = () => {
+      if (!shutdownComplete && activeShutdown === shutdownAttempt) {
+        activeShutdown = null;
+      }
+    };
+    void shutdownAttempt.then(releaseFailedAttempt, releaseFailedAttempt);
+    return shutdownAttempt;
   };
 
   const handleCloseRequest = (event) => {
@@ -286,8 +329,10 @@ function createBackendRestartController(options) {
 
 module.exports = {
   createApplicationShutdownController,
+  createBackendCloseoutGate,
   createBackendRestartController,
   hasProcessExited,
   isProcessMissingError,
+  isVerifiedGracefulShutdownResult,
   stopProcessTree,
 };

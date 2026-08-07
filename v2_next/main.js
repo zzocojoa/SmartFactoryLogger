@@ -12,6 +12,7 @@ const {
 } = require('./startupCoordinator');
 const {
   createApplicationShutdownController,
+  createBackendCloseoutGate,
   createBackendRestartController,
   stopProcessTree,
 } = require('./backendProcessLifecycle');
@@ -72,6 +73,7 @@ const BACKEND_SHUTDOWN_REQUEST_TIMEOUT_MS = 2_000;
 
 let mainWindow;
 let backendProcess;
+const backendCloseoutGate = createBackendCloseoutGate();
 let backendProgressTransport;
 let trustedMainDocumentUrl = null;
 let trustedRendererTimeOriginMs = null;
@@ -610,6 +612,7 @@ function startBackend() {
     backendProcess = child;
 
     child.on('spawn', () => {
+      backendCloseoutGate.markBackendStarted();
       logStartupEvent('backend.spawned', { pid: child.pid ?? null });
       startupCoordinator.handleMainMilestone('backend_spawned');
       log(`Backend process spawned successfully (PID: ${child.pid})`);
@@ -744,11 +747,14 @@ const applicationShutdownController = createApplicationShutdownController({
   shutdown: async () => {
     await backendRestartController.waitForActiveRestart();
     const child = backendProcess;
-    if (child?.pid) {
-      await stopBackendProcess(child);
-      if (backendProcess === child) {
-        backendProcess = null;
-      }
+    if (!child?.pid) {
+      backendCloseoutGate.assertCanExitWithoutProcess();
+      return;
+    }
+    const result = await stopBackendProcess(child);
+    backendCloseoutGate.acceptShutdownResult(result);
+    if (backendProcess === child) {
+      backendProcess = null;
     }
   },
   quitApplication: () => app.quit(),
