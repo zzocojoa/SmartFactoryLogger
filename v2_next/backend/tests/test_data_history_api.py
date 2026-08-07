@@ -259,6 +259,40 @@ class MemoryApiTests(unittest.TestCase):
 class ElectronPreloadContractTests(unittest.TestCase):
     repo_root = Path(__file__).resolve().parents[2]
 
+    def test_embedded_control_health_requires_token_and_returns_process_identity(
+        self,
+    ) -> None:
+        with (
+            patch.object(backend_app, "is_embedded_electron", return_value=True),
+            patch.dict(backend_app.os.environ, {"SFL_CONTROL_TOKEN": "launch-secret"}),
+        ):
+            client = TestClient(
+                backend_app.app,
+                raise_server_exceptions=False,
+                client=("127.0.0.1", 50000),
+            )
+            try:
+                rejected = client.get("/api/control/health")
+                wrong_token = client.get(
+                    "/api/control/health",
+                    headers={"X-SFL-Control-Token": "wrong-secret"},
+                )
+                accepted = client.get(
+                    "/api/control/health",
+                    headers={"X-SFL-Control-Token": "launch-secret"},
+                )
+            finally:
+                client.close()
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(wrong_token.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        payload = accepted.json()
+        self.assertTrue(payload["running"])
+        self.assertEqual(payload["backend_process_id"], backend_app.os.getpid())
+        self.assertEqual(payload["backend_session_id"], backend_app._app_session_id)
+        self.assertEqual(payload["started_at"], backend_app._app_started_at_iso)
+
     def test_embedded_shutdown_requires_the_per_launch_control_token(self) -> None:
         with (
             patch.object(backend_app, "is_embedded_electron", return_value=True),

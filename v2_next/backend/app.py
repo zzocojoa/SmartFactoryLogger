@@ -2285,6 +2285,13 @@ def _require_control_shutdown_access(
     _require_local_control_access(request, control_token, "Control shutdown requests")
 
 
+def _require_control_health_access(
+    request: Request,
+    control_token: str | None,
+) -> None:
+    _require_local_control_access(request, control_token, "Control health requests")
+
+
 @app.get("/api/facility/operator-metadata", response_model=OperatorMetadata)
 async def get_operator_metadata():
     return operator_metadata_store.get()
@@ -3581,6 +3588,20 @@ async def shutdown(
 
     _schedule_control_shutdown(payload.reason or "api_request")
     return {"ok": True}
+
+
+@app.get("/api/control/health")
+async def control_health(
+    request: Request,
+    control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,
+):
+    _require_control_health_access(request, control_token)
+    return {
+        "running": True,
+        "backend_process_id": os.getpid(),
+        "backend_session_id": _app_session_id,
+        "started_at": _app_started_at_iso,
+    }
 
 # --- Static File Serving (Frontend) ---
 @app.get("/assets/{asset_path:path}")

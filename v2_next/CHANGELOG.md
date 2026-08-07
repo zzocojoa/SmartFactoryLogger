@@ -7,8 +7,8 @@ All notable changes to Smart Factory Logger V2 are documented here.
 ### Fixed
 
 - Prevented a second Electron launch from creating a competing runtime, and
-  made startup Retry preserve a backend that becomes healthy during a bounded
-  final health check instead of stopping it unnecessarily.
+  made startup Retry preserve a backend only when a bounded, authenticated
+  health check matches the spawned child process identity.
 - Made SPOT shutdown report each background task's final or timed-out state,
   recover metadata finalization when observation writes drain late, and fail
   closed when a completed drain can no longer produce a trustworthy manifest.

@@ -34,6 +34,7 @@ const {
 } = require('./backendControlClient');
 const {
   createRotatingFileLogger,
+  isMatchingBackendHealth,
   installSingleInstanceGuard,
 } = require('./electronRuntimeSafety');
 
@@ -737,14 +738,16 @@ async function waitForBackendHealthBeforeRetry() {
     attempts += 1;
     try {
       const health = await sendBackendHealth({
+        controlToken: backendControlToken,
         port: resolveBackendPort(),
         maxResponseBytes: BACKEND_CONTROL_RESPONSE_MAX_BYTES,
         timeoutMs: BACKEND_RETRY_HEALTH_REQUEST_TIMEOUT_MS,
       });
-      if (health?.running === true) {
+      if (isMatchingBackendHealth(health, backendProcess.pid)) {
         logStartupEvent('backend.retry-health-recovered', { attempts });
         return true;
       }
+      lastError = new Error('Backend health identity did not match the spawned process.');
     } catch (error) {
       lastError = error;
     }

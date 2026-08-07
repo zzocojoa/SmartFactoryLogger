@@ -8,8 +8,25 @@ const test = require('node:test');
 
 const {
   createRotatingFileLogger,
+  isMatchingBackendHealth,
   installSingleInstanceGuard,
 } = require('./electronRuntimeSafety');
+
+test('backend health recovery requires the authenticated child process identity', () => {
+  assert.equal(isMatchingBackendHealth({
+    running: true,
+    backend_process_id: 4321,
+  }, 4321), true);
+  assert.equal(isMatchingBackendHealth({
+    running: true,
+    backend_process_id: 9999,
+  }, 4321), false);
+  assert.equal(isMatchingBackendHealth({ running: true }, 4321), false);
+  assert.equal(isMatchingBackendHealth({
+    running: false,
+    backend_process_id: 4321,
+  }, 4321), false);
+});
 
 test('secondary Electron launch exits without creating another runtime', () => {
   const events = [];

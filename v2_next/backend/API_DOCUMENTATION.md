@@ -751,6 +751,14 @@ with `Retry-After` instead of queueing behind operational SPOT traffic.
 }
 ```
 
+### GET `/api/control/health`
+
+The packaged Electron application uses this endpoint to verify that the
+backend answering on the configured loopback port is the exact child process
+it spawned. The request requires the per-launch `X-SFL-Control-Token`; the
+response includes `backend_process_id`, `backend_session_id`, and `started_at`.
+An absent or incorrect token returns `403`.
+
 ### POST `/api/control/shutdown`
 
 The packaged Electron application supplies its per-launch

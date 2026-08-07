@@ -152,6 +152,7 @@ function requestBackendGracefulShutdown(options) {
 
 function requestBackendHealth(options) {
   const {
+    controlToken,
     port,
     maxResponseBytes,
     timeoutMs,
@@ -171,8 +172,11 @@ function requestBackendHealth(options) {
     const request = requestImpl({
       hostname: '127.0.0.1',
       port,
-      path: '/health',
+      path: '/api/control/health',
       method: 'GET',
+      headers: {
+        'X-SFL-Control-Token': controlToken,
+      },
     }, (response) => {
       const chunks = [];
       let responseBytes = 0;

@@ -76,6 +76,7 @@ function shutdownWith(harness, overrides = {}) {
 
 function healthWith(harness, overrides = {}) {
   return requestBackendHealth({
+    controlToken: 'test-control-token',
     port: 8000,
     maxResponseBytes: 64,
     timeoutMs: 50,
@@ -175,8 +176,12 @@ test('backend health client reads only a bounded local health response', async (
 
   assert.deepEqual(await resultPromise, { running: true });
   assert.equal(harness.request.options.hostname, '127.0.0.1');
-  assert.equal(harness.request.options.path, '/health');
+  assert.equal(harness.request.options.path, '/api/control/health');
   assert.equal(harness.request.options.method, 'GET');
+  assert.equal(
+    harness.request.options.headers['X-SFL-Control-Token'],
+    'test-control-token'
+  );
   assert.equal(harness.request.body, undefined);
 });
 

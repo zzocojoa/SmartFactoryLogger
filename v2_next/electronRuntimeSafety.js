@@ -116,7 +116,19 @@ function installSingleInstanceGuard(app, options) {
   return true;
 }
 
+function isMatchingBackendHealth(health, expectedPid) {
+  return Boolean(
+    health &&
+    health.running === true &&
+    Number.isSafeInteger(expectedPid) &&
+    expectedPid > 0 &&
+    Number.isSafeInteger(health.backend_process_id) &&
+    health.backend_process_id === expectedPid
+  );
+}
+
 module.exports = {
   createRotatingFileLogger,
+  isMatchingBackendHealth,
   installSingleInstanceGuard,
 };
