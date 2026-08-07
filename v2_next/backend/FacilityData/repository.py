@@ -2579,6 +2579,10 @@ class CSVLoggerService:
                 )
                 if suppressed_path is None:
                     closeout_succeeded = False
+                if finalize_closeout and not observation_manifest_ready:
+                    # A later drain probe cannot retroactively restore the
+                    # manifest once this logger generation has closed.
+                    closeout_succeeded = False
                 self.logger.warning(
                     "Skipped SPOT observation fact manifest because writes did not drain."
                 )

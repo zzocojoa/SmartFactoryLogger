@@ -86,6 +86,39 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
             )
             suppress_manifest.assert_not_called()
 
+    def test_closeout_fails_closed_when_observation_manifest_cannot_be_finalized(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = CSVLoggerService()
+            csv_path = Path(temp_dir) / "Factory_Integrated_Log_v2_pending.csv"
+            metadata_path = csv_path.with_suffix(".metadata.json")
+            csv_path.write_text("sample_seq\n1\n", encoding="utf-8")
+            metadata_path.write_text("{}", encoding="utf-8")
+            service._current_v2_csv_path = csv_path
+            service._finalize_spot_observation_manifest_on_stop = False
+            service._allow_spot_observation_late_drain_on_stop = True
+
+            with (
+                patch(
+                    "backend.FacilityData.drivers.spot_api.spot_observation_fact_writes_drained",
+                    return_value=False,
+                ),
+                patch.object(
+                    service,
+                    "_suppress_spot_observation_fact_manifest_for_csv",
+                    return_value=metadata_path,
+                ) as suppress_manifest,
+            ):
+                self.assertFalse(service._close_v2_file(None))
+
+            suppress_manifest.assert_called_once_with(
+                csv_path,
+                writes_drained=False,
+                reason="shutdown-write-drain-timeout",
+            )
+            self.assertTrue(service._runtime_write_failure_observed)
+
     def test_stop_suppresses_image_manifest_when_capture_did_not_drain(self) -> None:
         service = CSVLoggerService()
         service.csv_v2_enabled = True
