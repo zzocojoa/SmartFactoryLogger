@@ -57,6 +57,44 @@ test('primary Electron instance restores and focuses its window on a second laun
   assert.deepEqual(calls, ['restore', 'show', 'focus']);
 });
 
+test('primary Electron instance records a second launch when no window is available', () => {
+  const handlers = new Map();
+  const events = [];
+  const fakeApp = {
+    requestSingleInstanceLock: () => true,
+    on: (name, handler) => handlers.set(name, handler),
+  };
+
+  assert.equal(installSingleInstanceGuard(fakeApp, {
+    getMainWindow: () => null,
+    logEvent: (name, payload) => events.push({ name, payload }),
+  }), true);
+  handlers.get('second-instance')();
+
+  assert.deepEqual(events, [
+    { name: 'electron.single-instance-lock-acquired', payload: {} },
+    {
+      name: 'electron.second-instance-redirected',
+      payload: { window_available: false },
+    },
+  ]);
+});
+
+test('Electron logger rejects unsafe rotation bounds', () => {
+  assert.throws(
+    () => createRotatingFileLogger({ logPath: '' }),
+    /logPath must be a non-empty string/
+  );
+  assert.throws(
+    () => createRotatingFileLogger({ logPath: 'debug.log', maxBytes: 0 }),
+    /maxBytes must be a positive safe integer/
+  );
+  assert.throws(
+    () => createRotatingFileLogger({ logPath: 'debug.log', maxBackups: -1 }),
+    /maxBackups must be a non-negative safe integer/
+  );
+});
+
 test('Electron logger rotates oversized local logs and bounds retained backups', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sfl-electron-log-'));
   const logPath = path.join(directory, 'debug_electron.log');
@@ -80,6 +118,48 @@ test('Electron logger rotates oversized local logs and bounds retained backups',
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('Electron logger supports rotation without retaining backups', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sfl-electron-log-zero-'));
+  const logPath = path.join(directory, 'debug_electron.log');
+  try {
+    fs.writeFileSync(logPath, 'x'.repeat(64), 'utf8');
+    const logger = createRotatingFileLogger({
+      logPath,
+      maxBytes: 48,
+      maxBackups: 0,
+      consoleTarget: { log: () => undefined, error: () => undefined },
+    });
+
+    logger.log('new-session');
+
+    assert.match(fs.readFileSync(logPath, 'utf8'), /new-session/);
+    assert.equal(fs.existsSync(`${logPath}.1`), false);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Electron logger reports file write failures without crashing the caller', () => {
+  const errors = [];
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => {
+        throw new Error('disk unavailable');
+      },
+    },
+    consoleTarget: {
+      log: () => assert.fail('failed writes must not be reported as successful'),
+      error: (...args) => errors.push(args),
+    },
+  });
+
+  assert.doesNotThrow(() => logger.log('shutdown-start'));
+  assert.equal(errors.length, 1);
+  assert.match(String(errors[0][1]), /disk unavailable/);
 });
 
 test('shutdown evidence collector prioritizes the packaged Electron userData path', () => {
