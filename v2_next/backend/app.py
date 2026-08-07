@@ -472,6 +472,38 @@ def _probe_spot_observation_fact_drained(shutdown_kind: str) -> bool:
         return False
 
 
+def _probe_spot_poll_shutdown_drained(
+    shutdown_kind: str,
+    initial_result: bool,
+) -> bool:
+    if initial_result:
+        return True
+    try:
+        status = spot_control.get_spot_poll_shutdown_status()
+    except (AttributeError, TypeError):
+        return initial_result
+    except Exception as exc:
+        _logger.warning(
+            "[Main] %s SPOT poll shutdown probe failed error_type=%s %s",
+            shutdown_kind,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+        return False
+    _logger.info(
+        "[Main] %s SPOT poll shutdown final complete=%s tasks=%s "
+        "observation_drained=%s image_refresh_stopped=%s transport_stopped=%s %s",
+        shutdown_kind,
+        bool(status.get("complete")),
+        json.dumps(status.get("tasks", {}), sort_keys=True),
+        bool(status.get("observation_fact_drained")),
+        bool(status.get("image_refresh_stopped")),
+        bool(status.get("transport_stopped")),
+        _lifecycle_log_fields(),
+    )
+    return bool(status.get("complete"))
+
+
 def _log_backend_access_urls() -> None:
     """Resolve local addresses outside the readiness-critical lifespan path."""
     try:
@@ -1704,18 +1736,16 @@ async def lifespan(app: FastAPI):
                         _lifecycle_log_fields(),
                     )
                 if not spot_poll_stopped:
-                    shutdown_failures.append("spot_poll")
-                    _logger.error(
-                        "SPOT poll or transport did not drain before lifespan shutdown"
+                    _logger.warning(
+                        "SPOT poll or transport missed the initial lifespan shutdown deadline"
                     )
                 observation_fact_drained = _probe_spot_observation_fact_drained(
                     "Lifespan"
                 )
                 if not observation_fact_drained:
-                    shutdown_failures.append("spot_observation_fact")
-                    _logger.error(
+                    _logger.warning(
                         "SPOT observation fact writes did not drain before lifespan "
-                        "shutdown; the observation manifest will be suppressed"
+                        "shutdown; closeout will recheck before finalizing"
                     )
                 try:
                     image_capture_drained = await asyncio.to_thread(
@@ -1783,6 +1813,24 @@ async def lifespan(app: FastAPI):
                     shutdown_failures.append("csv_logger")
                     _logger.warning(
                         "CSV logger did not stop cleanly during lifespan shutdown"
+                    )
+            if spot_start_attempted:
+                observation_fact_drained = _probe_spot_observation_fact_drained(
+                    "Lifespan final"
+                )
+                spot_poll_stopped = _probe_spot_poll_shutdown_drained(
+                    "Lifespan final",
+                    spot_poll_stopped,
+                )
+                if not spot_poll_stopped:
+                    shutdown_failures.append("spot_poll")
+                    _logger.error(
+                        "SPOT poll or transport did not drain before lifespan shutdown"
+                    )
+                if not observation_fact_drained:
+                    shutdown_failures.append("spot_observation_fact")
+                    _logger.error(
+                        "SPOT observation fact writes did not drain before lifespan shutdown"
                     )
             if shutdown_failures and not shutdown_has_primary_error:
                 raise RuntimeError(
@@ -1990,6 +2038,9 @@ def _stop_services_for_control_shutdown(
         status=status,
     )
 
+    status["spot_observation_fact_drained"] = (
+        _probe_spot_observation_fact_drained("Control shutdown final")
+    )
     status["total_elapsed_ms"] = round(
         (time.perf_counter() - shutdown_started_perf) * 1000.0,
         1,
@@ -3488,6 +3539,10 @@ async def _run_control_shutdown(reason: str) -> None:
             _stop_services_for_control_shutdown,
             observation_fact_drained=observation_fact_drained,
         )
+    )
+    status["spot_poll_loop_stopped"] = _probe_spot_poll_shutdown_drained(
+        "Control shutdown final",
+        bool(status.get("spot_poll_loop_stopped")),
     )
     status["total_elapsed_ms"] = round(
         (time.perf_counter() - shutdown_started_perf) * 1000.0,

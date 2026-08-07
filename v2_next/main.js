@@ -30,7 +30,12 @@ const { createBackendControlIpcHandlers } = require('./backendControlIpc');
 const {
   requestBackendConnectionTest: sendBackendConnectionTest,
   requestBackendGracefulShutdown: sendBackendGracefulShutdown,
+  requestBackendHealth: sendBackendHealth,
 } = require('./backendControlClient');
+const {
+  createRotatingFileLogger,
+  installSingleInstanceGuard,
+} = require('./electronRuntimeSafety');
 
 const startupOriginNs = process.hrtime.bigint();
 const startupSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -71,6 +76,11 @@ const BACKEND_GRACEFUL_SHUTDOWN_MS = 365_000;
 const BACKEND_CONTROL_RESPONSE_MAX_BYTES = 1024 * 1024;
 const BACKEND_CONNECTION_TEST_TIMEOUT_MS = 10_000;
 const BACKEND_SHUTDOWN_REQUEST_TIMEOUT_MS = 2_000;
+const BACKEND_RETRY_HEALTH_GRACE_MS = 12_000;
+const BACKEND_RETRY_HEALTH_REQUEST_TIMEOUT_MS = 750;
+const BACKEND_RETRY_HEALTH_INTERVAL_MS = 500;
+const ELECTRON_LOG_MAX_BYTES = 8 * 1024 * 1024;
+const ELECTRON_LOG_MAX_BACKUPS = 3;
 
 let mainWindow;
 let backendProcess;
@@ -101,15 +111,14 @@ try {
   logPath = path.join(app.getPath('temp'), 'debug_electron.log');
 }
 
+const electronLogger = createRotatingFileLogger({
+  logPath,
+  maxBytes: ELECTRON_LOG_MAX_BYTES,
+  maxBackups: ELECTRON_LOG_MAX_BACKUPS,
+});
+
 function log(msg) {
-  try {
-    const timestamp = new Date().toISOString();
-    const formattedMsg = `[${timestamp}] ${msg}\n`;
-    fs.appendFileSync(logPath, formattedMsg);
-    console.log(msg);
-  } catch (e) {
-    console.error("Failed to write to log file:", e);
-  }
+  electronLogger.log(msg);
 }
 
 function getStartupElapsedMs() {
@@ -307,6 +316,8 @@ function registerStartupIpcHandlers() {
         maybeShowSplashAndTriggerInitialBackendStart();
       }
     },
+    recheckBackendHealth: waitForBackendHealthBeforeRetry,
+    recoverHealthyBackend: recoverStartupWithHealthyBackend,
     restartBackend,
     quitApplication: () => setImmediate(() => app.quit()),
   });
@@ -714,6 +725,60 @@ async function stopBackendProcess(child = backendProcess) {
   }
 }
 
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForBackendHealthBeforeRetry() {
+  const deadline = Date.now() + BACKEND_RETRY_HEALTH_GRACE_MS;
+  let attempts = 0;
+  let lastError = null;
+  while (!applicationQuitting && backendProcess?.pid && Date.now() <= deadline) {
+    attempts += 1;
+    try {
+      const health = await sendBackendHealth({
+        port: resolveBackendPort(),
+        maxResponseBytes: BACKEND_CONTROL_RESPONSE_MAX_BYTES,
+        timeoutMs: BACKEND_RETRY_HEALTH_REQUEST_TIMEOUT_MS,
+      });
+      if (health?.running === true) {
+        logStartupEvent('backend.retry-health-recovered', { attempts });
+        return true;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    if (!startupCoordinator.getState().can_retry) {
+      logStartupEvent('backend.retry-renderer-recovered', { attempts });
+      return false;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      break;
+    }
+    await delay(Math.min(BACKEND_RETRY_HEALTH_INTERVAL_MS, remaining));
+  }
+  logStartupEvent('backend.retry-health-not-ready', {
+    attempts,
+    message: lastError instanceof Error ? lastError.message : null,
+  });
+  return false;
+}
+
+function resetStartupForRetry(reason) {
+  rendererStartupEventCounts.clear();
+  trustedRendererTimeOriginMs = null;
+  startupCoordinator.reset(reason);
+  const contents = mainWindow?.webContents;
+  if (contents && !contents.isDestroyed()) {
+    contents.reload();
+  }
+}
+
+async function recoverStartupWithHealthyBackend() {
+  resetStartupForRetry('retry_health_recovered');
+}
+
 const stopBackendWithVerifiedCloseout = createCloseoutVerifiedStop({
   stopProcess: stopBackendProcess,
   closeoutGate: backendCloseoutGate,
@@ -730,13 +795,7 @@ const backendRestartController = createBackendRestartController({
   beforeRestart: async () => {
     backendCloseoutGate.assertCanExitWithoutProcess();
     logStartupEvent('backend.restart-requested');
-    rendererStartupEventCounts.clear();
-    trustedRendererTimeOriginMs = null;
-    startupCoordinator.reset('manual_retry');
-    const contents = mainWindow?.webContents;
-    if (contents && !contents.isDestroyed()) {
-      contents.reload();
-    }
+    resetStartupForRetry('manual_retry');
   },
 });
 
@@ -783,25 +842,32 @@ function restartBackend() {
   return backendRestartController.restart();
 }
 
-app.whenReady().then(() => {
-  logStartupEvent('electron.app-ready');
-  log("App ready, preparing startup window...");
-  registerMemoryIpcHandlers();
-  registerStartupIpcHandlers();
-  registerBackendControlIpcHandlers();
-  startupCoordinator.start();
-  createWindow();
-  logStartupEvent('electron.ready-flow-complete');
+const isPrimaryInstance = installSingleInstanceGuard(app, {
+  getMainWindow: () => mainWindow,
+  logEvent: logStartupEvent,
+});
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (isPrimaryInstance) {
+  app.whenReady().then(() => {
+    logStartupEvent('electron.app-ready');
+    log("App ready, preparing startup window...");
+    registerMemoryIpcHandlers();
+    registerStartupIpcHandlers();
+    registerBackendControlIpcHandlers();
+    startupCoordinator.start();
+    createWindow();
+    logStartupEvent('electron.ready-flow-complete');
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
+  });
 
-app.on('before-quit', handleApplicationCloseRequest);
+  app.on('before-quit', handleApplicationCloseRequest);
+}

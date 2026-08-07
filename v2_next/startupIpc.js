@@ -50,6 +50,8 @@ function createStartupIpcHandlers(options) {
     onAcceptedEvent = () => undefined,
     getRendererGeneration,
     setRendererGeneration,
+    recheckBackendHealth = async () => false,
+    recoverHealthyBackend = async () => undefined,
     restartBackend,
     quitApplication,
   } = options;
@@ -136,6 +138,14 @@ function createStartupIpcHandlers(options) {
         return { ok: false, reason: 'not_available' };
       }
       try {
+        const backendHealthy = await recheckBackendHealth();
+        if (backendHealthy) {
+          await recoverHealthyBackend();
+          return { ok: true, recovered: true, restarted: false };
+        }
+        if (!coordinator.getState().can_retry) {
+          return { ok: true, recovered: true, restarted: false };
+        }
         const restarted = await restartBackend();
         return restarted
           ? { ok: true }

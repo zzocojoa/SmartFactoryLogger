@@ -373,6 +373,7 @@ class CSVLoggerService:
         self._runtime_write_failure_observed = False
         self._finalize_spot_image_manifest_on_stop = True
         self._finalize_spot_observation_manifest_on_stop = True
+        self._allow_spot_observation_late_drain_on_stop = False
         self._require_runtime_manifest_state = bool(require_runtime_manifest_state)
 
     def start(self) -> None:
@@ -394,6 +395,7 @@ class CSVLoggerService:
             self._runtime_write_failure_observed = False
             self._finalize_spot_image_manifest_on_stop = True
             self._finalize_spot_observation_manifest_on_stop = True
+            self._allow_spot_observation_late_drain_on_stop = False
             self.running = True
             self.thread = threading.Thread(target=self._loop, name="CSVLogger", daemon=True)
             self.thread.start()
@@ -421,6 +423,7 @@ class CSVLoggerService:
                 and not finalize_spot_observation_manifest
             ):
                 self._finalize_spot_observation_manifest_on_stop = False
+                self._allow_spot_observation_late_drain_on_stop = True
             if self.running:
                 self.running = False
                 try:
@@ -2508,11 +2511,33 @@ class CSVLoggerService:
             except Exception as exc:
                 closeout_succeeded = False
                 self.logger.warning("Failed to flush CSV v2 log file before close: %s", exc)
+        observation_manifest_ready = self._finalize_spot_observation_manifest_on_stop
+        if (
+            not observation_manifest_ready
+            and self._allow_spot_observation_late_drain_on_stop
+        ):
+            try:
+                from backend.FacilityData.drivers import spot_api
+
+                observation_manifest_ready = bool(
+                    spot_api.spot_observation_fact_writes_drained()
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to recheck late SPOT observation drain: %s",
+                    exc,
+                )
+                observation_manifest_ready = False
+            if observation_manifest_ready:
+                self.logger.info(
+                    "SPOT observation writes drained after the initial shutdown "
+                    "deadline; finalizing the manifest."
+                )
         if csv_path is not None and self.csv_v2_sidecar_enabled:
             if (
                 closeout_succeeded
                 and finalize_closeout
-                and self._finalize_spot_observation_manifest_on_stop
+                and observation_manifest_ready
             ):
                 refreshed_path = self.refresh_spot_observation_fact_manifest_for_csv(
                     csv_path,
@@ -2545,7 +2570,11 @@ class CSVLoggerService:
                 )
                 suppressed_path = self._suppress_spot_observation_fact_manifest_for_csv(
                     csv_path,
-                    writes_drained=closeout_succeeded,
+                    writes_drained=(
+                        closeout_succeeded
+                        if not finalize_closeout
+                        else observation_manifest_ready
+                    ),
                     reason=suppression_reason,
                 )
                 if suppressed_path is None:

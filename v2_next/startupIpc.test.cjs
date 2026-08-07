@@ -20,6 +20,7 @@ function createHarness(overrides = {}) {
   const accepted = [];
   const logs = [];
   let restartCount = 0;
+  let recoveredCount = 0;
   let quitCount = 0;
   const handlers = createStartupIpcHandlers({
     getMainWindow: () => mainWindow,
@@ -45,6 +46,10 @@ function createHarness(overrides = {}) {
     sanitizePayload: (payload) => ({ valid: payload?.valid === true }),
     normalizeRejectedEventName: (name) => String(name),
     logStartupEvent: (name, payload) => logs.push({ name, payload }),
+    recheckBackendHealth: async () => false,
+    recoverHealthyBackend: async () => {
+      recoveredCount += 1;
+    },
     restartBackend: async () => {
       restartCount += 1;
       return true;
@@ -65,6 +70,7 @@ function createHarness(overrides = {}) {
     accepted,
     logs,
     getRestartCount: () => restartCount,
+    getRecoveredCount: () => recoveredCount,
     getQuitCount: () => quitCount,
   };
 }
@@ -213,6 +219,36 @@ test('trusted privileged startup actions call their bounded capabilities', async
   assert.deepEqual(await harness.handlers.exitStartup(harness.trustedEvent), { ok: true });
   assert.equal(harness.getRestartCount(), 1);
   assert.equal(harness.getQuitCount(), 1);
+});
+
+test('retry preserves a backend that becomes healthy during the bounded recheck', async () => {
+  const harness = createHarness({
+    recheckBackendHealth: async () => true,
+  });
+
+  assert.deepEqual(
+    await harness.handlers.retryStartup(harness.trustedEvent),
+    { ok: true, recovered: true, restarted: false }
+  );
+  assert.equal(harness.getRestartCount(), 0);
+  assert.equal(harness.getRecoveredCount(), 1);
+});
+
+test('retry does not stop a backend after renderer gates recover concurrently', async () => {
+  let harness;
+  harness = createHarness({
+    recheckBackendHealth: async () => {
+      harness.state.can_retry = false;
+      return false;
+    },
+  });
+
+  assert.deepEqual(
+    await harness.handlers.retryStartup(harness.trustedEvent),
+    { ok: true, recovered: true, restarted: false }
+  );
+  assert.equal(harness.getRestartCount(), 0);
+  assert.equal(harness.getRecoveredCount(), 0);
 });
 
 test('retry exposes a bounded failure instead of starting through a stop error', async () => {

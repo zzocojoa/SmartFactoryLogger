@@ -37,7 +37,9 @@ function Resolve-CandidateLogPaths {
         $candidates += Join-Path $env:LOCALAPPDATA "smart-factory\debug_electron.log"
     }
 
-    return $candidates | Sort-Object -Unique
+    # Preserve priority: Electron's packaged userData path must be checked
+    # before legacy product-name and LOCALAPPDATA fallbacks.
+    return @($candidates | Select-Object -Unique)
 }
 
 function Convert-StartupLogLine {
