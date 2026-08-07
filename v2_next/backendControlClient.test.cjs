@@ -194,6 +194,37 @@ test('backend health client fails closed on malformed and oversized responses', 
   await assert.rejects(oversizedPromise, /exceeded the size limit/);
 });
 
+test('backend health client fails closed on HTTP, timeout, socket, and premature-close errors', async () => {
+  const httpHarness = createRequestHarness();
+  const httpPromise = healthWith(httpHarness);
+  const httpResponse = httpHarness.respond(503);
+  httpResponse.emit('data', Buffer.from('{"detail":"unavailable"}'));
+  httpResponse.emit('end');
+  await assert.rejects(httpPromise, /HTTP 503/);
+
+  const timeoutHarness = createRequestHarness();
+  const timeoutPromise = healthWith(timeoutHarness);
+  timeoutHarness.request.timeoutCallback();
+  await assert.rejects(timeoutPromise, /timed out/);
+
+  const socketHarness = createRequestHarness();
+  const socketPromise = healthWith(socketHarness);
+  socketHarness.request.emit('error', new Error('connect refused'));
+  await assert.rejects(socketPromise, /connect refused/);
+
+  for (const eventName of ['aborted', 'error', 'close']) {
+    const harness = createRequestHarness();
+    const resultPromise = healthWith(harness);
+    const response = harness.respond();
+    if (eventName === 'error') {
+      response.emit(eventName, new Error('socket reset'));
+    } else {
+      response.emit(eventName);
+    }
+    await assert.rejects(resultPromise, /aborted|failed|closed before completion/);
+  }
+});
+
 test('backend graceful-shutdown client rejects HTTP, timeout, and socket failures', async () => {
   const httpHarness = createRequestHarness();
   const httpPromise = shutdownWith(httpHarness);
