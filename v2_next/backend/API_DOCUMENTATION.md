@@ -1,6 +1,6 @@
 # Smart Factory Logger V2 - 백엔드 API 문서
 
-> **버전:** 1.0.18\
+> **버전:** 1.0.19\
 > **기본 URL:** `http://localhost:8000` (기본값)\
 > **프레임워크:** FastAPI
 
@@ -1090,7 +1090,7 @@ python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ## API Versioning
 
-현재 버전: **1.0.18**
+현재 버전: **1.0.19**
 
 API 버전은 FastAPI 앱 정의에 지정되어 있으며 `/docs`의 OpenAPI 문서에서 확인할
 수 있습니다.

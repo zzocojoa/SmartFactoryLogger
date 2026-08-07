@@ -2,13 +2,13 @@
 
 ## Release
 
-### Validate the v1.0.18 private shutdown-closeout release
+### Validate the v1.0.19 private shutdown-recovery release
 
-**What:** Produce an unsigned private release kit bound to the final v1.0.18 commit and complete the controlled server validation sequence.
+**What:** Produce an unsigned private release kit bound to the final v1.0.19 commit and complete the controlled server validation sequence.
 
-**Why:** The `9eaa913` private candidate passed commit-bound re-attestation, native X-close QA, smoke, recovered canary, and the final live gate, but the stricter forced/non-zero/missing-process and restart-race fixes were added afterward and are not covered by that field evidence.
+**Why:** The v1.0.18 `33058fc` candidate completed re-attestation and normal-launch native X-close QA, but the later backend-shutdown error exposed duplicate-instance, Retry recovery, shutdown instrumentation, and closeout-manifest gaps that are fixed only in the replacement source.
 
-**Context:** Private owner-controlled use does not currently require a publicly trusted Authenticode certificate. The release kit must still verify the exact commit, installer, packaged backend, QA bundle, and SHA-256 values. Run the read-only preinstall gate, install, commit-bound re-attestation, one-command QA, 15-minute smoke, 120-minute canary, and final read-only live gate. Do not reuse evidence from `575e869`, `49fbf6b`, `949ef38`, `0695a0f`, or `9eaa913` for the v1.0.18 candidate.
+**Context:** Private owner-controlled use does not currently require a publicly trusted Authenticode certificate. The release kit must still verify the exact commit, installer, packaged backend, QA bundle, and SHA-256 values. Run the read-only preinstall gate, install, commit-bound re-attestation, one-command QA, 15-minute smoke, 120-minute canary, and final read-only live gate. Do not reuse the `33058fc` installer or evidence from `575e869`, `49fbf6b`, `949ef38`, `0695a0f`, `9eaa913`, or `33058fc` for the v1.0.19 candidate.
 
 **Effort:** L
 **Priority:** P0
@@ -50,7 +50,7 @@ artifact for internal validation. This does not block NSIS-based server validati
 
 **Why:** Recurring health requests no longer rescan archives, but the first pending-count call can still scale with accumulated historical archive size.
 
-**Context:** Preserve the current fail-closed manifest semantics and mutation-aware cached counts. This is not part of the v1.0.18 promotion gate unless field evidence shows startup or first-health latency regression.
+**Context:** Preserve the current fail-closed manifest semantics and mutation-aware cached counts. This is not part of the v1.0.19 promotion gate unless field evidence shows startup or first-health latency regression.
 
 **Effort:** M
 **Priority:** P2
