@@ -159,6 +159,13 @@ class ShutdownRequest(BaseModel):
     reason: str | None = None
 
 
+class ControlHealthResponse(BaseModel):
+    running: bool
+    backend_process_id: int
+    backend_session_id: str
+    started_at: str
+
+
 class FrontendErrorPayload(BaseModel):
     time: float
     type: str
@@ -3610,7 +3617,11 @@ async def shutdown(
     return {"ok": True}
 
 
-@app.get("/api/control/health")
+@app.get(
+    "/api/control/health",
+    response_model=ControlHealthResponse,
+    responses={403: {"description": "Local control access denied"}},
+)
 async def control_health(
     request: Request,
     control_token: Annotated[str | None, Header(alias="X-SFL-Control-Token")] = None,

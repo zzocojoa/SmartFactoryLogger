@@ -232,4 +232,10 @@ test('shutdown evidence collector prioritizes the packaged Electron userData pat
   assert.match(collector, /"\$candidate\.3"/);
   assert.match(collector, /log_paths = \$observedLogPaths\.ToArray\(\)/);
   assert.match(collector, /Sort-Object timestamp, event/);
+  assert.match(collector, /session_id = \[string\]\$payload\.session_id/);
+  assert.match(collector, /electron\.single-instance-lock-denied/);
+  assert.match(collector, /electron\.single-instance-lock-acquired/);
+  assert.match(collector, /-SessionId \$startupSessionId/);
+  assert.match(collector, /\$launchedSessionPrefix = "\$\(\$process\.Id\)-"/);
+  assert.match(collector, /-SessionIdPrefix \$launchedSessionPrefix/);
 });

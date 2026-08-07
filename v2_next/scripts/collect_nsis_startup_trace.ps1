@@ -1,6 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$ExePath,
+    [string]$ExePath = "",
 
     [string]$OutputDirectory = "",
 
@@ -10,7 +9,9 @@ param(
 
     [int]$TraceDurationSec = 5,
 
-    [string]$Categories = "electron,blink,loading,toplevel,v8,devtools.timeline,disabled-by-default-v8.compile"
+    [string]$Categories = "electron,blink,loading,toplevel,v8,devtools.timeline,disabled-by-default-v8.compile",
+
+    [switch]$SelfTest
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,6 +67,7 @@ function Convert-StartupLogLine {
     return [pscustomobject]@{
         timestamp = $timestamp.ToUniversalTime().ToString("o")
         event = [string]$payload.event
+        session_id = [string]$payload.session_id
         elapsed_ms = [double]$payload.elapsed_ms
         payload = $payload.payload
     }
@@ -116,10 +118,27 @@ function Read-StartupEvents {
 function Get-StartupEvent {
     param(
         [object[]]$Events,
-        [string]$Name
+        [string]$Name,
+        [string]$SessionId = "",
+        [string]$SessionIdPrefix = ""
     )
 
-    return $Events | Where-Object { $_.event -eq $Name } | Select-Object -First 1
+    return $Events |
+        Where-Object {
+            $_.event -eq $Name -and
+            (
+                [string]::IsNullOrWhiteSpace($SessionId) -or
+                $_.session_id -ceq $SessionId
+            ) -and
+            (
+                [string]::IsNullOrWhiteSpace($SessionIdPrefix) -or
+                $_.session_id.StartsWith(
+                    $SessionIdPrefix,
+                    [System.StringComparison]::Ordinal
+                )
+            )
+        } |
+        Select-Object -First 1
 }
 
 function Stop-LaunchedProcessTree {
@@ -204,6 +223,71 @@ function Get-TraceOutputDirectory {
     return Join-Path ([System.IO.Path]::GetTempPath()) "smart-factory-startup-traces"
 }
 
+if ($SelfTest) {
+    $events = @(
+        [pscustomobject]@{
+            event = "electron.single-instance-lock-denied"
+            session_id = "9999-foreign"
+        },
+        [pscustomobject]@{
+            event = "electron.single-instance-lock-acquired"
+            session_id = "9999-foreign"
+        },
+        [pscustomobject]@{
+            event = "renderer.dashboard-ready"
+            session_id = "9999-foreign"
+        },
+        [pscustomobject]@{
+            event = "electron.single-instance-lock-acquired"
+            session_id = "4321-target"
+        },
+        [pscustomobject]@{
+            event = "renderer.dashboard-ready"
+            session_id = "4321-target"
+        }
+    )
+    $targetPrefix = "4321-"
+    $foreignDenialIgnored = $null -eq (
+        Get-StartupEvent `
+            -Events $events `
+            -Name "electron.single-instance-lock-denied" `
+            -SessionIdPrefix $targetPrefix
+    )
+    $acquired = Get-StartupEvent `
+        -Events $events `
+        -Name "electron.single-instance-lock-acquired" `
+        -SessionIdPrefix $targetPrefix
+    $ready = Get-StartupEvent `
+        -Events $events `
+        -Name "renderer.dashboard-ready" `
+        -SessionId ([string]$acquired.session_id)
+    $targetDenialDetected = $null -ne (
+        Get-StartupEvent `
+            -Events @(
+                $events + [pscustomobject]@{
+                    event = "electron.single-instance-lock-denied"
+                    session_id = "4321-denied"
+                }
+            ) `
+            -Name "electron.single-instance-lock-denied" `
+            -SessionIdPrefix $targetPrefix
+    )
+    if (
+        -not $foreignDenialIgnored -or
+        [string]$acquired.session_id -cne "4321-target" -or
+        [string]$ready.session_id -cne "4321-target" -or
+        -not $targetDenialDetected
+    ) {
+        throw "Startup session correlation self-test failed."
+    }
+    Write-Host "[PASS] NSIS startup trace session-correlation self-tests passed."
+    exit 0
+}
+
+if ([string]::IsNullOrWhiteSpace($ExePath)) {
+    throw "ExePath is required unless -SelfTest is used."
+}
+
 $resolvedExePath = (Resolve-Path -LiteralPath $ExePath).Path
 $resolvedOutputDirectory = Get-TraceOutputDirectory -ConfiguredDirectory $OutputDirectory
 New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
@@ -223,14 +307,53 @@ $argumentList = @(
 )
 
 $process = Start-Process -FilePath $resolvedExePath -ArgumentList $argumentList -PassThru
+$launchedSessionPrefix = "$($process.Id)-"
 $lastSnapshot = $null
 $dashboardReadySeen = $false
+$startupSessionId = ""
 
 while ((Get-Date) -lt $deadline) {
     $logSnapshot = Read-StartupEvents -CandidateLogPaths $candidateLogPaths -StartedAtUtc $startedAtUtc
     if ($null -ne $logSnapshot) {
         $lastSnapshot = $logSnapshot
-        $dashboardReadySeen = $null -ne (Get-StartupEvent -Events $logSnapshot.events -Name "renderer.dashboard-ready")
+        $lockDeniedEvent = Get-StartupEvent `
+            -Events $logSnapshot.events `
+            -Name "electron.single-instance-lock-denied" `
+            -SessionIdPrefix $launchedSessionPrefix
+        if ($null -ne $lockDeniedEvent) {
+            $cleanup = Stop-LaunchedProcessTree -Process $process
+            [pscustomobject]@{
+                status = "SINGLE_INSTANCE_DENIED"
+                exe_path = $resolvedExePath
+                process_id = $process.Id
+                started_at_utc = $startedAtUtc.ToString("o")
+                session_id = [string]$lockDeniedEvent.session_id
+                log_path = $logSnapshot.log_path
+                trace_path = $tracePath
+                cleanup = $cleanup
+            } | ConvertTo-Json -Depth 5
+            exit 1
+        }
+
+        if ([string]::IsNullOrWhiteSpace($startupSessionId)) {
+            $lockAcquiredEvent = Get-StartupEvent `
+                -Events $logSnapshot.events `
+                -Name "electron.single-instance-lock-acquired" `
+                -SessionIdPrefix $launchedSessionPrefix
+            if ($null -ne $lockAcquiredEvent) {
+                $startupSessionId = [string]$lockAcquiredEvent.session_id
+            }
+        }
+
+        $dashboardReadySeen = (
+            -not [string]::IsNullOrWhiteSpace($startupSessionId) -and
+            $null -ne (
+                Get-StartupEvent `
+                    -Events $logSnapshot.events `
+                    -Name "renderer.dashboard-ready" `
+                    -SessionId $startupSessionId
+            )
+        )
     }
 
     $traceExists = Test-Path -LiteralPath $tracePath
@@ -243,6 +366,7 @@ while ((Get-Date) -lt $deadline) {
             exe_path = $resolvedExePath
             process_id = $process.Id
             started_at_utc = $startedAtUtc.ToString("o")
+            session_id = $startupSessionId
             log_path = if ($null -eq $lastSnapshot) { $null } else { $lastSnapshot.log_path }
             trace_path = $tracePath
             trace_exists = $true
@@ -272,6 +396,7 @@ $traceBytes = if ($traceExists) { (Get-Item -LiteralPath $tracePath).Length } el
     exe_path = $resolvedExePath
     process_id = $process.Id
     started_at_utc = $startedAtUtc.ToString("o")
+    session_id = $startupSessionId
     timeout_sec = $TimeoutSec
     candidate_log_paths = $candidateLogPaths
     trace_path = $tracePath

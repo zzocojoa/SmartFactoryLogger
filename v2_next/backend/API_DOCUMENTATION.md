@@ -755,9 +755,21 @@ with `Retry-After` instead of queueing behind operational SPOT traffic.
 
 The packaged Electron application uses this endpoint to verify that the
 backend answering on the configured loopback port is the exact child process
-it spawned. The request requires the per-launch `X-SFL-Control-Token`; the
-response includes `backend_process_id`, `backend_session_id`, and `started_at`.
-An absent or incorrect token returns `403`.
+it spawned. Embedded Electron requests require the per-launch
+`X-SFL-Control-Token`; an absent or incorrect token returns `403`. Standalone
+development mode accepts only loopback clients and rejects non-loopback browser
+origins or referrers with `403`.
+
+**Response:**
+
+```json
+{
+    "running": true,
+    "backend_process_id": 12345,
+    "backend_session_id": "4f43f68e9b2a",
+    "started_at": "2026-08-07T10:00:00+00:00"
+}
+```
 
 ### POST `/api/control/shutdown`
 

@@ -17,7 +17,7 @@
     "health:backend:lint": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m ruff check backend",
     "health:backend:typecheck": ".\\\\backend\\\\.venv\\\\Scripts\\\\python.exe -m mypy",
     "health:backend:test": "node scripts/run_backend_unittest.cjs",
-    "health:qa:selftest": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/measure_nsis_operational_ready.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_release_signature.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_release_workflow_contract.ps1 -SelfTest"
+    "health:qa:selftest": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/measure_nsis_operational_ready.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/collect_nsis_startup_trace.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_release_signature.ps1 -SelfTest && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_release_workflow_contract.ps1 -SelfTest"
   },
   "keywords": [],
   "author": "",

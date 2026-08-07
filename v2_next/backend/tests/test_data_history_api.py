@@ -293,6 +293,28 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertEqual(payload["backend_session_id"], backend_app._app_session_id)
         self.assertEqual(payload["started_at"], backend_app._app_started_at_iso)
 
+        operation = backend_app.app.openapi()["paths"]["/api/control/health"]["get"]
+        self.assertIn("403", operation["responses"])
+        response_schema = operation["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+        self.assertEqual(
+            response_schema["$ref"],
+            "#/components/schemas/ControlHealthResponse",
+        )
+        health_schema = backend_app.app.openapi()["components"]["schemas"][
+            "ControlHealthResponse"
+        ]
+        self.assertEqual(
+            set(health_schema["required"]),
+            {
+                "running",
+                "backend_process_id",
+                "backend_session_id",
+                "started_at",
+            },
+        )
+
     def test_embedded_shutdown_requires_the_per_launch_control_token(self) -> None:
         with (
             patch.object(backend_app, "is_embedded_electron", return_value=True),
