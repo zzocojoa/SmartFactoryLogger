@@ -728,6 +728,7 @@ const backendRestartController = createBackendRestartController({
   startProcess: startBackend,
   isQuitting: () => applicationQuitting,
   beforeRestart: async () => {
+    backendCloseoutGate.assertCanExitWithoutProcess();
     logStartupEvent('backend.restart-requested');
     rendererStartupEventCounts.clear();
     trustedRendererTimeOriginMs = null;

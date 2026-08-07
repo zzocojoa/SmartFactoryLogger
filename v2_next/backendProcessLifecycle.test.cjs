@@ -252,6 +252,23 @@ test('backend closeout gate blocks forced or missing-process shutdown bypasses',
   assert.doesNotThrow(() => gate.assertCanExitWithoutProcess());
 });
 
+test('verified stop rejects missing lifecycle dependencies', () => {
+  const gate = createBackendCloseoutGate();
+
+  assert.throws(
+    () => createCloseoutVerifiedStop(),
+    /stopProcess must be a function/
+  );
+  assert.throws(
+    () => createCloseoutVerifiedStop({ closeoutGate: gate }),
+    /stopProcess must be a function/
+  );
+  assert.throws(
+    () => createCloseoutVerifiedStop({ stopProcess: async () => undefined }),
+    /closeoutGate must accept shutdown results/
+  );
+});
+
 test('verified stop accepts a graceful restart before concurrent shutdown exits', async () => {
   const previous = createChild();
   let current = previous;
@@ -576,6 +593,38 @@ test('concurrent retry requests share one stop and one replacement spawn', async
   assert.equal(stopCount, 1);
   assert.equal(startCount, 1);
   assert.equal(current, replacement);
+});
+
+test('failed non-zero closeout cannot be bypassed by a second restart', async () => {
+  const previous = createChild();
+  let current = previous;
+  let startCount = 0;
+  const gate = createBackendCloseoutGate();
+  gate.markBackendStarted();
+  const controller = createBackendRestartController({
+    getProcess: () => current,
+    setProcess: (value) => {
+      current = value;
+    },
+    stopProcess: async () => {
+      current = null;
+      throw new Error('Backend exited with code 2.');
+    },
+    beforeRestart: () => gate.assertCanExitWithoutProcess(),
+    startProcess: () => {
+      startCount += 1;
+      return createChild(4321);
+    },
+  });
+
+  await assert.rejects(controller.restart(), /code 2/);
+  assert.equal(current, null);
+  assert.equal(gate.isCloseoutRequired(), true);
+  await assert.rejects(
+    controller.restart(),
+    /before a graceful shutdown closeout was verified/
+  );
+  assert.equal(startCount, 0);
 });
 
 test('quitting during an active stop aborts the replacement spawn', async () => {

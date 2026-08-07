@@ -205,7 +205,7 @@ function createBackendCloseoutGate() {
   };
 }
 
-function createCloseoutVerifiedStop(options) {
+function createCloseoutVerifiedStop(options = {}) {
   const { stopProcess, closeoutGate } = options;
   if (typeof stopProcess !== 'function') {
     throw new TypeError('stopProcess must be a function.');
