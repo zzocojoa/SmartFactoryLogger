@@ -533,6 +533,25 @@ def _probe_spot_poll_shutdown_drained(
     return bool(status.get("complete"))
 
 
+def _probe_spot_poll_producers_settled(
+    shutdown_kind: str,
+    successful_shutdown: bool,
+) -> bool:
+    if successful_shutdown:
+        return True
+    try:
+        status = spot_control.get_spot_poll_shutdown_status()
+    except Exception as exc:
+        _logger.warning(
+            "[Main] %s SPOT producer settlement probe failed error_type=%s %s",
+            shutdown_kind,
+            type(exc).__name__,
+            _lifecycle_log_fields(),
+        )
+        return False
+    return bool(status.get("tasks_settled"))
+
+
 def _log_backend_access_urls() -> None:
     """Resolve local addresses outside the readiness-critical lifespan path."""
     try:
@@ -1851,6 +1870,10 @@ async def lifespan(app: FastAPI):
                     "Lifespan final",
                     spot_poll_stopped,
                 )
+                spot_producers_settled = _probe_spot_poll_producers_settled(
+                    "Lifespan final",
+                    spot_poll_stopped,
+                )
                 if not spot_poll_stopped:
                     shutdown_failures.append("spot_poll")
                     _logger.error(
@@ -1861,6 +1884,13 @@ async def lifespan(app: FastAPI):
                     _logger.error(
                         "SPOT observation fact writes did not drain before lifespan shutdown"
                     )
+                if spot_producers_settled:
+                    print("[Main] Stopping SPOT diagnostic request journal...")
+                    if not await _run_lifespan_stop_stage(
+                        "spot_diagnostic_journal",
+                        spot_control.stop_spot_diagnostic_request_journal,
+                    ):
+                        shutdown_failures.append("spot_diagnostic_journal")
             if shutdown_failures and not shutdown_has_primary_error:
                 raise RuntimeError(
                     "lifespan shutdown incomplete: "
@@ -1908,6 +1938,7 @@ app.add_middleware(
 
 _CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS = (
     "spot_poll_loop_stopped",
+    "spot_diagnostic_journal_stopped",
     "spot_observation_fact_drained",
     "spot_image_capture_drained",
     "plc_service_stopped",
@@ -3580,6 +3611,29 @@ async def _run_control_shutdown(reason: str) -> None:
         "Control shutdown final",
         bool(status.get("spot_poll_loop_stopped")),
     )
+    spot_producers_settled = _probe_spot_poll_producers_settled(
+        "Control shutdown final",
+        bool(status.get("spot_poll_loop_stopped")),
+    )
+    if spot_producers_settled:
+        async def _stop_spot_diagnostic_journal() -> bool:
+            return await asyncio.to_thread(
+                spot_control.stop_spot_diagnostic_request_journal
+            )
+
+        await _run_async_control_shutdown_stage(
+            stage="spot_diagnostic_journal",
+            status_key="spot_diagnostic_journal_stopped",
+            stopper=_stop_spot_diagnostic_journal,
+            status=status,
+        )
+    else:
+        status["spot_diagnostic_journal_stopped"] = False
+        _logger.warning(
+            "[Main] Control shutdown left SPOT diagnostic journal open because "
+            "a producer is not settled %s",
+            _lifecycle_log_fields(),
+        )
     status["total_elapsed_ms"] = round(
         (time.perf_counter() - shutdown_started_perf) * 1000.0,
         1,

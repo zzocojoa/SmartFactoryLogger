@@ -4,13 +4,17 @@ import asyncio
 import http.client
 import logging
 import math
+import re
 import socket
 import sys
 import threading
 import time
 from concurrent.futures import Future, InvalidStateError
+from collections import deque
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from enum import Enum
+from functools import partial
 from queue import Empty, Queue
 from typing import Callable, Mapping, Protocol
 from urllib.parse import SplitResult, urljoin, urlsplit
@@ -32,6 +36,18 @@ _RESPONSE_READ_CHUNK_BYTES = 64 * 1024
 _ALLOWED_METHODS = frozenset({"GET", "HEAD", "PUT"})
 _REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
 _BIND_COLLISION_ERRNOS = frozenset({98, 10048})
+_CORRELATION_ID_PATTERN = re.compile(r"^transport:[0-9a-f]{32}$")
+_REQUEST_EVENT_LIMIT = 256
+_REQUEST_FAILURE_EVENT_LIMIT = 256
+_REQUEST_FAILURE_STATES = frozenset(
+    {
+        "failure",
+        "shutdown_cancelled",
+        "caller_cancelled",
+        "late_worker_success",
+        "late_worker_failure",
+    }
+)
 _logger = logging.getLogger("spot_control")
 
 
@@ -77,7 +93,7 @@ def _build_spot_http_transport_diagnostics(
 
 def empty_spot_http_transport_diagnostics() -> dict[str, object]:
     zero_counts = {kind.value: 0 for kind in SpotRequestKind}
-    return _build_spot_http_transport_diagnostics(
+    payload = _build_spot_http_transport_diagnostics(
         pool_diagnostics=SourcePortLeasePool().diagnostics(),
         started_count=0,
         success_count=0,
@@ -88,6 +104,19 @@ def empty_spot_http_transport_diagnostics() -> dict[str, object]:
         kind_success_count=zero_counts,
         kind_failure_count=zero_counts,
     )
+    payload.update(
+        {
+            "source_port_request_event_limit": _REQUEST_EVENT_LIMIT,
+            "source_port_request_event_count_total": 0,
+            "source_port_request_event_drop_count": 0,
+            "source_port_recent_request_events": [],
+            "source_port_request_failure_event_limit": _REQUEST_FAILURE_EVENT_LIMIT,
+            "source_port_request_failure_event_count_total": 0,
+            "source_port_request_failure_event_drop_count": 0,
+            "source_port_recent_request_failure_events": [],
+        }
+    )
+    return payload
 
 
 @dataclass(frozen=True)
@@ -101,6 +130,7 @@ class SpotHttpRequest:
     read_timeout_sec: float
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     read_response_body: bool = True
+    correlation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,8 +215,10 @@ class _DaemonSingleWorker:
     def __init__(
         self,
         handler: Callable[[SpotHttpRequest], SpotHttpResponse],
+        reject_handler: Callable[[SpotHttpRequest, BaseException], None],
     ) -> None:
         self._handler = handler
+        self._reject_handler = reject_handler
         self._queue: Queue[_WorkItem | None] = Queue()
         self._state_lock = threading.Lock()
         self._accepting = True
@@ -239,14 +271,15 @@ class _DaemonSingleWorker:
             if item is None:
                 retained_sentinel = True
                 continue
+            failure = SpotTransportClosedError(
+                "SPOT transport is not accepting requests"
+            )
             try:
-                item.future.set_exception(
-                    SpotTransportClosedError(
-                        "SPOT transport is not accepting requests"
-                    )
-                )
+                item.future.set_exception(failure)
             except InvalidStateError:
                 pass
+            else:
+                self._reject_handler(item.request, failure)
         if retained_sentinel:
             self._queue.put(None)
 
@@ -343,6 +376,17 @@ class SpotHttpTransport:
         self._kind_started_count = {kind.value: 0 for kind in SpotRequestKind}
         self._kind_success_count = {kind.value: 0 for kind in SpotRequestKind}
         self._kind_failure_count = {kind.value: 0 for kind in SpotRequestKind}
+        self._request_event_sequence = 0
+        self._request_event_count_total = 0
+        self._request_event_drop_count = 0
+        self._recent_request_events: deque[dict[str, object]] = deque(
+            maxlen=_REQUEST_EVENT_LIMIT
+        )
+        self._request_failure_event_count_total = 0
+        self._request_failure_event_drop_count = 0
+        self._recent_request_failure_events: deque[dict[str, object]] = deque(
+            maxlen=_REQUEST_FAILURE_EVENT_LIMIT
+        )
 
     @property
     def supported(self) -> bool:
@@ -369,7 +413,10 @@ class SpotHttpTransport:
                 return False
             self._pool.initialize()
             self._start_response_deadline_watchdog_locked()
-            self._executor = _DaemonSingleWorker(self._execute_request_sync)
+            self._executor = _DaemonSingleWorker(
+                self._execute_request_sync,
+                self._record_shutdown_cancelled_request,
+            )
             self._active = True
             self._accepting = True
             return True
@@ -379,8 +426,11 @@ class SpotHttpTransport:
         wrapped = asyncio.wrap_future(future)
         try:
             return await asyncio.shield(wrapped)
-        except asyncio.CancelledError:
-            future.add_done_callback(self._consume_cancelled_result)
+        except asyncio.CancelledError as exc:
+            self._record_request_event(request, state="caller_cancelled", exception=exc)
+            future.add_done_callback(
+                partial(self._consume_cancelled_result, request=request)
+            )
             wrapped.add_done_callback(self._consume_cancelled_wrapped_result)
             raise
 
@@ -402,22 +452,32 @@ class SpotHttpTransport:
                 ) from exc
             self._pending.add(future)
             future.add_done_callback(self._discard_pending)
+            self._record_request_event_locked(request, state="submitted")
             return future
 
     def _execute_request_sync(self, request: SpotHttpRequest) -> SpotHttpResponse:
         with self._request_lock:
             with self._state_lock:
                 if not self._accepting or not self._active:
-                    raise SpotTransportClosedError(
+                    failure = SpotTransportClosedError(
                         "SPOT transport is not accepting requests"
                     )
+                    self._record_request_event_locked(
+                        request,
+                        state="shutdown_cancelled",
+                        exception=failure,
+                    )
+                    raise failure
             self._record_started(request.kind)
+            self._record_request_event(request, state="started")
             try:
                 response = self._request_with_redirects(request)
-            except BaseException:
+            except BaseException as exc:
                 self._record_failure(request.kind)
+                self._record_request_event(request, state="failure", exception=exc)
                 raise
             self._record_success(request.kind)
+            self._record_request_event(request, state="success")
             return response
 
     def _request_with_redirects(
@@ -706,7 +766,7 @@ class SpotHttpTransport:
     def diagnostics(self) -> dict[str, object]:
         pool_diagnostics = self._pool.diagnostics()
         with self._state_lock:
-            return _build_spot_http_transport_diagnostics(
+            payload = _build_spot_http_transport_diagnostics(
                 pool_diagnostics=pool_diagnostics,
                 started_count=self._started_count,
                 success_count=self._success_count,
@@ -717,6 +777,23 @@ class SpotHttpTransport:
                 kind_success_count=self._kind_success_count,
                 kind_failure_count=self._kind_failure_count,
             )
+            payload.update(
+                {
+                    "source_port_request_event_limit": _REQUEST_EVENT_LIMIT,
+                    "source_port_request_event_count_total": self._request_event_count_total,
+                    "source_port_request_event_drop_count": self._request_event_drop_count,
+                    "source_port_recent_request_events": [
+                        dict(event) for event in self._recent_request_events
+                    ],
+                    "source_port_request_failure_event_limit": _REQUEST_FAILURE_EVENT_LIMIT,
+                    "source_port_request_failure_event_count_total": self._request_failure_event_count_total,
+                    "source_port_request_failure_event_drop_count": self._request_failure_event_drop_count,
+                    "source_port_recent_request_failure_events": [
+                        dict(event) for event in self._recent_request_failure_events
+                    ],
+                }
+            )
+            return payload
 
     def _request_with_bind_retries(self, request: SpotHttpRequest) -> SpotHttpResponse:
         parts, host, port, origin_form = self._parse_url(request.url)
@@ -979,14 +1056,24 @@ class SpotHttpTransport:
         code_text = "unknown" if code is None else str(code)
         return f"SPOT transport request failed: {exc.__class__.__name__}; code={code_text}"
 
-    @staticmethod
-    def _consume_cancelled_result(future: Future[SpotHttpResponse]) -> None:
+    def _consume_cancelled_result(
+        self,
+        future: Future[SpotHttpResponse],
+        *,
+        request: SpotHttpRequest,
+    ) -> None:
         try:
             failure = future.exception()
         except BaseException:
             return
         if failure is None:
+            self._record_request_event(request, state="late_worker_success")
             return
+        self._record_request_event(
+            request,
+            state="late_worker_failure",
+            exception=failure,
+        )
         _logger.warning(
             "Cancelled SPOT HTTP worker failed",
             extra={
@@ -994,6 +1081,63 @@ class SpotHttpTransport:
                 "error_type": failure.__class__.__name__,
             },
         )
+
+    def _record_request_event(
+        self,
+        request: SpotHttpRequest,
+        *,
+        state: str,
+        exception: BaseException | None = None,
+    ) -> None:
+        with self._state_lock:
+            self._record_request_event_locked(
+                request,
+                state=state,
+                exception=exception,
+            )
+
+    def _record_shutdown_cancelled_request(
+        self,
+        request: SpotHttpRequest,
+        failure: BaseException,
+    ) -> None:
+        self._record_request_event(
+            request,
+            state="shutdown_cancelled",
+            exception=failure,
+        )
+
+    def _record_request_event_locked(
+        self,
+        request: SpotHttpRequest,
+        *,
+        state: str,
+        exception: BaseException | None = None,
+    ) -> None:
+        correlation_id = str(request.correlation_id or "").strip()
+        if _CORRELATION_ID_PATTERN.fullmatch(correlation_id) is None:
+            return
+        self._request_event_sequence += 1
+        event: dict[str, object] = {
+            "event_sequence": self._request_event_sequence,
+            "event_at_utc": datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+            "correlation_id": correlation_id,
+            "request_kind": request.kind.value,
+            "state": state,
+        }
+        if exception is not None:
+            event["exception_class"] = exception.__class__.__name__
+        self._request_event_count_total += 1
+        if len(self._recent_request_events) == _REQUEST_EVENT_LIMIT:
+            self._request_event_drop_count += 1
+        self._recent_request_events.append(event)
+        if state in _REQUEST_FAILURE_STATES:
+            self._request_failure_event_count_total += 1
+            if len(self._recent_request_failure_events) == _REQUEST_FAILURE_EVENT_LIMIT:
+                self._request_failure_event_drop_count += 1
+            self._recent_request_failure_events.append(dict(event))
 
     @staticmethod
     def _consume_cancelled_wrapped_result(

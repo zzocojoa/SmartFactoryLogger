@@ -2,6 +2,41 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.20] - 2026-08-12
+
+### Added
+
+- Added a bounded, append-only SPOT diagnostic request journal so operators can
+  correlate each field request with its snapshot, poll, and transport lifecycle
+  across timeout, cancellation, recovery, and process restart boundaries.
+- Added payload-free transport failure retention that remains available after
+  later successful traffic for post-canary root-cause analysis.
+
+### Changed
+
+- Moved diagnostic journal persistence to a bounded single-writer queue outside
+  the event loop and serialized SPOT device lock, with queue, write latency,
+  rotation, recovery, and shutdown-drain health exposed through diagnostics.
+- Made restart recovery byte-bounded and schema-allowlisted, preserving complete
+  events that lack only a final newline while rejecting malformed or private
+  fields before they can reappear through the diagnostics API.
+
+### Fixed
+
+- Prevented later diagnostic success, JSONL rotation, or process restart from
+  erasing the timeout phase, exception class, UTC duration, and correlation IDs
+  needed to attribute the post-canary API stalls observed in v1.0.19.
+- Made journal shutdown drain retryable without detaching a live writer, and
+  record queued transport work as terminal `shutdown_cancelled` evidence.
+- Added a bounded failure-terminal queue reserve so successful terminal traffic
+  cannot crowd out timeout, cancellation, or failed-completion evidence; exposed
+  per-class drop counters and made any failure-terminal drop fail closeout.
+- Deferred final journal close until all SPOT producers drain, and made corrupt
+  recovery lines, including non-scalar allowlisted fields, fail open without
+  blocking startup.
+- Converted recovered `queued` or `running` requests without a terminal record
+  into durable, cause-neutral `terminal_missing` failure evidence.
+
 ## [1.0.19] - 2026-08-07
 
 ### Fixed
