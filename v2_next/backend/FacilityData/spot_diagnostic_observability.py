@@ -946,14 +946,30 @@ class SpotDiagnosticRequestJournal:
         }
         if not required_keys.issubset(value):
             return None
+        journal_instance_id = value.get("journal_instance_id")
+        request_id = value.get("request_id")
+        snapshot_correlation_id = value.get("snapshot_correlation_id")
+        poll_correlation_id = value.get("poll_correlation_id")
+        transport_correlation_id = value.get("transport_correlation_id")
+        diagnostic_field = value.get("diagnostic_field")
+        api_route = value.get("api_route")
         if (
-            _JOURNAL_INSTANCE_ID_PATTERN.fullmatch(str(value.get("journal_instance_id", ""))) is None
-            or _REQUEST_ID_PATTERN.fullmatch(str(value.get("request_id", ""))) is None
-            or _SNAPSHOT_CORRELATION_ID_PATTERN.fullmatch(str(value.get("snapshot_correlation_id", ""))) is None
-            or _POLL_CORRELATION_ID_PATTERN.fullmatch(str(value.get("poll_correlation_id", ""))) is None
-            or _TRANSPORT_CORRELATION_ID_PATTERN.fullmatch(str(value.get("transport_correlation_id", ""))) is None
-            or value.get("diagnostic_field") not in {*SPOT_DIAGNOSTIC_OUTPUT_FIELDS, "unknown"}
-            or value.get("api_route") not in {*_ALLOWED_ROUTES, "/unknown"}
+            not isinstance(journal_instance_id, str)
+            or _JOURNAL_INSTANCE_ID_PATTERN.fullmatch(journal_instance_id) is None
+            or not isinstance(request_id, str)
+            or _REQUEST_ID_PATTERN.fullmatch(request_id) is None
+            or not isinstance(snapshot_correlation_id, str)
+            or _SNAPSHOT_CORRELATION_ID_PATTERN.fullmatch(snapshot_correlation_id)
+            is None
+            or not isinstance(poll_correlation_id, str)
+            or _POLL_CORRELATION_ID_PATTERN.fullmatch(poll_correlation_id) is None
+            or not isinstance(transport_correlation_id, str)
+            or _TRANSPORT_CORRELATION_ID_PATTERN.fullmatch(transport_correlation_id)
+            is None
+            or not isinstance(diagnostic_field, str)
+            or diagnostic_field not in {*SPOT_DIAGNOSTIC_OUTPUT_FIELDS, "unknown"}
+            or not isinstance(api_route, str)
+            or api_route not in {*_ALLOWED_ROUTES, "/unknown"}
         ):
             return None
         timestamp_keys = {"event_at_utc", "queued_at_utc", "started_at_utc", "ended_at_utc"} & set(value)
@@ -971,23 +987,32 @@ class SpotDiagnosticRequestJournal:
             ):
                 return None
         outcome = value.get("outcome")
+        if state in _TERMINAL_STATES and not isinstance(outcome, str):
+            return None
         if state == "completed" and outcome not in _ALLOWED_OUTCOMES - {
             "timeout",
             "cancelled",
             "terminal_missing_after_restart",
         }:
             return None
-        if state == "timed_out" and (
-            outcome != "timeout" or value.get("timeout_phase") not in _ALLOWED_TIMEOUT_PHASES
-        ):
-            return None
+        if state == "timed_out":
+            timeout_phase = value.get("timeout_phase")
+            if (
+                outcome != "timeout"
+                or not isinstance(timeout_phase, str)
+                or timeout_phase not in _ALLOWED_TIMEOUT_PHASES
+            ):
+                return None
         if state == "cancelled" and outcome != "cancelled":
             return None
-        if state == "terminal_missing" and (
-            outcome != "terminal_missing_after_restart"
-            or value.get("recovered_from_state") not in {"queued", "running"}
-        ):
-            return None
+        if state == "terminal_missing":
+            recovered_from_state = value.get("recovered_from_state")
+            if (
+                outcome != "terminal_missing_after_restart"
+                or not isinstance(recovered_from_state, str)
+                or recovered_from_state not in {"queued", "running"}
+            ):
+                return None
         return {key: value[key] for key in allowed_keys if key in value}
 
     @staticmethod

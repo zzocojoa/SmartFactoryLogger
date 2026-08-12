@@ -32,7 +32,8 @@ All notable changes to Smart Factory Logger V2 are documented here.
   cannot crowd out timeout, cancellation, or failed-completion evidence; exposed
   per-class drop counters and made any failure-terminal drop fail closeout.
 - Deferred final journal close until all SPOT producers drain, and made corrupt
-  recovery lines fail open without blocking startup.
+  recovery lines, including non-scalar allowlisted fields, fail open without
+  blocking startup.
 - Converted recovered `queued` or `running` requests without a terminal record
   into durable, cause-neutral `terminal_missing` failure evidence.
 

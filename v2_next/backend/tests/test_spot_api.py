@@ -6394,6 +6394,57 @@ class SpotDiagnosticRequestJournalTests(unittest.TestCase):
             self.assertNotIn("device-secret", serialized)
             self.assertTrue(recovered.close())
 
+    def test_recovery_rejects_non_string_membership_fields_without_startup_failure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME
+            service_id = str(uuid4())
+            journal = SpotDiagnosticRequestJournal(log_path)
+            context = journal.queue_request(
+                snapshot_correlation_id=f"{service_id}:diag:1",
+                poll_correlation_id=f"{service_id}:poll:1",
+                diagnostic_field="signalpc",
+                api_route="/output",
+            )
+            journal.mark_running(context)
+            journal.mark_timed_out(
+                context,
+                exception=httpx.ReadTimeout("private timeout"),
+                timeout_phase="response",
+            )
+            self.assertTrue(journal.close())
+            valid_event = json.loads(
+                log_path.read_text(encoding="utf-8").splitlines()[-1]
+            )
+            malformed_events = []
+            for index, (key, malformed_value) in enumerate(
+                (
+                    ("diagnostic_field", []),
+                    ("api_route", {}),
+                    ("outcome", []),
+                    ("timeout_phase", {}),
+                ),
+                start=1,
+            ):
+                malformed_events.append(
+                    {
+                        **valid_event,
+                        "event_sequence": valid_event["event_sequence"] + index,
+                        key: malformed_value,
+                    }
+                )
+            with log_path.open("a", encoding="utf-8") as handle:
+                for event in malformed_events:
+                    handle.write(json.dumps(event) + "\n")
+
+            recovered = SpotDiagnosticRequestJournal(log_path)
+            snapshot = recovered.snapshot()
+            self.assertEqual(snapshot["recovered_event_count"], 3)
+            self.assertEqual(snapshot["recovery_invalid_line_count"], 4)
+            self.assertEqual(snapshot["failure_count_retained"], 1)
+            self.assertTrue(recovered.close())
+
     def test_recovery_rejects_oversized_integer_and_deep_json_without_startup_failure(
         self,
     ) -> None:
