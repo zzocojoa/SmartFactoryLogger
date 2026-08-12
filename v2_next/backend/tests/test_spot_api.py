@@ -1000,6 +1000,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("exception_class", failures["d2temperature"])
             self.assertEqual(journal["outcome_counts"]["success"], 4)
             self.assertEqual(journal["active_request_count"], 0)
+            self.assertTrue(
+                await asyncio.to_thread(
+                    spot_api._close_spot_diagnostic_request_journal
+                )
+            )
 
     async def test_diagnostic_request_journal_write_failure_does_not_abort_sweep(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1958,6 +1963,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                     route == "/output"
                     for field, route in routes_by_field.items()
                     if field != "appnumber"
+                )
+            )
+            self.assertTrue(
+                await asyncio.to_thread(
+                    spot_api._close_spot_diagnostic_request_journal
                 )
             )
 
