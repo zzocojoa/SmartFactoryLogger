@@ -2,13 +2,13 @@
 
 ## Release
 
-### Validate the v1.0.19 private shutdown-recovery release
+### Validate the v1.0.20 private diagnostic-instrumentation release
 
-**What:** Produce an unsigned private release kit bound to the final v1.0.19 commit and complete the controlled server validation sequence.
+**What:** Produce an unsigned private release kit bound to the final v1.0.20 commit and complete the controlled server validation sequence.
 
-**Why:** The v1.0.18 `33058fc` candidate completed re-attestation and normal-launch native X-close QA, but the later backend-shutdown error exposed duplicate-instance, Retry recovery, shutdown instrumentation, and closeout-manifest gaps that are fixed only in the replacement source.
+**Why:** The v1.0.19 `0c1ad4f` candidate completed re-attestation, native-X QA, passive smoke, 120-minute canary, and final closeout, but two diagnostic requests became unresponsive during the canary and the retained evidence could not attribute their field, timeout phase, or transport lifecycle.
 
-**Context:** Private owner-controlled use does not currently require a publicly trusted Authenticode certificate. The release kit must still verify the exact commit, installer, packaged backend, QA bundle, and SHA-256 values. Run the read-only preinstall gate, install, commit-bound re-attestation, one-command QA, 15-minute smoke, 120-minute canary, and final read-only live gate. Do not reuse the `33058fc` installer or evidence from `575e869`, `49fbf6b`, `949ef38`, `0695a0f`, `9eaa913`, or `33058fc` for the v1.0.19 candidate.
+**Context:** Keep production/customer release blocked until a new exact-commit artifact proves the bounded append-only request journal under timeout, cancellation, recovery, concurrency, rotation, smoke, instrumented canary, and native-X closeout. Reuse v1.0.19 evidence only as a comparison baseline, not as promotion evidence. Keep the approved v1.0.16 installer as rollback.
 
 **Effort:** L
 **Priority:** P0

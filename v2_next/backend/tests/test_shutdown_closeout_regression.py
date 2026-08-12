@@ -1376,6 +1376,9 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                 backend_app.memory_service.stop = lambda: mark("memory_service")
                 backend_app.config_sync_agent.stop = lambda: mark("config_sync")
                 backend_app.config_watch_service.stop = lambda: mark("config_watch")
+                backend_app.spot_control.stop_spot_diagnostic_request_journal = (
+                    lambda: mark("spot_diagnostic_journal")
+                )
 
                 asyncio.run(backend_app._run_control_shutdown("subprocess-regression"))
                 """
@@ -1395,6 +1398,11 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
         self.assertGreaterEqual(len(order), 3)
         self.assertEqual(order[0], "spot_poll_loop")
         self.assertLess(order.index("spot_poll_loop"), order.index("logger_service"))
+        self.assertLess(
+            order.index("logger_service"),
+            order.index("spot_diagnostic_journal"),
+        )
+        self.assertEqual(order[-1], "spot_diagnostic_journal")
 
     def test_control_shutdown_spot_failure_still_runs_closeout_and_exits_with_failure(self) -> None:
         async def exercise() -> None:
@@ -1414,11 +1422,22 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     "_stop_services_for_control_shutdown",
                     return_value=downstream_status,
                 ) as closeout,
+                patch.object(
+                    backend_app,
+                    "_probe_spot_poll_producers_settled",
+                    return_value=True,
+                ),
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_diagnostic_request_journal",
+                    return_value=True,
+                ) as stop_journal,
                 patch.object(backend_app.os, "_exit") as process_exit,
             ):
                 await backend_app._run_control_shutdown("spot-stop-regression")
 
             closeout.assert_called_once_with(observation_fact_drained=True)
+            stop_journal.assert_called_once_with()
             process_exit.assert_called_once_with(2)
 
         asyncio.run(exercise())
@@ -1449,12 +1468,18 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     "_stop_services_for_control_shutdown",
                     return_value=downstream_status,
                 ) as closeout,
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_diagnostic_request_journal",
+                    return_value=True,
+                ) as stop_journal,
                 patch.object(backend_app.os, "_exit") as process_exit,
             ):
                 with self.assertLogs("SmartFactoryLoggerV2", level="WARNING"):
                     await backend_app._run_control_shutdown("drain-probe-regression")
 
             closeout.assert_called_once_with(observation_fact_drained=False)
+            stop_journal.assert_called_once_with()
             process_exit.assert_called_once_with(2)
 
         asyncio.run(exercise())
@@ -1477,11 +1502,54 @@ class ShutdownCloseoutRegressionTests(unittest.TestCase):
                     "_stop_services_for_control_shutdown",
                     return_value=downstream_status,
                 ) as closeout,
+                patch.object(
+                    backend_app,
+                    "_probe_spot_poll_producers_settled",
+                    return_value=False,
+                ),
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_diagnostic_request_journal",
+                    return_value=True,
+                ) as stop_journal,
                 patch.object(backend_app.os, "_exit") as process_exit,
             ):
                 await backend_app._run_control_shutdown("transport-timeout-regression")
 
             closeout.assert_called_once_with(observation_fact_drained=True)
+            stop_journal.assert_not_called()
+            process_exit.assert_called_once_with(2)
+
+        asyncio.run(exercise())
+
+    def test_control_shutdown_journal_drain_failure_exits_with_failure(self) -> None:
+        async def exercise() -> None:
+            downstream_status = {
+                key: True
+                for key in backend_app._CONTROL_SHUTDOWN_REQUIRED_STATUS_KEYS
+                if key != "spot_diagnostic_journal_stopped"
+            }
+            with (
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_poll_loop",
+                    new=AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    backend_app,
+                    "_stop_services_for_control_shutdown",
+                    return_value=downstream_status,
+                ),
+                patch.object(
+                    backend_app.spot_control,
+                    "stop_spot_diagnostic_request_journal",
+                    return_value=False,
+                ) as stop_journal,
+                patch.object(backend_app.os, "_exit") as process_exit,
+            ):
+                await backend_app._run_control_shutdown("journal-drain-regression")
+
+            stop_journal.assert_called_once_with()
             process_exit.assert_called_once_with(2)
 
         asyncio.run(exercise())

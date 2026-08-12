@@ -560,6 +560,7 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
             )
 
         status["spot_poll_loop_stopped"] = True
+        status["spot_diagnostic_journal_stopped"] = True
         self.assertTrue(status["logger_service_stopped"])
         stop_image_capture.assert_called_once_with(timeout_sec=30.0)
         self.assertTrue(logger_stub.finalize_spot_image_manifest)

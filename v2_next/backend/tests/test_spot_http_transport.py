@@ -315,6 +315,7 @@ def _request(
     read_timeout_sec: float = 2.0,
     max_response_bytes: int = transport_module.DEFAULT_MAX_RESPONSE_BYTES,
     read_response_body: bool = True,
+    correlation_id: str | None = None,
 ) -> SpotHttpRequest:
     return SpotHttpRequest(
         kind=kind,
@@ -326,6 +327,7 @@ def _request(
         read_timeout_sec=read_timeout_sec,
         max_response_bytes=max_response_bytes,
         read_response_body=read_response_body,
+        correlation_id=correlation_id,
     )
 
 
@@ -364,6 +366,82 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(await transport.close())
 
         acquire.assert_called_once_with()
+
+    async def test_request_correlation_id_is_visible_in_transport_lifecycle(self) -> None:
+        transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=lambda *_args: _FakeConnection(),
+        )
+        correlation_id = "transport:0123456789abcdef0123456789abcdef"
+        transport.start()
+        try:
+            await transport.request(
+                _request(
+                    kind=SpotRequestKind.DIAGNOSTIC,
+                    url="http://spot.local/output?p=signalpc",
+                    correlation_id=correlation_id,
+                )
+            )
+            diagnostics = transport.diagnostics()
+        finally:
+            self.assertTrue(await transport.close())
+
+        events = diagnostics["source_port_recent_request_events"]
+        self.assertEqual(
+            [event["state"] for event in events],
+            ["submitted", "started", "success"],
+        )
+        self.assertEqual(
+            {event["correlation_id"] for event in events},
+            {correlation_id},
+        )
+        self.assertEqual(
+            {event["request_kind"] for event in events},
+            {SpotRequestKind.DIAGNOSTIC.value},
+        )
+        self.assertTrue(all(event["event_at_utc"].endswith("Z") for event in events))
+
+    async def test_failure_correlation_survives_success_event_eviction(self) -> None:
+        transport = SpotHttpTransport(
+            pool=self.make_pool(capacity=1),
+            connection_factory=lambda *_args: _FakeConnection(
+                response_error=OSError(10054, "private endpoint detail")
+            ),
+        )
+        failure_correlation_id = "transport:11111111111111111111111111111111"
+        transport.start()
+        try:
+            with self.assertRaises(SpotTransportRequestError):
+                await transport.request(
+                    _request(
+                        kind=SpotRequestKind.DIAGNOSTIC,
+                        correlation_id=failure_correlation_id,
+                    )
+                )
+            for index in range(300):
+                request = _request(
+                    kind=SpotRequestKind.DIAGNOSTIC,
+                    correlation_id=f"transport:{index:032x}",
+                )
+                transport._record_request_event(request, state="submitted")
+                transport._record_request_event(request, state="success")
+            diagnostics = transport.diagnostics()
+        finally:
+            self.assertTrue(await transport.close())
+
+        self.assertNotIn(
+            failure_correlation_id,
+            {
+                event["correlation_id"]
+                for event in diagnostics["source_port_recent_request_events"]
+            },
+        )
+        failure_events = diagnostics["source_port_recent_request_failure_events"]
+        self.assertEqual(len(failure_events), 1)
+        self.assertEqual(failure_events[0]["correlation_id"], failure_correlation_id)
+        self.assertEqual(failure_events[0]["state"], "failure")
+        self.assertEqual(failure_events[0]["exception_class"], "SpotTransportRequestError")
+        self.assertNotIn("private endpoint detail", repr(failure_events))
 
     async def test_shutdown_cleanup_is_retryable_after_pool_close_failure(
         self,
@@ -1311,7 +1389,11 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
             connection_factory=connection_factory,
         )
         transport.start()
-        first = asyncio.create_task(transport.request(_request()))
+        first = asyncio.create_task(
+            transport.request(
+                _request(correlation_id="transport:33333333333333333333333333333333")
+            )
+        )
         self.assertTrue(
             await asyncio.wait_for(
                 asyncio.to_thread(first_response_started.wait),
@@ -1336,6 +1418,13 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(created_count, 2)
         self.assertEqual(diagnostics["source_port_transport_success_count"], 2)
         self.assertEqual(diagnostics["source_port_pool_quarantined_count"], 2)
+        self.assertEqual(
+            [
+                event["state"]
+                for event in diagnostics["source_port_recent_request_failure_events"]
+            ],
+            ["caller_cancelled", "late_worker_success"],
+        )
 
     async def test_cancelled_worker_failure_emits_privacy_safe_bounded_warning(
         self,
@@ -1369,7 +1458,10 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(transport_module._logger, "warning") as warning_mock:
                 request_task = asyncio.create_task(
                     transport.request(
-                        _request(url="http://secret.internal:8080/image.jpg")
+                        _request(
+                            url="http://secret.internal:8080/image.jpg",
+                            correlation_id="transport:22222222222222222222222222222222",
+                        )
                     )
                 )
                 await asyncio.sleep(0.02)
@@ -1409,6 +1501,15 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private endpoint detail", warning_payload)
         self.assertEqual(diagnostics["source_port_transport_failure_count"], 1)
         self.assertEqual(diagnostics["source_port_pool_quarantined_count"], 1)
+        failure_events = diagnostics["source_port_recent_request_failure_events"]
+        self.assertEqual(
+            [event["state"] for event in failure_events],
+            ["caller_cancelled", "failure", "late_worker_failure"],
+        )
+        self.assertEqual(
+            {event["correlation_id"] for event in failure_events},
+            {"transport:22222222222222222222222222222222"},
+        )
 
     async def test_url_and_method_validation_reject_unsafe_requests(self) -> None:
         transport = SpotHttpTransport(pool=self.make_pool())
@@ -1691,13 +1792,22 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         )
         transport.start()
         first = asyncio.create_task(
-            asyncio.to_thread(transport.request_sync, _request())
+            asyncio.to_thread(
+                transport.request_sync,
+                _request(
+                    correlation_id="transport:33333333333333333333333333333333"
+                ),
+            )
         )
         self.assertTrue(await asyncio.to_thread(response_started.wait, 1.0))
         second = asyncio.create_task(
             asyncio.to_thread(
                 transport.request_sync,
-                _request(kind=SpotRequestKind.FOCUS_WRITE, method="PUT"),
+                _request(
+                    kind=SpotRequestKind.FOCUS_WRITE,
+                    method="PUT",
+                    correlation_id="transport:44444444444444444444444444444444",
+                ),
             )
         )
         await asyncio.sleep(0.01)
@@ -1707,6 +1817,25 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(SpotTransportClosedError):
                 await task
         self.assertEqual(connection_count, 1)
+        diagnostics = transport.diagnostics()
+        second_events = [
+            event
+            for event in diagnostics["source_port_recent_request_events"]
+            if event["correlation_id"]
+            == "transport:44444444444444444444444444444444"
+        ]
+        self.assertEqual(
+            [event["state"] for event in second_events],
+            ["submitted", "shutdown_cancelled"],
+        )
+        self.assertEqual(
+            second_events[-1]["exception_class"],
+            "SpotTransportClosedError",
+        )
+        self.assertIn(
+            second_events[-1],
+            diagnostics["source_port_recent_request_failure_events"],
+        )
 
         release_response.set()
         for _attempt in range(100):

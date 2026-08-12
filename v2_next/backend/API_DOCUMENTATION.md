@@ -777,7 +777,11 @@ origins or referrers with `403`.
 The packaged Electron application supplies its per-launch
 `X-SFL-Control-Token`; direct embedded requests without the token return `403`.
 Standalone mode accepts shutdown requests only from a loopback client and rejects
-non-loopback browser origins or referrers with `403`.
+non-loopback browser origins or referrers with `403`. The control-shutdown path
+waits for SPOT producers to become quiescent and then drains the diagnostic
+request journal before process exit. An unsettled producer or journal drain
+failure makes the shutdown exit non-zero instead of claiming a complete
+native-X closeout.
 
 백엔드 서버를 정상적으로 종료합니다.
 
@@ -936,6 +940,49 @@ cache and single-flight state, the calculated background budget for image,
 target-temperature, internal-temperature, and diagnostic requests, plus
 aggregate source-port quarantine health. It never exposes source-port values.
 `refresh_interval` and the effective refresh interval fields use seconds.
+
+`image.diagnostic_request_journal` is an additive, bounded diagnostic-request
+lifecycle view. Each request appends immutable `queued`, optional `running`, and
+exactly one of `completed`, `timed_out`, or `cancelled` events; cancellation
+while waiting for the serialized device lock is a valid `queued` to `cancelled`
+transition. On restart, a retained `queued` or `running` lifecycle with no
+terminal record is closed by a neutral canonical `terminal_missing` event with
+the `terminal_missing_after_restart` outcome and its prior state in
+`recovered_from_state`; it does not claim that a process crash was the cause.
+The bounded `recovered_incomplete_request_count` and
+`recovered_incomplete_synthesized_count` counters expose that repair. Events contain only the
+diagnostic field, `/output` or `/control` route, exception class, timeout phase,
+UTC timing, elapsed milliseconds, and snapshot/poll/transport correlation IDs.
+Failure events have separate bounded retention, so a later successful sweep does
+not erase the failure that preceded it. The backing
+`spot_diagnostic_request_events.jsonl` lifecycle file and dedicated
+`spot_diagnostic_request_failures.jsonl` failure file each rotate at 2 MiB with
+four backups; recovery merges identical failure records by event sequence while
+rejecting conflicting records.
+the API returns at most 64 recent lifecycle events and 128 failure events from
+bounded in-memory retention. On restart, valid retained JSONL events and failure
+tails are recovered, the event sequence resumes from the highest retained value,
+and an incomplete final JSONL fragment is truncated before the next append. A
+complete final event that is missing only its newline is preserved. Recovery is
+byte-bounded, validates the complete allowlisted event schema, and discards
+unknown or privacy-sensitive fields rather than replaying arbitrary JSON.
+`journal_instance_id` distinguishes process lifetimes. The guarded transport
+also exposes bounded, payload-free lifecycle and failure/cancellation views keyed
+by the same transport correlation ID; successful traffic cannot evict the
+separately retained failure correlations. Transport shutdown records queued
+work as `shutdown_cancelled` instead of leaving a submitted-only correlation.
+Request/response payloads, headers, credentials, hosts, IP addresses, query
+strings, exception messages, and device identifiers are not recorded. JSONL
+persistence runs through a bounded single-writer queue, outside the event loop
+and serialized SPOT device lock. Queue drops, pending writes, write latency,
+last success, and `write_failure_count` are observable; such a persistence
+error or delay does not interrupt the SPOT request itself. When that queue is
+full, a terminal failure/timeout/cancellation replaces routine lifecycle work
+before it can be dropped. Shutdown drain is idempotent and retryable, and the
+journal is closed only after the final SPOT producers are quiescent, including
+failed producers whose terminal event must still drain, so a late terminal
+event is persisted before the writer is detached. Recovery
+also rejects resource-exhaustion JSON lines without blocking backend startup.
 
 ### POST `/api/spot/focus`
 

@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import logging
 import math
@@ -53,6 +54,11 @@ from backend.FacilityData.spot_diagnostics import (
     SPOT_DIAGNOSTIC_OUTPUT_FIELDS,
     SpotPollContext,
     configured_diagnostics_max_age_ms,
+)
+from backend.FacilityData.spot_diagnostic_observability import (
+    SPOT_DIAGNOSTIC_JOURNAL_FILENAME,
+    SpotDiagnosticRequestContext,
+    SpotDiagnosticRequestJournal,
 )
 from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_FILENAME,
@@ -161,6 +167,12 @@ _spot_diagnostics_sweep_started_count = 0
 _spot_diagnostics_upstream_request_count = 0
 _spot_diagnostics_suppressed_poll_count = 0
 _spot_diagnostics_inflight_suppressed_count = 0
+_spot_diagnostic_journal_lock = threading.RLock()
+_spot_diagnostic_journal: SpotDiagnosticRequestJournal | None = None
+_spot_diagnostic_journal_path: Path | None = None
+_spot_diagnostic_journal_lease_count = 0
+_spot_diagnostic_journal_shutdown_started = False
+_spot_diagnostic_journal_closed_snapshot: dict[str, object] | None = None
 _spot_config_provenance_lock = threading.Lock()
 _spot_config_drift_detected_count = 0
 _spot_config_active_drift_signature: Optional[str] = None
@@ -326,6 +338,164 @@ def _spot_image_capture_mode() -> str:
 
 def _spot_image_capture_log_path() -> Path:
     return Path(getattr(config, "LOG_PATH", Path("logs/data")))
+
+
+def _get_spot_diagnostic_request_journal() -> SpotDiagnosticRequestJournal:
+    global _spot_diagnostic_journal
+    global _spot_diagnostic_journal_path
+
+    journal_path = Path(getattr(config, "LOG_PATH", Path("logs/data"))) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME
+    with _spot_diagnostic_journal_lock:
+        if _spot_diagnostic_journal_shutdown_started:
+            if _spot_diagnostic_journal is not None:
+                return _spot_diagnostic_journal
+            raise RuntimeError("SPOT diagnostic request journal is closed")
+        if _spot_diagnostic_journal is None:
+            _spot_diagnostic_journal = SpotDiagnosticRequestJournal(journal_path)
+            _spot_diagnostic_journal_path = journal_path
+        elif (
+            _spot_diagnostic_journal_path == journal_path
+            and not _spot_diagnostic_journal.snapshot()["accepting_persistence"]
+        ):
+            if (
+                _spot_diagnostic_journal_lease_count != 0
+                or _spot_diagnostic_journal.snapshot()["active_request_count"] != 0
+            ):
+                raise RuntimeError(
+                    "SPOT diagnostic request journal recovery has active requests"
+                )
+            if not _spot_diagnostic_journal.close(timeout_sec=0.5):
+                raise RuntimeError(
+                    "SPOT diagnostic request journal recovery drain timed out"
+                )
+            _spot_diagnostic_journal = None
+            _spot_diagnostic_journal_path = None
+            _spot_diagnostic_journal = SpotDiagnosticRequestJournal(journal_path)
+            _spot_diagnostic_journal_path = journal_path
+        elif _spot_diagnostic_journal_path != journal_path:
+            if (
+                _spot_diagnostic_journal_lease_count != 0
+                or _spot_diagnostic_journal.snapshot()["active_request_count"] != 0
+            ):
+                raise RuntimeError(
+                    "SPOT diagnostic request journal path change has active requests"
+                )
+            if not _spot_diagnostic_journal.close(timeout_sec=0.5):
+                raise RuntimeError(
+                    "SPOT diagnostic request journal path change drain timed out"
+                )
+            _spot_diagnostic_journal = None
+            _spot_diagnostic_journal_path = None
+            _spot_diagnostic_journal = SpotDiagnosticRequestJournal(journal_path)
+            _spot_diagnostic_journal_path = journal_path
+        journal = _spot_diagnostic_journal
+    return journal
+
+
+def _acquire_spot_diagnostic_request_journal() -> SpotDiagnosticRequestJournal:
+    global _spot_diagnostic_journal_lease_count
+
+    with _spot_diagnostic_journal_lock:
+        if _spot_diagnostic_journal_shutdown_started:
+            raise RuntimeError("SPOT diagnostic request journal is shutting down")
+        journal = _get_spot_diagnostic_request_journal()
+        _spot_diagnostic_journal_lease_count += 1
+        return journal
+
+
+def _release_spot_diagnostic_request_journal(
+    journal: SpotDiagnosticRequestJournal,
+) -> None:
+    global _spot_diagnostic_journal_lease_count
+
+    with _spot_diagnostic_journal_lock:
+        if _spot_diagnostic_journal is not journal:
+            raise RuntimeError("SPOT diagnostic request journal lease identity changed")
+        if _spot_diagnostic_journal_lease_count <= 0:
+            raise RuntimeError("SPOT diagnostic request journal lease underflow")
+        _spot_diagnostic_journal_lease_count -= 1
+
+
+async def _acquire_spot_diagnostic_request_journal_for_sweep(
+) -> SpotDiagnosticRequestJournal:
+    acquire_task = asyncio.create_task(
+        asyncio.to_thread(_acquire_spot_diagnostic_request_journal)
+    )
+    cancellation_requested = False
+    while not acquire_task.done():
+        try:
+            await asyncio.shield(acquire_task)
+        except asyncio.CancelledError:
+            cancellation_requested = True
+        except Exception:
+            if cancellation_requested:
+                raise asyncio.CancelledError from None
+            raise
+
+    try:
+        journal = acquire_task.result()
+    except Exception:
+        if cancellation_requested:
+            raise asyncio.CancelledError from None
+        raise
+    if cancellation_requested:
+        _release_spot_diagnostic_request_journal(journal)
+        raise asyncio.CancelledError
+    return journal
+
+
+def _close_spot_diagnostic_request_journal(
+    timeout_sec: float = 2.0,
+    *,
+    final_shutdown: bool = False,
+) -> bool:
+    global _spot_diagnostic_journal
+    global _spot_diagnostic_journal_path
+    global _spot_diagnostic_journal_shutdown_started
+    global _spot_diagnostic_journal_closed_snapshot
+
+    with _spot_diagnostic_journal_lock:
+        if final_shutdown:
+            _spot_diagnostic_journal_shutdown_started = True
+        journal = _spot_diagnostic_journal
+        if _spot_diagnostic_journal_lease_count != 0:
+            if final_shutdown and journal is not None:
+                _spot_diagnostic_journal_closed_snapshot = journal.snapshot()
+            return False
+    if journal is None:
+        return True
+    if final_shutdown:
+        _spot_diagnostic_journal_closed_snapshot = journal.snapshot()
+    stopped = journal.close(timeout_sec=timeout_sec)
+    snapshot = journal.snapshot()
+    with _spot_diagnostic_journal_lock:
+        if final_shutdown:
+            _spot_diagnostic_journal_closed_snapshot = snapshot
+        if stopped and _spot_diagnostic_journal is journal:
+            _spot_diagnostic_journal = None
+            _spot_diagnostic_journal_path = None
+    return stopped
+
+
+def _spot_diagnostic_request_journal_snapshot() -> dict[str, object]:
+    with _spot_diagnostic_journal_lock:
+        journal = _spot_diagnostic_journal
+        shutdown_started = _spot_diagnostic_journal_shutdown_started
+        closed_snapshot = copy.deepcopy(_spot_diagnostic_journal_closed_snapshot)
+    if journal is not None:
+        return journal.snapshot()
+    if shutdown_started and closed_snapshot is not None:
+        return closed_snapshot
+    return _get_spot_diagnostic_request_journal().snapshot()
+
+
+def stop_spot_diagnostic_request_journal(timeout_sec: float = 2.0) -> bool:
+    """Drain the append-only journal after all SPOT diagnostic consumers stop."""
+
+    return _close_spot_diagnostic_request_journal(
+        timeout_sec=timeout_sec,
+        final_shutdown=True,
+    )
 
 
 def _spot_image_capture_root() -> Path:
@@ -546,6 +716,9 @@ def _reset_spot_diagnostics_request_state_for_tests() -> None:
     global _spot_diagnostics_last_completed_at, _spot_diagnostics_sweep_started_count
     global _spot_diagnostics_upstream_request_count, _spot_diagnostics_suppressed_poll_count
     global _spot_diagnostics_inflight_suppressed_count
+    global _spot_diagnostic_journal_shutdown_started
+    global _spot_diagnostic_journal_closed_snapshot
+    global _spot_diagnostic_journal_lease_count
 
     diagnostics_task = _spot_diagnostics_task
     if diagnostics_task is not None and not diagnostics_task.done():
@@ -558,6 +731,11 @@ def _reset_spot_diagnostics_request_state_for_tests() -> None:
     _spot_diagnostics_upstream_request_count = 0
     _spot_diagnostics_suppressed_poll_count = 0
     _spot_diagnostics_inflight_suppressed_count = 0
+    _close_spot_diagnostic_request_journal(timeout_sec=0.5)
+    with _spot_diagnostic_journal_lock:
+        _spot_diagnostic_journal_lease_count = 0
+        _spot_diagnostic_journal_shutdown_started = False
+        _spot_diagnostic_journal_closed_snapshot = None
 
 
 def get_latest_spot_image_capture_fact() -> Dict[str, str]:
@@ -1022,17 +1200,28 @@ def _spot_configuration_snapshot() -> Dict[str, Any]:
     return snapshot
 
 
-async def _request_spot_diagnostic_output(client: httpx.AsyncClient, param: str) -> tuple[str, str]:
+async def _request_spot_diagnostic_output(
+    client: httpx.AsyncClient,
+    param: str,
+    *,
+    journal: SpotDiagnosticRequestJournal | None = None,
+    request_context: SpotDiagnosticRequestContext | None = None,
+) -> tuple[str, str]:
     global _spot_diagnostics_upstream_request_count
 
     url = _resolve_spot_diagnostic_url(param)
     async with _spot_device_request_lock:
+        if journal is not None and request_context is not None:
+            journal.mark_running(request_context)
         _spot_diagnostics_upstream_request_count += 1
         response = await _request_spot_http_response(
             client,
             kind=SpotRequestKind.DIAGNOSTIC,
             method="GET",
             url=url,
+            correlation_id=(
+                request_context.transport_correlation_id if request_context is not None else None
+            ),
         )
         response.raise_for_status()
     return param, response.text.strip()[:_SPOT_DIAGNOSTIC_TEXT_MAX_CHARS]
@@ -1043,6 +1232,26 @@ def _diagnostic_exception_field_status(exc: BaseException) -> str:
         return "timeout"
     if isinstance(exc, httpx.HTTPError):
         return "http_error"
+    return "parse_error"
+
+
+def _diagnostic_timeout_phase(exc: BaseException) -> str:
+    if isinstance(exc, httpx.ConnectTimeout) or isinstance(exc.__cause__, SpotTransportConnectTimeout):
+        return "connect"
+    if isinstance(exc, httpx.ReadTimeout) or isinstance(exc.__cause__, SpotTransportReadTimeout):
+        return "response"
+    if isinstance(exc, httpx.WriteTimeout):
+        return "write"
+    if isinstance(exc, httpx.PoolTimeout):
+        return "pool"
+    return "unknown"
+
+
+def _diagnostic_journal_error_outcome(exc: BaseException) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return "http_error"
+    if isinstance(exc, httpx.RequestError):
+        return "transport_error"
     return "parse_error"
 
 
@@ -1088,12 +1297,56 @@ async def _refresh_spot_diagnostics(
     global _spot_diagnostics_last_error_message
     global _spot_diagnostics_snapshot
 
+    snapshot_id = _next_spot_diagnostics_snapshot_id()
+    poll_correlation_id = (
+        f"{poll_context.service_instance_id}:poll:{poll_context.poll_seq}"
+        if poll_context is not None
+        else "poll:none"
+    )
+    journal = await _acquire_spot_diagnostic_request_journal_for_sweep()
     results: list[tuple[str, str] | BaseException] = []
-    for param in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS:
-        try:
-            results.append(await _request_spot_diagnostic_output(client, param))
-        except Exception as exc:
-            results.append(exc)
+    try:
+        for param in _SPOT_DIAGNOSTIC_OUTPUT_PARAMS:
+            api_route = "/control" if param == "appnumber" else "/output"
+            request_context = journal.queue_request(
+                snapshot_correlation_id=snapshot_id,
+                poll_correlation_id=poll_correlation_id,
+                diagnostic_field=param,
+                api_route=api_route,
+            )
+            try:
+                request_result = await _request_spot_diagnostic_output(
+                    client,
+                    param,
+                    journal=journal,
+                    request_context=request_context,
+                )
+            except asyncio.CancelledError as exc:
+                journal.mark_cancelled(request_context, exception=exc)
+                raise
+            except httpx.TimeoutException as exc:
+                journal.mark_timed_out(
+                    request_context,
+                    exception=exc,
+                    timeout_phase=_diagnostic_timeout_phase(exc),
+                )
+                results.append(exc)
+            except Exception as exc:
+                journal.mark_completed(
+                    request_context,
+                    outcome=_diagnostic_journal_error_outcome(exc),
+                    exception=exc,
+                )
+                results.append(exc)
+            else:
+                _key, value = request_result
+                journal.mark_completed(
+                    request_context,
+                    outcome=_diagnostic_value_field_status(param, value),
+                )
+                results.append(request_result)
+    finally:
+        _release_spot_diagnostic_request_journal(journal)
     payload: Dict[str, Any] = {}
     raw_values: dict[str, str] = {}
     errors: list[str] = []
@@ -1124,7 +1377,7 @@ async def _refresh_spot_diagnostics(
     else:
         capture_status = "async_complete"
     snapshot = DiagnosticSnapshot(
-        snapshot_id=_next_spot_diagnostics_snapshot_id(),
+        snapshot_id=snapshot_id,
         source_poll_seq=poll_context.poll_seq if poll_context is not None else None,
         captured_at=_epoch_to_utc_iso(captured_at) or "",
         captured_at_epoch=captured_at,
@@ -2220,7 +2473,7 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         configured_image_url: Optional[str] = _resolve_spot_image_url()
     except SpotImageConfigError:
         configured_image_url = None
-    payload = {
+    payload: Dict[str, Any] = {
         "image_status": "error" if _img_last_error_code else ("ok" if _img_last_success_at else "idle"),
         "image_source": _img_last_source,
         "failure_count": int(_img_failure_count),
@@ -2292,6 +2545,7 @@ def get_spot_diagnostics() -> Dict[str, Any]:
     payload.update(_spot_source_port_diagnostics())
     payload.update(_build_spot_temperature_snapshot_diagnostics(now))
     payload.update(_build_internal_temperature_diagnostics(now, include_cached_at=False))
+    payload["diagnostic_request_journal"] = _spot_diagnostic_request_journal_snapshot()
     return payload
 
 
@@ -2514,6 +2768,7 @@ async def _request_spot_http_response(
     read_timeout_sec: float = 5.0,
     max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     read_response_body: bool = True,
+    correlation_id: str | None = None,
 ) -> httpx.Response:
     request = httpx.Request(method, url)
     try:
@@ -2567,6 +2822,7 @@ async def _request_spot_http_response(
                 read_timeout_sec=read_timeout_sec,
                 max_response_bytes=max_response_bytes,
                 read_response_body=read_response_body,
+                correlation_id=correlation_id,
             )
         )
     except SpotTransportConnectTimeout as exc:
@@ -2940,8 +3196,19 @@ async def start_spot_poll_loop():
     global _img_accepting_requests, _spot_poll_task, _spot_poll_running
     global _spot_shutdown_image_refresh_stopped, _spot_shutdown_started_monotonic
     global _spot_shutdown_transport_stopped
+    global _spot_diagnostic_journal_shutdown_started
+    global _spot_diagnostic_journal_closed_snapshot
     if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
+
+    with _spot_diagnostic_journal_lock:
+        if (
+            _spot_diagnostic_journal_shutdown_started
+            and _spot_diagnostic_journal is not None
+        ):
+            raise RuntimeError("SPOT diagnostic request journal shutdown is incomplete")
+        _spot_diagnostic_journal_shutdown_started = False
+        _spot_diagnostic_journal_closed_snapshot = None
 
     with _spot_shutdown_state_lock:
         _spot_shutdown_task_states.update(
@@ -2952,6 +3219,7 @@ async def start_spot_poll_loop():
         _spot_shutdown_image_refresh_stopped = False
         _spot_shutdown_transport_stopped = False
         _spot_shutdown_started_monotonic = None
+    await asyncio.to_thread(_get_spot_diagnostic_request_journal)
     _start_spot_http_transport()
     _img_accepting_requests = True
     _spot_poll_running = True
@@ -3174,11 +3442,14 @@ def get_spot_poll_shutdown_status() -> Dict[str, Any]:
         "cancelled_late",
         "completed_late",
     }
+    settled_states = drained_states | {"failed", "failed_late"}
     tasks_drained = all(state in drained_states for state in task_states.values())
+    tasks_settled = all(state in settled_states for state in task_states.values())
     observation_fact_drained = spot_observation_fact_writes_drained()
     return {
         "tasks": task_states,
         "tasks_drained": tasks_drained,
+        "tasks_settled": tasks_settled,
         "observation_fact_drained": observation_fact_drained,
         "image_refresh_stopped": image_refresh_stopped,
         "transport_stopped": transport_stopped,
