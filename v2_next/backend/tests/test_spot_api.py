@@ -28,6 +28,7 @@ from backend.FacilityData.spot_diagnostic_observability import (
     SPOT_DIAGNOSTIC_FAILURE_JOURNAL_FILENAME,
     SPOT_DIAGNOSTIC_JOURNAL_FILENAME,
     SPOT_DIAGNOSTIC_JOURNAL_SCHEMA_VERSION,
+    SpotDiagnosticRequestContext,
     SpotDiagnosticRequestJournal,
 )
 from backend.FacilityData.spot_image_fact import (
@@ -1180,8 +1181,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 saturated = journal.snapshot()
 
                 self.assertLess(elapsed, 0.1)
-                self.assertEqual(saturated["persist_queue_drop_count"], 1)
-                self.assertEqual(saturated["pending_persist_count"], 2)
+                self.assertEqual(saturated["persist_queue_drop_count"], 0)
+                self.assertEqual(saturated["routine_drop_count"], 0)
+                self.assertEqual(saturated["successful_terminal_drop_count"], 0)
+                self.assertEqual(saturated["failure_terminal_drop_count"], 0)
+                self.assertEqual(saturated["pending_persist_count"], 3)
                 self.assertEqual(saturated["failure_count_total"], 1)
                 self.assertEqual(
                     saturated["failure_events"][0]["state"],
@@ -1235,6 +1239,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 journal.mark_completed(context, outcome="success")
                 saturated = journal.snapshot()
                 self.assertEqual(saturated["persist_queue_drop_count"], 1)
+                self.assertEqual(saturated["routine_drop_count"], 1)
+                self.assertEqual(saturated["successful_terminal_drop_count"], 0)
+                self.assertEqual(saturated["failure_terminal_drop_count"], 0)
                 self.assertEqual(saturated["pending_persist_count"], 2)
                 release_writer.set()
                 self.assertTrue(journal.close(timeout_sec=1.0))
@@ -1247,6 +1254,184 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot["recovered_incomplete_request_count"], 0)
             self.assertEqual(snapshot["failure_count_retained"], 0)
             self.assertEqual(snapshot["outcome_counts"]["success"], 1)
+            self.assertTrue(recovered.close(timeout_sec=1.0))
+
+    def test_failure_reserve_survives_success_terminal_saturation_and_restart(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME
+            writer_started = threading.Event()
+            release_writer = threading.Event()
+            journal = SpotDiagnosticRequestJournal(
+                log_path,
+                persist_queue_limit=3,
+                failure_persist_queue_reserve=3,
+            )
+            original_write = journal._write_event_locked
+
+            def blocking_write(event: Mapping[str, object]) -> None:
+                writer_started.set()
+                release_writer.wait(timeout=2.0)
+                original_write(event)
+
+            def queue(index: int) -> SpotDiagnosticRequestContext:
+                return journal.queue_request(
+                    snapshot_correlation_id=f"{uuid4()}:diag:{index}",
+                    poll_correlation_id=f"{uuid4()}:poll:{index}",
+                    diagnostic_field="signalpc",
+                    api_route="/output",
+                )
+
+            with patch.object(
+                journal,
+                "_write_event_locked",
+                side_effect=blocking_write,
+            ):
+                for index in range(1, 4):
+                    success = queue(index)
+                    if index == 1:
+                        self.assertTrue(writer_started.wait(timeout=1.0))
+                    journal.mark_completed(success, outcome="success")
+
+                timed_out = queue(4)
+                journal.mark_running(timed_out)
+                journal.mark_timed_out(
+                    timed_out,
+                    exception=TimeoutError("private timeout detail"),
+                    timeout_phase="response",
+                )
+                cancelled = queue(5)
+                journal.mark_running(cancelled)
+                journal.mark_cancelled(
+                    cancelled,
+                    exception=asyncio.CancelledError(),
+                )
+                failed = queue(6)
+                journal.mark_running(failed)
+                journal.mark_completed(
+                    failed,
+                    outcome="transport_error",
+                    exception=ConnectionError("private failure detail"),
+                )
+
+                saturated = journal.snapshot()
+                self.assertGreater(saturated["routine_drop_count"], 0)
+                self.assertEqual(saturated["successful_terminal_drop_count"], 0)
+                self.assertEqual(saturated["failure_terminal_drop_count"], 0)
+                self.assertEqual(saturated["pending_persist_count"], 7)
+
+                release_writer.set()
+                self.assertTrue(journal.flush(timeout_sec=1.0))
+                self.assertTrue(journal.close(timeout_sec=1.0))
+
+            recovered = SpotDiagnosticRequestJournal(
+                log_path,
+                persist_queue_limit=3,
+                failure_persist_queue_reserve=3,
+            )
+            snapshot = recovered.snapshot()
+            self.assertEqual(snapshot["recovered_incomplete_request_count"], 0)
+            self.assertEqual(snapshot["outcome_counts"]["success"], 3)
+            self.assertEqual(snapshot["failure_count_retained"], 3)
+            expected_correlations = {
+                context.request_id: (
+                    context.snapshot_correlation_id,
+                    context.poll_correlation_id,
+                    context.transport_correlation_id,
+                )
+                for context in (timed_out, cancelled, failed)
+            }
+            recovered_correlations = {
+                event["request_id"]: (
+                    event["snapshot_correlation_id"],
+                    event["poll_correlation_id"],
+                    event["transport_correlation_id"],
+                )
+                for event in snapshot["failure_events"]
+            }
+            self.assertEqual(recovered_correlations, expected_correlations)
+            failure_rows = [
+                json.loads(line)
+                for line in recovered._failure_log_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ]
+            self.assertEqual(
+                {row["request_id"] for row in failure_rows},
+                set(expected_correlations),
+            )
+            self.assertTrue(recovered.close(timeout_sec=1.0))
+
+    def test_failure_terminal_drop_makes_closeout_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir) / SPOT_DIAGNOSTIC_JOURNAL_FILENAME
+            writer_started = threading.Event()
+            release_writer = threading.Event()
+            journal = SpotDiagnosticRequestJournal(
+                log_path,
+                persist_queue_limit=1,
+                failure_persist_queue_reserve=1,
+            )
+            original_write = journal._write_event_locked
+
+            def blocking_write(event: Mapping[str, object]) -> None:
+                writer_started.set()
+                release_writer.wait(timeout=2.0)
+                original_write(event)
+
+            def queue(index: int) -> SpotDiagnosticRequestContext:
+                return journal.queue_request(
+                    snapshot_correlation_id=f"{uuid4()}:diag:{index}",
+                    poll_correlation_id=f"{uuid4()}:poll:{index}",
+                    diagnostic_field="signalpc",
+                    api_route="/output",
+                )
+
+            with patch.object(
+                journal,
+                "_write_event_locked",
+                side_effect=blocking_write,
+            ):
+                success = queue(1)
+                self.assertTrue(writer_started.wait(timeout=1.0))
+                journal.mark_completed(success, outcome="success")
+
+                retained_failure = queue(2)
+                journal.mark_timed_out(
+                    retained_failure,
+                    exception=TimeoutError("private retained timeout"),
+                    timeout_phase="response",
+                )
+                dropped_failure = queue(3)
+                journal.mark_cancelled(
+                    dropped_failure,
+                    exception=asyncio.CancelledError(),
+                )
+
+                saturated = journal.snapshot()
+                self.assertEqual(saturated["successful_terminal_drop_count"], 0)
+                self.assertEqual(saturated["failure_terminal_drop_count"], 1)
+                self.assertEqual(saturated["failure_count_total"], 2)
+                release_writer.set()
+                self.assertFalse(journal.close(timeout_sec=1.0))
+                self.assertFalse(journal._writer_thread.is_alive())
+
+            recovered = SpotDiagnosticRequestJournal(
+                log_path,
+                persist_queue_limit=1,
+                failure_persist_queue_reserve=1,
+            )
+            snapshot = recovered.snapshot()
+            self.assertEqual(snapshot["failure_count_retained"], 1)
+            self.assertEqual(
+                snapshot["failure_events"][0]["request_id"],
+                retained_failure.request_id,
+            )
+            self.assertNotEqual(
+                snapshot["failure_events"][0]["request_id"],
+                dropped_failure.request_id,
+            )
             self.assertTrue(recovered.close(timeout_sec=1.0))
 
     def test_failure_sink_error_still_persists_terminal_to_main_journal(self) -> None:
@@ -5284,6 +5469,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 "log_max_bytes": 2 * 1024 * 1024,
                 "log_backup_count": 4,
                 "persist_queue_limit": 1024,
+                "failure_persist_queue_reserve": 64,
             },
         )
         self.assertNotIn("live_image_url", config_response.json())

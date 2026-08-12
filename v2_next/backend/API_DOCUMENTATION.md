@@ -974,15 +974,20 @@ work as `shutdown_cancelled` instead of leaving a submitted-only correlation.
 Request/response payloads, headers, credentials, hosts, IP addresses, query
 strings, exception messages, and device identifiers are not recorded. JSONL
 persistence runs through a bounded single-writer queue, outside the event loop
-and serialized SPOT device lock. Queue drops, pending writes, write latency,
-last success, and `write_failure_count` are observable; such a persistence
-error or delay does not interrupt the SPOT request itself. When that queue is
-full, a terminal failure/timeout/cancellation replaces routine lifecycle work
-before it can be dropped. Shutdown drain is idempotent and retryable, and the
-journal is closed only after the final SPOT producers are quiescent, including
-failed producers whose terminal event must still drain, so a late terminal
-event is persisted before the writer is detached. Recovery
-also rejects resource-exhaustion JSON lines without blocking backend startup.
+and serialized SPOT device lock. The 1,024-item routine/success queue has a
+separate 64-item failure-terminal reserve. Successful terminals displace only
+routine lifecycle work; failure/timeout/cancellation terminals consume the
+reserve or displace routine work, never successful terminal records. Aggregate
+queue drops and the separate `routine_drop_count`,
+`successful_terminal_drop_count`, and `failure_terminal_drop_count` values,
+pending writes, write latency, last success, and `write_failure_count` are
+observable. Persistence pressure does not interrupt the SPOT request itself,
+but any failure-terminal drop makes journal closeout fail closed. Shutdown
+drain is idempotent and retryable, and the journal is closed only after the
+final SPOT producers are quiescent, including failed producers whose terminal
+event must still drain, so a late terminal event is persisted before the writer
+is detached. Recovery also rejects resource-exhaustion JSON lines without
+blocking backend startup.
 
 ### POST `/api/spot/focus`
 

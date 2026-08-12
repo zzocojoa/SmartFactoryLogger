@@ -9,6 +9,7 @@ from collections import Counter, deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import IntEnum
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -27,6 +28,7 @@ DEFAULT_API_FAILURE_EVENT_LIMIT = 128
 DEFAULT_MAX_LOG_BYTES = 2 * 1024 * 1024
 DEFAULT_BACKUP_COUNT = 4
 DEFAULT_PERSIST_QUEUE_LIMIT = 1024
+DEFAULT_FAILURE_PERSIST_QUEUE_RESERVE = 64
 MAX_RECOVERY_LINE_BYTES = 16 * 1024
 
 _ALLOWED_ROUTES = frozenset({"/control", "/output"})
@@ -209,37 +211,65 @@ class _ActiveRequest:
 @dataclass(frozen=True)
 class _PersistenceItem:
     event: dict[str, object]
-    priority: bool
+    priority: _PersistencePriority
+
+
+class _PersistencePriority(IntEnum):
+    ROUTINE = 0
+    SUCCESSFUL_TERMINAL = 1
+    FAILURE_TERMINAL = 2
 
 
 class _BoundedPersistenceQueue:
     """Bounded queue that preserves terminal failures ahead of routine events."""
 
-    def __init__(self, limit: int) -> None:
+    def __init__(self, limit: int, failure_reserve: int) -> None:
         self._limit = limit
+        self._failure_reserve = failure_reserve
+        self._total_limit = limit + failure_reserve
         self._condition = threading.Condition(threading.Lock())
         self._items: deque[_PersistenceItem] = deque()
         self._stopping = False
 
-    def put(self, event: Mapping[str, object], *, priority: bool) -> tuple[bool, bool]:
+    def put(
+        self,
+        event: Mapping[str, object],
+        *,
+        priority: _PersistencePriority,
+    ) -> tuple[bool, _PersistencePriority | None]:
         with self._condition:
             if self._stopping:
-                return False, False
-            evicted = False
-            if len(self._items) >= self._limit:
-                if not priority:
-                    return False, False
+                return False, priority
+            dropped_priority: _PersistencePriority | None = None
+            non_failure_count = sum(
+                item.priority != _PersistencePriority.FAILURE_TERMINAL
+                for item in self._items
+            )
+            if priority == _PersistencePriority.FAILURE_TERMINAL:
+                if len(self._items) >= self._total_limit:
+                    for index, item in enumerate(self._items):
+                        if item.priority == _PersistencePriority.ROUTINE:
+                            del self._items[index]
+                            dropped_priority = item.priority
+                            break
+                    else:
+                        return False, priority
+            elif non_failure_count >= self._limit:
+                if priority == _PersistencePriority.ROUTINE:
+                    return False, priority
                 for index, item in enumerate(self._items):
-                    if not item.priority:
+                    if item.priority == _PersistencePriority.ROUTINE:
                         del self._items[index]
-                        evicted = True
+                        dropped_priority = item.priority
                         break
                 else:
-                    return False, False
+                    return False, priority
+            elif len(self._items) >= self._total_limit:
+                return False, priority
             new_item = _PersistenceItem(event=dict(event), priority=priority)
             self._items.append(new_item)
             self._condition.notify()
-            return True, evicted
+            return True, dropped_priority
 
     def get(self, timeout_sec: float) -> tuple[bool, dict[str, object] | None]:
         deadline = time.monotonic() + max(0.0, timeout_sec)
@@ -273,6 +303,7 @@ class SpotDiagnosticRequestJournal:
         max_log_bytes: int = DEFAULT_MAX_LOG_BYTES,
         backup_count: int = DEFAULT_BACKUP_COUNT,
         persist_queue_limit: int = DEFAULT_PERSIST_QUEUE_LIMIT,
+        failure_persist_queue_reserve: int = DEFAULT_FAILURE_PERSIST_QUEUE_RESERVE,
         utc_now: Callable[[], datetime] = _utc_now,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -288,6 +319,8 @@ class SpotDiagnosticRequestJournal:
             raise ValueError("backup_count must be positive")
         if persist_queue_limit <= 0:
             raise ValueError("persist_queue_limit must be positive")
+        if failure_persist_queue_reserve <= 0:
+            raise ValueError("failure_persist_queue_reserve must be positive")
 
         self._log_path = Path(log_path)
         self._failure_log_path = self._log_path.with_name(
@@ -300,12 +333,16 @@ class SpotDiagnosticRequestJournal:
         self._max_log_bytes = int(max_log_bytes)
         self._backup_count = int(backup_count)
         self._persist_queue_limit = int(persist_queue_limit)
+        self._failure_persist_queue_reserve = int(failure_persist_queue_reserve)
         self._utc_now = utc_now
         self._monotonic = monotonic
         self._lock = threading.RLock()
         self._close_lock = threading.Lock()
         self._pending_condition = threading.Condition(threading.Lock())
-        self._persist_queue = _BoundedPersistenceQueue(self._persist_queue_limit)
+        self._persist_queue = _BoundedPersistenceQueue(
+            self._persist_queue_limit,
+            self._failure_persist_queue_reserve,
+        )
         self._journal_instance_id = f"journal:{uuid4().hex}"
         self._recent_events: deque[dict[str, object]] = deque(maxlen=self._recent_event_limit)
         self._failure_events: deque[dict[str, object]] = deque(maxlen=self._failure_event_limit)
@@ -320,6 +357,9 @@ class SpotDiagnosticRequestJournal:
         self._invalid_transition_count = 0
         self._write_failure_count = 0
         self._persist_queue_drop_count = 0
+        self._routine_drop_count = 0
+        self._successful_terminal_drop_count = 0
+        self._failure_terminal_drop_count = 0
         self._pending_persist_count = 0
         self._last_write_error_class: str | None = None
         self._last_write_success_at_utc: str | None = None
@@ -467,6 +507,7 @@ class SpotDiagnosticRequestJournal:
                     "log_max_bytes": self._max_log_bytes,
                     "log_backup_count": self._backup_count,
                     "persist_queue_limit": self._persist_queue_limit,
+                    "failure_persist_queue_reserve": self._failure_persist_queue_reserve,
                 },
                 "log_file": self._log_path.name,
                 "failure_log_file": self._failure_log_path.name,
@@ -481,6 +522,9 @@ class SpotDiagnosticRequestJournal:
                 "invalid_transition_count": self._invalid_transition_count,
                 "write_failure_count": self._write_failure_count,
                 "persist_queue_drop_count": self._persist_queue_drop_count,
+                "routine_drop_count": self._routine_drop_count,
+                "successful_terminal_drop_count": self._successful_terminal_drop_count,
+                "failure_terminal_drop_count": self._failure_terminal_drop_count,
                 "pending_persist_count": pending_persist_count,
                 "last_write_error_class": self._last_write_error_class,
                 "last_write_success_at_utc": self._last_write_success_at_utc,
@@ -602,26 +646,49 @@ class SpotDiagnosticRequestJournal:
             if not drained:
                 return False
             if not self._writer_thread.is_alive():
-                return True
+                return self._failure_terminal_drop_count == 0
             self._persist_queue.stop()
             self._writer_thread.join(timeout=max(0.0, deadline - time.monotonic()))
-            return not self._writer_thread.is_alive()
+            return (
+                not self._writer_thread.is_alive()
+                and self._failure_terminal_drop_count == 0
+            )
 
     def _enqueue_event_locked(self, event: Mapping[str, object]) -> None:
+        if self._is_failure_event(event):
+            priority = _PersistencePriority.FAILURE_TERMINAL
+        elif event.get("state") in _TERMINAL_STATES:
+            priority = _PersistencePriority.SUCCESSFUL_TERMINAL
+        else:
+            priority = _PersistencePriority.ROUTINE
         if not self._accepting_persistence:
-            self._persist_queue_drop_count += 1
+            self._record_persist_queue_drop_locked(priority)
             return
         with self._pending_condition:
             self._pending_persist_count += 1
-        priority = event.get("state") in _TERMINAL_STATES
-        accepted, evicted = self._persist_queue.put(event, priority=priority)
-        if not accepted or evicted:
+        accepted, dropped_priority = self._persist_queue.put(
+            event,
+            priority=priority,
+        )
+        if dropped_priority is not None:
             with self._pending_condition:
                 self._pending_persist_count -= 1
                 self._pending_condition.notify_all()
-            self._persist_queue_drop_count += 1
+            self._record_persist_queue_drop_locked(dropped_priority)
         if not accepted:
             return
+
+    def _record_persist_queue_drop_locked(
+        self,
+        priority: _PersistencePriority,
+    ) -> None:
+        self._persist_queue_drop_count += 1
+        if priority == _PersistencePriority.FAILURE_TERMINAL:
+            self._failure_terminal_drop_count += 1
+        elif priority == _PersistencePriority.SUCCESSFUL_TERMINAL:
+            self._successful_terminal_drop_count += 1
+        else:
+            self._routine_drop_count += 1
 
     def _writer_loop(self) -> None:
         while True:
