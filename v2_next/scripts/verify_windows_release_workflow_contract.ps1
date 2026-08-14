@@ -264,8 +264,8 @@ Assert-Matches -Text $prWorkflow `
     -Pattern 'verify_windows_release_workflow_contract\.ps1"?\s+-SelfTest' `
     -Message "PR workflow must execute its release-workflow contract test"
 Assert-Matches -Text $prWorkflow `
-    -Pattern 'verify_packaged_electron_sources\.cjs[\s\S]*--asar\s+dist/win-unpacked/resources/app\.asar' `
-    -Message "PR workflow must verify packaged Electron source identity"
+    -Pattern 'verify_packaged_electron_sources\.cjs[\s\S]*--asar\s+dist/win-unpacked/resources/app\.asar[\s\S]*--expected-commit\s+\$env:EXPECTED_BUILD_COMMIT' `
+    -Message "PR workflow must verify packaged Electron source identity against the exact commit"
 Assert-Matches -Text $prWorkflow -Pattern "smartfactorylogger-windows-pr-unsigned-" `
     -Message "PR artifacts must be explicitly named unsigned"
 Assert-PinnedOfficialActionTextIsPresent -Workflow $prWorkflow
@@ -282,6 +282,9 @@ Assert-Matches -Text $signedWorkflow `
 Assert-Matches -Text $signedWorkflow `
     -Pattern 'GITHUB_REF_NAME\s+-cne\s+\$env:DEFAULT_BRANCH' `
     -Message "signed workflow must require the protected default-branch workflow ref"
+Assert-Matches -Text $signedWorkflow `
+    -Pattern 'verify_packaged_electron_sources\.cjs[\s\S]*--asar\s+\$appAsarPath[\s\S]*--expected-commit\s+\$env:EXPECTED_BUILD_COMMIT' `
+    -Message "signed workflow must verify packaged Electron source identity against the exact commit"
 Assert-DoesNotMatch -Text $signedWorkflow `
     -Pattern 'GITHUB_REF_NAME\s+-cne\s+"\$\{\{' `
     -Message "GitHub context values must not be interpolated directly into PowerShell code"

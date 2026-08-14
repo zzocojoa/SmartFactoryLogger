@@ -191,7 +191,8 @@ jobs:
 
           node scripts/verify_packaged_electron_sources.cjs `
             --asar dist/win-unpacked/resources/app.asar `
-            --source-root .
+            --source-root . `
+            --expected-commit $env:EXPECTED_BUILD_COMMIT
           if ($LASTEXITCODE -ne 0) {
             throw "Packaged Electron source identity failed: exit_code=$LASTEXITCODE"
           }
