@@ -51,6 +51,12 @@ $procDump = (Resolve-Path -LiteralPath $ProcDumpPath).Path
 if ($exe -notlike "*\dist\win-unpacked\smart-factory.exe") {
     throw "Only an unpacked development build is allowed: $exe"
 }
+$backendExecutablePath = Join-Path `
+    (Split-Path -Parent $exe) `
+    "resources\backend\SmartFactoryBackend.exe"
+if (-not (Test-Path -LiteralPath $backendExecutablePath -PathType Leaf)) {
+    throw "Unpacked development backend is missing: $backendExecutablePath"
+}
 
 $procDumpSignature = Get-AuthenticodeSignature -LiteralPath $procDump
 if (
@@ -320,11 +326,25 @@ finally {
             # Preserve the original failure; cleanup is best-effort only.
         }
         try {
-            if ($null -ne $applicationProcess -and -not $applicationProcess.HasExited) {
+            if ($null -ne $applicationProcess) {
                 $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
-                & $taskkill /PID ([string]$applicationProcess.Id) /T /F 2>$null |
-                    Out-Null
-                [void]$applicationProcess.WaitForExit(5000)
+                $applicationProcessId = [uint32]$applicationProcess.Id
+                $backendChildren = @(
+                    Get-CimInstance Win32_Process -Filter "Name='SmartFactoryBackend.exe'" |
+                        Where-Object {
+                            [uint32]$_.ParentProcessId -eq $applicationProcessId -and
+                            [string]$_.ExecutablePath -ceq $backendExecutablePath
+                        }
+                )
+                if (-not $applicationProcess.HasExited) {
+                    & $taskkill /PID ([string]$applicationProcessId) /T /F 2>$null |
+                        Out-Null
+                    [void]$applicationProcess.WaitForExit(5000)
+                }
+                foreach ($backendChild in $backendChildren) {
+                    & $taskkill /PID ([string]$backendChild.ProcessId) /T /F 2>$null |
+                        Out-Null
+                }
             }
         }
         catch {
