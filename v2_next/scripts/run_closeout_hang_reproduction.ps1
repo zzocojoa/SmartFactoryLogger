@@ -348,7 +348,8 @@ finally {
             }
         }
         catch {
-            # The exact development app PID is the only cleanup target.
+            # Targets are restricted to the exact app tree and backend children
+            # matching both the captured parent PID and unpacked executable path.
         }
     }
     if ($null -ne $shell) {
