@@ -9,6 +9,8 @@ function createRotatingFileLogger(options) {
     maxBackups = 3,
     fsImpl = fs,
     consoleTarget = console,
+    diagnosticObserver = () => undefined,
+    echoToConsole = true,
   } = options;
 
   if (typeof logPath !== 'string' || logPath.length === 0) {
@@ -20,6 +22,20 @@ function createRotatingFileLogger(options) {
   if (!Number.isSafeInteger(maxBackups) || maxBackups < 0) {
     throw new TypeError('maxBackups must be a non-negative safe integer.');
   }
+  if (typeof diagnosticObserver !== 'function') {
+    throw new TypeError('diagnosticObserver must be a function.');
+  }
+  if (typeof echoToConsole !== 'boolean') {
+    throw new TypeError('echoToConsole must be a boolean.');
+  }
+
+  const notifyDiagnostic = (phase, details = {}) => {
+    try {
+      diagnosticObserver(phase, details);
+    } catch (_error) {
+      // Diagnostic instrumentation must never change application behavior.
+    }
+  };
 
   let currentBytes = 0;
   try {
@@ -74,11 +90,26 @@ function createRotatingFileLogger(options) {
       if (currentBytes > 0 && currentBytes + bytes > maxBytes) {
         rotate();
       }
+      const diagnosticDetails = { text_prefix: text.slice(0, 160), bytes };
+      notifyDiagnostic('append-start', diagnosticDetails);
       fsImpl.appendFileSync(logPath, formatted);
       currentBytes += bytes;
-      consoleTarget.log(text);
+      notifyDiagnostic('append-complete', diagnosticDetails);
+      if (echoToConsole) {
+        notifyDiagnostic('console-start', diagnosticDetails);
+        consoleTarget.log(text);
+        notifyDiagnostic('console-complete', diagnosticDetails);
+      } else {
+        notifyDiagnostic('console-skipped', diagnosticDetails);
+      }
     } catch (error) {
-      consoleTarget.error('Failed to write to Electron log file:', error);
+      notifyDiagnostic('log-error', {
+        error_name: error?.name ?? 'Error',
+        error_message: String(error?.message ?? error).slice(0, 160),
+      });
+      if (echoToConsole) {
+        consoleTarget.error('Failed to write to Electron log file:', error);
+      }
     }
   };
 

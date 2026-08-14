@@ -159,6 +159,14 @@ test('Electron logger rejects unsafe rotation bounds', () => {
     () => createRotatingFileLogger({ logPath: 'debug.log', maxBackups: -1 }),
     /maxBackups must be a non-negative safe integer/
   );
+  assert.throws(
+    () => createRotatingFileLogger({ logPath: 'debug.log', echoToConsole: 'no' }),
+    /echoToConsole must be a boolean/
+  );
+  assert.throws(
+    () => createRotatingFileLogger({ logPath: 'debug.log', diagnosticObserver: null }),
+    /diagnosticObserver must be a function/
+  );
 });
 
 test('Electron logger rotates oversized local logs and bounds retained backups', () => {
@@ -228,6 +236,99 @@ test('Electron logger reports file write failures without crashing the caller', 
   assert.match(String(errors[0][1]), /disk unavailable/);
 });
 
+test('Electron logger exposes append and console boundaries to a non-blocking observer', () => {
+  const phases = [];
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => undefined,
+    },
+    consoleTarget: {
+      log: () => undefined,
+      error: () => assert.fail('successful writes must not emit an error'),
+    },
+    diagnosticObserver: (phase) => phases.push(phase),
+  });
+
+  logger.log('shutdown-boundary');
+
+  assert.deepEqual(phases, [
+    'append-start',
+    'append-complete',
+    'console-start',
+    'console-complete',
+  ]);
+});
+
+test('Electron logger ignores diagnostic observer failures', () => {
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => undefined,
+    },
+    consoleTarget: { log: () => undefined, error: () => undefined },
+    diagnosticObserver: () => {
+      throw new Error('diagnostic channel unavailable');
+    },
+  });
+
+  assert.doesNotThrow(() => logger.log('shutdown-boundary'));
+});
+
+test('packaged-safe Electron logging skips synchronous console output', () => {
+  const phases = [];
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => undefined,
+    },
+    consoleTarget: {
+      log: () => assert.fail('packaged-safe logging must not write to stdout'),
+      error: () => assert.fail('successful writes must not emit an error'),
+    },
+    diagnosticObserver: (phase) => phases.push(phase),
+    echoToConsole: false,
+  });
+
+  logger.log('shutdown-boundary');
+
+  assert.deepEqual(phases, [
+    'append-start',
+    'append-complete',
+    'console-skipped',
+  ]);
+});
+
+test('packaged-safe Electron logging reports append failure without console I/O', () => {
+  const phases = [];
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => {
+        throw new Error('disk unavailable');
+      },
+    },
+    consoleTarget: {
+      log: () => assert.fail('packaged-safe logging must not write to stdout'),
+      error: () => assert.fail('packaged-safe logging must not write to stderr'),
+    },
+    diagnosticObserver: (phase) => phases.push(phase),
+    echoToConsole: false,
+  });
+
+  assert.doesNotThrow(() => logger.log('shutdown-boundary'));
+  assert.deepEqual(phases, ['append-start', 'log-error']);
+});
+
+test('Electron main disables synchronous console echo in packaged builds', () => {
+  const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  assert.match(mainSource, /echoToConsole:\s*!app\.isPackaged/);
+});
+
 test('shutdown evidence collector prioritizes the packaged Electron userData path', () => {
   const collector = fs.readFileSync(
     path.join(__dirname, 'scripts', 'collect_nsis_startup_trace.ps1'),
@@ -250,4 +351,43 @@ test('shutdown evidence collector prioritizes the packaged Electron userData pat
   assert.match(collector, /-SessionId \$startupSessionId/);
   assert.match(collector, /\$launchedSessionPrefix = "\$\(\$process\.Id\)-"/);
   assert.match(collector, /-SessionIdPrefix \$launchedSessionPrefix/);
+});
+
+test('closeout reproduction runner quotes paths and waits for ProcDump before hashing', () => {
+  const runner = fs.readFileSync(
+    path.join(__dirname, 'scripts', 'run_closeout_hang_reproduction.ps1'),
+    'utf8'
+  );
+  const argumentLineIndex = runner.indexOf('$launchArgumentLine');
+  const procDumpWaitIndex = runner.indexOf('$procDumpProcess.WaitForExit');
+  const dumpInventoryIndex = runner.indexOf('$dumpFiles = @(');
+
+  assert.notEqual(argumentLineIndex, -1);
+  assert.match(runner, /ConvertTo-QuotedWindowsArgument/);
+  assert.notEqual(procDumpWaitIndex, -1);
+  assert.ok(dumpInventoryIndex > procDumpWaitIndex);
+  assert.match(runner, /finally\s*\{/);
+  assert.match(runner, /taskkill\.exe/);
+  assert.match(runner, /& \$TaskkillPath \/PID \(\[string\]\$TargetProcessId\) \/T \/F/);
+  assert.match(runner, /\[uint32\]\$_\.ParentProcessId -eq \$applicationProcessId/);
+  assert.match(runner, /\[string\]\$_\.ExecutablePath -ceq \$backendExecutablePath/);
+  assert.match(runner, /ExpectedExecutableSHA256/);
+  assert.match(runner, /ExpectedAsarSHA256/);
+  assert.match(runner, /ExpectedBackendSHA256/);
+  assert.match(runner, /ExpectedBuildCommit/);
+  assert.match(runner, /Read-ValidatedShutdownTrace/);
+  assert.match(runner, /Exactly one shutdown trace is required/);
+  assert.match(runner, /application\.quit-call-before must be the final shutdown boundary/);
+  assert.match(runner, /ExitCode = \$LASTEXITCODE/);
+  assert.match(runner, /Diagnostic cleanup failed/);
+  assert.doesNotMatch(runner, /cleanup is best-effort only/);
+  assert.match(runner, /Invoke-ReproductionSelfTest/);
+  assert.match(runner, /immediately_before_launch/);
+  assert.match(runner, /before_summary_fixation/);
+
+  const identityCaptureIndex = runner.indexOf('$applicationIdentity = [pscustomobject]@{');
+  const windowWaitIndex = runner.indexOf('$windowDeadline = ');
+  assert.notEqual(identityCaptureIndex, -1);
+  assert.notEqual(windowWaitIndex, -1);
+  assert.ok(identityCaptureIndex < windowWaitIndex);
 });

@@ -271,9 +271,20 @@ jobs:
           }
 
           $applicationPath = Join-Path $payloadRoot "smart-factory.exe"
+          $appAsarPath = Join-Path $payloadRoot "resources\app.asar"
           $manifestPath = Join-Path $payloadRoot "resources\backend\bundle-manifest.json"
           $provenancePath = Join-Path $payloadRoot "resources\backend\_internal\backend\build_provenance.json"
           $evidencePath = Join-Path $artifactDir "signed_release_identity.json"
+          $asarEvidencePath = Join-Path $artifactDir "packaged_electron_source_identity.json"
+
+          node scripts/verify_packaged_electron_sources.cjs `
+            --asar $appAsarPath `
+            --source-root . `
+            --expected-commit $env:EXPECTED_BUILD_COMMIT `
+            --output $asarEvidencePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "Signed packaged Electron source identity failed: exit_code=$LASTEXITCODE"
+          }
 
           powershell.exe `
             -NoProfile `

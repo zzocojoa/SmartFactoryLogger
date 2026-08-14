@@ -383,6 +383,7 @@ test('failed application shutdown keeps the window open and permits a retry', as
 test('graceful termination resolves only after the child close event', async () => {
   const child = createChild();
   let gracefulRequests = 0;
+  const phases = [];
   const resultPromise = stopProcessTree(child, {
     killTree: () => assert.fail('force kill must not run after graceful close'),
     requestGracefulStop: async () => {
@@ -390,6 +391,7 @@ test('graceful termination resolves only after the child close event', async () 
     },
     graceMs: 50,
     forceCloseMs: 50,
+    onPhase: (phase) => phases.push(phase),
   });
   child.exitCode = 0;
   child.emit('close', 0);
@@ -401,6 +403,15 @@ test('graceful termination resolves only after the child close event', async () 
     forced: false,
   });
   assert.equal(gracefulRequests, 1);
+  assert.deepEqual(phases.slice(0, 3), [
+    'lifecycle-armed-start',
+    'lifecycle-armed-complete',
+    'graceful-request-queued',
+  ]);
+  assert.ok(phases.includes('graceful-request-call-start'));
+  assert.ok(phases.includes('graceful-request-call-returned'));
+  assert.ok(phases.includes('child-close-observed'));
+  assert.ok(phases.includes('settle-success'));
 });
 
 test('graceful non-zero backend exit rejects clean shutdown', async () => {

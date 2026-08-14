@@ -8,9 +8,27 @@ on:
       - "v2_next/package.json"
       - "v2_next/package-lock.json"
       - "v2_next/main.js"
+      - "v2_next/preload.js"
+      - "v2_next/startupCoordinator.js"
+      - "v2_next/startupIpc.js"
+      - "v2_next/backendControlIpc.js"
+      - "v2_next/backendControlClient.js"
+      - "v2_next/backendStartupProgress.js"
+      - "v2_next/backendControlClient.test.cjs"
+      - "v2_next/backendProcessLifecycle.js"
+      - "v2_next/backendProcessLifecycle.test.cjs"
+      - "v2_next/electronRuntimeSafety.js"
+      - "v2_next/electronRuntimeSafety.test.cjs"
+      - "v2_next/electronRuntimeSafetyBackpressure.fixture.cjs"
+      - "v2_next/electronRuntimeSafetyBackpressure.test.cjs"
+      - "v2_next/shutdownDiagnosticTrace.js"
+      - "v2_next/shutdownDiagnosticTrace.test.cjs"
+      - "v2_next/shutdownDiagnosticTraceWorker.js"
+      - "v2_next/scripts/verify_packaged_electron_sources.cjs"
       - "v2_next/scripts/deploy.ps1"
       - "v2_next/scripts/backend_bundle_integrity.psm1"
       - "v2_next/scripts/measure_nsis_operational_ready.ps1"
+      - "v2_next/scripts/run_closeout_hang_reproduction.ps1"
       - "v2_next/scripts/verify_windows_release_signature.ps1"
       - "v2_next/scripts/verify_windows_release_workflow_actions.cjs"
       - "v2_next/scripts/verify_windows_release_workflow_contract.ps1"
@@ -85,8 +103,15 @@ jobs:
           npm run health:backend:typecheck
           npm run health:backend:test
 
+      - name: Validate Electron runtime before packaging
+        run: npm run health:electron-startup
+
       - name: Validate Windows release gates
         run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_closeout_hang_reproduction.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Closeout reproduction self-test failed: exit_code=$LASTEXITCODE"
+          }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\verify_windows_release_signature.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) {
             throw "Signature verifier self-test failed: exit_code=$LASTEXITCODE"
@@ -167,6 +192,17 @@ jobs:
           }
           if ($provenance.git_commit -cne $env:EXPECTED_BUILD_COMMIT) {
             throw "Packaged application provenance mismatch: expected=$env:EXPECTED_BUILD_COMMIT actual=$($provenance.git_commit)"
+          }
+
+          $artifactDir = Join-Path $env:RUNNER_TEMP "smartfactorylogger-windows"
+          $asarEvidencePath = Join-Path $artifactDir "packaged_electron_source_identity.json"
+          node scripts/verify_packaged_electron_sources.cjs `
+            --asar dist/win-unpacked/resources/app.asar `
+            --source-root . `
+            --expected-commit $env:EXPECTED_BUILD_COMMIT `
+            --output $asarEvidencePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged Electron source identity failed: exit_code=$LASTEXITCODE"
           }
 
       - name: Preserve installer artifact

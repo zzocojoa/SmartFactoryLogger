@@ -151,7 +151,10 @@ test('backend connection-test client rejects request timeout and socket errors',
 
 test('backend graceful-shutdown client sends the authenticated closeout request', async () => {
   const harness = createRequestHarness();
-  const resultPromise = shutdownWith(harness);
+  const phases = [];
+  const resultPromise = shutdownWith(harness, {
+    onPhase: (phase) => phases.push(phase),
+  });
   const response = harness.respond(202);
   response.emit('end');
   response.emit('close');
@@ -164,6 +167,27 @@ test('backend graceful-shutdown client sends the authenticated closeout request'
   assert.equal(harness.request.options.headers['X-SFL-Control-Token'], 'test-control-token');
   assert.deepEqual(JSON.parse(harness.request.body), { reason: 'electron_exit' });
   assert.equal(response.resumed, true);
+  assert.deepEqual(phases, [
+    'request-create-start',
+    'request-create-complete',
+    'request-end-start',
+    'request-end-complete',
+    'response-received',
+    'response-end',
+  ]);
+});
+
+test('shutdown diagnostic observer failures do not alter transport completion', async () => {
+  const harness = createRequestHarness();
+  const resultPromise = shutdownWith(harness, {
+    onPhase: () => {
+      throw new Error('diagnostic observer unavailable');
+    },
+  });
+  const response = harness.respond(202);
+  response.emit('end');
+
+  await assert.doesNotReject(resultPromise);
 });
 
 test('backend health client reads only a bounded local health response', async () => {
@@ -248,14 +272,20 @@ test('backend graceful-shutdown client rejects HTTP, timeout, and socket failure
   await assert.rejects(errorPromise, /connect refused/);
 
   const setupHarness = createRequestHarness();
+  const setupPhases = [];
   await assert.rejects(
     shutdownWith(setupHarness, {
+      onPhase: (phase) => setupPhases.push(phase),
       requestImpl: () => {
         throw new ReferenceError('transport dependency unavailable');
       },
     }),
     /transport dependency unavailable/
   );
+  assert.deepEqual(setupPhases, [
+    'request-create-start',
+    'request-failed',
+  ]);
 });
 
 test('backend graceful-shutdown client rejects every premature response termination mode', async () => {

@@ -53,6 +53,7 @@ docs/data/Factory_Integrated_Log_v2_*.csv
 docs/data/Factory_Integrated_Log_v2_*.metadata.json
 
 # Local QA / Codex artifacts
+release_artifacts/
 .tmp_*
 .tmp_*/
 _tmp_*

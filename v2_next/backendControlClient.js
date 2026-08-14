@@ -95,8 +95,17 @@ function requestBackendGracefulShutdown(options) {
     reason,
     timeoutMs,
     requestImpl = http.request,
+    onPhase = () => undefined,
   } = options;
   const serializedPayload = JSON.stringify({ reason });
+
+  const notifyPhase = (phase, details = {}) => {
+    try {
+      onPhase(phase, details);
+    } catch (_error) {
+      // Diagnostic instrumentation must never alter shutdown transport.
+    }
+  };
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -107,46 +116,67 @@ function requestBackendGracefulShutdown(options) {
       settled = true;
       callback(value);
     };
-    const fail = (error) => finish(reject, error);
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      notifyPhase('request-failed', {
+        error_name: error?.name ?? 'Error',
+        error_message: String(error?.message ?? error),
+      });
+      reject(error);
+    };
 
-    const request = requestImpl({
-      hostname: '127.0.0.1',
-      port,
-      path: '/api/control/shutdown',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(serializedPayload),
-        'X-SFL-Control-Token': controlToken,
-      },
-    }, (response) => {
-      let responseEnded = false;
-      response.once('aborted', () => {
-        fail(new Error('Backend shutdown response was aborted.'));
+    try {
+      notifyPhase('request-create-start', { port, timeout_ms: timeoutMs });
+      const request = requestImpl({
+        hostname: '127.0.0.1',
+        port,
+        path: '/api/control/shutdown',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(serializedPayload),
+          'X-SFL-Control-Token': controlToken,
+        },
+      }, (response) => {
+        notifyPhase('response-received', { status_code: response.statusCode ?? null });
+        let responseEnded = false;
+        response.once('aborted', () => {
+          fail(new Error('Backend shutdown response was aborted.'));
+        });
+        response.once('error', () => {
+          fail(new Error('Backend shutdown response failed.'));
+        });
+        response.once('close', () => {
+          if (!responseEnded) {
+            fail(new Error('Backend shutdown response closed before completion.'));
+          }
+        });
+        response.once('end', () => {
+          notifyPhase('response-end', { status_code: response.statusCode ?? null });
+          responseEnded = true;
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            finish(resolve);
+            return;
+          }
+          fail(new Error(`Backend shutdown endpoint returned HTTP ${response.statusCode}.`));
+        });
+        response.resume();
       });
-      response.once('error', () => {
-        fail(new Error('Backend shutdown response failed.'));
+      notifyPhase('request-create-complete', { port });
+      request.setTimeout(timeoutMs, () => {
+        notifyPhase('request-timeout', { timeout_ms: timeoutMs });
+        request.destroy(new Error('Backend shutdown request timed out.'));
       });
-      response.once('close', () => {
-        if (!responseEnded) {
-          fail(new Error('Backend shutdown response closed before completion.'));
-        }
-      });
-      response.once('end', () => {
-        responseEnded = true;
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          finish(resolve);
-          return;
-        }
-        fail(new Error(`Backend shutdown endpoint returned HTTP ${response.statusCode}.`));
-      });
-      response.resume();
-    });
-    request.setTimeout(timeoutMs, () => {
-      request.destroy(new Error('Backend shutdown request timed out.'));
-    });
-    request.once('error', fail);
-    request.end(serializedPayload);
+      request.once('error', fail);
+      notifyPhase('request-end-start', { payload_bytes: Buffer.byteLength(serializedPayload) });
+      request.end(serializedPayload);
+      notifyPhase('request-end-complete', { payload_bytes: Buffer.byteLength(serializedPayload) });
+    } catch (error) {
+      fail(error);
+    }
   });
 }
 

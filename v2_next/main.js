@@ -37,6 +37,10 @@ const {
   isMatchingBackendHealth,
   installSingleInstanceGuard,
 } = require('./electronRuntimeSafety');
+const {
+  createShutdownDiagnosticTrace,
+  resolveShutdownDiagnosticDirectory,
+} = require('./shutdownDiagnosticTrace');
 
 const startupOriginNs = process.hrtime.bigint();
 const startupSessionId = `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -101,6 +105,22 @@ let deferredSecondInstanceFocus = false;
 const expectedBackendExitPids = new Set();
 const rendererStartupEventCounts = new Map();
 
+const shutdownDiagnosticTrace = createShutdownDiagnosticTrace({
+  directoryPath: resolveShutdownDiagnosticDirectory(),
+  sessionId: startupSessionId,
+  processId: process.pid,
+});
+
+function markShutdownDiagnostic(phase, details = {}) {
+  shutdownDiagnosticTrace.mark(phase, details);
+}
+
+markShutdownDiagnostic('electron.main-module-start', {
+  argv_mode: process.argv.some((value) => (
+    typeof value === 'string' && value.startsWith('--sfl-shutdown-diagnostic-dir=')
+  )) ? 'argument' : 'environment',
+});
+
 // Robust Logging
 let logPath;
 try {
@@ -118,6 +138,10 @@ const electronLogger = createRotatingFileLogger({
   logPath,
   maxBytes: ELECTRON_LOG_MAX_BYTES,
   maxBackups: ELECTRON_LOG_MAX_BACKUPS,
+  echoToConsole: !app.isPackaged,
+  diagnosticObserver: (phase, details) => {
+    markShutdownDiagnostic(`electron.log.${phase}`, details);
+  },
 });
 
 function log(msg) {
@@ -691,31 +715,51 @@ function startBackend() {
 }
 
 function requestBackendGracefulShutdown() {
+  markShutdownDiagnostic('backend.control-shutdown.invoke', {
+    port: resolveBackendPort(),
+  });
   return sendBackendGracefulShutdown({
     controlToken: backendControlToken,
     port: resolveBackendPort(),
     reason: applicationQuitting ? 'electron_exit' : 'electron_retry',
     timeoutMs: BACKEND_SHUTDOWN_REQUEST_TIMEOUT_MS,
+    onPhase: (phase, details) => {
+      markShutdownDiagnostic(`backend.control-shutdown.${phase}`, details);
+    },
   });
 }
 
 async function stopBackendProcess(child = backendProcess) {
+  markShutdownDiagnostic('backend.stop-function-enter', {
+    pid: child?.pid ?? null,
+  });
   if (!child?.pid) {
+    markShutdownDiagnostic('backend.stop-no-process');
     return { stopped: true, reason: 'no_process' };
   }
 
   expectedBackendExitPids.add(child.pid);
   const startedAtNs = process.hrtime.bigint();
+  markShutdownDiagnostic('backend.shutdown-start-log-before', { pid: child.pid });
   logStartupEvent('backend.shutdown-start', {
     pid: child.pid,
     grace_ms: BACKEND_GRACEFUL_SHUTDOWN_MS,
   });
+  markShutdownDiagnostic('backend.shutdown-start-log-after', { pid: child.pid });
   try {
+    markShutdownDiagnostic('backend.stop-process-tree-before', { pid: child.pid });
     const result = await stopProcessTree(child, {
       killTree: kill,
       requestGracefulStop: requestBackendGracefulShutdown,
       log,
       graceMs: BACKEND_GRACEFUL_SHUTDOWN_MS,
+      onPhase: (phase, details) => {
+        markShutdownDiagnostic(`backend.process-lifecycle.${phase}`, details);
+      },
+    });
+    markShutdownDiagnostic('backend.stop-process-tree-after', {
+      pid: child.pid,
+      reason: result.reason,
     });
     if (result.reason === 'already_exited') {
       expectedBackendExitPids.delete(child.pid);
@@ -730,6 +774,11 @@ async function stopBackendProcess(child = backendProcess) {
     });
     return result;
   } catch (error) {
+    markShutdownDiagnostic('backend.stop-process-tree-error', {
+      pid: child.pid,
+      error_name: error?.name ?? 'Error',
+      error_message: String(error?.message ?? error),
+    });
     logStartupEvent('backend.shutdown-failed', {
       pid: child.pid,
       message: error instanceof Error ? error.message : String(error),
@@ -825,25 +874,42 @@ const backendRestartController = createBackendRestartController({
 
 const applicationShutdownController = createApplicationShutdownController({
   setQuitting: (value) => {
+    markShutdownDiagnostic('application.set-quitting', { value });
     applicationQuitting = value;
   },
   prepareShutdown: () => {
+    markShutdownDiagnostic('application.prepare-shutdown-start');
     if (backendStartFallbackTimer !== null) {
       clearTimeout(backendStartFallbackTimer);
       backendStartFallbackTimer = null;
     }
     startupCoordinator.dispose();
+    markShutdownDiagnostic('application.prepare-shutdown-complete');
   },
   shutdown: async () => {
+    markShutdownDiagnostic('application.shutdown-start');
+    markShutdownDiagnostic('application.restart-wait-before');
     await backendRestartController.waitForActiveRestart();
+    markShutdownDiagnostic('application.restart-wait-after');
     const child = backendProcess;
     if (!child?.pid) {
+      markShutdownDiagnostic('application.shutdown-no-process');
       backendCloseoutGate.assertCanExitWithoutProcess();
-      return;
+    } else {
+      markShutdownDiagnostic('application.verified-stop-before', { pid: child.pid });
+      await stopBackendWithVerifiedCloseout(child);
+      markShutdownDiagnostic('application.verified-stop-after', { pid: child.pid });
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
     }
-    await stopBackendWithVerifiedCloseout(child);
-    if (backendProcess === child) {
-      backendProcess = null;
+    markShutdownDiagnostic('application.shutdown-complete');
+    markShutdownDiagnostic('application.quit-call-before');
+    const traceClosed = await shutdownDiagnosticTrace.close(2_000);
+    if (shutdownDiagnosticTrace.required && !traceClosed) {
+      const traceError = shutdownDiagnosticTrace.getLastError();
+      const detail = traceError instanceof Error ? `: ${traceError.message}` : '';
+      throw new Error(`Shutdown diagnostic trace did not close cleanly${detail}`);
     }
   },
   quitApplication: () => app.quit(),
@@ -859,7 +925,13 @@ const applicationShutdownController = createApplicationShutdownController({
 });
 
 function handleApplicationCloseRequest(event) {
+  markShutdownDiagnostic('application.close-request-enter', {
+    default_prevented: event?.defaultPrevented === true,
+  });
   applicationShutdownController.handleCloseRequest(event);
+  markShutdownDiagnostic('application.close-request-returned', {
+    default_prevented: event?.defaultPrevented === true,
+  });
 }
 
 function restartBackend() {

@@ -187,6 +187,22 @@ foreach ($path in @($prWorkflowPath, $signedWorkflowPath)) {
 
 $prWorkflow = Get-Content -LiteralPath $prWorkflowPath -Raw -Encoding UTF8
 $signedWorkflow = Get-Content -LiteralPath $signedWorkflowPath -Raw -Encoding UTF8
+$packageJson = Get-Content `
+    -LiteralPath (Join-Path $repositoryRoot "v2_next\package.json") `
+    -Raw `
+    -Encoding UTF8 |
+    ConvertFrom-Json
+$packagedRuntimeFiles = @(
+    $packageJson.build.files |
+        Where-Object {
+            $_ -is [string] -and
+            $_ -notmatch '^!' -and
+            $_ -notmatch '[?*{}\[\]]' -and
+            $_ -match '\.(c?js)$'
+        }
+)
+Assert-Contract -Condition ($packagedRuntimeFiles.Count -gt 0) `
+    -Message "package.json must declare exact packaged Electron runtime files"
 Invoke-SemanticActionVerification `
     -WorkflowPaths @($prWorkflowPath, $signedWorkflowPath)
 Assert-HashLockedWindowsReleaseDependencies -RepositoryRoot $repositoryRoot
@@ -218,6 +234,7 @@ foreach ($workflow in @($prWorkflow, $signedWorkflow)) {
 }
 
 foreach ($pattern in @(
+    "npm run health:electron-startup",
     "npm run health:backend:lint",
     "npm run health:backend:typecheck",
     "npm run health:backend:test"
@@ -226,6 +243,30 @@ foreach ($pattern in @(
         -Text $prWorkflow `
         -Pattern ([regex]::Escape($pattern)) `
         -Message "PR artifact workflow must execute $pattern"
+}
+foreach ($path in @(
+    'v2_next/backendControlClient.js',
+    'v2_next/backendProcessLifecycle.js',
+    'v2_next/electronRuntimeSafety.js',
+    'v2_next/electronRuntimeSafetyBackpressure.fixture.cjs',
+    'v2_next/electronRuntimeSafetyBackpressure.test.cjs',
+    'v2_next/shutdownDiagnosticTrace.js',
+    'v2_next/shutdownDiagnosticTrace.test.cjs',
+    'v2_next/shutdownDiagnosticTraceWorker.js',
+    'v2_next/scripts/run_closeout_hang_reproduction.ps1',
+    'v2_next/scripts/verify_packaged_electron_sources.cjs'
+)) {
+    Assert-Matches `
+        -Text $prWorkflow `
+        -Pattern ([regex]::Escape("- `"$path`"")) `
+        -Message "PR artifact workflow path filter must include $path"
+}
+foreach ($runtimeFile in $packagedRuntimeFiles) {
+    $path = "v2_next/$runtimeFile"
+    Assert-Matches `
+        -Text $prWorkflow `
+        -Pattern ([regex]::Escape("- `"$path`"")) `
+        -Message "PR artifact workflow path filter must include packaged runtime $path"
 }
 Assert-Matches -Text $signedWorkflow -Pattern "(?m)^\s*run: npm run health\s*$" `
     -Message "signed workflow must run the complete health suite on the exact release commit"
@@ -237,11 +278,17 @@ Assert-DoesNotMatch -Text $prWorkflow -Pattern "(?m)^  (push|workflow_dispatch):
 Assert-DoesNotMatch -Text $prWorkflow -Pattern "production-signing|\$\{\{\s*secrets\." `
     -Message "PR artifact workflow must not access production signing material"
 Assert-Matches -Text $prWorkflow `
+    -Pattern 'run_closeout_hang_reproduction\.ps1"?\s+-SelfTest' `
+    -Message "PR workflow must execute closeout reproduction helper self-tests"
+Assert-Matches -Text $prWorkflow `
     -Pattern 'verify_windows_release_signature\.ps1"?\s+-SelfTest' `
     -Message "PR workflow must execute signature verifier self-tests"
 Assert-Matches -Text $prWorkflow `
     -Pattern 'verify_windows_release_workflow_contract\.ps1"?\s+-SelfTest' `
     -Message "PR workflow must execute its release-workflow contract test"
+Assert-Matches -Text $prWorkflow `
+    -Pattern 'verify_packaged_electron_sources\.cjs[\s\S]*--asar\s+dist/win-unpacked/resources/app\.asar[\s\S]*--expected-commit\s+\$env:EXPECTED_BUILD_COMMIT[\s\S]*--output\s+\$asarEvidencePath' `
+    -Message "PR workflow must persist packaged Electron source identity against the exact commit"
 Assert-Matches -Text $prWorkflow -Pattern "smartfactorylogger-windows-pr-unsigned-" `
     -Message "PR artifacts must be explicitly named unsigned"
 Assert-PinnedOfficialActionTextIsPresent -Workflow $prWorkflow
@@ -258,6 +305,9 @@ Assert-Matches -Text $signedWorkflow `
 Assert-Matches -Text $signedWorkflow `
     -Pattern 'GITHUB_REF_NAME\s+-cne\s+\$env:DEFAULT_BRANCH' `
     -Message "signed workflow must require the protected default-branch workflow ref"
+Assert-Matches -Text $signedWorkflow `
+    -Pattern 'verify_packaged_electron_sources\.cjs[\s\S]*--asar\s+\$appAsarPath[\s\S]*--expected-commit\s+\$env:EXPECTED_BUILD_COMMIT[\s\S]*--output\s+\$asarEvidencePath' `
+    -Message "signed workflow must persist packaged Electron source identity against the exact commit"
 Assert-DoesNotMatch -Text $signedWorkflow `
     -Pattern 'GITHUB_REF_NAME\s+-cne\s+"\$\{\{' `
     -Message "GitHub context values must not be interpolated directly into PowerShell code"
