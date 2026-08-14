@@ -23,6 +23,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ### Fixed
 
+- Prevented packaged Electron shutdown from blocking on synchronous Windows
+  stdout or stderr pipe writes while preserving bounded rotating file logs and
+  development-run console echo.
 - Prevented later diagnostic success, JSONL rotation, or process restart from
   erasing the timeout phase, exception class, UTC duration, and correlation IDs
   needed to attribute the post-canary API stalls observed in v1.0.19.
@@ -36,6 +39,16 @@ All notable changes to Smart Factory Logger V2 are documented here.
   blocking startup.
 - Converted recovered `queued` or `running` requests without a terminal record
   into durable, cause-neutral `terminal_missing` failure evidence.
+
+### Validation
+
+- Stopped-state WER inventory Evidence SHA-256
+  `E0F46C49826611FE5E474D85D6D59C2FD624A020BD20882E24EA72CEEAAB6C83`
+  confirmed one `AppHangB1` `Report.wer` and no dump, cabinet, or dump
+  reference; the archive inventory remained stable before and after inspection.
+- Release remains blocked until this patch is committed, rebuilt from that new
+  clean commit, and provenance-verified. The server remains stopped under
+  release hold, and the verified rollback remains v1.0.16.
 
 ## [1.0.19] - 2026-08-07
 

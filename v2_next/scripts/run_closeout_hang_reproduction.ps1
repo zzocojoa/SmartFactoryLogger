@@ -1,0 +1,279 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("PowerShell", "Shortcut", "BlockedPipe")]
+    [string]$LaunchMode,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ExecutablePath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ProcDumpPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedDevelopmentComputerName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$OutputRoot,
+
+    [ValidateRange(1, 120)]
+    [int]$StartupWaitSeconds = 30,
+
+    [ValidateRange(1, 120)]
+    [int]$PreCloseWaitSeconds = 15,
+
+    [ValidateRange(5, 300)]
+    [int]$CloseObservationSeconds = 25,
+
+    [switch]$ShowTraceTail
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+if ($env:COMPUTERNAME -cne $ExpectedDevelopmentComputerName) {
+    throw "Development-computer guard failed: actual=$env:COMPUTERNAME expected=$ExpectedDevelopmentComputerName"
+}
+
+$exe = (Resolve-Path -LiteralPath $ExecutablePath).Path
+$procDump = (Resolve-Path -LiteralPath $ProcDumpPath).Path
+if ($exe -notlike "*\dist\win-unpacked\smart-factory.exe") {
+    throw "Only an unpacked development build is allowed: $exe"
+}
+
+$procDumpSignature = Get-AuthenticodeSignature -LiteralPath $procDump
+if (
+    $procDumpSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+    [string]$procDumpSignature.SignerCertificate.Subject -notlike "CN=Microsoft Corporation,*"
+) {
+    throw "ProcDump must have a valid Microsoft signature."
+}
+
+$resolvedOutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
+if (Test-Path -LiteralPath $resolvedOutputRoot) {
+    throw "Append-only diagnostic output already exists: $resolvedOutputRoot"
+}
+
+$traceDirectory = Join-Path $resolvedOutputRoot "trace"
+$dumpDirectory = Join-Path $resolvedOutputRoot "dump"
+$appDataDirectory = Join-Path $resolvedOutputRoot "appdata"
+$electronUserDataDirectory = Join-Path $resolvedOutputRoot "electron-user-data"
+New-Item -ItemType Directory -Path @(
+    $traceDirectory,
+    $dumpDirectory,
+    $appDataDirectory,
+    $electronUserDataDirectory
+) | Out-Null
+
+$existing = @(
+    Get-CimInstance Win32_Process -Filter "Name='smart-factory.exe'" |
+        Where-Object { $_.ExecutablePath -ceq $exe }
+)
+if ($existing.Count -ne 0) {
+    throw "The instrumented development build is already running: $($existing.ProcessId -join ',')"
+}
+
+$environmentNames = @(
+    "APPDATA",
+    "SFL_CONFIG_PATH",
+    "BACKEND_PORT",
+    "EXTRUDER_IP",
+    "EXTRUDER_PORT",
+    "LS_IP",
+    "LS_PORT",
+    "SPOT_IP",
+    "SPOT_URL",
+    "SPOT_INTERNAL_TEMPERATURE_URL",
+    "SPOT_FOCUS_URL",
+    "SPOT_ACTUATOR_URL"
+)
+$originalEnvironment = @{}
+foreach ($name in $environmentNames) {
+    $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
+
+$shortcutPath = Join-Path $resolvedOutputRoot "SmartFactoryLogger-diagnostic.lnk"
+try {
+    $env:APPDATA = $appDataDirectory
+    $env:SFL_CONFIG_PATH = Join-Path $appDataDirectory "SmartFactoryLogger\diagnostic-config-does-not-exist.ini"
+    $env:BACKEND_PORT = "18081"
+    $env:EXTRUDER_IP = "127.0.0.1"
+    $env:EXTRUDER_PORT = "1"
+    $env:LS_IP = "127.0.0.1"
+    $env:LS_PORT = "1"
+    $env:SPOT_IP = "127.0.0.1"
+    $env:SPOT_URL = "http://127.0.0.1:1/output?p=temperature"
+    $env:SPOT_INTERNAL_TEMPERATURE_URL = "http://127.0.0.1:1/output?p=itemperature"
+    $env:SPOT_FOCUS_URL = "http://127.0.0.1:1/control?p=focus"
+    $env:SPOT_ACTUATOR_URL = "http://127.0.0.1:1/scan.cgi"
+
+    $launchArguments = @(
+        "--sfl-shutdown-diagnostic-dir=$traceDirectory",
+        "--user-data-dir=$electronUserDataDirectory"
+    )
+    if ($LaunchMode -ceq "PowerShell") {
+        $applicationProcess = Start-Process `
+            -FilePath $exe `
+            -ArgumentList $launchArguments `
+            -PassThru
+    }
+    elseif ($LaunchMode -ceq "Shortcut") {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $exe
+        $shortcut.Arguments = $launchArguments -join " "
+        $shortcut.WorkingDirectory = Split-Path -Parent $exe
+        $shortcut.Save()
+        $applicationProcess = Start-Process -FilePath $shortcutPath -PassThru
+    }
+    else {
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $exe
+        $startInfo.Arguments = @(
+            foreach ($argument in $launchArguments) {
+                '"' + $argument.Replace('"', '\"') + '"'
+            }
+        ) -join " "
+        $startInfo.WorkingDirectory = Split-Path -Parent $exe
+        $startInfo.UseShellExecute = $false
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.CreateNoWindow = $false
+        $applicationProcess = New-Object System.Diagnostics.Process
+        $applicationProcess.StartInfo = $startInfo
+        if (-not $applicationProcess.Start()) {
+            throw "Blocked-pipe launch failed."
+        }
+        # Intentionally do not consume stdout/stderr. This is the regression
+        # condition that previously blocked the packaged Electron main thread.
+    }
+}
+finally {
+    foreach ($name in $environmentNames) {
+        [Environment]::SetEnvironmentVariable(
+            $name,
+            $originalEnvironment[$name],
+            "Process"
+        )
+    }
+}
+
+$windowDeadline = (Get-Date).AddSeconds($StartupWaitSeconds)
+$windowHandle = [IntPtr]::Zero
+while ((Get-Date) -lt $windowDeadline -and -not $applicationProcess.HasExited) {
+    $applicationProcess.Refresh()
+    $windowHandle = $applicationProcess.MainWindowHandle
+    if ($windowHandle -ne [IntPtr]::Zero) {
+        break
+    }
+    Start-Sleep -Milliseconds 250
+}
+if ($applicationProcess.HasExited) {
+    throw "Instrumented app exited before window creation: exit_code=$($applicationProcess.ExitCode)"
+}
+if ($windowHandle -eq [IntPtr]::Zero) {
+    throw "Instrumented app window did not become available."
+}
+
+$procDumpStdout = Join-Path $resolvedOutputRoot "procdump.stdout.txt"
+$procDumpStderr = Join-Path $resolvedOutputRoot "procdump.stderr.txt"
+$procDumpProcess = Start-Process `
+    -FilePath $procDump `
+    -ArgumentList @(
+        "-accepteula",
+        "-ma",
+        "-h",
+        "-n",
+        "1",
+        [string]$applicationProcess.Id,
+        $dumpDirectory
+    ) `
+    -RedirectStandardOutput $procDumpStdout `
+    -RedirectStandardError $procDumpStderr `
+    -WindowStyle Hidden `
+    -PassThru
+
+Start-Sleep -Seconds $PreCloseWaitSeconds
+$closePosted = $applicationProcess.CloseMainWindow()
+if (-not $closePosted) {
+    throw "Native WM_CLOSE request was not accepted by the development window."
+}
+
+$exitDeadline = (Get-Date).AddSeconds($CloseObservationSeconds)
+while ((Get-Date) -lt $exitDeadline -and -not $applicationProcess.HasExited) {
+    Start-Sleep -Milliseconds 250
+    $applicationProcess.Refresh()
+}
+$hung = -not $applicationProcess.HasExited
+if ($hung) {
+    Start-Sleep -Seconds 5
+}
+
+$dumpFiles = @(Get-ChildItem -LiteralPath $dumpDirectory -Filter "*.dmp" -File)
+$traceFiles = @(Get-ChildItem -LiteralPath $traceDirectory -Filter "*.jsonl" -File)
+$summary = [ordered]@{
+    schema_version = "sfl-local-closeout-hang-reproduction-v1"
+    captured_at = (Get-Date).ToUniversalTime().ToString("o")
+    computer_name = $env:COMPUTERNAME
+    launch_mode = $LaunchMode
+    executable_path = $exe
+    executable_sha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+    procdump_path = $procDump
+    procdump_sha256 = (Get-FileHash -LiteralPath $procDump -Algorithm SHA256).Hash
+    main_process_id = $applicationProcess.Id
+    native_close_posted = $closePosted
+    exited_within_observation = -not $hung
+    exit_code = if ($applicationProcess.HasExited) { $applicationProcess.ExitCode } else { $null }
+    dump_files = @(
+        foreach ($file in $dumpFiles) {
+            [ordered]@{
+                path = $file.FullName
+                length = $file.Length
+                sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+            }
+        }
+    )
+    trace_files = @(
+        foreach ($file in $traceFiles) {
+            [ordered]@{
+                path = $file.FullName
+                length = $file.Length
+                sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+            }
+        }
+    )
+    procdump_process_id = $procDumpProcess.Id
+    loopback_only_runtime = $true
+}
+$summaryPath = Join-Path $resolvedOutputRoot "reproduction-summary.json"
+$summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $summaryPath -Encoding UTF8
+$summaryHash = (Get-FileHash -LiteralPath $summaryPath -Algorithm SHA256).Hash
+[System.IO.File]::WriteAllText(
+    "$summaryPath.sha256.txt",
+    "$summaryHash`r`n",
+    [System.Text.Encoding]::ASCII
+)
+
+[pscustomobject]@{
+    OutputRoot = $resolvedOutputRoot
+    MainProcessId = $applicationProcess.Id
+    NativeClosePosted = $closePosted
+    Exited = -not $hung
+    ExitCode = if ($applicationProcess.HasExited) { $applicationProcess.ExitCode } else { $null }
+    DumpCount = $dumpFiles.Count
+    TraceCount = $traceFiles.Count
+    Summary = $summaryPath
+    SummarySHA256 = $summaryHash
+} | Format-List
+
+if ($ShowTraceTail -and $traceFiles.Count -gt 0) {
+    Write-Host "[TRACE] Last 30 diagnostic rows"
+    Get-Content -LiteralPath $traceFiles[0].FullName -Tail 30
+}
+
+if ($hung) {
+    Write-Host "[HOLD] The local instrumented process is still hung. Do not start another run."
+    exit 2
+}
+
+Write-Host "[PASS] The local instrumented process exited after native WM_CLOSE."

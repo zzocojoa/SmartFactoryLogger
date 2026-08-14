@@ -159,6 +159,10 @@ test('Electron logger rejects unsafe rotation bounds', () => {
     () => createRotatingFileLogger({ logPath: 'debug.log', maxBackups: -1 }),
     /maxBackups must be a non-negative safe integer/
   );
+  assert.throws(
+    () => createRotatingFileLogger({ logPath: 'debug.log', echoToConsole: 'no' }),
+    /echoToConsole must be a boolean/
+  );
 });
 
 test('Electron logger rotates oversized local logs and bounds retained backups', () => {
@@ -226,6 +230,77 @@ test('Electron logger reports file write failures without crashing the caller', 
   assert.doesNotThrow(() => logger.log('shutdown-start'));
   assert.equal(errors.length, 1);
   assert.match(String(errors[0][1]), /disk unavailable/);
+});
+
+test('Electron logger exposes append and console boundaries to a non-blocking observer', () => {
+  const phases = [];
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => undefined,
+    },
+    consoleTarget: {
+      log: () => undefined,
+      error: () => assert.fail('successful writes must not emit an error'),
+    },
+    diagnosticObserver: (phase) => phases.push(phase),
+  });
+
+  logger.log('shutdown-boundary');
+
+  assert.deepEqual(phases, [
+    'append-start',
+    'append-complete',
+    'console-start',
+    'console-complete',
+  ]);
+});
+
+test('Electron logger ignores diagnostic observer failures', () => {
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => undefined,
+    },
+    consoleTarget: { log: () => undefined, error: () => undefined },
+    diagnosticObserver: () => {
+      throw new Error('diagnostic channel unavailable');
+    },
+  });
+
+  assert.doesNotThrow(() => logger.log('shutdown-boundary'));
+});
+
+test('packaged-safe Electron logging skips synchronous console output', () => {
+  const phases = [];
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => undefined,
+    },
+    consoleTarget: {
+      log: () => assert.fail('packaged-safe logging must not write to stdout'),
+      error: () => assert.fail('successful writes must not emit an error'),
+    },
+    diagnosticObserver: (phase) => phases.push(phase),
+    echoToConsole: false,
+  });
+
+  logger.log('shutdown-boundary');
+
+  assert.deepEqual(phases, [
+    'append-start',
+    'append-complete',
+    'console-skipped',
+  ]);
+});
+
+test('Electron main disables synchronous console echo in packaged builds', () => {
+  const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  assert.match(mainSource, /echoToConsole:\s*!app\.isPackaged/);
 });
 
 test('shutdown evidence collector prioritizes the packaged Electron userData path', () => {

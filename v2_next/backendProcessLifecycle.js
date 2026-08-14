@@ -52,7 +52,16 @@ function stopProcessTree(child, options) {
     forceCloseMs = 5_000,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
+    onPhase = () => undefined,
   } = options;
+
+  const notifyPhase = (phase, details = {}) => {
+    try {
+      onPhase(phase, details);
+    } catch (_error) {
+      // Diagnostic instrumentation must never alter shutdown semantics.
+    }
+  };
 
   if (typeof killTree !== 'function') {
     return Promise.reject(new TypeError('killTree must be a function.'));
@@ -79,6 +88,7 @@ function stopProcessTree(child, options) {
         return;
       }
       settled = true;
+      notifyPhase('settle-success', { reason, ...details });
       cleanup();
       resolve({ stopped: true, reason, ...details });
     };
@@ -88,11 +98,20 @@ function stopProcessTree(child, options) {
         return;
       }
       settled = true;
+      notifyPhase('settle-failure', {
+        error_name: error?.name ?? 'Error',
+        error_message: String(error?.message ?? error),
+      });
       cleanup();
       reject(error);
     };
 
     function onClose(exitCode, signalCode) {
+      notifyPhase('child-close-observed', {
+        exit_code: exitCode ?? null,
+        signal_code: signalCode ?? null,
+        forcing,
+      });
       if (forcing) {
         finish('forced_close', {
           exitCode: exitCode ?? null,
@@ -123,6 +142,7 @@ function stopProcessTree(child, options) {
         return;
       }
       forcing = true;
+      notifyPhase('force-stop-start', { pid: child.pid });
       log(`Backend graceful stop timed out for PID ${child.pid}; forcing termination.`);
       killTree(child.pid, 'SIGKILL', (error) => {
         if (settled) {
@@ -150,12 +170,28 @@ function stopProcessTree(child, options) {
       });
     };
 
+    notifyPhase('lifecycle-armed-start', { pid: child.pid, grace_ms: graceMs });
     child.once('close', onClose);
     graceTimer = setTimer(forceStop, graceMs);
+    notifyPhase('lifecycle-armed-complete', { pid: child.pid, grace_ms: graceMs });
     if (typeof requestGracefulStop === 'function') {
+      notifyPhase('graceful-request-queued', { pid: child.pid });
       Promise.resolve()
-        .then(() => requestGracefulStop())
+        .then(() => {
+          notifyPhase('graceful-request-call-start', { pid: child.pid });
+          const request = requestGracefulStop();
+          notifyPhase('graceful-request-call-returned', { pid: child.pid });
+          return request;
+        })
+        .then(() => {
+          notifyPhase('graceful-request-resolved', { pid: child.pid });
+        })
         .catch((error) => {
+          notifyPhase('graceful-request-rejected', {
+            pid: child.pid,
+            error_name: error?.name ?? 'Error',
+            error_message: String(error?.message ?? error),
+          });
           if (!settled) {
             const message = error instanceof Error ? error.message : String(error);
             log(`Backend graceful shutdown request failed for PID ${child.pid}: ${message}`);
