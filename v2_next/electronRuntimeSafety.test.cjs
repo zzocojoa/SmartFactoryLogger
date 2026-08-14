@@ -366,4 +366,6 @@ test('closeout reproduction runner quotes paths and waits for ProcDump before ha
   assert.match(runner, /ConvertTo-QuotedWindowsArgument/);
   assert.notEqual(procDumpWaitIndex, -1);
   assert.ok(dumpInventoryIndex > procDumpWaitIndex);
+  assert.match(runner, /finally\s*\{/);
+  assert.match(runner, /\$process\.Kill\(\)/);
 });

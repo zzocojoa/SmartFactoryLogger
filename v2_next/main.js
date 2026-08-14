@@ -895,13 +895,13 @@ const applicationShutdownController = createApplicationShutdownController({
     if (!child?.pid) {
       markShutdownDiagnostic('application.shutdown-no-process');
       backendCloseoutGate.assertCanExitWithoutProcess();
-      return;
-    }
-    markShutdownDiagnostic('application.verified-stop-before', { pid: child.pid });
-    await stopBackendWithVerifiedCloseout(child);
-    markShutdownDiagnostic('application.verified-stop-after', { pid: child.pid });
-    if (backendProcess === child) {
-      backendProcess = null;
+    } else {
+      markShutdownDiagnostic('application.verified-stop-before', { pid: child.pid });
+      await stopBackendWithVerifiedCloseout(child);
+      markShutdownDiagnostic('application.verified-stop-after', { pid: child.pid });
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
     }
     markShutdownDiagnostic('application.shutdown-complete');
     markShutdownDiagnostic('application.quit-call-before');

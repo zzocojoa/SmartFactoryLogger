@@ -218,6 +218,7 @@ foreach ($workflow in @($prWorkflow, $signedWorkflow)) {
 }
 
 foreach ($pattern in @(
+    "npm run health:electron-startup",
     "npm run health:backend:lint",
     "npm run health:backend:typecheck",
     "npm run health:backend:test"
@@ -226,6 +227,18 @@ foreach ($pattern in @(
         -Text $prWorkflow `
         -Pattern ([regex]::Escape($pattern)) `
         -Message "PR artifact workflow must execute $pattern"
+}
+foreach ($path in @(
+    'v2_next/backendControlClient.js',
+    'v2_next/backendProcessLifecycle.js',
+    'v2_next/electronRuntimeSafety.js',
+    'v2_next/shutdownDiagnosticTrace.js',
+    'v2_next/scripts/run_closeout_hang_reproduction.ps1'
+)) {
+    Assert-Matches `
+        -Text $prWorkflow `
+        -Pattern ([regex]::Escape("- `"$path`"")) `
+        -Message "PR artifact workflow path filter must include $path"
 }
 Assert-Matches -Text $signedWorkflow -Pattern "(?m)^\s*run: npm run health\s*$" `
     -Message "signed workflow must run the complete health suite on the exact release commit"

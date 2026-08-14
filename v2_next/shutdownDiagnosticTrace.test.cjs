@@ -59,9 +59,12 @@ test('shutdown diagnostic worker persists ordered boundary records', async () =>
 
 test('Electron main drains the optional diagnostic trace before app quit', () => {
   const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  const noProcessIndex = mainSource.indexOf("markShutdownDiagnostic('application.shutdown-no-process')");
   const closeIndex = mainSource.indexOf('await shutdownDiagnosticTrace.close(2_000)');
   const quitIndex = mainSource.indexOf('app.quit()', closeIndex);
 
+  assert.notEqual(noProcessIndex, -1);
   assert.notEqual(closeIndex, -1);
+  assert.doesNotMatch(mainSource.slice(noProcessIndex, closeIndex), /\breturn\s*;/);
   assert.ok(quitIndex > closeIndex);
 });

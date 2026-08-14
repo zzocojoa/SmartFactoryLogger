@@ -76,6 +76,13 @@ New-Item -ItemType Directory -Path @(
     $electronUserDataDirectory
 ) | Out-Null
 
+$applicationProcess = $null
+$procDumpProcess = $null
+$shell = $null
+$preserveHungApplication = $false
+
+try {
+
 $existing = @(
     Get-CimInstance Win32_Process -Filter "Name='smart-factory.exe'" |
         Where-Object { $_.ExecutablePath -ceq $exe }
@@ -294,8 +301,31 @@ if ($ShowTraceTail -and $traceFiles.Count -gt 0) {
 }
 
 if ($hung) {
+    $preserveHungApplication = $true
     Write-Host "[HOLD] The local instrumented process is still hung. Do not start another run."
     exit 2
 }
 
 Write-Host "[PASS] The local instrumented process exited after native WM_CLOSE."
+}
+finally {
+    if (-not $preserveHungApplication) {
+        foreach ($process in @($procDumpProcess, $applicationProcess)) {
+            if ($null -eq $process) {
+                continue
+            }
+            try {
+                if (-not $process.HasExited) {
+                    $process.Kill()
+                    [void]$process.WaitForExit(5000)
+                }
+            }
+            catch {
+                # Preserve the original failure; cleanup is best-effort only.
+            }
+        }
+    }
+    if ($null -ne $shell) {
+        [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
+    }
+}
