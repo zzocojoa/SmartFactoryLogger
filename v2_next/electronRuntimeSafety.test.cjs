@@ -163,6 +163,10 @@ test('Electron logger rejects unsafe rotation bounds', () => {
     () => createRotatingFileLogger({ logPath: 'debug.log', echoToConsole: 'no' }),
     /echoToConsole must be a boolean/
   );
+  assert.throws(
+    () => createRotatingFileLogger({ logPath: 'debug.log', diagnosticObserver: null }),
+    /diagnosticObserver must be a function/
+  );
 });
 
 test('Electron logger rotates oversized local logs and bounds retained backups', () => {
@@ -298,6 +302,28 @@ test('packaged-safe Electron logging skips synchronous console output', () => {
   ]);
 });
 
+test('packaged-safe Electron logging reports append failure without console I/O', () => {
+  const phases = [];
+  const logger = createRotatingFileLogger({
+    logPath: 'debug_electron.log',
+    fsImpl: {
+      statSync: () => ({ size: 0 }),
+      appendFileSync: () => {
+        throw new Error('disk unavailable');
+      },
+    },
+    consoleTarget: {
+      log: () => assert.fail('packaged-safe logging must not write to stdout'),
+      error: () => assert.fail('packaged-safe logging must not write to stderr'),
+    },
+    diagnosticObserver: (phase) => phases.push(phase),
+    echoToConsole: false,
+  });
+
+  assert.doesNotThrow(() => logger.log('shutdown-boundary'));
+  assert.deepEqual(phases, ['append-start', 'log-error']);
+});
+
 test('Electron main disables synchronous console echo in packaged builds', () => {
   const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
   assert.match(mainSource, /echoToConsole:\s*!app\.isPackaged/);
@@ -325,4 +351,19 @@ test('shutdown evidence collector prioritizes the packaged Electron userData pat
   assert.match(collector, /-SessionId \$startupSessionId/);
   assert.match(collector, /\$launchedSessionPrefix = "\$\(\$process\.Id\)-"/);
   assert.match(collector, /-SessionIdPrefix \$launchedSessionPrefix/);
+});
+
+test('closeout reproduction runner quotes paths and waits for ProcDump before hashing', () => {
+  const runner = fs.readFileSync(
+    path.join(__dirname, 'scripts', 'run_closeout_hang_reproduction.ps1'),
+    'utf8'
+  );
+  const argumentLineIndex = runner.indexOf('$launchArgumentLine');
+  const procDumpWaitIndex = runner.indexOf('$procDumpProcess.WaitForExit');
+  const dumpInventoryIndex = runner.indexOf('$dumpFiles = @(');
+
+  assert.notEqual(argumentLineIndex, -1);
+  assert.match(runner, /ConvertTo-QuotedWindowsArgument/);
+  assert.notEqual(procDumpWaitIndex, -1);
+  assert.ok(dumpInventoryIndex > procDumpWaitIndex);
 });

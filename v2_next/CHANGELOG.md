@@ -26,6 +26,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Prevented packaged Electron shutdown from blocking on synchronous Windows
   stdout or stderr pipe writes while preserving bounded rotating file logs and
   development-run console echo.
+- Drained the optional worker-backed shutdown trace before the final app quit,
+  and made the local hang reproducer wait for ProcDump completion before fixing
+  dump hashes and summary Evidence.
 - Prevented later diagnostic success, JSONL rotation, or process restart from
   erasing the timeout phase, exception class, UTC duration, and correlation IDs
   needed to attribute the post-canary API stalls observed in v1.0.19.

@@ -56,3 +56,12 @@ test('shutdown diagnostic worker persists ordered boundary records', async () =>
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('Electron main drains the optional diagnostic trace before app quit', () => {
+  const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
+  const closeIndex = mainSource.indexOf('await shutdownDiagnosticTrace.close(2_000)');
+  const quitIndex = mainSource.indexOf('app.quit()', closeIndex);
+
+  assert.notEqual(closeIndex, -1);
+  assert.ok(quitIndex > closeIndex);
+});

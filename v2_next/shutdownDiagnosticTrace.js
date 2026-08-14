@@ -106,6 +106,10 @@ function createShutdownDiagnosticTrace(options = {}) {
   });
 
   const waitFor = (key, timeoutMs = 2_000) => new Promise((resolve) => {
+    if (lastError) {
+      resolve(false);
+      return;
+    }
     if (key !== 'close' && Number.isInteger(key) && key <= lastAcknowledgedSequence) {
       resolve(true);
       return;

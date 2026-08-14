@@ -177,6 +177,19 @@ test('backend graceful-shutdown client sends the authenticated closeout request'
   ]);
 });
 
+test('shutdown diagnostic observer failures do not alter transport completion', async () => {
+  const harness = createRequestHarness();
+  const resultPromise = shutdownWith(harness, {
+    onPhase: () => {
+      throw new Error('diagnostic observer unavailable');
+    },
+  });
+  const response = harness.respond(202);
+  response.emit('end');
+
+  await assert.doesNotReject(resultPromise);
+});
+
 test('backend health client reads only a bounded local health response', async () => {
   const harness = createRequestHarness();
   const resultPromise = healthWith(harness);
@@ -259,14 +272,20 @@ test('backend graceful-shutdown client rejects HTTP, timeout, and socket failure
   await assert.rejects(errorPromise, /connect refused/);
 
   const setupHarness = createRequestHarness();
+  const setupPhases = [];
   await assert.rejects(
     shutdownWith(setupHarness, {
+      onPhase: (phase) => setupPhases.push(phase),
       requestImpl: () => {
         throw new ReferenceError('transport dependency unavailable');
       },
     }),
     /transport dependency unavailable/
   );
+  assert.deepEqual(setupPhases, [
+    'request-create-start',
+    'request-failed',
+  ]);
 });
 
 test('backend graceful-shutdown client rejects every premature response termination mode', async () => {

@@ -85,6 +85,9 @@ jobs:
           npm run health:backend:typecheck
           npm run health:backend:test
 
+      - name: Validate Electron runtime before packaging
+        run: npm run health:electron-startup
+
       - name: Validate Windows release gates
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\verify_windows_release_signature.ps1 -SelfTest

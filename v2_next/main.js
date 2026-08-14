@@ -904,12 +904,10 @@ const applicationShutdownController = createApplicationShutdownController({
       backendProcess = null;
     }
     markShutdownDiagnostic('application.shutdown-complete');
-  },
-  quitApplication: () => {
     markShutdownDiagnostic('application.quit-call-before');
-    app.quit();
-    markShutdownDiagnostic('application.quit-call-after');
+    await shutdownDiagnosticTrace.close(2_000);
   },
+  quitApplication: () => app.quit(),
   onFailure: (error) => {
     const message = error instanceof Error ? error.message : String(error);
     logStartupEvent('backend.shutdown-failed', { message });
