@@ -1,22 +1,25 @@
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const asar = require('@electron/asar');
 
-const REQUIRED_RUNTIME_FILES = Object.freeze([
-  'main.js',
-  'backendControlClient.js',
-  'backendProcessLifecycle.js',
-  'electronRuntimeSafety.js',
-  'shutdownDiagnosticTrace.js',
-  'shutdownDiagnosticTraceWorker.js',
-]);
-
 function getArgument(name) {
   const index = process.argv.indexOf(name);
   if (index === -1 || index + 1 >= process.argv.length) {
     throw new Error(`Missing required argument: ${name}`);
+  }
+  return process.argv[index + 1];
+}
+
+function getOptionalArgument(name) {
+  const index = process.argv.indexOf(name);
+  if (index === -1) {
+    return null;
+  }
+  if (index + 1 >= process.argv.length) {
+    throw new Error(`Missing value for argument: ${name}`);
   }
   return process.argv[index + 1];
 }
@@ -50,6 +53,20 @@ function main() {
   const sourcePackage = JSON.parse(
     readGitBlob('package.json').toString('utf8'),
   );
+  const runtimeFiles = sourcePackage.build?.files?.filter((entry) => (
+    typeof entry === 'string'
+      && !entry.startsWith('!')
+      && !/[?*{}[\]]/.test(entry)
+      && /\.(?:c?js)$/i.test(entry)
+      && !path.isAbsolute(entry)
+      && !entry.split('/').includes('..')
+  ));
+  if (!Array.isArray(runtimeFiles) || runtimeFiles.length === 0) {
+    throw new Error('Commit package.json declares no exact packaged Electron runtime files');
+  }
+  if (!runtimeFiles.includes(sourcePackage.main)) {
+    throw new Error(`Packaged Electron runtime list omits main entry: ${sourcePackage.main}`);
+  }
   const packagedPackage = JSON.parse(
     asar.extractFile(archivePath, 'package.json').toString('utf8'),
   );
@@ -62,7 +79,7 @@ function main() {
     }
   }
 
-  const files = REQUIRED_RUNTIME_FILES.map((relativePath) => {
+  const files = runtimeFiles.map((relativePath) => {
     const source = normalizeText(readGitBlob(relativePath));
     const packaged = normalizeText(asar.extractFile(archivePath, relativePath));
     const sourceSHA256 = sha256(source);
@@ -75,20 +92,23 @@ function main() {
     return { relative_path: relativePath, sha256: sourceSHA256 };
   });
 
-  process.stdout.write(
-    `${JSON.stringify({
-      status: 'PASS',
-      archive: archivePath,
-      expected_commit: expectedCommit,
-      comparison: 'utf8-lf-normalized',
-      package: {
-        name: packagedPackage.name,
-        version: packagedPackage.version,
-        main: packagedPackage.main,
-      },
-      files,
-    })}\n`,
-  );
+  const result = `${JSON.stringify({
+    status: 'PASS',
+    archive: archivePath,
+    expected_commit: expectedCommit,
+    comparison: 'utf8-lf-normalized',
+    package: {
+      name: packagedPackage.name,
+      version: packagedPackage.version,
+      main: packagedPackage.main,
+    },
+    files,
+  })}\n`;
+  const outputPath = getOptionalArgument('--output');
+  if (outputPath) {
+    fs.writeFileSync(path.resolve(outputPath), result, { encoding: 'utf8', flag: 'wx' });
+  }
+  process.stdout.write(result);
 }
 
 try {
