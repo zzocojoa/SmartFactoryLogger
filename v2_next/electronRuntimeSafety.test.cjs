@@ -367,5 +367,6 @@ test('closeout reproduction runner quotes paths and waits for ProcDump before ha
   assert.notEqual(procDumpWaitIndex, -1);
   assert.ok(dumpInventoryIndex > procDumpWaitIndex);
   assert.match(runner, /finally\s*\{/);
-  assert.match(runner, /\$process\.Kill\(\)/);
+  assert.match(runner, /taskkill\.exe/);
+  assert.match(runner, /\/PID \(\[string\]\$applicationProcess\.Id\) \/T \/F/);
 });

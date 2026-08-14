@@ -310,19 +310,25 @@ Write-Host "[PASS] The local instrumented process exited after native WM_CLOSE."
 }
 finally {
     if (-not $preserveHungApplication) {
-        foreach ($process in @($procDumpProcess, $applicationProcess)) {
-            if ($null -eq $process) {
-                continue
+        try {
+            if ($null -ne $procDumpProcess -and -not $procDumpProcess.HasExited) {
+                $procDumpProcess.Kill()
+                [void]$procDumpProcess.WaitForExit(5000)
             }
-            try {
-                if (-not $process.HasExited) {
-                    $process.Kill()
-                    [void]$process.WaitForExit(5000)
-                }
+        }
+        catch {
+            # Preserve the original failure; cleanup is best-effort only.
+        }
+        try {
+            if ($null -ne $applicationProcess -and -not $applicationProcess.HasExited) {
+                $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
+                & $taskkill /PID ([string]$applicationProcess.Id) /T /F 2>$null |
+                    Out-Null
+                [void]$applicationProcess.WaitForExit(5000)
             }
-            catch {
-                # Preserve the original failure; cleanup is best-effort only.
-            }
+        }
+        catch {
+            # The exact development app PID is the only cleanup target.
         }
     }
     if ($null -ne $shell) {
