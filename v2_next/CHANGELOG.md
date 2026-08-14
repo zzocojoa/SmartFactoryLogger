@@ -25,7 +25,7 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 - Gated Windows PR and signed-release artifacts on exact commit-bound
   `app.asar` inclusion of every declared Electron runtime source, with the
-  signed-release result retained in published checksum evidence.
+  attestation results retained in published checksum evidence.
 - Prevented packaged Electron shutdown from blocking on synchronous Windows
   stdout or stderr pipe writes while preserving bounded rotating file logs and
   development-run console echo.

@@ -194,10 +194,13 @@ jobs:
             throw "Packaged application provenance mismatch: expected=$env:EXPECTED_BUILD_COMMIT actual=$($provenance.git_commit)"
           }
 
+          $artifactDir = Join-Path $env:RUNNER_TEMP "smartfactorylogger-windows"
+          $asarEvidencePath = Join-Path $artifactDir "packaged_electron_source_identity.json"
           node scripts/verify_packaged_electron_sources.cjs `
             --asar dist/win-unpacked/resources/app.asar `
             --source-root . `
-            --expected-commit $env:EXPECTED_BUILD_COMMIT
+            --expected-commit $env:EXPECTED_BUILD_COMMIT `
+            --output $asarEvidencePath
           if ($LASTEXITCODE -ne 0) {
             throw "Packaged Electron source identity failed: exit_code=$LASTEXITCODE"
           }
