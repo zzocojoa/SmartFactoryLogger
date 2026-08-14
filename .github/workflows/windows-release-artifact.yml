@@ -102,6 +102,10 @@ jobs:
 
       - name: Validate Windows release gates
         run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run_closeout_hang_reproduction.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Closeout reproduction self-test failed: exit_code=$LASTEXITCODE"
+          }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\verify_windows_release_signature.ps1 -SelfTest
           if ($LASTEXITCODE -ne 0) {
             throw "Signature verifier self-test failed: exit_code=$LASTEXITCODE"

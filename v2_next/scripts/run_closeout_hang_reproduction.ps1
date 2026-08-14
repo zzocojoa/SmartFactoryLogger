@@ -1,31 +1,54 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = "Execute")]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
     [ValidateSet("PowerShell", "Shortcut", "BlockedPipe")]
     [string]$LaunchMode,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
     [string]$ExecutablePath,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
+    [ValidatePattern("^[A-Fa-f0-9]{64}$")]
+    [string]$ExpectedExecutableSHA256,
+
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
+    [ValidatePattern("^[A-Fa-f0-9]{64}$")]
+    [string]$ExpectedAsarSHA256,
+
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
+    [ValidatePattern("^[A-Fa-f0-9]{64}$")]
+    [string]$ExpectedBackendSHA256,
+
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
+    [ValidatePattern("^[A-Fa-f0-9]{40}$")]
+    [string]$ExpectedBuildCommit,
+
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
     [string]$ProcDumpPath,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
     [string]$ExpectedDevelopmentComputerName,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $true, ParameterSetName = "Execute")]
     [string]$OutputRoot,
 
+    [Parameter(ParameterSetName = "Execute")]
     [ValidateRange(1, 120)]
     [int]$StartupWaitSeconds = 30,
 
+    [Parameter(ParameterSetName = "Execute")]
     [ValidateRange(1, 120)]
     [int]$PreCloseWaitSeconds = 15,
 
+    [Parameter(ParameterSetName = "Execute")]
     [ValidateRange(5, 300)]
     [int]$CloseObservationSeconds = 25,
 
-    [switch]$ShowTraceTail
+    [Parameter(ParameterSetName = "Execute")]
+    [switch]$ShowTraceTail,
+
+    [Parameter(Mandatory = $true, ParameterSetName = "SelfTest")]
+    [switch]$SelfTest
 )
 
 Set-StrictMode -Version Latest
@@ -40,6 +63,475 @@ function ConvertTo-QuotedWindowsArgument {
         throw "Launch argument contains an unsupported double quote."
     }
     return '"' + $Value + '"'
+}
+
+function Get-ExactProcessIdentity {
+    param(
+        [Parameter(Mandatory = $true)][uint32]$TargetProcessId,
+        [Parameter(Mandatory = $true)][string]$ExpectedPath,
+        [Nullable[uint32]]$ExpectedParentProcessId = $null,
+        [string]$ExpectedCreationDate = "",
+        [Nullable[long]]$ExpectedStartTimeUtcTicks = $null
+    )
+
+    $candidates = @(Get-CimInstance Win32_Process -Filter "ProcessId=$TargetProcessId")
+    return @(
+        foreach ($candidate in $candidates) {
+            $processStartMatches = $true
+            if ($null -ne $ExpectedStartTimeUtcTicks) {
+                try {
+                    $process = Get-Process -Id $TargetProcessId -ErrorAction Stop
+                    $processStartMatches = (
+                        [string]$process.Path -ceq $ExpectedPath -and
+                        $process.StartTime.ToUniversalTime().Ticks -eq
+                            [long]$ExpectedStartTimeUtcTicks
+                    )
+                }
+                catch {
+                    $processStartMatches = $false
+                }
+            }
+            $matches = (
+                [string]$candidate.ExecutablePath -ceq $ExpectedPath -and
+                (
+                    $null -eq $ExpectedParentProcessId -or
+                    [uint32]$candidate.ParentProcessId -eq
+                        [uint32]$ExpectedParentProcessId
+                ) -and
+                (
+                    [string]::IsNullOrEmpty($ExpectedCreationDate) -or
+                    [string]$candidate.CreationDate -ceq $ExpectedCreationDate
+                ) -and
+                $processStartMatches
+            )
+            if ($matches) {
+                $candidate
+            }
+        }
+    )
+}
+
+function Invoke-TaskkillCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskkillPath,
+        [Parameter(Mandatory = $true)][uint32]$TargetProcessId
+    )
+
+    $output = @(
+        & $TaskkillPath /PID ([string]$TargetProcessId) /T /F 2>&1
+    )
+    return [pscustomobject]@{
+        ExitCode = $LASTEXITCODE
+        Output = @($output | ForEach-Object { [string]$_ })
+    }
+}
+
+function Stop-ExactProcessTree {
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskkillPath,
+        [Parameter(Mandatory = $true)][uint32]$TargetProcessId,
+        [Parameter(Mandatory = $true)][string]$ExpectedPath,
+        [Nullable[uint32]]$ExpectedParentProcessId = $null,
+        [string]$ExpectedCreationDate = "",
+        [Nullable[long]]$ExpectedStartTimeUtcTicks = $null,
+        [Parameter(Mandatory = $true)][string]$Description,
+        [scriptblock]$TaskkillInvoker = ${function:Invoke-TaskkillCommand}
+    )
+
+    $identity = @(
+        Get-ExactProcessIdentity `
+            -TargetProcessId $TargetProcessId `
+            -ExpectedPath $ExpectedPath `
+            -ExpectedParentProcessId $ExpectedParentProcessId `
+            -ExpectedCreationDate $ExpectedCreationDate `
+            -ExpectedStartTimeUtcTicks $ExpectedStartTimeUtcTicks
+    )
+    if ($identity.Count -eq 0) {
+        return
+    }
+    if ($identity.Count -ne 1) {
+        throw "Cleanup identity was not unique for $Description (PID $TargetProcessId)."
+    }
+
+    $taskkillResult = & $TaskkillInvoker $TaskkillPath $TargetProcessId
+    if ([int]$taskkillResult.ExitCode -ne 0) {
+        $outputText = @($taskkillResult.Output) -join " | "
+        throw "Cleanup taskkill failed for $Description (PID $TargetProcessId, exit_code=$($taskkillResult.ExitCode)): $outputText"
+    }
+
+    $deadline = (Get-Date).AddSeconds(5)
+    do {
+        Start-Sleep -Milliseconds 100
+        $remaining = @(
+            Get-ExactProcessIdentity `
+                -TargetProcessId $TargetProcessId `
+                -ExpectedPath $ExpectedPath `
+                -ExpectedParentProcessId $ExpectedParentProcessId `
+                -ExpectedCreationDate $ExpectedCreationDate `
+                -ExpectedStartTimeUtcTicks $ExpectedStartTimeUtcTicks
+        )
+    } while ($remaining.Count -gt 0 -and (Get-Date) -lt $deadline)
+
+    if ($remaining.Count -gt 0) {
+        throw "Cleanup verification failed for $Description (PID $TargetProcessId)."
+    }
+}
+
+function Read-ValidatedShutdownTrace {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.FileInfo[]]$TraceFiles,
+        [Parameter(Mandatory = $true)][uint32]$ExpectedProcessId
+    )
+
+    if ($TraceFiles.Count -ne 1) {
+        throw "Exactly one shutdown trace is required; observed=$($TraceFiles.Count)."
+    }
+
+    $lines = @(Get-Content -LiteralPath $TraceFiles[0].FullName -Encoding UTF8)
+    if ($lines.Count -eq 0 -or @($lines | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -ne 0) {
+        throw "Shutdown trace must contain only non-empty JSONL rows."
+    }
+
+    [object[]]$rows = @(
+        foreach ($line in $lines) {
+            try {
+                $line | ConvertFrom-Json
+            }
+            catch {
+                throw "Shutdown trace contains invalid JSON: $($_.Exception.Message)"
+            }
+        }
+    )
+    if (@($rows | Where-Object { [string]$_.schema_version -cne "sfl-electron-shutdown-diagnostic-v1" }).Count -ne 0) {
+        throw "Shutdown trace schema mismatch."
+    }
+
+    $workerReady = @($rows | Where-Object { [string]$_.type -ceq "trace.worker-ready" })
+    $closed = @($rows | Where-Object { [string]$_.type -ceq "trace.closed" })
+    [object[]]$boundaries = @($rows | Where-Object { [string]$_.type -ceq "boundary" })
+    if ($workerReady.Count -ne 1 -or [string]$rows[0].type -cne "trace.worker-ready") {
+        throw "Shutdown trace must start with exactly one trace.worker-ready row."
+    }
+    if ($closed.Count -ne 1 -or [string]$rows[-1].type -cne "trace.closed") {
+        throw "Shutdown trace must end with exactly one trace.closed row."
+    }
+    if ($rows.Count -ne (2 + $boundaries.Count) -or $boundaries.Count -eq 0) {
+        throw "Shutdown trace contains an unexpected row type or no boundary rows."
+    }
+
+    for ($index = 0; $index -lt $boundaries.Count; $index += 1) {
+        $expectedSequence = $index + 1
+        if (
+            [long]$boundaries[$index].sequence -ne $expectedSequence -or
+            [uint32]$boundaries[$index].process_id -ne $ExpectedProcessId
+        ) {
+            throw "Shutdown trace boundary sequence or process identity mismatch at index $index."
+        }
+    }
+
+    $sessionIds = @(
+        $boundaries |
+            ForEach-Object { [string]$_.session_id } |
+            Sort-Object -Unique
+    )
+    if ($sessionIds.Count -ne 1 -or [string]::IsNullOrWhiteSpace($sessionIds[0])) {
+        throw "Shutdown trace must contain exactly one non-empty session identity."
+    }
+
+    $requiredPhases = @(
+        "application.close-request-enter",
+        "application.shutdown-start",
+        "application.shutdown-complete",
+        "application.quit-call-before"
+    )
+    foreach ($phase in $requiredPhases) {
+        if (@($boundaries | Where-Object { [string]$_.phase -ceq $phase }).Count -ne 1) {
+            throw "Shutdown trace must contain exactly one required phase: $phase"
+        }
+    }
+    $requiredPhaseIndexes = @(
+        foreach ($phase in $requiredPhases) {
+            [array]::IndexOf([object[]]$boundaries.phase, $phase)
+        }
+    )
+    for ($index = 1; $index -lt $requiredPhaseIndexes.Count; $index += 1) {
+        if ($requiredPhaseIndexes[$index] -le $requiredPhaseIndexes[$index - 1]) {
+            throw "Shutdown trace required phases are not strictly ordered."
+        }
+    }
+    if ([string]$boundaries[-1].phase -cne "application.quit-call-before") {
+        throw "application.quit-call-before must be the final shutdown boundary."
+    }
+
+    return [pscustomobject]@{
+        Path = $TraceFiles[0].FullName
+        RowCount = $rows.Count
+        BoundaryCount = $boundaries.Count
+        SessionId = $sessionIds[0]
+        FinalSequence = [long]$boundaries[-1].sequence
+        Closed = $true
+    }
+}
+
+function Get-ReproductionOutcome {
+    param(
+        [Parameter(Mandatory = $true)][bool]$Hung,
+        [Nullable[int]]$ElectronExitCode,
+        [Parameter(Mandatory = $true)][int]$DumpCount,
+        [Nullable[int]]$ProcDumpExitCode
+    )
+
+    $checks = [ordered]@{
+        electron_exited_within_observation = -not $Hung
+        electron_exit_code_zero = (
+            -not $Hung -and
+            $null -ne $ElectronExitCode -and
+            [int]$ElectronExitCode -eq 0
+        )
+        unexpected_dump_absent = $DumpCount -eq 0
+        procdump_exit_code_approved = (
+            $null -ne $ProcDumpExitCode -and
+            [int]$ProcDumpExitCode -eq 0
+        )
+    }
+    $failedChecks = @(
+        $checks.GetEnumerator() |
+            Where-Object { -not [bool]$_.Value } |
+            ForEach-Object { [string]$_.Key }
+    )
+    return [pscustomobject]@{
+        Passed = $failedChecks.Count -eq 0
+        Checks = $checks
+        FailedChecks = $failedChecks
+    }
+}
+
+function Get-ApprovedBuildIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExecutablePath,
+        [Parameter(Mandatory = $true)][string]$AsarPath,
+        [Parameter(Mandatory = $true)][string]$BackendPath,
+        [Parameter(Mandatory = $true)][string]$BuildProvenancePath,
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutableHash,
+        [Parameter(Mandatory = $true)][string]$ExpectedAsarHash,
+        [Parameter(Mandatory = $true)][string]$ExpectedBackendHash,
+        [Parameter(Mandatory = $true)][string]$ExpectedCommit
+    )
+
+    $identity = [pscustomobject]@{
+        ExecutableSHA256 = (Get-FileHash -LiteralPath $ExecutablePath -Algorithm SHA256).Hash
+        AsarSHA256 = (Get-FileHash -LiteralPath $AsarPath -Algorithm SHA256).Hash
+        BackendSHA256 = (Get-FileHash -LiteralPath $BackendPath -Algorithm SHA256).Hash
+        BuildCommit = [string](
+            Get-Content -LiteralPath $BuildProvenancePath -Raw -Encoding UTF8 |
+                ConvertFrom-Json
+        ).git_commit
+    }
+    if (
+        $identity.ExecutableSHA256 -cne $ExpectedExecutableHash.ToUpperInvariant() -or
+        $identity.AsarSHA256 -cne $ExpectedAsarHash.ToUpperInvariant() -or
+        $identity.BackendSHA256 -cne $ExpectedBackendHash.ToUpperInvariant() -or
+        $identity.BuildCommit -cne $ExpectedCommit.ToLowerInvariant()
+    ) {
+        throw "Unpacked development build identity does not match the approved hashes and commit."
+    }
+    return $identity
+}
+
+function Assert-SelfTestThrows {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$Action,
+        [Parameter(Mandatory = $true)][string]$ExpectedMessage
+    )
+
+    try {
+        & $Action
+    }
+    catch {
+        if ($_.Exception.Message -notlike $ExpectedMessage) {
+            throw "Self-test observed an unexpected error: $($_.Exception.Message)"
+        }
+        return
+    }
+    throw "Self-test expected an error matching: $ExpectedMessage"
+}
+
+function Invoke-ReproductionSelfTest {
+    $temporaryRoot = Join-Path `
+        ([System.IO.Path]::GetTempPath()) `
+        "sfl-closeout-reproduction-selftest-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $temporaryRoot -ErrorAction Stop | Out-Null
+    try {
+        $schema = "sfl-electron-shutdown-diagnostic-v1"
+        $tracePath = Join-Path $temporaryRoot "shutdown-boundary-4242-selftest.jsonl"
+        $validRows = @(
+            [ordered]@{ schema_version = $schema; type = "trace.worker-ready" },
+            [ordered]@{ schema_version = $schema; type = "boundary"; sequence = 1; process_id = 4242; session_id = "selftest"; phase = "application.close-request-enter" },
+            [ordered]@{ schema_version = $schema; type = "boundary"; sequence = 2; process_id = 4242; session_id = "selftest"; phase = "application.shutdown-start" },
+            [ordered]@{ schema_version = $schema; type = "boundary"; sequence = 3; process_id = 4242; session_id = "selftest"; phase = "application.shutdown-complete" },
+            [ordered]@{ schema_version = $schema; type = "boundary"; sequence = 4; process_id = 4242; session_id = "selftest"; phase = "application.quit-call-before" },
+            [ordered]@{ schema_version = $schema; type = "trace.closed" }
+        )
+        [System.IO.File]::WriteAllLines(
+            $tracePath,
+            [string[]]@($validRows | ForEach-Object { $_ | ConvertTo-Json -Compress })
+        )
+        $trace = Read-ValidatedShutdownTrace `
+            -TraceFiles @((Get-Item -LiteralPath $tracePath)) `
+            -ExpectedProcessId 4242
+        if (-not $trace.Closed -or $trace.FinalSequence -ne 4) {
+            throw "Valid shutdown trace was rejected."
+        }
+
+        [System.IO.File]::WriteAllLines(
+            $tracePath,
+            [string[]]@($validRows | Select-Object -First 5 | ForEach-Object { $_ | ConvertTo-Json -Compress })
+        )
+        Assert-SelfTestThrows `
+            -Action {
+                [void](Read-ValidatedShutdownTrace `
+                    -TraceFiles @((Get-Item -LiteralPath $tracePath)) `
+                    -ExpectedProcessId 4242)
+            } `
+            -ExpectedMessage "Shutdown trace must end*"
+
+        $semanticOrderRows = @($validRows)
+        $semanticOrderRows[2].phase = "application.shutdown-complete"
+        $semanticOrderRows[3].phase = "application.shutdown-start"
+        [System.IO.File]::WriteAllLines(
+            $tracePath,
+            [string[]]@($semanticOrderRows | ForEach-Object { $_ | ConvertTo-Json -Compress })
+        )
+        Assert-SelfTestThrows `
+            -Action {
+                [void](Read-ValidatedShutdownTrace `
+                    -TraceFiles @((Get-Item -LiteralPath $tracePath)) `
+                    -ExpectedProcessId 4242)
+            } `
+            -ExpectedMessage "Shutdown trace required phases are not strictly ordered."
+        $semanticOrderRows[2].phase = "application.shutdown-start"
+        $semanticOrderRows[3].phase = "application.shutdown-complete"
+
+        $outOfOrderRows = @($validRows)
+        $outOfOrderRows[2].sequence = 7
+        [System.IO.File]::WriteAllLines(
+            $tracePath,
+            [string[]]@($outOfOrderRows | ForEach-Object { $_ | ConvertTo-Json -Compress })
+        )
+        Assert-SelfTestThrows `
+            -Action {
+                [void](Read-ValidatedShutdownTrace `
+                    -TraceFiles @((Get-Item -LiteralPath $tracePath)) `
+                    -ExpectedProcessId 4242)
+            } `
+            -ExpectedMessage "Shutdown trace boundary sequence*"
+
+        [System.IO.File]::WriteAllText($tracePath, "{invalid-json}`r`n")
+        Assert-SelfTestThrows `
+            -Action {
+                [void](Read-ValidatedShutdownTrace `
+                    -TraceFiles @((Get-Item -LiteralPath $tracePath)) `
+                    -ExpectedProcessId 4242)
+            } `
+            -ExpectedMessage "Shutdown trace contains invalid JSON*"
+
+        $currentProcess = Get-Process -Id $PID -ErrorAction Stop
+        $currentCim = Get-CimInstance Win32_Process -Filter "ProcessId=$PID"
+        $currentIdentity = @(
+            Get-ExactProcessIdentity `
+                -TargetProcessId ([uint32]$PID) `
+                -ExpectedPath ([string]$currentProcess.Path) `
+                -ExpectedCreationDate ([string]$currentCim.CreationDate) `
+                -ExpectedStartTimeUtcTicks $currentProcess.StartTime.ToUniversalTime().Ticks
+        )
+        if ($currentIdentity.Count -ne 1) {
+            throw "Exact process identity self-test failed."
+        }
+        Assert-SelfTestThrows `
+            -Action {
+                Stop-ExactProcessTree `
+                    -TaskkillPath "not-invoked.exe" `
+                    -TargetProcessId ([uint32]$PID) `
+                    -ExpectedPath ([string]$currentProcess.Path) `
+                    -ExpectedCreationDate ([string]$currentCim.CreationDate) `
+                    -ExpectedStartTimeUtcTicks $currentProcess.StartTime.ToUniversalTime().Ticks `
+                    -Description "native exit propagation self-test" `
+                    -TaskkillInvoker {
+                        [pscustomobject]@{ ExitCode = 23; Output = @("synthetic failure") }
+                    }
+            } `
+            -ExpectedMessage "Cleanup taskkill failed*exit_code=23*"
+
+        $exeTestPath = Join-Path $temporaryRoot "smart-factory.exe"
+        $asarTestPath = Join-Path $temporaryRoot "app.asar"
+        $backendTestPath = Join-Path $temporaryRoot "SmartFactoryBackend.exe"
+        $provenanceTestPath = Join-Path $temporaryRoot "build_provenance.json"
+        [System.IO.File]::WriteAllText($exeTestPath, "exe")
+        [System.IO.File]::WriteAllText($asarTestPath, "asar")
+        [System.IO.File]::WriteAllText($backendTestPath, "backend")
+        [System.IO.File]::WriteAllText(
+            $provenanceTestPath,
+            '{"git_commit":"0123456789abcdef0123456789abcdef01234567"}'
+        )
+        $expectedExe = (Get-FileHash -LiteralPath $exeTestPath -Algorithm SHA256).Hash
+        $expectedAsar = (Get-FileHash -LiteralPath $asarTestPath -Algorithm SHA256).Hash
+        $expectedBackend = (Get-FileHash -LiteralPath $backendTestPath -Algorithm SHA256).Hash
+        [void](Get-ApprovedBuildIdentity `
+            -ExecutablePath $exeTestPath `
+            -AsarPath $asarTestPath `
+            -BackendPath $backendTestPath `
+            -BuildProvenancePath $provenanceTestPath `
+            -ExpectedExecutableHash $expectedExe `
+            -ExpectedAsarHash $expectedAsar `
+            -ExpectedBackendHash $expectedBackend `
+            -ExpectedCommit "0123456789abcdef0123456789abcdef01234567")
+        [System.IO.File]::AppendAllText($backendTestPath, "changed")
+        Assert-SelfTestThrows `
+            -Action {
+                [void](Get-ApprovedBuildIdentity `
+                    -ExecutablePath $exeTestPath `
+                    -AsarPath $asarTestPath `
+                    -BackendPath $backendTestPath `
+                    -BuildProvenancePath $provenanceTestPath `
+                    -ExpectedExecutableHash $expectedExe `
+                    -ExpectedAsarHash $expectedAsar `
+                    -ExpectedBackendHash $expectedBackend `
+                    -ExpectedCommit "0123456789abcdef0123456789abcdef01234567")
+            } `
+            -ExpectedMessage "Unpacked development build identity*"
+
+        $passingOutcome = Get-ReproductionOutcome `
+            -Hung $false `
+            -ElectronExitCode 0 `
+            -DumpCount 0 `
+            -ProcDumpExitCode 0
+        if (-not $passingOutcome.Passed) {
+            throw "Valid reproduction outcome was rejected."
+        }
+        foreach ($failureCase in @(
+            [pscustomobject]@{ ExitCode = 1; DumpCount = 0; ProcDumpExitCode = 0; Expected = "electron_exit_code_zero" },
+            [pscustomobject]@{ ExitCode = 0; DumpCount = 1; ProcDumpExitCode = 0; Expected = "unexpected_dump_absent" },
+            [pscustomobject]@{ ExitCode = 0; DumpCount = 0; ProcDumpExitCode = 1; Expected = "procdump_exit_code_approved" }
+        )) {
+            $outcome = Get-ReproductionOutcome `
+                -Hung $false `
+                -ElectronExitCode $failureCase.ExitCode `
+                -DumpCount $failureCase.DumpCount `
+                -ProcDumpExitCode $failureCase.ProcDumpExitCode
+            if ($outcome.Passed -or $failureCase.Expected -notin $outcome.FailedChecks) {
+                throw "Invalid reproduction outcome was accepted: $($failureCase.Expected)"
+            }
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
+    }
+    Write-Host "[PASS] Closeout hang reproduction helper self-tests passed."
+}
+
+if ($SelfTest) {
+    Invoke-ReproductionSelfTest
+    exit 0
 }
 
 if ($env:COMPUTERNAME -cne $ExpectedDevelopmentComputerName) {
@@ -57,6 +549,25 @@ $backendExecutablePath = Join-Path `
 if (-not (Test-Path -LiteralPath $backendExecutablePath -PathType Leaf)) {
     throw "Unpacked development backend is missing: $backendExecutablePath"
 }
+$asarPath = Join-Path (Split-Path -Parent $exe) "resources\app.asar"
+$buildProvenancePath = Join-Path `
+    (Split-Path -Parent $exe) `
+    "resources\backend\_internal\backend\build_provenance.json"
+foreach ($requiredPath in @($asarPath, $buildProvenancePath)) {
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+        throw "Unpacked development artifact is missing: $requiredPath"
+    }
+}
+
+$preflightBuildIdentity = Get-ApprovedBuildIdentity `
+    -ExecutablePath $exe `
+    -AsarPath $asarPath `
+    -BackendPath $backendExecutablePath `
+    -BuildProvenancePath $buildProvenancePath `
+    -ExpectedExecutableHash $ExpectedExecutableSHA256 `
+    -ExpectedAsarHash $ExpectedAsarSHA256 `
+    -ExpectedBackendHash $ExpectedBackendSHA256 `
+    -ExpectedCommit $ExpectedBuildCommit
 
 $procDumpSignature = Get-AuthenticodeSignature -LiteralPath $procDump
 if (
@@ -86,6 +597,7 @@ $applicationProcess = $null
 $procDumpProcess = $null
 $shell = $null
 $preserveHungApplication = $false
+$applicationIdentity = $null
 
 try {
 
@@ -140,6 +652,15 @@ try {
             ConvertTo-QuotedWindowsArgument -Value $_
         }
     ) -join " "
+    $launchBuildIdentity = Get-ApprovedBuildIdentity `
+        -ExecutablePath $exe `
+        -AsarPath $asarPath `
+        -BackendPath $backendExecutablePath `
+        -BuildProvenancePath $buildProvenancePath `
+        -ExpectedExecutableHash $ExpectedExecutableSHA256 `
+        -ExpectedAsarHash $ExpectedAsarSHA256 `
+        -ExpectedBackendHash $ExpectedBackendSHA256 `
+        -ExpectedCommit $ExpectedBuildCommit
     if ($LaunchMode -ceq "PowerShell") {
         $applicationProcess = Start-Process `
             -FilePath $exe `
@@ -172,6 +693,39 @@ try {
         # Intentionally do not consume stdout/stderr. This is the regression
         # condition that previously blocked the packaged Electron main thread.
     }
+
+    $applicationProcess.Refresh()
+    if ($applicationProcess.HasExited) {
+        throw "Instrumented app exited immediately after launch: exit_code=$($applicationProcess.ExitCode)"
+    }
+    $observedExecutablePath = [string]$applicationProcess.Path
+    $observedStartTimeUtcTicks = $applicationProcess.StartTime.ToUniversalTime().Ticks
+    if ($observedExecutablePath -cne $exe) {
+        throw "Launched process path does not match the approved executable: $observedExecutablePath"
+    }
+    $applicationIdentity = [pscustomobject]@{
+        ProcessId = [uint32]$applicationProcess.Id
+        ExecutablePath = $observedExecutablePath
+        CreationDate = ""
+        StartTimeUtcTicks = [long]$observedStartTimeUtcTicks
+    }
+    $identityDeadline = (Get-Date).AddSeconds(5)
+    do {
+        $applicationIdentityRows = @(
+            Get-ExactProcessIdentity `
+                -TargetProcessId $applicationIdentity.ProcessId `
+                -ExpectedPath $applicationIdentity.ExecutablePath `
+                -ExpectedStartTimeUtcTicks $applicationIdentity.StartTimeUtcTicks
+        )
+        if ($applicationIdentityRows.Count -eq 1) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $identityDeadline)
+    if ($applicationIdentityRows.Count -ne 1) {
+        throw "The launched application process identity could not be fixed exactly."
+    }
+    $applicationIdentity.CreationDate = [string]$applicationIdentityRows[0].CreationDate
 }
 finally {
     foreach ($name in $environmentNames) {
@@ -243,22 +797,79 @@ if (-not $procDumpCompleted) {
     throw "ProcDump did not exit within $procDumpWaitSeconds seconds; Evidence was not fixed."
 }
 $procDumpProcess.Refresh()
+$procDumpExitCode = [int]$procDumpProcess.ExitCode
+
+$postRunBuildIdentity = Get-ApprovedBuildIdentity `
+    -ExecutablePath $exe `
+    -AsarPath $asarPath `
+    -BackendPath $backendExecutablePath `
+    -BuildProvenancePath $buildProvenancePath `
+    -ExpectedExecutableHash $ExpectedExecutableSHA256 `
+    -ExpectedAsarHash $ExpectedAsarSHA256 `
+    -ExpectedBackendHash $ExpectedBackendSHA256 `
+    -ExpectedCommit $ExpectedBuildCommit
 
 $dumpFiles = @(Get-ChildItem -LiteralPath $dumpDirectory -Filter "*.dmp" -File)
 $traceFiles = @(Get-ChildItem -LiteralPath $traceDirectory -Filter "*.jsonl" -File)
+$electronExitCode = if ($applicationProcess.HasExited) {
+    [int]$applicationProcess.ExitCode
+}
+else {
+    $null
+}
+$outcome = Get-ReproductionOutcome `
+    -Hung $hung `
+    -ElectronExitCode $electronExitCode `
+    -DumpCount $dumpFiles.Count `
+    -ProcDumpExitCode $procDumpExitCode
+$traceValidation = $null
+if (-not $hung -and $outcome.Passed) {
+    $traceValidation = Read-ValidatedShutdownTrace `
+        -TraceFiles $traceFiles `
+        -ExpectedProcessId ([uint32]$applicationProcess.Id)
+}
+$traceValidationSummary = if ($null -ne $traceValidation) {
+    [ordered]@{
+        status = "validated"
+        row_count = $traceValidation.RowCount
+        boundary_count = $traceValidation.BoundaryCount
+        session_id = $traceValidation.SessionId
+        final_sequence = $traceValidation.FinalSequence
+        closed = $traceValidation.Closed
+    }
+}
+else {
+    [ordered]@{
+        status = if ($hung) { "not_validated_hung" } else { "not_validated_invalid_outcome" }
+        closed = $false
+    }
+}
 $summary = [ordered]@{
     schema_version = "sfl-local-closeout-hang-reproduction-v1"
     captured_at = (Get-Date).ToUniversalTime().ToString("o")
     computer_name = $env:COMPUTERNAME
     launch_mode = $LaunchMode
     executable_path = $exe
-    executable_sha256 = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+    executable_sha256 = $postRunBuildIdentity.ExecutableSHA256
+    app_asar_path = $asarPath
+    app_asar_sha256 = $postRunBuildIdentity.AsarSHA256
+    backend_executable_path = $backendExecutablePath
+    backend_executable_sha256 = $postRunBuildIdentity.BackendSHA256
+    build_git_commit = $postRunBuildIdentity.BuildCommit
+    build_identity_checks = @(
+        [ordered]@{ phase = "preflight"; commit = $preflightBuildIdentity.BuildCommit },
+        [ordered]@{ phase = "immediately_before_launch"; commit = $launchBuildIdentity.BuildCommit },
+        [ordered]@{ phase = "before_summary_fixation"; commit = $postRunBuildIdentity.BuildCommit }
+    )
     procdump_path = $procDump
     procdump_sha256 = (Get-FileHash -LiteralPath $procDump -Algorithm SHA256).Hash
     main_process_id = $applicationProcess.Id
     native_close_posted = $closePosted
     exited_within_observation = -not $hung
-    exit_code = if ($applicationProcess.HasExited) { $applicationProcess.ExitCode } else { $null }
+    exit_code = $electronExitCode
+    procdump_exit_code = $procDumpExitCode
+    outcome_checks = $outcome.Checks
+    outcome_failed_checks = $outcome.FailedChecks
     dump_files = @(
         foreach ($file in $dumpFiles) {
             [ordered]@{
@@ -277,6 +888,7 @@ $summary = [ordered]@{
             }
         }
     )
+    trace_validation = $traceValidationSummary
     procdump_process_id = $procDumpProcess.Id
     loopback_only_runtime = $true
 }
@@ -295,8 +907,11 @@ $summaryHash = (Get-FileHash -LiteralPath $summaryPath -Algorithm SHA256).Hash
     NativeClosePosted = $closePosted
     Exited = -not $hung
     ExitCode = if ($applicationProcess.HasExited) { $applicationProcess.ExitCode } else { $null }
+    ProcDumpExitCode = $procDumpExitCode
     DumpCount = $dumpFiles.Count
     TraceCount = $traceFiles.Count
+    OutcomePassed = $outcome.Passed
+    OutcomeFailedChecks = $outcome.FailedChecks -join ","
     Summary = $summaryPath
     SummarySHA256 = $summaryHash
 } | Format-List
@@ -311,19 +926,23 @@ if ($hung) {
     Write-Host "[HOLD] The local instrumented process is still hung. Do not start another run."
     exit 2
 }
-
-Write-Host "[PASS] The local instrumented process exited after native WM_CLOSE."
+if (-not $outcome.Passed) {
+    throw "Reproduction outcome failed: $($outcome.FailedChecks -join ', ')"
+}
 }
 finally {
     if (-not $preserveHungApplication) {
+        $cleanupFailures = New-Object System.Collections.Generic.List[string]
         try {
             if ($null -ne $procDumpProcess -and -not $procDumpProcess.HasExited) {
                 $procDumpProcess.Kill()
-                [void]$procDumpProcess.WaitForExit(5000)
+                if (-not $procDumpProcess.WaitForExit(5000)) {
+                    throw "ProcDump cleanup did not complete within five seconds."
+                }
             }
         }
         catch {
-            # Preserve the original failure; cleanup is best-effort only.
+            $cleanupFailures.Add($_.Exception.Message)
         }
         try {
             if ($null -ne $applicationProcess) {
@@ -334,25 +953,56 @@ finally {
                         Where-Object {
                             [uint32]$_.ParentProcessId -eq $applicationProcessId -and
                             [string]$_.ExecutablePath -ceq $backendExecutablePath
+                        } |
+                        ForEach-Object {
+                            [pscustomobject]@{
+                                ProcessId = [uint32]$_.ProcessId
+                                ParentProcessId = [uint32]$_.ParentProcessId
+                                ExecutablePath = [string]$_.ExecutablePath
+                                CreationDate = [string]$_.CreationDate
+                            }
                         }
                 )
                 if (-not $applicationProcess.HasExited) {
-                    & $taskkill /PID ([string]$applicationProcessId) /T /F 2>$null |
-                        Out-Null
-                    [void]$applicationProcess.WaitForExit(5000)
+                    if ($null -eq $applicationIdentity) {
+                        $cleanupFailures.Add(
+                            "Electron cleanup identity was not fixed; refusing an unbound process termination."
+                        )
+                    }
+                    else {
+                        Stop-ExactProcessTree `
+                            -TaskkillPath $taskkill `
+                            -TargetProcessId $applicationProcessId `
+                            -ExpectedPath $applicationIdentity.ExecutablePath `
+                            -ExpectedCreationDate $applicationIdentity.CreationDate `
+                            -ExpectedStartTimeUtcTicks $applicationIdentity.StartTimeUtcTicks `
+                            -Description "instrumented Electron application"
+                        if (-not $applicationProcess.WaitForExit(5000)) {
+                            throw "Electron process object did not observe cleanup completion."
+                        }
+                    }
                 }
                 foreach ($backendChild in $backendChildren) {
-                    & $taskkill /PID ([string]$backendChild.ProcessId) /T /F 2>$null |
-                        Out-Null
+                    Stop-ExactProcessTree `
+                        -TaskkillPath $taskkill `
+                        -TargetProcessId $backendChild.ProcessId `
+                        -ExpectedPath $backendChild.ExecutablePath `
+                        -ExpectedParentProcessId $backendChild.ParentProcessId `
+                        -ExpectedCreationDate $backendChild.CreationDate `
+                        -Description "instrumented backend child"
                 }
             }
         }
         catch {
-            # Targets are restricted to the exact app tree and backend children
-            # matching both the captured parent PID and unpacked executable path.
+            $cleanupFailures.Add($_.Exception.Message)
+        }
+        if ($cleanupFailures.Count -gt 0) {
+            throw "Diagnostic cleanup failed: $($cleanupFailures -join ' | ')"
         }
     }
     if ($null -ne $shell) {
         [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
     }
 }
+
+Write-Host "[PASS] The local instrumented process exited after native WM_CLOSE and exact cleanup completed."

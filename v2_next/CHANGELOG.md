@@ -29,6 +29,13 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Drained the optional worker-backed shutdown trace before the final app quit,
   and made the local hang reproducer wait for ProcDump completion before fixing
   dump hashes and summary Evidence.
+- Made opt-in diagnostic shutdown fail closed when its trace cannot be drained,
+  and require a single schema-valid, continuous, terminally closed JSONL trace
+  before the local reproducer can report success.
+- Bound local reproduction launches to the approved executable, ASAR, backend,
+  and build commit before and after execution, made exact-identity cleanup
+  failures return nonzero, and reject nonzero Electron/ProcDump exits or
+  unexpected hang dumps from a successful reproduction result.
 - Prevented later diagnostic success, JSONL rotation, or process restart from
   erasing the timeout phase, exception class, UTC duration, and correlation IDs
   needed to attribute the post-canary API stalls observed in v1.0.19.

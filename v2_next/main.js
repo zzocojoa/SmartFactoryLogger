@@ -905,7 +905,12 @@ const applicationShutdownController = createApplicationShutdownController({
     }
     markShutdownDiagnostic('application.shutdown-complete');
     markShutdownDiagnostic('application.quit-call-before');
-    await shutdownDiagnosticTrace.close(2_000);
+    const traceClosed = await shutdownDiagnosticTrace.close(2_000);
+    if (shutdownDiagnosticTrace.required && !traceClosed) {
+      const traceError = shutdownDiagnosticTrace.getLastError();
+      const detail = traceError instanceof Error ? `: ${traceError.message}` : '';
+      throw new Error(`Shutdown diagnostic trace did not close cleanly${detail}`);
+    }
   },
   quitApplication: () => app.quit(),
   onFailure: (error) => {

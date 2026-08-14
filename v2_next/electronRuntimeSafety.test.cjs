@@ -368,7 +368,26 @@ test('closeout reproduction runner quotes paths and waits for ProcDump before ha
   assert.ok(dumpInventoryIndex > procDumpWaitIndex);
   assert.match(runner, /finally\s*\{/);
   assert.match(runner, /taskkill\.exe/);
-  assert.match(runner, /\/PID \(\[string\]\$applicationProcessId\) \/T \/F/);
+  assert.match(runner, /& \$TaskkillPath \/PID \(\[string\]\$TargetProcessId\) \/T \/F/);
   assert.match(runner, /\[uint32\]\$_\.ParentProcessId -eq \$applicationProcessId/);
   assert.match(runner, /\[string\]\$_\.ExecutablePath -ceq \$backendExecutablePath/);
+  assert.match(runner, /ExpectedExecutableSHA256/);
+  assert.match(runner, /ExpectedAsarSHA256/);
+  assert.match(runner, /ExpectedBackendSHA256/);
+  assert.match(runner, /ExpectedBuildCommit/);
+  assert.match(runner, /Read-ValidatedShutdownTrace/);
+  assert.match(runner, /Exactly one shutdown trace is required/);
+  assert.match(runner, /application\.quit-call-before must be the final shutdown boundary/);
+  assert.match(runner, /ExitCode = \$LASTEXITCODE/);
+  assert.match(runner, /Diagnostic cleanup failed/);
+  assert.doesNotMatch(runner, /cleanup is best-effort only/);
+  assert.match(runner, /Invoke-ReproductionSelfTest/);
+  assert.match(runner, /immediately_before_launch/);
+  assert.match(runner, /before_summary_fixation/);
+
+  const identityCaptureIndex = runner.indexOf('$applicationIdentity = [pscustomobject]@{');
+  const windowWaitIndex = runner.indexOf('$windowDeadline = ');
+  assert.notEqual(identityCaptureIndex, -1);
+  assert.notEqual(windowWaitIndex, -1);
+  assert.ok(identityCaptureIndex < windowWaitIndex);
 });

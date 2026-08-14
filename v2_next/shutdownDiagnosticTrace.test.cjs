@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { EventEmitter } = require('node:events');
 
 const {
   createShutdownDiagnosticTrace,
@@ -22,7 +23,28 @@ test('shutdown diagnostic directory prefers an explicit launch argument', () => 
 test('shutdown diagnostic trace is disabled unless explicitly configured', () => {
   const trace = createShutdownDiagnosticTrace({ directoryPath: null });
   assert.equal(trace.enabled, false);
+  assert.equal(trace.required, false);
   assert.equal(trace.mark('ignored'), null);
+});
+
+test('shutdown diagnostic trace preserves an explicit request when worker setup fails', async () => {
+  class FailingWorker {
+    constructor() {
+      throw new Error('worker unavailable');
+    }
+  }
+
+  const trace = createShutdownDiagnosticTrace({
+    directoryPath: os.tmpdir(),
+    sessionId: 'worker-failure',
+    processId: 4321,
+    WorkerImpl: FailingWorker,
+  });
+
+  assert.equal(trace.enabled, false);
+  assert.equal(trace.required, true);
+  assert.equal(await trace.close(), false);
+  assert.match(trace.getLastError().message, /worker unavailable/);
 });
 
 test('shutdown diagnostic worker persists ordered boundary records', async () => {
@@ -57,14 +79,40 @@ test('shutdown diagnostic worker persists ordered boundary records', async () =>
   }
 });
 
+test('shutdown diagnostic close timeout can observe a later completed drain', async () => {
+  let worker;
+  class NonResponsiveWorker extends EventEmitter {
+    constructor() {
+      super();
+      worker = this;
+    }
+    unref() {}
+    postMessage() {}
+  }
+
+  const trace = createShutdownDiagnosticTrace({
+    directoryPath: os.tmpdir(),
+    sessionId: 'timeout-test',
+    processId: 4321,
+    WorkerImpl: NonResponsiveWorker,
+  });
+
+  assert.equal(await trace.close(5), false);
+  assert.equal(trace.getLastError(), null);
+  worker.emit('message', { type: 'closed' });
+  assert.equal(await trace.close(5), true);
+});
+
 test('Electron main drains the optional diagnostic trace before app quit', () => {
   const mainSource = fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8');
   const noProcessIndex = mainSource.indexOf("markShutdownDiagnostic('application.shutdown-no-process')");
-  const closeIndex = mainSource.indexOf('await shutdownDiagnosticTrace.close(2_000)');
+  const closeIndex = mainSource.indexOf('const traceClosed = await shutdownDiagnosticTrace.close(2_000)');
   const quitIndex = mainSource.indexOf('app.quit()', closeIndex);
 
   assert.notEqual(noProcessIndex, -1);
   assert.notEqual(closeIndex, -1);
   assert.doesNotMatch(mainSource.slice(noProcessIndex, closeIndex), /\breturn\s*;/);
+  assert.match(mainSource, /shutdownDiagnosticTrace\.required && !traceClosed/);
+  assert.match(mainSource, /Shutdown diagnostic trace did not close cleanly/);
   assert.ok(quitIndex > closeIndex);
 });

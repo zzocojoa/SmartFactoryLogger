@@ -35,9 +35,10 @@ function sanitizeDetails(details) {
   return sanitized;
 }
 
-function createDisabledTrace(error = null) {
+function createDisabledTrace(error = null, required = false) {
   return {
     enabled: false,
+    required,
     outputPath: null,
     mark: () => null,
     waitFor: () => Promise.resolve(false),
@@ -69,7 +70,7 @@ function createShutdownDiagnosticTrace(options = {}) {
   try {
     worker = new WorkerImpl(workerPath, { workerData: { outputPath } });
   } catch (error) {
-    return createDisabledTrace(error);
+    return createDisabledTrace(error, true);
   }
 
   worker.unref?.();
@@ -106,16 +107,16 @@ function createShutdownDiagnosticTrace(options = {}) {
   });
 
   const waitFor = (key, timeoutMs = 2_000) => new Promise((resolve) => {
-    if (lastError) {
-      resolve(false);
-      return;
-    }
     if (key !== 'close' && Number.isInteger(key) && key <= lastAcknowledgedSequence) {
       resolve(true);
       return;
     }
     if (key === 'close' && closed) {
       resolve(true);
+      return;
+    }
+    if (lastError) {
+      resolve(false);
       return;
     }
     const timer = setTimeout(() => {
@@ -155,6 +156,9 @@ function createShutdownDiagnosticTrace(options = {}) {
     if (closed) {
       return true;
     }
+    if (lastError) {
+      return false;
+    }
     const completion = waitFor('close', timeoutMs);
     try {
       worker.postMessage({ type: 'close' });
@@ -167,6 +171,7 @@ function createShutdownDiagnosticTrace(options = {}) {
 
   return {
     enabled: true,
+    required: true,
     outputPath,
     mark,
     waitFor,

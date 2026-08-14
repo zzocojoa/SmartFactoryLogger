@@ -250,6 +250,9 @@ Assert-DoesNotMatch -Text $prWorkflow -Pattern "(?m)^  (push|workflow_dispatch):
 Assert-DoesNotMatch -Text $prWorkflow -Pattern "production-signing|\$\{\{\s*secrets\." `
     -Message "PR artifact workflow must not access production signing material"
 Assert-Matches -Text $prWorkflow `
+    -Pattern 'run_closeout_hang_reproduction\.ps1"?\s+-SelfTest' `
+    -Message "PR workflow must execute closeout reproduction helper self-tests"
+Assert-Matches -Text $prWorkflow `
     -Pattern 'verify_windows_release_signature\.ps1"?\s+-SelfTest' `
     -Message "PR workflow must execute signature verifier self-tests"
 Assert-Matches -Text $prWorkflow `
