@@ -23,6 +23,8 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 ### Fixed
 
+- Gated Windows PR artifacts on exact `app.asar` inclusion of the tested
+  Electron shutdown runtime and diagnostic worker sources.
 - Prevented packaged Electron shutdown from blocking on synchronous Windows
   stdout or stderr pipe writes while preserving bounded rotating file logs and
   development-run console echo.

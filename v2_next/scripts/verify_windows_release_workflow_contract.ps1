@@ -232,8 +232,13 @@ foreach ($path in @(
     'v2_next/backendControlClient.js',
     'v2_next/backendProcessLifecycle.js',
     'v2_next/electronRuntimeSafety.js',
+    'v2_next/electronRuntimeSafetyBackpressure.fixture.cjs',
+    'v2_next/electronRuntimeSafetyBackpressure.test.cjs',
     'v2_next/shutdownDiagnosticTrace.js',
-    'v2_next/scripts/run_closeout_hang_reproduction.ps1'
+    'v2_next/shutdownDiagnosticTrace.test.cjs',
+    'v2_next/shutdownDiagnosticTraceWorker.js',
+    'v2_next/scripts/run_closeout_hang_reproduction.ps1',
+    'v2_next/scripts/verify_packaged_electron_sources.cjs'
 )) {
     Assert-Matches `
         -Text $prWorkflow `
@@ -258,6 +263,9 @@ Assert-Matches -Text $prWorkflow `
 Assert-Matches -Text $prWorkflow `
     -Pattern 'verify_windows_release_workflow_contract\.ps1"?\s+-SelfTest' `
     -Message "PR workflow must execute its release-workflow contract test"
+Assert-Matches -Text $prWorkflow `
+    -Pattern 'verify_packaged_electron_sources\.cjs[\s\S]*--asar\s+dist/win-unpacked/resources/app\.asar' `
+    -Message "PR workflow must verify packaged Electron source identity"
 Assert-Matches -Text $prWorkflow -Pattern "smartfactorylogger-windows-pr-unsigned-" `
     -Message "PR artifacts must be explicitly named unsigned"
 Assert-PinnedOfficialActionTextIsPresent -Workflow $prWorkflow
