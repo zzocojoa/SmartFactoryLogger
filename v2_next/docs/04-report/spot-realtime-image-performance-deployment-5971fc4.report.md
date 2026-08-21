@@ -96,6 +96,21 @@ Runtime hard failures require rollback. Incomplete packet coverage is an evidenc
 `PASS_WITH_SWITCH_LIMITATION` only when all app, packet, source-port, and operator gates
 pass. No result from this unsigned canary automatically permits production promotion.
 
+The commit-bound field kit was built and independently re-verified from a clean tooling
+commit.
+
+| Kit item | Identity |
+|---|---|
+| Tooling source commit | `92395058f00e63d421a21870714e9756c50141f2` |
+| Diagnostic core source commit | `077b6b1c45b7bf6023d89ba13ecaa54d22acbe70` |
+| Package files | `12` |
+| ZIP | `SmartFactoryLogger_SPOT_Realtime_Image_v1021_Canary_92395058_20260821_110150Z.zip` |
+| ZIP length | `73,895` bytes |
+| ZIP SHA-256 | `EF8A30946C89F857C1FBF9C58C47796FFC88D0C4E5E0F2B3D4C4CCF55E680C49` |
+| Extracted verifier | `PASS` |
+| Analyzer / monitor / collectors / controller self-tests | `PASS` |
+| Trigger integration | `PASS`, detection latency `7 ms` in the local fixture |
+
 ## 6. Current status
 
 | Gate | Status |
@@ -103,6 +118,7 @@ pass. No result from this unsigned canary automatically permits production promo
 | Target preinstall | `PASS` |
 | v1.0.21 installation identity | `PASS` |
 | Actual SPOT 15-minute smoke | `PASS` |
+| Commit-bound 120-minute kit | `BUILD_AND_VERIFY_PASS` |
 | Actual SPOT 120-minute canary | `PENDING` |
 | Request-rate comparison | `15M_PASS`, `120M_PENDING` |
 | old-ACK/RST risk proxy comparison | `PENDING` |
