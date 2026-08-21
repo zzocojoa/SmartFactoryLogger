@@ -1,10 +1,10 @@
 # SPOT realtime image v1.0.21 deployment gate report
 
-> Generated: 2026-08-21
+> Updated: 2026-08-21
 > Candidate version: `1.0.21`
 > Build commit: `5971fc4fbdeec07ef65681a945319f0ae12d55cb`
 > Classification: `PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY`
-> Verdict: `BLOCKED_BEFORE_INSTALL`
+> Verdict: `15M_GATE_PASS_120M_PENDING`
 
 ## 1. Candidate identity
 
@@ -12,83 +12,102 @@
 |---|---|
 | Installer | `smart-factory-logger-v2 Setup 1.0.21.exe` |
 | Installer SHA-256 | `01CF544C999FB21FADB7F36965DC35FB9E8AEE36D1EEBD3319A1EB7296AD191A` |
-| Installer length | `149170277` bytes |
 | Authenticode | `NotSigned` |
 | Backend bundle SHA-256 | `B818383DF7B035DC73C86E57F0080489B287C958086C8E2C426639C0622CB094` |
 | Backend files verified | `1385 / 1385` |
 | Extracted `app.asar` SHA-256 | `50734BC222DF943A2DC6605E35EDEA0AD600C909A0A32E4ADEFF2A2A0952C048` |
-| Bundle manifest SHA-256 | `C15C8A4133BA80D7A5D8ADA4990CFFC8B75D042F4DA8C97DEE936FD510546F9A` |
-| Build provenance SHA-256 | `20932B2B361F3CDDF03701B9F8B501F1336BDA4C4CEC92A359E560767210A610` |
-| Extraction helper SHA-256 | `223B873C50380FE9A39F1A22B6ABF8D46DB506E1C08D08312902F6F3CD1F7AC3` |
+| Config SHA-256 | `6841C848A443DF91966C991707C2B21CA57C575993DCA36FACFF2592D070147E` |
 
-The installer, extracted backend manifest, extracted build provenance, and
-packaged Electron sources all resolve to the exact build commit above. The
-artifact kit is stored locally under
-`artifacts/spot-realtime-image-performance-v1.0.21-5971fc4/`; it is not a
-signed production release and must not be promoted or distributed externally.
+The candidate remains unsigned and is restricted to the owner-controlled internal
+canary. Production promotion and external distribution are not allowed.
 
-## 2. Completed gates
+## 2. Target install gates
 
-- Clean detached-worktree build from the exact commit: `PASS`.
-- Frontend production build: `PASS`, 4,532 modules transformed.
-- PyInstaller provenance check before and after packaging: `PASS`.
-- Backend bundle integrity: `PASS`, 1,385 files and aggregate hash matched.
-- NSIS extraction into an isolated temporary directory: `PASS`.
-- Extracted Electron runtime-source identity: `PASS`.
-- Root health suite: Electron `94`, frontend `265`, backend `711`, Ruff, mypy,
-  and Windows helper self-tests passed. The first helper invocation failed only
-  because the Codex runtime shadowed the Windows PowerShell module path; the
-  same helper suite passed after explicitly restoring the system module path.
+| Gate | Result |
+|---|---|
+| Preinstall kit identity | `PASS` |
+| Existing target baseline | `PASS`, v1.0.20, one backend, port 8000 owner matched |
+| Rollback installer | `PASS`, v1.0.16 SHA-256 matched |
+| Installed app version/commit | `PASS`, v1.0.21 / `5971fc4...` |
+| Installed `app.asar` | `PASS` |
+| Installed backend bundle | `PASS`, 1,385 files |
+| Config unchanged | `PASS` |
+| Operator-live route | `PASS`, HTTP 200 / `image/jpeg` / `operator_live` |
 
-## 3. Target baseline
+Rollback is fixed to
+`C:\Users\user\Desktop\SmartFactory\rollback\smart-factory-logger-v2.Setup.1.0.16.exe`
+with SHA-256
+`42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615`.
 
-The expected server service was reachable through its existing LAN HTTP
-endpoint on 2026-08-21.
+## 3. Physical SPOT 15-minute gate
 
-- `/health`: HTTP `200`, installed `app_version=1.0.20`.
-- `/stats`: HTTP `200`.
-- Existing `/api/spot/image.jpg`: HTTP `200`, `image/jpeg`, 9,692 bytes,
-  `X-Spot-Image-Source=cache`. This confirms only the old snapshot path and does
-  not substitute for a v1.0.21 physical-device smoke.
-- `/api/spot/live_image.jpg`: HTTP `404`, confirming that the v1.0.21
-  candidate has not been installed.
-- The development PC could not directly reach the SPOT device at port 80.
+The complete 2026-08-21 19:13-19:28 KST interval passed.
 
-No target configuration, process, error queue, or SPOT device state was
-modified during this baseline check.
+| Check | Result |
+|---|---|
+| Completion-driven image requests | `2928 / 2928`, failures `0` |
+| Average / maximum response | `34.5 ms / 1323 ms` |
+| Total SPOT transport | `4908 / 4908`, failures `0` |
+| Average total SPOT rate | `5.4533/s`, limit `6/s` |
+| Average image upstream rate | `2.6578/s` |
+| Pool wait / exhaustion / reuse violation | `0 / 0 / 0` |
+| Minimum source-port reuse interval | `75.0 s` |
+| Image refresh failure / cache anomaly | `0 / 0` |
+| Backend restart | none, PID unchanged |
+| Config drift | none |
+| Operator visual confirmation | continuous refresh for the full interval; no screen error |
 
-## 4. Install blockers
+The QA artifact contained 100 `recent_image_errors`, but every listed line was dated
+2026-06-29. The script selected recently modified log files and then read the first 100
+matching lines from the whole files; it did not filter each line to the observation
+window. This is a false positive for the 2026-08-21 canary interval. The artifact's
+`blockers` list was empty, current image/transport failure counters were zero, all 2,928
+active probes succeeded, and the operator confirmed the complete interval. The first-100
+cap remains a log-review coverage limitation and must not be reused as proof for the
+120-minute interval.
 
-Installation was not attempted because the fail-closed preinstall conditions
-were incomplete.
+## 4. 15-minute evidence identity
 
-1. The candidate is unsigned. It is eligible only for the documented
-   owner-controlled private-use exception, never customer, public, commercial,
-   or organization-managed deployment.
-2. No approved remote execution channel was available from the development PC:
-   WinRM and SSH were unavailable and administrative SMB shares were not
-   accessible.
-3. The required rollback installer was not present. The design records the
-   expected v1.0.16 SHA-256 as
-   `42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615`,
-   but no local candidate could be hashed and matched.
-4. Target-side read-only preinstall, normal UI close, installed payload
-   re-attestation, and operator visual confirmation remain pending.
+| File | SHA-256 |
+|---|---|
+| `spot-15m.json` | `464BF0A540133C5165B7E550430EDA9EDAA07FA866481B43FAD2B0392016A4F8` |
+| `spot-config-image-before-15m.json` | `7E7486908045EF4898F44CA474816C647EAC1C5619EAADA6B3DA6445E5C87342` |
+| `spot-config-image-after-15m.json` | `1859E0E79C7D24348132B93B8D2EBFA50FBD0166762F7A4F1A16B41C15A6D100` |
+| `health-before-15m.json` | `12653336422E897764C47069F7CAE5F2C876B8B27591CDF7D52AB6ED6F982021` |
+| `health-after-15m.json` | `9CD044E41D5A42AA72F94275B18AC1CBDB786AA44C5BCD0E836CF6772B883322` |
+| `backend-integrity-after-install.json` | `6D077E7944C5670A6990862209C6D7A10935E13B01D920AF3D270538A5147058` |
+| `postinstall-bundle-gate.json` | `E42CF3126CD5CC42F38918D0E64CF9C302A860FB00DD8B8030B676EF20147994` |
+| `preinstall-summary.json` | `06F076A09D7D659B88A92959769CD1528802EC08E3C0A13F35A6A8329FF32138` |
 
-## 5. Canary status
+The operator confirmation is human attestation, not machine-generated evidence. The
+120-minute kit binds it separately from the hashed server artifacts.
+
+## 5. 120-minute canary contract
+
+The 120-minute canary uses the passive diagnostic core from
+`077b6b1c45b7bf6023d89ba13ecaa54d22acbe70`, bound to the v1.0.21 product and the
+15-minute evidence above. It stops on a new `spot_image ConnectTimeout`, keeps a 75-second
+post-trigger packet tail, and adds a 30-second console progress display based only on the
+local clock and Windows process state. The progress display adds no SPOT or backend HTTP
+requests.
+
+Runtime hard failures require rollback. Incomplete packet coverage is an evidence
+`HOLD`, not an automatic runtime failure. Missing managed-switch evidence yields
+`PASS_WITH_SWITCH_LIMITATION` only when all app, packet, source-port, and operator gates
+pass. No result from this unsigned canary automatically permits production promotion.
+
+## 6. Current status
 
 | Gate | Status |
 |---|---|
-| Target preinstall | `PENDING` |
-| v1.0.21 installation | `NOT_RUN` |
-| Actual SPOT 15-minute smoke | `NOT_RUN` |
-| Actual SPOT 120-minute canary | `NOT_RUN` |
-| Request-rate comparison | `NOT_MEASURED` |
-| old-ACK/RST comparison | `NOT_MEASURED` |
-| source-port pool comparison | `NOT_MEASURED` |
+| Target preinstall | `PASS` |
+| v1.0.21 installation identity | `PASS` |
+| Actual SPOT 15-minute smoke | `PASS` |
+| Actual SPOT 120-minute canary | `PENDING` |
+| Request-rate comparison | `15M_PASS`, `120M_PENDING` |
+| old-ACK/RST risk proxy comparison | `PENDING` |
+| source-port pool comparison | `15M_PASS`, `120M_PENDING` |
+| Production promotion | `NOT_ALLOWED` |
 
-No release, production, or field-resolution claim is permitted from the local
-build result. Resume only on the owner-controlled server after the rollback
-installer hash and target-side execution channel are available. The 120-minute
-canary may start only after the same binary and configuration pass the complete
-15-minute hard gate.
+The next action is to verify and run the exact commit-bound 120-minute canary kit on the
+same installed binary and unchanged configuration.
