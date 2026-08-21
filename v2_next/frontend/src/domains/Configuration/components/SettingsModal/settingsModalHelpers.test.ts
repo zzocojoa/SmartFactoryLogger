@@ -6,6 +6,7 @@ import {
   buildObservabilitySummary,
   formatSpotImageCaptureSummary,
   getSpotImageCaptureModeLabel,
+  resolveSpotImagePollingStats,
 } from './settingsModalHelpers';
 
 const emptyMemoryDetails = (): MemoryDetailsResponse => ({
@@ -40,6 +41,38 @@ describe('spot image capture helpers', () => {
   it('formats disabled capture as off regardless of the retained mode value', () => {
     expect(formatSpotImageCaptureSummary(false, 'all', '7')).toBe('Off');
     expect(formatSpotImageCaptureSummary(true, 'event', '7')).toBe('Event only / 7d retention');
+  });
+});
+
+describe('spot image polling stats', () => {
+  const snapshotStats = {
+    count: 2,
+    requests_per_sec: 0.333,
+    unique_clients: 1,
+    top_clients: [],
+  };
+  const liveStats = {
+    count: 20,
+    requests_per_sec: 3.6,
+    unique_clients: 1,
+    top_clients: [],
+  };
+
+  it('prefers the operator-live route when both route summaries exist', () => {
+    expect(resolveSpotImagePollingStats({
+      window_sec: 60,
+      paths: {
+        '/api/spot/image.jpg': snapshotStats,
+        '/api/spot/live_image.jpg': liveStats,
+      },
+    })).toBe(liveStats);
+  });
+
+  it('falls back to snapshot statistics for an older backend', () => {
+    expect(resolveSpotImagePollingStats({
+      window_sec: 60,
+      paths: { '/api/spot/image.jpg': snapshotStats },
+    })).toBe(snapshotStats);
   });
 });
 

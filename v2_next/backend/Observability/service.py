@@ -14,8 +14,11 @@ PollingClientCounts = Dict[str, int]
 PollingPathSummary = Dict[str, Any]
 PollingBucket = Tuple[float, Dict[str, PollingPathSummary]]
 _SPOT_IMAGE_PATH = "/api/spot/image.jpg"
+_SPOT_LIVE_IMAGE_PATH = "/api/spot/live_image.jpg"
+_SPOT_IMAGE_PATHS = {_SPOT_IMAGE_PATH, _SPOT_LIVE_IMAGE_PATH}
 _POLLING_PATHS = {
     _SPOT_IMAGE_PATH,
+    _SPOT_LIVE_IMAGE_PATH,
     "/api/data",
     "/health",
     "/stats",
@@ -186,12 +189,19 @@ class ObservabilityService:
         bucket[path] = next_entry
         return next_entry
 
-    def record_spot_image_result(self, status_code: int) -> None:
+    def record_spot_image_result(
+        self,
+        status_code: int,
+        *,
+        path: str = _SPOT_IMAGE_PATH,
+    ) -> None:
+        if path not in _SPOT_IMAGE_PATHS:
+            raise ValueError(f"unsupported SPOT image path: {path}")
         now = time.time()
         with self._lock:
             self._trim_polling_buckets(now)
             bucket = self._get_or_create_polling_bucket(now)
-            entry = self._get_or_create_polling_entry(bucket, _SPOT_IMAGE_PATH)
+            entry = self._get_or_create_polling_entry(bucket, path)
             if status_code >= 400:
                 return
             entry["success_count"] += 1
@@ -226,7 +236,7 @@ class ObservabilityService:
                     entry["http_5xx_count"] += 1
                 clients: PollingClientCounts = entry["clients"]
                 clients[client_host] = clients.get(client_host, 0) + 1
-                if path == _SPOT_IMAGE_PATH and status_code >= 400:
+                if path in _SPOT_IMAGE_PATHS and status_code >= 400:
                     entry["failure_count"] += 1
             else:
                 self._requests.append(sample)
@@ -505,7 +515,7 @@ class ObservabilityService:
                     for client_host, client_count in top_clients
                 ],
             }
-            if path == _SPOT_IMAGE_PATH:
+            if path in _SPOT_IMAGE_PATHS:
                 path_payload["success_count"] = int(entry["success_count"])
                 path_payload["failure_count"] = int(entry["failure_count"])
             payload[path] = path_payload

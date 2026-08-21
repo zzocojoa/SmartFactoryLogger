@@ -1,5 +1,11 @@
 # spot-camera-rest-api-conformance - Design Document
 
+> **SUPERSEDED IN PART (2026-08-21):** The device boundary in this document remains
+> authoritative (`GET /image.jpg` only). The newer
+> `spot-realtime-image-performance.design.md` supersedes the application-route and
+> cadence policy by adding `/api/spot/live_image.jpg`, which still uses the same shared
+> `/image.jpg` upstream.
+>
 > Version: 1.0.0 | Date: 2026-07-11 | Status: Approved
 > Level: Dynamic | Plan: docs/01-plan/features/spot-camera-rest-api-conformance.plan.md
 

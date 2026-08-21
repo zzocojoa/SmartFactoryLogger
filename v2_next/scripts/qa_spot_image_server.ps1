@@ -5,6 +5,7 @@ param(
     [string]$InstallerPath = "",
     [string]$OutputPath = "",
     [int]$ObservationSeconds = 30,
+    [int]$ObservationDelayMilliseconds = 250,
     [int]$LogLookbackMinutes = 30
 )
 
@@ -82,6 +83,7 @@ function Invoke-HttpProbe {
             content_type = Get-HeaderValue -Response $response -Name "Content-Type"
             cache_control = Get-HeaderValue -Response $response -Name "Cache-Control"
             image_source = Get-HeaderValue -Response $response -Name "X-Spot-Image-Source"
+            image_profile = Get-HeaderValue -Response $response -Name "X-Spot-Image-Profile"
             body_bytes = $bytes.Length
             body_text = if ($IncludeBodyText) { [Text.Encoding]::UTF8.GetString($bytes) } else { $null }
             error = $null
@@ -96,6 +98,7 @@ function Invoke-HttpProbe {
             content_type = $null
             cache_control = $null
             image_source = $null
+            image_profile = $null
             body_bytes = 0
             body_text = $null
             error = $_.Exception.Message
@@ -110,7 +113,8 @@ function Invoke-HttpProbe {
 function Invoke-CompletionDrivenObservation {
     param(
         [string]$Uri,
-        [int]$DurationSeconds
+        [int]$DurationSeconds,
+        [int]$DelayMilliseconds
     )
     $deadline = (Get-Date).AddSeconds([math]::Max(0, $DurationSeconds))
     $requests = 0
@@ -132,11 +136,15 @@ function Invoke-CompletionDrivenObservation {
                 $samples.Add($probe)
             }
         }
+        if ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds ([math]::Max(250, $DelayMilliseconds))
+        }
     }
 
     return [ordered]@{
         duration_sec = [math]::Max(0, $DurationSeconds)
         request_mode = "completion_driven"
+        request_delay_ms = [math]::Max(250, $DelayMilliseconds)
         requests = $requests
         successes = $successes
         failures = $failures
@@ -152,7 +160,7 @@ function Invoke-CompletionDrivenObservation {
 
 $backend = $BackendBaseUrl.TrimEnd("/")
 $artifact = [ordered]@{
-    schema_version = "spot-image-server-qa-v1"
+    schema_version = "spot-image-server-qa-v2"
     generated_at = (Get-Date).ToUniversalTime().ToString("o")
     config_path_exists = Test-Path -LiteralPath $ConfigPath -PathType Leaf
     spot_ip_configured = -not [string]::IsNullOrWhiteSpace($SpotIp)
@@ -167,7 +175,8 @@ $artifact = [ordered]@{
     } else { $null }
     direct_spot = $null
     app_config = Invoke-HttpProbe -Name "app-config" -Uri "$backend/api/spot/config" -IncludeBodyText
-    app_image = Invoke-HttpProbe -Name "app-image" -Uri "$backend/api/spot/image.jpg"
+    app_image = Invoke-HttpProbe -Name "app-snapshot-image" -Uri "$backend/api/spot/image.jpg"
+    app_live_image = Invoke-HttpProbe -Name "app-live-image" -Uri "$backend/api/spot/live_image.jpg"
     health = Invoke-HttpProbe -Name "health" -Uri "$backend/health" -IncludeBodyText
     stats_before = Invoke-HttpProbe -Name "stats-before" -Uri "$backend/stats" -IncludeBodyText
     observation = $null
@@ -179,7 +188,10 @@ $artifact = [ordered]@{
 if ($artifact.spot_ip_configured) {
     $artifact.direct_spot = Invoke-HttpProbe -Name "spot-image-jpg" -Uri "http://$SpotIp/image.jpg"
 }
-$artifact.observation = Invoke-CompletionDrivenObservation -Uri "$backend/api/spot/image.jpg" -DurationSeconds $ObservationSeconds
+$artifact.observation = Invoke-CompletionDrivenObservation `
+    -Uri "$backend/api/spot/live_image.jpg" `
+    -DurationSeconds $ObservationSeconds `
+    -DelayMilliseconds $ObservationDelayMilliseconds
 $artifact.stats_after = Invoke-HttpProbe -Name "stats-after" -Uri "$backend/stats" -IncludeBodyText
 
 $logRoot = Join-Path $env:APPDATA "SmartFactoryLogger\logs"
@@ -210,6 +222,18 @@ if (-not $artifact.app_image.ok -or $artifact.app_image.content_type -notmatch "
 }
 if ($artifact.app_image.cache_control -notmatch "no-store") {
     $blockers.Add("App /api/spot/image.jpg did not include Cache-Control no-store.")
+}
+if ($artifact.app_image.image_profile -ne "snapshot") {
+    $blockers.Add("App /api/spot/image.jpg did not report the snapshot profile.")
+}
+if (-not $artifact.app_live_image.ok -or $artifact.app_live_image.content_type -notmatch "^image/jpeg") {
+    $blockers.Add("App /api/spot/live_image.jpg did not return HTTP 200 image/jpeg.")
+}
+if ($artifact.app_live_image.cache_control -notmatch "no-store") {
+    $blockers.Add("App /api/spot/live_image.jpg did not include Cache-Control no-store.")
+}
+if ($artifact.app_live_image.image_profile -ne "operator_live") {
+    $blockers.Add("App /api/spot/live_image.jpg did not report the operator_live profile.")
 }
 if ($artifact.observation.failures -gt 0) {
     $blockers.Add("Completion-driven image observation contained failures.")

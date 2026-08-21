@@ -901,7 +901,9 @@ SPOT 카메라 위젯 설정을 가져옵니다.
 
 ```json
 {
-    "image_url": "/api/spot/image.jpg",
+    "image_url": "/api/spot/live_image.jpg",
+    "snapshot_image_url": "/api/spot/image.jpg",
+    "image_refresh_interval": 0.25,
     "refresh_interval": 3.0,
     "crosshair_x": 50,
     "crosshair_y": 50,
@@ -914,16 +916,18 @@ SPOT 카메라 위젯 설정을 가져옵니다.
     "focus_step": 10,
     "focus_enabled": true,
     "image": {
-        "image_request_policy_version": "spot-image-demand-shaping-v2",
+        "image_request_policy_version": "spot-realtime-image-budget-v1",
         "image_refresh_interval_sec_effective": 3.0,
+        "live_image_refresh_interval_sec_effective": 0.25,
+        "live_image_max_fps_effective": 4.0,
         "image_cache_present": true,
         "image_cache_fresh": true,
         "image_cache_age_ms": 250.5,
         "image_refresh_in_flight": false,
         "diagnostics_refresh_interval_sec_effective": 10.0,
-        "request_budget_policy_version": "spot-background-request-budget-v2",
+        "request_budget_policy_version": "spot-background-request-budget-v3",
         "request_budget_target_max_per_sec": 6.0,
-        "request_budget_total_background_max_per_sec": 3.133333,
+        "request_budget_total_background_max_per_sec": 5.466667,
         "request_budget_within_target": true,
         "source_port_policy_version": "spot-source-port-quarantine-v2",
         "source_port_enforcement_active": true,
@@ -939,7 +943,9 @@ The `image` object is a backward-compatible diagnostics extension. It reports
 cache and single-flight state, the calculated background budget for image,
 target-temperature, internal-temperature, and diagnostic requests, plus
 aggregate source-port quarantine health. It never exposes source-port values.
-`refresh_interval` and the effective refresh interval fields use seconds.
+`refresh_interval`, `image_refresh_interval`, and the effective refresh interval
+fields use seconds. `image_refresh_interval` is server-derived from the remaining
+six-request/s SPOT background budget and is not caller-controlled.
 
 `image.diagnostic_request_journal` is an additive, bounded diagnostic-request
 lifecycle view. Each request appends immutable `queued`, optional `running`, and
@@ -1019,8 +1025,16 @@ The backend bridges the official SPOT `GET /image.jpg` resource to the Electron
 `file:` UI. It uses a shared process cache and single-flight refreshes so
 concurrent dashboard consumers reuse one upstream image request. The client
 response remains `no-store`; that header does not disable the backend cache.
+This snapshot profile retains the three-second minimum freshness policy.
 
-**응답:**
+### GET `/api/spot/live_image.jpg`
+
+The operator-live bridge uses the same official SPOT `GET /image.jpg` upstream,
+cache, single-flight task, device lock, and source-port quarantine as the snapshot
+route. Its freshness interval is dynamically budgeted up to 4 FPS. It does not
+enable `image.ssi`, `/newjpeg.jpg`, or an alternate device URL.
+
+**두 경로 공통 응답:**
 
 - **Content-Type:** `image/jpeg`
 - **Cache-Control:** `no-store, no-cache, must-revalidate, max-age=0`
@@ -1028,6 +1042,7 @@ response remains `no-store`; that header does not disable the backend cache.
 - **X-Spot-Image-Source:** `upstream`, `cache`, or `coalesced`
 - **X-Spot-Image-Latency-Ms:** upstream request latency, when known
 - **X-Spot-Image-Age-Ms:** current shared-cache age, including cached responses
+- **X-Spot-Image-Profile:** `snapshot` or `operator_live`
 - **Body:** 바이너리 JPEG 데이터
 
 **에러 응답 (404):**

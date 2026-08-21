@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-08-06T04:20:00.000Z",
+  "lastUpdated": "2026-08-21T07:22:13.207Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -28,7 +28,8 @@
     "electron-startup-progress",
     "runtime-error-root-cause-validation",
     "spot-request-churn-remediation",
-    "spot-tcp-source-port-quarantine-v2"
+    "spot-tcp-source-port-quarantine-v2",
+    "spot-realtime-image-performance"
   ],
   "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
@@ -2132,7 +2133,7 @@
         "spot_http_failure_count": 0,
         "same_4tuple_reuse_under_60_seconds_count": 0,
         "packet_minimum_reuse_interval_seconds": 74.039191,
-        "internal_minimum_reuse_interval_seconds": 75.0,
+        "internal_minimum_reuse_interval_seconds": 75,
         "total_spot_opens_60s_p95_per_sec": 3.133333,
         "image_upstream_60s_p95_per_sec": 0.333333,
         "ping_success_count": 7101,
@@ -2268,6 +2269,49 @@
         "started": "2026-07-27T01:32:07.127Z",
         "lastUpdated": "2026-07-31T07:33:35.402Z"
       }
+    },
+    "spot-realtime-image-performance": {
+      "phase": "completed",
+      "matchRate": null,
+      "iterationCount": 1,
+      "documents": {},
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-08-21T06:42:41.995Z",
+          "completedAt": "2026-08-21T06:46:16.487Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-08-21T06:42:41.995Z",
+          "completedAt": "2026-08-21T06:48:05.262Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-08-21T06:42:41.995Z",
+          "completedAt": "2026-08-21T07:14:48.917Z"
+        },
+        {
+          "phase": "check",
+          "status": "completed",
+          "createdAt": "2026-08-21T06:42:41.995Z",
+          "completedAt": "2026-08-21T07:21:12.356Z"
+        },
+        {
+          "phase": "report",
+          "status": "completed",
+          "createdAt": "2026-08-21T06:42:41.995Z",
+          "completedAt": "2026-08-21T07:22:13.207Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-08-21T06:42:41.997Z",
+        "lastUpdated": "2026-08-21T07:22:13.207Z"
+      },
+      "completedAt": "2026-08-21T07:22:13.202Z"
     }
   },
   "pipeline": {
@@ -2279,7 +2323,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-07-27T02:43:00.863Z"
+    "lastActivity": "2026-08-21T07:22:13.207Z"
   },
   "history": [
     {
@@ -3854,6 +3898,71 @@
       "phase": "report",
       "nextPhase": "completed",
       "timestamp": "2026-07-27T02:43:00.860Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "from": "plan",
+      "to": "design",
+      "timestamp": "2026-08-21T06:46:16.482Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "action": "phase_complete",
+      "phase": "plan",
+      "nextPhase": "design",
+      "timestamp": "2026-08-21T06:46:16.483Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "from": "design",
+      "to": "design",
+      "timestamp": "2026-08-21T06:46:19.184Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "from": "design",
+      "to": "do",
+      "timestamp": "2026-08-21T06:48:05.257Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "action": "phase_complete",
+      "phase": "design",
+      "nextPhase": "do",
+      "timestamp": "2026-08-21T06:48:05.258Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-08-21T07:14:48.913Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-08-21T07:14:48.914Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-08-21T07:21:12.351Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-08-21T07:21:12.352Z"
+    },
+    {
+      "feature": "spot-realtime-image-performance",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-08-21T07:22:13.204Z"
     }
   ],
   "timeline": [

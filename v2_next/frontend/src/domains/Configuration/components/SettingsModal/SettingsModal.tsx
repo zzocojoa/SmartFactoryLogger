@@ -58,6 +58,7 @@ import {
   getCentralBadge,
   formatCentralTime,
   buildObservabilitySummary,
+  resolveSpotImagePollingStats,
   SPOT_IMAGE_CAPTURE_MODE_OPTIONS,
   formatSpotImageCaptureSummary,
 } from './settingsModalHelpers';
@@ -434,7 +435,7 @@ export function SettingsModal(props: SettingsModalProps) {
 
   if (!settingsOpen) return null;
 
-  const spotPollingStats = stats?.polling?.paths?.['/api/spot/image.jpg'];
+  const spotPollingStats = resolveSpotImagePollingStats(stats?.polling);
   const spotPollingClientText = spotPollingStats?.top_clients?.length
     ? spotPollingStats.top_clients.map((item) => `${item.client} ${item.count}`).join(', ')
     : '--';

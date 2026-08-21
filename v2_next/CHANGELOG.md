@@ -2,6 +2,34 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.21] - 2026-08-21
+
+### Added
+
+- Added a dedicated `/api/spot/live_image.jpg` operator-live profile while
+  preserving `/api/spot/image.jpg` as the existing snapshot contract.
+- Added profile-specific, payload-free SPOT image diagnostics and field QA
+  checks for live cadence, cache reuse, guarded transport, and request budget.
+
+### Changed
+
+- Made the dashboard use the server-declared live-image cadence with
+  completion-driven refresh, visibility pause, and bounded retry behavior.
+- Kept both image profiles on the manufacturer-defined `/image.jpg` resource
+  through one shared cache, single-flight refresh, serialized device access,
+  and the existing Windows source-port quarantine policy.
+
+### Security
+
+- Kept SPOT host validation strict and JPEG validation fail-closed without
+  exposing raw device addresses, URLs, source ports, or image payloads through
+  diagnostics.
+
+### Validation
+
+- Local automated checks and an HTTP/1.0 close benchmark passed. Physical SPOT
+  smoke and the 120-minute canary remain mandatory before release promotion.
+
 ## [1.0.20] - 2026-08-12
 
 ### Added
