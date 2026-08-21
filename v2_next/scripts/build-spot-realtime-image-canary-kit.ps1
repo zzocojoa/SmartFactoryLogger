@@ -52,11 +52,6 @@ function Add-CanaryProgressContract {
     )
 
     $source = [IO.File]::ReadAllText($CollectorPath)
-    $parameterNeedle = @'
-    [int]$PostTriggerCaptureSeconds = 75,
-
-    [switch]$PreflightOnly,
-'@
     $parameterReplacement = @'
     [int]$PostTriggerCaptureSeconds = 75,
 
@@ -65,15 +60,16 @@ function Add-CanaryProgressContract {
 
     [switch]$PreflightOnly,
 '@
-    if (-not $source.Contains($parameterNeedle)) {
+    $parameterPattern = (
+        '(?m)^    \[int\]\$PostTriggerCaptureSeconds = 75,\r?\n' +
+        '\r?\n    \[switch\]\$PreflightOnly,'
+    ).Trim()
+    $parameterRegex = [regex]::new($parameterPattern)
+    if ($parameterRegex.Matches($source).Count -ne 1) {
         throw "Historical collector parameter insertion point was not found."
     }
-    $source = $source.Replace($parameterNeedle, $parameterReplacement)
+    $source = $parameterRegex.Replace($source, $parameterReplacement, 1)
 
-    $loopNeedle = @'
-        while ($true) {
-            Receive-CollectorJobOutput -Job $collectorJob -ConsolePath $collectorConsolePath
-'@
     $loopReplacement = @'
         $progressStartedAt = Get-Date
         $lastProgressAt = $progressStartedAt.AddSeconds(-$ProgressIntervalSeconds)
@@ -119,10 +115,16 @@ function Add-CanaryProgressContract {
             }
             Receive-CollectorJobOutput -Job $collectorJob -ConsolePath $collectorConsolePath
 '@
-    if (-not $source.Contains($loopNeedle)) {
+    $loopPattern = (
+        '(?m)^        while \(\$true\) \{\r?\n' +
+        '            Receive-CollectorJobOutput -Job \$collectorJob ' +
+        '-ConsolePath \$collectorConsolePath'
+    )
+    $loopRegex = [regex]::new($loopPattern)
+    if ($loopRegex.Matches($source).Count -ne 1) {
         throw "Historical collector progress insertion point was not found."
     }
-    $source = $source.Replace($loopNeedle, $loopReplacement)
+    $source = $loopRegex.Replace($source, $loopReplacement, 1)
     if (
         ([regex]::Matches($source, "ProgressIntervalSeconds = 30")).Count -ne 1 -or
         ([regex]::Matches($source, "\[CANARY PROGRESS\]")).Count -ne 1
