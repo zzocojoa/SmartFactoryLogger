@@ -2,19 +2,6 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
-## [Unreleased]
-
-### Distribution
-
-- Deferred purchase and registration of a publicly trusted Windows
-  Authenticode certificate while Smart Factory Logger remains limited to
-  owner-controlled private use. Unsigned internal installers must still be
-  distributed with SHA-256 verification and a commit-bound release kit.
-- Publicly trusted production signing remains mandatory before any installer is
-  distributed to customers, external users, or commercial environments. Do not
-  assume that a CA-issued certificate can be exported as a PFX; token-, HSM-,
-  or cloud-backed certificates require the matching remote-signing workflow.
-
 ## [1.0.20] - 2026-08-12
 
 ### Added
