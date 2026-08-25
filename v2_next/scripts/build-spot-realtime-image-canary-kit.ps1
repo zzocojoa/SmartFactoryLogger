@@ -75,16 +75,16 @@ function Add-TriggerMonitorFailureContract {
 
     $source = [IO.File]::ReadAllText($CollectorPath).Replace("`r`n", "`n")
     $pathAnchor = @'
-  $triggerMonitorConsolePath = Join-Path $rawRoot "trigger_monitor_console.txt"
-  $triggerMonitorSummaryPath = Join-Path $rawRoot "trigger_monitor_summary.json"
-  $collectorProcess = [Diagnostics.Process]::GetCurrentProcess()
+$triggerMonitorConsolePath = Join-Path $rawRoot "trigger_monitor_console.txt"
+$triggerMonitorSummaryPath = Join-Path $rawRoot "trigger_monitor_summary.json"
+$collectorProcess = [Diagnostics.Process]::GetCurrentProcess()
 '@
     $pathReplacement = @'
-  $triggerMonitorConsolePath = Join-Path $rawRoot "trigger_monitor_console.txt"
-  $triggerMonitorSummaryPath = Join-Path $rawRoot "trigger_monitor_summary.json"
-  $triggerMonitorFailureRawPath = Join-Path $rawRoot "trigger_monitor_failure_raw.json"
-  $triggerMonitorFailureSafePath = Join-Path $rawRoot "trigger_monitor_failure.json"
-  $collectorProcess = [Diagnostics.Process]::GetCurrentProcess()
+$triggerMonitorConsolePath = Join-Path $rawRoot "trigger_monitor_console.txt"
+$triggerMonitorSummaryPath = Join-Path $rawRoot "trigger_monitor_summary.json"
+$triggerMonitorFailureRawPath = Join-Path $rawRoot "trigger_monitor_failure_raw.json"
+$triggerMonitorFailureSafePath = Join-Path $rawRoot "trigger_monitor_failure.json"
+$collectorProcess = [Diagnostics.Process]::GetCurrentProcess()
 '@
     $source = Replace-TextExactlyOnce `
         -Source $source `
