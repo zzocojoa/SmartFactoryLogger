@@ -670,7 +670,8 @@ try {
             controlled_delta = (
                 "30-second local clock/process progress plus fail-closed trigger " +
                 "monitor failure evidence export, short runtime evidence root, " +
-                "and Windows PowerShell path-budget gate"
+                "Windows PowerShell path-budget gate, and stable historical " +
+                "failure counter baselining"
             )
             product_request_behavior_changed = $false
         }
@@ -688,6 +689,9 @@ try {
             backend_pid_must_remain_constant = $true
             request_budget_max_per_second = 6.0
             counter_rate_window = "installed-state-preflight-to-postflight"
+            historical_failure_counter_policy = "stable-preflight-baseline-and-zero-canary-delta"
+            historical_failure_stability_seconds = 30
+            historical_failure_progress_interval_seconds = 10
             collector_failure_without_runtime_hard_gate = "evidence-hold"
             runtime_evidence_default_root = "%LOCALAPPDATA%\SFLCanary"
             runtime_evidence_path_limit_chars = 240

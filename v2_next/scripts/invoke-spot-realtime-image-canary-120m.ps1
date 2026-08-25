@@ -39,6 +39,24 @@ function Get-RequiredProperty {
     return $property.Value
 }
 
+function Get-OptionalProperty {
+    param(
+        [object]$InputObject,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if ($null -eq $InputObject) {
+        return $null
+    }
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
 function Assert-FileSha256 {
     param(
         [Parameter(Mandatory = $true)]
@@ -262,6 +280,107 @@ function ConvertTo-SafeImageSnapshot {
     return [pscustomobject]$snapshot
 }
 
+function Get-CumulativeFailureCounterNames {
+    return @(
+        "source_port_pool_acquire_wait_count",
+        "source_port_pool_exhaustion_count",
+        "source_port_reuse_violation_count",
+        "source_port_transport_failure_count",
+        "source_port_image_failure_count",
+        "source_port_temperature_failure_count",
+        "source_port_internal_temperature_failure_count",
+        "source_port_diagnostic_failure_count",
+        "image_refresh_failure_count",
+        "image_cache_clock_anomaly_count"
+    )
+}
+
+function Get-CumulativeFailureCounterSnapshot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Image
+    )
+
+    $snapshot = [ordered]@{}
+    foreach ($name in @(Get-CumulativeFailureCounterNames)) {
+        $snapshot[$name] = [int64](Get-RequiredProperty `
+            -InputObject $Image `
+            -Name $name `
+            -Context "SPOT cumulative failure counters")
+    }
+    return [pscustomobject]$snapshot
+}
+
+function Assert-FailureCounterDeltas {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$BeforeImage,
+
+        [Parameter(Mandatory = $true)]
+        [object]$AfterImage,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Stage
+    )
+
+    $deltas = [ordered]@{}
+    foreach ($name in @(Get-CumulativeFailureCounterNames)) {
+        $beforeValue = [int64](Get-RequiredProperty `
+            -InputObject $BeforeImage `
+            -Name $name `
+            -Context "$Stage baseline counters")
+        $afterValue = [int64](Get-RequiredProperty `
+            -InputObject $AfterImage `
+            -Name $name `
+            -Context "$Stage ending counters")
+        $delta = $afterValue - $beforeValue
+        $deltas[$name] = $delta
+
+        if ($delta -lt 0) {
+            throw (
+                "SPOT failure counter decreased during canary: " +
+                "stage=$Stage field=$name before=$beforeValue " +
+                "after=$afterValue delta=$delta"
+            )
+        }
+        if ($delta -gt 0) {
+            throw (
+                "SPOT failure counter increased during canary: " +
+                "stage=$Stage field=$name before=$beforeValue " +
+                "after=$afterValue delta=$delta"
+            )
+        }
+    }
+    return [pscustomobject]$deltas
+}
+
+function ConvertTo-SafeRecentSpotErrors {
+    param(
+        [object]$ErrorResponse
+    )
+
+    $items = @(Get-OptionalProperty -InputObject $ErrorResponse -Name "items")
+    $safe = New-Object System.Collections.Generic.List[object]
+    foreach ($item in $items) {
+        if ($null -eq $item) {
+            continue
+        }
+        $source = [string](Get-OptionalProperty -InputObject $item -Name "source")
+        if ($source -notlike "spot*") {
+            continue
+        }
+        [void]$safe.Add([pscustomobject][ordered]@{
+            time_iso = Get-OptionalProperty -InputObject $item -Name "time_iso"
+            source = $source
+            status = Get-OptionalProperty -InputObject $item -Name "status"
+            error_type = Get-OptionalProperty -InputObject $item -Name "error_type"
+            path = Get-OptionalProperty -InputObject $item -Name "path"
+            repeat = Get-OptionalProperty -InputObject $item -Name "repeat"
+        })
+    }
+    return @($safe.ToArray())
+}
+
 function Assert-ImageGate {
     param(
         [Parameter(Mandatory = $true)]
@@ -290,21 +409,9 @@ function Assert-ImageGate {
         throw "$Stage source-port pool partition mismatch"
     }
 
-    $zeroFields = @(
-        "source_port_pool_acquire_wait_count",
-        "source_port_pool_exhaustion_count",
-        "source_port_reuse_violation_count",
-        "source_port_transport_failure_count",
-        "source_port_image_failure_count",
-        "source_port_temperature_failure_count",
-        "source_port_internal_temperature_failure_count",
-        "source_port_diagnostic_failure_count",
-        "image_refresh_failure_count",
-        "image_cache_clock_anomaly_count"
-    )
-    foreach ($name in $zeroFields) {
-        if ([int64]$Image.$name -ne 0) {
-            throw "$Stage non-zero failure counter: $name=$($Image.$name)"
+    foreach ($name in @(Get-CumulativeFailureCounterNames)) {
+        if ([int64]$Image.$name -lt 0) {
+            throw "$Stage negative cumulative counter: $name=$($Image.$name)"
         }
     }
 
@@ -428,6 +535,153 @@ function Get-InstalledState {
     }
 }
 
+function Confirm-StableHistoricalFailureBaseline {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$InitialState,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigPath,
+
+        [int]$StabilitySeconds = 30,
+
+        [int]$ProgressIntervalSeconds = 10
+    )
+
+    if ($StabilitySeconds -lt 1) {
+        throw "historical failure baseline stability duration must be positive"
+    }
+    if ($ProgressIntervalSeconds -lt 1) {
+        throw "historical failure baseline progress interval must be positive"
+    }
+
+    $startedAt = Get-Date
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalSeconds -lt $StabilitySeconds) {
+        $remainingBeforeSleep = [math]::Max(
+            0.0,
+            $StabilitySeconds - $clock.Elapsed.TotalSeconds
+        )
+        $sleepSeconds = [math]::Min(
+            [double]$ProgressIntervalSeconds,
+            $remainingBeforeSleep
+        )
+        if ($sleepSeconds -gt 0) {
+            Start-Sleep -Milliseconds ([int][math]::Ceiling($sleepSeconds * 1000))
+        }
+
+        $backend = @(
+            Get-Process -Name "SmartFactoryBackend" -ErrorAction SilentlyContinue
+        )
+        $backendAlive = (
+            $backend.Count -eq 1 -and
+            $backend[0].Id -eq [int]$InitialState.backend_pid
+        )
+        $elapsedSeconds = [math]::Min(
+            [double]$StabilitySeconds,
+            $clock.Elapsed.TotalSeconds
+        )
+        $remainingSeconds = [math]::Max(
+            0.0,
+            $StabilitySeconds - $elapsedSeconds
+        )
+        $percent = [math]::Round(
+            100.0 * $elapsedSeconds / $StabilitySeconds,
+            1
+        )
+        $progressMessage = (
+            "[PREFLIGHT BASELINE PROGRESS] elapsed={0} remaining={1} " +
+            "percent={2}% backend_pid={3} backend_alive={4} checked_at={5}; " +
+            "local clock/process only; no added SPOT requests"
+        ) -f `
+            ([TimeSpan]::FromSeconds($elapsedSeconds).ToString("hh\:mm\:ss")), `
+            ([TimeSpan]::FromSeconds($remainingSeconds).ToString("hh\:mm\:ss")), `
+            $percent, `
+            $InitialState.backend_pid, `
+            $backendAlive, `
+            (Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz")
+        Write-Host $progressMessage -ForegroundColor Cyan
+
+        if (-not $backendAlive) {
+            throw "backend changed during historical failure baseline stability check"
+        }
+    }
+    $clock.Stop()
+
+    $portOwners = @(
+        Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    )
+    if (
+        $portOwners.Count -ne 1 -or
+        $portOwners[0] -ne [int]$InitialState.backend_pid
+    ) {
+        throw "port 8000 ownership changed during historical failure baseline"
+    }
+    $configHash = (
+        Get-FileHash -LiteralPath $ConfigPath -Algorithm SHA256
+    ).Hash
+    if ($configHash -cne [string]$InitialState.config_sha256) {
+        throw "config.ini changed during historical failure baseline"
+    }
+
+    $imageRaw = (
+        Invoke-RestMethod "http://127.0.0.1:8000/api/spot/config" -TimeoutSec 10
+    ).image
+    $stableImage = ConvertTo-SafeImageSnapshot -Image $imageRaw
+    Assert-ImageGate -Image $stableImage -Stage "historical failure baseline"
+    $failureCounterDeltas = Assert-FailureCounterDeltas `
+        -BeforeImage $InitialState.image `
+        -AfterImage $stableImage `
+        -Stage "preflight baseline"
+
+    $recentErrors = Invoke-RestMethod `
+        "http://127.0.0.1:8000/api/observability/errors?limit=50" `
+        -TimeoutSec 10
+    $baselineCounters = Get-CumulativeFailureCounterSnapshot -Image $stableImage
+    $hasHistoricalFailure = $false
+    foreach ($name in @(Get-CumulativeFailureCounterNames)) {
+        if ([int64]$baselineCounters.$name -gt 0) {
+            $hasHistoricalFailure = $true
+            break
+        }
+    }
+
+    $completedAt = Get-Date
+    $InitialState.observed_at = $completedAt.ToString("o")
+    $InitialState.image = $stableImage
+    $evidence = [pscustomobject][ordered]@{
+        schema_version = "spot-canary-historical-failure-baseline-v1"
+        classification = if ($hasHistoricalFailure) {
+            "STABLE_HISTORICAL_FAILURE_BASELINE"
+        } else {
+            "CLEAN_FAILURE_BASELINE"
+        }
+        started_at = $startedAt.ToString("o")
+        completed_at = $completedAt.ToString("o")
+        stability_duration_seconds = [math]::Round(
+            $clock.Elapsed.TotalSeconds,
+            3
+        )
+        progress_interval_seconds = $ProgressIntervalSeconds
+        progress_source = "local-clock-and-process-state-only"
+        progress_adds_spot_requests = $false
+        backend_pid = $InitialState.backend_pid
+        config_sha256 = $InitialState.config_sha256
+        historical_failure_baseline = $baselineCounters
+        stability_failure_counter_deltas = $failureCounterDeltas
+        recent_spot_errors = @(
+            ConvertTo-SafeRecentSpotErrors -ErrorResponse $recentErrors
+        )
+        error_queue_cleared = $false
+        application_restarted = $false
+    }
+    return [pscustomobject][ordered]@{
+        state = $InitialState
+        evidence = $evidence
+    }
+}
+
 function Assert-EvidenceFiles {
     param(
         [Parameter(Mandatory = $true)]
@@ -481,6 +735,11 @@ function Assert-PostflightDeltas {
         throw "Electron executable path changed during the 120-minute canary"
     }
 
+    $failureCounterDeltas = Assert-FailureCounterDeltas `
+        -BeforeImage $Before.image `
+        -AfterImage $After.image `
+        -Stage "120-minute observation"
+
     $transportDelta =
         [int64]$After.image.source_port_transport_started_count -
         [int64]$Before.image.source_port_transport_started_count
@@ -521,6 +780,7 @@ function Assert-PostflightDeltas {
         counter_window_elapsed_seconds = $counterWindowElapsedSeconds
         transport_rate_per_sec = $transportRate
         image_upstream_rate_per_sec = $imageRate
+        failure_counter_deltas = $failureCounterDeltas
     }
 }
 
@@ -706,9 +966,9 @@ function Invoke-SelfTest {
         source_port_minimum_reuse_interval_seconds = 75.0
         source_port_transport_started_count = 10
         source_port_transport_success_count = 10
-        source_port_transport_failure_count = 0
+        source_port_transport_failure_count = 1
         source_port_bind_collision_count = 0
-        source_port_image_failure_count = 0
+        source_port_image_failure_count = 1
         source_port_temperature_failure_count = 0
         source_port_internal_temperature_failure_count = 0
         source_port_diagnostic_failure_count = 0
@@ -783,16 +1043,44 @@ function Invoke-SelfTest {
             image_upstream_request_count = 9986
         }
     }
+    foreach ($name in @(Get-CumulativeFailureCounterNames)) {
+        Add-Member `
+            -InputObject $before.image `
+            -NotePropertyName $name `
+            -NotePropertyValue 0
+        Add-Member `
+            -InputObject $after.image `
+            -NotePropertyName $name `
+            -NotePropertyValue 0
+    }
+    $before.image.source_port_transport_failure_count = 1
+    $before.image.source_port_image_failure_count = 1
+    $after.image.source_port_transport_failure_count = 1
+    $after.image.source_port_image_failure_count = 1
     $deltas = Assert-PostflightDeltas -Before $before -After $after
     if (
         [math]::Abs(
             [double]$deltas.counter_window_elapsed_seconds - 59.4678005
         ) -gt 0.0001 -or
         [double]$deltas.transport_rate_per_sec -ne 5.5829 -or
-        [double]$deltas.image_upstream_rate_per_sec -ne 2.7578
+        [double]$deltas.image_upstream_rate_per_sec -ne 2.7578 -or
+        [int64]$deltas.failure_counter_deltas.source_port_transport_failure_count -ne 0
     ) {
         throw "self-test counter-window rate calculation mismatch"
     }
+    $after.image.source_port_transport_failure_count = 2
+    $failureDeltaRejected = $false
+    try {
+        Assert-PostflightDeltas -Before $before -After $after | Out-Null
+    } catch {
+        $failureDeltaRejected = $_.Exception.Message -like (
+            "SPOT failure counter increased during canary:*"
+        )
+    }
+    if (-not $failureDeltaRejected) {
+        throw "self-test new failure counter delta was not rejected"
+    }
+    $after.image.source_port_transport_failure_count = 1
     $after.image.source_port_transport_started_count = 21452
     $after.image.source_port_transport_success_count = 21452
     $rateLimitRejected = $false
@@ -971,13 +1259,25 @@ try {
         -Label "v1.0.20 rollback installer" | Out-Null
     Assert-EvidenceFiles -Identity $identity -EvidenceRoot $evidenceRoot
 
-    $before = Get-InstalledState `
+    $initialBefore = Get-InstalledState `
         -Identity $identity `
         -IntegrityModulePath $integrityModulePath `
         -ConfigPath $configPath `
         -Stage "120m preflight"
+    $phase = "preflight-history-baseline"
+    $historicalBaseline = Confirm-StableHistoricalFailureBaseline `
+        -InitialState $initialBefore `
+        -ConfigPath $configPath `
+        -StabilitySeconds 30 `
+        -ProgressIntervalSeconds 10
+    $before = $historicalBaseline.state
+    $historicalBaseline.evidence | ConvertTo-Json -Depth 10 |
+        Set-Content `
+            -LiteralPath (Join-Path $controlRoot "historical-failure-baseline.json") `
+            -Encoding UTF8
     $before | ConvertTo-Json -Depth 10 |
         Set-Content -LiteralPath (Join-Path $controlRoot "canary-preflight.json") -Encoding UTF8
+    $phase = "preflight"
 
     & powershell.exe -NoProfile -ExecutionPolicy Bypass `
         -File $collectorPath `
@@ -1007,6 +1307,10 @@ try {
             runtime_evidence_base = $canaryEvidenceBase
             runtime_evidence_projected_path_chars = $runtimeEvidenceProjectedPathChars
             runtime_evidence_path_limit_chars = $runtimeEvidencePathLimitChars
+            historical_failure_baseline = $historicalBaseline.evidence.classification
+            historical_failure_stability_seconds = (
+                $historicalBaseline.evidence.stability_duration_seconds
+            )
             product_changes_performed = $false
         }
         exit 0

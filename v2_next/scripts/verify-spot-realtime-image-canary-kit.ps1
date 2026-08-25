@@ -126,6 +126,10 @@ if (
     -not [bool]$identity.canary.packet_capture_full_window_required -or
     $identity.canary.counter_rate_window -cne
         "installed-state-preflight-to-postflight" -or
+    $identity.canary.historical_failure_counter_policy -cne
+        "stable-preflight-baseline-and-zero-canary-delta" -or
+    [int]$identity.canary.historical_failure_stability_seconds -ne 30 -or
+    [int]$identity.canary.historical_failure_progress_interval_seconds -ne 10 -or
     $identity.canary.collector_failure_without_runtime_hard_gate -cne
         "evidence-hold" -or
     [bool]$identity.contains_installer -or

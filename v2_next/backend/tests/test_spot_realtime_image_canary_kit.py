@@ -158,6 +158,39 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         for fragment in required_fragments:
             self.assertIn(fragment, source)
 
+    def test_controller_baselines_historical_failures_and_rejects_new_deltas(
+        self,
+    ) -> None:
+        controller = CONTROLLER.read_text(encoding="utf-8")
+        builder = BUILDER.read_text(encoding="utf-8")
+        verifier = VERIFIER.read_text(encoding="utf-8")
+        guide = GUIDE.read_text(encoding="utf-8")
+
+        for fragment in (
+            "Get-CumulativeFailureCounterNames",
+            "Confirm-StableHistoricalFailureBaseline",
+            "historical-failure-baseline.json",
+            "spot-canary-historical-failure-baseline-v1",
+            "STABLE_HISTORICAL_FAILURE_BASELINE",
+            "failure_counter_deltas",
+            "SPOT failure counter increased during canary",
+            "[PREFLIGHT BASELINE PROGRESS]",
+        ):
+            self.assertIn(fragment, controller)
+
+        self.assertIn(
+            'historical_failure_counter_policy = '
+            '"stable-preflight-baseline-and-zero-canary-delta"',
+            builder,
+        )
+        self.assertIn("historical_failure_stability_seconds = 30", builder)
+        self.assertIn(
+            "historical_failure_progress_interval_seconds -ne 10",
+            verifier,
+        )
+        self.assertIn("historical_failure_baseline", guide)
+        self.assertIn("신규 증가분", guide)
+
     def test_controller_handles_incomplete_operator_and_switch_evidence(self) -> None:
         source = CONTROLLER.read_text(encoding="utf-8")
         for fragment in (

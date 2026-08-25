@@ -87,6 +87,14 @@ F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19
 - 같은 수집기를 동시에 두 번 실행하지 않는다.
 - 최소 5GB 여유 공간과 관리자 권한이 필요하다.
 
+preflight는 누적 failure counter의 절대값이 0인지 강제하지 않는다. 먼저 현재 값을
+`historical_failure_baseline`으로 기록하고 30초 동안 backend PID와 설정을 유지한 채
+신규 증가분이 없는지 확인한다. 이 대기 중 진행 상태는 10초마다 로컬 시계와 process
+상태만으로 표시하며 SPOT 요청을 추가하지 않는다. 안정성 확인 뒤 진단 snapshot을 한
+번 읽어 기준선을 확정한다. 기존 에러 큐는 지우지 않으므로 2026-08-25 19:32 KST의
+`spot_image upstream-request-error` 같은 과거 오류도 `recent_spot_errors`에 가능한
+범위에서 함께 보존된다.
+
 ## 실행
 
 압축을 푼 폴더에서 다음 파일 하나를 더블클릭한다.
@@ -130,6 +138,12 @@ run-spot-realtime-image-canary-120m-as-admin.cmd
 backend 재시작, SPOT failure counter 증가 같은 별도 runtime hard gate가 없으면
 `EVIDENCE_HOLD`이다.
 
+failure counter 판정도 동일한 증거 연속성을 사용한다. 30초 안정성 확인을 통과한
+`historical_failure_baseline`과 postflight를 비교하며, 기존 누적값은 유지하되 120분
+관측 중 신규 증가분이 하나라도 있으면 fail-closed로 `ROLLBACK_REQUIRED` 처리한다.
+counter가 감소한 경우도 backend 상태 초기화 또는 증거 불연속으로 간주해 통과시키지
+않는다.
+
 ## 제공할 자료
 
 실행 후 다음 자료를 전달한다.
@@ -138,6 +152,8 @@ backend 재시작, SPOT failure counter 증가 같은 별도 runtime hard gate�
 2. 같은 실행 폴더의 `sanitized_share_sha256.txt`
 3. `server-evidence\20260821-190022\canary-control-*` 폴더
 4. 최종 CMD 화면
+
+control 폴더에는 `historical-failure-baseline.json`이 포함되어야 한다.
 
 `raw_private`에는 비식별 처리 전 네트워크 정보가 있을 수 있으므로 명시적 요청 전에는
 공유하지 않는다.
