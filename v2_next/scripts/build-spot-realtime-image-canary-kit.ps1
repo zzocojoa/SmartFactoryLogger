@@ -45,13 +45,187 @@ function Assert-SafeTemporaryPath {
     }
 }
 
+function Replace-TextExactlyOnce {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Source,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OldText,
+
+        [Parameter(Mandatory = $true)]
+        [string]$NewText,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Label
+    )
+
+    $count = ([regex]::Matches($Source, [regex]::Escape($OldText))).Count
+    if ($count -ne 1) {
+        throw "$Label insertion point count was $count instead of 1."
+    }
+    return $Source.Replace($OldText, $NewText)
+}
+
+function Add-TriggerMonitorFailureContract {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CollectorPath
+    )
+
+    $source = [IO.File]::ReadAllText($CollectorPath).Replace("`r`n", "`n")
+    $pathAnchor = @'
+  $triggerMonitorConsolePath = Join-Path $rawRoot "trigger_monitor_console.txt"
+  $triggerMonitorSummaryPath = Join-Path $rawRoot "trigger_monitor_summary.json"
+  $collectorProcess = [Diagnostics.Process]::GetCurrentProcess()
+'@
+    $pathReplacement = @'
+  $triggerMonitorConsolePath = Join-Path $rawRoot "trigger_monitor_console.txt"
+  $triggerMonitorSummaryPath = Join-Path $rawRoot "trigger_monitor_summary.json"
+  $triggerMonitorFailureRawPath = Join-Path $rawRoot "trigger_monitor_failure_raw.json"
+  $triggerMonitorFailureSafePath = Join-Path $rawRoot "trigger_monitor_failure.json"
+  $collectorProcess = [Diagnostics.Process]::GetCurrentProcess()
+'@
+    $source = Replace-TextExactlyOnce `
+        -Source $source `
+        -OldText $pathAnchor `
+        -NewText $pathReplacement `
+        -Label "Trigger monitor failure path"
+
+    $failureAnchor = @'
+    if ($null -ne $triggerMonitorJob -and
+        $triggerMonitorJob.State -in @("Failed", "Stopped")) {
+      throw "The dedicated ConnectTimeout trigger monitor stopped unexpectedly."
+    }
+'@
+    $failureReplacement = @'
+    if ($null -ne $triggerMonitorJob -and
+        $triggerMonitorJob.State -in @("Failed", "Stopped")) {
+      $triggerMonitorReceiveErrors = @()
+      $triggerMonitorOutput = @(
+        Receive-Job `
+          -Job $triggerMonitorJob `
+          -ErrorAction SilentlyContinue `
+          -ErrorVariable triggerMonitorReceiveErrors
+      )
+      if ($triggerMonitorOutput.Count -gt 0) {
+        $triggerMonitorOutput | Out-String |
+          Set-Content -LiteralPath $triggerMonitorConsolePath -Encoding UTF8
+      }
+
+      $jobReason = $triggerMonitorJob.JobStateInfo.Reason
+      $errorMessages = @(
+        if ($null -ne $jobReason -and
+            -not [string]::IsNullOrWhiteSpace($jobReason.Message)) {
+          [string]$jobReason.Message
+        }
+        foreach ($record in @($triggerMonitorReceiveErrors)) {
+          if ($null -ne $record.Exception -and
+              -not [string]::IsNullOrWhiteSpace($record.Exception.Message)) {
+            [string]$record.Exception.Message
+          }
+        }
+      )
+      $exceptionTypes = @(
+        if ($null -ne $jobReason) {
+          $jobReason.GetType().FullName
+        }
+        foreach ($record in @($triggerMonitorReceiveErrors)) {
+          if ($null -ne $record.Exception) {
+            $record.Exception.GetType().FullName
+          }
+        }
+      )
+      $failureReasonCode = if (@(
+          $errorMessages | Where-Object {
+            $_ -like "*could not read its baseline*"
+          }
+        ).Count -gt 0) {
+        "trigger-baseline-read-failed"
+      } elseif (@(
+          $errorMessages | Where-Object {
+            $_ -like "*capture stop signal*" -or
+            $_ -like "*RawRoot*"
+          }
+        ).Count -gt 0) {
+        "trigger-input-contract-failed"
+      } else {
+        "trigger-monitor-job-failed"
+      }
+
+      $rawFailure = [ordered]@{
+        schema_version = "spot-connecttimeout-trigger-monitor-failure-raw-v1"
+        observed_at = [DateTimeOffset]::Now.ToString("o")
+        reason_code = $failureReasonCode
+        job_state = [string]$triggerMonitorJob.State
+        job_reason_type = if ($null -eq $jobReason) {
+          $null
+        } else {
+          $jobReason.GetType().FullName
+        }
+        job_reason_message = if ($null -eq $jobReason) {
+          $null
+        } else {
+          [string]$jobReason.Message
+        }
+        error_records = @(
+          foreach ($record in @($triggerMonitorReceiveErrors)) {
+            [ordered]@{
+              exception_type = if ($null -eq $record.Exception) {
+                $null
+              } else {
+                $record.Exception.GetType().FullName
+              }
+              message = if ($null -eq $record.Exception) {
+                [string]$record
+              } else {
+                [string]$record.Exception.Message
+              }
+              fully_qualified_error_id = [string]$record.FullyQualifiedErrorId
+              script_stack_trace = [string]$record.ScriptStackTrace
+            }
+          }
+        )
+        monitor_output = @($triggerMonitorOutput | ForEach-Object { [string]$_ })
+      }
+      $rawFailure | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath $triggerMonitorFailureRawPath -Encoding UTF8
+
+      $safeFailure = [ordered]@{
+        schema_version = "spot-connecttimeout-trigger-monitor-failure-v1"
+        observed_at = [DateTimeOffset]::Now.ToString("o")
+        reason_code = $failureReasonCode
+        job_state = [string]$triggerMonitorJob.State
+        exception_types = @($exceptionTypes | Sort-Object -Unique)
+        raw_detail_retained = $true
+        raw_detail_file = "trigger_monitor_failure_raw.json"
+        error_message_retained = $false
+      }
+      $safeFailure | ConvertTo-Json -Depth 6 |
+        Set-Content -LiteralPath $triggerMonitorFailureSafePath -Encoding UTF8
+      throw (
+        "The dedicated ConnectTimeout trigger monitor stopped unexpectedly. " +
+        "Evidence reason: $failureReasonCode."
+      )
+    }
+'@
+    $source = Replace-TextExactlyOnce `
+        -Source $source `
+        -OldText $failureAnchor `
+        -NewText $failureReplacement `
+        -Label "Trigger monitor failure capture"
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($CollectorPath, $source, $utf8)
+}
+
 function Add-CanaryProgressContract {
     param(
         [Parameter(Mandatory = $true)]
         [string]$CollectorPath
     )
 
-    $source = [IO.File]::ReadAllText($CollectorPath)
+    $source = [IO.File]::ReadAllText($CollectorPath).Replace("`r`n", "`n")
     $parameterReplacement = @'
     [int]$PostTriggerCaptureSeconds = 75,
 
@@ -101,9 +275,9 @@ function Add-CanaryProgressContract {
                     "unavailable"
                 }
                 Write-Host (
-                    "[CANARY PROGRESS] stage=observing elapsed={0} remaining={1} " +
+                    ("[CANARY PROGRESS] stage=observing elapsed={0} remaining={1} " +
                     "percent={2} backend_pid={3} backend_alive={4} checked_at={5}; " +
-                    "local clock/process only; no added SPOT requests" -f
+                    "local clock/process only; no added SPOT requests") -f
                         ([TimeSpan]::FromSeconds($progressElapsedSeconds).ToString("hh\:mm\:ss")),
                         ([TimeSpan]::FromSeconds($progressRemainingSeconds).ToString("hh\:mm\:ss")),
                         $progressPercent,
@@ -125,9 +299,76 @@ function Add-CanaryProgressContract {
         throw "Historical collector progress insertion point was not found."
     }
     $source = $loopRegex.Replace($source, $loopReplacement, 1)
+
+    $collectorSessionAnchor = @'
+$appObservabilitySummary = $null
+if ($null -ne $collectorSession) {
+    $collectorSanitized = Join-Path $collectorSession.FullName 'sanitized'
+'@
+    $collectorSessionReplacement = @'
+$appObservabilitySummary = $null
+$triggerMonitorFailure = $null
+if ($null -ne $collectorSession) {
+    $triggerMonitorFailurePath = Join-Path `
+        $collectorSession.FullName `
+        'raw\trigger_monitor_failure.json'
+    if (Test-Path -LiteralPath $triggerMonitorFailurePath -PathType Leaf) {
+        try {
+            $triggerMonitorFailure = Get-Content `
+                -LiteralPath $triggerMonitorFailurePath `
+                -Raw `
+                -Encoding utf8 |
+                ConvertFrom-Json
+            if ($triggerMonitorFailure.schema_version -ne
+                'spot-connecttimeout-trigger-monitor-failure-v1') {
+                throw 'Unexpected trigger monitor failure evidence schema.'
+            }
+            Copy-Item `
+                -LiteralPath $triggerMonitorFailurePath `
+                -Destination (Join-Path $sanitizedRoot 'trigger_monitor_failure.json') `
+                -Force
+        } catch {
+            $triggerMonitorFailure = $null
+        }
+    }
+    $collectorSanitized = Join-Path $collectorSession.FullName 'sanitized'
+'@
+    $source = Replace-TextExactlyOnce `
+        -Source $source `
+        -OldText $collectorSessionAnchor `
+        -NewText $collectorSessionReplacement `
+        -Label "Safe trigger monitor failure export"
+
+    $safeSummaryAnchor = @'
+    collector_exit_code = $collectionResult.ExitCode
+    required_evidence_missing = @($requiredEvidenceMissing)
+    ping_samples = $pingRows.Count
+'@
+    $safeSummaryReplacement = @'
+    collector_exit_code = $collectionResult.ExitCode
+    required_evidence_missing = @($requiredEvidenceMissing)
+    trigger_monitor_failure_present = $null -ne $triggerMonitorFailure
+    trigger_monitor_failure_reason_code = if ($null -eq $triggerMonitorFailure) {
+        $null
+    } else {
+        [string]$triggerMonitorFailure.reason_code
+    }
+    trigger_monitor_failure_job_state = if ($null -eq $triggerMonitorFailure) {
+        $null
+    } else {
+        [string]$triggerMonitorFailure.job_state
+    }
+    ping_samples = $pingRows.Count
+'@
+    $source = Replace-TextExactlyOnce `
+        -Source $source `
+        -OldText $safeSummaryAnchor `
+        -NewText $safeSummaryReplacement `
+        -Label "Trigger monitor failure summary"
     if (
         ([regex]::Matches($source, "ProgressIntervalSeconds = 30")).Count -ne 1 -or
-        ([regex]::Matches($source, "\[CANARY PROGRESS\]")).Count -ne 1
+        ([regex]::Matches($source, "\[CANARY PROGRESS\]")).Count -ne 1 -or
+        ([regex]::Matches($source, "trigger_monitor_failure_reason_code")).Count -ne 1
     ) {
         throw "The canary progress patch was not applied exactly once."
     }
@@ -174,7 +415,10 @@ function Invoke-CanarySelfTests {
     if ($LASTEXITCODE -ne 0) {
         throw "SPOT field collector self-test failed."
     }
-    & python.exe $IntegrationTestPath
+    & python.exe `
+        $IntegrationTestPath `
+        --collector-path (Join-Path $StagingRoot "collect_operational_observability.ps1") `
+        --monitor-path (Join-Path $StagingRoot "monitor-spot-connecttimeout-trigger.ps1")
     if ($LASTEXITCODE -ne 0) {
         throw "SPOT trigger integration test failed."
     }
@@ -244,6 +488,19 @@ foreach ($path in $currentSources.Values) {
         -Arguments @("ls-files", "--error-unmatch", "--", $relativePath) |
         Out-Null
 }
+$integrationTestPath = Join-Path `
+    $PSScriptRoot `
+    "test_spot_connecttimeout_trigger_collector.py"
+if (-not (Test-Path -LiteralPath $integrationTestPath -PathType Leaf)) {
+    throw "The current SPOT trigger integration test is missing."
+}
+$integrationFullPath = [IO.Path]::GetFullPath($integrationTestPath)
+$integrationRelativePath = $integrationFullPath.Substring($gitRootPrefix.Length)
+$integrationRelativePath = $integrationRelativePath.Replace("\", "/")
+Invoke-GitText `
+    -RepositoryRoot $gitRoot `
+    -Arguments @("ls-files", "--error-unmatch", "--", $integrationRelativePath) |
+    Out-Null
 
 $corePaths = @(
     "v2_next/scripts/analyze-spot-http-framing.ps1",
@@ -291,9 +548,8 @@ try {
             -LiteralPath (Join-Path $archiveRoot $relativePath.Replace("/", "\")) `
             -Destination (Join-Path $stagingRoot (Split-Path -Leaf $relativePath))
     }
-    $integrationTestPath = Join-Path `
-        $archiveRoot `
-        "v2_next\scripts\test_spot_connecttimeout_trigger_collector.py"
+    Add-TriggerMonitorFailureContract `
+        -CollectorPath (Join-Path $stagingRoot "collect_operational_observability.ps1")
     Add-CanaryProgressContract `
         -CollectorPath (Join-Path $stagingRoot "collect-spot-connecttimeout-evidence.ps1")
 
@@ -371,7 +627,10 @@ try {
             source_commit = $diagnosticCoreCommit
             source_identity = "spot-connecttimeout-trigger-field-kit-v4"
             framing_schema = "spot-http-framing-evidence-v5"
-            controlled_delta = "30-second local clock/process progress output only"
+            controlled_delta = (
+                "30-second local clock/process progress plus fail-closed trigger " +
+                "monitor failure evidence export"
+            )
             product_request_behavior_changed = $false
         }
         canary = [ordered]@{

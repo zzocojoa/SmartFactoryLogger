@@ -98,6 +98,30 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             source,
         )
 
+    def test_builder_preserves_trigger_job_failure_evidence(self) -> None:
+        source = BUILDER.read_text(encoding="utf-8")
+        for fragment in (
+            "trigger_monitor_failure_raw.json",
+            "trigger_monitor_failure.json",
+            "spot-connecttimeout-trigger-monitor-failure-v1",
+            "trigger-baseline-read-failed",
+            "trigger_monitor_failure_reason_code",
+        ):
+            self.assertIn(fragment, source)
+
+    def test_progress_format_applies_to_the_complete_message(self) -> None:
+        source = BUILDER.read_text(encoding="utf-8")
+        self.assertIn(
+            '                    ("[CANARY PROGRESS] stage=observing '
+            'elapsed={0} remaining={1} " +',
+            source,
+        )
+        self.assertIn(
+            '                    "local clock/process only; no added SPOT '
+            'requests") -f',
+            source,
+        )
+
     def test_controller_has_runtime_packet_and_identity_gates(self) -> None:
         source = CONTROLLER.read_text(encoding="utf-8")
         required_fragments = (
@@ -118,6 +142,17 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "mismatched rollback baseline was accepted",
         )
         for fragment in required_fragments:
+            self.assertIn(fragment, source)
+
+    def test_controller_handles_incomplete_operator_and_switch_evidence(self) -> None:
+        source = CONTROLLER.read_text(encoding="utf-8")
+        for fragment in (
+            "Test-SwitchEvidenceLimitation",
+            "Test-OperatorVisualConfirmationEligible",
+            "NOT_REQUESTED_INCOMPLETE_INTERVAL",
+            "prompted = $operatorEligible",
+            "switch_evidence_unavailable_declared",
+        ):
             self.assertIn(fragment, source)
 
     def test_verifier_and_guide_fix_exact_deployment_identity(self) -> None:

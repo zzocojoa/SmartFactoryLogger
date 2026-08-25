@@ -162,6 +162,41 @@ function Get-CollectorEvidenceHolds {
     return @($holds.ToArray())
 }
 
+function Test-SwitchEvidenceLimitation {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$FieldSummary
+    )
+
+    $unavailable = $FieldSummary.PSObject.Properties[
+        "switch_evidence_unavailable_declared"
+    ]
+    if ($null -ne $unavailable -and [bool]$unavailable.Value) {
+        return $true
+    }
+    $switchStatus = $FieldSummary.PSObject.Properties["switch_evidence_status"]
+    if ($null -ne $switchStatus -and
+        [string]$switchStatus.Value -notin @("complete", "completed")) {
+        return $true
+    }
+    return [string]$FieldSummary.status -ceq "PARTIAL"
+}
+
+function Test-OperatorVisualConfirmationEligible {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$FieldSummary,
+
+        [double]$MinimumElapsedSeconds = 7190.0
+    )
+
+    $elapsed = $FieldSummary.PSObject.Properties["observation_elapsed_seconds"]
+    if ($null -eq $elapsed -or $null -eq $elapsed.Value) {
+        return $false
+    }
+    return [double]$elapsed.Value -ge $MinimumElapsedSeconds
+}
+
 function Get-CanaryExceptionResultName {
     param(
         [Parameter(Mandatory = $true)]
@@ -731,6 +766,24 @@ function Invoke-SelfTest {
         throw "self-test canary exception classification mismatch"
     }
 
+    $failedSwitchField = [pscustomobject]@{
+        status = "FAILED"
+        switch_evidence_status = "unavailable"
+        switch_evidence_unavailable_declared = $true
+        observation_elapsed_seconds = 8.852
+    }
+    if (-not (Test-SwitchEvidenceLimitation -FieldSummary $failedSwitchField)) {
+        throw "self-test unavailable switch evidence was not reported"
+    }
+    if (Test-OperatorVisualConfirmationEligible -FieldSummary $failedSwitchField) {
+        throw "self-test incomplete interval allowed operator confirmation"
+    }
+    $failedSwitchField.observation_elapsed_seconds = 7200
+    if (-not (Test-OperatorVisualConfirmationEligible `
+        -FieldSummary $failedSwitchField)) {
+        throw "self-test complete interval blocked operator confirmation"
+    }
+
     $identity = [pscustomobject]@{
         product = [pscustomobject]@{ version = "1.0.21" }
         rollback = [pscustomobject]@{
@@ -926,24 +979,42 @@ try {
         $packet.evidence_holds += $collectorHold
     }
 
-    $operatorAnswer = Read-Host (
-        "120분 전체 구간 동안 SPOT 영상이 계속 갱신되고 화면 오류가 없었습니까? " +
-        "정상인 경우 YES 입력"
-    )
+    $operatorEligible = Test-OperatorVisualConfirmationEligible `
+        -FieldSummary $fieldSummary
+    $operatorAnswer = if ($operatorEligible) {
+        Read-Host (
+            "120분 전체 구간 동안 SPOT 영상이 계속 갱신되고 화면 오류가 없었습니까? " +
+            "정상인 경우 YES 입력"
+        )
+    } else {
+        $packet.evidence_holds += (
+            "operator-visual-confirmation-not-requested-incomplete-interval"
+        )
+        "NOT_REQUESTED_INCOMPLETE_INTERVAL"
+    }
     $operatorEvidence = [pscustomobject]@{
-        confirmed_at = (Get-Date).ToString("o")
+        recorded_at = (Get-Date).ToString("o")
+        confirmed_at = if ($operatorEligible) {
+            (Get-Date).ToString("o")
+        } else {
+            $null
+        }
         answer = $operatorAnswer
+        prompted = $operatorEligible
+        eligible = $operatorEligible
         full_interval_required = $true
+        minimum_elapsed_seconds = 7190.0
+        observed_elapsed_seconds = $fieldSummary.observation_elapsed_seconds
     }
     $operatorEvidence | ConvertTo-Json |
         Set-Content `
             -LiteralPath (Join-Path $controlRoot "operator-visual-confirmation-120m.json") `
             -Encoding UTF8
-    if ($operatorAnswer -cne "YES") {
+    if ($operatorEligible -and $operatorAnswer -cne "YES") {
         $packet.hard_failures += "operator-visual-confirmation-failed"
     }
 
-    $switchLimited = $fieldSummary.status -eq "PARTIAL"
+    $switchLimited = Test-SwitchEvidenceLimitation -FieldSummary $fieldSummary
     $resultName = if (@($packet.hard_failures).Count -gt 0) {
         "SPOT_120M_ROLLBACK_REQUIRED"
     } elseif (@($packet.evidence_holds).Count -gt 0) {
@@ -965,7 +1036,9 @@ try {
         collector_status = $fieldSummary.status
         collector_exit_code = $collectorExitCode
         switch_limitation = $switchLimited
-        operator_visual_confirmation = $operatorAnswer -ceq "YES"
+        operator_visual_confirmation = (
+            $operatorEligible -and $operatorAnswer -ceq "YES"
+        )
         counter_rate_window = $identity.canary.counter_rate_window
         deltas = $deltas
         packet_gate = $packet
