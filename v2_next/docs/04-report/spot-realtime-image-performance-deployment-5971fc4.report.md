@@ -4,7 +4,7 @@
 > Candidate version: `1.0.21`
 > Build commit: `5971fc4fbdeec07ef65681a945319f0ae12d55cb`
 > Classification: `PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY`
-> Verdict: `15M_GATE_PASS_120M_PENDING`
+> Verdict: `15M_GATE_PASS_120M_TOOLING_HOLD_V1020_RESTORED`
 
 ## 1. Candidate identity
 
@@ -27,17 +27,18 @@ canary. Production promotion and external distribution are not allowed.
 |---|---|
 | Preinstall kit identity | `PASS` |
 | Existing target baseline | `PASS`, v1.0.20, one backend, port 8000 owner matched |
-| Rollback installer | `PASS`, v1.0.16 SHA-256 matched |
+| Rollback installer | `CORRECTED`, v1.0.20 `cd8cfa6...` SHA-256 matched |
 | Installed app version/commit | `PASS`, v1.0.21 / `5971fc4...` |
 | Installed `app.asar` | `PASS` |
 | Installed backend bundle | `PASS`, 1,385 files |
 | Config unchanged | `PASS` |
 | Operator-live route | `PASS`, HTTP 200 / `image/jpeg` / `operator_live` |
 
-Rollback is fixed to
-`C:\Users\user\Desktop\SmartFactory\rollback\smart-factory-logger-v2.Setup.1.0.16.exe`
+Rollback is fixed to the exact pre-deploy baseline, v1.0.20
+`cd8cfa649203494cf087206cf656dc2197107ea1`, using
+`C:\Users\user\Desktop\SmartFactory\v1020_cd8cfa6_internal_private_server_deploy_20260821_R3\smart-factory-logger-v2 Setup 1.0.20.exe`
 with SHA-256
-`42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615`.
+`F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19`.
 
 ## 3. Physical SPOT 15-minute gate
 
@@ -119,11 +120,22 @@ commit.
 | v1.0.21 installation identity | `PASS` |
 | Actual SPOT 15-minute smoke | `PASS` |
 | Commit-bound 120-minute kit | `BUILD_AND_VERIFY_PASS` |
-| Actual SPOT 120-minute canary | `PENDING` |
-| Request-rate comparison | `15M_PASS`, `120M_PENDING` |
+| Actual SPOT 120-minute canary | `INVALID_TOOLING_RUN`, stopped after 6.237 seconds |
+| Request-rate comparison | `15M_PASS`, first 120M calculation invalid |
 | old-ACK/RST risk proxy comparison | `PENDING` |
 | source-port pool comparison | `15M_PASS`, `120M_PENDING` |
 | Production promotion | `NOT_ALLOWED` |
 
-The next action is to verify and run the exact commit-bound 120-minute canary kit on the
-same installed binary and unchanged configuration.
+The first server attempt did not execute a 120-minute observation. The collector stopped
+after 6.237 seconds, while the product pre/post counter snapshots spanned 59.4678 seconds.
+The controller divided the 332-request counter delta by the collector duration and
+reported a false `53.2307/s`; the aligned installed-state window is `5.5829/s`. It also
+classified the collector tooling failure as a runtime rollback and pointed at v1.0.16
+instead of the actual v1.0.20 pre-deploy baseline. v1.0.20 `cd8cfa6...` was subsequently
+restored and validated with unchanged config, one backend/port owner, live SPOT
+connectivity, and operator-confirmed image refresh.
+
+The next action is to build and verify the corrected commit-bound kit, reinstall the
+same v1.0.21 product identity, repeat the short identity/visual gate, and only then run a
+fresh 120-minute observation. The invalid attempt is retained as incident evidence and
+must not be counted as a candidate failure or a successful canary.

@@ -73,9 +73,15 @@ $actual -ceq $expected
 - rollback 설치본은 다음 경로와 해시가 일치해야 한다.
 
 ```text
-C:\Users\user\Desktop\SmartFactory\rollback\smart-factory-logger-v2.Setup.1.0.16.exe
-42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615
+C:\Users\user\Desktop\SmartFactory\v1020_cd8cfa6_internal_private_server_deploy_20260821_R3\smart-factory-logger-v2 Setup 1.0.20.exe
+F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19
 ```
+
+키트는 `preinstall-summary.json`의 `current_version=1.0.20`과
+`health-before.json`의 `app_version=1.0.20`,
+`build_git_commit=cd8cfa649203494cf087206cf656dc2197107ea1`을 함께 검증한다.
+파일 해시가 맞더라도 이 직전 배포 기준선과 버전·commit이 다르면 preflight에서
+중단한다.
 
 - 에러 큐를 지우거나 앱을 재시작하지 않는다.
 - 같은 수집기를 동시에 두 번 실행하지 않는다.
@@ -104,13 +110,19 @@ run-spot-realtime-image-canary-120m-as-admin.cmd
 |---|---|---|
 | `SPOT_120M_GATE_PASS` | 앱·packet·source-port·화면·스위치 게이트 통과 | 증거 전달, production 승격은 별도 승인 |
 | `SPOT_120M_PASS_WITH_SWITCH_LIMITATION` | 앱·packet 게이트 통과, 스위치 원인만 미배제 | 증거 전달, 제한사항 유지 |
-| `SPOT_120M_EVIDENCE_HOLD` | packet 보존 범위나 진단 자료 불충분 | 재실행하지 말고 자료 검토 |
-| `SPOT_120M_ROLLBACK_REQUIRED` | 신규 ConnectTimeout, runtime failure, 재시작, 화면 오류 등 | 증거 보존 후 정상 종료·v1.0.16 rollback |
+| `SPOT_120M_EVIDENCE_HOLD` | 수집기 오류 또는 packet 보존 범위·진단 자료 불충분 | 제품 롤백 없이 자료 보존·검토 |
+| `SPOT_120M_ROLLBACK_REQUIRED` | 신규 ConnectTimeout, runtime failure, 재시작, 화면 오류 등 | 증거 보존 후 정상 종료·검증된 v1.0.20 rollback |
 | `SPOT_120M_PREFLIGHT_FAILED` | 수집 전 identity·권한·디스크·pktmon 조건 실패 | 원인 수정 전 실행 금지 |
 
 `same_four_tuple_reuse_interval_ms_min >= 75000`, `reset_before_response=0`,
 `source_port_reuse_violation_count=0`을 함께 사용해 늦은 ACK/RST 위험을 간접 검증한다.
 수집기는 모든 늦은 ACK의 발신 주체를 직접 확정한다고 주장하지 않는다.
+
+요청률 분자는 preflight/postflight의 SPOT 누적 카운터 차이를 사용하고, 분모는 같은
+두 installed-state 스냅샷의 `observed_at` 차이를 사용한다. packet 수집기의 내부
+실행시간은 이 요청률 분모로 사용하지 않는다. 수집기 자체 실패는 신규 ConnectTimeout,
+backend 재시작, SPOT failure counter 증가 같은 별도 runtime hard gate가 없으면
+`EVIDENCE_HOLD`이다.
 
 ## 제공할 자료
 
@@ -127,5 +139,6 @@ run-spot-realtime-image-canary-120m-as-admin.cmd
 ## 롤백
 
 `ROLLBACK REQUIRED`이면 먼저 수집 자료를 보존하고 SmartFactoryLogger를 정상 UI로
-종료한다. 그다음 위에서 해시를 확인한 v1.0.16 설치본을 실행한다. 강제 종료, 설정
+종료한다. 그다음 위에서 해시와 기준선 identity를 확인한 v1.0.20 `cd8cfa6...`
+설치본을 실행한다. 강제 종료, 설정
 수정, 에러 큐 삭제, 즉시 재수집은 하지 않는다.

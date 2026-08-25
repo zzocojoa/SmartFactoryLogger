@@ -324,6 +324,7 @@ try {
     $evidenceFiles = @(
         [ordered]@{ file = "backend-integrity-after-install.json"; sha256 = "6D077E7944C5670A6990862209C6D7A10935E13B01D920AF3D270538A5147058" },
         [ordered]@{ file = "health-after-15m.json"; sha256 = "9CD044E41D5A42AA72F94275B18AC1CBDB786AA44C5BCD0E836CF6772B883322" },
+        [ordered]@{ file = "health-before.json"; sha256 = "2E16E28BD695B5D9125EF11822E4E10DA2D422E0D1781EE72A623D1EE0A97063" },
         [ordered]@{ file = "health-before-15m.json"; sha256 = "12653336422E897764C47069F7CAE5F2C876B8B27591CDF7D52AB6ED6F982021" },
         [ordered]@{ file = "postinstall-bundle-gate.json"; sha256 = "E42CF3126CD5CC42F38918D0E64CF9C302A860FB00DD8B8030B676EF20147994" },
         [ordered]@{ file = "preinstall-summary.json"; sha256 = "06F076A09D7D659B88A92959769CD1528802EC08E3C0A13F35A6A8329FF32138" },
@@ -332,7 +333,7 @@ try {
         [ordered]@{ file = "spot-config-image-before-15m.json"; sha256 = "7E7486908045EF4898F44CA474816C647EAC1C5619EAADA6B3DA6445E5C87342" }
     )
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1021-canary-kit-v1"
+        schema_version = "spot-realtime-image-v1021-canary-kit-v2"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -350,9 +351,12 @@ try {
             config_sha256 = "6841C848A443DF91966C991707C2B21CA57C575993DCA36FACFF2592D070147E"
         }
         rollback = [ordered]@{
-            version = "1.0.16"
-            installer_file = "smart-factory-logger-v2.Setup.1.0.16.exe"
-            installer_sha256 = "42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615"
+            version = "1.0.20"
+            build_git_commit = "cd8cfa649203494cf087206cf656dc2197107ea1"
+            installer_file = "smart-factory-logger-v2 Setup 1.0.20.exe"
+            installer_sha256 = "F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19"
+            baseline_preinstall_summary_file = "preinstall-summary.json"
+            baseline_health_file = "health-before.json"
         }
         prerequisite_15m = [ordered]@{
             result = "PASS"
@@ -383,6 +387,8 @@ try {
             packet_capture_full_window_required = $true
             backend_pid_must_remain_constant = $true
             request_budget_max_per_second = 6.0
+            counter_rate_window = "installed-state-preflight-to-postflight"
+            collector_failure_without_runtime_hard_gate = "evidence-hold"
         }
         contains_installer = $false
         contains_product_binary = $false

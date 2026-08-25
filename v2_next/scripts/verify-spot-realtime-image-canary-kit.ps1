@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v1" -or
+    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v2" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.21" -or
@@ -105,8 +105,16 @@ if (
     [int]$identity.product.backend_bundle_file_count -ne 1385 -or
     $identity.product.config_sha256 -cne
         "6841C848A443DF91966C991707C2B21CA57C575993DCA36FACFF2592D070147E" -or
+    $identity.rollback.version -cne "1.0.20" -or
+    $identity.rollback.build_git_commit -cne
+        "cd8cfa649203494cf087206cf656dc2197107ea1" -or
+    $identity.rollback.installer_file -cne
+        "smart-factory-logger-v2 Setup 1.0.20.exe" -or
     $identity.rollback.installer_sha256 -cne
-        "42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615" -or
+        "F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19" -or
+    $identity.rollback.baseline_preinstall_summary_file -cne
+        "preinstall-summary.json" -or
+    $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
         "077b6b1c45b7bf6023d89ba13ecaa54d22acbe70" -or
     [int]$identity.canary.maximum_observation_minutes -ne 120 -or
@@ -116,6 +124,10 @@ if (
     -not [bool]$identity.canary.stop_on_new_spot_connecttimeout -or
     -not [bool]$identity.canary.same_four_tuple_minimum_75s_required -or
     -not [bool]$identity.canary.packet_capture_full_window_required -or
+    $identity.canary.counter_rate_window -cne
+        "installed-state-preflight-to-postflight" -or
+    $identity.canary.collector_failure_without_runtime_hard_gate -cne
+        "evidence-hold" -or
     [bool]$identity.contains_installer -or
     [bool]$identity.contains_product_binary -or
     [bool]$identity.changes_application_or_settings -or
@@ -131,6 +143,7 @@ if ($identity.tooling_source_commit -notmatch "^[0-9a-f]{40}$") {
 $expectedEvidence = [ordered]@{
     "backend-integrity-after-install.json" = "6D077E7944C5670A6990862209C6D7A10935E13B01D920AF3D270538A5147058"
     "health-after-15m.json" = "9CD044E41D5A42AA72F94275B18AC1CBDB786AA44C5BCD0E836CF6772B883322"
+    "health-before.json" = "2E16E28BD695B5D9125EF11822E4E10DA2D422E0D1781EE72A623D1EE0A97063"
     "health-before-15m.json" = "12653336422E897764C47069F7CAE5F2C876B8B27591CDF7D52AB6ED6F982021"
     "postinstall-bundle-gate.json" = "E42CF3126CD5CC42F38918D0E64CF9C302A860FB00DD8B8030B676EF20147994"
     "preinstall-summary.json" = "06F076A09D7D659B88A92959769CD1528802EC08E3C0A13F35A6A8329FF32138"

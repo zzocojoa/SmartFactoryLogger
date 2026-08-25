@@ -59,6 +59,8 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("Progress appears every 30 seconds", source)
         self.assertIn('if "%SFL_CANARY_EXIT%"=="10"', source)
         self.assertIn("ROLLBACK REQUIRED", source)
+        self.assertIn("verified v1.0.20 cd8cfa6 installer", source)
+        self.assertNotIn("v1.0.16", source)
 
     def test_builder_binds_product_core_and_progress_contract(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
@@ -79,6 +81,22 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("--untracked-files=no", source)
         self.assertIn("contains_installer = $false", source)
         self.assertIn("changes_application_or_settings = $false", source)
+        self.assertIn(
+            'schema_version = "spot-realtime-image-v1021-canary-kit-v2"',
+            source,
+        )
+        self.assertIn(
+            'version = "1.0.20"',
+            source,
+        )
+        self.assertIn(
+            'build_git_commit = "cd8cfa649203494cf087206cf656dc2197107ea1"',
+            source,
+        )
+        self.assertIn(
+            'counter_rate_window = "installed-state-preflight-to-postflight"',
+            source,
+        )
 
     def test_controller_has_runtime_packet_and_identity_gates(self) -> None:
         source = CONTROLLER.read_text(encoding="utf-8")
@@ -94,6 +112,10 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "SPOT_120M_EVIDENCE_HOLD",
             "SPOT_120M_PASS_WITH_SWITCH_LIMITATION",
             "production_promotion_allowed = $false",
+            "counter_window_elapsed_seconds",
+            "Get-CollectorEvidenceHolds",
+            "collector failure was not classified as evidence hold",
+            "mismatched rollback baseline was accepted",
         )
         for fragment in required_fragments:
             self.assertIn(fragment, source)
@@ -104,13 +126,28 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         for expected in (
             "5971fc4fbdeec07ef65681a945319f0ae12d55cb",
             "01CF544C999FB21FADB7F36965DC35FB9E8AEE36D1EEBD3319A1EB7296AD191A",
-            "42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615",
+            "cd8cfa649203494cf087206cf656dc2197107ea1",
+            "F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19",
             "464BF0A540133C5165B7E550430EDA9EDAA07FA866481B43FAD2B0392016A4F8",
+            "2E16E28BD695B5D9125EF11822E4E10DA2D422E0D1781EE72A623D1EE0A97063",
         ):
             self.assertIn(expected, verifier)
+        for source in (
+            BUILDER.read_text(encoding="utf-8"),
+            verifier,
+            guide,
+            LAUNCHER.read_text(encoding="utf-8"),
+        ):
+            self.assertNotIn("1.0.16", source)
+            self.assertNotIn(
+                "42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615",
+                source,
+            )
         self.assertIn("30초마다", guide)
         self.assertIn("추가 호출하지 않으므로", guide)
         self.assertIn("PASS_WITH_SWITCH_LIMITATION", guide)
+        self.assertIn("installed-state", guide)
+        self.assertIn("EVIDENCE_HOLD", guide)
 
 
 if __name__ == "__main__":

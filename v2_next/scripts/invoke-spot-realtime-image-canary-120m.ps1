@@ -5,8 +5,9 @@ param(
     [string]$ReleaseKitRoot = "",
 
     [string]$RollbackInstallerPath = (
-        "C:\Users\user\Desktop\SmartFactory\rollback\" +
-        "smart-factory-logger-v2.Setup.1.0.16.exe"
+        "C:\Users\user\Desktop\SmartFactory\" +
+        "v1020_cd8cfa6_internal_private_server_deploy_20260821_R3\" +
+        "smart-factory-logger-v2 Setup 1.0.20.exe"
     ),
 
     [switch]$PreflightOnly,
@@ -56,6 +57,127 @@ function Assert-FileSha256 {
         throw "$Label SHA256 mismatch"
     }
     return $actual
+}
+
+function Assert-RollbackBaselineEvidence {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Identity,
+
+        [Parameter(Mandatory = $true)]
+        [object]$PreinstallSummary,
+
+        [Parameter(Mandatory = $true)]
+        [object]$BaselineHealth
+    )
+
+    $rollbackVersion = [string](Get-RequiredProperty `
+        -InputObject $Identity.rollback `
+        -Name "version" `
+        -Context "rollback identity")
+    $rollbackCommit = [string](Get-RequiredProperty `
+        -InputObject $Identity.rollback `
+        -Name "build_git_commit" `
+        -Context "rollback identity")
+    $preinstallVersion = [string](Get-RequiredProperty `
+        -InputObject $PreinstallSummary `
+        -Name "current_version" `
+        -Context "preinstall summary")
+    $healthVersion = [string](Get-RequiredProperty `
+        -InputObject $BaselineHealth `
+        -Name "app_version" `
+        -Context "baseline health")
+    $spotTemperature = Get-RequiredProperty `
+        -InputObject $BaselineHealth `
+        -Name "spot_temperature" `
+        -Context "baseline health"
+    $healthCommit = [string](Get-RequiredProperty `
+        -InputObject $spotTemperature `
+        -Name "build_git_commit" `
+        -Context "baseline health spot_temperature")
+
+    if ($rollbackVersion -ceq [string]$Identity.product.version) {
+        throw "rollback version must differ from the v1.0.21 candidate"
+    }
+    if ($preinstallVersion -cne $rollbackVersion) {
+        throw "rollback version does not match the preinstall baseline"
+    }
+    if ($healthVersion -cne $rollbackVersion) {
+        throw "rollback version does not match baseline health"
+    }
+    if ($healthCommit -cne $rollbackCommit) {
+        throw "rollback commit does not match baseline health"
+    }
+}
+
+function Get-CounterWindowElapsedSeconds {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Before,
+
+        [Parameter(Mandatory = $true)]
+        [object]$After
+    )
+
+    $beforeText = [string](Get-RequiredProperty `
+        -InputObject $Before `
+        -Name "observed_at" `
+        -Context "preflight installed state")
+    $afterText = [string](Get-RequiredProperty `
+        -InputObject $After `
+        -Name "observed_at" `
+        -Context "postflight installed state")
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    $styles = [Globalization.DateTimeStyles]::RoundtripKind
+    $beforeAt = [DateTimeOffset]::Parse($beforeText, $culture, $styles)
+    $afterAt = [DateTimeOffset]::Parse($afterText, $culture, $styles)
+    $elapsedSeconds = ($afterAt - $beforeAt).TotalSeconds
+    if ($elapsedSeconds -le 0) {
+        throw "invalid SPOT counter observation window"
+    }
+    return [double]$elapsedSeconds
+}
+
+function Get-CollectorEvidenceHolds {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$FieldSummary,
+
+        [Parameter(Mandatory = $true)]
+        [int]$CollectorExitCode
+    )
+
+    $holds = New-Object System.Collections.Generic.List[string]
+    if ($CollectorExitCode -notin @(0, 2)) {
+        [void]$holds.Add("collector-exit-$CollectorExitCode")
+    }
+    $statusProperty = $FieldSummary.PSObject.Properties["status"]
+    if ($null -eq $statusProperty -or $null -eq $statusProperty.Value) {
+        [void]$holds.Add("collector-status-missing")
+    } elseif ([string]$statusProperty.Value -notin @("COMPLETED", "PARTIAL")) {
+        [void]$holds.Add(
+            "collector-status-$([string]$statusProperty.Value)".ToLowerInvariant()
+        )
+    }
+    return @($holds.ToArray())
+}
+
+function Get-CanaryExceptionResultName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$CollectionStarted,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Phase
+    )
+
+    if (-not $CollectionStarted) {
+        return "SPOT_120M_PREFLIGHT_FAILED"
+    }
+    if ($Phase -ceq "postflight-runtime") {
+        return "SPOT_120M_ROLLBACK_REQUIRED"
+    }
+    return "SPOT_120M_EVIDENCE_HOLD"
 }
 
 function ConvertTo-SafeImageSnapshot {
@@ -285,6 +407,25 @@ function Assert-EvidenceFiles {
             -ExpectedSha256 ([string]$entry.sha256) `
             -Label "15-minute evidence $($entry.file)" | Out-Null
     }
+
+    $preinstallSummaryPath = Join-Path `
+        $EvidenceRoot `
+        ([string]$Identity.rollback.baseline_preinstall_summary_file)
+    $baselineHealthPath = Join-Path `
+        $EvidenceRoot `
+        ([string]$Identity.rollback.baseline_health_file)
+    $preinstallSummary = Get-Content `
+        -LiteralPath $preinstallSummaryPath `
+        -Raw |
+        ConvertFrom-Json
+    $baselineHealth = Get-Content `
+        -LiteralPath $baselineHealthPath `
+        -Raw |
+        ConvertFrom-Json
+    Assert-RollbackBaselineEvidence `
+        -Identity $Identity `
+        -PreinstallSummary $preinstallSummary `
+        -BaselineHealth $baselineHealth
 }
 
 function Assert-PostflightDeltas {
@@ -293,10 +434,7 @@ function Assert-PostflightDeltas {
         [object]$Before,
 
         [Parameter(Mandatory = $true)]
-        [object]$After,
-
-        [Parameter(Mandatory = $true)]
-        [double]$ElapsedSeconds
+        [object]$After
     )
 
     if ($After.backend_pid -ne $Before.backend_pid) {
@@ -321,11 +459,17 @@ function Assert-PostflightDeltas {
     if ($successDelta -gt $transportDelta) {
         throw "SPOT transport counter relationship is invalid"
     }
-    if ($ElapsedSeconds -le 0) {
-        throw "invalid 120-minute elapsed duration"
-    }
-    $transportRate = [math]::Round($transportDelta / $ElapsedSeconds, 4)
-    $imageRate = [math]::Round($imageDelta / $ElapsedSeconds, 4)
+    $counterWindowElapsedSeconds = Get-CounterWindowElapsedSeconds `
+        -Before $Before `
+        -After $After
+    $transportRate = [math]::Round(
+        $transportDelta / $counterWindowElapsedSeconds,
+        4
+    )
+    $imageRate = [math]::Round(
+        $imageDelta / $counterWindowElapsedSeconds,
+        4
+    )
     if ($transportRate -gt 6.0) {
         throw "SPOT average transport rate exceeded 6/s: $transportRate"
     }
@@ -337,6 +481,7 @@ function Assert-PostflightDeltas {
         transport_started_delta = $transportDelta
         transport_success_delta = $successDelta
         image_upstream_delta = $imageDelta
+        counter_window_elapsed_seconds = $counterWindowElapsedSeconds
         transport_rate_per_sec = $transportRate
         image_upstream_rate_per_sec = $imageRate
     }
@@ -481,6 +626,7 @@ function Invoke-SelfTest {
     Assert-ImageGate -Image $snapshot -Stage "self-test"
 
     $field = [pscustomobject]@{
+        status = "COMPLETED"
         event_trigger_detected = $false
         event_trigger_monitor_error_count = 0
         packet_direction_preflight = "passed"
@@ -518,6 +664,103 @@ function Invoke-SelfTest {
     $packet = Test-PacketEvidence -FieldSummary $field -FramingSummary $framing
     if ("same-four-tuple-reuse-under-75s" -notin $packet.hard_failures) {
         throw "self-test short reuse interval was not rejected"
+    }
+
+    $before = [pscustomobject]@{
+        observed_at = "2026-08-21T20:12:04.2365692+09:00"
+        backend_pid = 10
+        electron_path = "C:\Program Files\SmartFactory\smart-factory.exe"
+        image = [pscustomobject]@{
+            source_port_transport_started_count = 21094
+            source_port_transport_success_count = 21094
+            image_upstream_request_count = 9822
+        }
+    }
+    $after = [pscustomobject]@{
+        observed_at = "2026-08-21T20:13:03.7043697+09:00"
+        backend_pid = 10
+        electron_path = "C:\Program Files\SmartFactory\smart-factory.exe"
+        image = [pscustomobject]@{
+            source_port_transport_started_count = 21426
+            source_port_transport_success_count = 21426
+            image_upstream_request_count = 9986
+        }
+    }
+    $deltas = Assert-PostflightDeltas -Before $before -After $after
+    if (
+        [math]::Abs(
+            [double]$deltas.counter_window_elapsed_seconds - 59.4678005
+        ) -gt 0.0001 -or
+        [double]$deltas.transport_rate_per_sec -ne 5.5829 -or
+        [double]$deltas.image_upstream_rate_per_sec -ne 2.7578
+    ) {
+        throw "self-test counter-window rate calculation mismatch"
+    }
+    $after.image.source_port_transport_started_count = 21452
+    $after.image.source_port_transport_success_count = 21452
+    $rateLimitRejected = $false
+    try {
+        Assert-PostflightDeltas -Before $before -After $after | Out-Null
+    } catch {
+        $rateLimitRejected = $_.Exception.Message -like (
+            "SPOT average transport rate exceeded 6/s:*"
+        )
+    }
+    if (-not $rateLimitRejected) {
+        throw "self-test transport rate limit was not enforced"
+    }
+
+    $field.status = "FAILED"
+    $collectorHolds = @(
+        Get-CollectorEvidenceHolds -FieldSummary $field -CollectorExitCode 1
+    )
+    if (
+        "collector-exit-1" -notin $collectorHolds -or
+        "collector-status-failed" -notin $collectorHolds
+    ) {
+        throw "self-test collector failure was not classified as evidence hold"
+    }
+    if (
+        (Get-CanaryExceptionResultName `
+            -CollectionStarted $true `
+            -Phase "collection") -cne "SPOT_120M_EVIDENCE_HOLD" -or
+        (Get-CanaryExceptionResultName `
+            -CollectionStarted $true `
+            -Phase "postflight-runtime") -cne "SPOT_120M_ROLLBACK_REQUIRED"
+    ) {
+        throw "self-test canary exception classification mismatch"
+    }
+
+    $identity = [pscustomobject]@{
+        product = [pscustomobject]@{ version = "1.0.21" }
+        rollback = [pscustomobject]@{
+            version = "1.0.20"
+            build_git_commit = "cd8cfa649203494cf087206cf656dc2197107ea1"
+        }
+    }
+    $preinstall = [pscustomobject]@{ current_version = "1.0.20" }
+    $baselineHealth = [pscustomobject]@{
+        app_version = "1.0.20"
+        spot_temperature = [pscustomobject]@{
+            build_git_commit = "cd8cfa649203494cf087206cf656dc2197107ea1"
+        }
+    }
+    Assert-RollbackBaselineEvidence `
+        -Identity $identity `
+        -PreinstallSummary $preinstall `
+        -BaselineHealth $baselineHealth
+    $preinstall.current_version = "1.0.16"
+    $mismatchRejected = $false
+    try {
+        Assert-RollbackBaselineEvidence `
+            -Identity $identity `
+            -PreinstallSummary $preinstall `
+            -BaselineHealth $baselineHealth
+    } catch {
+        $mismatchRejected = $true
+    }
+    if (-not $mismatchRejected) {
+        throw "self-test mismatched rollback baseline was accepted"
     }
     Write-Output "SPOT_REALTIME_IMAGE_CANARY_120M_SELF_TEST_PASS"
 }
@@ -566,10 +809,16 @@ try {
         -Path (Join-Path $ReleaseKitRoot $identity.product.installer_file) `
         -ExpectedSha256 $identity.product.installer_sha256 `
         -Label "v1.0.21 installer" | Out-Null
+    if (
+        (Split-Path -Leaf $RollbackInstallerPath) -cne
+            [string]$identity.rollback.installer_file
+    ) {
+        throw "rollback installer file name does not match the verified baseline"
+    }
     Assert-FileSha256 `
         -Path $RollbackInstallerPath `
         -ExpectedSha256 $identity.rollback.installer_sha256 `
-        -Label "v1.0.16 rollback installer" | Out-Null
+        -Label "v1.0.20 rollback installer" | Out-Null
     Assert-EvidenceFiles -Identity $identity -EvidenceRoot $evidenceRoot
 
     $before = Get-InstalledState `
@@ -600,6 +849,10 @@ try {
             build_commit = $before.build_git_commit
             backend_pid = $before.backend_pid
             config_sha256 = $before.config_sha256
+            rollback_version = $identity.rollback.version
+            rollback_build_commit = $identity.rollback.build_git_commit
+            rollback_installer = $RollbackInstallerPath
+            rollback_sha256 = $identity.rollback.installer_sha256
             evidence_path = $controlRoot
             product_changes_performed = $false
         }
@@ -647,7 +900,7 @@ try {
     $fieldSummary = Get-Content -LiteralPath $fieldSummaryPath -Raw | ConvertFrom-Json
     $framingSummary = Get-Content -LiteralPath $framingSummaryPath -Raw | ConvertFrom-Json
 
-    $phase = "postflight"
+    $phase = "postflight-runtime"
     $after = Get-InstalledState `
         -Identity $identity `
         -IntegrityModulePath $integrityModulePath `
@@ -657,14 +910,20 @@ try {
         Set-Content -LiteralPath (Join-Path $controlRoot "canary-postflight.json") -Encoding UTF8
     $deltas = Assert-PostflightDeltas `
         -Before $before `
-        -After $after `
-        -ElapsedSeconds ([double]$fieldSummary.observation_elapsed_seconds)
+        -After $after
+    $phase = "evidence-evaluation"
     $packet = Test-PacketEvidence `
         -FieldSummary $fieldSummary `
         -FramingSummary $framingSummary
 
-    if ($collectorExitCode -notin @(0, 2)) {
-        $packet.hard_failures += "collector-exit-$collectorExitCode"
+    foreach (
+        $collectorHold in @(
+            Get-CollectorEvidenceHolds `
+                -FieldSummary $fieldSummary `
+                -CollectorExitCode $collectorExitCode
+        )
+    ) {
+        $packet.evidence_holds += $collectorHold
     }
 
     $operatorAnswer = Read-Host (
@@ -707,6 +966,7 @@ try {
         collector_exit_code = $collectorExitCode
         switch_limitation = $switchLimited
         operator_visual_confirmation = $operatorAnswer -ceq "YES"
+        counter_rate_window = $identity.canary.counter_rate_window
         deltas = $deltas
         packet_gate = $packet
         packet_evidence_run = $runRoot
@@ -714,6 +974,8 @@ try {
             $runRoot `
             ("{0}_sanitized_share.zip" -f $fieldSummary.run_id)
         sanitized_zip_sha256_file = Join-Path $runRoot "sanitized_share_sha256.txt"
+        rollback_version = $identity.rollback.version
+        rollback_build_commit = $identity.rollback.build_git_commit
         rollback_installer = $RollbackInstallerPath
         rollback_sha256 = $identity.rollback.installer_sha256
         control_evidence_path = $controlRoot
@@ -733,18 +995,20 @@ try {
     }
     exit 0
 } catch {
+    $failureResult = Get-CanaryExceptionResultName `
+        -CollectionStarted $collectionStarted `
+        -Phase $phase
     $failure = [pscustomobject][ordered]@{
-        result = if ($collectionStarted) {
-            "SPOT_120M_ROLLBACK_REQUIRED"
-        } else {
-            "SPOT_120M_PREFLIGHT_FAILED"
-        }
+        result = $failureResult
         phase = $phase
         failed_at = (Get-Date).ToString("o")
         error_type = $_.Exception.GetType().FullName
         error_message = $_.Exception.Message
         collection_started = $collectionStarted
+        rollback_required = $failureResult -ceq "SPOT_120M_ROLLBACK_REQUIRED"
         product_changes_performed_by_canary = $false
+        rollback_version = $identity.rollback.version
+        rollback_build_commit = $identity.rollback.build_git_commit
         rollback_installer = $RollbackInstallerPath
         rollback_sha256 = $identity.rollback.installer_sha256
         control_evidence_path = $controlRoot
@@ -752,8 +1016,11 @@ try {
     $failure | ConvertTo-Json -Depth 8 |
         Set-Content -LiteralPath (Join-Path $controlRoot "canary-120m-failure.json") -Encoding UTF8
     $failure | Format-List | Out-String | Write-Host
-    if ($collectionStarted) {
+    if ($failureResult -ceq "SPOT_120M_ROLLBACK_REQUIRED") {
         exit 10
+    }
+    if ($failureResult -ceq "SPOT_120M_EVIDENCE_HOLD") {
+        exit 3
     }
     exit 1
 }
