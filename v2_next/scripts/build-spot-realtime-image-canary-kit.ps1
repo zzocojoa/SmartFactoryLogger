@@ -138,6 +138,12 @@ $collectorProcess = [Diagnostics.Process]::GetCurrentProcess()
       )
       $failureReasonCode = if (@(
           $errorMessages | Where-Object {
+            $_ -like "*trigger evidence path exceeds*"
+          }
+        ).Count -gt 0) {
+        "trigger-evidence-path-too-long"
+      } elseif (@(
+          $errorMessages | Where-Object {
             $_ -like "*could not read its baseline*"
           }
         ).Count -gt 0) {
@@ -217,6 +223,38 @@ $collectorProcess = [Diagnostics.Process]::GetCurrentProcess()
 
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     [IO.File]::WriteAllText($CollectorPath, $source, $utf8)
+}
+
+function Add-TriggerMonitorPathBudgetContract {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$MonitorPath
+    )
+
+    $source = [IO.File]::ReadAllText($MonitorPath).Replace("`r`n", "`n")
+    $temporaryPathAnchor = @'
+    $temporaryPath = '{0}.{1}.tmp' -f $Path, [guid]::NewGuid().ToString('N')
+    try {
+'@
+    $temporaryPathReplacement = @'
+    $temporaryPath = '{0}.{1}.tmp' -f $Path, [guid]::NewGuid().ToString('N')
+    $pathLimitChars = 240
+    if ($temporaryPath.Length -gt $pathLimitChars) {
+        throw (
+            'The trigger evidence path exceeds the Windows PowerShell safe limit. ' +
+            'chars={0} limit={1}' -f $temporaryPath.Length, $pathLimitChars
+        )
+    }
+    try {
+'@
+    $source = Replace-TextExactlyOnce `
+        -Source $source `
+        -OldText $temporaryPathAnchor `
+        -NewText $temporaryPathReplacement `
+        -Label "Trigger monitor path budget"
+
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($MonitorPath, $source, $utf8)
 }
 
 function Add-CanaryProgressContract {
@@ -550,6 +588,8 @@ try {
     }
     Add-TriggerMonitorFailureContract `
         -CollectorPath (Join-Path $stagingRoot "collect_operational_observability.ps1")
+    Add-TriggerMonitorPathBudgetContract `
+        -MonitorPath (Join-Path $stagingRoot "monitor-spot-connecttimeout-trigger.ps1")
     Add-CanaryProgressContract `
         -CollectorPath (Join-Path $stagingRoot "collect-spot-connecttimeout-evidence.ps1")
 
@@ -629,7 +669,8 @@ try {
             framing_schema = "spot-http-framing-evidence-v5"
             controlled_delta = (
                 "30-second local clock/process progress plus fail-closed trigger " +
-                "monitor failure evidence export"
+                "monitor failure evidence export, short runtime evidence root, " +
+                "and Windows PowerShell path-budget gate"
             )
             product_request_behavior_changed = $false
         }
@@ -648,6 +689,8 @@ try {
             request_budget_max_per_second = 6.0
             counter_rate_window = "installed-state-preflight-to-postflight"
             collector_failure_without_runtime_hard_gate = "evidence-hold"
+            runtime_evidence_default_root = "%LOCALAPPDATA%\SFLCanary"
+            runtime_evidence_path_limit_chars = 240
         }
         contains_installer = $false
         contains_product_binary = $false

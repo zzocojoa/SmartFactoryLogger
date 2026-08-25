@@ -10,6 +10,8 @@ param(
         "smart-factory-logger-v2 Setup 1.0.20.exe"
     ),
 
+    [string]$RuntimeEvidenceBase = "",
+
     [switch]$PreflightOnly,
 
     [switch]$SelfTest
@@ -627,6 +629,66 @@ function Test-PacketEvidence {
     }
 }
 
+function Resolve-CanaryRuntimeEvidenceBase {
+    param(
+        [string]$ExplicitPath = ""
+    )
+
+    $candidate = $ExplicitPath
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+            throw "LOCALAPPDATA is unavailable for the private canary runtime evidence root"
+        }
+        $candidate = Join-Path $env:LOCALAPPDATA "SFLCanary"
+    }
+    if (-not [IO.Path]::IsPathRooted($candidate)) {
+        throw "runtime evidence base must be an absolute path"
+    }
+
+    $fullPath = [IO.Path]::GetFullPath($candidate).TrimEnd("\")
+    $volumeRoot = [IO.Path]::GetPathRoot($fullPath).TrimEnd("\")
+    if ($fullPath -ceq $volumeRoot) {
+        throw "runtime evidence base must not be a volume root"
+    }
+    return $fullPath
+}
+
+function Get-ProjectedRuntimeEvidencePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$EvidenceBase
+    )
+
+    return Join-Path $EvidenceBase (
+        "runtime_validation_yyyyMMdd_HHmmss\raw_private\app\" +
+        "operational_observability_yyyyMMdd_HHmmss\raw\" +
+        "trigger_baseline_observability_errors.json." +
+        "ffffffffffffffffffffffffffffffff.tmp"
+    )
+}
+
+function Assert-CanaryRuntimeEvidencePathBudget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$EvidenceBase,
+
+        [ValidateRange(200, 259)]
+        [int]$MaxPathChars = 240
+    )
+
+    $projectedPath = Get-ProjectedRuntimeEvidencePath -EvidenceBase $EvidenceBase
+    if ($projectedPath.Length -gt $MaxPathChars) {
+        throw (
+            "trigger-evidence-path-too-long: projected runtime evidence path " +
+            "chars={0} limit={1} base={2}" -f
+                $projectedPath.Length,
+                $MaxPathChars,
+                $EvidenceBase
+        )
+    }
+    return $projectedPath
+}
+
 function Invoke-SelfTest {
     $image = [pscustomobject]@{
         source_port_policy_version = "spot-source-port-quarantine-v2"
@@ -815,6 +877,31 @@ function Invoke-SelfTest {
     if (-not $mismatchRejected) {
         throw "self-test mismatched rollback baseline was accepted"
     }
+
+    $shortRuntimeEvidenceBase = Resolve-CanaryRuntimeEvidenceBase `
+        -ExplicitPath "C:\SFLCanary"
+    $projectedRuntimeEvidencePath = Assert-CanaryRuntimeEvidencePathBudget `
+        -EvidenceBase $shortRuntimeEvidenceBase
+    if (
+        $shortRuntimeEvidenceBase -cne "C:\SFLCanary" -or
+        $projectedRuntimeEvidencePath.Length -gt 240
+    ) {
+        throw "self-test short runtime evidence path was rejected"
+    }
+    $longRuntimeEvidenceBase = "C:\" + (("x" * 220) -join "")
+    $longRuntimeEvidenceRejected = $false
+    try {
+        Assert-CanaryRuntimeEvidencePathBudget `
+            -EvidenceBase $longRuntimeEvidenceBase |
+            Out-Null
+    } catch {
+        $longRuntimeEvidenceRejected = $_.Exception.Message -like (
+            "trigger-evidence-path-too-long:*"
+        )
+    }
+    if (-not $longRuntimeEvidenceRejected) {
+        throw "self-test long runtime evidence path was accepted"
+    }
     Write-Output "SPOT_REALTIME_IMAGE_CANARY_120M_SELF_TEST_PASS"
 }
 
@@ -841,7 +928,12 @@ $configPath = Join-Path $env:APPDATA "SmartFactoryLogger\config.ini"
 $integrityModulePath = Join-Path $KitRoot "backend_bundle_integrity.psm1"
 $collectorPath = Join-Path $KitRoot "collect-spot-connecttimeout-evidence.ps1"
 $framingAnalyzerPath = Join-Path $KitRoot "analyze-spot-http-framing.ps1"
-$canaryEvidenceBase = Join-Path $evidenceRoot "canary-120m"
+$runtimeEvidencePathLimitChars = 240
+$canaryEvidenceBase = Resolve-CanaryRuntimeEvidenceBase `
+    -ExplicitPath $RuntimeEvidenceBase
+$projectedRuntimeEvidencePath = Get-ProjectedRuntimeEvidencePath `
+    -EvidenceBase $canaryEvidenceBase
+$runtimeEvidenceProjectedPathChars = $projectedRuntimeEvidencePath.Length
 $controlRoot = Join-Path `
     $evidenceRoot `
     ("canary-control-{0}" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
@@ -850,6 +942,11 @@ New-Item -ItemType Directory -Path $controlRoot -Force | Out-Null
 $phase = "preflight"
 $collectionStarted = $false
 try {
+    Assert-CanaryRuntimeEvidencePathBudget `
+        -EvidenceBase $canaryEvidenceBase `
+        -MaxPathChars $runtimeEvidencePathLimitChars |
+        Out-Null
+
     & powershell.exe -NoProfile -ExecutionPolicy Bypass `
         -File (Join-Path $KitRoot "verify-spot-realtime-image-canary-kit.ps1") `
         -KitRoot $KitRoot `
@@ -907,6 +1004,9 @@ try {
             rollback_installer = $RollbackInstallerPath
             rollback_sha256 = $identity.rollback.installer_sha256
             evidence_path = $controlRoot
+            runtime_evidence_base = $canaryEvidenceBase
+            runtime_evidence_projected_path_chars = $runtimeEvidenceProjectedPathChars
+            runtime_evidence_path_limit_chars = $runtimeEvidencePathLimitChars
             product_changes_performed = $false
         }
         exit 0
@@ -1052,6 +1152,9 @@ try {
         rollback_installer = $RollbackInstallerPath
         rollback_sha256 = $identity.rollback.installer_sha256
         control_evidence_path = $controlRoot
+        runtime_evidence_base = $canaryEvidenceBase
+        runtime_evidence_projected_path_chars = $runtimeEvidenceProjectedPathChars
+        runtime_evidence_path_limit_chars = $runtimeEvidencePathLimitChars
     }
     $result | ConvertTo-Json -Depth 12 |
         Set-Content -LiteralPath (Join-Path $controlRoot "canary-120m-gate.json") -Encoding UTF8
@@ -1085,6 +1188,9 @@ try {
         rollback_installer = $RollbackInstallerPath
         rollback_sha256 = $identity.rollback.installer_sha256
         control_evidence_path = $controlRoot
+        runtime_evidence_base = $canaryEvidenceBase
+        runtime_evidence_projected_path_chars = $runtimeEvidenceProjectedPathChars
+        runtime_evidence_path_limit_chars = $runtimeEvidencePathLimitChars
     }
     $failure | ConvertTo-Json -Depth 8 |
         Set-Content -LiteralPath (Join-Path $controlRoot "canary-120m-failure.json") -Encoding UTF8

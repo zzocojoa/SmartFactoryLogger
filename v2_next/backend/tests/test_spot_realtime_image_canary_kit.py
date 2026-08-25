@@ -105,7 +105,21 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "trigger_monitor_failure.json",
             "spot-connecttimeout-trigger-monitor-failure-v1",
             "trigger-baseline-read-failed",
+            "trigger-evidence-path-too-long",
             "trigger_monitor_failure_reason_code",
+        ):
+            self.assertIn(fragment, source)
+
+    def test_controller_uses_a_short_fail_closed_runtime_evidence_root(self) -> None:
+        source = CONTROLLER.read_text(encoding="utf-8")
+        for fragment in (
+            "RuntimeEvidenceBase",
+            "LOCALAPPDATA",
+            "SFLCanary",
+            "Get-ProjectedRuntimeEvidencePath",
+            "Assert-CanaryRuntimeEvidencePathBudget",
+            "runtime_evidence_projected_path_chars",
+            "runtime_evidence_path_limit_chars",
         ):
             self.assertIn(fragment, source)
 

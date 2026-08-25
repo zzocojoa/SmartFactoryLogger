@@ -245,6 +245,54 @@ def assert_failure_evidence_path(collector: Path, monitor: Path) -> None:
         shutil.rmtree(temp_root)
 
 
+def assert_long_output_path_failure_evidence(collector: Path, monitor: Path) -> None:
+    temp_root = Path(tempfile.mkdtemp(prefix="sfl-trigger-long-path-"))
+    padding_length = max(1, 176 - len(str(temp_root)) - 1)
+    output_root = temp_root / ("x" * padding_length)
+    output_root.mkdir()
+    signal_path = output_root / "capture_stop_signal.json"
+    server, thread = start_server(
+        invalid_error_baseline=False,
+        slow_health=False,
+    )
+    try:
+        completed = run_collector(
+            collector=collector,
+            monitor=monitor,
+            api_base=f"http://127.0.0.1:{server.server_port}",
+            output_root=output_root,
+            signal_path=signal_path,
+            duration_seconds=5,
+        )
+        if completed.returncode == 0:
+            raise AssertionError("unsafe long evidence path unexpectedly passed")
+        sessions = sorted(output_root.glob("operational_observability_*"))
+        if len(sessions) != 1:
+            raise AssertionError("long-path failure session was not retained once")
+        raw_root = sessions[0] / "raw"
+        safe = json.loads(
+            (raw_root / "trigger_monitor_failure.json").read_text(
+                encoding="utf-8-sig"
+            )
+        )
+        raw = json.loads(
+            (raw_root / "trigger_monitor_failure_raw.json").read_text(
+                encoding="utf-8-sig"
+            )
+        )
+        if safe["reason_code"] != "trigger-evidence-path-too-long":
+            raise AssertionError(
+                f"long path was not classified safely: {safe['reason_code']}"
+            )
+        if "trigger evidence path exceeds" not in json.dumps(raw).lower():
+            raise AssertionError("raw long-path evidence omitted the root cause")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        shutil.rmtree(temp_root)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--collector-path", required=True, type=Path)
@@ -255,9 +303,10 @@ def main() -> None:
 
     assert_success_path(collector, monitor)
     assert_failure_evidence_path(collector, monitor)
+    assert_long_output_path_failure_evidence(collector, monitor)
     print(
         "TRIGGER_COLLECTOR_INTEGRATION_PASS "
-        "success_path=true failure_evidence=true"
+        "success_path=true failure_evidence=true long_path_fail_closed=true"
     )
 
 

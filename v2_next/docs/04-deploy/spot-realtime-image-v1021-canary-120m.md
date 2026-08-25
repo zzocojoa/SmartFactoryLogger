@@ -99,6 +99,12 @@ run-spot-realtime-image-canary-120m-as-admin.cmd
 않는다. 정상 실행 중에는 앱의 평상시 화면을 유지하고 탭 추가, 반복 새로고침, 부하
 시험을 하지 않는다.
 
+런타임 수집 자료는 Windows PowerShell 5.1의 장문 경로 실패를 피하기 위해 기본적으로
+`%LOCALAPPDATA%\SFLCanary` 아래에 저장한다. preflight는 가장 긴 임시 증거 경로를
+미리 계산하며 240자를 초과하면 `trigger-evidence-path-too-long`으로 수집 전에
+중단한다. 이 경로에는 비식별 처리 전 자료가 포함될 수 있으므로 서버 사용자 계정의
+로컬 폴더에 그대로 보존한다.
+
 관리형 스위치 화면을 사용할 수 있으면 안내되는 폴더에 서버 포트와 SPOT 포트의
 시작·종료 RX/TX, error, discard, CRC, link 상태를 저장한다. 접근 권한이나 관리
 화면 자체가 없을 때만 `UNAVAILABLE`을 입력한다. 이 경우 런타임과 packet 검증은
@@ -128,8 +134,8 @@ backend 재시작, SPOT failure counter 증가 같은 별도 runtime hard gate�
 
 실행 후 다음 자료를 전달한다.
 
-1. `runtime_validation_*_sanitized_share.zip`
-2. 같은 폴더의 `sanitized_share_sha256.txt`
+1. `%LOCALAPPDATA%\SFLCanary\runtime_validation_*\runtime_validation_*_sanitized_share.zip`
+2. 같은 실행 폴더의 `sanitized_share_sha256.txt`
 3. `server-evidence\20260821-190022\canary-control-*` 폴더
 4. 최종 CMD 화면
 
