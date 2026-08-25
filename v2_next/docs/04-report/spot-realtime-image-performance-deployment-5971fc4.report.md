@@ -1,6 +1,6 @@
 # SPOT realtime image v1.0.21 deployment gate report
 
-> Updated: 2026-08-21
+> Updated: 2026-08-25
 > Candidate version: `1.0.21`
 > Build commit: `5971fc4fbdeec07ef65681a945319f0ae12d55cb`
 > Classification: `PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY`
@@ -79,6 +79,7 @@ cap remains a log-review coverage limitation and must not be reused as proof for
 | `backend-integrity-after-install.json` | `6D077E7944C5670A6990862209C6D7A10935E13B01D920AF3D270538A5147058` |
 | `postinstall-bundle-gate.json` | `E42CF3126CD5CC42F38918D0E64CF9C302A860FB00DD8B8030B676EF20147994` |
 | `preinstall-summary.json` | `06F076A09D7D659B88A92959769CD1528802EC08E3C0A13F35A6A8329FF32138` |
+| `health-before.json` | `2E16E28BD695B5D9125EF11822E4E10DA2D422E0D1781EE72A623D1EE0A97063` |
 
 The operator confirmation is human attestation, not machine-generated evidence. The
 120-minute kit binds it separately from the hashed server artifacts.
@@ -97,20 +98,27 @@ Runtime hard failures require rollback. Incomplete packet coverage is an evidenc
 `PASS_WITH_SWITCH_LIMITATION` only when all app, packet, source-port, and operator gates
 pass. No result from this unsigned canary automatically permits production promotion.
 
-The commit-bound field kit was built and independently re-verified from a clean tooling
-commit.
+The corrected schema-v2 field kit was built and independently re-verified from a clean
+tooling commit. It binds rollback to the v1.0.20 baseline evidence, calculates request
+rates over the installed-state preflight/postflight timestamp window, and classifies a
+collector failure without a separate runtime hard gate as `EVIDENCE_HOLD`. The previous
+schema-v1 `92395058...` kit is incident evidence only and must not be executed again.
 
 | Kit item | Identity |
 |---|---|
-| Tooling source commit | `92395058f00e63d421a21870714e9756c50141f2` |
+| Schema | `spot-realtime-image-v1021-canary-kit-v2` |
+| Tooling source commit | `fc29620a9ea0c24ecc8e10a6f7378b2928ed08ea` |
 | Diagnostic core source commit | `077b6b1c45b7bf6023d89ba13ecaa54d22acbe70` |
 | Package files | `12` |
-| ZIP | `SmartFactoryLogger_SPOT_Realtime_Image_v1021_Canary_92395058_20260821_110150Z.zip` |
-| ZIP length | `73,895` bytes |
-| ZIP SHA-256 | `EF8A30946C89F857C1FBF9C58C47796FFC88D0C4E5E0F2B3D4C4CCF55E680C49` |
+| ZIP | `SmartFactoryLogger_SPOT_Realtime_Image_v1021_Canary_fc29620a_20260825_001911Z.zip` |
+| ZIP length | `76,395` bytes |
+| ZIP SHA-256 | `1D9A62D6F13C093A7DF1DC297691265B85A221F0DEAD66093890A95DB6D9755C` |
+| Rollback identity | v1.0.20 / `cd8cfa649203494cf087206cf656dc2197107ea1` |
+| Counter rate window | `installed-state-preflight-to-postflight` |
+| Collector-only failure policy | `evidence-hold` |
 | Extracted verifier | `PASS` |
 | Analyzer / monitor / collectors / controller self-tests | `PASS` |
-| Trigger integration | `PASS`, detection latency `7 ms` in the local fixture |
+| Trigger integration | `PASS`, detection latency `6 ms` in the local fixture |
 
 ## 6. Current status
 
@@ -119,7 +127,7 @@ commit.
 | Target preinstall | `PASS` |
 | v1.0.21 installation identity | `PASS` |
 | Actual SPOT 15-minute smoke | `PASS` |
-| Commit-bound 120-minute kit | `BUILD_AND_VERIFY_PASS` |
+| Corrected commit-bound 120-minute kit | `BUILD_AND_VERIFY_PASS`, schema v2 / `fc29620a...` |
 | Actual SPOT 120-minute canary | `INVALID_TOOLING_RUN`, stopped after 6.237 seconds |
 | Request-rate comparison | `15M_PASS`, first 120M calculation invalid |
 | old-ACK/RST risk proxy comparison | `PENDING` |
@@ -135,7 +143,7 @@ instead of the actual v1.0.20 pre-deploy baseline. v1.0.20 `cd8cfa6...` was subs
 restored and validated with unchanged config, one backend/port owner, live SPOT
 connectivity, and operator-confirmed image refresh.
 
-The next action is to build and verify the corrected commit-bound kit, reinstall the
-same v1.0.21 product identity, repeat the short identity/visual gate, and only then run a
-fresh 120-minute observation. The invalid attempt is retained as incident evidence and
+The next action is to transfer the corrected ZIP and SHA-256 file to the server, reinstall
+the same v1.0.21 product identity, repeat the short identity/visual gate, and only then run
+a fresh 120-minute observation. The invalid attempt is retained as incident evidence and
 must not be counted as a candidate failure or a successful canary.
