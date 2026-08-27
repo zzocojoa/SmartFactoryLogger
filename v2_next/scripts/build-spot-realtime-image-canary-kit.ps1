@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$diagnosticCoreCommit = "077b6b1c45b7bf6023d89ba13ecaa54d22acbe70"
+$diagnosticCoreCommit = "1f4e0f61622ca6e0865a6e96e23aa1d86cfda3c3"
 
 function Invoke-GitText {
     param(
@@ -586,13 +586,6 @@ try {
             -LiteralPath (Join-Path $archiveRoot $relativePath.Replace("/", "\")) `
             -Destination (Join-Path $stagingRoot (Split-Path -Leaf $relativePath))
     }
-    Add-TriggerMonitorFailureContract `
-        -CollectorPath (Join-Path $stagingRoot "collect_operational_observability.ps1")
-    Add-TriggerMonitorPathBudgetContract `
-        -MonitorPath (Join-Path $stagingRoot "monitor-spot-connecttimeout-trigger.ps1")
-    Add-CanaryProgressContract `
-        -CollectorPath (Join-Path $stagingRoot "collect-spot-connecttimeout-evidence.ps1")
-
     foreach ($entry in $currentSources.GetEnumerator()) {
         Copy-Item -LiteralPath $entry.Value -Destination (Join-Path $stagingRoot $entry.Key)
     }
@@ -629,7 +622,7 @@ try {
         [ordered]@{ file = "spot-config-image-before-15m.json"; sha256 = "7E7486908045EF4898F44CA474816C647EAC1C5619EAADA6B3DA6445E5C87342" }
     )
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1021-canary-kit-v2"
+        schema_version = "spot-realtime-image-v1021-canary-kit-v3"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -665,13 +658,13 @@ try {
         }
         diagnostic_core = [ordered]@{
             source_commit = $diagnosticCoreCommit
-            source_identity = "spot-connecttimeout-trigger-field-kit-v4"
-            framing_schema = "spot-http-framing-evidence-v5"
+            source_identity = "spot-connecttimeout-trigger-field-kit-v5"
+            framing_schema = "spot-http-framing-evidence-v6"
+            observation_boundary_schema = "spot-canary-observation-boundary-v1"
             controlled_delta = (
-                "30-second local clock/process progress plus fail-closed trigger " +
-                "monitor failure evidence export, short runtime evidence root, " +
-                "Windows PowerShell path-budget gate, and stable historical " +
-                "failure counter baselining"
+                "Immutable observation boundaries, aggregate packet deduplication, " +
+                "wall/monotonic clock calibration, complete failure aggregation, " +
+                "and fail-closed trigger monitor evidence"
             )
             product_request_behavior_changed = $false
         }
@@ -688,7 +681,9 @@ try {
             packet_capture_full_window_required = $true
             backend_pid_must_remain_constant = $true
             request_budget_max_per_second = 6.0
-            counter_rate_window = "installed-state-preflight-to-postflight"
+            counter_rate_window = "observation-start-to-observation-end"
+            postprocess_failure_policy = "separate-evidence-hold"
+            observation_end_snapshot_max_delay_seconds = 5
             historical_failure_counter_policy = "stable-preflight-baseline-and-zero-canary-delta"
             historical_failure_stability_seconds = 30
             historical_failure_progress_interval_seconds = 10

@@ -65,24 +65,30 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
     def test_builder_binds_product_core_and_progress_contract(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
         self.assertIn(
-            '"077b6b1c45b7bf6023d89ba13ecaa54d22acbe70"',
+            '"1f4e0f61622ca6e0865a6e96e23aa1d86cfda3c3"',
             source,
         )
         self.assertIn(
             'build_git_commit = "5971fc4fbdeec07ef65681a945319f0ae12d55cb"',
             source,
         )
-        self.assertIn("ProgressIntervalSeconds = 30", source)
-        self.assertIn("[CANARY PROGRESS]", source)
-        self.assertIn(
-            "local clock/process only; no added SPOT requests",
+        self.assertNotIn(
+            '    Add-CanaryProgressContract `',
+            source,
+        )
+        self.assertNotIn(
+            '    Add-TriggerMonitorFailureContract `',
+            source,
+        )
+        self.assertNotIn(
+            '    Add-TriggerMonitorPathBudgetContract `',
             source,
         )
         self.assertIn("--untracked-files=no", source)
         self.assertIn("contains_installer = $false", source)
         self.assertIn("changes_application_or_settings = $false", source)
         self.assertIn(
-            'schema_version = "spot-realtime-image-v1021-canary-kit-v2"',
+            'schema_version = "spot-realtime-image-v1021-canary-kit-v3"',
             source,
         )
         self.assertIn(
@@ -94,21 +100,22 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            'counter_rate_window = "installed-state-preflight-to-postflight"',
+            'counter_rate_window = "observation-start-to-observation-end"',
+            source,
+        )
+        self.assertIn('framing_schema = "spot-http-framing-evidence-v6"', source)
+        self.assertIn(
+            'observation_boundary_schema = "spot-canary-observation-boundary-v1"',
             source,
         )
 
     def test_builder_preserves_trigger_job_failure_evidence(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
-        for fragment in (
-            "trigger_monitor_failure_raw.json",
-            "trigger_monitor_failure.json",
-            "spot-connecttimeout-trigger-monitor-failure-v1",
-            "trigger-baseline-read-failed",
-            "trigger-evidence-path-too-long",
-            "trigger_monitor_failure_reason_code",
-        ):
-            self.assertIn(fragment, source)
+        self.assertIn(
+            '"1f4e0f61622ca6e0865a6e96e23aa1d86cfda3c3"',
+            source,
+        )
+        self.assertNotIn('    Add-TriggerMonitorFailureContract `', source)
 
     def test_controller_uses_a_short_fail_closed_runtime_evidence_root(self) -> None:
         source = CONTROLLER.read_text(encoding="utf-8")
@@ -124,22 +131,20 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             self.assertIn(fragment, source)
 
     def test_progress_format_applies_to_the_complete_message(self) -> None:
-        source = BUILDER.read_text(encoding="utf-8")
+        source = CONTROLLER.read_text(encoding="utf-8")
         self.assertIn(
-            '                    ("[CANARY PROGRESS] stage=observing '
-            'elapsed={0} remaining={1} " +',
+            'counter_rate_window = $identity.canary.counter_rate_window',
             source,
         )
         self.assertIn(
-            '                    "local clock/process only; no added SPOT '
-            'requests") -f',
+            'postprocess_integrity_failures',
             source,
         )
 
     def test_controller_has_runtime_packet_and_identity_gates(self) -> None:
         source = CONTROLLER.read_text(encoding="utf-8")
         required_fragments = (
-            "backend restarted during the 120-minute canary",
+            "observation-state-changed",
             "source_port_pool_exhaustion_count",
             "source_port_reuse_violation_count",
             "image_refresh_failure_count",
@@ -151,6 +156,13 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "SPOT_120M_PASS_WITH_SWITCH_LIMITATION",
             "production_promotion_allowed = $false",
             "counter_window_elapsed_seconds",
+            "canary-observation-start.json",
+            "canary-observation-end.json",
+            "canary-postprocess-state.json",
+            "failure_events",
+            "postprocess_integrity_failures",
+            "packet-clock-calibration-incomplete",
+            "bidirectional-rst-observed",
             "Get-CollectorEvidenceHolds",
             "collector failure was not classified as evidence hold",
             "mismatched rollback baseline was accepted",
@@ -228,7 +240,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("30초마다", guide)
         self.assertIn("추가 호출하지 않으므로", guide)
         self.assertIn("PASS_WITH_SWITCH_LIMITATION", guide)
-        self.assertIn("installed-state", guide)
+        self.assertIn("observation-start-to-observation-end", guide)
         self.assertIn("EVIDENCE_HOLD", guide)
 
 

@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v2" -or
+    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v3" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.21" -or
@@ -116,7 +116,11 @@ if (
         "preinstall-summary.json" -or
     $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
-        "077b6b1c45b7bf6023d89ba13ecaa54d22acbe70" -or
+        "1f4e0f61622ca6e0865a6e96e23aa1d86cfda3c3" -or
+    $identity.diagnostic_core.framing_schema -cne
+        "spot-http-framing-evidence-v6" -or
+    $identity.diagnostic_core.observation_boundary_schema -cne
+        "spot-canary-observation-boundary-v1" -or
     [int]$identity.canary.maximum_observation_minutes -ne 120 -or
     [int]$identity.canary.post_trigger_capture_seconds -ne 75 -or
     [int]$identity.canary.progress_interval_seconds -ne 30 -or
@@ -125,7 +129,10 @@ if (
     -not [bool]$identity.canary.same_four_tuple_minimum_75s_required -or
     -not [bool]$identity.canary.packet_capture_full_window_required -or
     $identity.canary.counter_rate_window -cne
-        "installed-state-preflight-to-postflight" -or
+        "observation-start-to-observation-end" -or
+    $identity.canary.postprocess_failure_policy -cne
+        "separate-evidence-hold" -or
+    [int]$identity.canary.observation_end_snapshot_max_delay_seconds -ne 5 -or
     $identity.canary.historical_failure_counter_policy -cne
         "stable-preflight-baseline-and-zero-canary-delta" -or
     [int]$identity.canary.historical_failure_stability_seconds -ne 30 -or
@@ -191,9 +198,24 @@ $collectorSource = Get-Content `
 if (
     $collectorSource -notmatch "ProgressIntervalSeconds = 30" -or
     $collectorSource -notmatch "\[CANARY PROGRESS\]" -or
-    $collectorSource -notmatch "local clock/process only; no added SPOT requests"
+    $collectorSource -notmatch "local clock/process only; no added SPOT requests" -or
+    $collectorSource -notmatch "spot-canary-observation-boundary-v1" -or
+    $collectorSource -notmatch "canary-observation-start.json" -or
+    $collectorSource -notmatch "canary-observation-end.json"
 ) {
     throw "The canary progress contract is missing."
+}
+$analyzerSource = Get-Content `
+    -LiteralPath (Join-Path $resolvedKitRoot "analyze-spot-http-framing.ps1") `
+    -Raw
+if (
+    $analyzerSource -notmatch "spot-http-framing-evidence-v6" -or
+    $analyzerSource -notmatch "duplicate_initial_syn_count" -or
+    $analyzerSource -notmatch "monotonic_corrected" -or
+    $analyzerSource -notmatch "excluded_before_count" -or
+    $analyzerSource -notmatch "excluded_after_count"
+) {
+    throw "The packet measurement v6 contract is missing."
 }
 
 if (-not $Quiet) {

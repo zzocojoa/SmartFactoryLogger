@@ -25,13 +25,14 @@
 관측이 시작되면 콘솔에 30초마다 다음 상태가 표시된다.
 
 ```text
-[CANARY PROGRESS] stage=observing elapsed=00:30:00 remaining=01:30:00 percent=25.0 backend_pid=... backend_alive=True checked_at=...
+[CANARY PROGRESS] stage=observing elapsed=00:30:00 remaining=01:30:00 percent=25.0 expected_end=... backend_pid=... backend_alive=True
 ```
 
 이 진행 표시는 로컬 시계와 Windows process 상태만 읽는다. SPOT 또는 backend API를
 추가 호출하지 않으므로 검증 중 요청률을 높이지 않는다. 초기 관리자·디스크·pktmon
-검사, 스위치 자료 입력, 방향 확인, packet 후처리 단계는 별도 `[STEP]` 또는
-`[PROGRESS]` 문구로 표시된다.
+검사, 스위치 자료 입력, 방향 확인은 별도 `[STEP]`으로 표시된다. 120분 관찰이 끝난
+뒤에는 `[POSTPROCESS PROGRESS] step=1/4`부터 `4/4`까지 관찰과 분리된 후처리 경과
+시간을 표시한다.
 
 ## 파일 배치
 
@@ -125,24 +126,34 @@ run-spot-realtime-image-canary-120m-as-admin.cmd
 | `SPOT_120M_GATE_PASS` | 앱·packet·source-port·화면·스위치 게이트 통과 | 증거 전달, production 승격은 별도 승인 |
 | `SPOT_120M_PASS_WITH_SWITCH_LIMITATION` | 앱·packet 게이트 통과, 스위치 원인만 미배제 | 증거 전달, 제한사항 유지 |
 | `SPOT_120M_EVIDENCE_HOLD` | 수집기 오류 또는 packet 보존 범위·진단 자료 불충분 | 제품 롤백 없이 자료 보존·검토 |
-| `SPOT_120M_ROLLBACK_REQUIRED` | 신규 ConnectTimeout, runtime failure, 재시작, 화면 오류 등 | 증거 보존 후 정상 종료·검증된 v1.0.20 rollback |
+| `SPOT_120M_ROLLBACK_REQUIRED` | 관찰 구간의 신규 ConnectTimeout, failure delta, 재시작, 화면 오류 등 제품 hard failure | 증거 보존 후 정상 종료·검증된 v1.0.20 rollback |
 | `SPOT_120M_PREFLIGHT_FAILED` | 수집 전 identity·권한·디스크·pktmon 조건 실패 | 원인 수정 전 실행 금지 |
 
-`same_four_tuple_reuse_interval_ms_min >= 75000`, `reset_before_response=0`,
+중복 제거와 wall-clock/monotonic 보정을 거친
+`same_four_tuple_monotonic_corrected.interval_ms_min >= 75000`,
+`reset_before_response=0`,
 `source_port_reuse_violation_count=0`을 함께 사용해 늦은 ACK/RST 위험을 간접 검증한다.
 수집기는 모든 늦은 ACK의 발신 주체를 직접 확정한다고 주장하지 않는다.
 
-요청률 분자는 preflight/postflight의 SPOT 누적 카운터 차이를 사용하고, 분모는 같은
-두 installed-state 스냅샷의 `observed_at` 차이를 사용한다. packet 수집기의 내부
-실행시간은 이 요청률 분모로 사용하지 않는다. 수집기 자체 실패는 신규 ConnectTimeout,
-backend 재시작, SPOT failure counter 증가 같은 별도 runtime hard gate가 없으면
-`EVIDENCE_HOLD`이다.
+요청률과 failure delta는 불변 파일 `canary-observation-start.json`과
+`canary-observation-end.json`의 `observation-start-to-observation-end` 구간만 사용한다.
+종료 스냅샷이 없거나 5초 안에 저장되지 않으면 이후 상태로 대체하지 않고
+`EVIDENCE_HOLD` 처리한다. packet 변환·로그 수집·압축 중 상태는
+`canary-postprocess-state.json`에 별도로 남으며 관찰 구간 제품 실패에 합산하지 않는다.
+수집기 자체 실패도 별도 제품 hard gate가 없으면 `EVIDENCE_HOLD`이다.
 
 failure counter 판정도 동일한 증거 연속성을 사용한다. 30초 안정성 확인을 통과한
-`historical_failure_baseline`과 postflight를 비교하며, 기존 누적값은 유지하되 120분
+`historical_failure_baseline`은 실행 전 이력으로 보존하고, 실제 판정은 관찰 시작과
+관찰 종료 스냅샷을 비교한다. 기존 누적값은 유지하되 120분
 관측 중 신규 증가분이 하나라도 있으면 fail-closed로 `ROLLBACK_REQUIRED` 처리한다.
 counter가 감소한 경우도 backend 상태 초기화 또는 증거 불연속으로 간주해 통과시키지
 않는다.
+
+packet 결과에는 인터페이스별 집계, 중복 SYN, 시각 역행, 양방향 RST, 관찰 범위 밖
+제외 수, 원본·중복 제거·monotonic 보정 재사용 간격이 포함된다. 보정 상태가 확정되지
+않으면 74초대를 제품 결함으로 단정하거나 기준을 완화하지 않고 `EVIDENCE_HOLD`한다.
+수정 도구의 15분 진단에서 보정 후에도 75초 미만이고 캡처 이상이 없을 때만 제품
+v1.0.22와 77초 quarantine 변경을 검토한다.
 
 ## 제공할 자료
 
@@ -153,7 +164,9 @@ counter가 감소한 경우도 backend 상태 초기화 또는 증거 불연속�
 3. `server-evidence\20260821-190022\canary-control-*` 폴더
 4. 최종 CMD 화면
 
-control 폴더에는 `historical-failure-baseline.json`이 포함되어야 한다.
+control 폴더에는 `historical-failure-baseline.json`, `canary-postflight.json`,
+`canary-postprocess-state.json`이 포함되어야 한다. 공유 ZIP에는 두 관찰 경계와
+`spot_http_framing_summary.json`이 포함되어야 한다.
 
 `raw_private`에는 비식별 처리 전 네트워크 정보가 있을 수 있으므로 명시적 요청 전에는
 공유하지 않는다.

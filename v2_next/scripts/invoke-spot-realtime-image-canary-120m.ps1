@@ -139,14 +139,20 @@ function Get-CounterWindowElapsedSeconds {
         [object]$After
     )
 
-    $beforeText = [string](Get-RequiredProperty `
-        -InputObject $Before `
-        -Name "observed_at" `
-        -Context "preflight installed state")
-    $afterText = [string](Get-RequiredProperty `
-        -InputObject $After `
-        -Name "observed_at" `
-        -Context "postflight installed state")
+    $beforeText = [string](Get-OptionalProperty $Before "observed_at_completed")
+    if ([string]::IsNullOrWhiteSpace($beforeText)) {
+        $beforeText = [string](Get-RequiredProperty `
+            -InputObject $Before `
+            -Name "observed_at" `
+            -Context "observation start state")
+    }
+    $afterText = [string](Get-OptionalProperty $After "observed_at_completed")
+    if ([string]::IsNullOrWhiteSpace($afterText)) {
+        $afterText = [string](Get-RequiredProperty `
+            -InputObject $After `
+            -Name "observed_at" `
+            -Context "observation end state")
+    }
     $culture = [Globalization.CultureInfo]::InvariantCulture
     $styles = [Globalization.DateTimeStyles]::RoundtripKind
     $beforeAt = [DateTimeOffset]::Parse($beforeText, $culture, $styles)
@@ -229,9 +235,6 @@ function Get-CanaryExceptionResultName {
     if (-not $CollectionStarted) {
         return "SPOT_120M_PREFLIGHT_FAILED"
     }
-    if ($Phase -ceq "postflight-runtime") {
-        return "SPOT_120M_ROLLBACK_REQUIRED"
-    }
     return "SPOT_120M_EVIDENCE_HOLD"
 }
 
@@ -263,6 +266,11 @@ function ConvertTo-SafeImageSnapshot {
         "source_port_temperature_failure_count",
         "source_port_internal_temperature_failure_count",
         "source_port_diagnostic_failure_count",
+        "source_port_connection_test_failure_count",
+        "source_port_request_event_count_total",
+        "source_port_request_event_drop_count",
+        "source_port_request_failure_event_count_total",
+        "source_port_request_failure_event_drop_count",
         "request_budget_within_target",
         "request_budget_total_background_max_per_sec",
         "image_upstream_request_count",
@@ -277,6 +285,22 @@ function ConvertTo-SafeImageSnapshot {
             -Name $name `
             -Context "SPOT image diagnostics"
     }
+    $snapshot["source_port_recent_request_failure_events"] = @(
+        foreach ($event in @(
+            Get-RequiredProperty `
+                -InputObject $Image `
+                -Name "source_port_recent_request_failure_events" `
+                -Context "SPOT image diagnostics"
+        )) {
+            [pscustomobject][ordered]@{
+                event_sequence = Get-OptionalProperty $event "event_sequence"
+                event_at_utc = Get-OptionalProperty $event "event_at_utc"
+                request_kind = Get-OptionalProperty $event "request_kind"
+                state = Get-OptionalProperty $event "state"
+                exception_class = Get-OptionalProperty $event "exception_class"
+            }
+        }
+    )
     return [pscustomobject]$snapshot
 }
 
@@ -290,6 +314,10 @@ function Get-CumulativeFailureCounterNames {
         "source_port_temperature_failure_count",
         "source_port_internal_temperature_failure_count",
         "source_port_diagnostic_failure_count",
+        "source_port_connection_test_failure_count",
+        "source_port_request_failure_event_count_total",
+        "source_port_request_failure_event_drop_count",
+        "source_port_request_event_drop_count",
         "image_refresh_failure_count",
         "image_cache_clock_anomaly_count"
     )
@@ -352,6 +380,102 @@ function Assert-FailureCounterDeltas {
         }
     }
     return [pscustomobject]$deltas
+}
+
+function Get-FailureCounterDeltaReport {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$BeforeImage,
+        [Parameter(Mandatory = $true)]
+        [object]$AfterImage
+    )
+
+    $deltas = [ordered]@{}
+    $hardFailures = New-Object System.Collections.Generic.List[string]
+    $holds = New-Object System.Collections.Generic.List[string]
+    foreach ($name in @(Get-CumulativeFailureCounterNames)) {
+        $beforeValue = [int64](Get-RequiredProperty `
+            -InputObject $BeforeImage `
+            -Name $name `
+            -Context "observation start counters")
+        $afterValue = [int64](Get-RequiredProperty `
+            -InputObject $AfterImage `
+            -Name $name `
+            -Context "observation end counters")
+        $delta = $afterValue - $beforeValue
+        $deltas[$name] = $delta
+        if ($delta -lt 0) {
+            [void]$holds.Add("counter-decreased:$name")
+        } elseif ($delta -gt 0) {
+            [void]$hardFailures.Add(
+                "failure-counter-increased:${name}:$delta"
+            )
+        }
+    }
+    return [pscustomobject][ordered]@{
+        deltas = [pscustomobject]$deltas
+        hard_failures = @($hardFailures.ToArray())
+        evidence_holds = @($holds.ToArray())
+    }
+}
+
+function Get-FailureEventDeltaReport {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$BeforeImage,
+        [Parameter(Mandatory = $true)]
+        [object]$AfterImage
+    )
+
+    $beforeTotal = [int64](Get-RequiredProperty `
+        $BeforeImage "source_port_request_failure_event_count_total" `
+        "observation start failure journal")
+    $afterTotal = [int64](Get-RequiredProperty `
+        $AfterImage "source_port_request_failure_event_count_total" `
+        "observation end failure journal")
+    $beforeDrop = [int64](Get-RequiredProperty `
+        $BeforeImage "source_port_request_failure_event_drop_count" `
+        "observation start failure journal")
+    $afterDrop = [int64](Get-RequiredProperty `
+        $AfterImage "source_port_request_failure_event_drop_count" `
+        "observation end failure journal")
+    $eventDelta = $afterTotal - $beforeTotal
+    $dropDelta = $afterDrop - $beforeDrop
+    $beforeSequence = [int64]0
+    foreach ($event in @($BeforeImage.source_port_recent_request_failure_events)) {
+        $sequence = [int64](Get-OptionalProperty $event "event_sequence")
+        $beforeSequence = [Math]::Max($beforeSequence, $sequence)
+    }
+    $newEvents = @(
+        foreach ($event in @($AfterImage.source_port_recent_request_failure_events)) {
+            if ([int64](Get-OptionalProperty $event "event_sequence") -gt
+                $beforeSequence) {
+                $event
+            }
+        }
+    )
+    $hardFailures = New-Object System.Collections.Generic.List[string]
+    $holds = New-Object System.Collections.Generic.List[string]
+    if ($eventDelta -gt 0) {
+        [void]$hardFailures.Add("failure-event-journal-increased:$eventDelta")
+    } elseif ($eventDelta -lt 0) {
+        [void]$holds.Add("failure-event-journal-decreased")
+    }
+    if ($dropDelta -gt 0) {
+        [void]$hardFailures.Add("failure-event-journal-drop-increased:$dropDelta")
+    } elseif ($dropDelta -lt 0) {
+        [void]$holds.Add("failure-event-drop-counter-decreased")
+    }
+    if ($eventDelta -gt 0 -and $newEvents.Count -eq 0) {
+        [void]$holds.Add("failure-event-detail-missing")
+    }
+    return [pscustomobject][ordered]@{
+        event_count_delta = $eventDelta
+        drop_count_delta = $dropDelta
+        failure_events = $newEvents
+        hard_failures = @($hardFailures.ToArray())
+        evidence_holds = @($holds.ToArray())
+    }
 }
 
 function ConvertTo-SafeRecentSpotErrors {
@@ -533,6 +657,123 @@ function Get-InstalledState {
         live_image_profile = $live.Headers["X-Spot-Image-Profile"]
         image = $image
     }
+}
+
+function Get-ObservationBoundaryPair {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SanitizedRoot
+    )
+
+    $holds = New-Object System.Collections.Generic.List[string]
+    $startPath = Join-Path $SanitizedRoot "canary-observation-start.json"
+    $endPath = Join-Path $SanitizedRoot "canary-observation-end.json"
+    $start = $null
+    $end = $null
+    foreach ($entry in @(
+        [pscustomobject]@{ Role = "start"; Path = $startPath },
+        [pscustomobject]@{ Role = "end"; Path = $endPath }
+    )) {
+        if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) {
+            [void]$holds.Add("observation-$($entry.Role)-boundary-missing")
+            continue
+        }
+        try {
+            $value = Get-Content -LiteralPath $entry.Path -Raw | ConvertFrom-Json
+            if ($value.schema_version -cne
+                "spot-canary-observation-boundary-v1" -or
+                $value.boundary_role -cne $entry.Role) {
+                throw "boundary schema or role mismatch"
+            }
+            if ([double]$value.capture_latency_ms -gt 5000) {
+                [void]$holds.Add("observation-$($entry.Role)-boundary-late")
+            }
+            if ($entry.Role -ceq "start") {
+                $start = $value
+            } else {
+                $end = $value
+            }
+        } catch {
+            [void]$holds.Add("observation-$($entry.Role)-boundary-invalid")
+        }
+    }
+    if ($null -ne $start -and $null -ne $end) {
+        try {
+            if ((Get-CounterWindowElapsedSeconds -Before $start -After $end) -le 0) {
+                [void]$holds.Add("observation-boundary-order-invalid")
+            }
+            if ([int64]$end.monotonic_ticks -le [int64]$start.monotonic_ticks -or
+                [int64]$end.monotonic_frequency -ne
+                    [int64]$start.monotonic_frequency) {
+                [void]$holds.Add("observation-monotonic-boundary-invalid")
+            }
+        } catch {
+            [void]$holds.Add("observation-boundary-time-invalid")
+        }
+    }
+    return [pscustomobject][ordered]@{
+        start = $start
+        end = $end
+        evidence_holds = @($holds.ToArray())
+        valid = ($null -ne $start -and $null -ne $end -and $holds.Count -eq 0)
+        start_path = $startPath
+        end_path = $endPath
+    }
+}
+
+function Get-PostprocessState {
+    param([Parameter(Mandatory = $true)][string]$ConfigPath)
+
+    $health = Invoke-RestMethod "http://127.0.0.1:8000/health" -TimeoutSec 5
+    $backend = @(Get-Process -Name "SmartFactoryBackend" -ErrorAction Stop)
+    if ($backend.Count -ne 1) {
+        throw "postprocess backend process count mismatch"
+    }
+    $owners = @(
+        Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction Stop |
+            Select-Object -ExpandProperty OwningProcess -Unique
+    )
+    if ($owners.Count -ne 1) {
+        throw "postprocess port 8000 owner is ambiguous"
+    }
+    $backendRoot = Split-Path -Parent $backend[0].Path
+    $provenance = Get-Content `
+        -LiteralPath (Join-Path $backendRoot "_internal\backend\build_provenance.json") `
+        -Raw |
+        ConvertFrom-Json
+    return [pscustomobject][ordered]@{
+        schema_version = "spot-canary-postprocess-state-v1"
+        observed_at = (Get-Date).ToString("o")
+        app_version = [string]$health.app_version
+        backend_pid = [int]$backend[0].Id
+        port_8000_owner = [int]$owners[0]
+        build_git_commit = [string]$provenance.git_commit
+        config_sha256 = (
+            Get-FileHash -LiteralPath $ConfigPath -Algorithm SHA256
+        ).Hash
+        local_only = $true
+        added_spot_requests = $false
+    }
+}
+
+function Get-PostprocessIntegrityFailures {
+    param(
+        [Parameter(Mandatory = $true)][object]$ObservationEnd,
+        [Parameter(Mandatory = $true)][object]$PostprocessState
+    )
+
+    $failures = New-Object System.Collections.Generic.List[string]
+    foreach ($field in @(
+        "backend_pid",
+        "port_8000_owner",
+        "build_git_commit",
+        "config_sha256"
+    )) {
+        if ([string]$PostprocessState.$field -cne [string]$ObservationEnd.$field) {
+            [void]$failures.Add("postprocess-state-changed:$field")
+        }
+    }
+    return @($failures.ToArray())
 }
 
 function Confirm-StableHistoricalFailureBaseline {
@@ -719,7 +960,7 @@ function Assert-EvidenceFiles {
         -BaselineHealth $baselineHealth
 }
 
-function Assert-PostflightDeltas {
+function Get-ObservationDeltaReport {
     param(
         [Parameter(Mandatory = $true)]
         [object]$Before,
@@ -728,17 +969,37 @@ function Assert-PostflightDeltas {
         [object]$After
     )
 
-    if ($After.backend_pid -ne $Before.backend_pid) {
-        throw "backend restarted during the 120-minute canary"
-    }
-    if ($After.electron_path -cne $Before.electron_path) {
-        throw "Electron executable path changed during the 120-minute canary"
+    $hardFailures = New-Object System.Collections.Generic.List[string]
+    $holds = New-Object System.Collections.Generic.List[string]
+    foreach ($field in @(
+        "backend_pid",
+        "port_8000_owner",
+        "build_git_commit",
+        "config_sha256"
+    )) {
+        if ([string]$After.$field -cne [string]$Before.$field) {
+            [void]$hardFailures.Add("observation-state-changed:$field")
+        }
     }
 
-    $failureCounterDeltas = Assert-FailureCounterDeltas `
+    $failureCounterReport = Get-FailureCounterDeltaReport `
         -BeforeImage $Before.image `
-        -AfterImage $After.image `
-        -Stage "120-minute observation"
+        -AfterImage $After.image
+    foreach ($item in @($failureCounterReport.hard_failures)) {
+        [void]$hardFailures.Add([string]$item)
+    }
+    foreach ($item in @($failureCounterReport.evidence_holds)) {
+        [void]$holds.Add([string]$item)
+    }
+    $failureEventReport = Get-FailureEventDeltaReport `
+        -BeforeImage $Before.image `
+        -AfterImage $After.image
+    foreach ($item in @($failureEventReport.hard_failures)) {
+        [void]$hardFailures.Add([string]$item)
+    }
+    foreach ($item in @($failureEventReport.evidence_holds)) {
+        [void]$holds.Add([string]$item)
+    }
 
     $transportDelta =
         [int64]$After.image.source_port_transport_started_count -
@@ -749,11 +1010,17 @@ function Assert-PostflightDeltas {
     $imageDelta =
         [int64]$After.image.image_upstream_request_count -
         [int64]$Before.image.image_upstream_request_count
-    if ($transportDelta -le 0 -or $successDelta -le 0 -or $imageDelta -le 0) {
-        throw "SPOT transport or image counters did not progress"
+    if ($transportDelta -le 0) {
+        [void]$hardFailures.Add("transport-counter-did-not-progress")
+    }
+    if ($successDelta -le 0) {
+        [void]$hardFailures.Add("transport-success-counter-did-not-progress")
+    }
+    if ($imageDelta -le 0) {
+        [void]$hardFailures.Add("image-counter-did-not-progress")
     }
     if ($successDelta -gt $transportDelta) {
-        throw "SPOT transport counter relationship is invalid"
+        [void]$holds.Add("transport-counter-relationship-invalid")
     }
     $counterWindowElapsedSeconds = Get-CounterWindowElapsedSeconds `
         -Before $Before `
@@ -767,10 +1034,10 @@ function Assert-PostflightDeltas {
         4
     )
     if ($transportRate -gt 6.0) {
-        throw "SPOT average transport rate exceeded 6/s: $transportRate"
+        [void]$hardFailures.Add("transport-rate-over-6:$transportRate")
     }
     if ($imageRate -gt 3.2) {
-        throw "SPOT average image upstream rate exceeded 3.2/s: $imageRate"
+        [void]$hardFailures.Add("image-rate-over-3.2:$imageRate")
     }
 
     return [pscustomobject][ordered]@{
@@ -780,7 +1047,12 @@ function Assert-PostflightDeltas {
         counter_window_elapsed_seconds = $counterWindowElapsedSeconds
         transport_rate_per_sec = $transportRate
         image_upstream_rate_per_sec = $imageRate
-        failure_counter_deltas = $failureCounterDeltas
+        failure_counter_deltas = $failureCounterReport.deltas
+        failure_event_count_delta = $failureEventReport.event_count_delta
+        failure_event_drop_count_delta = $failureEventReport.drop_count_delta
+        failure_events = @($failureEventReport.failure_events)
+        hard_failures = @($hardFailures.ToArray())
+        evidence_holds = @($holds.ToArray())
     }
 }
 
@@ -808,6 +1080,17 @@ function Test-PacketEvidence {
     if ($FieldSummary.framing_analysis_status -ne "completed") {
         [void]$holds.Add("framing-analysis-incomplete")
     }
+    if ($FieldSummary.observation_boundary_status -ne "complete") {
+        [void]$holds.Add("observation-boundary-incomplete")
+    }
+    if ($FieldSummary.observation_counter_policy -cne
+        "observation-start-to-observation-end") {
+        [void]$holds.Add("observation-counter-policy-mismatch")
+    }
+    if ($FieldSummary.packet_analysis_schema -cne
+        "spot-http-framing-evidence-v6") {
+        [void]$holds.Add("packet-analysis-schema-mismatch")
+    }
     if ($FieldSummary.windows_tcp_ipv4_evidence_status -ne "completed") {
         [void]$holds.Add("windows-tcp-evidence-incomplete")
     }
@@ -826,8 +1109,12 @@ function Test-PacketEvidence {
         }
     }
 
-    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v5") {
+    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v6") {
         [void]$holds.Add("framing-schema-mismatch")
+    }
+    if ($FramingSummary.analysis_window.policy -cne
+        "observation-start-to-observation-end") {
+        [void]$holds.Add("packet-analysis-window-policy-mismatch")
     }
     if (
         [bool]$FramingSummary.capture_coverage.overwrite_detected -or
@@ -847,10 +1134,21 @@ function Test-PacketEvidence {
         [void]$hardFailures.Add("no-response-after-handshake")
     }
     if ([int]$tcp.syn_retransmissions_total -ne 0) {
-        [void]$holds.Add("syn-retransmission-observed")
+        [void]$hardFailures.Add("syn-retransmission-observed")
     }
 
-    $reuse = $tcp.same_four_tuple_reuse
+    $measurement = $FramingSummary.packet_measurement
+    if ([string]$measurement.clock_calibration.status -cne "complete") {
+        [void]$holds.Add("packet-clock-calibration-incomplete")
+    }
+    if ([int]$measurement.timestamp_regression_count -ne 0) {
+        [void]$holds.Add("packet-timestamp-regression-observed")
+    }
+    if ([int]$measurement.rst_total -ne 0) {
+        [void]$hardFailures.Add("bidirectional-rst-observed")
+    }
+
+    $reuse = $tcp.same_four_tuple_reuse.monotonic_corrected
     if ([int]$reuse.under_60000_ms_count -ne 0) {
         [void]$hardFailures.Add("same-four-tuple-reuse-under-60s")
     }
@@ -878,6 +1176,24 @@ function Test-PacketEvidence {
         reset_before_response_attempts = [int]$tcp.reset_before_response_attempts
         server_reset_response_count = $serverResetCount
         syn_retransmissions_total = [int]$tcp.syn_retransmissions_total
+        interface_count = [int]$measurement.interface_count
+        duplicate_packet_count = [int64]$measurement.duplicate_packet_count
+        duplicate_initial_syn_count = [int64]$measurement.duplicate_initial_syn_count
+        timestamp_regression_count = [int64]$measurement.timestamp_regression_count
+        client_to_server_rst_count = [int64]$measurement.client_to_server_rst_count
+        server_to_client_rst_count = [int64]$measurement.server_to_client_rst_count
+        excluded_before_observation_count = [int64](
+            $FramingSummary.analysis_window.excluded_before_count
+        )
+        excluded_after_observation_count = [int64](
+            $FramingSummary.analysis_window.excluded_after_count
+        )
+        clock_calibration_status = [string]$measurement.clock_calibration.status
+        same_four_tuple_original = $tcp.same_four_tuple_reuse.original
+        same_four_tuple_duplicate_removed = (
+            $tcp.same_four_tuple_reuse.duplicate_removed
+        )
+        same_four_tuple_monotonic_corrected = $reuse
         same_four_tuple_reuse_observed_count = [int]$reuse.observed_count
         same_four_tuple_reuse_interval_ms_min = $reuse.interval_ms_min
         same_four_tuple_reuse_under_60000_ms_count = [int]$reuse.under_60000_ms_count
@@ -972,6 +1288,21 @@ function Invoke-SelfTest {
         source_port_temperature_failure_count = 0
         source_port_internal_temperature_failure_count = 0
         source_port_diagnostic_failure_count = 0
+        source_port_connection_test_failure_count = 0
+        source_port_request_event_count_total = 20
+        source_port_request_event_drop_count = 0
+        source_port_request_failure_event_count_total = 2
+        source_port_request_failure_event_drop_count = 0
+        source_port_recent_request_failure_events = @(
+            [pscustomobject]@{
+                event_sequence = 10
+                event_at_utc = "2026-08-21T10:32:26.000Z"
+                correlation_id = "must-not-be-copied"
+                request_kind = "image"
+                state = "failed"
+                exception_class = "TimeoutError"
+            }
+        )
         request_budget_within_target = $true
         request_budget_total_background_max_per_sec = 6.0
         image_upstream_request_count = 5
@@ -981,6 +1312,11 @@ function Invoke-SelfTest {
     }
     $snapshot = ConvertTo-SafeImageSnapshot -Image $image
     Assert-ImageGate -Image $snapshot -Stage "self-test"
+    if ($snapshot.source_port_recent_request_failure_events[0].PSObject.Properties[
+        "correlation_id"
+    ]) {
+        throw "self-test safe failure event leaked correlation_id"
+    }
 
     $field = [pscustomobject]@{
         status = "COMPLETED"
@@ -992,9 +1328,27 @@ function Invoke-SelfTest {
         packet_payload_artifacts_retained = $false
         observation_elapsed_seconds = 7200
         required_evidence_missing = @()
+        observation_boundary_status = "complete"
+        observation_counter_policy = "observation-start-to-observation-end"
+        packet_analysis_schema = "spot-http-framing-evidence-v6"
     }
     $framing = [pscustomobject]@{
-        schema_version = "spot-http-framing-evidence-v5"
+        schema_version = "spot-http-framing-evidence-v6"
+        analysis_window = [pscustomobject]@{
+            policy = "observation-start-to-observation-end"
+            excluded_before_count = 2
+            excluded_after_count = 3
+        }
+        packet_measurement = [pscustomobject]@{
+            interface_count = 2
+            duplicate_packet_count = 8
+            duplicate_initial_syn_count = 4
+            timestamp_regression_count = 0
+            client_to_server_rst_count = 0
+            server_to_client_rst_count = 0
+            rst_total = 0
+            clock_calibration = [pscustomobject]@{ status = "complete" }
+        }
         capture_coverage = [pscustomobject]@{
             overwrite_detected = $false
             status = "capture-window-retained"
@@ -1006,9 +1360,13 @@ function Invoke-SelfTest {
             no_response_after_handshake_attempts = 0
             syn_retransmissions_total = 0
             same_four_tuple_reuse = [pscustomobject]@{
-                observed_count = 1
-                interval_ms_min = 75000
-                under_60000_ms_count = 0
+                original = [pscustomobject]@{ interval_ms_min = 74011 }
+                duplicate_removed = [pscustomobject]@{ interval_ms_min = 74011 }
+                monotonic_corrected = [pscustomobject]@{
+                    observed_count = 1
+                    interval_ms_min = 75000
+                    under_60000_ms_count = 0
+                }
             }
         }
         server_close_counts = [pscustomobject]@{ reset = 0 }
@@ -1017,7 +1375,7 @@ function Invoke-SelfTest {
     if ($packet.hard_failures.Count -ne 0 -or $packet.evidence_holds.Count -ne 0) {
         throw "self-test valid packet evidence was rejected"
     }
-    $framing.tcp_connection_summary.same_four_tuple_reuse.interval_ms_min = 74999
+    $framing.tcp_connection_summary.same_four_tuple_reuse.monotonic_corrected.interval_ms_min = 74999
     $packet = Test-PacketEvidence -FieldSummary $field -FramingSummary $framing
     if ("same-four-tuple-reuse-under-75s" -notin $packet.hard_failures) {
         throw "self-test short reuse interval was not rejected"
@@ -1026,6 +1384,9 @@ function Invoke-SelfTest {
     $before = [pscustomobject]@{
         observed_at = "2026-08-21T20:12:04.2365692+09:00"
         backend_pid = 10
+        port_8000_owner = 10
+        build_git_commit = "5971fc4fbdeec07ef65681a945319f0ae12d55cb"
+        config_sha256 = "config-hash"
         electron_path = "C:\Program Files\SmartFactory\smart-factory.exe"
         image = [pscustomobject]@{
             source_port_transport_started_count = 21094
@@ -1036,6 +1397,9 @@ function Invoke-SelfTest {
     $after = [pscustomobject]@{
         observed_at = "2026-08-21T20:13:03.7043697+09:00"
         backend_pid = 10
+        port_8000_owner = 10
+        build_git_commit = "5971fc4fbdeec07ef65681a945319f0ae12d55cb"
+        config_sha256 = "config-hash"
         electron_path = "C:\Program Files\SmartFactory\smart-factory.exe"
         image = [pscustomobject]@{
             source_port_transport_started_count = 21426
@@ -1057,42 +1421,135 @@ function Invoke-SelfTest {
     $before.image.source_port_image_failure_count = 1
     $after.image.source_port_transport_failure_count = 1
     $after.image.source_port_image_failure_count = 1
-    $deltas = Assert-PostflightDeltas -Before $before -After $after
+    Add-Member `
+        -InputObject $before.image `
+        -NotePropertyName source_port_recent_request_failure_events `
+        -NotePropertyValue @()
+    Add-Member `
+        -InputObject $after.image `
+        -NotePropertyName source_port_recent_request_failure_events `
+        -NotePropertyValue @()
+    $deltas = Get-ObservationDeltaReport -Before $before -After $after
     if (
         [math]::Abs(
             [double]$deltas.counter_window_elapsed_seconds - 59.4678005
         ) -gt 0.0001 -or
         [double]$deltas.transport_rate_per_sec -ne 5.5829 -or
         [double]$deltas.image_upstream_rate_per_sec -ne 2.7578 -or
-        [int64]$deltas.failure_counter_deltas.source_port_transport_failure_count -ne 0
+        [int64]$deltas.failure_counter_deltas.source_port_transport_failure_count -ne 0 -or
+        @($deltas.hard_failures).Count -ne 0 -or
+        @($deltas.evidence_holds).Count -ne 0
     ) {
         throw "self-test counter-window rate calculation mismatch"
     }
     $after.image.source_port_transport_failure_count = 2
-    $failureDeltaRejected = $false
-    try {
-        Assert-PostflightDeltas -Before $before -After $after | Out-Null
-    } catch {
-        $failureDeltaRejected = $_.Exception.Message -like (
-            "SPOT failure counter increased during canary:*"
-        )
-    }
-    if (-not $failureDeltaRejected) {
-        throw "self-test new failure counter delta was not rejected"
+    $after.image.source_port_image_failure_count = 2
+    $after.image.source_port_temperature_failure_count = 1
+    $after.image.source_port_request_failure_event_count_total = 2
+    $after.image.source_port_recent_request_failure_events = @(
+        [pscustomobject]@{
+            event_sequence = 11
+            event_at_utc = "2026-08-21T11:13:00.000Z"
+            request_kind = "image"
+            state = "failed"
+            exception_class = "TimeoutError"
+        }
+    )
+    $multiFailure = Get-ObservationDeltaReport -Before $before -After $after
+    if (@($multiFailure.hard_failures).Count -lt 4 -or
+        @($multiFailure.failure_events).Count -ne 1) {
+        throw "self-test simultaneous failure aggregation was incomplete"
     }
     $after.image.source_port_transport_failure_count = 1
+    $after.image.source_port_image_failure_count = 1
+    $after.image.source_port_temperature_failure_count = 0
+    $after.image.source_port_request_failure_event_count_total = 0
+    $after.image.source_port_recent_request_failure_events = @()
     $after.image.source_port_transport_started_count = 21452
     $after.image.source_port_transport_success_count = 21452
-    $rateLimitRejected = $false
-    try {
-        Assert-PostflightDeltas -Before $before -After $after | Out-Null
-    } catch {
-        $rateLimitRejected = $_.Exception.Message -like (
-            "SPOT average transport rate exceeded 6/s:*"
-        )
-    }
-    if (-not $rateLimitRejected) {
+    $rateReport = Get-ObservationDeltaReport -Before $before -After $after
+    if (@($rateReport.hard_failures | Where-Object {
+        $_ -like "transport-rate-over-6:*"
+    }).Count -ne 1) {
         throw "self-test transport rate limit was not enforced"
+    }
+
+    $boundaryRoot = Join-Path `
+        ([IO.Path]::GetTempPath()) `
+        ("sfl-canary-boundary-{0}" -f [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $boundaryRoot | Out-Null
+    try {
+        $boundaryStart = [pscustomobject][ordered]@{
+            schema_version = "spot-canary-observation-boundary-v1"
+            boundary_role = "start"
+            observed_at_completed = "2026-08-21T20:00:00+09:00"
+            capture_latency_ms = 40
+            monotonic_ticks = 1000
+            monotonic_frequency = 1000
+        }
+        $boundaryEnd = [pscustomobject][ordered]@{
+            schema_version = "spot-canary-observation-boundary-v1"
+            boundary_role = "end"
+            observed_at_completed = "2026-08-21T22:00:00+09:00"
+            capture_latency_ms = 45
+            monotonic_ticks = 7201000
+            monotonic_frequency = 1000
+        }
+        $boundaryStart | ConvertTo-Json |
+            Set-Content (Join-Path $boundaryRoot "canary-observation-start.json")
+        $boundaryEnd | ConvertTo-Json |
+            Set-Content (Join-Path $boundaryRoot "canary-observation-end.json")
+        $boundaryPair = Get-ObservationBoundaryPair -SanitizedRoot $boundaryRoot
+        if (-not [bool]$boundaryPair.valid) {
+            throw "self-test valid observation boundaries were rejected"
+        }
+        $boundaryEnd.capture_latency_ms = 5001
+        $boundaryEnd | ConvertTo-Json |
+            Set-Content (Join-Path $boundaryRoot "canary-observation-end.json")
+        $lateBoundary = Get-ObservationBoundaryPair -SanitizedRoot $boundaryRoot
+        if ("observation-end-boundary-late" -notin
+            @($lateBoundary.evidence_holds)) {
+            throw "self-test late observation boundary was accepted"
+        }
+        Remove-Item `
+            -LiteralPath (Join-Path $boundaryRoot "canary-observation-end.json")
+        $missingBoundary = Get-ObservationBoundaryPair -SanitizedRoot $boundaryRoot
+        if ("observation-end-boundary-missing" -notin
+            @($missingBoundary.evidence_holds)) {
+            throw "self-test missing observation boundary was accepted"
+        }
+    } finally {
+        $resolvedBoundaryRoot = [IO.Path]::GetFullPath($boundaryRoot)
+        $resolvedTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+        if (-not $resolvedBoundaryRoot.StartsWith(
+            $resolvedTempRoot,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "self-test boundary cleanup path is unsafe"
+        }
+        Remove-Item -LiteralPath $resolvedBoundaryRoot -Recurse -Force
+    }
+
+    $postprocessEnd = [pscustomobject]@{
+        backend_pid = 10
+        port_8000_owner = 10
+        build_git_commit = "commit"
+        config_sha256 = "config"
+    }
+    $postprocessChanged = [pscustomobject]@{
+        backend_pid = 11
+        port_8000_owner = 11
+        build_git_commit = "changed"
+        config_sha256 = "changed"
+    }
+    $postprocessFailures = @(
+        Get-PostprocessIntegrityFailures `
+            -ObservationEnd $postprocessEnd `
+            -PostprocessState $postprocessChanged
+    )
+    if ($postprocessFailures.Count -ne 4 -or
+        @($deltas.hard_failures).Count -ne 0) {
+        throw "self-test postprocess failures contaminated observation deltas"
     }
 
     $field.status = "FAILED"
@@ -1111,7 +1568,7 @@ function Invoke-SelfTest {
             -Phase "collection") -cne "SPOT_120M_EVIDENCE_HOLD" -or
         (Get-CanaryExceptionResultName `
             -CollectionStarted $true `
-            -Phase "postflight-runtime") -cne "SPOT_120M_ROLLBACK_REQUIRED"
+            -Phase "postflight-runtime") -cne "SPOT_120M_EVIDENCE_HOLD"
     ) {
         throw "self-test canary exception classification mismatch"
     }
@@ -1357,21 +1814,75 @@ try {
     $fieldSummary = Get-Content -LiteralPath $fieldSummaryPath -Raw | ConvertFrom-Json
     $framingSummary = Get-Content -LiteralPath $framingSummaryPath -Raw | ConvertFrom-Json
 
-    $phase = "postflight-runtime"
-    $after = Get-InstalledState `
-        -Identity $identity `
-        -IntegrityModulePath $integrityModulePath `
-        -ConfigPath $configPath `
-        -Stage "120m postflight"
-    $after | ConvertTo-Json -Depth 10 |
-        Set-Content -LiteralPath (Join-Path $controlRoot "canary-postflight.json") -Encoding UTF8
-    $deltas = Assert-PostflightDeltas `
-        -Before $before `
-        -After $after
     $phase = "evidence-evaluation"
+    $sanitizedRoot = Join-Path $runRoot "sanitized_share"
+    $boundary = Get-ObservationBoundaryPair -SanitizedRoot $sanitizedRoot
+    $deltas = $null
+    $observationHardFailures = New-Object System.Collections.Generic.List[string]
+    $observationEvidenceHolds = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($boundary.evidence_holds)) {
+        [void]$observationEvidenceHolds.Add([string]$item)
+    }
+    if ([bool]$boundary.valid) {
+        $deltas = Get-ObservationDeltaReport `
+            -Before $boundary.start `
+            -After $boundary.end
+        foreach ($item in @($deltas.hard_failures)) {
+            [void]$observationHardFailures.Add([string]$item)
+        }
+        foreach ($item in @($deltas.evidence_holds)) {
+            [void]$observationEvidenceHolds.Add([string]$item)
+        }
+    } else {
+        [void]$observationEvidenceHolds.Add("observation-delta-unavailable")
+    }
+
+    $postprocessIntegrityFailures = New-Object System.Collections.Generic.List[string]
+    $postprocessState = $null
+    if ($null -ne $boundary.end) {
+        try {
+            $postprocessState = Get-PostprocessState -ConfigPath $configPath
+            foreach ($item in @(
+                Get-PostprocessIntegrityFailures `
+                    -ObservationEnd $boundary.end `
+                    -PostprocessState $postprocessState
+            )) {
+                [void]$postprocessIntegrityFailures.Add([string]$item)
+            }
+        } catch {
+            [void]$postprocessIntegrityFailures.Add(
+                "postprocess-state-capture-failed:$($_.Exception.GetType().Name)"
+            )
+        }
+    } else {
+        [void]$postprocessIntegrityFailures.Add("postprocess-baseline-boundary-missing")
+    }
+    $postprocessState | ConvertTo-Json -Depth 10 |
+        Set-Content `
+            -LiteralPath (Join-Path $controlRoot "canary-postprocess-state.json") `
+            -Encoding UTF8
+    [pscustomobject][ordered]@{
+        schema_version = "spot-canary-postflight-evaluation-v2"
+        observation_start = $boundary.start
+        observation_end = $boundary.end
+        observation_hard_failures = @($observationHardFailures.ToArray())
+        observation_evidence_holds = @($observationEvidenceHolds.ToArray())
+        postprocess_integrity_failures = @($postprocessIntegrityFailures.ToArray())
+    } | ConvertTo-Json -Depth 12 |
+        Set-Content `
+            -LiteralPath (Join-Path $controlRoot "canary-postflight.json") `
+            -Encoding UTF8
+
     $packet = Test-PacketEvidence `
         -FieldSummary $fieldSummary `
         -FramingSummary $framingSummary
+
+    foreach ($item in @($observationHardFailures.ToArray())) {
+        $packet.hard_failures += [string]$item
+    }
+    foreach ($item in @($observationEvidenceHolds.ToArray())) {
+        $packet.evidence_holds += [string]$item
+    }
 
     foreach (
         $collectorHold in @(
@@ -1383,8 +1894,10 @@ try {
         $packet.evidence_holds += $collectorHold
     }
 
-    $operatorEligible = Test-OperatorVisualConfirmationEligible `
-        -FieldSummary $fieldSummary
+    $operatorEligible = (
+        [bool]$boundary.valid -and
+        (Test-OperatorVisualConfirmationEligible -FieldSummary $fieldSummary)
+    )
     $operatorAnswer = if ($operatorEligible) {
         Read-Host (
             "120분 전체 구간 동안 SPOT 영상이 계속 갱신되고 화면 오류가 없었습니까? " +
@@ -1421,7 +1934,8 @@ try {
     $switchLimited = Test-SwitchEvidenceLimitation -FieldSummary $fieldSummary
     $resultName = if (@($packet.hard_failures).Count -gt 0) {
         "SPOT_120M_ROLLBACK_REQUIRED"
-    } elseif (@($packet.evidence_holds).Count -gt 0) {
+    } elseif (@($packet.evidence_holds).Count -gt 0 -or
+        $postprocessIntegrityFailures.Count -gt 0) {
         "SPOT_120M_EVIDENCE_HOLD"
     } elseif ($switchLimited) {
         "SPOT_120M_PASS_WITH_SWITCH_LIMITATION"
@@ -1432,9 +1946,21 @@ try {
         result = $resultName
         classification = $identity.classification
         production_promotion_allowed = $false
-        version = $after.version
-        build_commit = $after.build_git_commit
-        backend_pid = $after.backend_pid
+        version = if ($null -eq $boundary.end) {
+            $null
+        } else {
+            $boundary.end.app_version
+        }
+        build_commit = if ($null -eq $boundary.end) {
+            $null
+        } else {
+            $boundary.end.build_git_commit
+        }
+        backend_pid = if ($null -eq $boundary.end) {
+            $null
+        } else {
+            $boundary.end.backend_pid
+        }
         observation_elapsed_seconds = $fieldSummary.observation_elapsed_seconds
         event_trigger_detected = $fieldSummary.event_trigger_detected
         collector_status = $fieldSummary.status
@@ -1445,6 +1971,27 @@ try {
         )
         counter_rate_window = $identity.canary.counter_rate_window
         deltas = $deltas
+        failure_counter_deltas = if ($null -eq $deltas) {
+            $null
+        } else {
+            $deltas.failure_counter_deltas
+        }
+        failure_events = if ($null -eq $deltas) {
+            @()
+        } else {
+            @($deltas.failure_events)
+        }
+        hard_failures = @($packet.hard_failures)
+        evidence_holds = @($packet.evidence_holds)
+        postprocess_integrity_failures = @(
+            $postprocessIntegrityFailures.ToArray()
+        )
+        observation_boundary = [pscustomobject][ordered]@{
+            schema_version = "spot-canary-observation-boundary-v1"
+            valid = [bool]$boundary.valid
+            start_path = $boundary.start_path
+            end_path = $boundary.end_path
+        }
         packet_gate = $packet
         packet_evidence_run = $runRoot
         sanitized_zip = Join-Path `
