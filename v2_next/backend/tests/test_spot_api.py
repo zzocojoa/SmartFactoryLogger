@@ -146,11 +146,14 @@ class FakeSpotHttpTransport:
 
     def diagnostics(self) -> dict[str, object]:
         return {
-            "source_port_policy_version": "spot-source-port-quarantine-v2",
+            "source_port_policy_version": "spot-source-port-quarantine-v3",
             "source_port_enforcement_supported": True,
             "source_port_enforcement_active": True,
-            "source_port_quarantine_seconds": 75.0,
+            "source_port_minimum_required_reuse_interval_seconds": 75.0,
+            "source_port_quarantine_safety_margin_seconds": 2.0,
+            "source_port_quarantine_seconds": 77.0,
             "source_port_pool_capacity": 768,
+            "source_port_minimum_required_pool_capacity": 462,
             "source_port_pool_guarded_count": 767,
             "source_port_pool_leased_count": 0,
             "source_port_pool_quarantined_count": 1,
@@ -5362,12 +5365,24 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             diagnostics["source_port_policy_version"],
-            "spot-source-port-quarantine-v2",
+            "spot-source-port-quarantine-v3",
         )
         self.assertTrue(diagnostics["source_port_enforcement_supported"])
         self.assertTrue(diagnostics["source_port_enforcement_active"])
-        self.assertEqual(diagnostics["source_port_quarantine_seconds"], 75.0)
+        self.assertEqual(
+            diagnostics["source_port_minimum_required_reuse_interval_seconds"],
+            75.0,
+        )
+        self.assertEqual(
+            diagnostics["source_port_quarantine_safety_margin_seconds"],
+            2.0,
+        )
+        self.assertEqual(diagnostics["source_port_quarantine_seconds"], 77.0)
         self.assertEqual(diagnostics["source_port_pool_capacity"], 768)
+        self.assertEqual(
+            diagnostics["source_port_minimum_required_pool_capacity"],
+            462,
+        )
         self.assertNotIn("source_port_values", diagnostics)
 
     def test_source_port_diagnostics_schema_is_stable_without_transport(self) -> None:
@@ -5380,8 +5395,11 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             "source_port_policy_version",
             "source_port_enforcement_supported",
             "source_port_enforcement_active",
+            "source_port_minimum_required_reuse_interval_seconds",
+            "source_port_quarantine_safety_margin_seconds",
             "source_port_quarantine_seconds",
             "source_port_pool_capacity",
+            "source_port_minimum_required_pool_capacity",
             "source_port_pool_guarded_count",
             "source_port_pool_leased_count",
             "source_port_pool_quarantined_count",

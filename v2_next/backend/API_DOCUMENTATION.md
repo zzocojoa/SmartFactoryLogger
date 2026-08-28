@@ -929,10 +929,13 @@ SPOT 카메라 위젯 설정을 가져옵니다.
         "request_budget_target_max_per_sec": 6.0,
         "request_budget_total_background_max_per_sec": 5.466667,
         "request_budget_within_target": true,
-        "source_port_policy_version": "spot-source-port-quarantine-v2",
+        "source_port_policy_version": "spot-source-port-quarantine-v3",
         "source_port_enforcement_active": true,
+        "source_port_minimum_required_reuse_interval_seconds": 75.0,
+        "source_port_quarantine_safety_margin_seconds": 2.0,
         "source_port_pool_capacity": 768,
-        "source_port_quarantine_seconds": 75.0,
+        "source_port_minimum_required_pool_capacity": 462,
+        "source_port_quarantine_seconds": 77.0,
         "source_port_pool_exhaustion_count": 0,
         "source_port_reuse_violation_count": 0
     }

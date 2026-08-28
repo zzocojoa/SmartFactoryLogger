@@ -8,9 +8,18 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
-POLICY_VERSION = "spot-source-port-quarantine-v2"
+POLICY_VERSION = "spot-source-port-quarantine-v3"
 POOL_CAPACITY = 768
-QUARANTINE_SECONDS = 75.0
+MINIMUM_REQUIRED_REUSE_INTERVAL_SECONDS = 75.0
+QUARANTINE_SAFETY_MARGIN_SECONDS = 2.0
+QUARANTINE_SECONDS = (
+    MINIMUM_REQUIRED_REUSE_INTERVAL_SECONDS
+    + QUARANTINE_SAFETY_MARGIN_SECONDS
+)
+CAPACITY_PLANNING_MAX_REQUESTS_PER_SECOND = 6.0
+MINIMUM_REQUIRED_POOL_CAPACITY = math.ceil(
+    CAPACITY_PLANNING_MAX_REQUESTS_PER_SECOND * QUARANTINE_SECONDS
+)
 ACQUIRE_TIMEOUT_SECONDS = 5.0
 REBIND_RETRY_INTERVAL_SECONDS = 1.0
 
@@ -299,8 +308,17 @@ class SourcePortLeasePool:
                 "source_port_policy_version": POLICY_VERSION,
                 "source_port_enforcement_supported": self.supported,
                 "source_port_enforcement_active": self.active,
+                "source_port_minimum_required_reuse_interval_seconds": (
+                    MINIMUM_REQUIRED_REUSE_INTERVAL_SECONDS
+                ),
+                "source_port_quarantine_safety_margin_seconds": (
+                    QUARANTINE_SAFETY_MARGIN_SECONDS
+                ),
                 "source_port_quarantine_seconds": self._quarantine_seconds,
                 "source_port_pool_capacity": self._capacity,
+                "source_port_minimum_required_pool_capacity": (
+                    MINIMUM_REQUIRED_POOL_CAPACITY
+                ),
                 "source_port_pool_guarded_count": counts["guarded"],
                 "source_port_pool_leased_count": counts["leased"],
                 "source_port_pool_quarantined_count": counts["quarantined"],

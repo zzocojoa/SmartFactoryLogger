@@ -2,6 +2,24 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.22] - 2026-08-28
+
+### Changed
+
+- Raised the Windows SPOT source-port quarantine from 75 to 77 seconds while
+  retaining the 75-second minimum reuse requirement and adding a two-second
+  safety margin under `spot-source-port-quarantine-v3`.
+- Exposed the required reuse interval, safety margin, effective quarantine,
+  and minimum required pool capacity as aggregate `/api/spot/config`
+  diagnostics without exposing source-port values.
+
+### Validation
+
+- Fixed the 768-port production pool capacity contract against the maximum
+  six-request/s rate: 462 ports are required for a 77-second quarantine.
+- The change requires a clean commit-bound Windows package, 15-minute server
+  verification, and 120-minute Canary before any production promotion.
+
 ## [1.0.21] - 2026-08-21
 
 ### Added
