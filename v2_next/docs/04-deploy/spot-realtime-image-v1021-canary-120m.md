@@ -149,6 +149,12 @@ failure counter 판정도 동일한 증거 연속성을 사용한다. 30초 안�
 counter가 감소한 경우도 backend 상태 초기화 또는 증거 불연속으로 간주해 통과시키지
 않는다.
 
+`source_port_request_event_drop_count`는 통신 실패 수가 아니다. 정상 요청을 포함하는
+제한 크기 일반 요청 journal에서 오래된 항목이 밀려난 누적 횟수이므로 스냅샷에는
+보존하되 failure gate에는 사용하지 않는다. 실제 실패 journal의 손실을 나타내는
+`source_port_request_failure_event_drop_count`와 실제 failure counter의 신규 증가만
+제품 hard failure로 판정한다.
+
 packet 결과에는 인터페이스별 집계, 중복 SYN, 시각 역행, 양방향 RST, 관찰 범위 밖
 제외 수, 원본·중복 제거·monotonic 보정 재사용 간격이 포함된다. 보정 상태가 확정되지
 않으면 74초대를 제품 결함으로 단정하거나 기준을 완화하지 않고 `EVIDENCE_HOLD`한다.

@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v3" -or
+    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v4" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.21" -or
@@ -135,6 +135,8 @@ if (
     [int]$identity.canary.observation_end_snapshot_max_delay_seconds -ne 5 -or
     $identity.canary.historical_failure_counter_policy -cne
         "stable-preflight-baseline-and-zero-canary-delta" -or
+    $identity.canary.general_request_event_drop_policy -cne
+        "bounded-journal-eviction-observability-only" -or
     [int]$identity.canary.historical_failure_stability_seconds -ne 30 -or
     [int]$identity.canary.historical_failure_progress_interval_seconds -ne 10 -or
     $identity.canary.collector_failure_without_runtime_hard_gate -cne

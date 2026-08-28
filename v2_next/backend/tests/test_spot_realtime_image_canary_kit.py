@@ -88,7 +88,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("contains_installer = $false", source)
         self.assertIn("changes_application_or_settings = $false", source)
         self.assertIn(
-            'schema_version = "spot-realtime-image-v1021-canary-kit-v3"',
+            'schema_version = "spot-realtime-image-v1021-canary-kit-v4"',
             source,
         )
         self.assertIn(
@@ -101,6 +101,11 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         )
         self.assertIn(
             'counter_rate_window = "observation-start-to-observation-end"',
+            source,
+        )
+        self.assertIn(
+            'general_request_event_drop_policy = '
+            '"bounded-journal-eviction-observability-only"',
             source,
         )
         self.assertIn('framing_schema = "spot-http-framing-evidence-v6"', source)
@@ -202,6 +207,28 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         )
         self.assertIn("historical_failure_baseline", guide)
         self.assertIn("신규 증가분", guide)
+
+        failure_names_start = controller.index(
+            "function Get-CumulativeFailureCounterNames"
+        )
+        failure_names_end = controller.index(
+            "function Get-CumulativeFailureCounterSnapshot"
+        )
+        failure_names = controller[failure_names_start:failure_names_end]
+        self.assertNotIn("source_port_request_event_drop_count", failure_names)
+        self.assertIn(
+            "source_port_request_failure_event_drop_count",
+            failure_names,
+        )
+        self.assertIn(
+            '"source_port_request_event_drop_count"',
+            controller[:failure_names_start],
+        )
+        self.assertIn(
+            "bounded-journal-eviction-observability-only",
+            verifier,
+        )
+        self.assertIn("일반 요청 journal", guide)
 
     def test_controller_handles_incomplete_operator_and_switch_evidence(self) -> None:
         source = CONTROLLER.read_text(encoding="utf-8")

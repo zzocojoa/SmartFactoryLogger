@@ -622,7 +622,7 @@ try {
         [ordered]@{ file = "spot-config-image-before-15m.json"; sha256 = "7E7486908045EF4898F44CA474816C647EAC1C5619EAADA6B3DA6445E5C87342" }
     )
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1021-canary-kit-v3"
+        schema_version = "spot-realtime-image-v1021-canary-kit-v4"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -685,6 +685,7 @@ try {
             postprocess_failure_policy = "separate-evidence-hold"
             observation_end_snapshot_max_delay_seconds = 5
             historical_failure_counter_policy = "stable-preflight-baseline-and-zero-canary-delta"
+            general_request_event_drop_policy = "bounded-journal-eviction-observability-only"
             historical_failure_stability_seconds = 30
             historical_failure_progress_interval_seconds = 10
             collector_failure_without_runtime_hard_gate = "evidence-hold"

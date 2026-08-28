@@ -317,7 +317,6 @@ function Get-CumulativeFailureCounterNames {
         "source_port_connection_test_failure_count",
         "source_port_request_failure_event_count_total",
         "source_port_request_failure_event_drop_count",
-        "source_port_request_event_drop_count",
         "image_refresh_failure_count",
         "image_cache_clock_anomaly_count"
     )
@@ -1429,6 +1428,23 @@ function Invoke-SelfTest {
         -InputObject $after.image `
         -NotePropertyName source_port_recent_request_failure_events `
         -NotePropertyValue @()
+    Add-Member `
+        -InputObject $before.image `
+        -NotePropertyName source_port_request_event_drop_count `
+        -NotePropertyValue 593576
+    Add-Member `
+        -InputObject $after.image `
+        -NotePropertyName source_port_request_event_drop_count `
+        -NotePropertyValue 593648
+    $journalEvictionDeltas = Assert-FailureCounterDeltas `
+        -BeforeImage $before.image `
+        -AfterImage $after.image `
+        -Stage "self-test general request journal eviction"
+    if ($journalEvictionDeltas.PSObject.Properties[
+        "source_port_request_event_drop_count"
+    ]) {
+        throw "self-test general request journal eviction was treated as failure"
+    }
     $deltas = Get-ObservationDeltaReport -Before $before -After $after
     if (
         [math]::Abs(
@@ -1442,6 +1458,26 @@ function Invoke-SelfTest {
     ) {
         throw "self-test counter-window rate calculation mismatch"
     }
+    $after.image.source_port_request_failure_event_drop_count = 1
+    $failureJournalDropRejected = $false
+    try {
+        $null = Assert-FailureCounterDeltas `
+            -BeforeImage $before.image `
+            -AfterImage $after.image `
+            -Stage "self-test failure journal drop"
+    } catch {
+        if ($_.Exception.Message -like (
+            "*field=source_port_request_failure_event_drop_count*"
+        )) {
+            $failureJournalDropRejected = $true
+        } else {
+            throw
+        }
+    }
+    if (-not $failureJournalDropRejected) {
+        throw "self-test failure journal drop was not rejected"
+    }
+    $after.image.source_port_request_failure_event_drop_count = 0
     $after.image.source_port_transport_failure_count = 2
     $after.image.source_port_image_failure_count = 2
     $after.image.source_port_temperature_failure_count = 1
