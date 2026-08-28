@@ -17,6 +17,7 @@ class TriggerFixtureServer(ThreadingHTTPServer):
     health_completed_at: datetime | None = None
     invalid_error_baseline = False
     slow_health = False
+    trigger_after_poll = 3
     lock = threading.Lock()
 
 
@@ -50,10 +51,10 @@ class TriggerFixtureHandler(BaseHTTPRequestHandler):
             with self.server.lock:
                 self.server.error_poll_count += 1
                 poll_count = self.server.error_poll_count
-            repeat = 99 if poll_count >= 3 else 98
+            repeat = 99 if poll_count >= self.server.trigger_after_poll else 98
             error_at = (
                 datetime.now(timezone.utc).isoformat()
-                if poll_count >= 3
+                if poll_count >= self.server.trigger_after_poll
                 else "2026-07-24T00:00:00+00:00"
             )
             self._write_json(
@@ -77,12 +78,18 @@ class TriggerFixtureHandler(BaseHTTPRequestHandler):
         self._write_json({"status": "ok"})
 
 
-def start_server(*, invalid_error_baseline: bool, slow_health: bool) -> tuple[
+def start_server(
+    *,
+    invalid_error_baseline: bool,
+    slow_health: bool,
+    trigger_after_poll: int = 3,
+) -> tuple[
     TriggerFixtureServer, threading.Thread
 ]:
     server = TriggerFixtureServer(("127.0.0.1", 0), TriggerFixtureHandler)
     server.invalid_error_baseline = invalid_error_baseline
     server.slow_health = slow_health
+    server.trigger_after_poll = trigger_after_poll
     server.error_poll_count = 0
     server.health_completed_at = None
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -293,6 +300,62 @@ def assert_long_output_path_failure_evidence(collector: Path, monitor: Path) -> 
         shutil.rmtree(temp_root)
 
 
+def assert_observer_completion_handshake(collector: Path, monitor: Path) -> None:
+    temp_root = Path(tempfile.mkdtemp(prefix="sfl-trigger-completion-"))
+    output_root = temp_root / "evidence"
+    output_root.mkdir()
+    signal_path = output_root / "capture_stop_signal.json"
+    server, thread = start_server(
+        invalid_error_baseline=False,
+        slow_health=False,
+        trigger_after_poll=100_000,
+    )
+    try:
+        completed = run_collector(
+            collector=collector,
+            monitor=monitor,
+            api_base=f"http://127.0.0.1:{server.server_port}",
+            output_root=output_root,
+            signal_path=signal_path,
+            duration_seconds=2,
+        )
+        if completed.returncode != 0:
+            raise AssertionError(
+                "observer completion handshake failed\n"
+                f"stdout:\n{completed.stdout}\n"
+                f"stderr:\n{completed.stderr}"
+            )
+        sessions = sorted(output_root.glob("operational_observability_*"))
+        if len(sessions) != 1:
+            raise AssertionError("completion session was not retained once")
+        raw_root = sessions[0] / "raw"
+        request_path = raw_root / "trigger_monitor_completion_request.json"
+        summary_path = raw_root / "trigger_monitor_summary.json"
+        if not request_path.is_file() or not summary_path.is_file():
+            raise AssertionError("completion handshake evidence is missing")
+
+        request = json.loads(request_path.read_text(encoding="utf-8-sig"))
+        summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+        signal = json.loads(signal_path.read_text(encoding="utf-8-sig"))
+        if signal["trigger_detected"]:
+            raise AssertionError("no-trigger completion was classified as a trigger")
+        if signal["stop_reason"] != "observation-completion-requested":
+            raise AssertionError("monitor ignored the observer completion request")
+        if not summary["completion_request_observed"]:
+            raise AssertionError("monitor omitted completion acknowledgement")
+        if summary["completion_request_id"] != request["request_id"]:
+            raise AssertionError("completion request identity was not preserved")
+        if datetime.fromisoformat(signal["collection_ended_at"]) != datetime.fromisoformat(
+            request["observation_ended_at"]
+        ):
+            raise AssertionError("observation end was replaced by monitor finalization")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        shutil.rmtree(temp_root)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--collector-path", required=True, type=Path)
@@ -304,9 +367,11 @@ def main() -> None:
     assert_success_path(collector, monitor)
     assert_failure_evidence_path(collector, monitor)
     assert_long_output_path_failure_evidence(collector, monitor)
+    assert_observer_completion_handshake(collector, monitor)
     print(
         "TRIGGER_COLLECTOR_INTEGRATION_PASS "
-        "success_path=true failure_evidence=true long_path_fail_closed=true"
+        "success_path=true failure_evidence=true long_path_fail_closed=true "
+        "completion_handshake=true"
     )
 
 

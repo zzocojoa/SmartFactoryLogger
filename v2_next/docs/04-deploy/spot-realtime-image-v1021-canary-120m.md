@@ -20,6 +20,11 @@
 이 키트는 설치본·제품 binary·설정·에러 큐를 변경하지 않는다. 패킷 본문은 최종
 공유 자료에 보존하지 않는다.
 
+Canary identity v4 이하 키트는 관찰 종료 시 부모 수집기와 전용 오류 감시 작업의
+시계가 어긋나 정상 실행을 `trigger-monitor-job-failed`로 오판할 수 있으므로 다시
+실행하지 않는다. identity v5는 관찰 종료 시 원자적 완료 요청을 전달하고, 감시
+작업이 최종 증거를 저장한 뒤 종료하도록 고정한다.
+
 ## 진행 상태 표시
 
 관측이 시작되면 콘솔에 30초마다 다음 상태가 표시된다.
@@ -141,6 +146,10 @@ run-spot-realtime-image-canary-120m-as-admin.cmd
 `EVIDENCE_HOLD` 처리한다. packet 변환·로그 수집·압축 중 상태는
 `canary-postprocess-state.json`에 별도로 남으며 관찰 구간 제품 실패에 합산하지 않는다.
 수집기 자체 실패도 별도 제품 hard gate가 없으면 `EVIDENCE_HOLD`이다.
+
+관찰 시간이 끝나면 `trigger_monitor_completion_request.json`을 원자적으로 기록한다.
+전용 감시 작업은 요청 ID와 관찰 종료 시각을 최종 요약·정지 신호에 연결한다. 이때
+관찰 종료 시각은 감시 작업의 후처리 완료 시각으로 덮어쓰지 않는다.
 
 failure counter 판정도 동일한 증거 연속성을 사용한다. 30초 안정성 확인을 통과한
 `historical_failure_baseline`은 실행 전 이력으로 보존하고, 실제 판정은 관찰 시작과

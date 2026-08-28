@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v4" -or
+    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v5" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.21" -or
@@ -116,11 +116,17 @@ if (
         "preinstall-summary.json" -or
     $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
-        "1f4e0f61622ca6e0865a6e96e23aa1d86cfda3c3" -or
+        "26532c432c6e3b72c0078cb257f91ab00d899c45" -or
     $identity.diagnostic_core.framing_schema -cne
         "spot-http-framing-evidence-v6" -or
     $identity.diagnostic_core.observation_boundary_schema -cne
         "spot-canary-observation-boundary-v1" -or
+    $identity.diagnostic_core.trigger_monitor_completion_policy -cne
+        "observer-deadline-atomic-request" -or
+    $identity.diagnostic_core.trigger_monitor_completion_request_schema -cne
+        "spot-trigger-monitor-completion-request-v1" -or
+    [int]$identity.diagnostic_core.trigger_monitor_completion_request_grace_seconds -ne
+        30 -or
     [int]$identity.canary.maximum_observation_minutes -ne 120 -or
     [int]$identity.canary.post_trigger_capture_seconds -ne 75 -or
     [int]$identity.canary.progress_interval_seconds -ne 30 -or

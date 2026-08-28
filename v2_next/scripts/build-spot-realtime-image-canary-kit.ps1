@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$diagnosticCoreCommit = "1f4e0f61622ca6e0865a6e96e23aa1d86cfda3c3"
+$diagnosticCoreCommit = "26532c432c6e3b72c0078cb257f91ab00d899c45"
 
 function Invoke-GitText {
     param(
@@ -622,7 +622,7 @@ try {
         [ordered]@{ file = "spot-config-image-before-15m.json"; sha256 = "7E7486908045EF4898F44CA474816C647EAC1C5619EAADA6B3DA6445E5C87342" }
     )
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1021-canary-kit-v4"
+        schema_version = "spot-realtime-image-v1021-canary-kit-v5"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -661,6 +661,11 @@ try {
             source_identity = "spot-connecttimeout-trigger-field-kit-v5"
             framing_schema = "spot-http-framing-evidence-v6"
             observation_boundary_schema = "spot-canary-observation-boundary-v1"
+            trigger_monitor_completion_policy =
+                "observer-deadline-atomic-request"
+            trigger_monitor_completion_request_schema =
+                "spot-trigger-monitor-completion-request-v1"
+            trigger_monitor_completion_request_grace_seconds = 30
             controlled_delta = (
                 "Immutable observation boundaries, aggregate packet deduplication, " +
                 "wall/monotonic clock calibration, complete failure aggregation, " +

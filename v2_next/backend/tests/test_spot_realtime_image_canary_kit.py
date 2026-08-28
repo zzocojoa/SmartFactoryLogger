@@ -65,7 +65,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
     def test_builder_binds_product_core_and_progress_contract(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
         self.assertIn(
-            '"1f4e0f61622ca6e0865a6e96e23aa1d86cfda3c3"',
+            '"26532c432c6e3b72c0078cb257f91ab00d899c45"',
             source,
         )
         self.assertIn(
@@ -88,7 +88,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("contains_installer = $false", source)
         self.assertIn("changes_application_or_settings = $false", source)
         self.assertIn(
-            'schema_version = "spot-realtime-image-v1021-canary-kit-v4"',
+            'schema_version = "spot-realtime-image-v1021-canary-kit-v5"',
             source,
         )
         self.assertIn(
@@ -113,11 +113,23 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             'observation_boundary_schema = "spot-canary-observation-boundary-v1"',
             source,
         )
+        self.assertIn(
+            'trigger_monitor_completion_policy =',
+            source,
+        )
+        self.assertIn(
+            '"observer-deadline-atomic-request"',
+            source,
+        )
+        self.assertIn(
+            '"spot-trigger-monitor-completion-request-v1"',
+            source,
+        )
 
     def test_builder_preserves_trigger_job_failure_evidence(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
         self.assertIn(
-            '"1f4e0f61622ca6e0865a6e96e23aa1d86cfda3c3"',
+            '"26532c432c6e3b72c0078cb257f91ab00d899c45"',
             source,
         )
         self.assertNotIn('    Add-TriggerMonitorFailureContract `', source)
