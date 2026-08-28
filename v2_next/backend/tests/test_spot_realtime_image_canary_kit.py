@@ -16,7 +16,7 @@ GUIDE = (
     REPOSITORY
     / "docs"
     / "04-deploy"
-    / "spot-realtime-image-v1021-canary-120m.md"
+    / "spot-realtime-image-v1022-validation.md"
 )
 
 
@@ -51,25 +51,24 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "verify-spot-realtime-image-canary-kit.ps1"
         )
         preflight_index = source.index("-PreflightOnly")
-        full_run_index = source.rindex(
-            "invoke-spot-realtime-image-canary-120m.ps1"
-        )
         self.assertLess(verify_index, preflight_index)
-        self.assertLess(preflight_index, full_run_index)
-        self.assertIn("Progress appears every 30 seconds", source)
-        self.assertIn('if "%SFL_CANARY_EXIT%"=="10"', source)
-        self.assertIn("ROLLBACK REQUIRED", source)
-        self.assertIn("verified v1.0.20 cd8cfa6 installer", source)
+        self.assertIn("separate 15-minute diagnostic", source)
+        self.assertIn("intentionally blocks the 120-minute observation", source)
+        self.assertIn('set "SFL_CANARY_EXIT=3"', source)
+        self.assertEqual(
+            source.count("invoke-spot-realtime-image-canary-120m.ps1"),
+            1,
+        )
         self.assertNotIn("v1.0.16", source)
 
     def test_builder_binds_product_core_and_progress_contract(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
         self.assertIn(
-            '"26532c432c6e3b72c0078cb257f91ab00d899c45"',
+            '"14d0a35c103715ecc82218b93e5d61ecaf5d585e"',
             source,
         )
         self.assertIn(
-            'build_git_commit = "5971fc4fbdeec07ef65681a945319f0ae12d55cb"',
+            'build_git_commit = "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80"',
             source,
         )
         self.assertNotIn(
@@ -88,7 +87,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("contains_installer = $false", source)
         self.assertIn("changes_application_or_settings = $false", source)
         self.assertIn(
-            'schema_version = "spot-realtime-image-v1021-canary-kit-v5"',
+            'schema_version = "spot-realtime-image-v1022-canary-kit-v1"',
             source,
         )
         self.assertIn(
@@ -108,7 +107,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             '"bounded-journal-eviction-observability-only"',
             source,
         )
-        self.assertIn('framing_schema = "spot-http-framing-evidence-v6"', source)
+        self.assertIn('framing_schema = "spot-http-framing-evidence-v7"', source)
         self.assertIn(
             'observation_boundary_schema = "spot-canary-observation-boundary-v1"',
             source,
@@ -125,11 +124,22 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             '"spot-trigger-monitor-completion-request-v1"',
             source,
         )
+        for expected in (
+            'result = "PENDING_SERVER_VALIDATION"',
+            'full_120m_allowed = $false',
+            'source_port_policy_version = "spot-source-port-quarantine-v3"',
+            "source_port_minimum_required_reuse_interval_seconds = 75.0",
+            "source_port_quarantine_safety_margin_seconds = 2.0",
+            "source_port_quarantine_seconds = 77.0",
+            "source_port_pool_capacity = 768",
+            "source_port_minimum_required_pool_capacity = 462",
+        ):
+            self.assertIn(expected, source)
 
     def test_builder_preserves_trigger_job_failure_evidence(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
         self.assertIn(
-            '"26532c432c6e3b72c0078cb257f91ab00d899c45"',
+            '"14d0a35c103715ecc82218b93e5d61ecaf5d585e"',
             source,
         )
         self.assertNotIn('    Add-TriggerMonitorFailureContract `', source)
@@ -183,6 +193,10 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "Get-CollectorEvidenceHolds",
             "collector failure was not classified as evidence hold",
             "mismatched rollback baseline was accepted",
+            "spot-source-port-quarantine-v3",
+            "source_port_quarantine_safety_margin_seconds",
+            "source_port_minimum_required_pool_capacity",
+            "120-minute observation is blocked until the v1.0.22",
         )
         for fragment in required_fragments:
             self.assertIn(fragment, source)
@@ -217,8 +231,8 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "historical_failure_progress_interval_seconds -ne 10",
             verifier,
         )
-        self.assertIn("historical_failure_baseline", guide)
-        self.assertIn("신규 증가분", guide)
+        self.assertIn("신규 transport/image/temperature", guide)
+        self.assertIn("77초", guide)
 
         failure_names_start = controller.index(
             "function Get-CumulativeFailureCounterNames"
@@ -240,7 +254,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "bounded-journal-eviction-observability-only",
             verifier,
         )
-        self.assertIn("일반 요청 journal", guide)
+        self.assertIn("failure event journal", guide)
 
     def test_controller_handles_incomplete_operator_and_switch_evidence(self) -> None:
         source = CONTROLLER.read_text(encoding="utf-8")
@@ -257,12 +271,12 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         verifier = VERIFIER.read_text(encoding="utf-8")
         guide = GUIDE.read_text(encoding="utf-8")
         for expected in (
-            "5971fc4fbdeec07ef65681a945319f0ae12d55cb",
-            "01CF544C999FB21FADB7F36965DC35FB9E8AEE36D1EEBD3319A1EB7296AD191A",
+            "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80",
+            "77577ABB08BD901365B2D366B5ABAF101217E90B8AA5F2E9CB47971FF03123E2",
             "cd8cfa649203494cf087206cf656dc2197107ea1",
             "F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19",
-            "464BF0A540133C5165B7E550430EDA9EDAA07FA866481B43FAD2B0392016A4F8",
-            "2E16E28BD695B5D9125EF11822E4E10DA2D422E0D1781EE72A623D1EE0A97063",
+            "E171DF1C3EB3C8DB78700E95913E87E7B1EE95460990F6B342AD4E0165448C2C",
+            "B13909D1A6067E94EC945750C82F17948FC597D3A29060323E807193650F0327",
         ):
             self.assertIn(expected, verifier)
         for source in (
@@ -276,10 +290,11 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
                 "42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615",
                 source,
             )
-        self.assertIn("30초마다", guide)
-        self.assertIn("추가 호출하지 않으므로", guide)
+        self.assertIn("every 30 seconds", guide)
+        self.assertIn("does not add SPOT or", guide)
+        self.assertIn("backend API requests", guide)
         self.assertIn("PASS_WITH_SWITCH_LIMITATION", guide)
-        self.assertIn("observation-start-to-observation-end", guide)
+        self.assertIn("PENDING_SERVER_VALIDATION", BUILDER.read_text(encoding="utf-8"))
         self.assertIn("EVIDENCE_HOLD", guide)
 
 

@@ -473,7 +473,7 @@ function Invoke-CanarySelfTests {
         -File (Join-Path $StagingRoot "invoke-spot-realtime-image-canary-120m.ps1") `
         -SelfTest
     if ($LASTEXITCODE -ne 0) {
-        throw "v1.0.21 canary controller self-test failed."
+        throw "v1.0.22 canary controller self-test failed."
     }
 }
 
@@ -515,7 +515,7 @@ $currentSources = [ordered]@{
     "invoke-spot-realtime-image-canary-120m.ps1" = Join-Path $PSScriptRoot "invoke-spot-realtime-image-canary-120m.ps1"
     "run-spot-realtime-image-canary-120m-as-admin.cmd" = Join-Path $PSScriptRoot "run-spot-realtime-image-canary-120m-as-admin.cmd"
     "verify-spot-realtime-image-canary-kit.ps1" = Join-Path $PSScriptRoot "verify-spot-realtime-image-canary-kit.ps1"
-    "SPOT_REALTIME_IMAGE_CANARY_120M_GUIDE.md" = Join-Path $projectRoot "docs\04-deploy\spot-realtime-image-v1021-canary-120m.md"
+    "SPOT_REALTIME_IMAGE_CANARY_120M_GUIDE.md" = Join-Path $projectRoot "docs\04-deploy\spot-realtime-image-v1022-validation.md"
 }
 foreach ($path in $currentSources.Values) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -543,7 +543,7 @@ $corePaths = @(
     "v2_next/scripts/test_spot_connecttimeout_trigger_collector.py"
 )
 $generatedAt = [DateTimeOffset]::UtcNow
-$kitName = "SmartFactoryLogger_SPOT_Realtime_Image_v1021_Canary_{0}_{1}" -f `
+$kitName = "SmartFactoryLogger_SPOT_Realtime_Image_v1022_Canary_{0}_{1}" -f `
     $toolingCommit.Substring(0, 8),
     $generatedAt.ToString("yyyyMMdd_HHmmssZ")
 $kitFolder = Join-Path $outputRootFull $kitName
@@ -558,7 +558,7 @@ foreach ($target in @($kitFolder, $zipPath, $zipHashPath)) {
 $temporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $temporaryRoot = Join-Path `
     $temporaryBase `
-    ("sfl-v1021-canary-{0}" -f [guid]::NewGuid().ToString("N"))
+    ("sfl-v1022-canary-{0}" -f [guid]::NewGuid().ToString("N"))
 $stagingRoot = Join-Path $temporaryRoot "staging"
 $archiveRoot = Join-Path $temporaryRoot "archive"
 $verificationRoot = Join-Path $temporaryRoot "verify"
@@ -593,17 +593,18 @@ try {
 
     $attestation = [ordered]@{
         schema_version = "spot-operator-visual-attestation-v1"
-        evidence_kind = "human-attestation"
-        product_version = "1.0.21"
-        build_git_commit = "5971fc4fbdeec07ef65681a945319f0ae12d55cb"
-        observation_date_kst = "2026-08-21"
-        observation_start_kst = "19:13"
-        observation_end_kst = "19:28"
+        evidence_kind = "pending-server-validation"
+        status = "PENDING"
+        product_version = "1.0.22"
+        build_git_commit = "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80"
+        observation_date_kst = $null
+        observation_start_kst = $null
+        observation_end_kst = $null
         observation_duration_minutes = 15
-        continuous_spot_image_refresh = $true
-        screen_error_observed = $false
-        statement = "SPOT video refreshed continuously for the complete interval and no screen error was observed."
-        source = "user-provided confirmation in the active Codex task"
+        continuous_spot_image_refresh = $null
+        screen_error_observed = $null
+        statement = "v1.0.22 server validation has not been performed."
+        source = "not-yet-collected"
         machine_generated = $false
     }
     $attestation | ConvertTo-Json -Depth 5 |
@@ -611,34 +612,32 @@ try {
             -LiteralPath (Join-Path $stagingRoot "operator_attestation_15m.json") `
             -Encoding UTF8
 
-    $evidenceFiles = @(
-        [ordered]@{ file = "backend-integrity-after-install.json"; sha256 = "6D077E7944C5670A6990862209C6D7A10935E13B01D920AF3D270538A5147058" },
-        [ordered]@{ file = "health-after-15m.json"; sha256 = "9CD044E41D5A42AA72F94275B18AC1CBDB786AA44C5BCD0E836CF6772B883322" },
-        [ordered]@{ file = "health-before.json"; sha256 = "2E16E28BD695B5D9125EF11822E4E10DA2D422E0D1781EE72A623D1EE0A97063" },
-        [ordered]@{ file = "health-before-15m.json"; sha256 = "12653336422E897764C47069F7CAE5F2C876B8B27591CDF7D52AB6ED6F982021" },
-        [ordered]@{ file = "postinstall-bundle-gate.json"; sha256 = "E42CF3126CD5CC42F38918D0E64CF9C302A860FB00DD8B8030B676EF20147994" },
-        [ordered]@{ file = "preinstall-summary.json"; sha256 = "06F076A09D7D659B88A92959769CD1528802EC08E3C0A13F35A6A8329FF32138" },
-        [ordered]@{ file = "spot-15m.json"; sha256 = "464BF0A540133C5165B7E550430EDA9EDAA07FA866481B43FAD2B0392016A4F8" },
-        [ordered]@{ file = "spot-config-image-after-15m.json"; sha256 = "1859E0E79C7D24348132B93B8D2EBFA50FBD0166762F7A4F1A16B41C15A6D100" },
-        [ordered]@{ file = "spot-config-image-before-15m.json"; sha256 = "7E7486908045EF4898F44CA474816C647EAC1C5619EAADA6B3DA6445E5C87342" }
-    )
+    $evidenceFiles = @()
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1021-canary-kit-v6"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v1"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
         classification = "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY"
         production_promotion_allowed = $false
         product = [ordered]@{
-            version = "1.0.21"
-            build_git_commit = "5971fc4fbdeec07ef65681a945319f0ae12d55cb"
-            release_kit_folder = "spot-realtime-image-performance-v1.0.21-5971fc4"
-            installer_file = "smart-factory-logger-v2 Setup 1.0.21.exe"
-            installer_sha256 = "01CF544C999FB21FADB7F36965DC35FB9E8AEE36D1EEBD3319A1EB7296AD191A"
-            app_asar_sha256 = "50734BC222DF943A2DC6605E35EDEA0AD600C909A0A32E4ADEFF2A2A0952C048"
-            backend_bundle_sha256 = "B818383DF7B035DC73C86E57F0080489B287C958086C8E2C426639C0622CB094"
-            backend_bundle_file_count = 1385
+            version = "1.0.22"
+            build_git_commit = "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80"
+            release_kit_folder = "spot-realtime-image-performance-v1.0.22-5cc34b4"
+            release_identity_file = "release_identity.json"
+            release_identity_sha256 = "3AB24AE19B127C3344DE59A345E668ED429B77D29F5C2BE8EE032B7B15262F32"
+            installer_file = "smart-factory-logger-v2 Setup 1.0.22.exe"
+            installer_sha256 = "77577ABB08BD901365B2D366B5ABAF101217E90B8AA5F2E9CB47971FF03123E2"
+            app_asar_sha256 = "B13909D1A6067E94EC945750C82F17948FC597D3A29060323E807193650F0327"
+            backend_bundle_sha256 = "E171DF1C3EB3C8DB78700E95913E87E7B1EE95460990F6B342AD4E0165448C2C"
+            backend_bundle_file_count = 1501
             config_sha256 = "6841C848A443DF91966C991707C2B21CA57C575993DCA36FACFF2592D070147E"
+            source_port_policy_version = "spot-source-port-quarantine-v3"
+            source_port_minimum_required_reuse_interval_seconds = 75.0
+            source_port_quarantine_safety_margin_seconds = 2.0
+            source_port_quarantine_seconds = 77.0
+            source_port_pool_capacity = 768
+            source_port_minimum_required_pool_capacity = 462
         }
         rollback = [ordered]@{
             version = "1.0.20"
@@ -649,11 +648,12 @@ try {
             baseline_health_file = "health-before.json"
         }
         prerequisite_15m = [ordered]@{
-            result = "PASS"
-            evidence_relative_path = "server-evidence\20260821-190022"
-            observation_date_kst = "2026-08-21"
-            observation_start_kst = "19:13"
-            observation_end_kst = "19:28"
+            result = "PENDING_SERVER_VALIDATION"
+            full_120m_allowed = $false
+            evidence_relative_path = "server-evidence\v1022-pending"
+            observation_date_kst = $null
+            observation_start_kst = $null
+            observation_end_kst = $null
             operator_attestation_file = "operator_attestation_15m.json"
             evidence_files = $evidenceFiles
         }
@@ -680,7 +680,7 @@ try {
                 "aggregate packet deduplication, wall/monotonic clock calibration, " +
                 "complete failure aggregation, and recoverability-aware trigger evidence"
             )
-            product_request_behavior_changed = $false
+            product_request_behavior_changed = $true
         }
         canary = [ordered]@{
             maximum_observation_minutes = 120
@@ -692,6 +692,12 @@ try {
             packet_capture_circular_limit_mb = 1024
             packet_payload_retained_in_share = $false
             same_four_tuple_minimum_75s_required = $true
+            required_source_port_policy_version = "spot-source-port-quarantine-v3"
+            source_port_minimum_required_reuse_interval_seconds = 75.0
+            source_port_quarantine_safety_margin_seconds = 2.0
+            source_port_quarantine_seconds = 77.0
+            source_port_pool_capacity = 768
+            source_port_minimum_required_pool_capacity = 462
             packet_capture_full_window_required = $true
             backend_pid_must_remain_constant = $true
             request_budget_max_per_second = 6.0
@@ -738,7 +744,7 @@ try {
         -KitRoot $stagingRoot `
         -Quiet
     if ($LASTEXITCODE -ne 0) {
-        throw "The staged v1.0.21 canary kit failed verification."
+        throw "The staged v1.0.22 server-validation kit failed verification."
     }
 
     Copy-Item -LiteralPath $stagingRoot -Destination $kitFolder -Recurse
@@ -753,7 +759,7 @@ try {
         -KitRoot $verificationRoot `
         -Quiet
     if ($LASTEXITCODE -ne 0) {
-        throw "The extracted v1.0.21 canary ZIP failed verification."
+        throw "The extracted v1.0.22 server-validation ZIP failed verification."
     }
     $recordedZipHash = (Get-Content -LiteralPath $zipHashPath -Raw).Trim()
     $recomputedZipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
@@ -761,7 +767,7 @@ try {
         $recordedZipHash -cne $zipHash -or
         $recomputedZipHash -cne $zipHash
     ) {
-        throw "The v1.0.21 canary ZIP SHA-256 verification failed."
+        throw "The v1.0.22 server-validation ZIP SHA-256 verification failed."
     }
 
     Write-Output "kit_folder=$kitFolder"
@@ -773,7 +779,7 @@ try {
     Write-Output "package_file_count=12"
     Write-Output "progress_interval_seconds=30"
     Write-Output "progress_adds_spot_or_backend_requests=false"
-    Write-Output "SPOT_REALTIME_IMAGE_V1021_CANARY_KIT_BUILD_PASS"
+    Write-Output "SPOT_REALTIME_IMAGE_V1022_VALIDATION_KIT_BUILD_PASS"
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
         Assert-SafeTemporaryPath `

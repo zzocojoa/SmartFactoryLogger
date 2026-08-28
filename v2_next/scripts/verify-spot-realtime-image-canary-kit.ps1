@@ -31,7 +31,7 @@ if ([string]::IsNullOrWhiteSpace($KitRoot)) {
     $KitRoot = $PSScriptRoot
 }
 if (-not (Test-Path -LiteralPath $KitRoot -PathType Container)) {
-    throw "The extracted v1.0.21 canary kit folder was not found."
+    throw "The extracted v1.0.22 server-validation kit folder was not found."
 }
 $resolvedKitRoot = (Resolve-Path -LiteralPath $KitRoot).Path
 $manifestPath = Join-Path $resolvedKitRoot $manifestFileName
@@ -90,19 +90,33 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v6" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v1" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
-    $identity.product.version -cne "1.0.21" -or
+    $identity.product.version -cne "1.0.22" -or
     $identity.product.build_git_commit -cne
-        "5971fc4fbdeec07ef65681a945319f0ae12d55cb" -or
+        "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80" -or
+    $identity.product.release_kit_folder -cne
+        "spot-realtime-image-performance-v1.0.22-5cc34b4" -or
+    $identity.product.release_identity_file -cne "release_identity.json" -or
+    $identity.product.release_identity_sha256 -cne
+        "3AB24AE19B127C3344DE59A345E668ED429B77D29F5C2BE8EE032B7B15262F32" -or
     $identity.product.installer_sha256 -cne
-        "01CF544C999FB21FADB7F36965DC35FB9E8AEE36D1EEBD3319A1EB7296AD191A" -or
+        "77577ABB08BD901365B2D366B5ABAF101217E90B8AA5F2E9CB47971FF03123E2" -or
     $identity.product.app_asar_sha256 -cne
-        "50734BC222DF943A2DC6605E35EDEA0AD600C909A0A32E4ADEFF2A2A0952C048" -or
+        "B13909D1A6067E94EC945750C82F17948FC597D3A29060323E807193650F0327" -or
     $identity.product.backend_bundle_sha256 -cne
-        "B818383DF7B035DC73C86E57F0080489B287C958086C8E2C426639C0622CB094" -or
-    [int]$identity.product.backend_bundle_file_count -ne 1385 -or
+        "E171DF1C3EB3C8DB78700E95913E87E7B1EE95460990F6B342AD4E0165448C2C" -or
+    [int]$identity.product.backend_bundle_file_count -ne 1501 -or
+    $identity.product.source_port_policy_version -cne
+        "spot-source-port-quarantine-v3" -or
+    [double]$identity.product.source_port_minimum_required_reuse_interval_seconds -ne
+        75.0 -or
+    [double]$identity.product.source_port_quarantine_safety_margin_seconds -ne
+        2.0 -or
+    [double]$identity.product.source_port_quarantine_seconds -ne 77.0 -or
+    [int]$identity.product.source_port_pool_capacity -ne 768 -or
+    [int]$identity.product.source_port_minimum_required_pool_capacity -ne 462 -or
     $identity.product.config_sha256 -cne
         "6841C848A443DF91966C991707C2B21CA57C575993DCA36FACFF2592D070147E" -or
     $identity.rollback.version -cne "1.0.20" -or
@@ -137,12 +151,22 @@ if (
         "spot-trigger-monitor-completion-request-v1" -or
     [int]$identity.diagnostic_core.trigger_monitor_completion_request_grace_seconds -ne
         30 -or
+    -not [bool]$identity.diagnostic_core.product_request_behavior_changed -or
     [int]$identity.canary.maximum_observation_minutes -ne 120 -or
     [int]$identity.canary.post_trigger_capture_seconds -ne 75 -or
     [int]$identity.canary.progress_interval_seconds -ne 30 -or
     $identity.canary.progress_source -cne "local-clock-and-process-state-only" -or
     -not [bool]$identity.canary.stop_on_new_spot_connecttimeout -or
     -not [bool]$identity.canary.same_four_tuple_minimum_75s_required -or
+    $identity.canary.required_source_port_policy_version -cne
+        "spot-source-port-quarantine-v3" -or
+    [double]$identity.canary.source_port_minimum_required_reuse_interval_seconds -ne
+        75.0 -or
+    [double]$identity.canary.source_port_quarantine_safety_margin_seconds -ne
+        2.0 -or
+    [double]$identity.canary.source_port_quarantine_seconds -ne 77.0 -or
+    [int]$identity.canary.source_port_pool_capacity -ne 768 -or
+    [int]$identity.canary.source_port_minimum_required_pool_capacity -ne 462 -or
     -not [bool]$identity.canary.packet_capture_full_window_required -or
     $identity.canary.counter_rate_window -cne
         "observation-start-to-observation-end" -or
@@ -157,40 +181,19 @@ if (
     [int]$identity.canary.historical_failure_progress_interval_seconds -ne 10 -or
     $identity.canary.collector_failure_without_runtime_hard_gate -cne
         "evidence-hold" -or
+    $identity.prerequisite_15m.result -cne "PENDING_SERVER_VALIDATION" -or
+    [bool]$identity.prerequisite_15m.full_120m_allowed -or
+    @($identity.prerequisite_15m.evidence_files).Count -ne 0 -or
     [bool]$identity.contains_installer -or
     [bool]$identity.contains_product_binary -or
     [bool]$identity.changes_application_or_settings -or
     [bool]$identity.restarts_application -or
     [bool]$identity.clears_error_queue
 ) {
-    throw "The canary kit identity is not the approved v1.0.21 contract."
+    throw "The canary kit identity is not the approved v1.0.22 validation contract."
 }
 if ($identity.tooling_source_commit -notmatch "^[0-9a-f]{40}$") {
     throw "The canary tooling source commit is invalid."
-}
-
-$expectedEvidence = [ordered]@{
-    "backend-integrity-after-install.json" = "6D077E7944C5670A6990862209C6D7A10935E13B01D920AF3D270538A5147058"
-    "health-after-15m.json" = "9CD044E41D5A42AA72F94275B18AC1CBDB786AA44C5BCD0E836CF6772B883322"
-    "health-before.json" = "2E16E28BD695B5D9125EF11822E4E10DA2D422E0D1781EE72A623D1EE0A97063"
-    "health-before-15m.json" = "12653336422E897764C47069F7CAE5F2C876B8B27591CDF7D52AB6ED6F982021"
-    "postinstall-bundle-gate.json" = "E42CF3126CD5CC42F38918D0E64CF9C302A860FB00DD8B8030B676EF20147994"
-    "preinstall-summary.json" = "06F076A09D7D659B88A92959769CD1528802EC08E3C0A13F35A6A8329FF32138"
-    "spot-15m.json" = "464BF0A540133C5165B7E550430EDA9EDAA07FA866481B43FAD2B0392016A4F8"
-    "spot-config-image-after-15m.json" = "1859E0E79C7D24348132B93B8D2EBFA50FBD0166762F7A4F1A16B41C15A6D100"
-    "spot-config-image-before-15m.json" = "7E7486908045EF4898F44CA474816C647EAC1C5619EAADA6B3DA6445E5C87342"
-}
-$identityEvidence = @($identity.prerequisite_15m.evidence_files)
-if ($identityEvidence.Count -ne $expectedEvidence.Count) {
-    throw "The prerequisite 15-minute evidence file count is invalid."
-}
-foreach ($entry in $identityEvidence) {
-    if (
-        -not $expectedEvidence.Contains([string]$entry.file) -or
-        $expectedEvidence[[string]$entry.file] -cne ([string]$entry.sha256)
-    ) {
-        throw "The prerequisite 15-minute evidence identity is invalid."
-    }
 }
 
 $attestation = Get-Content `
@@ -199,15 +202,15 @@ $attestation = Get-Content `
     ConvertFrom-Json
 if (
     $attestation.schema_version -cne "spot-operator-visual-attestation-v1" -or
-    $attestation.product_version -cne "1.0.21" -or
-    $attestation.observation_date_kst -cne "2026-08-21" -or
-    $attestation.observation_start_kst -cne "19:13" -or
-    $attestation.observation_end_kst -cne "19:28" -or
-    $attestation.continuous_spot_image_refresh -ne $true -or
-    $attestation.screen_error_observed -ne $false -or
-    $attestation.evidence_kind -cne "human-attestation"
+    $attestation.product_version -cne "1.0.22" -or
+    $attestation.build_git_commit -cne
+        "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80" -or
+    $attestation.evidence_kind -cne "pending-server-validation" -or
+    $attestation.status -cne "PENDING" -or
+    $null -ne $attestation.continuous_spot_image_refresh -or
+    $null -ne $attestation.screen_error_observed
 ) {
-    throw "The 15-minute operator attestation is invalid."
+    throw "The pending v1.0.22 15-minute attestation contract is invalid."
 }
 
 $collectorSource = Get-Content `
@@ -253,6 +256,6 @@ if (
 if (-not $Quiet) {
     $results | Format-Table -AutoSize
     Write-Host (
-        "[PASS] v1.0.21 120-minute canary kit identity and SHA-256 values are valid."
+        "[PASS] v1.0.22 server-validation kit identity and SHA-256 values are valid."
     ) -ForegroundColor Green
 }

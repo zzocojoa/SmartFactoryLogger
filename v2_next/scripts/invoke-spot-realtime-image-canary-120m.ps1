@@ -117,7 +117,7 @@ function Assert-RollbackBaselineEvidence {
         -Context "baseline health spot_temperature")
 
     if ($rollbackVersion -ceq [string]$Identity.product.version) {
-        throw "rollback version must differ from the v1.0.21 candidate"
+        throw "rollback version must differ from the v1.0.22 candidate"
     }
     if ($preinstallVersion -cne $rollbackVersion) {
         throw "rollback version does not match the preinstall baseline"
@@ -257,6 +257,10 @@ function ConvertTo-SafeImageSnapshot {
         "source_port_pool_exhaustion_count",
         "source_port_rebind_retry_count",
         "source_port_reuse_violation_count",
+        "source_port_minimum_required_reuse_interval_seconds",
+        "source_port_quarantine_safety_margin_seconds",
+        "source_port_quarantine_seconds",
+        "source_port_minimum_required_pool_capacity",
         "source_port_minimum_reuse_interval_seconds",
         "source_port_transport_started_count",
         "source_port_transport_success_count",
@@ -513,7 +517,7 @@ function Assert-ImageGate {
         [string]$Stage
     )
 
-    if ($Image.source_port_policy_version -cne "spot-source-port-quarantine-v2") {
+    if ($Image.source_port_policy_version -cne "spot-source-port-quarantine-v3") {
         throw "$Stage source-port policy mismatch"
     }
     if (
@@ -531,6 +535,16 @@ function Assert-ImageGate {
     if ($poolTotal -ne [int]$Image.source_port_pool_capacity) {
         throw "$Stage source-port pool partition mismatch"
     }
+    if (
+        [double]$Image.source_port_minimum_required_reuse_interval_seconds -ne
+            75.0 -or
+        [double]$Image.source_port_quarantine_safety_margin_seconds -ne 2.0 -or
+        [double]$Image.source_port_quarantine_seconds -ne 77.0 -or
+        [int]$Image.source_port_minimum_required_pool_capacity -ne 462 -or
+        [int]$Image.source_port_pool_capacity -lt 462
+    ) {
+        throw "$Stage source-port v3 safety contract mismatch"
+    }
 
     foreach ($name in @(Get-CumulativeFailureCounterNames)) {
         if ([int64]$Image.$name -lt 0) {
@@ -544,8 +558,8 @@ function Assert-ImageGate {
     if ([double]$Image.request_budget_total_background_max_per_sec -gt 6.0) {
         throw "$Stage SPOT request budget limit exceeds 6/s"
     }
-    if ([double]$Image.source_port_minimum_reuse_interval_seconds -lt 75.0) {
-        throw "$Stage source-port minimum reuse interval below 75 seconds"
+    if ([double]$Image.source_port_minimum_reuse_interval_seconds -lt 77.0) {
+        throw "$Stage source-port minimum reuse interval below 77 seconds"
     }
 }
 
@@ -930,6 +944,17 @@ function Assert-EvidenceFiles {
         [Parameter(Mandatory = $true)]
         [string]$EvidenceRoot
     )
+
+    $prerequisiteResult = [string]$Identity.prerequisite_15m.result
+    if ($prerequisiteResult -eq "PENDING_SERVER_VALIDATION") {
+        if (@($Identity.prerequisite_15m.evidence_files).Count -ne 0) {
+            throw "pending 15-minute validation must not claim evidence files"
+        }
+        return
+    }
+    if ($prerequisiteResult -ne "PASS") {
+        throw "unsupported 15-minute prerequisite result: $prerequisiteResult"
+    }
 
     foreach ($entry in @($Identity.prerequisite_15m.evidence_files)) {
         $path = Join-Path $EvidenceRoot ([string]$entry.file)
@@ -1329,11 +1354,11 @@ function Assert-CanaryRuntimeEvidencePathBudget {
 
 function Invoke-SelfTest {
     $image = [pscustomobject]@{
-        source_port_policy_version = "spot-source-port-quarantine-v2"
+        source_port_policy_version = "spot-source-port-quarantine-v3"
         source_port_enforcement_supported = $true
         source_port_enforcement_active = $true
-        source_port_pool_capacity = 4
-        source_port_pool_guarded_count = 1
+        source_port_pool_capacity = 768
+        source_port_pool_guarded_count = 765
         source_port_pool_leased_count = 1
         source_port_pool_quarantined_count = 2
         source_port_pool_rebind_pending_count = 0
@@ -1341,7 +1366,11 @@ function Invoke-SelfTest {
         source_port_pool_exhaustion_count = 0
         source_port_rebind_retry_count = 0
         source_port_reuse_violation_count = 0
-        source_port_minimum_reuse_interval_seconds = 75.0
+        source_port_minimum_required_reuse_interval_seconds = 75.0
+        source_port_quarantine_safety_margin_seconds = 2.0
+        source_port_quarantine_seconds = 77.0
+        source_port_minimum_required_pool_capacity = 462
+        source_port_minimum_reuse_interval_seconds = 77.0
         source_port_transport_started_count = 10
         source_port_transport_success_count = 10
         source_port_transport_failure_count = 1
@@ -1485,7 +1514,7 @@ function Invoke-SelfTest {
         observed_at = "2026-08-21T20:12:04.2365692+09:00"
         backend_pid = 10
         port_8000_owner = 10
-        build_git_commit = "5971fc4fbdeec07ef65681a945319f0ae12d55cb"
+        build_git_commit = "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80"
         config_sha256 = "config-hash"
         electron_path = "C:\Program Files\SmartFactory\smart-factory.exe"
         image = [pscustomobject]@{
@@ -1498,7 +1527,7 @@ function Invoke-SelfTest {
         observed_at = "2026-08-21T20:13:03.7043697+09:00"
         backend_pid = 10
         port_8000_owner = 10
-        build_git_commit = "5971fc4fbdeec07ef65681a945319f0ae12d55cb"
+        build_git_commit = "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80"
         config_sha256 = "config-hash"
         electron_path = "C:\Program Files\SmartFactory\smart-factory.exe"
         image = [pscustomobject]@{
@@ -1729,7 +1758,7 @@ function Invoke-SelfTest {
     }
 
     $identity = [pscustomobject]@{
-        product = [pscustomobject]@{ version = "1.0.21" }
+        product = [pscustomobject]@{ version = "1.0.22" }
         rollback = [pscustomobject]@{
             version = "1.0.20"
             build_git_commit = "cd8cfa649203494cf087206cf656dc2197107ea1"
@@ -1840,7 +1869,11 @@ try {
     Assert-FileSha256 `
         -Path (Join-Path $ReleaseKitRoot $identity.product.installer_file) `
         -ExpectedSha256 $identity.product.installer_sha256 `
-        -Label "v1.0.21 installer" | Out-Null
+        -Label "v1.0.22 installer" | Out-Null
+    Assert-FileSha256 `
+        -Path (Join-Path $ReleaseKitRoot $identity.product.release_identity_file) `
+        -ExpectedSha256 $identity.product.release_identity_sha256 `
+        -Label "v1.0.22 release identity" | Out-Null
     if (
         (Split-Path -Leaf $RollbackInstallerPath) -cne
             [string]$identity.rollback.installer_file
@@ -1905,9 +1938,22 @@ try {
             historical_failure_stability_seconds = (
                 $historicalBaseline.evidence.stability_duration_seconds
             )
+            prerequisite_15m = $identity.prerequisite_15m.result
+            full_120m_allowed = [bool]$identity.prerequisite_15m.full_120m_allowed
             product_changes_performed = $false
         }
         exit 0
+    }
+
+    if (
+        [string]$identity.prerequisite_15m.result -ne "PASS" -or
+        -not [bool]$identity.prerequisite_15m.full_120m_allowed
+    ) {
+        throw (
+            "120-minute observation is blocked until the v1.0.22 " +
+            "15-minute server validation evidence is reviewed and bound " +
+            "to a new canary kit"
+        )
     }
 
     $phase = "collection"
