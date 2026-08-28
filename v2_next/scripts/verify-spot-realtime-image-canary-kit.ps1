@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v1" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v2" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.22" -or
@@ -130,7 +130,9 @@ if (
         "preinstall-summary.json" -or
     $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
-        "14d0a35c103715ecc82218b93e5d61ecaf5d585e" -or
+        "8ec69b31ba6ba8cadc6c6360a9ea18dbed54cf96" -or
+    $identity.diagnostic_core.source_identity -cne
+        "spot-connecttimeout-trigger-field-kit-v7" -or
     $identity.diagnostic_core.framing_schema -cne
         "spot-http-framing-evidence-v7" -or
     $identity.diagnostic_core.observation_boundary_schema -cne
@@ -151,6 +153,12 @@ if (
         "spot-trigger-monitor-completion-request-v1" -or
     [int]$identity.diagnostic_core.trigger_monitor_completion_request_grace_seconds -ne
         30 -or
+    $identity.diagnostic_core.parent_capture_stop_signal_policy -cne
+        "nonblocking-poll-and-five-second-fail-closed" -or
+    [int]$identity.diagnostic_core.capture_stop_signal_observation_max_delay_seconds -ne
+        5 -or
+    $identity.diagnostic_core.postprocess_state_schema -cne
+        "spot-canary-postprocess-state-v1" -or
     -not [bool]$identity.diagnostic_core.product_request_behavior_changed -or
     [int]$identity.canary.maximum_observation_minutes -ne 120 -or
     [int]$identity.canary.post_trigger_capture_seconds -ne 75 -or
@@ -222,7 +230,11 @@ if (
     $collectorSource -notmatch "local clock/process only; no added SPOT requests" -or
     $collectorSource -notmatch "spot-canary-observation-boundary-v1" -or
     $collectorSource -notmatch "canary-observation-start.json" -or
-    $collectorSource -notmatch "canary-observation-end.json"
+    $collectorSource -notmatch "canary-observation-end.json" -or
+    $collectorSource -notmatch "Wait-CollectorStopSignal" -or
+    $collectorSource -notmatch "capture-stop-signal-observed-within-5s" -or
+    $collectorSource -notmatch "canary-postprocess-state.json" -or
+    $collectorSource -notmatch "boundary_signal_nonblocking=true"
 ) {
     throw "The canary progress contract is missing."
 }

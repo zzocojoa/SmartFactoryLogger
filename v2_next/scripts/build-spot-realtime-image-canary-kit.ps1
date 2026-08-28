@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$diagnosticCoreCommit = "14d0a35c103715ecc82218b93e5d61ecaf5d585e"
+$diagnosticCoreCommit = "8ec69b31ba6ba8cadc6c6360a9ea18dbed54cf96"
 
 function Invoke-GitText {
     param(
@@ -614,7 +614,7 @@ try {
 
     $evidenceFiles = @()
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1022-canary-kit-v1"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v2"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -659,7 +659,7 @@ try {
         }
         diagnostic_core = [ordered]@{
             source_commit = $diagnosticCoreCommit
-            source_identity = "spot-connecttimeout-trigger-field-kit-v6"
+            source_identity = "spot-connecttimeout-trigger-field-kit-v7"
             framing_schema = "spot-http-framing-evidence-v7"
             observation_boundary_schema = "spot-canary-observation-boundary-v1"
             packet_timestamp_ordering_policy = "timestamp-sorted-stable-v1"
@@ -675,10 +675,15 @@ try {
             trigger_monitor_completion_request_schema =
                 "spot-trigger-monitor-completion-request-v1"
             trigger_monitor_completion_request_grace_seconds = 30
+            parent_capture_stop_signal_policy =
+                "nonblocking-poll-and-five-second-fail-closed"
+            capture_stop_signal_observation_max_delay_seconds = 5
+            postprocess_state_schema = "spot-canary-postprocess-state-v1"
             controlled_delta = (
                 "Immutable observation boundaries, stable timestamp ordering, " +
                 "aggregate packet deduplication, wall/monotonic clock calibration, " +
-                "complete failure aggregation, and recoverability-aware trigger evidence"
+                "complete failure aggregation, nonblocking parent boundary polling, " +
+                "and separately captured postprocess integrity evidence"
             )
             product_request_behavior_changed = $true
         }
