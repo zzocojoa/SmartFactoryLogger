@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v5" -or
+    $identity.schema_version -cne "spot-realtime-image-v1021-canary-kit-v6" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.21" -or
@@ -116,11 +116,21 @@ if (
         "preinstall-summary.json" -or
     $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
-        "26532c432c6e3b72c0078cb257f91ab00d899c45" -or
+        "14d0a35c103715ecc82218b93e5d61ecaf5d585e" -or
     $identity.diagnostic_core.framing_schema -cne
-        "spot-http-framing-evidence-v6" -or
+        "spot-http-framing-evidence-v7" -or
     $identity.diagnostic_core.observation_boundary_schema -cne
         "spot-canary-observation-boundary-v1" -or
+    $identity.diagnostic_core.packet_timestamp_ordering_policy -cne
+        "timestamp-sorted-stable-v1" -or
+    $identity.diagnostic_core.same_four_tuple_reuse_ordering_policy -cne
+        "timestamp-sorted-per-four-tuple-v1" -or
+    $identity.diagnostic_core.packet_timing_uncertainty_policy -cne
+        "evidence-hold" -or
+    $identity.diagnostic_core.trigger_monitor_error_event_schema -cne
+        "spot-trigger-monitor-error-event-raw-v1" -or
+    $identity.diagnostic_core.trigger_monitor_integrity_policy -cne
+        "recovered-errors-within-detection-threshold-are-complete" -or
     $identity.diagnostic_core.trigger_monitor_completion_policy -cne
         "observer-deadline-atomic-request" -or
     $identity.diagnostic_core.trigger_monitor_completion_request_schema -cne
@@ -217,13 +227,27 @@ $analyzerSource = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "analyze-spot-http-framing.ps1") `
     -Raw
 if (
-    $analyzerSource -notmatch "spot-http-framing-evidence-v6" -or
+    $analyzerSource -notmatch "spot-http-framing-evidence-v7" -or
     $analyzerSource -notmatch "duplicate_initial_syn_count" -or
     $analyzerSource -notmatch "monotonic_corrected" -or
+    $analyzerSource -notmatch "timestamp-sorted-stable-v1" -or
+    $analyzerSource -notmatch "initial_syn_timestamp_regression_max_ms" -or
     $analyzerSource -notmatch "excluded_before_count" -or
     $analyzerSource -notmatch "excluded_after_count"
 ) {
-    throw "The packet measurement v6 contract is missing."
+    throw "The packet measurement v7 contract is missing."
+}
+$monitorSource = Get-Content `
+    -LiteralPath (Join-Path $resolvedKitRoot "monitor-spot-connecttimeout-trigger.ps1") `
+    -Raw
+if (
+    $monitorSource -notmatch "spot-trigger-monitor-error-event-raw-v1" -or
+    $monitorSource -notmatch
+        "complete-recovered-transient-errors" -or
+    $monitorSource -notmatch
+        "recovered-errors-within-detection-threshold-are-complete"
+) {
+    throw "The trigger monitor recoverability evidence contract is missing."
 }
 
 if (-not $Quiet) {

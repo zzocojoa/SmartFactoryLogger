@@ -1070,8 +1070,29 @@ function Test-PacketEvidence {
     if ([bool]$FieldSummary.event_trigger_detected) {
         [void]$hardFailures.Add("new-spot-image-connecttimeout")
     }
-    if ([int]$FieldSummary.event_trigger_monitor_error_count -ne 0) {
-        [void]$holds.Add("trigger-monitor-error")
+    $monitorErrorCount =
+        [int]$FieldSummary.event_trigger_monitor_error_count
+    $monitorRecoveredErrorCount =
+        [int]$FieldSummary.event_trigger_monitor_recovered_error_count
+    $monitorUnrecoveredErrorCount =
+        [int]$FieldSummary.event_trigger_monitor_unrecovered_error_count
+    $monitorIntegrityStatus =
+        [string]$FieldSummary.event_trigger_monitor_integrity_status
+    $monitorIntegrityPolicy =
+        [string]$FieldSummary.event_trigger_monitor_integrity_policy
+    $monitorIntegrityComplete = (
+        $monitorIntegrityPolicy -ceq
+            "recovered-errors-within-detection-threshold-are-complete" -and
+        $monitorIntegrityStatus.StartsWith(
+            "complete-",
+            [StringComparison]::Ordinal
+        ) -and
+        $monitorUnrecoveredErrorCount -eq 0 -and
+        ($monitorRecoveredErrorCount + $monitorUnrecoveredErrorCount) -eq
+            $monitorErrorCount
+    )
+    if (-not $monitorIntegrityComplete) {
+        [void]$holds.Add("trigger-monitor-integrity-incomplete")
     }
     if ($FieldSummary.packet_direction_preflight -ne "passed") {
         [void]$holds.Add("packet-direction-preflight")
@@ -1087,7 +1108,7 @@ function Test-PacketEvidence {
         [void]$holds.Add("observation-counter-policy-mismatch")
     }
     if ($FieldSummary.packet_analysis_schema -cne
-        "spot-http-framing-evidence-v6") {
+        "spot-http-framing-evidence-v7") {
         [void]$holds.Add("packet-analysis-schema-mismatch")
     }
     if ($FieldSummary.windows_tcp_ipv4_evidence_status -ne "completed") {
@@ -1108,7 +1129,7 @@ function Test-PacketEvidence {
         }
     }
 
-    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v6") {
+    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v7") {
         [void]$holds.Add("framing-schema-mismatch")
     }
     if ($FramingSummary.analysis_window.policy -cne
@@ -1123,39 +1144,69 @@ function Test-PacketEvidence {
     }
 
     $tcp = $FramingSummary.tcp_connection_summary
-    if ([int]$tcp.failed_connection_attempts -ne 0) {
-        [void]$hardFailures.Add("failed-connection-attempt")
-    }
-    if ([int]$tcp.reset_before_response_attempts -ne 0) {
-        [void]$hardFailures.Add("reset-before-response")
-    }
-    if ([int]$tcp.no_response_after_handshake_attempts -ne 0) {
-        [void]$hardFailures.Add("no-response-after-handshake")
-    }
-    if ([int]$tcp.syn_retransmissions_total -ne 0) {
-        [void]$hardFailures.Add("syn-retransmission-observed")
-    }
-
     $measurement = $FramingSummary.packet_measurement
-    if ([string]$measurement.clock_calibration.status -cne "complete") {
+    $clockCalibrationComplete =
+        [string]$measurement.clock_calibration.status -ceq "complete"
+    if (-not $clockCalibrationComplete) {
         [void]$holds.Add("packet-clock-calibration-incomplete")
     }
-    if ([int]$measurement.timestamp_regression_count -ne 0) {
-        [void]$holds.Add("packet-timestamp-regression-observed")
+    $packetOrderComplete = (
+        [string]$measurement.timestamp_ordering_policy -ceq
+            "timestamp-sorted-stable-v1"
+    )
+    if (-not $packetOrderComplete) {
+        [void]$holds.Add("packet-timestamp-order-unresolved")
+    }
+    if ([int]$measurement.timestamp_regression_count -ne 0 -and
+        -not [bool]$measurement.timestamp_order_correction_applied) {
+        [void]$holds.Add("packet-timestamp-regression-uncorrected")
+    }
+    if ($packetOrderComplete) {
+        if ([int]$tcp.failed_connection_attempts -ne 0) {
+            [void]$hardFailures.Add("failed-connection-attempt")
+        }
+        if ([int]$tcp.reset_before_response_attempts -ne 0) {
+            [void]$hardFailures.Add("reset-before-response")
+        }
+        if ([int]$tcp.no_response_after_handshake_attempts -ne 0) {
+            [void]$hardFailures.Add("no-response-after-handshake")
+        }
+        if ([int]$tcp.syn_retransmissions_total -ne 0) {
+            [void]$hardFailures.Add("syn-retransmission-observed")
+        }
+    } elseif (
+        [int]$tcp.failed_connection_attempts -ne 0 -or
+        [int]$tcp.reset_before_response_attempts -ne 0 -or
+        [int]$tcp.no_response_after_handshake_attempts -ne 0 -or
+        [int]$tcp.syn_retransmissions_total -ne 0
+    ) {
+        [void]$holds.Add("packet-connection-outcome-unresolved")
     }
     if ([int]$measurement.rst_total -ne 0) {
         [void]$hardFailures.Add("bidirectional-rst-observed")
     }
 
     $reuse = $tcp.same_four_tuple_reuse.monotonic_corrected
-    if ([int]$reuse.under_60000_ms_count -ne 0) {
-        [void]$hardFailures.Add("same-four-tuple-reuse-under-60s")
-    }
-    if (
-        [int]$reuse.observed_count -gt 0 -and
-        [double]$reuse.interval_ms_min -lt 75000.0
-    ) {
-        [void]$hardFailures.Add("same-four-tuple-reuse-under-75s")
+    $reuseMeasurementComplete = (
+        $packetOrderComplete -and
+        $clockCalibrationComplete -and
+        [string]$tcp.same_four_tuple_reuse.ordering_policy -ceq
+            "timestamp-sorted-per-four-tuple-v1" -and
+        [string]$tcp.same_four_tuple_reuse.measurement_integrity_status -ceq
+            "complete"
+    )
+    if (-not $reuseMeasurementComplete) {
+        [void]$holds.Add("same-four-tuple-reuse-measurement-unresolved")
+    } else {
+        if ([int]$reuse.under_60000_ms_count -ne 0) {
+            [void]$hardFailures.Add("same-four-tuple-reuse-under-60s")
+        }
+        if (
+            [int]$reuse.observed_count -gt 0 -and
+            [double]$reuse.interval_ms_min -lt 75000.0
+        ) {
+            [void]$hardFailures.Add("same-four-tuple-reuse-under-75s")
+        }
     }
 
     $serverResetProperty = $FramingSummary.server_close_counts.PSObject.Properties["reset"]
@@ -1179,6 +1230,14 @@ function Test-PacketEvidence {
         duplicate_packet_count = [int64]$measurement.duplicate_packet_count
         duplicate_initial_syn_count = [int64]$measurement.duplicate_initial_syn_count
         timestamp_regression_count = [int64]$measurement.timestamp_regression_count
+        timestamp_regression_max_ms = $measurement.timestamp_regression_max_ms
+        initial_syn_timestamp_regression_count =
+            [int64]$measurement.initial_syn_timestamp_regression_count
+        initial_syn_timestamp_regression_max_ms =
+            $measurement.initial_syn_timestamp_regression_max_ms
+        timestamp_ordering_policy = [string]$measurement.timestamp_ordering_policy
+        timestamp_order_correction_applied =
+            [bool]$measurement.timestamp_order_correction_applied
         client_to_server_rst_count = [int64]$measurement.client_to_server_rst_count
         server_to_client_rst_count = [int64]$measurement.server_to_client_rst_count
         excluded_before_observation_count = [int64](
@@ -1193,6 +1252,10 @@ function Test-PacketEvidence {
             $tcp.same_four_tuple_reuse.duplicate_removed
         )
         same_four_tuple_monotonic_corrected = $reuse
+        same_four_tuple_reuse_ordering_policy =
+            [string]$tcp.same_four_tuple_reuse.ordering_policy
+        same_four_tuple_reuse_measurement_integrity_status =
+            [string]$tcp.same_four_tuple_reuse.measurement_integrity_status
         same_four_tuple_reuse_observed_count = [int]$reuse.observed_count
         same_four_tuple_reuse_interval_ms_min = $reuse.interval_ms_min
         same_four_tuple_reuse_under_60000_ms_count = [int]$reuse.under_60000_ms_count
@@ -1321,6 +1384,11 @@ function Invoke-SelfTest {
         status = "COMPLETED"
         event_trigger_detected = $false
         event_trigger_monitor_error_count = 0
+        event_trigger_monitor_recovered_error_count = 0
+        event_trigger_monitor_unrecovered_error_count = 0
+        event_trigger_monitor_integrity_status = "complete-no-errors"
+        event_trigger_monitor_integrity_policy =
+            "recovered-errors-within-detection-threshold-are-complete"
         packet_direction_preflight = "passed"
         framing_analysis_status = "completed"
         windows_tcp_ipv4_evidence_status = "completed"
@@ -1329,10 +1397,10 @@ function Invoke-SelfTest {
         required_evidence_missing = @()
         observation_boundary_status = "complete"
         observation_counter_policy = "observation-start-to-observation-end"
-        packet_analysis_schema = "spot-http-framing-evidence-v6"
+        packet_analysis_schema = "spot-http-framing-evidence-v7"
     }
     $framing = [pscustomobject]@{
-        schema_version = "spot-http-framing-evidence-v6"
+        schema_version = "spot-http-framing-evidence-v7"
         analysis_window = [pscustomobject]@{
             policy = "observation-start-to-observation-end"
             excluded_before_count = 2
@@ -1342,7 +1410,12 @@ function Invoke-SelfTest {
             interface_count = 2
             duplicate_packet_count = 8
             duplicate_initial_syn_count = 4
-            timestamp_regression_count = 0
+            timestamp_regression_count = 924
+            timestamp_regression_max_ms = 1.25
+            initial_syn_timestamp_regression_count = 0
+            initial_syn_timestamp_regression_max_ms = 0
+            timestamp_ordering_policy = "timestamp-sorted-stable-v1"
+            timestamp_order_correction_applied = $true
             client_to_server_rst_count = 0
             server_to_client_rst_count = 0
             rst_total = 0
@@ -1361,6 +1434,8 @@ function Invoke-SelfTest {
             same_four_tuple_reuse = [pscustomobject]@{
                 original = [pscustomobject]@{ interval_ms_min = 74011 }
                 duplicate_removed = [pscustomobject]@{ interval_ms_min = 74011 }
+                ordering_policy = "timestamp-sorted-per-four-tuple-v1"
+                measurement_integrity_status = "complete"
                 monotonic_corrected = [pscustomobject]@{
                     observed_count = 1
                     interval_ms_min = 75000
@@ -1375,9 +1450,35 @@ function Invoke-SelfTest {
         throw "self-test valid packet evidence was rejected"
     }
     $framing.tcp_connection_summary.same_four_tuple_reuse.monotonic_corrected.interval_ms_min = 74999
+    $framing.tcp_connection_summary.same_four_tuple_reuse.measurement_integrity_status =
+        "packet-order-unresolved"
+    $packet = Test-PacketEvidence -FieldSummary $field -FramingSummary $framing
+    if ("same-four-tuple-reuse-under-75s" -in $packet.hard_failures -or
+        "same-four-tuple-reuse-measurement-unresolved" -notin
+            $packet.evidence_holds) {
+        throw "self-test uncertain reuse interval was not held"
+    }
+    $framing.tcp_connection_summary.same_four_tuple_reuse.measurement_integrity_status =
+        "complete"
     $packet = Test-PacketEvidence -FieldSummary $field -FramingSummary $framing
     if ("same-four-tuple-reuse-under-75s" -notin $packet.hard_failures) {
-        throw "self-test short reuse interval was not rejected"
+        throw "self-test confirmed short reuse interval was not rejected"
+    }
+    $framing.tcp_connection_summary.same_four_tuple_reuse.monotonic_corrected.interval_ms_min = 75000
+    $field.event_trigger_monitor_error_count = 1
+    $field.event_trigger_monitor_recovered_error_count = 1
+    $field.event_trigger_monitor_integrity_status =
+        "complete-recovered-transient-errors"
+    $packet = Test-PacketEvidence -FieldSummary $field -FramingSummary $framing
+    if ("trigger-monitor-integrity-incomplete" -in $packet.evidence_holds) {
+        throw "self-test recovered trigger monitor error was rejected"
+    }
+    $field.event_trigger_monitor_recovered_error_count = 0
+    $field.event_trigger_monitor_unrecovered_error_count = 1
+    $field.event_trigger_monitor_integrity_status = "incomplete-unrecovered-errors"
+    $packet = Test-PacketEvidence -FieldSummary $field -FramingSummary $framing
+    if ("trigger-monitor-integrity-incomplete" -notin $packet.evidence_holds) {
+        throw "self-test unrecovered trigger monitor error was accepted"
     }
 
     $before = [pscustomobject]@{

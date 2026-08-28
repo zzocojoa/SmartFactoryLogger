@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$diagnosticCoreCommit = "26532c432c6e3b72c0078cb257f91ab00d899c45"
+$diagnosticCoreCommit = "14d0a35c103715ecc82218b93e5d61ecaf5d585e"
 
 function Invoke-GitText {
     param(
@@ -453,12 +453,21 @@ function Invoke-CanarySelfTests {
     if ($LASTEXITCODE -ne 0) {
         throw "SPOT field collector self-test failed."
     }
-    & python.exe `
-        $IntegrationTestPath `
-        --collector-path (Join-Path $StagingRoot "collect_operational_observability.ps1") `
-        --monitor-path (Join-Path $StagingRoot "monitor-spot-connecttimeout-trigger.ps1")
-    if ($LASTEXITCODE -ne 0) {
-        throw "SPOT trigger integration test failed."
+    $savedPsModulePath = $env:PSModulePath
+    try {
+        $env:PSModulePath = @(
+            (Join-Path $env:ProgramFiles "WindowsPowerShell\Modules")
+            (Join-Path $env:SystemRoot "system32\WindowsPowerShell\v1.0\Modules")
+        ) -join ";"
+        & python.exe `
+            $IntegrationTestPath `
+            --collector-path (Join-Path $StagingRoot "collect_operational_observability.ps1") `
+            --monitor-path (Join-Path $StagingRoot "monitor-spot-connecttimeout-trigger.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            throw "SPOT trigger integration test failed."
+        }
+    } finally {
+        $env:PSModulePath = $savedPsModulePath
     }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass `
         -File (Join-Path $StagingRoot "invoke-spot-realtime-image-canary-120m.ps1") `
@@ -526,20 +535,6 @@ foreach ($path in $currentSources.Values) {
         -Arguments @("ls-files", "--error-unmatch", "--", $relativePath) |
         Out-Null
 }
-$integrationTestPath = Join-Path `
-    $PSScriptRoot `
-    "test_spot_connecttimeout_trigger_collector.py"
-if (-not (Test-Path -LiteralPath $integrationTestPath -PathType Leaf)) {
-    throw "The current SPOT trigger integration test is missing."
-}
-$integrationFullPath = [IO.Path]::GetFullPath($integrationTestPath)
-$integrationRelativePath = $integrationFullPath.Substring($gitRootPrefix.Length)
-$integrationRelativePath = $integrationRelativePath.Replace("\", "/")
-Invoke-GitText `
-    -RepositoryRoot $gitRoot `
-    -Arguments @("ls-files", "--error-unmatch", "--", $integrationRelativePath) |
-    Out-Null
-
 $corePaths = @(
     "v2_next/scripts/analyze-spot-http-framing.ps1",
     "v2_next/scripts/collect_operational_observability.ps1",
@@ -580,6 +575,12 @@ try {
         throw "Could not export the fixed diagnostic core commit."
     }
     Expand-Archive -LiteralPath $coreArchive -DestinationPath $archiveRoot
+    $integrationTestPath = Join-Path `
+        $archiveRoot `
+        "v2_next\scripts\test_spot_connecttimeout_trigger_collector.py"
+    if (-not (Test-Path -LiteralPath $integrationTestPath -PathType Leaf)) {
+        throw "The pinned diagnostic core integration test is missing."
+    }
 
     foreach ($relativePath in $corePaths | Where-Object { $_ -like "*.ps1" }) {
         Copy-Item `
@@ -622,7 +623,7 @@ try {
         [ordered]@{ file = "spot-config-image-before-15m.json"; sha256 = "7E7486908045EF4898F44CA474816C647EAC1C5619EAADA6B3DA6445E5C87342" }
     )
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1021-canary-kit-v5"
+        schema_version = "spot-realtime-image-v1021-canary-kit-v6"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -658,18 +659,26 @@ try {
         }
         diagnostic_core = [ordered]@{
             source_commit = $diagnosticCoreCommit
-            source_identity = "spot-connecttimeout-trigger-field-kit-v5"
-            framing_schema = "spot-http-framing-evidence-v6"
+            source_identity = "spot-connecttimeout-trigger-field-kit-v6"
+            framing_schema = "spot-http-framing-evidence-v7"
             observation_boundary_schema = "spot-canary-observation-boundary-v1"
+            packet_timestamp_ordering_policy = "timestamp-sorted-stable-v1"
+            same_four_tuple_reuse_ordering_policy =
+                "timestamp-sorted-per-four-tuple-v1"
+            packet_timing_uncertainty_policy = "evidence-hold"
+            trigger_monitor_error_event_schema =
+                "spot-trigger-monitor-error-event-raw-v1"
+            trigger_monitor_integrity_policy =
+                "recovered-errors-within-detection-threshold-are-complete"
             trigger_monitor_completion_policy =
                 "observer-deadline-atomic-request"
             trigger_monitor_completion_request_schema =
                 "spot-trigger-monitor-completion-request-v1"
             trigger_monitor_completion_request_grace_seconds = 30
             controlled_delta = (
-                "Immutable observation boundaries, aggregate packet deduplication, " +
-                "wall/monotonic clock calibration, complete failure aggregation, " +
-                "and fail-closed trigger monitor evidence"
+                "Immutable observation boundaries, stable timestamp ordering, " +
+                "aggregate packet deduplication, wall/monotonic clock calibration, " +
+                "complete failure aggregation, and recoverability-aware trigger evidence"
             )
             product_request_behavior_changed = $false
         }
