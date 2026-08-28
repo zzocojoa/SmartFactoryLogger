@@ -238,6 +238,20 @@ if (
 ) {
     throw "The canary progress contract is missing."
 }
+$boundaryWait = [regex]::Match(
+    $collectorSource,
+    (
+        '(?s)\$stopSignalResult = Wait-CollectorStopSignal.*?' +
+        '\$observationEndSnapshot = New-ObservationBoundarySnapshot'
+    )
+)
+if (-not $boundaryWait.Success -or
+    $boundaryWait.Value -match 'Receive-CollectorJobOutput') {
+    throw (
+        'The observation boundary wait is missing or still drains collector ' +
+        'output before the end snapshot.'
+    )
+}
 $analyzerSource = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "analyze-spot-http-framing.ps1") `
     -Raw
