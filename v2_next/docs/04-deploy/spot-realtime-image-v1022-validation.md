@@ -55,6 +55,28 @@ SPOT 또는 backend API 호출을 추가하지 않는다.
 The observation prints progress every 30 seconds and does not add SPOT or
 backend API requests.
 
+## 관찰 종료 경계
+
+- 부모 수집기가 monotonic 15분 또는 120분 경계에서 즉시 종료 스냅샷을
+  저장한다.
+- 부모 수집기는 같은 경계 시각을 담은 원자적 완료 요청을 자식 오류 모니터에
+  전달한다.
+- 패킷·ping 종료 상태를 먼저 고정한 뒤 자식 완료 신호를 확인한다.
+- 자식 완료 신호가 경계 후 5초 안에 확인되지 않거나 부모 요청 ID와 다르면
+  제품 실패로 대체하지 않고 `EVIDENCE_HOLD`로 판정한다.
+- 압축·로그 수집·패킷 분석 시간은 관찰 구간 실패 delta와 요청률 계산에서
+  제외한다.
+
+## HTTP 무응답 분류
+
+- `request_no_response_after_handshake_attempts`는 TCP handshake 뒤 실제 outbound
+  HTTP 요청 payload가 관측됐지만 응답 payload가 없는 경우만 집계한다.
+- handshake만 완료되고 outbound 요청 payload가 없는 흐름은
+  `handshake_only_without_request_attempts` 또는
+  `handshake_only_at_capture_end`로 별도 기록한다.
+- handshake-only 흐름은 HTTP 요청 무응답 제품 실패로 판정하지 않는다.
+- 이 분리는 원문 주소와 source port를 공유 ZIP에 노출하지 않는다.
+
 ## 15분 진단 판정
 
 다음 조건을 모두 확인한다.

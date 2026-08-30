@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v2" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v3" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.22" -or
@@ -130,11 +130,11 @@ if (
         "preinstall-summary.json" -or
     $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
-        "8ec69b31ba6ba8cadc6c6360a9ea18dbed54cf96" -or
+        "19c46035eb6c96f7fcdd5dc16d58532f9dc71f38" -or
     $identity.diagnostic_core.source_identity -cne
-        "spot-connecttimeout-trigger-field-kit-v7" -or
+        "spot-connecttimeout-trigger-field-kit-v8" -or
     $identity.diagnostic_core.framing_schema -cne
-        "spot-http-framing-evidence-v7" -or
+        "spot-http-framing-evidence-v8" -or
     $identity.diagnostic_core.observation_boundary_schema -cne
         "spot-canary-observation-boundary-v1" -or
     $identity.diagnostic_core.packet_timestamp_ordering_policy -cne
@@ -154,11 +154,17 @@ if (
     [int]$identity.diagnostic_core.trigger_monitor_completion_request_grace_seconds -ne
         30 -or
     $identity.diagnostic_core.parent_capture_stop_signal_policy -cne
-        "nonblocking-poll-and-five-second-fail-closed" -or
+        "parent-authoritative-monotonic-boundary-and-five-second-signal-integrity" -or
+    $identity.diagnostic_core.parent_completion_request_source -cne
+        "parent-authoritative-observation-boundary" -or
     [int]$identity.diagnostic_core.capture_stop_signal_observation_max_delay_seconds -ne
         5 -or
     $identity.diagnostic_core.postprocess_state_schema -cne
         "spot-canary-postprocess-state-v1" -or
+    $identity.diagnostic_core.http_no_response_definition -cne
+        "handshake-complete-with-outbound-request-payload-and-no-response" -or
+    $identity.diagnostic_core.handshake_only_classification_policy -cne
+        "evidence-only-not-http-request-failure" -or
     -not [bool]$identity.diagnostic_core.product_request_behavior_changed -or
     [int]$identity.canary.maximum_observation_minutes -ne 120 -or
     [int]$identity.canary.post_trigger_capture_seconds -ne 75 -or
@@ -231,32 +237,59 @@ if (
     $collectorSource -notmatch "spot-canary-observation-boundary-v1" -or
     $collectorSource -notmatch "canary-observation-start.json" -or
     $collectorSource -notmatch "canary-observation-end.json" -or
+    $collectorSource -notmatch "Wait-CollectorObservationBoundary" -or
+    $collectorSource -notmatch "Write-ParentCollectorCompletionRequest" -or
     $collectorSource -notmatch "Wait-CollectorStopSignal" -or
     $collectorSource -notmatch "capture-stop-signal-observed-within-5s" -or
+    $collectorSource -notmatch "capture-stop-signal-after-boundary-within-5s" -or
+    $collectorSource -notmatch "parent-authoritative-observation-boundary" -or
+    $collectorSource -notmatch "capture_stop_signal_integrity_status" -or
     $collectorSource -notmatch "canary-postprocess-state.json" -or
     $collectorSource -notmatch "boundary_signal_nonblocking=true"
 ) {
     throw "The canary progress contract is missing."
 }
-$boundaryWait = [regex]::Match(
-    $collectorSource,
-    (
-        '(?s)\$stopSignalResult = Wait-CollectorStopSignal.*?' +
-        '\$observationEndSnapshot = New-ObservationBoundarySnapshot'
-    )
+$boundaryWaitIndex = $collectorSource.IndexOf(
+    '$boundaryResult = Wait-CollectorObservationBoundary',
+    [StringComparison]::Ordinal
 )
-if (-not $boundaryWait.Success -or
-    $boundaryWait.Value -match 'Receive-CollectorJobOutput') {
+$endSnapshotIndex = $collectorSource.IndexOf(
+    '$observationEndSnapshot = New-ObservationBoundarySnapshot',
+    [Math]::Max(0, $boundaryWaitIndex),
+    [StringComparison]::Ordinal
+)
+$packetStopIndex = $collectorSource.IndexOf(
+    '$pktmonStarted = $false',
+    [Math]::Max(0, $endSnapshotIndex),
+    [StringComparison]::Ordinal
+)
+$integrityWaitIndex = $collectorSource.IndexOf(
+    '$signalIntegrityResult = Wait-CollectorStopSignal',
+    [Math]::Max(0, $endSnapshotIndex),
+    [StringComparison]::Ordinal
+)
+if ($boundaryWaitIndex -lt 0 -or
+    $endSnapshotIndex -le $boundaryWaitIndex -or
+    $packetStopIndex -le $endSnapshotIndex -or
+    $integrityWaitIndex -le $packetStopIndex -or
+    $collectorSource.Substring(
+        $boundaryWaitIndex,
+        $endSnapshotIndex - $boundaryWaitIndex
+    ) -match 'Receive-CollectorJobOutput|Wait-CollectorStopSignal') {
     throw (
-        'The observation boundary wait is missing or still drains collector ' +
-        'output before the end snapshot.'
+        'The parent-authoritative boundary, packet stop, and signal integrity ' +
+        'order is invalid.'
     )
 }
 $analyzerSource = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "analyze-spot-http-framing.ps1") `
     -Raw
 if (
-    $analyzerSource -notmatch "spot-http-framing-evidence-v7" -or
+    $analyzerSource -notmatch "spot-http-framing-evidence-v8" -or
+    $analyzerSource -notmatch "request_no_response_after_handshake_attempts" -or
+    $analyzerSource -notmatch "handshake_only_without_request_attempts" -or
+    $analyzerSource -notmatch
+        "handshake-complete-with-outbound-request-payload-and-no-response" -or
     $analyzerSource -notmatch "duplicate_initial_syn_count" -or
     $analyzerSource -notmatch "monotonic_corrected" -or
     $analyzerSource -notmatch "timestamp-sorted-stable-v1" -or
@@ -264,7 +297,7 @@ if (
     $analyzerSource -notmatch "excluded_before_count" -or
     $analyzerSource -notmatch "excluded_after_count"
 ) {
-    throw "The packet measurement v7 contract is missing."
+    throw "The packet measurement v8 contract is missing."
 }
 $monitorSource = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "monitor-spot-connecttimeout-trigger.ps1") `
@@ -274,7 +307,8 @@ if (
     $monitorSource -notmatch
         "complete-recovered-transient-errors" -or
     $monitorSource -notmatch
-        "recovered-errors-within-detection-threshold-are-complete"
+        "recovered-errors-within-detection-threshold-are-complete" -or
+    $monitorSource -notmatch "completion_request_source"
 ) {
     throw "The trigger monitor recoverability evidence contract is missing."
 }

@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$diagnosticCoreCommit = "8ec69b31ba6ba8cadc6c6360a9ea18dbed54cf96"
+$diagnosticCoreCommit = "19c46035eb6c96f7fcdd5dc16d58532f9dc71f38"
 
 function Invoke-GitText {
     param(
@@ -614,7 +614,7 @@ try {
 
     $evidenceFiles = @()
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1022-canary-kit-v2"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v3"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -659,8 +659,8 @@ try {
         }
         diagnostic_core = [ordered]@{
             source_commit = $diagnosticCoreCommit
-            source_identity = "spot-connecttimeout-trigger-field-kit-v7"
-            framing_schema = "spot-http-framing-evidence-v7"
+            source_identity = "spot-connecttimeout-trigger-field-kit-v8"
+            framing_schema = "spot-http-framing-evidence-v8"
             observation_boundary_schema = "spot-canary-observation-boundary-v1"
             packet_timestamp_ordering_policy = "timestamp-sorted-stable-v1"
             same_four_tuple_reuse_ordering_policy =
@@ -676,14 +676,22 @@ try {
                 "spot-trigger-monitor-completion-request-v1"
             trigger_monitor_completion_request_grace_seconds = 30
             parent_capture_stop_signal_policy =
-                "nonblocking-poll-and-five-second-fail-closed"
+                "parent-authoritative-monotonic-boundary-and-five-second-signal-integrity"
+            parent_completion_request_source =
+                "parent-authoritative-observation-boundary"
             capture_stop_signal_observation_max_delay_seconds = 5
             postprocess_state_schema = "spot-canary-postprocess-state-v1"
+            http_no_response_definition =
+                "handshake-complete-with-outbound-request-payload-and-no-response"
+            handshake_only_classification_policy =
+                "evidence-only-not-http-request-failure"
             controlled_delta = (
                 "Immutable observation boundaries, stable timestamp ordering, " +
                 "aggregate packet deduplication, wall/monotonic clock calibration, " +
-                "complete failure aggregation, nonblocking parent boundary polling, " +
-                "and separately captured postprocess integrity evidence"
+                "complete failure aggregation, parent-authoritative monotonic end " +
+                "snapshots, five-second child signal integrity, request-aware HTTP " +
+                "no-response classification, and separately captured postprocess " +
+                "integrity evidence"
             )
             product_request_behavior_changed = $true
         }

@@ -1128,12 +1128,36 @@ function Test-PacketEvidence {
     if ($FieldSummary.observation_boundary_status -ne "complete") {
         [void]$holds.Add("observation-boundary-incomplete")
     }
+    $boundarySignalStatus =
+        [string]$FieldSummary.capture_stop_signal_boundary_status
+    if ($boundarySignalStatus -notin @(
+            "signal-observed",
+            "planned-end-reached"
+        )) {
+        [void]$holds.Add("observation-boundary-authority-incomplete")
+    }
+    if ($FieldSummary.capture_stop_signal_integrity_status -cne
+        "signal-observed") {
+        [void]$holds.Add("capture-stop-signal-integrity-incomplete")
+    }
+    if ($boundarySignalStatus -ceq "planned-end-reached") {
+        if ($FieldSummary.parent_completion_request_source -cne
+            "parent-authoritative-observation-boundary") {
+            [void]$holds.Add("parent-completion-request-source-mismatch")
+        }
+        if ($null -eq
+                $FieldSummary.capture_stop_signal_after_boundary_latency_ms -or
+            [double]$FieldSummary.capture_stop_signal_after_boundary_latency_ms -gt
+                5000) {
+            [void]$holds.Add("capture-stop-signal-after-boundary-late")
+        }
+    }
     if ($FieldSummary.observation_counter_policy -cne
         "observation-start-to-observation-end") {
         [void]$holds.Add("observation-counter-policy-mismatch")
     }
     if ($FieldSummary.packet_analysis_schema -cne
-        "spot-http-framing-evidence-v7") {
+        "spot-http-framing-evidence-v8") {
         [void]$holds.Add("packet-analysis-schema-mismatch")
     }
     if ($FieldSummary.windows_tcp_ipv4_evidence_status -ne "completed") {
@@ -1154,7 +1178,7 @@ function Test-PacketEvidence {
         }
     }
 
-    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v7") {
+    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v8") {
         [void]$holds.Add("framing-schema-mismatch")
     }
     if ($FramingSummary.analysis_window.policy -cne
@@ -1170,6 +1194,14 @@ function Test-PacketEvidence {
 
     $tcp = $FramingSummary.tcp_connection_summary
     $measurement = $FramingSummary.packet_measurement
+    $requestNoResponseCount =
+        [int]$tcp.request_no_response_after_handshake_attempts
+    if ($tcp.no_response_definition -cne
+        "handshake-complete-with-outbound-request-payload-and-no-response" -or
+        [int]$tcp.no_response_after_handshake_attempts -ne
+            $requestNoResponseCount) {
+        [void]$holds.Add("http-no-response-classification-mismatch")
+    }
     $clockCalibrationComplete =
         [string]$measurement.clock_calibration.status -ceq "complete"
     if (-not $clockCalibrationComplete) {
@@ -1193,7 +1225,7 @@ function Test-PacketEvidence {
         if ([int]$tcp.reset_before_response_attempts -ne 0) {
             [void]$hardFailures.Add("reset-before-response")
         }
-        if ([int]$tcp.no_response_after_handshake_attempts -ne 0) {
+        if ($requestNoResponseCount -ne 0) {
             [void]$hardFailures.Add("no-response-after-handshake")
         }
         if ([int]$tcp.syn_retransmissions_total -ne 0) {
@@ -1202,7 +1234,7 @@ function Test-PacketEvidence {
     } elseif (
         [int]$tcp.failed_connection_attempts -ne 0 -or
         [int]$tcp.reset_before_response_attempts -ne 0 -or
-        [int]$tcp.no_response_after_handshake_attempts -ne 0 -or
+        $requestNoResponseCount -ne 0 -or
         [int]$tcp.syn_retransmissions_total -ne 0
     ) {
         [void]$holds.Add("packet-connection-outcome-unresolved")
@@ -1426,10 +1458,15 @@ function Invoke-SelfTest {
         required_evidence_missing = @()
         observation_boundary_status = "complete"
         observation_counter_policy = "observation-start-to-observation-end"
-        packet_analysis_schema = "spot-http-framing-evidence-v7"
+        packet_analysis_schema = "spot-http-framing-evidence-v8"
+        capture_stop_signal_boundary_status = "planned-end-reached"
+        capture_stop_signal_integrity_status = "signal-observed"
+        capture_stop_signal_after_boundary_latency_ms = 250
+        parent_completion_request_source =
+            "parent-authoritative-observation-boundary"
     }
     $framing = [pscustomobject]@{
-        schema_version = "spot-http-framing-evidence-v7"
+        schema_version = "spot-http-framing-evidence-v8"
         analysis_window = [pscustomobject]@{
             policy = "observation-start-to-observation-end"
             excluded_before_count = 2
@@ -1459,6 +1496,11 @@ function Invoke-SelfTest {
             failed_connection_attempts = 0
             reset_before_response_attempts = 0
             no_response_after_handshake_attempts = 0
+            no_response_definition =
+                "handshake-complete-with-outbound-request-payload-and-no-response"
+            request_no_response_after_handshake_attempts = 0
+            handshake_only_without_request_attempts = 15
+            handshake_only_at_capture_end = 1
             syn_retransmissions_total = 0
             same_four_tuple_reuse = [pscustomobject]@{
                 original = [pscustomobject]@{ interval_ms_min = 74011 }
