@@ -249,15 +249,19 @@ if (
 ) {
     throw "The canary progress contract is missing."
 }
-$boundaryWaitIndex = $collectorSource.IndexOf(
-    '$boundaryResult = Wait-CollectorObservationBoundary',
-    [StringComparison]::Ordinal
-)
 $endSnapshotIndex = $collectorSource.IndexOf(
     '$observationEndSnapshot = New-ObservationBoundarySnapshot',
-    [Math]::Max(0, $boundaryWaitIndex),
     [StringComparison]::Ordinal
 )
+$boundaryWaitIndex = if ($endSnapshotIndex -lt 0) {
+    -1
+} else {
+    $collectorSource.LastIndexOf(
+        '$boundaryResult = Wait-CollectorObservationBoundary',
+        $endSnapshotIndex,
+        [StringComparison]::Ordinal
+    )
+}
 $packetStopIndex = $collectorSource.IndexOf(
     '$pktmonStarted = $false',
     [Math]::Max(0, $endSnapshotIndex),
