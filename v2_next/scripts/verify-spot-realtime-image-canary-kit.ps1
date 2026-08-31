@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v3" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v4" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.22" -or
@@ -130,11 +130,11 @@ if (
         "preinstall-summary.json" -or
     $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
-        "19c46035eb6c96f7fcdd5dc16d58532f9dc71f38" -or
+        "8c5bdd21b2a14ea0dac592359bf611f5f7ed625f" -or
     $identity.diagnostic_core.source_identity -cne
-        "spot-connecttimeout-trigger-field-kit-v8" -or
+        "spot-connecttimeout-trigger-field-kit-v9" -or
     $identity.diagnostic_core.framing_schema -cne
-        "spot-http-framing-evidence-v8" -or
+        "spot-http-framing-evidence-v9" -or
     $identity.diagnostic_core.observation_boundary_schema -cne
         "spot-canary-observation-boundary-v1" -or
     $identity.diagnostic_core.packet_timestamp_ordering_policy -cne
@@ -161,10 +161,14 @@ if (
         5 -or
     $identity.diagnostic_core.postprocess_state_schema -cne
         "spot-canary-postprocess-state-v1" -or
+    $identity.diagnostic_core.observation_elapsed_source_policy -cne
+        "parent-authoritative-monotonic-boundary" -or
     $identity.diagnostic_core.http_no_response_definition -cne
         "handshake-complete-with-outbound-request-payload-and-no-response" -or
     $identity.diagnostic_core.handshake_only_classification_policy -cne
         "evidence-only-not-http-request-failure" -or
+    $identity.diagnostic_core.pre_handshake_failure_attribution_policy -cne
+        "requires-observation-window-app-failure-counter-or-event-delta" -or
     -not [bool]$identity.diagnostic_core.product_request_behavior_changed -or
     [int]$identity.canary.maximum_observation_minutes -ne 120 -or
     [int]$identity.canary.post_trigger_capture_seconds -ne 75 -or
@@ -245,6 +249,9 @@ if (
     $collectorSource -notmatch "parent-authoritative-observation-boundary" -or
     $collectorSource -notmatch "capture_stop_signal_integrity_status" -or
     $collectorSource -notmatch "canary-postprocess-state.json" -or
+    $collectorSource -notmatch "Get-ObservationTimingSummary" -or
+    $collectorSource -notmatch "parent-authoritative-monotonic-boundary" -or
+    $collectorSource -notmatch "app_observation_elapsed_seconds" -or
     $collectorSource -notmatch "boundary_signal_nonblocking=true"
 ) {
     throw "The canary progress contract is missing."
@@ -289,9 +296,12 @@ $analyzerSource = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "analyze-spot-http-framing.ps1") `
     -Raw
 if (
-    $analyzerSource -notmatch "spot-http-framing-evidence-v8" -or
+    $analyzerSource -notmatch "spot-http-framing-evidence-v9" -or
     $analyzerSource -notmatch "request_no_response_after_handshake_attempts" -or
     $analyzerSource -notmatch "handshake_only_without_request_attempts" -or
+    $analyzerSource -notmatch "pre_handshake_failed_attempts" -or
+    $analyzerSource -notmatch
+        "requires-observation-window-app-failure-counter-or-event-delta" -or
     $analyzerSource -notmatch
         "handshake-complete-with-outbound-request-payload-and-no-response" -or
     $analyzerSource -notmatch "duplicate_initial_syn_count" -or
@@ -301,7 +311,7 @@ if (
     $analyzerSource -notmatch "excluded_before_count" -or
     $analyzerSource -notmatch "excluded_after_count"
 ) {
-    throw "The packet measurement v8 contract is missing."
+    throw "The packet measurement v9 contract is missing."
 }
 $monitorSource = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "monitor-spot-connecttimeout-trigger.ps1") `

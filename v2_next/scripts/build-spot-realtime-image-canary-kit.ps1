@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$diagnosticCoreCommit = "19c46035eb6c96f7fcdd5dc16d58532f9dc71f38"
+$diagnosticCoreCommit = "8c5bdd21b2a14ea0dac592359bf611f5f7ed625f"
 
 function Invoke-GitText {
     param(
@@ -614,7 +614,7 @@ try {
 
     $evidenceFiles = @()
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1022-canary-kit-v3"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v4"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -659,8 +659,8 @@ try {
         }
         diagnostic_core = [ordered]@{
             source_commit = $diagnosticCoreCommit
-            source_identity = "spot-connecttimeout-trigger-field-kit-v8"
-            framing_schema = "spot-http-framing-evidence-v8"
+            source_identity = "spot-connecttimeout-trigger-field-kit-v9"
+            framing_schema = "spot-http-framing-evidence-v9"
             observation_boundary_schema = "spot-canary-observation-boundary-v1"
             packet_timestamp_ordering_policy = "timestamp-sorted-stable-v1"
             same_four_tuple_reuse_ordering_policy =
@@ -681,17 +681,22 @@ try {
                 "parent-authoritative-observation-boundary"
             capture_stop_signal_observation_max_delay_seconds = 5
             postprocess_state_schema = "spot-canary-postprocess-state-v1"
+            observation_elapsed_source_policy =
+                "parent-authoritative-monotonic-boundary"
             http_no_response_definition =
                 "handshake-complete-with-outbound-request-payload-and-no-response"
             handshake_only_classification_policy =
                 "evidence-only-not-http-request-failure"
+            pre_handshake_failure_attribution_policy =
+                "requires-observation-window-app-failure-counter-or-event-delta"
             controlled_delta = (
                 "Immutable observation boundaries, stable timestamp ordering, " +
                 "aggregate packet deduplication, wall/monotonic clock calibration, " +
                 "complete failure aggregation, parent-authoritative monotonic end " +
                 "snapshots, five-second child signal integrity, request-aware HTTP " +
-                "no-response classification, and separately captured postprocess " +
-                "integrity evidence"
+                "no-response classification, parent-authoritative elapsed duration, " +
+                "app-corroborated pre-handshake failure attribution, and separately " +
+                "captured postprocess integrity evidence"
             )
             product_request_behavior_changed = $true
         }

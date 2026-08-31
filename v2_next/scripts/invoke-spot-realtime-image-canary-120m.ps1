@@ -1086,7 +1086,9 @@ function Test-PacketEvidence {
         [object]$FieldSummary,
 
         [Parameter(Mandatory = $true)]
-        [object]$FramingSummary
+        [object]$FramingSummary,
+
+        [object]$ObservationDeltas = $null
     )
 
     $hardFailures = New-Object System.Collections.Generic.List[string]
@@ -1157,7 +1159,7 @@ function Test-PacketEvidence {
         [void]$holds.Add("observation-counter-policy-mismatch")
     }
     if ($FieldSummary.packet_analysis_schema -cne
-        "spot-http-framing-evidence-v8") {
+        "spot-http-framing-evidence-v9") {
         [void]$holds.Add("packet-analysis-schema-mismatch")
     }
     if ($FieldSummary.windows_tcp_ipv4_evidence_status -ne "completed") {
@@ -1178,7 +1180,7 @@ function Test-PacketEvidence {
         }
     }
 
-    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v8") {
+    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v9") {
         [void]$holds.Add("framing-schema-mismatch")
     }
     if ($FramingSummary.analysis_window.policy -cne
@@ -1194,6 +1196,53 @@ function Test-PacketEvidence {
 
     $tcp = $FramingSummary.tcp_connection_summary
     $measurement = $FramingSummary.packet_measurement
+    $preHandshakeFailedCount = [int]$tcp.pre_handshake_failed_attempts
+    $preHandshakeCorrelationPolicy =
+        [string]$tcp.pre_handshake_failure_corroboration_policy
+    $preHandshakeCorrelationStatus = if ($preHandshakeFailedCount -eq 0) {
+        "not-applicable"
+    } else {
+        "packet-only-uncorroborated"
+    }
+    $appFailureCounterDeltaTotal = 0L
+    $appFailureEventCountDelta = 0L
+    if ($null -ne $ObservationDeltas) {
+        $failureCounterDeltas = Get-OptionalProperty `
+            -InputObject $ObservationDeltas `
+            -Name "failure_counter_deltas"
+        foreach ($name in @(
+            "source_port_transport_failure_count",
+            "source_port_image_failure_count",
+            "source_port_temperature_failure_count",
+            "source_port_internal_temperature_failure_count",
+            "source_port_diagnostic_failure_count",
+            "source_port_connection_test_failure_count"
+        )) {
+            $value = Get-OptionalProperty `
+                -InputObject $failureCounterDeltas `
+                -Name $name
+            if ($null -ne $value -and [int64]$value -gt 0) {
+                $appFailureCounterDeltaTotal += [int64]$value
+            }
+        }
+        $eventDelta = Get-OptionalProperty `
+            -InputObject $ObservationDeltas `
+            -Name "failure_event_count_delta"
+        if ($null -ne $eventDelta -and [int64]$eventDelta -gt 0) {
+            $appFailureEventCountDelta = [int64]$eventDelta
+        }
+    }
+    $preHandshakeAppCorroborated = (
+        $appFailureCounterDeltaTotal -gt 0 -or
+        $appFailureEventCountDelta -gt 0
+    )
+    if ($preHandshakeFailedCount -ne [int]$tcp.failed_connection_attempts -or
+        [string]$tcp.pre_handshake_failure_attribution -cne
+            "packet-only-not-product-attributable" -or
+        $preHandshakeCorrelationPolicy -cne
+            "requires-observation-window-app-failure-counter-or-event-delta") {
+        [void]$holds.Add("pre-handshake-failure-contract-mismatch")
+    }
     $requestNoResponseCount =
         [int]$tcp.request_no_response_after_handshake_attempts
     if ($tcp.no_response_definition -cne
@@ -1220,7 +1269,16 @@ function Test-PacketEvidence {
     }
     if ($packetOrderComplete) {
         if ([int]$tcp.failed_connection_attempts -ne 0) {
-            [void]$hardFailures.Add("failed-connection-attempt")
+            if ($preHandshakeAppCorroborated) {
+                $preHandshakeCorrelationStatus = "app-failure-corroborated"
+                [void]$hardFailures.Add(
+                    "failed-connection-attempt-app-corroborated"
+                )
+            } else {
+                [void]$holds.Add(
+                    "pre-handshake-failure-packet-only-uncorroborated"
+                )
+            }
         }
         if ([int]$tcp.reset_before_response_attempts -ne 0) {
             [void]$hardFailures.Add("reset-before-response")
@@ -1280,6 +1338,19 @@ function Test-PacketEvidence {
         capture_overwrite_detected = [bool]$FramingSummary.capture_coverage.overwrite_detected
         connection_attempts_total = [int]$tcp.connection_attempts_total
         failed_connection_attempts = [int]$tcp.failed_connection_attempts
+        pre_handshake_failed_attempts = $preHandshakeFailedCount
+        pre_handshake_failure_correlation_status = (
+            $preHandshakeCorrelationStatus
+        )
+        pre_handshake_failure_correlation_policy = (
+            $preHandshakeCorrelationPolicy
+        )
+        pre_handshake_app_failure_counter_delta_total = (
+            $appFailureCounterDeltaTotal
+        )
+        pre_handshake_app_failure_event_count_delta = (
+            $appFailureEventCountDelta
+        )
         reset_before_response_attempts = [int]$tcp.reset_before_response_attempts
         server_reset_response_count = $serverResetCount
         syn_retransmissions_total = [int]$tcp.syn_retransmissions_total
@@ -1458,7 +1529,7 @@ function Invoke-SelfTest {
         required_evidence_missing = @()
         observation_boundary_status = "complete"
         observation_counter_policy = "observation-start-to-observation-end"
-        packet_analysis_schema = "spot-http-framing-evidence-v8"
+        packet_analysis_schema = "spot-http-framing-evidence-v9"
         capture_stop_signal_boundary_status = "planned-end-reached"
         capture_stop_signal_integrity_status = "signal-observed"
         capture_stop_signal_after_boundary_latency_ms = 250
@@ -1466,7 +1537,7 @@ function Invoke-SelfTest {
             "parent-authoritative-observation-boundary"
     }
     $framing = [pscustomobject]@{
-        schema_version = "spot-http-framing-evidence-v8"
+        schema_version = "spot-http-framing-evidence-v9"
         analysis_window = [pscustomobject]@{
             policy = "observation-start-to-observation-end"
             excluded_before_count = 2
@@ -1494,6 +1565,11 @@ function Invoke-SelfTest {
         tcp_connection_summary = [pscustomobject]@{
             connection_attempts_total = 100
             failed_connection_attempts = 0
+            pre_handshake_failed_attempts = 0
+            pre_handshake_failure_attribution =
+                "packet-only-not-product-attributable"
+            pre_handshake_failure_corroboration_policy =
+                "requires-observation-window-app-failure-counter-or-event-delta"
             reset_before_response_attempts = 0
             no_response_after_handshake_attempts = 0
             no_response_definition =
@@ -1520,6 +1596,46 @@ function Invoke-SelfTest {
     if ($packet.hard_failures.Count -ne 0 -or $packet.evidence_holds.Count -ne 0) {
         throw "self-test valid packet evidence was rejected"
     }
+    $zeroObservationDeltas = [pscustomobject]@{
+        failure_counter_deltas = [pscustomobject]@{
+            source_port_transport_failure_count = 0
+            source_port_image_failure_count = 0
+            source_port_temperature_failure_count = 0
+            source_port_internal_temperature_failure_count = 0
+            source_port_diagnostic_failure_count = 0
+            source_port_connection_test_failure_count = 0
+        }
+        failure_event_count_delta = 0
+    }
+    $framing.tcp_connection_summary.failed_connection_attempts = 1
+    $framing.tcp_connection_summary.pre_handshake_failed_attempts = 1
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ("failed-connection-attempt-app-corroborated" -in
+            $packet.hard_failures -or
+        "pre-handshake-failure-packet-only-uncorroborated" -notin
+            $packet.evidence_holds -or
+        $packet.pre_handshake_failure_correlation_status -cne
+            "packet-only-uncorroborated") {
+        throw "self-test packet-only pre-handshake failure was not held"
+    }
+    $zeroObservationDeltas.failure_counter_deltas.source_port_transport_failure_count = 1
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ("failed-connection-attempt-app-corroborated" -notin
+            $packet.hard_failures -or
+        "pre-handshake-failure-packet-only-uncorroborated" -in
+            $packet.evidence_holds -or
+        $packet.pre_handshake_failure_correlation_status -cne
+            "app-failure-corroborated") {
+        throw "self-test corroborated pre-handshake failure was not rejected"
+    }
+    $framing.tcp_connection_summary.failed_connection_attempts = 0
+    $framing.tcp_connection_summary.pre_handshake_failed_attempts = 0
     $framing.tcp_connection_summary.same_four_tuple_reuse.monotonic_corrected.interval_ms_min = 74999
     $framing.tcp_connection_summary.same_four_tuple_reuse.measurement_integrity_status =
         "packet-order-unresolved"
@@ -2100,7 +2216,8 @@ try {
 
     $packet = Test-PacketEvidence `
         -FieldSummary $fieldSummary `
-        -FramingSummary $framingSummary
+        -FramingSummary $framingSummary `
+        -ObservationDeltas $deltas
 
     foreach ($item in @($observationHardFailures.ToArray())) {
         $packet.hard_failures += [string]$item
