@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v4" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v5" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.22" -or
@@ -199,6 +199,10 @@ if (
     [int]$identity.canary.historical_failure_progress_interval_seconds -ne 10 -or
     $identity.canary.collector_failure_without_runtime_hard_gate -cne
         "evidence-hold" -or
+    $identity.canary.no_response_after_handshake_attribution_policy -cne
+        "requires-observation-window-app-failure-counter-or-event-delta" -or
+    $identity.canary.uncorroborated_packet_no_response_policy -cne
+        "evidence-hold" -or
     $identity.prerequisite_15m.result -cne "PENDING_SERVER_VALIDATION" -or
     [bool]$identity.prerequisite_15m.full_120m_allowed -or
     @($identity.prerequisite_15m.evidence_files).Count -ne 0 -or
@@ -212,6 +216,24 @@ if (
 }
 if ($identity.tooling_source_commit -notmatch "^[0-9a-f]{40}$") {
     throw "The canary tooling source commit is invalid."
+}
+
+$controllerSource = Get-Content `
+    -LiteralPath (
+        Join-Path $resolvedKitRoot "invoke-spot-realtime-image-canary-120m.ps1"
+    ) `
+    -Raw
+if (
+    $controllerSource -notmatch
+        "no-response-after-handshake-packet-only-uncorroborated" -or
+    $controllerSource -notmatch
+        "no-response-after-handshake-app-corroborated" -or
+    $controllerSource -notmatch
+        "no_response_after_handshake_correlation_status" -or
+    $controllerSource -notmatch
+        "requires-observation-window-app-failure-counter-or-event-delta"
+) {
+    throw "The packet-only HTTP no-response attribution contract is missing."
 }
 
 $attestation = Get-Content `

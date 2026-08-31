@@ -614,7 +614,7 @@ try {
 
     $evidenceFiles = @()
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1022-canary-kit-v4"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v5"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -695,7 +695,8 @@ try {
                 "complete failure aggregation, parent-authoritative monotonic end " +
                 "snapshots, five-second child signal integrity, request-aware HTTP " +
                 "no-response classification, parent-authoritative elapsed duration, " +
-                "app-corroborated pre-handshake failure attribution, and separately " +
+                "app-corroborated pre-handshake and HTTP no-response attribution, " +
+                "uncorroborated packet-only no-response evidence holds, and separately " +
                 "captured postprocess integrity evidence"
             )
             product_request_behavior_changed = $true
@@ -727,6 +728,9 @@ try {
             historical_failure_stability_seconds = 30
             historical_failure_progress_interval_seconds = 10
             collector_failure_without_runtime_hard_gate = "evidence-hold"
+            no_response_after_handshake_attribution_policy =
+                "requires-observation-window-app-failure-counter-or-event-delta"
+            uncorroborated_packet_no_response_policy = "evidence-hold"
             runtime_evidence_default_root = "%LOCALAPPDATA%\SFLCanary"
             runtime_evidence_path_limit_chars = 240
         }

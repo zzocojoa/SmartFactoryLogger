@@ -1204,6 +1204,15 @@ function Test-PacketEvidence {
     } else {
         "packet-only-uncorroborated"
     }
+    $requestNoResponseCount =
+        [int]$tcp.request_no_response_after_handshake_attempts
+    $noResponseCorrelationPolicy =
+        "requires-observation-window-app-failure-counter-or-event-delta"
+    $noResponseCorrelationStatus = if ($requestNoResponseCount -eq 0) {
+        "not-applicable"
+    } else {
+        "packet-only-uncorroborated"
+    }
     $appFailureCounterDeltaTotal = 0L
     $appFailureEventCountDelta = 0L
     if ($null -ne $ObservationDeltas) {
@@ -1232,7 +1241,7 @@ function Test-PacketEvidence {
             $appFailureEventCountDelta = [int64]$eventDelta
         }
     }
-    $preHandshakeAppCorroborated = (
+    $appFailureCorroborated = (
         $appFailureCounterDeltaTotal -gt 0 -or
         $appFailureEventCountDelta -gt 0
     )
@@ -1243,8 +1252,6 @@ function Test-PacketEvidence {
             "requires-observation-window-app-failure-counter-or-event-delta") {
         [void]$holds.Add("pre-handshake-failure-contract-mismatch")
     }
-    $requestNoResponseCount =
-        [int]$tcp.request_no_response_after_handshake_attempts
     if ($tcp.no_response_definition -cne
         "handshake-complete-with-outbound-request-payload-and-no-response" -or
         [int]$tcp.no_response_after_handshake_attempts -ne
@@ -1269,7 +1276,7 @@ function Test-PacketEvidence {
     }
     if ($packetOrderComplete) {
         if ([int]$tcp.failed_connection_attempts -ne 0) {
-            if ($preHandshakeAppCorroborated) {
+            if ($appFailureCorroborated) {
                 $preHandshakeCorrelationStatus = "app-failure-corroborated"
                 [void]$hardFailures.Add(
                     "failed-connection-attempt-app-corroborated"
@@ -1284,7 +1291,16 @@ function Test-PacketEvidence {
             [void]$hardFailures.Add("reset-before-response")
         }
         if ($requestNoResponseCount -ne 0) {
-            [void]$hardFailures.Add("no-response-after-handshake")
+            if ($appFailureCorroborated) {
+                $noResponseCorrelationStatus = "app-failure-corroborated"
+                [void]$hardFailures.Add(
+                    "no-response-after-handshake-app-corroborated"
+                )
+            } else {
+                [void]$holds.Add(
+                    "no-response-after-handshake-packet-only-uncorroborated"
+                )
+            }
         }
         if ([int]$tcp.syn_retransmissions_total -ne 0) {
             [void]$hardFailures.Add("syn-retransmission-observed")
@@ -1349,6 +1365,21 @@ function Test-PacketEvidence {
             $appFailureCounterDeltaTotal
         )
         pre_handshake_app_failure_event_count_delta = (
+            $appFailureEventCountDelta
+        )
+        request_no_response_after_handshake_attempts = (
+            $requestNoResponseCount
+        )
+        no_response_after_handshake_correlation_status = (
+            $noResponseCorrelationStatus
+        )
+        no_response_after_handshake_correlation_policy = (
+            $noResponseCorrelationPolicy
+        )
+        no_response_after_handshake_app_failure_counter_delta_total = (
+            $appFailureCounterDeltaTotal
+        )
+        no_response_after_handshake_app_failure_event_count_delta = (
             $appFailureEventCountDelta
         )
         reset_before_response_attempts = [int]$tcp.reset_before_response_attempts
@@ -1636,6 +1667,37 @@ function Invoke-SelfTest {
     }
     $framing.tcp_connection_summary.failed_connection_attempts = 0
     $framing.tcp_connection_summary.pre_handshake_failed_attempts = 0
+    $zeroObservationDeltas.failure_counter_deltas.source_port_transport_failure_count = 0
+    $framing.tcp_connection_summary.no_response_after_handshake_attempts = 1
+    $framing.tcp_connection_summary.request_no_response_after_handshake_attempts = 1
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ("no-response-after-handshake-app-corroborated" -in
+            $packet.hard_failures -or
+        "no-response-after-handshake-packet-only-uncorroborated" -notin
+            $packet.evidence_holds -or
+        $packet.no_response_after_handshake_correlation_status -cne
+            "packet-only-uncorroborated") {
+        throw "self-test packet-only no-response was not held"
+    }
+    $zeroObservationDeltas.failure_event_count_delta = 1
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ("no-response-after-handshake-app-corroborated" -notin
+            $packet.hard_failures -or
+        "no-response-after-handshake-packet-only-uncorroborated" -in
+            $packet.evidence_holds -or
+        $packet.no_response_after_handshake_correlation_status -cne
+            "app-failure-corroborated") {
+        throw "self-test corroborated no-response was not rejected"
+    }
+    $framing.tcp_connection_summary.no_response_after_handshake_attempts = 0
+    $framing.tcp_connection_summary.request_no_response_after_handshake_attempts = 0
+    $zeroObservationDeltas.failure_event_count_delta = 0
     $framing.tcp_connection_summary.same_four_tuple_reuse.monotonic_corrected.interval_ms_min = 74999
     $framing.tcp_connection_summary.same_four_tuple_reuse.measurement_integrity_status =
         "packet-order-unresolved"
