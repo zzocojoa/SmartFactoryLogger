@@ -614,7 +614,7 @@ try {
 
     $evidenceFiles = @()
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1022-canary-kit-v8"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v9"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -703,8 +703,11 @@ try {
                 "flow attribution discrepancies, aggregate app-success corroboration " +
                 "separates HTTP no-response packet discrepancies, uncorroborated " +
                 "packet-only candidates remain evidence holds, timestamp/capture " +
-                "order-sensitive response candidates remain evidence holds, and separately " +
-                "captured postprocess integrity evidence"
+                "order-sensitive response candidates remain evidence holds, zero image " +
+                "activity remains an evidence hold instead of a rollback signal, a 30-to-60 " +
+                "second pre-observation liveness gate requires image request, success, and " +
+                "capture-file counter progress, and separately captured postprocess integrity " +
+                "evidence"
             )
             product_request_behavior_changed = $true
         }
@@ -748,6 +751,14 @@ try {
                 "capture-or-flow-attribution-discrepancy"
             uncorroborated_packet_no_response_policy = "evidence-hold"
             packet_order_sensitive_no_response_policy = "evidence-hold"
+            zero_image_activity_policy = "evidence-hold"
+            image_liveness_preflight_schema = "spot-image-liveness-preflight-v1"
+            image_liveness_preflight_policy =
+                "30-to-60-second-image-request-success-and-capture-file-progress-gate"
+            image_liveness_preflight_minimum_seconds = 30
+            image_liveness_preflight_maximum_seconds = 60
+            image_liveness_preflight_poll_interval_seconds = 5
+            image_liveness_preflight_adds_spot_image_requests = $false
             runtime_evidence_default_root = "%LOCALAPPDATA%\SFLCanary"
             runtime_evidence_path_limit_chars = 240
         }

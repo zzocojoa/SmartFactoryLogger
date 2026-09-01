@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v8" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v9" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.22" -or
@@ -217,6 +217,15 @@ if (
         "evidence-hold" -or
     $identity.canary.packet_order_sensitive_no_response_policy -cne
         "evidence-hold" -or
+    $identity.canary.zero_image_activity_policy -cne "evidence-hold" -or
+    $identity.canary.image_liveness_preflight_schema -cne
+        "spot-image-liveness-preflight-v1" -or
+    $identity.canary.image_liveness_preflight_policy -cne
+        "30-to-60-second-image-request-success-and-capture-file-progress-gate" -or
+    [int]$identity.canary.image_liveness_preflight_minimum_seconds -ne 30 -or
+    [int]$identity.canary.image_liveness_preflight_maximum_seconds -ne 60 -or
+    [int]$identity.canary.image_liveness_preflight_poll_interval_seconds -ne 5 -or
+    [bool]$identity.canary.image_liveness_preflight_adds_spot_image_requests -or
     $identity.prerequisite_15m.result -cne "PENDING_SERVER_VALIDATION" -or
     [bool]$identity.prerequisite_15m.full_120m_allowed -or
     @($identity.prerequisite_15m.evidence_files).Count -ne 0 -or
@@ -257,9 +266,14 @@ if (
     $controllerSource -notmatch
         "no_response_after_handshake_correlation_status" -or
     $controllerSource -notmatch
-        "requires-aggregate-observation-window-app-outcome-integrity-v1"
+        "requires-aggregate-observation-window-app-outcome-integrity-v1" -or
+    $controllerSource -notmatch
+        '\$holds\.Add\("image-counter-did-not-progress"\)' -or
+    $controllerSource -notmatch "SPOT_IMAGE_LIVENESS_EVIDENCE_HOLD" -or
+    $controllerSource -notmatch "capture_fact_row_count" -or
+    $controllerSource -notmatch "no added SPOT image request"
 ) {
-    throw "The packet-only pre-handshake or HTTP attribution contract is missing."
+    throw "The packet attribution or image liveness hold contract is missing."
 }
 
 $attestation = Get-Content `

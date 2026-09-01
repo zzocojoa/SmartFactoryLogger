@@ -101,6 +101,22 @@ backend API requests.
 
 ## 15분 진단 판정
 
+15분 수집을 시작하기 직전에 SmartFactory 카메라 화면을 표시한 상태로 30초 이상,
+최대 60초 동안 이미지 활성 상태를 확인한다. PowerShell은 화면 옆에 배치하고 앱을
+최소화하거나 다른 탭으로 이동하지 않는다. 이 확인은 로컬
+`/api/spot/config` 카운터만 읽으며 SPOT 이미지 요청을 추가하지 않는다.
+
+다음 값이 모두 증가해야 본 관찰을 시작한다.
+
+- image downstream/upstream 요청 수
+- source-port image 시작/성공 수와 화면 갱신 성공 수
+- 이미지 캡처 enqueue/write/fact row 수
+- 마지막 capture ID와 상대 경로
+
+증가하지 않으면 제품 실패나 롤백으로 단정하지 않고
+`SPOT_IMAGE_LIVENESS_EVIDENCE_HOLD`로 멈춘다. 15분 전체 구간의 이미지 요청 수가
+0인 경우에도 같은 원칙으로 `EVIDENCE_HOLD`이며 자동 롤백 사유가 아니다.
+
 다음 조건을 모두 확인한다.
 
 - backend PID, config SHA256, build commit 유지

@@ -18,6 +18,19 @@ param(
 
     [int]$EvidenceCollectorExitCode = 0,
 
+    [switch]$ImageLivenessPreflightOnly,
+
+    [string]$ImageLivenessEvidencePath = "",
+
+    [ValidateRange(30, 60)]
+    [int]$ImageLivenessMinimumSeconds = 30,
+
+    [ValidateRange(30, 60)]
+    [int]$ImageLivenessMaximumSeconds = 60,
+
+    [ValidateRange(1, 10)]
+    [int]$ImageLivenessPollIntervalSeconds = 5,
+
     [switch]$PreflightOnly,
 
     [switch]$SelfTest
@@ -285,6 +298,7 @@ function ConvertTo-SafeImageSnapshot {
         "source_port_request_failure_event_drop_count",
         "request_budget_within_target",
         "request_budget_total_background_max_per_sec",
+        "image_downstream_request_count",
         "image_upstream_request_count",
         "image_refresh_success_count",
         "image_refresh_failure_count",
@@ -687,6 +701,338 @@ function Get-InstalledState {
     }
 }
 
+function Get-ImageLivenessSnapshot {
+    $health = Invoke-RestMethod "http://127.0.0.1:8000/health" -TimeoutSec 5
+    if ([string]$health.app_version -cne "1.0.22") {
+        throw "image liveness app version mismatch: $($health.app_version)"
+    }
+
+    $backend = @(Get-Process -Name "SmartFactoryBackend" -ErrorAction Stop)
+    if ($backend.Count -ne 1) {
+        throw "image liveness backend process count mismatch: $($backend.Count)"
+    }
+
+    $config = Invoke-RestMethod `
+        "http://127.0.0.1:8000/api/spot/config" `
+        -TimeoutSec 10
+    $image = ConvertTo-SafeImageSnapshot `
+        -Image (Get-RequiredProperty `
+            -InputObject $config `
+            -Name "image" `
+            -Context "image liveness config")
+    $capture = Get-RequiredProperty `
+        -InputObject $config `
+        -Name "image_capture" `
+        -Context "image liveness config"
+
+    return [pscustomobject][ordered]@{
+        observed_at = [DateTimeOffset]::Now.ToString("o")
+        backend_pid = [int]$backend[0].Id
+        image = $image
+        image_capture = [pscustomobject][ordered]@{
+            enabled = [bool](Get-RequiredProperty `
+                -InputObject $capture `
+                -Name "enabled" `
+                -Context "image liveness capture")
+            mode = [string](Get-RequiredProperty `
+                -InputObject $capture `
+                -Name "mode" `
+                -Context "image liveness capture")
+            enqueued_count = [int64](Get-RequiredProperty `
+                -InputObject $capture `
+                -Name "enqueued_count" `
+                -Context "image liveness capture")
+            written_count = [int64](Get-RequiredProperty `
+                -InputObject $capture `
+                -Name "written_count" `
+                -Context "image liveness capture")
+            fact_row_count = [int64](Get-RequiredProperty `
+                -InputObject $capture `
+                -Name "fact_row_count" `
+                -Context "image liveness capture")
+            dropped_count = [int64](Get-RequiredProperty `
+                -InputObject $capture `
+                -Name "dropped_count" `
+                -Context "image liveness capture")
+            failure_count = [int64](Get-RequiredProperty `
+                -InputObject $capture `
+                -Name "failure_count" `
+                -Context "image liveness capture")
+            last_capture_id = [string](Get-OptionalProperty `
+                -InputObject $capture `
+                -Name "last_capture_id")
+            last_capture_path = [string](Get-OptionalProperty `
+                -InputObject $capture `
+                -Name "last_capture_path")
+        }
+    }
+}
+
+function Get-ImageLivenessProgressReport {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Before,
+
+        [Parameter(Mandatory = $true)]
+        [object]$After
+    )
+
+    $reasons = New-Object System.Collections.Generic.List[string]
+    $elapsedSeconds = (
+        [DateTimeOffset]::Parse([string]$After.observed_at) -
+        [DateTimeOffset]::Parse([string]$Before.observed_at)
+    ).TotalSeconds
+    $deltas = [ordered]@{
+        image_downstream_request_count = (
+            [int64]$After.image.image_downstream_request_count -
+            [int64]$Before.image.image_downstream_request_count
+        )
+        image_upstream_request_count = (
+            [int64]$After.image.image_upstream_request_count -
+            [int64]$Before.image.image_upstream_request_count
+        )
+        source_port_image_started_count = (
+            [int64]$After.image.source_port_image_started_count -
+            [int64]$Before.image.source_port_image_started_count
+        )
+        source_port_image_success_count = (
+            [int64]$After.image.source_port_image_success_count -
+            [int64]$Before.image.source_port_image_success_count
+        )
+        image_refresh_success_count = (
+            [int64]$After.image.image_refresh_success_count -
+            [int64]$Before.image.image_refresh_success_count
+        )
+        capture_enqueued_count = (
+            [int64]$After.image_capture.enqueued_count -
+            [int64]$Before.image_capture.enqueued_count
+        )
+        capture_written_count = (
+            [int64]$After.image_capture.written_count -
+            [int64]$Before.image_capture.written_count
+        )
+        capture_fact_row_count = (
+            [int64]$After.image_capture.fact_row_count -
+            [int64]$Before.image_capture.fact_row_count
+        )
+        source_port_image_failure_count = (
+            [int64]$After.image.source_port_image_failure_count -
+            [int64]$Before.image.source_port_image_failure_count
+        )
+        image_refresh_failure_count = (
+            [int64]$After.image.image_refresh_failure_count -
+            [int64]$Before.image.image_refresh_failure_count
+        )
+        capture_dropped_count = (
+            [int64]$After.image_capture.dropped_count -
+            [int64]$Before.image_capture.dropped_count
+        )
+        capture_failure_count = (
+            [int64]$After.image_capture.failure_count -
+            [int64]$Before.image_capture.failure_count
+        )
+    }
+
+    if ([int]$After.backend_pid -ne [int]$Before.backend_pid) {
+        [void]$reasons.Add("backend-process-changed")
+    }
+    if (-not [bool]$After.image_capture.enabled -or
+        [string]$After.image_capture.mode -ceq "off") {
+        [void]$reasons.Add("image-capture-not-enabled")
+    }
+    foreach ($name in @(
+        "image_downstream_request_count",
+        "image_upstream_request_count",
+        "source_port_image_started_count",
+        "source_port_image_success_count",
+        "image_refresh_success_count",
+        "capture_enqueued_count",
+        "capture_written_count",
+        "capture_fact_row_count"
+    )) {
+        if ([int64]$deltas[$name] -le 0) {
+            [void]$reasons.Add("$name-did-not-progress")
+        }
+    }
+    foreach ($name in @(
+        "source_port_image_failure_count",
+        "image_refresh_failure_count",
+        "capture_dropped_count",
+        "capture_failure_count"
+    )) {
+        if ([int64]$deltas[$name] -gt 0) {
+            [void]$reasons.Add("$name-increased")
+        }
+    }
+    if ([int64]$deltas.source_port_image_success_count -gt
+        [int64]$deltas.source_port_image_started_count) {
+        [void]$reasons.Add("image-success-started-relationship-invalid")
+    }
+    if ([int64]$deltas.capture_written_count -gt
+        [int64]$deltas.capture_enqueued_count) {
+        [void]$reasons.Add("capture-written-enqueued-relationship-invalid")
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$After.image_capture.last_capture_id) -or
+        [string]$After.image_capture.last_capture_id -ceq
+            [string]$Before.image_capture.last_capture_id) {
+        [void]$reasons.Add("last-capture-id-did-not-change")
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$After.image_capture.last_capture_path) -or
+        [string]$After.image_capture.last_capture_path -ceq
+            [string]$Before.image_capture.last_capture_path) {
+        [void]$reasons.Add("last-capture-path-did-not-change")
+    }
+
+    return [pscustomobject][ordered]@{
+        schema_version = "spot-image-liveness-preflight-v1"
+        elapsed_seconds = [math]::Round($elapsedSeconds, 3)
+        ready = $reasons.Count -eq 0
+        evidence_holds = @($reasons.ToArray())
+        deltas = [pscustomobject]$deltas
+        backend_pid = [int]$After.backend_pid
+        last_capture_id_changed = (
+            [string]$After.image_capture.last_capture_id -cne
+            [string]$Before.image_capture.last_capture_id
+        )
+        last_capture_path_changed = (
+            [string]$After.image_capture.last_capture_path -cne
+            [string]$Before.image_capture.last_capture_path
+        )
+    }
+}
+
+function Invoke-ImageLivenessPreflight {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$MinimumSeconds,
+
+        [Parameter(Mandatory = $true)]
+        [int]$MaximumSeconds,
+
+        [Parameter(Mandatory = $true)]
+        [int]$PollIntervalSeconds,
+
+        [string]$EvidencePath = ""
+    )
+
+    if ($MaximumSeconds -lt $MinimumSeconds) {
+        throw "image liveness maximum must be at least the minimum"
+    }
+
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $report = $null
+    $readErrors = New-Object System.Collections.Generic.List[string]
+    try {
+        $before = Get-ImageLivenessSnapshot
+        while ($timer.Elapsed.TotalSeconds -lt $MaximumSeconds) {
+            Start-Sleep -Seconds $PollIntervalSeconds
+            try {
+                $after = Get-ImageLivenessSnapshot
+                $report = Get-ImageLivenessProgressReport `
+                    -Before $before `
+                    -After $after
+            } catch {
+                [void]$readErrors.Add(
+                    "snapshot-read-failed:$($_.Exception.GetType().Name)"
+                )
+            }
+
+            $elapsed = [math]::Round($timer.Elapsed.TotalSeconds, 1)
+            $percent = [math]::Min(
+                100,
+                [int][math]::Floor(100 * $elapsed / $MaximumSeconds)
+            )
+            $ready = (
+                $null -ne $report -and
+                [bool]$report.ready -and
+                $elapsed -ge $MinimumSeconds
+            )
+            $backendAlive = @(
+                Get-Process -Name "SmartFactoryBackend" `
+                    -ErrorAction SilentlyContinue
+            ).Count -eq 1
+            Write-Host (
+                "[IMAGE LIVENESS] elapsed=${elapsed}s " +
+                "minimum=${MinimumSeconds}s maximum=${MaximumSeconds}s " +
+                "percent=$percent% ready=$ready backend_alive=$backendAlive; " +
+                "local config counters only; no added SPOT image request"
+            ) -ForegroundColor Cyan
+            if ($ready) {
+                break
+            }
+        }
+    } catch {
+        [void]$readErrors.Add(
+            "snapshot-read-failed:$($_.Exception.GetType().Name)"
+        )
+    } finally {
+        $timer.Stop()
+    }
+
+    $evidenceHolds = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($readErrors.ToArray())) {
+        [void]$evidenceHolds.Add([string]$item)
+    }
+    if ($null -eq $report) {
+        [void]$evidenceHolds.Add("image-liveness-report-unavailable")
+    } else {
+        foreach ($item in @($report.evidence_holds)) {
+            [void]$evidenceHolds.Add([string]$item)
+        }
+    }
+    if ($timer.Elapsed.TotalSeconds -lt $MinimumSeconds) {
+        [void]$evidenceHolds.Add("image-liveness-minimum-window-not-reached")
+    }
+
+    $passed = (
+        $null -ne $report -and
+        [bool]$report.ready -and
+        $timer.Elapsed.TotalSeconds -ge $MinimumSeconds -and
+        $readErrors.Count -eq 0
+    )
+    $result = [pscustomobject][ordered]@{
+        result = if ($passed) {
+            "SPOT_IMAGE_LIVENESS_PREFLIGHT_PASS"
+        } else {
+            "SPOT_IMAGE_LIVENESS_EVIDENCE_HOLD"
+        }
+        schema_version = "spot-image-liveness-preflight-v1"
+        checked_at = [DateTimeOffset]::Now.ToString("o")
+        minimum_seconds = $MinimumSeconds
+        maximum_seconds = $MaximumSeconds
+        poll_interval_seconds = $PollIntervalSeconds
+        elapsed_seconds = [math]::Round($timer.Elapsed.TotalSeconds, 3)
+        ready = $passed
+        evidence_holds = @($evidenceHolds.ToArray() | Select-Object -Unique)
+        deltas = if ($null -eq $report) { $null } else { $report.deltas }
+        backend_pid = if ($null -eq $report) { $null } else { $report.backend_pid }
+        last_capture_id_changed = if ($null -eq $report) {
+            $false
+        } else {
+            [bool]$report.last_capture_id_changed
+        }
+        last_capture_path_changed = if ($null -eq $report) {
+            $false
+        } else {
+            [bool]$report.last_capture_path_changed
+        }
+        progress_source = "local-backend-config-counters-only"
+        added_spot_image_requests = $false
+        product_changes_made = $false
+        automatic_rollback_performed = $false
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($EvidencePath)) {
+        $evidenceParent = Split-Path -Parent $EvidencePath
+        if (-not [string]::IsNullOrWhiteSpace($evidenceParent)) {
+            New-Item -ItemType Directory -Path $evidenceParent -Force | Out-Null
+        }
+        $result | ConvertTo-Json -Depth 10 |
+            Set-Content -LiteralPath $EvidencePath -Encoding UTF8
+    }
+    return $result
+}
+
 function Get-ObservationBoundaryPair {
     param(
         [Parameter(Mandatory = $true)]
@@ -1074,7 +1420,7 @@ function Get-ObservationDeltaReport {
         [void]$hardFailures.Add("transport-success-counter-did-not-progress")
     }
     if ($imageDelta -le 0) {
-        [void]$hardFailures.Add("image-counter-did-not-progress")
+        [void]$holds.Add("image-counter-did-not-progress")
     }
     if ($successDelta -gt $transportDelta) {
         [void]$holds.Add("transport-counter-relationship-invalid")
@@ -1794,6 +2140,7 @@ function Invoke-SelfTest {
         )
         request_budget_within_target = $true
         request_budget_total_background_max_per_sec = 6.0
+        image_downstream_request_count = 5
         image_upstream_request_count = 5
         image_refresh_success_count = 5
         image_refresh_failure_count = 0
@@ -2167,6 +2514,101 @@ function Invoke-SelfTest {
     ) {
         throw "self-test counter-window rate calculation mismatch"
     }
+    $noImageProgressAfter = $after | Select-Object *
+    $noImageProgressAfter.image = $after.image | Select-Object *
+    $noImageProgressAfter.image.source_port_image_started_count =
+        $before.image.source_port_image_started_count
+    $noImageProgressAfter.image.source_port_image_success_count =
+        $before.image.source_port_image_success_count
+    $noImageProgressAfter.image.image_upstream_request_count =
+        $before.image.image_upstream_request_count
+    $noImageProgress = Get-ObservationDeltaReport `
+        -Before $before `
+        -After $noImageProgressAfter
+    if (
+        "image-counter-did-not-progress" -in $noImageProgress.hard_failures -or
+        "image-counter-did-not-progress" -notin $noImageProgress.evidence_holds -or
+        $noImageProgress.app_request_outcome_integrity_status -cne
+            "incomplete-or-inconsistent"
+    ) {
+        throw "self-test zero image activity was not classified as evidence hold"
+    }
+
+    $livenessBefore = [pscustomobject]@{
+        observed_at = "2026-09-01T10:00:00+09:00"
+        backend_pid = 10
+        image = [pscustomobject]@{
+            image_downstream_request_count = 100
+            image_upstream_request_count = 100
+            source_port_image_started_count = 100
+            source_port_image_success_count = 100
+            image_refresh_success_count = 100
+            source_port_image_failure_count = 0
+            image_refresh_failure_count = 0
+        }
+        image_capture = [pscustomobject]@{
+            enabled = $true
+            mode = "all"
+            enqueued_count = 100
+            written_count = 100
+            fact_row_count = 1000
+            dropped_count = 0
+            failure_count = 0
+            last_capture_id = "capture-before"
+            last_capture_path = "spot_images/before.jpg"
+        }
+    }
+    $livenessAfter = [pscustomobject]@{
+        observed_at = "2026-09-01T10:00:30+09:00"
+        backend_pid = 10
+        image = [pscustomobject]@{
+            image_downstream_request_count = 110
+            image_upstream_request_count = 110
+            source_port_image_started_count = 110
+            source_port_image_success_count = 110
+            image_refresh_success_count = 110
+            source_port_image_failure_count = 0
+            image_refresh_failure_count = 0
+        }
+        image_capture = [pscustomobject]@{
+            enabled = $true
+            mode = "all"
+            enqueued_count = 110
+            written_count = 110
+            fact_row_count = 1010
+            dropped_count = 0
+            failure_count = 0
+            last_capture_id = "capture-after"
+            last_capture_path = "spot_images/after.jpg"
+        }
+    }
+    $liveness = Get-ImageLivenessProgressReport `
+        -Before $livenessBefore `
+        -After $livenessAfter
+    if (-not [bool]$liveness.ready -or
+        @($liveness.evidence_holds).Count -ne 0 -or
+        [int64]$liveness.deltas.capture_fact_row_count -ne 10) {
+        throw "self-test valid image liveness progress was rejected"
+    }
+    $livenessAfter.image.image_upstream_request_count = 100
+    $livenessAfter.image_capture.written_count = 100
+    $livenessAfter.image_capture.fact_row_count = 1000
+    $livenessAfter.image_capture.last_capture_id = "capture-before"
+    $livenessAfter.image_capture.last_capture_path = "spot_images/before.jpg"
+    $stalledLiveness = Get-ImageLivenessProgressReport `
+        -Before $livenessBefore `
+        -After $livenessAfter
+    if ([bool]$stalledLiveness.ready -or
+        "image_upstream_request_count-did-not-progress" -notin
+            $stalledLiveness.evidence_holds -or
+        "capture_written_count-did-not-progress" -notin
+            $stalledLiveness.evidence_holds -or
+        "capture_fact_row_count-did-not-progress" -notin
+            $stalledLiveness.evidence_holds -or
+        "last-capture-id-did-not-change" -notin
+            $stalledLiveness.evidence_holds) {
+        throw "self-test stalled image liveness was accepted"
+    }
     $after.image.source_port_image_success_count = 9985
     $inconsistentOutcome = Get-ObservationDeltaReport `
         -Before $before `
@@ -2427,6 +2869,19 @@ function Invoke-SelfTest {
 if ($SelfTest) {
     Invoke-SelfTest
     exit 0
+}
+
+if ($ImageLivenessPreflightOnly) {
+    $liveness = Invoke-ImageLivenessPreflight `
+        -MinimumSeconds $ImageLivenessMinimumSeconds `
+        -MaximumSeconds $ImageLivenessMaximumSeconds `
+        -PollIntervalSeconds $ImageLivenessPollIntervalSeconds `
+        -EvidencePath $ImageLivenessEvidencePath
+    $liveness
+    if ([bool]$liveness.ready) {
+        exit 0
+    }
+    exit 3
 }
 
 if (-not [string]::IsNullOrWhiteSpace($EvidenceEvaluationRoot)) {
