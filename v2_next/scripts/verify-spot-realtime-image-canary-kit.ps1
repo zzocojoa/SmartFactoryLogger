@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v5" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v6" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.22" -or
@@ -130,11 +130,11 @@ if (
         "preinstall-summary.json" -or
     $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
-        "8c5bdd21b2a14ea0dac592359bf611f5f7ed625f" -or
+        "9b38171a00616a732d1aa64853d114c946f3bb78" -or
     $identity.diagnostic_core.source_identity -cne
-        "spot-connecttimeout-trigger-field-kit-v9" -or
+        "spot-connecttimeout-trigger-field-kit-v10" -or
     $identity.diagnostic_core.framing_schema -cne
-        "spot-http-framing-evidence-v9" -or
+        "spot-http-framing-evidence-v10" -or
     $identity.diagnostic_core.observation_boundary_schema -cne
         "spot-canary-observation-boundary-v1" -or
     $identity.diagnostic_core.packet_timestamp_ordering_policy -cne
@@ -143,6 +143,8 @@ if (
         "timestamp-sorted-per-four-tuple-v1" -or
     $identity.diagnostic_core.packet_timing_uncertainty_policy -cne
         "evidence-hold" -or
+    $identity.diagnostic_core.packet_order_sensitive_response_policy -cne
+        "timestamp-and-capture-order-disagreement-is-evidence-hold" -or
     $identity.diagnostic_core.trigger_monitor_error_event_schema -cne
         "spot-trigger-monitor-error-event-raw-v1" -or
     $identity.diagnostic_core.trigger_monitor_integrity_policy -cne
@@ -202,6 +204,8 @@ if (
     $identity.canary.no_response_after_handshake_attribution_policy -cne
         "requires-observation-window-app-failure-counter-or-event-delta" -or
     $identity.canary.uncorroborated_packet_no_response_policy -cne
+        "evidence-hold" -or
+    $identity.canary.packet_order_sensitive_no_response_policy -cne
         "evidence-hold" -or
     $identity.prerequisite_15m.result -cne "PENDING_SERVER_VALIDATION" -or
     [bool]$identity.prerequisite_15m.full_120m_allowed -or
@@ -318,7 +322,7 @@ $analyzerSource = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "analyze-spot-http-framing.ps1") `
     -Raw
 if (
-    $analyzerSource -notmatch "spot-http-framing-evidence-v9" -or
+    $analyzerSource -notmatch "spot-http-framing-evidence-v10" -or
     $analyzerSource -notmatch "request_no_response_after_handshake_attempts" -or
     $analyzerSource -notmatch "handshake_only_without_request_attempts" -or
     $analyzerSource -notmatch "pre_handshake_failed_attempts" -or
@@ -330,6 +334,9 @@ if (
     $analyzerSource -notmatch "monotonic_corrected" -or
     $analyzerSource -notmatch "timestamp-sorted-stable-v1" -or
     $analyzerSource -notmatch "initial_syn_timestamp_regression_max_ms" -or
+    $analyzerSource -notmatch "packet_order_sensitive_no_response_attempts" -or
+    $analyzerSource -notmatch
+        "timestamp-and-capture-order-disagreement-is-evidence-hold" -or
     $analyzerSource -notmatch "excluded_before_count" -or
     $analyzerSource -notmatch "excluded_after_count"
 ) {

@@ -8,7 +8,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$diagnosticCoreCommit = "8c5bdd21b2a14ea0dac592359bf611f5f7ed625f"
+$diagnosticCoreCommit = "9b38171a00616a732d1aa64853d114c946f3bb78"
 
 function Invoke-GitText {
     param(
@@ -614,7 +614,7 @@ try {
 
     $evidenceFiles = @()
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1022-canary-kit-v5"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v6"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -659,13 +659,15 @@ try {
         }
         diagnostic_core = [ordered]@{
             source_commit = $diagnosticCoreCommit
-            source_identity = "spot-connecttimeout-trigger-field-kit-v9"
-            framing_schema = "spot-http-framing-evidence-v9"
+            source_identity = "spot-connecttimeout-trigger-field-kit-v10"
+            framing_schema = "spot-http-framing-evidence-v10"
             observation_boundary_schema = "spot-canary-observation-boundary-v1"
             packet_timestamp_ordering_policy = "timestamp-sorted-stable-v1"
             same_four_tuple_reuse_ordering_policy =
                 "timestamp-sorted-per-four-tuple-v1"
             packet_timing_uncertainty_policy = "evidence-hold"
+            packet_order_sensitive_response_policy =
+                "timestamp-and-capture-order-disagreement-is-evidence-hold"
             trigger_monitor_error_event_schema =
                 "spot-trigger-monitor-error-event-raw-v1"
             trigger_monitor_integrity_policy =
@@ -696,7 +698,8 @@ try {
                 "snapshots, five-second child signal integrity, request-aware HTTP " +
                 "no-response classification, parent-authoritative elapsed duration, " +
                 "app-corroborated pre-handshake and HTTP no-response attribution, " +
-                "uncorroborated packet-only no-response evidence holds, and separately " +
+                "uncorroborated packet-only no-response evidence holds, timestamp/capture " +
+                "order-sensitive response candidates remain evidence holds, and separately " +
                 "captured postprocess integrity evidence"
             )
             product_request_behavior_changed = $true
@@ -731,6 +734,7 @@ try {
             no_response_after_handshake_attribution_policy =
                 "requires-observation-window-app-failure-counter-or-event-delta"
             uncorroborated_packet_no_response_policy = "evidence-hold"
+            packet_order_sensitive_no_response_policy = "evidence-hold"
             runtime_evidence_default_root = "%LOCALAPPDATA%\SFLCanary"
             runtime_evidence_path_limit_chars = 240
         }

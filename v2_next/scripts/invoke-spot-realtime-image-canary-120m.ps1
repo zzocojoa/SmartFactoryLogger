@@ -1159,7 +1159,7 @@ function Test-PacketEvidence {
         [void]$holds.Add("observation-counter-policy-mismatch")
     }
     if ($FieldSummary.packet_analysis_schema -cne
-        "spot-http-framing-evidence-v9") {
+        "spot-http-framing-evidence-v10") {
         [void]$holds.Add("packet-analysis-schema-mismatch")
     }
     if ($FieldSummary.windows_tcp_ipv4_evidence_status -ne "completed") {
@@ -1180,7 +1180,7 @@ function Test-PacketEvidence {
         }
     }
 
-    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v9") {
+    if ($FramingSummary.schema_version -ne "spot-http-framing-evidence-v10") {
         [void]$holds.Add("framing-schema-mismatch")
     }
     if ($FramingSummary.analysis_window.policy -cne
@@ -1206,6 +1206,10 @@ function Test-PacketEvidence {
     }
     $requestNoResponseCount =
         [int]$tcp.request_no_response_after_handshake_attempts
+    $packetOrderSensitiveNoResponseCount =
+        [int]$tcp.packet_order_sensitive_no_response_attempts
+    $packetOrderSensitiveNoResponsePolicy =
+        [string]$tcp.packet_order_sensitive_no_response_policy
     $noResponseCorrelationPolicy =
         "requires-observation-window-app-failure-counter-or-event-delta"
     $noResponseCorrelationStatus = if ($requestNoResponseCount -eq 0) {
@@ -1257,6 +1261,13 @@ function Test-PacketEvidence {
         [int]$tcp.no_response_after_handshake_attempts -ne
             $requestNoResponseCount) {
         [void]$holds.Add("http-no-response-classification-mismatch")
+    }
+    if ($packetOrderSensitiveNoResponsePolicy -cne
+        "timestamp-and-capture-order-disagreement-is-evidence-hold") {
+        [void]$holds.Add("packet-order-sensitive-response-contract-mismatch")
+    }
+    if ($packetOrderSensitiveNoResponseCount -ne 0) {
+        [void]$holds.Add("packet-order-sensitive-response")
     }
     $clockCalibrationComplete =
         [string]$measurement.clock_calibration.status -ceq "complete"
@@ -1369,6 +1380,12 @@ function Test-PacketEvidence {
         )
         request_no_response_after_handshake_attempts = (
             $requestNoResponseCount
+        )
+        packet_order_sensitive_no_response_attempts = (
+            $packetOrderSensitiveNoResponseCount
+        )
+        packet_order_sensitive_no_response_policy = (
+            $packetOrderSensitiveNoResponsePolicy
         )
         no_response_after_handshake_correlation_status = (
             $noResponseCorrelationStatus
@@ -1560,7 +1577,7 @@ function Invoke-SelfTest {
         required_evidence_missing = @()
         observation_boundary_status = "complete"
         observation_counter_policy = "observation-start-to-observation-end"
-        packet_analysis_schema = "spot-http-framing-evidence-v9"
+        packet_analysis_schema = "spot-http-framing-evidence-v10"
         capture_stop_signal_boundary_status = "planned-end-reached"
         capture_stop_signal_integrity_status = "signal-observed"
         capture_stop_signal_after_boundary_latency_ms = 250
@@ -1568,7 +1585,7 @@ function Invoke-SelfTest {
             "parent-authoritative-observation-boundary"
     }
     $framing = [pscustomobject]@{
-        schema_version = "spot-http-framing-evidence-v9"
+        schema_version = "spot-http-framing-evidence-v10"
         analysis_window = [pscustomobject]@{
             policy = "observation-start-to-observation-end"
             excluded_before_count = 2
@@ -1606,6 +1623,9 @@ function Invoke-SelfTest {
             no_response_definition =
                 "handshake-complete-with-outbound-request-payload-and-no-response"
             request_no_response_after_handshake_attempts = 0
+            packet_order_sensitive_no_response_attempts = 0
+            packet_order_sensitive_no_response_policy =
+                "timestamp-and-capture-order-disagreement-is-evidence-hold"
             handshake_only_without_request_attempts = 15
             handshake_only_at_capture_end = 1
             syn_retransmissions_total = 0
@@ -1698,6 +1718,17 @@ function Invoke-SelfTest {
     $framing.tcp_connection_summary.no_response_after_handshake_attempts = 0
     $framing.tcp_connection_summary.request_no_response_after_handshake_attempts = 0
     $zeroObservationDeltas.failure_event_count_delta = 0
+    $framing.tcp_connection_summary.packet_order_sensitive_no_response_attempts = 1
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ($packet.hard_failures.Count -ne 0 -or
+        "packet-order-sensitive-response" -notin $packet.evidence_holds -or
+        [int]$packet.packet_order_sensitive_no_response_attempts -ne 1) {
+        throw "self-test packet-order-sensitive response was not held"
+    }
+    $framing.tcp_connection_summary.packet_order_sensitive_no_response_attempts = 0
     $framing.tcp_connection_summary.same_four_tuple_reuse.monotonic_corrected.interval_ms_min = 74999
     $framing.tcp_connection_summary.same_four_tuple_reuse.measurement_integrity_status =
         "packet-order-unresolved"
