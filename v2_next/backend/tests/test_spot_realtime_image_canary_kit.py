@@ -52,13 +52,11 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         )
         preflight_index = source.index("-PreflightOnly")
         self.assertLess(verify_index, preflight_index)
-        self.assertIn("separate 15-minute diagnostic", source)
-        self.assertIn("intentionally blocks the 120-minute observation", source)
-        self.assertIn('set "SFL_CANARY_EXIT=3"', source)
-        self.assertEqual(
-            source.count("invoke-spot-realtime-image-canary-120m.ps1"),
-            1,
-        )
+        self.assertIn("RUN-120M", source)
+        self.assertIn("No automatic rollback was performed", source)
+        self.assertIn("PASS WITH LIMITATION", source)
+        self.assertIn('if "%SFL_CANARY_EXIT%"=="2"', source)
+        self.assertEqual(source.count("-PreflightOnly"), 1)
         self.assertNotIn("v1.0.16", source)
 
     def test_builder_binds_product_core_and_progress_contract(self) -> None:
@@ -87,7 +85,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("contains_installer = $false", source)
         self.assertIn("changes_application_or_settings = $false", source)
         self.assertIn(
-            'schema_version = "spot-realtime-image-v1022-canary-kit-v8"',
+            'schema_version = "spot-realtime-image-v1022-canary-kit-v10"',
             source,
         )
         self.assertIn(
@@ -125,8 +123,11 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             source,
         )
         for expected in (
-            'result = "PENDING_SERVER_VALIDATION"',
-            'full_120m_allowed = $false',
+            'result = "PASS"',
+            'full_120m_allowed = $true',
+            'approval_scope = "120-minute-canary-only"',
+            'reviewed_result_schema =',
+            'switch_limitation = $true',
             'source_port_policy_version = "spot-source-port-quarantine-v3"',
             "source_port_minimum_required_reuse_interval_seconds = 75.0",
             "source_port_quarantine_safety_margin_seconds = 2.0",
@@ -203,6 +204,11 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "self-test incomplete pre-handshake app outcome was not held",
             "self-test pre-handshake SYN retransmission was not rejected",
             "self-test pre-handshake reset evidence was not rejected",
+            'Phase -ceq "image-liveness-preflight"',
+            '"image-liveness-preflight-120m.json"',
+            "120-minute image liveness preflight did not pass",
+            "15-minute evidence path escapes the approved evidence root",
+            "reviewed 15-minute result does not satisfy the bound gate",
         )
         for fragment in required_fragments:
             self.assertIn(fragment, source)
@@ -300,8 +306,25 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("does not add SPOT or", guide)
         self.assertIn("backend API requests", guide)
         self.assertIn("PASS_WITH_SWITCH_LIMITATION", guide)
-        self.assertIn("PENDING_SERVER_VALIDATION", BUILDER.read_text(encoding="utf-8"))
+        self.assertIn(
+            "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA",
+            BUILDER.read_text(encoding="utf-8"),
+        )
+        self.assertIn("120-minute-canary-only", guide)
         self.assertIn("EVIDENCE_HOLD", guide)
+
+    def test_verifier_binds_the_exact_reviewed_15m_evidence(self) -> None:
+        verifier = VERIFIER.read_text(encoding="utf-8")
+        for expected in (
+            "spot-realtime-image-v1022-canary-kit-v10",
+            "approved-15m-v9-20260901-135039",
+            "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA",
+            "C3082C90D259A17D86BB5FF2D15A2861F7CAC195565EABA7FDAFB6667BDEDF6D",
+            "9361D97E07FD57534836B432F610F281449C3C6F2C1E3B3E1323B3DBF9FD7BD2",
+            "120-minute-canary-only",
+            "delayed-historical-server-validation",
+        ):
+            self.assertIn(expected, verifier)
 
 
 if __name__ == "__main__":

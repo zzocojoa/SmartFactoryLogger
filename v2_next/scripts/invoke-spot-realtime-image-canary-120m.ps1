@@ -251,6 +251,12 @@ function Get-CanaryExceptionResultName {
         [string]$Phase
     )
 
+    if (
+        -not $CollectionStarted -and
+        $Phase -ceq "image-liveness-preflight"
+    ) {
+        return "SPOT_120M_EVIDENCE_HOLD"
+    }
     if (-not $CollectionStarted) {
         return "SPOT_120M_PREFLIGHT_FAILED"
     }
@@ -1317,12 +1323,114 @@ function Assert-EvidenceFiles {
         throw "unsupported 15-minute prerequisite result: $prerequisiteResult"
     }
 
-    foreach ($entry in @($Identity.prerequisite_15m.evidence_files)) {
-        $path = Join-Path $EvidenceRoot ([string]$entry.file)
+    $resolvedEvidenceRoot = [IO.Path]::GetFullPath(
+        (Resolve-Path -LiteralPath $EvidenceRoot).Path
+    )
+    $evidenceRootPrefix = $resolvedEvidenceRoot.TrimEnd("\") + "\"
+    $evidenceFiles = @($Identity.prerequisite_15m.evidence_files)
+    if ($evidenceFiles.Count -eq 0) {
+        throw "approved 15-minute validation must bind evidence files"
+    }
+
+    foreach ($entry in $evidenceFiles) {
+        $relativePath = [string]$entry.file
+        if (
+            [string]::IsNullOrWhiteSpace($relativePath) -or
+            [IO.Path]::IsPathRooted($relativePath)
+        ) {
+            throw "15-minute evidence path must be relative"
+        }
+        $path = [IO.Path]::GetFullPath(
+            (Join-Path $resolvedEvidenceRoot $relativePath)
+        )
+        if (-not $path.StartsWith(
+            $evidenceRootPrefix,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "15-minute evidence path escapes the approved evidence root"
+        }
         Assert-FileSha256 `
             -Path $path `
             -ExpectedSha256 ([string]$entry.sha256) `
             -Label "15-minute evidence $($entry.file)" | Out-Null
+    }
+
+    if (
+        [string]$Identity.prerequisite_15m.approval_scope -cne
+            "120-minute-canary-only" -or
+        -not [bool]$Identity.prerequisite_15m.full_120m_allowed -or
+        [bool]$Identity.production_promotion_allowed
+    ) {
+        throw "15-minute approval scope is not limited to the 120-minute canary"
+    }
+
+    $reviewedResultRelativePath =
+        [string]$Identity.prerequisite_15m.reviewed_result_file
+    $reviewedResultPath = [IO.Path]::GetFullPath(
+        (Join-Path $resolvedEvidenceRoot $reviewedResultRelativePath)
+    )
+    if (-not $reviewedResultPath.StartsWith(
+        $evidenceRootPrefix,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "reviewed 15-minute result escapes the approved evidence root"
+    }
+    Assert-FileSha256 `
+        -Path $reviewedResultPath `
+        -ExpectedSha256 (
+            [string]$Identity.prerequisite_15m.reviewed_result_sha256
+        ) `
+        -Label "reviewed 15-minute result" | Out-Null
+    $reviewedResult = Get-Content `
+        -LiteralPath $reviewedResultPath `
+        -Raw |
+        ConvertFrom-Json
+    if (
+        [string]$reviewedResult.schema_version -cne
+            [string]$Identity.prerequisite_15m.reviewed_result_schema -or
+        [string]$reviewedResult.result -cne
+            "SPOT_V1022_V9_15M_PASS_WITH_SWITCH_LIMITATION_CORRECTED_POSTRUN" -or
+        [string]$reviewedResult.technical_evidence_result -cne
+            "SPOT_EVIDENCE_PASS_WITH_SWITCH_LIMITATION" -or
+        -not [bool]$reviewedResult.switch_limitation -or
+        [string]$reviewedResult.operator_historical_attestation.answer -cne
+            "YES" -or
+        [double]$reviewedResult.observation.elapsed_seconds -lt 900.0 -or
+        [string]$reviewedResult.observation.boundary_status -cne "complete" -or
+        [string]$reviewedResult.observation.app_request_outcome_integrity_status -cne
+            "complete-success-corroborated" -or
+        [int64]$reviewedResult.observation.transport_started_delta -ne
+            [int64]$reviewedResult.observation.transport_success_delta -or
+        [int64]$reviewedResult.observation.image_started_delta -ne
+            [int64]$reviewedResult.observation.image_success_delta -or
+        [int64]$reviewedResult.observation.image_success_delta -ne
+            [int64]$reviewedResult.observation.image_upstream_delta -or
+        [int64]$reviewedResult.observation.transport_failure_delta -ne 0 -or
+        [int64]$reviewedResult.observation.image_failure_delta -ne 0 -or
+        [int64]$reviewedResult.observation.request_failure_event_delta -ne 0 -or
+        [int]$reviewedResult.packet_evidence.request_no_response_after_handshake_attempts -ne
+            0 -or
+        [int]$reviewedResult.packet_evidence.syn_retransmissions_total -ne 0 -or
+        [int]$reviewedResult.packet_evidence.rst_packets_total -ne 0 -or
+        [double]$reviewedResult.packet_evidence.same_four_tuple_reuse_minimum_ms -lt
+            75000.0 -or
+        [int]$reviewedResult.packet_evidence.same_four_tuple_reuse_under_75000_ms_count -ne
+            0 -or
+        [string]$reviewedResult.evidence_binding.canary_zip_sha256 -cne
+            [string]$Identity.prerequisite_15m.source_canary_zip_sha256 -or
+        [string]$reviewedResult.evidence_binding.sanitized_zip_sha256 -cne
+            [string]$Identity.prerequisite_15m.sanitized_zip_sha256 -or
+        [string]$reviewedResult.evidence_binding.control_zip_sha256 -cne
+            [string]$Identity.prerequisite_15m.control_zip_sha256 -or
+        [bool]$reviewedResult.observation_rerun_performed -or
+        [bool]$reviewedResult.product_changes_made -or
+        [bool]$reviewedResult.app_restart_performed -or
+        [bool]$reviewedResult.automatic_rollback_performed -or
+        [bool]$reviewedResult.rollback_required -or
+        [bool]$reviewedResult.full_120m_allowed -or
+        [bool]$reviewedResult.production_promotion_allowed
+    ) {
+        throw "reviewed 15-minute result does not satisfy the bound gate"
     }
 
     $preinstallSummaryPath = Join-Path `
@@ -3037,6 +3145,49 @@ try {
         )
     }
 
+    $phase = "image-liveness-preflight"
+    $imageLivenessPath = Join-Path `
+        $controlRoot `
+        "image-liveness-preflight-120m.json"
+    Write-Host (
+        "[IMAGE LIVENESS INSTRUCTION] Keep the SmartFactory camera " +
+        "screen visible. Do not minimize the app or change tabs."
+    ) -ForegroundColor Yellow
+    $imageLiveness = Invoke-ImageLivenessPreflight `
+        -MinimumSeconds 30 `
+        -MaximumSeconds 60 `
+        -PollIntervalSeconds 5 `
+        -EvidencePath $imageLivenessPath
+    if (
+        [string]$imageLiveness.result -cne
+            "SPOT_IMAGE_LIVENESS_PREFLIGHT_PASS" -or
+        -not [bool]$imageLiveness.ready -or
+        [int]$imageLiveness.backend_pid -ne [int]$before.backend_pid -or
+        [double]$imageLiveness.elapsed_seconds -lt 30.0 -or
+        @($imageLiveness.evidence_holds).Count -ne 0 -or
+        [bool]$imageLiveness.added_spot_image_requests -or
+        [bool]$imageLiveness.product_changes_made -or
+        [bool]$imageLiveness.automatic_rollback_performed
+    ) {
+        throw "120-minute image liveness preflight did not pass"
+    }
+
+    $preCollectionState = Get-InstalledState `
+        -Identity $identity `
+        -IntegrityModulePath $integrityModulePath `
+        -ConfigPath $configPath `
+        -Stage "120m pre-collection"
+    if (
+        [string]$preCollectionState.version -cne [string]$before.version -or
+        [string]$preCollectionState.build_git_commit -cne
+            [string]$before.build_git_commit -or
+        [int]$preCollectionState.backend_pid -ne [int]$before.backend_pid -or
+        [string]$preCollectionState.config_sha256 -cne
+            [string]$before.config_sha256
+    ) {
+        throw "app state changed during the 120-minute liveness preflight"
+    }
+
     $phase = "collection"
     New-Item -ItemType Directory -Path $canaryEvidenceBase -Force | Out-Null
     $existingRuns = @(
@@ -3234,6 +3385,8 @@ try {
         operator_visual_confirmation = (
             $operatorEligible -and $operatorAnswer -ceq "YES"
         )
+        image_liveness_preflight = $imageLiveness
+        image_liveness_evidence_path = $imageLivenessPath
         counter_rate_window = $identity.canary.counter_rate_window
         deltas = $deltas
         failure_counter_deltas = if ($null -eq $deltas) {

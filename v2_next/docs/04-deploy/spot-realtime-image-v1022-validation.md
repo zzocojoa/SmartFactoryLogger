@@ -13,12 +13,18 @@ quarantine을 사용한다.
 이 키트는 다음 단계까지만 허용한다.
 
 1. 파일·commit·rollback·서버 상태 preflight
-2. v1.0.22 설치 후 15분 진단
-3. 15분 증거 보존 및 검토
+2. 검토 완료된 v9 15분 증거의 SHA-256 재검증
+3. 실행 직전 30~60초 이미지 활성 확인
+4. 120분 관찰과 증거 보존
 
-15분 증거가 아직 identity에 묶이지 않았으므로 이 키트의 120분 launcher는
-의도적으로 `EVIDENCE_HOLD`에서 멈춘다. 15분 결과를 검토한 후 별도의
-commit-bound 120분 키트를 생성한다.
+2026-09-01의 v9 15분 결과는 앱 요청 4,989/성공 4,989, 이미지 요청
+2,491/성공 2,491, 신규 실패 0, HTTP 응답 누락 0, SYN 재전송 0, RST 0,
+동일 four-tuple 최소 재사용 75.992초로 검토됐다. 정정 결과 JSON, 정제 ZIP,
+control ZIP의 SHA-256을 v10 identity에 고정했으며 이 세 파일이 모두 일치해야
+120분을 시작할 수 있다. 이 승인은 120분 내부 검증에만 적용하며 production
+승격을 승인하지 않는다.
+
+- 승인 범위 식별자: `120-minute-canary-only`
 
 ## 고정 제품 계약
 
@@ -54,6 +60,21 @@ SPOT 또는 backend API 호출을 추가하지 않는다.
 
 The observation prints progress every 30 seconds and does not add SPOT or
 backend API requests.
+
+## 120분 시작 절차
+
+1. v10 ZIP과 SHA-256 sidecar를 검증한다.
+2. 승인된 v9 15분 결과 JSON, 정제 ZIP, control ZIP을
+   `server-evidence\v1022-pending\approved-15m-v9-20260901-135039`에 둔다.
+3. v1.0.20 복구본과 기존 `preinstall-summary.json`, `health-before.json`을
+   검증한다.
+4. 새 30초 historical baseline과 packet preflight를 통과한다.
+5. SmartFactory 카메라 화면을 계속 표시한 상태에서 30~60초 이미지 요청·성공·
+   파일 생성 카운터가 증가하는지 확인한다.
+6. `RUN-120M`을 입력해 정확히 한 번 실행한다.
+
+120분 중에는 앱을 최소화하거나 탭을 바꾸거나 오류를 지우거나 부하 시험을
+실행하지 않는다. 오류가 보이면 그대로 두고 시각을 기록한다.
 
 ## 관찰 종료 경계
 
@@ -134,12 +155,13 @@ backend API requests.
 
 ## 제공할 증거
 
-15분 실행 뒤 다음을 제공한다.
+120분 실행 뒤 다음을 제공한다.
 
 - `runtime_validation_*_sanitized_share.zip`
 - `sanitized_share_sha256.txt`
 - 해당 `canary-control-*` 폴더의 ZIP
-- 15분 동안 영상 갱신과 화면 오류 여부에 대한 사용자 확인
+- `canary-120m-gate.json`이 있는 해당 `canary-control-*` 폴더
+- 120분 동안 영상 갱신과 화면 오류 여부에 대한 사용자 확인
 
 원본 `raw_private` 폴더는 서버에서 삭제하지 않는다. 공유 ZIP은 원문 주소와
 source port 값을 포함하지 않는 정제 증거만 사용한다.
@@ -147,7 +169,7 @@ source port 값을 포함하지 않는 정제 증거만 사용한다.
 ## 운영 제한
 
 - 이 키트와 설치본은 서명되지 않은 내부 검증용이다.
-- 15분 통과만으로 production 승격을 승인하지 않는다.
-- 120분 검증 전에는 v1.0.22를 운영 후보로 확정하지 않는다.
+- 15분 통과와 120분 실행 승인만으로 production 승격을 승인하지 않는다.
+- 120분 결과를 별도로 검토하기 전에는 v1.0.22를 운영 후보로 확정하지 않는다.
 - 관리형 스위치 증거가 끝까지 없으면 최대 판정은
   `PASS_WITH_SWITCH_LIMITATION`이다.

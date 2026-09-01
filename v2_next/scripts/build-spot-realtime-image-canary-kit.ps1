@@ -9,6 +9,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $diagnosticCoreCommit = "9b38171a00616a732d1aa64853d114c946f3bb78"
+$approved15mEvidenceFolder = "approved-15m-v9-20260901-135039"
+$approved15mResultFile = "v9_15m_corrected_postrun_validation.json"
+$approved15mResultSha256 =
+    "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA"
+$approved15mSanitizedZipFile =
+    "runtime_validation_20260901_135039_sanitized_share.zip"
+$approved15mSanitizedZipSha256 =
+    "C3082C90D259A17D86BB5FF2D15A2861F7CAC195565EABA7FDAFB6667BDEDF6D"
+$approved15mControlZipFile =
+    "canary-control-20260901-133801-for-runtime_validation_20260901_135039.zip"
+$approved15mControlZipSha256 =
+    "9361D97E07FD57534836B432F610F281449C3C6F2C1E3B3E1323B3DBF9FD7BD2"
 
 function Invoke-GitText {
     param(
@@ -593,18 +605,24 @@ try {
 
     $attestation = [ordered]@{
         schema_version = "spot-operator-visual-attestation-v1"
-        evidence_kind = "pending-server-validation"
-        status = "PENDING"
+        evidence_kind = "delayed-historical-server-validation"
+        status = "CONFIRMED"
         product_version = "1.0.22"
         build_git_commit = "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80"
-        observation_date_kst = $null
-        observation_start_kst = $null
-        observation_end_kst = $null
+        observation_date_kst = "2026-09-01"
+        observation_start_kst = "2026-09-01T13:51:03.1498905+09:00"
+        observation_end_kst = "2026-09-01T14:06:04.4812825+09:00"
         observation_duration_minutes = 15
-        continuous_spot_image_refresh = $null
-        screen_error_observed = $null
-        statement = "v1.0.22 server validation has not been performed."
-        source = "not-yet-collected"
+        continuous_spot_image_refresh = $true
+        screen_error_observed = $false
+        statement = (
+            "SPOT images continued updating and no new app-screen error " +
+            "was observed during the complete interval."
+        )
+        source = $approved15mResultFile
+        source_sha256 = $approved15mResultSha256
+        recorded_at = "2026-09-02T07:57:56.2923477+09:00"
+        delayed_attestation = $true
         machine_generated = $false
     }
     $attestation | ConvertTo-Json -Depth 5 |
@@ -612,9 +630,26 @@ try {
             -LiteralPath (Join-Path $stagingRoot "operator_attestation_15m.json") `
             -Encoding UTF8
 
-    $evidenceFiles = @()
+    $evidenceFiles = @(
+        [ordered]@{
+            file = Join-Path $approved15mEvidenceFolder $approved15mResultFile
+            sha256 = $approved15mResultSha256
+        }
+        [ordered]@{
+            file = Join-Path `
+                $approved15mEvidenceFolder `
+                $approved15mSanitizedZipFile
+            sha256 = $approved15mSanitizedZipSha256
+        }
+        [ordered]@{
+            file = Join-Path `
+                $approved15mEvidenceFolder `
+                $approved15mControlZipFile
+            sha256 = $approved15mControlZipSha256
+        }
+    )
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1022-canary-kit-v9"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v10"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -648,13 +683,31 @@ try {
             baseline_health_file = "health-before.json"
         }
         prerequisite_15m = [ordered]@{
-            result = "PENDING_SERVER_VALIDATION"
-            full_120m_allowed = $false
+            result = "PASS"
+            full_120m_allowed = $true
             evidence_relative_path = "server-evidence\v1022-pending"
-            observation_date_kst = $null
-            observation_start_kst = $null
-            observation_end_kst = $null
+            observation_date_kst = "2026-09-01"
+            observation_start_kst = "2026-09-01T13:51:03.1498905+09:00"
+            observation_end_kst = "2026-09-01T14:06:04.4812825+09:00"
             operator_attestation_file = "operator_attestation_15m.json"
+            approval_scope = "120-minute-canary-only"
+            reviewed_result_schema =
+                "spot-v1022-v9-corrected-postrun-validation-v1"
+            reviewed_result_file = Join-Path `
+                $approved15mEvidenceFolder `
+                $approved15mResultFile
+            reviewed_result_sha256 = $approved15mResultSha256
+            sanitized_zip_file = Join-Path `
+                $approved15mEvidenceFolder `
+                $approved15mSanitizedZipFile
+            sanitized_zip_sha256 = $approved15mSanitizedZipSha256
+            control_zip_file = Join-Path `
+                $approved15mEvidenceFolder `
+                $approved15mControlZipFile
+            control_zip_sha256 = $approved15mControlZipSha256
+            source_canary_zip_sha256 =
+                "F38DE4BBECEA6D0F1BD9FF65BB82BC677221DEDACCDBE8E2BC6512C5C460AE82"
+            switch_limitation = $true
             evidence_files = $evidenceFiles
         }
         diagnostic_core = [ordered]@{

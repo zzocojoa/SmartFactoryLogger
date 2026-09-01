@@ -89,8 +89,27 @@ $identity = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "canary_kit_identity.json") `
     -Raw |
     ConvertFrom-Json
+$approvedEvidenceFiles = @($identity.prerequisite_15m.evidence_files)
+$approvedEvidenceByName = @{}
+foreach ($entry in $approvedEvidenceFiles) {
+    $name = [string]$entry.file
+    if ($approvedEvidenceByName.ContainsKey($name)) {
+        throw "The approved 15-minute evidence list contains a duplicate path."
+    }
+    $approvedEvidenceByName[$name] = [string]$entry.sha256
+}
+$approvedResultFile =
+    "approved-15m-v9-20260901-135039\v9_15m_corrected_postrun_validation.json"
+$approvedSanitizedZip = (
+    "approved-15m-v9-20260901-135039\" +
+    "runtime_validation_20260901_135039_sanitized_share.zip"
+)
+$approvedControlZip = (
+    "approved-15m-v9-20260901-135039\" +
+    "canary-control-20260901-133801-for-runtime_validation_20260901_135039.zip"
+)
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v9" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v10" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.22" -or
@@ -226,9 +245,43 @@ if (
     [int]$identity.canary.image_liveness_preflight_maximum_seconds -ne 60 -or
     [int]$identity.canary.image_liveness_preflight_poll_interval_seconds -ne 5 -or
     [bool]$identity.canary.image_liveness_preflight_adds_spot_image_requests -or
-    $identity.prerequisite_15m.result -cne "PENDING_SERVER_VALIDATION" -or
-    [bool]$identity.prerequisite_15m.full_120m_allowed -or
-    @($identity.prerequisite_15m.evidence_files).Count -ne 0 -or
+    $identity.prerequisite_15m.result -cne "PASS" -or
+    -not [bool]$identity.prerequisite_15m.full_120m_allowed -or
+    $identity.prerequisite_15m.evidence_relative_path -cne
+        "server-evidence\v1022-pending" -or
+    $identity.prerequisite_15m.observation_date_kst -cne "2026-09-01" -or
+    $identity.prerequisite_15m.observation_start_kst -cne
+        "2026-09-01T13:51:03.1498905+09:00" -or
+    $identity.prerequisite_15m.observation_end_kst -cne
+        "2026-09-01T14:06:04.4812825+09:00" -or
+    $identity.prerequisite_15m.operator_attestation_file -cne
+        "operator_attestation_15m.json" -or
+    $identity.prerequisite_15m.approval_scope -cne
+        "120-minute-canary-only" -or
+    $identity.prerequisite_15m.reviewed_result_schema -cne
+        "spot-v1022-v9-corrected-postrun-validation-v1" -or
+    $identity.prerequisite_15m.reviewed_result_file -cne
+        $approvedResultFile -or
+    $identity.prerequisite_15m.reviewed_result_sha256 -cne
+        "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA" -or
+    $identity.prerequisite_15m.sanitized_zip_file -cne
+        $approvedSanitizedZip -or
+    $identity.prerequisite_15m.sanitized_zip_sha256 -cne
+        "C3082C90D259A17D86BB5FF2D15A2861F7CAC195565EABA7FDAFB6667BDEDF6D" -or
+    $identity.prerequisite_15m.control_zip_file -cne
+        $approvedControlZip -or
+    $identity.prerequisite_15m.control_zip_sha256 -cne
+        "9361D97E07FD57534836B432F610F281449C3C6F2C1E3B3E1323B3DBF9FD7BD2" -or
+    $identity.prerequisite_15m.source_canary_zip_sha256 -cne
+        "F38DE4BBECEA6D0F1BD9FF65BB82BC677221DEDACCDBE8E2BC6512C5C460AE82" -or
+    -not [bool]$identity.prerequisite_15m.switch_limitation -or
+    $approvedEvidenceFiles.Count -ne 3 -or
+    $approvedEvidenceByName[$approvedResultFile] -cne
+        "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA" -or
+    $approvedEvidenceByName[$approvedSanitizedZip] -cne
+        "C3082C90D259A17D86BB5FF2D15A2861F7CAC195565EABA7FDAFB6667BDEDF6D" -or
+    $approvedEvidenceByName[$approvedControlZip] -cne
+        "9361D97E07FD57534836B432F610F281449C3C6F2C1E3B3E1323B3DBF9FD7BD2" -or
     [bool]$identity.contains_installer -or
     [bool]$identity.contains_product_binary -or
     [bool]$identity.changes_application_or_settings -or
@@ -271,7 +324,13 @@ if (
         '\$holds\.Add\("image-counter-did-not-progress"\)' -or
     $controllerSource -notmatch "SPOT_IMAGE_LIVENESS_EVIDENCE_HOLD" -or
     $controllerSource -notmatch "capture_fact_row_count" -or
-    $controllerSource -notmatch "no added SPOT image request"
+    $controllerSource -notmatch "no added SPOT image request" -or
+    $controllerSource -notmatch "image-liveness-preflight-120m.json" -or
+    $controllerSource -notmatch
+        "reviewed 15-minute result does not satisfy the bound gate" -or
+    $controllerSource -notmatch
+        "15-minute evidence path escapes the approved evidence root" -or
+    $controllerSource -notmatch "120-minute-canary-only"
 ) {
     throw "The packet attribution or image liveness hold contract is missing."
 }
@@ -285,12 +344,23 @@ if (
     $attestation.product_version -cne "1.0.22" -or
     $attestation.build_git_commit -cne
         "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80" -or
-    $attestation.evidence_kind -cne "pending-server-validation" -or
-    $attestation.status -cne "PENDING" -or
-    $null -ne $attestation.continuous_spot_image_refresh -or
-    $null -ne $attestation.screen_error_observed
+    $attestation.evidence_kind -cne
+        "delayed-historical-server-validation" -or
+    $attestation.status -cne "CONFIRMED" -or
+    $attestation.observation_date_kst -cne "2026-09-01" -or
+    $attestation.observation_start_kst -cne
+        "2026-09-01T13:51:03.1498905+09:00" -or
+    $attestation.observation_end_kst -cne
+        "2026-09-01T14:06:04.4812825+09:00" -or
+    -not [bool]$attestation.continuous_spot_image_refresh -or
+    [bool]$attestation.screen_error_observed -or
+    $attestation.source -cne "v9_15m_corrected_postrun_validation.json" -or
+    $attestation.source_sha256 -cne
+        "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA" -or
+    -not [bool]$attestation.delayed_attestation -or
+    [bool]$attestation.machine_generated
 ) {
-    throw "The pending v1.0.22 15-minute attestation contract is invalid."
+    throw "The approved v1.0.22 15-minute attestation contract is invalid."
 }
 
 $collectorSource = Get-Content `
