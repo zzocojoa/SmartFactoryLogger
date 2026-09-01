@@ -75,9 +75,12 @@ backend API requests.
   `handshake_only_without_request_attempts` 또는
   `handshake_only_at_capture_end`로 별도 기록한다.
 - handshake-only 흐름은 HTTP 요청 무응답 제품 실패로 판정하지 않는다.
-- 패킷 분석에서만 무응답이 보이고 같은 관찰 구간의 앱 failure counter 또는
-  failure event가 증가하지 않았다면 제품 실패로 확정하지 않고
-  `EVIDENCE_HOLD`로 보존한다.
+- 패킷 분석에서만 무응답이 보이더라도 같은 관찰 구간의 transport 시작/성공,
+  image 시작/성공, image upstream 카운터가 모두 일치하고 관련 failure counter와
+  failure event 증가가 0이면 `capture-or-flow-attribution-discrepancy`로 기록한다.
+  이 경우 패킷 후보 자체는 제품 실패나 `EVIDENCE_HOLD`로 승격하지 않는다.
+- 위 aggregate app-success 계약의 필수 카운터가 없거나 관계가 일치하지 않으면
+  제품 성공으로 추정하지 않고 `EVIDENCE_HOLD`로 보존한다.
 - 패킷 무응답과 앱 failure 증가가 함께 확인된 경우에만
   `no-response-after-handshake-app-corroborated` 제품 hard failure로 판정한다.
 - 이 분리는 원문 주소와 source port를 공유 ZIP에 노출하지 않는다.

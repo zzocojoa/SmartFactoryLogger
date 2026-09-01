@@ -12,6 +12,12 @@ param(
 
     [string]$RuntimeEvidenceBase = "",
 
+    [string]$EvidenceEvaluationRoot = "",
+
+    [double]$MinimumObservationSeconds = 7190.0,
+
+    [int]$EvidenceCollectorExitCode = 0,
+
     [switch]$PreflightOnly,
 
     [switch]$SelfTest
@@ -266,6 +272,8 @@ function ConvertTo-SafeImageSnapshot {
         "source_port_transport_success_count",
         "source_port_transport_failure_count",
         "source_port_bind_collision_count",
+        "source_port_image_started_count",
+        "source_port_image_success_count",
         "source_port_image_failure_count",
         "source_port_temperature_failure_count",
         "source_port_internal_temperature_failure_count",
@@ -323,6 +331,13 @@ function Get-CumulativeFailureCounterNames {
         "source_port_request_failure_event_drop_count",
         "image_refresh_failure_count",
         "image_cache_clock_anomaly_count"
+    )
+}
+
+function Get-ObservationFailureCounterNames {
+    return @(
+        Get-CumulativeFailureCounterNames |
+            Where-Object { $_ -cne "image_cache_clock_anomaly_count" }
     )
 }
 
@@ -396,7 +411,7 @@ function Get-FailureCounterDeltaReport {
     $deltas = [ordered]@{}
     $hardFailures = New-Object System.Collections.Generic.List[string]
     $holds = New-Object System.Collections.Generic.List[string]
-    foreach ($name in @(Get-CumulativeFailureCounterNames)) {
+    foreach ($name in @(Get-ObservationFailureCounterNames)) {
         $beforeValue = [int64](Get-RequiredProperty `
             -InputObject $BeforeImage `
             -Name $name `
@@ -1034,6 +1049,24 @@ function Get-ObservationDeltaReport {
     $imageDelta =
         [int64]$After.image.image_upstream_request_count -
         [int64]$Before.image.image_upstream_request_count
+    $imageStartedDelta =
+        [int64](Get-RequiredProperty `
+            -InputObject $After.image `
+            -Name "source_port_image_started_count" `
+            -Context "observation end image counters") -
+        [int64](Get-RequiredProperty `
+            -InputObject $Before.image `
+            -Name "source_port_image_started_count" `
+            -Context "observation start image counters")
+    $imageSuccessDelta =
+        [int64](Get-RequiredProperty `
+            -InputObject $After.image `
+            -Name "source_port_image_success_count" `
+            -Context "observation end image counters") -
+        [int64](Get-RequiredProperty `
+            -InputObject $Before.image `
+            -Name "source_port_image_success_count" `
+            -Context "observation start image counters")
     if ($transportDelta -le 0) {
         [void]$hardFailures.Add("transport-counter-did-not-progress")
     }
@@ -1045,6 +1078,43 @@ function Get-ObservationDeltaReport {
     }
     if ($successDelta -gt $transportDelta) {
         [void]$holds.Add("transport-counter-relationship-invalid")
+    }
+    $appFailureDeltaTotal = 0L
+    foreach ($name in @(
+        "source_port_transport_failure_count",
+        "source_port_image_failure_count",
+        "source_port_temperature_failure_count",
+        "source_port_internal_temperature_failure_count",
+        "source_port_diagnostic_failure_count",
+        "source_port_connection_test_failure_count",
+        "image_refresh_failure_count"
+    )) {
+        $deltaProperty = $failureCounterReport.deltas.PSObject.Properties[$name]
+        if ($null -ne $deltaProperty -and [int64]$deltaProperty.Value -gt 0) {
+            $appFailureDeltaTotal += [int64]$deltaProperty.Value
+        }
+    }
+    if ([int64]$failureEventReport.event_count_delta -gt 0) {
+        $appFailureDeltaTotal += [int64]$failureEventReport.event_count_delta
+    }
+    if ([int64]$failureEventReport.drop_count_delta -gt 0) {
+        $appFailureDeltaTotal += [int64]$failureEventReport.drop_count_delta
+    }
+    $appRequestOutcomeIntegrityStatus = if ($appFailureDeltaTotal -gt 0) {
+        "app-failure-corroborated"
+    } elseif (
+        $transportDelta -gt 0 -and
+        $transportDelta -eq $successDelta -and
+        $imageStartedDelta -gt 0 -and
+        $imageStartedDelta -eq $imageSuccessDelta -and
+        $imageStartedDelta -eq $imageDelta
+    ) {
+        "complete-success-corroborated"
+    } else {
+        "incomplete-or-inconsistent"
+    }
+    if ($appRequestOutcomeIntegrityStatus -ceq "incomplete-or-inconsistent") {
+        [void]$holds.Add("app-request-outcome-integrity-incomplete")
     }
     $counterWindowElapsedSeconds = Get-CounterWindowElapsedSeconds `
         -Before $Before `
@@ -1067,7 +1137,16 @@ function Get-ObservationDeltaReport {
     return [pscustomobject][ordered]@{
         transport_started_delta = $transportDelta
         transport_success_delta = $successDelta
+        image_started_delta = $imageStartedDelta
+        image_success_delta = $imageSuccessDelta
         image_upstream_delta = $imageDelta
+        app_request_outcome_integrity_status = (
+            $appRequestOutcomeIntegrityStatus
+        )
+        app_request_failure_delta_total = $appFailureDeltaTotal
+        app_request_outcome_integrity_policy = (
+            "aggregate-observation-window-started-success-and-zero-failure-delta-v1"
+        )
         counter_window_elapsed_seconds = $counterWindowElapsedSeconds
         transport_rate_per_sec = $transportRate
         image_upstream_rate_per_sec = $imageRate
@@ -1088,7 +1167,9 @@ function Test-PacketEvidence {
         [Parameter(Mandatory = $true)]
         [object]$FramingSummary,
 
-        [object]$ObservationDeltas = $null
+        [object]$ObservationDeltas = $null,
+
+        [double]$MinimumElapsedSeconds = 7190.0
     )
 
     $hardFailures = New-Object System.Collections.Generic.List[string]
@@ -1168,9 +1249,10 @@ function Test-PacketEvidence {
     if ([bool]$FieldSummary.packet_payload_artifacts_retained) {
         [void]$holds.Add("packet-payload-retained")
     }
-    if ([double]$FieldSummary.observation_elapsed_seconds -lt 7190.0 -and
+    if ([double]$FieldSummary.observation_elapsed_seconds -lt
+            $MinimumElapsedSeconds -and
         -not [bool]$FieldSummary.event_trigger_detected) {
-        [void]$holds.Add("observation-shorter-than-120m")
+        [void]$holds.Add("observation-shorter-than-required-window")
     }
 
     $allowedMissing = @("switch-start-counters", "switch-end-counters")
@@ -1211,7 +1293,7 @@ function Test-PacketEvidence {
     $packetOrderSensitiveNoResponsePolicy =
         [string]$tcp.packet_order_sensitive_no_response_policy
     $noResponseCorrelationPolicy =
-        "requires-observation-window-app-failure-counter-or-event-delta"
+        "requires-aggregate-observation-window-app-outcome-integrity-v1"
     $noResponseCorrelationStatus = if ($requestNoResponseCount -eq 0) {
         "not-applicable"
     } else {
@@ -1247,8 +1329,19 @@ function Test-PacketEvidence {
     }
     $appFailureCorroborated = (
         $appFailureCounterDeltaTotal -gt 0 -or
-        $appFailureEventCountDelta -gt 0
+        $appFailureEventCountDelta -gt 0 -or
+        [int64](Get-OptionalProperty `
+            -InputObject $ObservationDeltas `
+            -Name "app_request_failure_delta_total") -gt 0
     )
+    $appRequestOutcomeIntegrityStatus = [string](Get-OptionalProperty `
+        -InputObject $ObservationDeltas `
+        -Name "app_request_outcome_integrity_status")
+    $appSuccessCorroborated = (
+        $appRequestOutcomeIntegrityStatus -ceq
+            "complete-success-corroborated"
+    )
+    $packetCaptureOrFlowDiscrepancyCount = 0
     if ($preHandshakeFailedCount -ne [int]$tcp.failed_connection_attempts -or
         [string]$tcp.pre_handshake_failure_attribution -cne
             "packet-only-not-product-attributable" -or
@@ -1307,6 +1400,10 @@ function Test-PacketEvidence {
                 [void]$hardFailures.Add(
                     "no-response-after-handshake-app-corroborated"
                 )
+            } elseif ($appSuccessCorroborated) {
+                $noResponseCorrelationStatus =
+                    "app-success-corroborated-packet-discrepancy"
+                $packetCaptureOrFlowDiscrepancyCount = $requestNoResponseCount
             } else {
                 [void]$holds.Add(
                     "no-response-after-handshake-packet-only-uncorroborated"
@@ -1392,6 +1489,12 @@ function Test-PacketEvidence {
         )
         no_response_after_handshake_correlation_policy = (
             $noResponseCorrelationPolicy
+        )
+        app_request_outcome_integrity_status = (
+            $appRequestOutcomeIntegrityStatus
+        )
+        packet_capture_or_flow_attribution_discrepancy_attempts = (
+            $packetCaptureOrFlowDiscrepancyCount
         )
         no_response_after_handshake_app_failure_counter_delta_total = (
             $appFailureCounterDeltaTotal
@@ -1503,6 +1606,120 @@ function Assert-CanaryRuntimeEvidencePathBudget {
     return $projectedPath
 }
 
+function Invoke-EvidenceEvaluation {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RunRoot,
+
+        [Parameter(Mandatory = $true)]
+        [double]$RequiredObservationSeconds,
+
+        [Parameter(Mandatory = $true)]
+        [int]$CollectorExitCode
+    )
+
+    $resolvedRunRoot = (Resolve-Path -LiteralPath $RunRoot).Path
+    $sanitizedRoot = Join-Path $resolvedRunRoot "sanitized_share"
+    $fieldSummaryPath = Join-Path $sanitizedRoot `
+        "field_collection_summary.json"
+    $framingSummaryPath = Join-Path $sanitizedRoot `
+        "spot_http_framing_summary.json"
+    foreach ($path in @($fieldSummaryPath, $framingSummaryPath)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "required evidence summary is missing: $path"
+        }
+    }
+
+    $fieldSummary = Get-Content `
+        -LiteralPath $fieldSummaryPath `
+        -Raw |
+        ConvertFrom-Json
+    $framingSummary = Get-Content `
+        -LiteralPath $framingSummaryPath `
+        -Raw |
+        ConvertFrom-Json
+    $boundary = Get-ObservationBoundaryPair -SanitizedRoot $sanitizedRoot
+    $deltas = $null
+    $observationHardFailures = New-Object System.Collections.Generic.List[string]
+    $observationEvidenceHolds = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @($boundary.evidence_holds)) {
+        [void]$observationEvidenceHolds.Add([string]$item)
+    }
+    if ([bool]$boundary.valid) {
+        try {
+            $deltas = Get-ObservationDeltaReport `
+                -Before $boundary.start `
+                -After $boundary.end
+            foreach ($item in @($deltas.hard_failures)) {
+                [void]$observationHardFailures.Add([string]$item)
+            }
+            foreach ($item in @($deltas.evidence_holds)) {
+                [void]$observationEvidenceHolds.Add([string]$item)
+            }
+        } catch {
+            [void]$observationEvidenceHolds.Add(
+                "observation-delta-evaluation-failed:$($_.Exception.GetType().Name)"
+            )
+        }
+    } else {
+        [void]$observationEvidenceHolds.Add("observation-delta-unavailable")
+    }
+
+    $packet = Test-PacketEvidence `
+        -FieldSummary $fieldSummary `
+        -FramingSummary $framingSummary `
+        -ObservationDeltas $deltas `
+        -MinimumElapsedSeconds $RequiredObservationSeconds
+    foreach ($item in @($observationHardFailures.ToArray())) {
+        $packet.hard_failures += [string]$item
+    }
+    foreach ($item in @($observationEvidenceHolds.ToArray())) {
+        $packet.evidence_holds += [string]$item
+    }
+    foreach ($item in @(
+        Get-CollectorEvidenceHolds `
+            -FieldSummary $fieldSummary `
+            -CollectorExitCode $CollectorExitCode
+    )) {
+        $packet.evidence_holds += [string]$item
+    }
+
+    $switchLimited = Test-SwitchEvidenceLimitation -FieldSummary $fieldSummary
+    $resultName = if (@($packet.hard_failures).Count -gt 0) {
+        "SPOT_EVIDENCE_ROLLBACK_REQUIRED"
+    } elseif (@($packet.evidence_holds).Count -gt 0) {
+        "SPOT_EVIDENCE_HOLD"
+    } elseif ($switchLimited) {
+        "SPOT_EVIDENCE_PASS_WITH_SWITCH_LIMITATION"
+    } else {
+        "SPOT_EVIDENCE_PASS"
+    }
+
+    return [pscustomobject][ordered]@{
+        result = $resultName
+        evaluated_at = (Get-Date).ToString("o")
+        evidence_root = $resolvedRunRoot
+        required_observation_seconds = $RequiredObservationSeconds
+        observed_elapsed_seconds = $fieldSummary.observation_elapsed_seconds
+        collector_status = $fieldSummary.status
+        collector_exit_code = $CollectorExitCode
+        switch_limitation = $switchLimited
+        observation_boundary_valid = [bool]$boundary.valid
+        app_request_outcome_integrity_status = if ($null -eq $deltas) {
+            "unavailable"
+        } else {
+            $deltas.app_request_outcome_integrity_status
+        }
+        deltas = $deltas
+        packet_gate = $packet
+        hard_failures = @($packet.hard_failures)
+        evidence_holds = @($packet.evidence_holds)
+        product_changes_made = $false
+        automatic_rollback_performed = $false
+        production_promotion_allowed = $false
+    }
+}
+
 function Invoke-SelfTest {
     $image = [pscustomobject]@{
         source_port_policy_version = "spot-source-port-quarantine-v3"
@@ -1526,6 +1743,8 @@ function Invoke-SelfTest {
         source_port_transport_success_count = 10
         source_port_transport_failure_count = 1
         source_port_bind_collision_count = 0
+        source_port_image_started_count = 5
+        source_port_image_success_count = 5
         source_port_image_failure_count = 1
         source_port_temperature_failure_count = 0
         source_port_internal_temperature_failure_count = 0
@@ -1648,6 +1867,14 @@ function Invoke-SelfTest {
         throw "self-test valid packet evidence was rejected"
     }
     $zeroObservationDeltas = [pscustomobject]@{
+        transport_started_delta = 20
+        transport_success_delta = 20
+        image_started_delta = 10
+        image_success_delta = 10
+        image_upstream_delta = 10
+        app_request_outcome_integrity_status =
+            "complete-success-corroborated"
+        app_request_failure_delta_total = 0
         failure_counter_deltas = [pscustomobject]@{
             source_port_transport_failure_count = 0
             source_port_image_failure_count = 0
@@ -1696,13 +1923,30 @@ function Invoke-SelfTest {
         -ObservationDeltas $zeroObservationDeltas
     if ("no-response-after-handshake-app-corroborated" -in
             $packet.hard_failures -or
-        "no-response-after-handshake-packet-only-uncorroborated" -notin
+        "no-response-after-handshake-packet-only-uncorroborated" -in
+            $packet.evidence_holds -or
+        $packet.no_response_after_handshake_correlation_status -cne
+            "app-success-corroborated-packet-discrepancy" -or
+        [int]$packet.packet_capture_or_flow_attribution_discrepancy_attempts -ne
+            1) {
+        throw "self-test app-success packet discrepancy was not cleared"
+    }
+    $zeroObservationDeltas.app_request_outcome_integrity_status =
+        "incomplete-or-inconsistent"
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ("no-response-after-handshake-packet-only-uncorroborated" -notin
             $packet.evidence_holds -or
         $packet.no_response_after_handshake_correlation_status -cne
             "packet-only-uncorroborated") {
-        throw "self-test packet-only no-response was not held"
+        throw "self-test incomplete app outcome evidence was not held"
     }
+    $zeroObservationDeltas.app_request_outcome_integrity_status =
+        "complete-success-corroborated"
     $zeroObservationDeltas.failure_event_count_delta = 1
+    $zeroObservationDeltas.app_request_failure_delta_total = 1
     $packet = Test-PacketEvidence `
         -FieldSummary $field `
         -FramingSummary $framing `
@@ -1718,6 +1962,7 @@ function Invoke-SelfTest {
     $framing.tcp_connection_summary.no_response_after_handshake_attempts = 0
     $framing.tcp_connection_summary.request_no_response_after_handshake_attempts = 0
     $zeroObservationDeltas.failure_event_count_delta = 0
+    $zeroObservationDeltas.app_request_failure_delta_total = 0
     $framing.tcp_connection_summary.packet_order_sensitive_no_response_attempts = 1
     $packet = Test-PacketEvidence `
         -FieldSummary $field `
@@ -1771,6 +2016,8 @@ function Invoke-SelfTest {
         image = [pscustomobject]@{
             source_port_transport_started_count = 21094
             source_port_transport_success_count = 21094
+            source_port_image_started_count = 9822
+            source_port_image_success_count = 9822
             image_upstream_request_count = 9822
         }
     }
@@ -1784,6 +2031,8 @@ function Invoke-SelfTest {
         image = [pscustomobject]@{
             source_port_transport_started_count = 21426
             source_port_transport_success_count = 21426
+            source_port_image_started_count = 9986
+            source_port_image_success_count = 9986
             image_upstream_request_count = 9986
         }
     }
@@ -1833,12 +2082,27 @@ function Invoke-SelfTest {
         ) -gt 0.0001 -or
         [double]$deltas.transport_rate_per_sec -ne 5.5829 -or
         [double]$deltas.image_upstream_rate_per_sec -ne 2.7578 -or
+        $deltas.app_request_outcome_integrity_status -cne
+            "complete-success-corroborated" -or
         [int64]$deltas.failure_counter_deltas.source_port_transport_failure_count -ne 0 -or
         @($deltas.hard_failures).Count -ne 0 -or
         @($deltas.evidence_holds).Count -ne 0
     ) {
         throw "self-test counter-window rate calculation mismatch"
     }
+    $after.image.source_port_image_success_count = 9985
+    $inconsistentOutcome = Get-ObservationDeltaReport `
+        -Before $before `
+        -After $after
+    if (
+        $inconsistentOutcome.app_request_outcome_integrity_status -cne
+            "incomplete-or-inconsistent" -or
+        "app-request-outcome-integrity-incomplete" -notin
+            $inconsistentOutcome.evidence_holds
+    ) {
+        throw "self-test inconsistent app success counters were accepted"
+    }
+    $after.image.source_port_image_success_count = 9986
     $after.image.source_port_request_failure_event_drop_count = 1
     $failureJournalDropRejected = $false
     try {
@@ -2069,6 +2333,24 @@ function Invoke-SelfTest {
 
 if ($SelfTest) {
     Invoke-SelfTest
+    exit 0
+}
+
+if (-not [string]::IsNullOrWhiteSpace($EvidenceEvaluationRoot)) {
+    $evaluation = Invoke-EvidenceEvaluation `
+        -RunRoot $EvidenceEvaluationRoot `
+        -RequiredObservationSeconds $MinimumObservationSeconds `
+        -CollectorExitCode $EvidenceCollectorExitCode
+    $evaluation
+    if ($evaluation.result -ceq "SPOT_EVIDENCE_ROLLBACK_REQUIRED") {
+        exit 10
+    }
+    if ($evaluation.result -ceq "SPOT_EVIDENCE_HOLD") {
+        exit 3
+    }
+    if ($evaluation.result -ceq "SPOT_EVIDENCE_PASS_WITH_SWITCH_LIMITATION") {
+        exit 2
+    }
     exit 0
 }
 
