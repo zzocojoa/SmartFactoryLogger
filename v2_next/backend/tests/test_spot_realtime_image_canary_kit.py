@@ -64,7 +64,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
     def test_builder_binds_product_core_and_progress_contract(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
         self.assertIn(
-            '"14d0a35c103715ecc82218b93e5d61ecaf5d585e"',
+            '"9b38171a00616a732d1aa64853d114c946f3bb78"',
             source,
         )
         self.assertIn(
@@ -87,7 +87,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("contains_installer = $false", source)
         self.assertIn("changes_application_or_settings = $false", source)
         self.assertIn(
-            'schema_version = "spot-realtime-image-v1022-canary-kit-v1"',
+            'schema_version = "spot-realtime-image-v1022-canary-kit-v8"',
             source,
         )
         self.assertIn(
@@ -107,7 +107,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             '"bounded-journal-eviction-observability-only"',
             source,
         )
-        self.assertIn('framing_schema = "spot-http-framing-evidence-v7"', source)
+        self.assertIn('framing_schema = "spot-http-framing-evidence-v10"', source)
         self.assertIn(
             'observation_boundary_schema = "spot-canary-observation-boundary-v1"',
             source,
@@ -139,7 +139,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
     def test_builder_preserves_trigger_job_failure_evidence(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")
         self.assertIn(
-            '"14d0a35c103715ecc82218b93e5d61ecaf5d585e"',
+            '"9b38171a00616a732d1aa64853d114c946f3bb78"',
             source,
         )
         self.assertNotIn('    Add-TriggerMonitorFailureContract `', source)
@@ -197,6 +197,12 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             "source_port_quarantine_safety_margin_seconds",
             "source_port_minimum_required_pool_capacity",
             "120-minute observation is blocked until the v1.0.22",
+            "preHandshakeAppSuccessDiscrepancyEligible",
+            "pre_handshake_packet_capture_or_flow_attribution_discrepancy_attempts",
+            "no_response_after_handshake_packet_capture_or_flow_attribution_discrepancy_attempts",
+            "self-test incomplete pre-handshake app outcome was not held",
+            "self-test pre-handshake SYN retransmission was not rejected",
+            "self-test pre-handshake reset evidence was not rejected",
         )
         for fragment in required_fragments:
             self.assertIn(fragment, source)

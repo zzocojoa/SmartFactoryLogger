@@ -85,6 +85,20 @@ backend API requests.
   `no-response-after-handshake-app-corroborated` 제품 hard failure로 판정한다.
 - 이 분리는 원문 주소와 source port를 공유 ZIP에 노출하지 않는다.
 
+## 연결 전 패킷 후보 분류
+
+- 패킷 분석에서 TCP handshake 전 실패 후보가 보이면 앱 failure counter 또는
+  failure event 증가가 있는지 먼저 확인한다. 증가가 있으면
+  `failed-connection-attempt-app-corroborated` 제품 hard failure다.
+- 앱의 같은 관찰 구간 transport 시작/성공, image 시작/성공/upstream 카운터가
+  모두 일치하고 failure 증가가 0이어야 앱 성공 증거로 인정한다.
+- 앱 성공 증거와 함께 캡처 구간 보존, timestamp 정렬, clock calibration 완료,
+  SYN 재전송 0, reset-before-response 0, 양방향 RST 0이 모두 확인되면 해당
+  패킷 후보는 `capture-or-flow-attribution-discrepancy`로 기록한다. 제품 실패나
+  `EVIDENCE_HOLD`로 승격하지 않는다.
+- 위 조건 중 하나라도 누락되거나 불일치하면 성공으로 추정하지 않고
+  `EVIDENCE_HOLD`로 보존한다.
+
 ## 15분 진단 판정
 
 다음 조건을 모두 확인한다.
@@ -94,7 +108,8 @@ backend API requests.
 - failure event journal 신규 항목과 drop 0
 - 보정된 동일 four-tuple 재사용 최소 간격 75초 이상
 - `reuse violation`, pool wait, pool exhaustion 0
-- 양방향 RST, 응답 누락, 실패 handshake, SYN 재전송 0
+- 양방향 RST, SYN 재전송 0
+- HTTP 무응답 및 연결 전 실패 후보는 위 앱 결과 상관판정 계약을 통과하거나 0
 - SPOT 영상 지속 갱신 및 전체 앱 화면 신규 오류 없음
 
 관리형 스위치 자료가 없으면 결과는 제한 판정으로 유지한다. 제품 hard failure가

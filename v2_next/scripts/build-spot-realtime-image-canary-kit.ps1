@@ -614,7 +614,7 @@ try {
 
     $evidenceFiles = @()
     $identity = [ordered]@{
-        schema_version = "spot-realtime-image-v1022-canary-kit-v7"
+        schema_version = "spot-realtime-image-v1022-canary-kit-v8"
         kit_name = $kitName
         generated_at_utc = $generatedAt.ToString("o")
         tooling_source_commit = $toolingCommit
@@ -698,9 +698,11 @@ try {
                 "snapshots, five-second child signal integrity, request-aware HTTP " +
                 "no-response classification, parent-authoritative elapsed duration, " +
                 "app-corroborated pre-handshake and HTTP no-response attribution, " +
-                "aggregate app-success corroboration separates packet capture or flow " +
-                "attribution discrepancies, uncorroborated packet-only no-response " +
-                "evidence holds, timestamp/capture " +
+                "aggregate app-success corroboration plus complete capture, ordering, " +
+                "clock, SYN, and RST evidence separates pre-handshake packet capture or " +
+                "flow attribution discrepancies, aggregate app-success corroboration " +
+                "separates HTTP no-response packet discrepancies, uncorroborated " +
+                "packet-only candidates remain evidence holds, timestamp/capture " +
                 "order-sensitive response candidates remain evidence holds, and separately " +
                 "captured postprocess integrity evidence"
             )
@@ -733,6 +735,11 @@ try {
             historical_failure_stability_seconds = 30
             historical_failure_progress_interval_seconds = 10
             collector_failure_without_runtime_hard_gate = "evidence-hold"
+            pre_handshake_failure_attribution_policy =
+                "requires-aggregate-observation-window-app-outcome-integrity-v1"
+            app_success_packet_pre_handshake_failure_policy =
+                "capture-or-flow-attribution-discrepancy"
+            uncorroborated_packet_pre_handshake_failure_policy = "evidence-hold"
             no_response_after_handshake_attribution_policy =
                 "requires-aggregate-observation-window-app-outcome-integrity-v1"
             app_request_outcome_integrity_policy =

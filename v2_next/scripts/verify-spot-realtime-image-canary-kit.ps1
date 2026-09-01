@@ -90,7 +90,7 @@ $identity = Get-Content `
     -Raw |
     ConvertFrom-Json
 if (
-    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v7" -or
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v8" -or
     $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
     [bool]$identity.production_promotion_allowed -or
     $identity.product.version -cne "1.0.22" -or
@@ -201,6 +201,12 @@ if (
     [int]$identity.canary.historical_failure_progress_interval_seconds -ne 10 -or
     $identity.canary.collector_failure_without_runtime_hard_gate -cne
         "evidence-hold" -or
+    $identity.canary.pre_handshake_failure_attribution_policy -cne
+        "requires-aggregate-observation-window-app-outcome-integrity-v1" -or
+    $identity.canary.app_success_packet_pre_handshake_failure_policy -cne
+        "capture-or-flow-attribution-discrepancy" -or
+    $identity.canary.uncorroborated_packet_pre_handshake_failure_policy -cne
+        "evidence-hold" -or
     $identity.canary.no_response_after_handshake_attribution_policy -cne
         "requires-aggregate-observation-window-app-outcome-integrity-v1" -or
     $identity.canary.app_request_outcome_integrity_policy -cne
@@ -233,11 +239,17 @@ $controllerSource = Get-Content `
     -Raw
 if (
     $controllerSource -notmatch
+        "pre-handshake-failure-packet-only-uncorroborated" -or
+    $controllerSource -notmatch
         "no-response-after-handshake-packet-only-uncorroborated" -or
     $controllerSource -notmatch
         "no-response-after-handshake-app-corroborated" -or
     $controllerSource -notmatch
         "app-success-corroborated-packet-discrepancy" -or
+    $controllerSource -notmatch
+        "pre_handshake_packet_capture_or_flow_attribution_discrepancy_attempts" -or
+    $controllerSource -notmatch
+        "no_response_after_handshake_packet_capture_or_flow_attribution_discrepancy_attempts" -or
     $controllerSource -notmatch
         "packet_capture_or_flow_attribution_discrepancy_attempts" -or
     $controllerSource -notmatch
@@ -247,7 +259,7 @@ if (
     $controllerSource -notmatch
         "requires-aggregate-observation-window-app-outcome-integrity-v1"
 ) {
-    throw "The packet-only HTTP no-response attribution contract is missing."
+    throw "The packet-only pre-handshake or HTTP attribution contract is missing."
 }
 
 $attestation = Get-Content `

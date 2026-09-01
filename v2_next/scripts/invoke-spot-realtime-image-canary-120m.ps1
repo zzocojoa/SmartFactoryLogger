@@ -1341,7 +1341,8 @@ function Test-PacketEvidence {
         $appRequestOutcomeIntegrityStatus -ceq
             "complete-success-corroborated"
     )
-    $packetCaptureOrFlowDiscrepancyCount = 0
+    $preHandshakePacketCaptureOrFlowDiscrepancyCount = 0
+    $noResponsePacketCaptureOrFlowDiscrepancyCount = 0
     if ($preHandshakeFailedCount -ne [int]$tcp.failed_connection_attempts -or
         [string]$tcp.pre_handshake_failure_attribution -cne
             "packet-only-not-product-attributable" -or
@@ -1378,6 +1379,17 @@ function Test-PacketEvidence {
         -not [bool]$measurement.timestamp_order_correction_applied) {
         [void]$holds.Add("packet-timestamp-regression-uncorrected")
     }
+    $preHandshakeAppSuccessDiscrepancyEligible = (
+        $appSuccessCorroborated -and
+        $FramingSummary.capture_coverage.status -ceq
+            "capture-window-retained" -and
+        -not [bool]$FramingSummary.capture_coverage.overwrite_detected -and
+        $packetOrderComplete -and
+        $clockCalibrationComplete -and
+        [int]$tcp.syn_retransmissions_total -eq 0 -and
+        [int]$tcp.reset_before_response_attempts -eq 0 -and
+        [int]$measurement.rst_total -eq 0
+    )
     if ($packetOrderComplete) {
         if ([int]$tcp.failed_connection_attempts -ne 0) {
             if ($appFailureCorroborated) {
@@ -1385,6 +1397,11 @@ function Test-PacketEvidence {
                 [void]$hardFailures.Add(
                     "failed-connection-attempt-app-corroborated"
                 )
+            } elseif ($preHandshakeAppSuccessDiscrepancyEligible) {
+                $preHandshakeCorrelationStatus =
+                    "app-success-corroborated-packet-discrepancy"
+                $preHandshakePacketCaptureOrFlowDiscrepancyCount =
+                    $preHandshakeFailedCount
             } else {
                 [void]$holds.Add(
                     "pre-handshake-failure-packet-only-uncorroborated"
@@ -1403,7 +1420,8 @@ function Test-PacketEvidence {
             } elseif ($appSuccessCorroborated) {
                 $noResponseCorrelationStatus =
                     "app-success-corroborated-packet-discrepancy"
-                $packetCaptureOrFlowDiscrepancyCount = $requestNoResponseCount
+                $noResponsePacketCaptureOrFlowDiscrepancyCount =
+                    $requestNoResponseCount
             } else {
                 [void]$holds.Add(
                     "no-response-after-handshake-packet-only-uncorroborated"
@@ -1424,6 +1442,10 @@ function Test-PacketEvidence {
     if ([int]$measurement.rst_total -ne 0) {
         [void]$hardFailures.Add("bidirectional-rst-observed")
     }
+    $packetCaptureOrFlowDiscrepancyCount = (
+        $preHandshakePacketCaptureOrFlowDiscrepancyCount +
+        $noResponsePacketCaptureOrFlowDiscrepancyCount
+    )
 
     $reuse = $tcp.same_four_tuple_reuse.monotonic_corrected
     $reuseMeasurementComplete = (
@@ -1475,6 +1497,9 @@ function Test-PacketEvidence {
         pre_handshake_app_failure_event_count_delta = (
             $appFailureEventCountDelta
         )
+        pre_handshake_packet_capture_or_flow_attribution_discrepancy_attempts = (
+            $preHandshakePacketCaptureOrFlowDiscrepancyCount
+        )
         request_no_response_after_handshake_attempts = (
             $requestNoResponseCount
         )
@@ -1495,6 +1520,9 @@ function Test-PacketEvidence {
         )
         packet_capture_or_flow_attribution_discrepancy_attempts = (
             $packetCaptureOrFlowDiscrepancyCount
+        )
+        no_response_after_handshake_packet_capture_or_flow_attribution_discrepancy_attempts = (
+            $noResponsePacketCaptureOrFlowDiscrepancyCount
         )
         no_response_after_handshake_app_failure_counter_delta_total = (
             $appFailureCounterDeltaTotal
@@ -1893,12 +1921,59 @@ function Invoke-SelfTest {
         -ObservationDeltas $zeroObservationDeltas
     if ("failed-connection-attempt-app-corroborated" -in
             $packet.hard_failures -or
+        "pre-handshake-failure-packet-only-uncorroborated" -in
+            $packet.evidence_holds -or
+        $packet.pre_handshake_failure_correlation_status -cne
+            "app-success-corroborated-packet-discrepancy" -or
+        [int]$packet.pre_handshake_packet_capture_or_flow_attribution_discrepancy_attempts -ne
+            1 -or
+        [int]$packet.packet_capture_or_flow_attribution_discrepancy_attempts -ne
+            1) {
+        throw "self-test app-success pre-handshake discrepancy was not cleared"
+    }
+    $zeroObservationDeltas.app_request_outcome_integrity_status =
+        "incomplete-or-inconsistent"
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ("pre-handshake-failure-packet-only-uncorroborated" -notin
+            $packet.evidence_holds -or
+        $packet.pre_handshake_failure_correlation_status -cne
+            "packet-only-uncorroborated") {
+        throw "self-test incomplete pre-handshake app outcome was not held"
+    }
+    $zeroObservationDeltas.app_request_outcome_integrity_status =
+        "complete-success-corroborated"
+    $framing.tcp_connection_summary.syn_retransmissions_total = 1
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ("syn-retransmission-observed" -notin $packet.hard_failures -or
         "pre-handshake-failure-packet-only-uncorroborated" -notin
             $packet.evidence_holds -or
         $packet.pre_handshake_failure_correlation_status -cne
             "packet-only-uncorroborated") {
-        throw "self-test packet-only pre-handshake failure was not held"
+        throw "self-test pre-handshake SYN retransmission was not rejected"
     }
+    $framing.tcp_connection_summary.syn_retransmissions_total = 0
+    $framing.tcp_connection_summary.reset_before_response_attempts = 1
+    $framing.packet_measurement.rst_total = 1
+    $packet = Test-PacketEvidence `
+        -FieldSummary $field `
+        -FramingSummary $framing `
+        -ObservationDeltas $zeroObservationDeltas
+    if ("reset-before-response" -notin $packet.hard_failures -or
+        "bidirectional-rst-observed" -notin $packet.hard_failures -or
+        "pre-handshake-failure-packet-only-uncorroborated" -notin
+            $packet.evidence_holds -or
+        $packet.pre_handshake_failure_correlation_status -cne
+            "packet-only-uncorroborated") {
+        throw "self-test pre-handshake reset evidence was not rejected"
+    }
+    $framing.tcp_connection_summary.reset_before_response_attempts = 0
+    $framing.packet_measurement.rst_total = 0
     $zeroObservationDeltas.failure_counter_deltas.source_port_transport_failure_count = 1
     $packet = Test-PacketEvidence `
         -FieldSummary $field `
@@ -1927,6 +2002,8 @@ function Invoke-SelfTest {
             $packet.evidence_holds -or
         $packet.no_response_after_handshake_correlation_status -cne
             "app-success-corroborated-packet-discrepancy" -or
+        [int]$packet.no_response_after_handshake_packet_capture_or_flow_attribution_discrepancy_attempts -ne
+            1 -or
         [int]$packet.packet_capture_or_flow_attribution_discrepancy_attempts -ne
             1) {
         throw "self-test app-success packet discrepancy was not cleared"
