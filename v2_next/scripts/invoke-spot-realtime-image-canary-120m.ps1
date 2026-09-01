@@ -2103,6 +2103,22 @@ function Invoke-SelfTest {
         throw "self-test inconsistent app success counters were accepted"
     }
     $after.image.source_port_image_success_count = 9986
+    $after.image.PSObject.Properties.Remove("source_port_image_success_count")
+    $missingOutcomeCounterRejected = $false
+    try {
+        $null = Get-ObservationDeltaReport -Before $before -After $after
+    } catch {
+        $missingOutcomeCounterRejected = $_.Exception.Message -like (
+            "*required property missing: source_port_image_success_count*"
+        )
+    }
+    if (-not $missingOutcomeCounterRejected) {
+        throw "self-test missing app outcome counter was accepted"
+    }
+    Add-Member `
+        -InputObject $after.image `
+        -NotePropertyName source_port_image_success_count `
+        -NotePropertyValue 9986
     $after.image.source_port_request_failure_event_drop_count = 1
     $failureJournalDropRejected = $false
     try {
