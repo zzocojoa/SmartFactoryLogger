@@ -23,6 +23,23 @@ GUIDE = (
 @unittest.skipUnless(os.name == "nt", "canary tooling is Windows-only")
 class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
     def test_controller_self_test(self) -> None:
+        environment = os.environ.copy()
+        environment["PSModulePath"] = os.pathsep.join(
+            (
+                str(
+                    Path(environment.get("ProgramFiles", r"C:\Program Files"))
+                    / "WindowsPowerShell"
+                    / "Modules"
+                ),
+                str(
+                    Path(environment.get("SystemRoot", r"C:\Windows"))
+                    / "System32"
+                    / "WindowsPowerShell"
+                    / "v1.0"
+                    / "Modules"
+                ),
+            )
+        )
         result = subprocess.run(
             [
                 "powershell.exe",
@@ -38,6 +55,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env=environment,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(

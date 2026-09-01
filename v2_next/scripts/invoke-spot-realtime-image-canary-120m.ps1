@@ -2892,7 +2892,10 @@ function Invoke-SelfTest {
             -Phase "collection") -cne "SPOT_120M_EVIDENCE_HOLD" -or
         (Get-CanaryExceptionResultName `
             -CollectionStarted $true `
-            -Phase "postflight-runtime") -cne "SPOT_120M_EVIDENCE_HOLD"
+            -Phase "postflight-runtime") -cne "SPOT_120M_EVIDENCE_HOLD" -or
+        (Get-CanaryExceptionResultName `
+            -CollectionStarted $false `
+            -Phase "image-liveness-preflight") -cne "SPOT_120M_EVIDENCE_HOLD"
     ) {
         throw "self-test canary exception classification mismatch"
     }
@@ -2945,6 +2948,171 @@ function Invoke-SelfTest {
     }
     if (-not $mismatchRejected) {
         throw "self-test mismatched rollback baseline was accepted"
+    }
+
+    $approvedEvidenceRoot = Join-Path `
+        ([IO.Path]::GetTempPath()) `
+        ("sfl-canary-approved-evidence-{0}" -f
+            [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $approvedEvidenceRoot | Out-Null
+    try {
+        $approvedFolder = Join-Path $approvedEvidenceRoot "approved"
+        New-Item -ItemType Directory -Path $approvedFolder | Out-Null
+        $approvedResultPath = Join-Path $approvedFolder "result.json"
+        $approvedResult = [pscustomobject][ordered]@{
+            schema_version = "approved-result-v1"
+            result =
+                "SPOT_V1022_V9_15M_PASS_WITH_SWITCH_LIMITATION_CORRECTED_POSTRUN"
+            technical_evidence_result =
+                "SPOT_EVIDENCE_PASS_WITH_SWITCH_LIMITATION"
+            switch_limitation = $true
+            operator_historical_attestation = [pscustomobject]@{
+                answer = "YES"
+            }
+            evidence_binding = [pscustomobject]@{
+                canary_zip_sha256 = "CANARY"
+                sanitized_zip_sha256 = "SANITIZED"
+                control_zip_sha256 = "CONTROL"
+            }
+            observation = [pscustomobject]@{
+                elapsed_seconds = 900.1
+                boundary_status = "complete"
+                app_request_outcome_integrity_status =
+                    "complete-success-corroborated"
+                transport_started_delta = 10
+                transport_success_delta = 10
+                transport_failure_delta = 0
+                image_started_delta = 5
+                image_success_delta = 5
+                image_upstream_delta = 5
+                image_failure_delta = 0
+                request_failure_event_delta = 0
+            }
+            packet_evidence = [pscustomobject]@{
+                request_no_response_after_handshake_attempts = 0
+                syn_retransmissions_total = 0
+                rst_packets_total = 0
+                same_four_tuple_reuse_minimum_ms = 75001.0
+                same_four_tuple_reuse_under_75000_ms_count = 0
+            }
+            observation_rerun_performed = $false
+            product_changes_made = $false
+            app_restart_performed = $false
+            automatic_rollback_performed = $false
+            rollback_required = $false
+            full_120m_allowed = $false
+            production_promotion_allowed = $false
+        }
+        $approvedResult | ConvertTo-Json -Depth 8 |
+            Set-Content -LiteralPath $approvedResultPath -Encoding UTF8
+        $approvedResultHash = (
+            Get-FileHash -LiteralPath $approvedResultPath -Algorithm SHA256
+        ).Hash
+        [pscustomobject]@{
+            current_version = "1.0.20"
+        } | ConvertTo-Json |
+            Set-Content `
+                -LiteralPath (
+                    Join-Path $approvedEvidenceRoot "preinstall-summary.json"
+                ) `
+                -Encoding UTF8
+        [pscustomobject]@{
+            app_version = "1.0.20"
+            spot_temperature = [pscustomobject]@{
+                build_git_commit =
+                    "cd8cfa649203494cf087206cf656dc2197107ea1"
+            }
+        } | ConvertTo-Json -Depth 4 |
+            Set-Content `
+                -LiteralPath (Join-Path $approvedEvidenceRoot "health-before.json") `
+                -Encoding UTF8
+        $approvedIdentity = [pscustomobject]@{
+            production_promotion_allowed = $false
+            product = [pscustomobject]@{ version = "1.0.22" }
+            rollback = [pscustomobject]@{
+                version = "1.0.20"
+                build_git_commit =
+                    "cd8cfa649203494cf087206cf656dc2197107ea1"
+                baseline_preinstall_summary_file = "preinstall-summary.json"
+                baseline_health_file = "health-before.json"
+            }
+            prerequisite_15m = [pscustomobject]@{
+                result = "PASS"
+                full_120m_allowed = $true
+                approval_scope = "120-minute-canary-only"
+                reviewed_result_schema = "approved-result-v1"
+                reviewed_result_file = "approved\result.json"
+                reviewed_result_sha256 = $approvedResultHash
+                source_canary_zip_sha256 = "CANARY"
+                sanitized_zip_sha256 = "SANITIZED"
+                control_zip_sha256 = "CONTROL"
+                evidence_files = @(
+                    [pscustomobject]@{
+                        file = "approved\result.json"
+                        sha256 = $approvedResultHash
+                    }
+                )
+            }
+        }
+        Assert-EvidenceFiles `
+            -Identity $approvedIdentity `
+            -EvidenceRoot $approvedEvidenceRoot
+
+        $approvedResult.observation.transport_failure_delta = 1
+        $approvedResult | ConvertTo-Json -Depth 8 |
+            Set-Content -LiteralPath $approvedResultPath -Encoding UTF8
+        $invalidResultHash = (
+            Get-FileHash -LiteralPath $approvedResultPath -Algorithm SHA256
+        ).Hash
+        $approvedIdentity.prerequisite_15m.reviewed_result_sha256 =
+            $invalidResultHash
+        $approvedIdentity.prerequisite_15m.evidence_files[0].sha256 =
+            $invalidResultHash
+        $invalidResultRejected = $false
+        try {
+            Assert-EvidenceFiles `
+                -Identity $approvedIdentity `
+                -EvidenceRoot $approvedEvidenceRoot
+        } catch {
+            $invalidResultRejected = $_.Exception.Message -ceq
+                "reviewed 15-minute result does not satisfy the bound gate"
+        }
+        if (-not $invalidResultRejected) {
+            throw "self-test invalid reviewed 15-minute result was accepted"
+        }
+
+        $approvedIdentity.prerequisite_15m.evidence_files = @(
+            [pscustomobject]@{
+                file = "..\outside.json"
+                sha256 = $invalidResultHash
+            }
+        )
+        $pathEscapeRejected = $false
+        try {
+            Assert-EvidenceFiles `
+                -Identity $approvedIdentity `
+                -EvidenceRoot $approvedEvidenceRoot
+        } catch {
+            $pathEscapeRejected = $_.Exception.Message -ceq
+                "15-minute evidence path escapes the approved evidence root"
+        }
+        if (-not $pathEscapeRejected) {
+            throw "self-test approved evidence path escape was accepted"
+        }
+    } finally {
+        $resolvedApprovedEvidenceRoot =
+            [IO.Path]::GetFullPath($approvedEvidenceRoot)
+        $resolvedTempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+        if (-not $resolvedApprovedEvidenceRoot.StartsWith(
+            $resolvedTempRoot,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "self-test approved evidence cleanup path is unsafe"
+        }
+        Remove-Item `
+            -LiteralPath $resolvedApprovedEvidenceRoot `
+            -Recurse `
+            -Force
     }
 
     $shortRuntimeEvidenceBase = Resolve-CanaryRuntimeEvidenceBase `
