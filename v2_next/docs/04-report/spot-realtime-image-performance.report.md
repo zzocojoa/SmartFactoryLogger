@@ -2,7 +2,7 @@
 
 > Date: 2026-08-21 | Level: Dynamic
 > Branch: `codex/spot-realtime-image-performance`
-> Local implementation: COMPLETE | Field status: FIELD_REVALIDATION_REQUIRED
+> Local implementation: COMPLETE | Field status: PASS_WITH_SWITCH_LIMITATION
 
 ---
 
@@ -81,7 +81,7 @@ prototype files.
 | Focused backend SPOT/observability | 182 tests PASS |
 | Electron startup | 94 tests PASS |
 | Frontend full | 35 files, 265 tests PASS |
-| Backend full | 711 tests PASS |
+| Backend full | 727 tests PASS |
 | Ruff / mypy | PASS / PASS |
 | Frontend production build | PASS, 4,532 modules |
 | Windows QA self-tests | PASS |
@@ -97,12 +97,13 @@ and transport/server/client failures were all zero.
 
 | Metric | Value |
 |---|---:|
-| Relevant files | 27 |
-| Working diff | +1,753 / -107 lines including PDCA docs/tests |
+| Relevant files | Branch-scoped implementation, tests, canary, and PDCA evidence |
+| Working diff | See the exact PR diff; volatile local counts are intentionally omitted |
 | PDCA iteration | 1 |
 | Design match rate | 100% |
 | Local performance target | PASS (>=3.5 displayed FPS) |
-| Physical device / production validation | NOT RUN |
+| Physical-device validation | PASS_WITH_SWITCH_LIMITATION |
+| Production promotion | HOLD pending PR CI and explicit risk acceptance |
 
 ## 6. Learnings
 
@@ -117,11 +118,24 @@ and transport/server/client failures were all zero.
 
 ## 7. Follow-up Gate
 
-- [ ] Produce the identity-bound signed installer and record SHA-256/source commit.
-- [ ] Run direct SPOT `/image.jpg`, snapshot route, and live route smoke tests.
-- [ ] Observe request/error/source-port counters for at least 15 minutes.
-- [ ] Complete the established 120-minute canary and inspect old-ACK/RST evidence.
+- [x] Produce the identity-bound private installer and record SHA-256/source commit.
+- [x] Run direct SPOT `/image.jpg`, snapshot route, and live route smoke tests.
+- [x] Observe request/error/source-port counters for at least 15 minutes.
+- [x] Complete the established 120-minute canary and inspect old-ACK/RST evidence.
 - [ ] Obtain explicit production promotion approval.
 
-The local completion report must not be used as physical-device, installer, canary, or
-production approval.
+The local completion report and the field evidence do not independently authorize
+production promotion. The remaining gates are recorded in the
+[production promotion pre-audit](../04-deploy/spot-realtime-image-v1022-production-promotion-preaudit.md).
+
+The original 120-minute controller result was `SPOT_120M_ROLLBACK_REQUIRED`: the
+immediate operator prompt answer was blank and one request remained in flight at the
+end boundary. The later pass is a corrected interpretation that preserved the original
+result, recorded a delayed historical `YES`, and did not rerun the observation. An
+eventual production approver must explicitly accept that boundary and the missing
+managed-switch evidence.
+
+The field-tested product identity is intentionally unchanged by this follow-up. A
+separate product build must add an explicit JPEG width, height, and total-pixel ceiling
+and reject decompression-bomb inputs before that security risk can be closed; that new
+build requires its own field validation.

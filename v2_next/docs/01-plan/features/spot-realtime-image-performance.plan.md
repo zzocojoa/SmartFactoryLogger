@@ -27,8 +27,8 @@ The manufacturer guide does not require that delay. Sections 2.3 and 5.3 use
 has completed. Earlier unrestricted completion-driven polling reached about 14
 requests/s and contributed to short HTTP/1.0 connections, premature Windows source-port
 reuse, SPOT old-ACK responses, RSTs, and `ConnectTimeout`. The later guarded transport
-proved a 768-port pool with a 75-second quarantine and a six-request/s background
-budget on the actual server.
+proved a 768-port pool with a 75-second minimum reuse interval, a two-second safety
+margin, and a six-request/s background budget on the actual server.
 
 ## 2. Goals
 

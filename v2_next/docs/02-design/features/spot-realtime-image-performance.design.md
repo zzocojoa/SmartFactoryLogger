@@ -115,7 +115,9 @@ changes violate that invariant, and diagnostics then report `request_budget_with
 | Fastest 0.5 s, all reads configured | 4.8000/s | 1.2000/s | 0.8333 s | 6.0000/s |
 | Image only | 0/s | 4.0000/s | 0.2500 s | 4.0000/s |
 
-The guarded pool's theoretical steady-state ceiling is 768 / 75 = 10.24 leases/s.
+The 75-second minimum reuse interval is enforced with a two-second safety margin.
+The guarded pool's theoretical steady-state ceiling is therefore 768 / 77 = about
+9.97 leases/s.
 The six-request/s application budget therefore retains capacity for bind collision
 recovery and infrequent operator control requests.
 

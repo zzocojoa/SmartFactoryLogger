@@ -46,7 +46,7 @@ Canary identity v5 이하 키트는 패킷 파일의 시각 역행과 일시적�
 전달받은 ZIP과 `.sha256.txt`를 기존 릴리스 폴더에 둔다.
 
 ```text
-C:\Users\user\Desktop\SmartFactory\spot-realtime-image-performance-v1.0.21-5971fc4
+<SERVER_RELEASE_ROOT>\spot-realtime-image-performance-v1.0.21-5971fc4
 ```
 
 ZIP을 이 폴더 바로 아래 새 폴더로 압축 해제한다. 구조는 다음과 같아야 한다.
@@ -81,7 +81,7 @@ $actual -ceq $expected
 - rollback 설치본은 다음 경로와 해시가 일치해야 한다.
 
 ```text
-C:\Users\user\Desktop\SmartFactory\v1020_cd8cfa6_internal_private_server_deploy_20260821_R3\smart-factory-logger-v2 Setup 1.0.20.exe
+<APPROVED_V1020_ROLLBACK_INSTALLER>
 F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19
 ```
 

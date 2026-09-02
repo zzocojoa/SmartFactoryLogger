@@ -36,7 +36,7 @@ canary. Production promotion and external distribution are not allowed.
 
 Rollback is fixed to the exact pre-deploy baseline, v1.0.20
 `cd8cfa649203494cf087206cf656dc2197107ea1`, using
-`C:\Users\user\Desktop\SmartFactory\v1020_cd8cfa6_internal_private_server_deploy_20260821_R3\smart-factory-logger-v2 Setup 1.0.20.exe`
+`<APPROVED_V1020_ROLLBACK_INSTALLER>`
 with SHA-256
 `F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19`.
 

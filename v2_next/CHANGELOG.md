@@ -17,8 +17,11 @@ All notable changes to Smart Factory Logger V2 are documented here.
 
 - Fixed the 768-port production pool capacity contract against the maximum
   six-request/s rate: 462 ports are required for a 77-second quarantine.
-- The change requires a clean commit-bound Windows package, 15-minute server
-  verification, and 120-minute Canary before any production promotion.
+- The commit-bound private Windows package completed the 15-minute prerequisite and
+  a 7200.908-second Canary with zero new app failures, ping failures, resets, SYN
+  retransmissions, or source-port reuse below 75 seconds.
+- The field result is `PASS_WITH_SWITCH_LIMITATION` because managed-switch counters
+  were unavailable. Production promotion remains a separate approval gate.
 
 ## [1.0.21] - 2026-08-21
 

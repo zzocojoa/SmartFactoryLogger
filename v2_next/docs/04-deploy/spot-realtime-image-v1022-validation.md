@@ -87,6 +87,11 @@ backend API requests.
   제품 실패로 대체하지 않고 `EVIDENCE_HOLD`로 판정한다.
 - 압축·로그 수집·패킷 분석 시간은 관찰 구간 실패 delta와 요청률 계산에서
   제외한다.
+- 관찰 시작 시 in-flight가 0이고 종료 시 transport와 image에 정확히 1건만
+  남으며, 관련 failure counter/event 증가가 0이고 image started와 upstream이
+  일치하면 `single-inflight-at-observation-end-v1`으로 정정 대조한다.
+- 종료 시 진행 중 요청이 2건 이상이거나 위 조건 중 하나라도 불일치하면 성공으로
+  추정하지 않고 `EVIDENCE_HOLD`로 보존한다.
 
 ## HTTP 무응답 분류
 
@@ -159,16 +164,38 @@ backend API requests.
 
 - `runtime_validation_*_sanitized_share.zip`
 - `sanitized_share_sha256.txt`
-- 해당 `canary-control-*` 폴더의 ZIP
-- `canary-120m-gate.json`이 있는 해당 `canary-control-*` 폴더
+- 승인된 비공개 검토 채널에서만 해당 `canary-control-*` 폴더의 ZIP
+- 승인된 비공개 검토 채널에서만 `canary-120m-gate.json`이 있는 control 폴더
 - 120분 동안 영상 갱신과 화면 오류 여부에 대한 사용자 확인
 
-원본 `raw_private` 폴더는 서버에서 삭제하지 않는다. 공유 ZIP은 원문 주소와
-source port 값을 포함하지 않는 정제 증거만 사용한다.
+원본 `raw_private` 폴더는 서버에서 삭제하지 않는다. 일반 공유에는 원문 주소와
+source port 값을 포함하지 않는 정제 증거 ZIP과 SHA-256만 사용한다. control ZIP은
+Windows 사용자명과 내부 배치 경로를 포함할 수 있으므로 공개 또는 외부 채널에
+전달하지 않는다.
+
+## 120분 정정 사후감사
+
+2026-09-02 09:04:46~11:04:47 KST 구간의 120분 관찰은 종료 경계에서
+진행 중이던 요청 1건을 정상 in-flight 요청으로 정정 대조한 뒤
+`SPOT_V1022_V10_120M_PASS_WITH_SWITCH_LIMITATION_CORRECTED_POSTRUN`으로
+판정됐다. 정정 결과 JSON SHA-256은
+`BF6070BDAD02632E51B122C57F3F8D31AA01D9237732A386AEB6A9549715E9DC`다.
+
+원본 controller 결과는 `SPOT_120M_ROLLBACK_REQUIRED`였고 관찰 직후 화면 확인
+prompt 답은 빈 문자열이었다. 사후감사는 원본 결과를 보존한 채 지연된 과거 구간
+확인 `YES`와 종료 경계 reconciliation을 추가한 `corrected interpretation only`다.
+관찰은 재실행하지 않았으며, 이 정정 결과는 원본 즉시 판정을 소급해 지우지 않는다.
+
+사후감사 결속 검사 21개와 논리 검사 20개가 모두 통과했다. 관리형 스위치
+자료 부재와 지연된 운영자 확인은 제한사항으로 유지한다. production 승격
+조건은 [별도 사전감사](spot-realtime-image-v1022-production-promotion-preaudit.md)에서
+관리하며 이 결과만으로 승격하지 않는다.
 
 ## 운영 제한
 
 - 이 키트와 설치본은 서명되지 않은 내부 검증용이다.
+- 키트 내부 launcher는 스스로 권한을 상승시키지 않는다. 독립적으로 전달된
+  예상 SHA-256으로 미압축 ZIP을 검증한 외부 bootstrap만 관리자 세션에서 실행한다.
 - 15분 통과와 120분 실행 승인만으로 production 승격을 승인하지 않는다.
 - 120분 결과를 별도로 검토하기 전에는 v1.0.22를 운영 후보로 확정하지 않는다.
 - 관리형 스위치 증거가 끝까지 없으면 최대 판정은
