@@ -9,6 +9,31 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $diagnosticCoreCommit = "9b38171a00616a732d1aa64853d114c946f3bb78"
+$diagnosticCoreRoot = Join-Path `
+    $PSScriptRoot `
+    "pinned\spot-diagnostic-core-9b38171a"
+$diagnosticCoreSources = [ordered]@{
+    "analyze-spot-http-framing.ps1" = [ordered]@{
+        path = Join-Path $diagnosticCoreRoot "analyze-spot-http-framing.ps1"
+        sha256 = "DBDDEB253E69174080243103474F77E34A6275A5F52B81273448C051C1D13A99"
+    }
+    "collect_operational_observability.ps1" = [ordered]@{
+        path = Join-Path $diagnosticCoreRoot "collect_operational_observability.ps1"
+        sha256 = "6D395373A7D2C9B70EA38F6DF681A5ED042D814829D82E0988D4B915672EC94C"
+    }
+    "collect-spot-connecttimeout-evidence.ps1" = [ordered]@{
+        path = Join-Path $diagnosticCoreRoot "collect-spot-connecttimeout-evidence.ps1"
+        sha256 = "9EF68A3251A74EED7DF3CF0B67D2FB04E7247352CBCF77B18F0597A5C92E9F3B"
+    }
+    "monitor-spot-connecttimeout-trigger.ps1" = [ordered]@{
+        path = Join-Path $diagnosticCoreRoot "monitor-spot-connecttimeout-trigger.ps1"
+        sha256 = "A6D46F9FB979ED2247BA34C436AFA5A59F6EC6D7BDCD95DC4E5D8D069A9837F9"
+    }
+    "test_spot_connecttimeout_trigger_collector.py" = [ordered]@{
+        path = Join-Path $diagnosticCoreRoot "test_spot_connecttimeout_trigger_collector.py"
+        sha256 = "0706A89D68E84A871A64CD688449EFFE62EE18C72E00D1C267180358D6D55968"
+    }
+}
 $approved15mEvidenceFolder = "approved-15m-v9-20260901-135039"
 $approved15mResultFile = "v9_15m_corrected_postrun_validation.json"
 $approved15mResultSha256 =
@@ -511,11 +536,6 @@ $dirtyTracked = Invoke-GitText `
 if (-not [string]::IsNullOrWhiteSpace($dirtyTracked)) {
     throw "Tracked files are modified. Commit and re-run the canary kit build."
 }
-Invoke-GitText `
-    -RepositoryRoot $gitRoot `
-    -Arguments @("cat-file", "-e", "$diagnosticCoreCommit^{commit}") |
-    Out-Null
-
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $projectRoot "artifacts"
 }
@@ -547,13 +567,33 @@ foreach ($path in $currentSources.Values) {
         -Arguments @("ls-files", "--error-unmatch", "--", $relativePath) |
         Out-Null
 }
-$corePaths = @(
-    "v2_next/scripts/analyze-spot-http-framing.ps1",
-    "v2_next/scripts/collect_operational_observability.ps1",
-    "v2_next/scripts/collect-spot-connecttimeout-evidence.ps1",
-    "v2_next/scripts/monitor-spot-connecttimeout-trigger.ps1",
-    "v2_next/scripts/test_spot_connecttimeout_trigger_collector.py"
-)
+$diagnosticCoreFileSha256 = [ordered]@{}
+foreach ($entry in $diagnosticCoreSources.GetEnumerator()) {
+    $path = [string]$entry.Value.path
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "A pinned diagnostic core source is missing: $($entry.Key)"
+    }
+    $gitRootPrefix = [IO.Path]::GetFullPath($gitRoot).TrimEnd("\") + "\"
+    $fullSourcePath = [IO.Path]::GetFullPath($path)
+    if (-not $fullSourcePath.StartsWith(
+        $gitRootPrefix,
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "A pinned diagnostic core source is outside the repository."
+    }
+    $relativePath = $fullSourcePath.Substring($gitRootPrefix.Length).Replace("\", "/")
+    Invoke-GitText `
+        -RepositoryRoot $gitRoot `
+        -Arguments @("ls-files", "--error-unmatch", "--", $relativePath) |
+        Out-Null
+    $actualSha256 = (
+        Get-FileHash -LiteralPath $path -Algorithm SHA256
+    ).Hash
+    if ($actualSha256 -cne [string]$entry.Value.sha256) {
+        throw "A pinned diagnostic core source SHA-256 does not match: $($entry.Key)"
+    }
+    $diagnosticCoreFileSha256[$entry.Key] = $actualSha256
+}
 $generatedAt = [DateTimeOffset]::UtcNow
 $kitName = "SmartFactoryLogger_SPOT_Realtime_Image_v1022_Canary_{0}_{1}" -f `
     $toolingCommit.Substring(0, 8),
@@ -572,32 +612,27 @@ $temporaryRoot = Join-Path `
     $temporaryBase `
     ("sfl-v1022-canary-{0}" -f [guid]::NewGuid().ToString("N"))
 $stagingRoot = Join-Path $temporaryRoot "staging"
-$archiveRoot = Join-Path $temporaryRoot "archive"
+$integrationScriptsRoot = Join-Path $temporaryRoot "diagnostic-core\scripts"
 $verificationRoot = Join-Path $temporaryRoot "verify"
 try {
     New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $archiveRoot -Force | Out-Null
-    $coreArchive = Join-Path $temporaryRoot "diagnostic-core.zip"
-    & git -C $gitRoot archive `
-        --format=zip `
-        "--output=$coreArchive" `
-        $diagnosticCoreCommit `
-        @corePaths
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not export the fixed diagnostic core commit."
-    }
-    Expand-Archive -LiteralPath $coreArchive -DestinationPath $archiveRoot
-    $integrationTestPath = Join-Path `
-        $archiveRoot `
-        "v2_next\scripts\test_spot_connecttimeout_trigger_collector.py"
-    if (-not (Test-Path -LiteralPath $integrationTestPath -PathType Leaf)) {
-        throw "The pinned diagnostic core integration test is missing."
-    }
-
-    foreach ($relativePath in $corePaths | Where-Object { $_ -like "*.ps1" }) {
+    New-Item -ItemType Directory -Path $integrationScriptsRoot -Force | Out-Null
+    foreach ($entry in $diagnosticCoreSources.GetEnumerator()) {
         Copy-Item `
-            -LiteralPath (Join-Path $archiveRoot $relativePath.Replace("/", "\")) `
-            -Destination (Join-Path $stagingRoot (Split-Path -Leaf $relativePath))
+            -LiteralPath ([string]$entry.Value.path) `
+            -Destination (Join-Path $integrationScriptsRoot $entry.Key)
+    }
+    $integrationTestPath = Join-Path `
+        $integrationScriptsRoot `
+        "test_spot_connecttimeout_trigger_collector.py"
+
+    foreach ($entry in $diagnosticCoreSources.GetEnumerator()) {
+        if ($entry.Key -notlike "*.ps1") {
+            continue
+        }
+        Copy-Item `
+            -LiteralPath ([string]$entry.Value.path) `
+            -Destination (Join-Path $stagingRoot $entry.Key)
     }
     foreach ($entry in $currentSources.GetEnumerator()) {
         Copy-Item -LiteralPath $entry.Value -Destination (Join-Path $stagingRoot $entry.Key)
@@ -712,6 +747,8 @@ try {
         }
         diagnostic_core = [ordered]@{
             source_commit = $diagnosticCoreCommit
+            source_delivery = "vendored-hash-bound-snapshot-v1"
+            source_files_sha256 = $diagnosticCoreFileSha256
             source_identity = "spot-connecttimeout-trigger-field-kit-v10"
             framing_schema = "spot-http-framing-evidence-v10"
             observation_boundary_schema = "spot-canary-observation-boundary-v1"

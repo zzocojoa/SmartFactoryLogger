@@ -21,6 +21,9 @@ GUIDE = (
     / "spot-realtime-image-v1022-validation.md"
 )
 QA_IMAGE_SERVER = SCRIPTS / "qa_spot_image_server.ps1"
+PINNED_DIAGNOSTIC_CORE = (
+    SCRIPTS / "pinned" / "spot-diagnostic-core-9b38171a"
+)
 
 
 def windows_powershell_environment() -> dict[str, str]:
@@ -177,7 +180,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             prepare_kit(kit)
             identity = run_verifier(kit)
             self.assertNotEqual(identity.returncode, 0)
-            self.assertIn("prerequisite_15m", identity.stderr)
+            self.assertIn("diagnostic_core", identity.stderr)
 
     def test_server_qa_rejects_non_positive_observation(self) -> None:
         result = subprocess.run(
@@ -211,6 +214,29 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             'build_git_commit = "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80"',
             source,
         )
+        self.assertIn('source_delivery = "vendored-hash-bound-snapshot-v1"', source)
+        self.assertNotIn('@("cat-file", "-e", "$diagnosticCoreCommit^{commit}")', source)
+        self.assertNotIn("git -C $gitRoot archive", source)
+        expected_core_hashes = {
+            "analyze-spot-http-framing.ps1":
+                "DBDDEB253E69174080243103474F77E34A6275A5F52B81273448C051C1D13A99",
+            "collect_operational_observability.ps1":
+                "6D395373A7D2C9B70EA38F6DF681A5ED042D814829D82E0988D4B915672EC94C",
+            "collect-spot-connecttimeout-evidence.ps1":
+                "9EF68A3251A74EED7DF3CF0B67D2FB04E7247352CBCF77B18F0597A5C92E9F3B",
+            "monitor-spot-connecttimeout-trigger.ps1":
+                "A6D46F9FB979ED2247BA34C436AFA5A59F6EC6D7BDCD95DC4E5D8D069A9837F9",
+            "test_spot_connecttimeout_trigger_collector.py":
+                "0706A89D68E84A871A64CD688449EFFE62EE18C72E00D1C267180358D6D55968",
+        }
+        for name, expected_hash in expected_core_hashes.items():
+            path = PINNED_DIAGNOSTIC_CORE / name
+            self.assertTrue(path.is_file(), name)
+            self.assertEqual(
+                hashlib.sha256(path.read_bytes()).hexdigest().upper(),
+                expected_hash,
+                name,
+            )
         self.assertNotIn(
             '    Add-CanaryProgressContract `',
             source,

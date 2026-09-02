@@ -12,6 +12,10 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Exposed the required reuse interval, safety margin, effective quarantine,
   and minimum required pool capacity as aggregate `/api/spot/config`
   diagnostics without exposing source-port values.
+- Added `/api/spot/live_image.jpg` to the sampled quiet access paths so the
+  operator refresh cadence does not emit two info-level access lines per frame.
+- Vendored the exact five-file diagnostic-core snapshot used by the Canary
+  builder and bound every source file to an approved SHA-256.
 
 ### Validation
 
@@ -22,6 +26,9 @@ All notable changes to Smart Factory Logger V2 are documented here.
   retransmissions, or source-port reuse below 75 seconds.
 - The field result is `PASS_WITH_SWITCH_LIMITATION` because managed-switch counters
   were unavailable. Production promotion remains a separate approval gate.
+- The quiet-path runtime fix was made after that field run. A new product build,
+  installer identity, 15-minute check, and 120-minute validation are required
+  before the post-review candidate can be promoted.
 
 ## [1.0.21] - 2026-08-21
 

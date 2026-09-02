@@ -5672,6 +5672,15 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(removed_live.status_code, 404)
         self.assertEqual(removed_proxy.status_code, 404)
 
+    def test_snapshot_and_operator_image_routes_are_quiet_access_paths(self) -> None:
+        self.assertTrue(backend_app._is_quiet_access_path("/api/spot/image.jpg"))
+        self.assertTrue(
+            backend_app._is_quiet_access_path("/api/spot/live_image.jpg")
+        )
+        self.assertFalse(
+            backend_app._should_log_access_start("/api/spot/live_image.jpg")
+        )
+
     def test_official_image_bridge_does_not_expose_stale_internal_temperature(self) -> None:
         from backend import app as backend_app
 

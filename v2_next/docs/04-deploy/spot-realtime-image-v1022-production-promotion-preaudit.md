@@ -7,7 +7,7 @@
 
 ## 1. 결론
 
-v1.0.22 제품과 v10 Canary의 commit-bound identity, 15분 선행 검증,
+현장에서 검증한 v1.0.22 제품과 v10 Canary의 commit-bound identity, 15분 선행 검증,
 120분 현장 관찰 및 정정 사후감사 증거는 서로 일치한다. 제품 hard failure,
 신규 앱 오류, ping 실패, TCP reset, SYN 재전송, 75초 미만 동일 four-tuple
 재사용은 확인되지 않았다. 종료 경계에서 진행 중이던 요청 1건도 실패가 아니라
@@ -33,7 +33,7 @@ production 승격을 허용하지 않는다.
 | 항목 | 값 |
 |---|---|
 | 제품 버전 | `1.0.22` |
-| 제품 build commit | `5cc34b4fffd70195ec7fdd9d27acf4880cecbd80` |
+| 현장 검증 제품 build commit | `5cc34b4fffd70195ec7fdd9d27acf4880cecbd80` |
 | 검증 도구 commit | `62f6d2df4922d0b47d154632c5d21fa3972e4515` |
 | 설치본 SHA-256 | `77577ABB08BD901365B2D366B5ABAF101217E90B8AA5F2E9CB47971FF03123E2` |
 | release identity SHA-256 | `3AB24AE19B127C3344DE59A345E668ED429B77D29F5C2BE8EE032B7B15262F32` |
@@ -122,13 +122,17 @@ PR CI는 새 head commit에서 빌드하므로 현장 검증 설치본의 제품
 운영 동작을 검증한다. 두 증거를 혼합하지 않는다.
 
 현장 Canary tooling identity는 `62f6d2df...`에 고정한다. 이후 PR에서 추가된
-launcher 신뢰 경계와 QA fail-closed 테스트 강화는 제품 runtime을 변경하지 않으며,
-과거 120분 증거의 tooling identity로 소급하지 않는다.
+launcher 신뢰 경계와 QA fail-closed 테스트 강화는 과거 120분 증거의 tooling
+identity로 소급하지 않는다. 재현 가능한 소스 빌드를 위해 diagnostic core의 정확한
+5개 파일 스냅샷을 저장소에 포함하고 각 파일 SHA-256을 빌더와 verifier에 고정한다.
 
-검토에서 확인된 live route 접근 로그 샘플링과 설정 화면의 refresh 명칭 개선은
-검증된 제품 identity를 바꾸지 않기 위해 이 PR의 사후 보강에서 제외한다. 두 항목은
-후속 제품 버전에서 수정하고 해당 새 build를 별도로 검증한다. JPEG 크기·픽셀 수
-상한과 decompression-bomb 거부도 같은 후속 제품 보안 gate로 관리한다.
+PR 검토에서 live image route가 access-log quiet path에서 누락된 사실이 확인돼
+PR 소스에서 수정했다. 이 수정은 backend runtime을 변경하므로 PR에서 새로 만든
+제품 후보는 현장 검증 제품 commit `5cc34b4...`와 동일하지 않다. 기존 120분 결과를
+이 새 후보의 production 증거로 사용할 수 없다. 새 버전·build identity와 설치본
+해시를 고정한 뒤 preflight, 15분, 120분을 다시 통과하기 전까지 production은
+`HOLD`다. 설정 화면 refresh 명칭 개선, JPEG 크기·픽셀 수 상한과
+decompression-bomb 거부도 후속 제품 보안 gate로 관리한다.
 
 ## 7. 롤백과 운영 실패 조건
 
@@ -156,6 +160,7 @@ launcher 신뢰 경계와 QA fail-closed 테스트 강화는 제품 runtime을 �
 | 관리형 스위치 제한 수락 | `PENDING` |
 | 지연된 화면 확인 수락 | `PENDING` |
 | 원본 결과와 정정-only/no-rerun 경계 수락 | `PENDING` |
+| PR runtime 변경분의 새 build 15분·120분 재검증 | `PENDING` |
 | JPEG 크기 상한 미적용 위험 처리 | `PENDING` |
 | 승인 범위 | `OWNER_CONTROLLED_PRIVATE_INTERNAL_SERVER_ONLY` |
 | PR 번호와 merge commit | `PENDING` |

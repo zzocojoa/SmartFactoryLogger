@@ -89,6 +89,32 @@ $identity = Get-Content `
     -LiteralPath (Join-Path $resolvedKitRoot "canary_kit_identity.json") `
     -Raw |
     ConvertFrom-Json
+$expectedDiagnosticCoreFileSha256 = [ordered]@{
+    "analyze-spot-http-framing.ps1" =
+        "DBDDEB253E69174080243103474F77E34A6275A5F52B81273448C051C1D13A99"
+    "collect_operational_observability.ps1" =
+        "6D395373A7D2C9B70EA38F6DF681A5ED042D814829D82E0988D4B915672EC94C"
+    "collect-spot-connecttimeout-evidence.ps1" =
+        "9EF68A3251A74EED7DF3CF0B67D2FB04E7247352CBCF77B18F0597A5C92E9F3B"
+    "monitor-spot-connecttimeout-trigger.ps1" =
+        "A6D46F9FB979ED2247BA34C436AFA5A59F6EC6D7BDCD95DC4E5D8D069A9837F9"
+    "test_spot_connecttimeout_trigger_collector.py" =
+        "0706A89D68E84A871A64CD688449EFFE62EE18C72E00D1C267180358D6D55968"
+}
+$diagnosticCoreFileProperties = @(
+    $identity.diagnostic_core.source_files_sha256.PSObject.Properties
+)
+if ($diagnosticCoreFileProperties.Count -ne $expectedDiagnosticCoreFileSha256.Count) {
+    throw "The diagnostic core source snapshot file list is not approved."
+}
+foreach ($entry in $expectedDiagnosticCoreFileSha256.GetEnumerator()) {
+    $property = $identity.diagnostic_core.source_files_sha256.PSObject.Properties[
+        $entry.Key
+    ]
+    if ($null -eq $property -or [string]$property.Value -cne [string]$entry.Value) {
+        throw "A diagnostic core source snapshot SHA-256 is not approved: $($entry.Key)"
+    }
+}
 $approvedEvidenceFiles = @($identity.prerequisite_15m.evidence_files)
 $approvedEvidenceByName = @{}
 foreach ($entry in $approvedEvidenceFiles) {
@@ -150,6 +176,8 @@ if (
     $identity.rollback.baseline_health_file -cne "health-before.json" -or
     $identity.diagnostic_core.source_commit -cne
         "9b38171a00616a732d1aa64853d114c946f3bb78" -or
+    $identity.diagnostic_core.source_delivery -cne
+        "vendored-hash-bound-snapshot-v1" -or
     $identity.diagnostic_core.source_identity -cne
         "spot-connecttimeout-trigger-field-kit-v10" -or
     $identity.diagnostic_core.framing_schema -cne

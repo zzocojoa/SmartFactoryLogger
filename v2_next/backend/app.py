@@ -237,6 +237,7 @@ _access_log_lock = threading.Lock()
 _quiet_access_state: dict[tuple[str, str, int], dict[str, float | int]] = {}
 _QUIET_ACCESS_PATHS = {
     "/api/spot/image.jpg",
+    "/api/spot/live_image.jpg",
     "/api/data",
     "/health",
     "/stats",
