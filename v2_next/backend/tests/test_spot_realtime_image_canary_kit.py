@@ -24,6 +24,7 @@ QA_IMAGE_SERVER = SCRIPTS / "qa_spot_image_server.ps1"
 PINNED_DIAGNOSTIC_CORE = (
     SCRIPTS / "pinned" / "spot-diagnostic-core-9b38171a"
 )
+GIT_ATTRIBUTES = REPOSITORY.parent / ".gitattributes"
 
 
 def windows_powershell_environment() -> dict[str, str]:
@@ -217,6 +218,10 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn('source_delivery = "vendored-hash-bound-snapshot-v1"', source)
         self.assertNotIn('@("cat-file", "-e", "$diagnosticCoreCommit^{commit}")', source)
         self.assertNotIn("git -C $gitRoot archive", source)
+        self.assertIn(
+            "v2_next/scripts/pinned/spot-diagnostic-core-9b38171a/* text eol=crlf",
+            GIT_ATTRIBUTES.read_text(encoding="utf-8"),
+        )
         expected_core_hashes = {
             "analyze-spot-http-framing.ps1":
                 "DBDDEB253E69174080243103474F77E34A6275A5F52B81273448C051C1D13A99",
