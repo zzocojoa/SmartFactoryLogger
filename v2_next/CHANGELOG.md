@@ -2,6 +2,26 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.23] - 2026-09-02
+
+### Changed
+
+- Added `/api/spot/live_image.jpg` to the sampled quiet access paths so the
+  operator refresh cadence does not emit two info-level access lines per frame.
+- Hardened the SPOT field-validation tooling around observation boundaries,
+  app-outcome correlation, payload-free evidence, and fail-closed uncertainty.
+- Vendored the exact five-file diagnostic-core snapshot used by the Canary
+  builder and bound every source file to an approved SHA-256.
+
+### Validation
+
+- PR #183 passed the frontend and Windows artifact CI gates at source commit
+  `77d30916ee13dacd7dbccadf3d1b0b2a706cfa57` and was merged to `master` as
+  `96dd62413720605e9697b8be03467dbc5593762f`.
+- This new version requires a clean commit-bound Windows package, installer
+  identity, 15-minute prerequisite, and 120-minute Canary before production
+  promotion. Evidence from the earlier v1.0.22 product build is not reused.
+
 ## [1.0.22] - 2026-08-28
 
 ### Changed
@@ -12,10 +32,6 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Exposed the required reuse interval, safety margin, effective quarantine,
   and minimum required pool capacity as aggregate `/api/spot/config`
   diagnostics without exposing source-port values.
-- Added `/api/spot/live_image.jpg` to the sampled quiet access paths so the
-  operator refresh cadence does not emit two info-level access lines per frame.
-- Vendored the exact five-file diagnostic-core snapshot used by the Canary
-  builder and bound every source file to an approved SHA-256.
 
 ### Validation
 
@@ -26,9 +42,6 @@ All notable changes to Smart Factory Logger V2 are documented here.
   retransmissions, or source-port reuse below 75 seconds.
 - The field result is `PASS_WITH_SWITCH_LIMITATION` because managed-switch counters
   were unavailable. Production promotion remains a separate approval gate.
-- The quiet-path runtime fix was made after that field run. A new product build,
-  installer identity, 15-minute check, and 120-minute validation are required
-  before the post-review candidate can be promoted.
 
 ## [1.0.21] - 2026-08-21
 
