@@ -94,6 +94,8 @@ export interface OperatorMetadataPayload {
 
 export interface SpotConfig {
     image_url: string;
+    snapshot_image_url?: string;
+    image_refresh_interval?: number;
     refresh_interval: number;
     crosshair_x: number;
     crosshair_y: number;

@@ -1,0 +1,504 @@
+from __future__ import annotations
+
+import os
+import hashlib
+import tempfile
+import subprocess
+import unittest
+from pathlib import Path
+
+
+REPOSITORY = Path(__file__).resolve().parents[2]
+SCRIPTS = REPOSITORY / "scripts"
+CONTROLLER = SCRIPTS / "invoke-spot-realtime-image-canary-120m.ps1"
+VERIFIER = SCRIPTS / "verify-spot-realtime-image-canary-kit.ps1"
+BUILDER = SCRIPTS / "build-spot-realtime-image-canary-kit.ps1"
+LAUNCHER = SCRIPTS / "run-spot-realtime-image-canary-120m-as-admin.cmd"
+GUIDE = (
+    REPOSITORY
+    / "docs"
+    / "04-deploy"
+    / "spot-realtime-image-v1022-validation.md"
+)
+QA_IMAGE_SERVER = SCRIPTS / "qa_spot_image_server.ps1"
+PINNED_DIAGNOSTIC_CORE = (
+    SCRIPTS / "pinned" / "spot-diagnostic-core-9b38171a"
+)
+GIT_ATTRIBUTES = REPOSITORY.parent / ".gitattributes"
+
+
+def windows_powershell_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["PSModulePath"] = os.pathsep.join(
+        (
+            str(
+                Path(environment.get("ProgramFiles", r"C:\Program Files"))
+                / "WindowsPowerShell"
+                / "Modules"
+            ),
+            str(
+                Path(environment.get("SystemRoot", r"C:\Windows"))
+                / "System32"
+                / "WindowsPowerShell"
+                / "v1.0"
+                / "Modules"
+            ),
+        )
+    )
+    return environment
+
+
+@unittest.skipUnless(os.name == "nt", "canary tooling is Windows-only")
+class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
+    def test_controller_self_test(self) -> None:
+        environment = windows_powershell_environment()
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(CONTROLLER),
+                "-SelfTest",
+            ],
+            cwd=REPOSITORY,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "SPOT_REALTIME_IMAGE_CANARY_120M_SELF_TEST_PASS",
+            result.stdout,
+        )
+
+    def test_launcher_is_fail_closed_and_progress_visible(self) -> None:
+        source = LAUNCHER.read_text(encoding="utf-8")
+        verify_index = source.index(
+            "verify-spot-realtime-image-canary-kit.ps1"
+        )
+        preflight_index = source.index("-PreflightOnly")
+        self.assertLess(verify_index, preflight_index)
+        self.assertIn("RUN-120M", source)
+        self.assertIn("No automatic rollback was performed", source)
+        self.assertIn("PASS WITH LIMITATION", source)
+        self.assertIn('if "%SFL_CANARY_EXIT%"=="2"', source)
+        self.assertIn("SFL_CANARY_EXTERNAL_PROVENANCE_VERIFIED", source)
+        self.assertIn("SFL_ROLLBACK_INSTALLER", source)
+        self.assertNotIn('"%SFL_ROLLBACK_INSTALLER%"', source)
+        self.assertNotIn("-Verb RunAs", source)
+        self.assertNotIn(r"C:\Users\user", source)
+        self.assertEqual(source.count("-PreflightOnly"), 1)
+        self.assertNotIn("v1.0.16", source)
+
+    def test_verifier_rejects_manifest_and_file_tampering(self) -> None:
+        expected_files = (
+            "SPOT_REALTIME_IMAGE_CANARY_120M_GUIDE.md",
+            "analyze-spot-http-framing.ps1",
+            "backend_bundle_integrity.psm1",
+            "canary_kit_files_sha256.txt",
+            "canary_kit_identity.json",
+            "collect-spot-connecttimeout-evidence.ps1",
+            "collect_operational_observability.ps1",
+            "invoke-spot-realtime-image-canary-120m.ps1",
+            "monitor-spot-connecttimeout-trigger.ps1",
+            "operator_attestation_15m.json",
+            "run-spot-realtime-image-canary-120m-as-admin.cmd",
+            "verify-spot-realtime-image-canary-kit.ps1",
+        )
+
+        def prepare_kit(root: Path) -> Path:
+            for name in expected_files:
+                if name == "canary_kit_files_sha256.txt":
+                    continue
+                (root / name).write_text("{}" if name.endswith(".json") else "fixture", encoding="utf-8")
+            manifest = root / "canary_kit_files_sha256.txt"
+            manifest.write_text(
+                "\n".join(
+                    f"{hashlib.sha256((root / name).read_bytes()).hexdigest().upper()}  {name}"
+                    for name in expected_files
+                    if name != manifest.name
+                ),
+                encoding="ascii",
+            )
+            return manifest
+
+        def run_verifier(root: Path) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(VERIFIER),
+                    "-KitRoot",
+                    str(root),
+                    "-Quiet",
+                ],
+                cwd=REPOSITORY,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=windows_powershell_environment(),
+            )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            kit = Path(temporary_directory)
+            manifest = prepare_kit(kit)
+            manifest.write_text(
+                manifest.read_text(encoding="ascii")
+                + "\n"
+                + manifest.read_text(encoding="ascii").splitlines()[0],
+                encoding="ascii",
+            )
+            duplicate = run_verifier(kit)
+            self.assertNotEqual(duplicate.returncode, 0)
+            self.assertIn("Duplicate canary kit manifest file", duplicate.stderr)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            kit = Path(temporary_directory)
+            prepare_kit(kit)
+            (kit / "unexpected.txt").write_text("unexpected", encoding="utf-8")
+            unexpected = run_verifier(kit)
+            self.assertNotEqual(unexpected.returncode, 0)
+            self.assertIn("missing or unexpected file", unexpected.stderr)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            kit = Path(temporary_directory)
+            prepare_kit(kit)
+            (kit / "analyze-spot-http-framing.ps1").write_text("tampered", encoding="utf-8")
+            hash_mismatch = run_verifier(kit)
+            self.assertNotEqual(hash_mismatch.returncode, 0)
+            self.assertIn("SHA-256 does not match", hash_mismatch.stderr)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            kit = Path(temporary_directory)
+            prepare_kit(kit)
+            identity = run_verifier(kit)
+            self.assertNotEqual(identity.returncode, 0)
+            self.assertIn("diagnostic_core", identity.stderr)
+
+    def test_server_qa_rejects_non_positive_observation(self) -> None:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(QA_IMAGE_SERVER),
+                "-ObservationSeconds",
+                "0",
+            ],
+            cwd=REPOSITORY,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=windows_powershell_environment(),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must be greater than zero", result.stderr)
+
+    def test_builder_binds_product_core_and_progress_contract(self) -> None:
+        source = BUILDER.read_text(encoding="utf-8")
+        self.assertIn(
+            '"9b38171a00616a732d1aa64853d114c946f3bb78"',
+            source,
+        )
+        self.assertIn(
+            'build_git_commit = "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80"',
+            source,
+        )
+        self.assertIn('source_delivery = "vendored-hash-bound-snapshot-v1"', source)
+        self.assertNotIn('@("cat-file", "-e", "$diagnosticCoreCommit^{commit}")', source)
+        self.assertNotIn("git -C $gitRoot archive", source)
+        self.assertIn(
+            "v2_next/scripts/pinned/spot-diagnostic-core-9b38171a/* text eol=crlf",
+            GIT_ATTRIBUTES.read_text(encoding="utf-8"),
+        )
+        expected_core_hashes = {
+            "analyze-spot-http-framing.ps1":
+                "DBDDEB253E69174080243103474F77E34A6275A5F52B81273448C051C1D13A99",
+            "collect_operational_observability.ps1":
+                "6D395373A7D2C9B70EA38F6DF681A5ED042D814829D82E0988D4B915672EC94C",
+            "collect-spot-connecttimeout-evidence.ps1":
+                "9EF68A3251A74EED7DF3CF0B67D2FB04E7247352CBCF77B18F0597A5C92E9F3B",
+            "monitor-spot-connecttimeout-trigger.ps1":
+                "A6D46F9FB979ED2247BA34C436AFA5A59F6EC6D7BDCD95DC4E5D8D069A9837F9",
+            "test_spot_connecttimeout_trigger_collector.py":
+                "0706A89D68E84A871A64CD688449EFFE62EE18C72E00D1C267180358D6D55968",
+        }
+        for name, expected_hash in expected_core_hashes.items():
+            path = PINNED_DIAGNOSTIC_CORE / name
+            self.assertTrue(path.is_file(), name)
+            self.assertEqual(
+                hashlib.sha256(path.read_bytes()).hexdigest().upper(),
+                expected_hash,
+                name,
+            )
+        self.assertNotIn(
+            '    Add-CanaryProgressContract `',
+            source,
+        )
+        self.assertNotIn(
+            '    Add-TriggerMonitorFailureContract `',
+            source,
+        )
+        self.assertNotIn(
+            '    Add-TriggerMonitorPathBudgetContract `',
+            source,
+        )
+        self.assertIn("--untracked-files=no", source)
+        self.assertIn("contains_installer = $false", source)
+        self.assertIn("changes_application_or_settings = $false", source)
+        self.assertIn(
+            'schema_version = "spot-realtime-image-v1022-canary-kit-v10"',
+            source,
+        )
+        self.assertIn(
+            'version = "1.0.20"',
+            source,
+        )
+        self.assertIn(
+            'build_git_commit = "cd8cfa649203494cf087206cf656dc2197107ea1"',
+            source,
+        )
+        self.assertIn(
+            'counter_rate_window = "observation-start-to-observation-end"',
+            source,
+        )
+        self.assertIn(
+            'general_request_event_drop_policy = '
+            '"bounded-journal-eviction-observability-only"',
+            source,
+        )
+        self.assertIn('framing_schema = "spot-http-framing-evidence-v10"', source)
+        self.assertIn(
+            'observation_boundary_schema = "spot-canary-observation-boundary-v1"',
+            source,
+        )
+        self.assertIn(
+            'trigger_monitor_completion_policy =',
+            source,
+        )
+        self.assertIn(
+            '"observer-deadline-atomic-request"',
+            source,
+        )
+        self.assertIn(
+            '"spot-trigger-monitor-completion-request-v1"',
+            source,
+        )
+        for expected in (
+            'result = "PASS"',
+            'full_120m_allowed = $true',
+            'approval_scope = "120-minute-canary-only"',
+            'reviewed_result_schema =',
+            'switch_limitation = $true',
+            'source_port_policy_version = "spot-source-port-quarantine-v3"',
+            "source_port_minimum_required_reuse_interval_seconds = 75.0",
+            "source_port_quarantine_safety_margin_seconds = 2.0",
+            "source_port_quarantine_seconds = 77.0",
+            "source_port_pool_capacity = 768",
+            "source_port_minimum_required_pool_capacity = 462",
+        ):
+            self.assertIn(expected, source)
+
+    def test_builder_preserves_trigger_job_failure_evidence(self) -> None:
+        source = BUILDER.read_text(encoding="utf-8")
+        self.assertIn(
+            '"9b38171a00616a732d1aa64853d114c946f3bb78"',
+            source,
+        )
+        self.assertNotIn('    Add-TriggerMonitorFailureContract `', source)
+
+    def test_controller_uses_a_short_fail_closed_runtime_evidence_root(self) -> None:
+        source = CONTROLLER.read_text(encoding="utf-8")
+        for fragment in (
+            "RuntimeEvidenceBase",
+            "LOCALAPPDATA",
+            "SFLCanary",
+            "Get-ProjectedRuntimeEvidencePath",
+            "Assert-CanaryRuntimeEvidencePathBudget",
+            "runtime_evidence_projected_path_chars",
+            "runtime_evidence_path_limit_chars",
+        ):
+            self.assertIn(fragment, source)
+
+    def test_progress_format_applies_to_the_complete_message(self) -> None:
+        source = CONTROLLER.read_text(encoding="utf-8")
+        self.assertIn(
+            'counter_rate_window = $identity.canary.counter_rate_window',
+            source,
+        )
+        self.assertIn(
+            'postprocess_integrity_failures',
+            source,
+        )
+
+    def test_controller_has_runtime_packet_and_identity_gates(self) -> None:
+        source = CONTROLLER.read_text(encoding="utf-8")
+        required_fragments = (
+            "observation-state-changed",
+            "source_port_pool_exhaustion_count",
+            "source_port_reuse_violation_count",
+            "image_refresh_failure_count",
+            "same-four-tuple-reuse-under-75s",
+            "reset-before-response",
+            "packet-capture-window-incomplete",
+            "SPOT_120M_ROLLBACK_REQUIRED",
+            "SPOT_120M_EVIDENCE_HOLD",
+            "SPOT_120M_PASS_WITH_SWITCH_LIMITATION",
+            "production_promotion_allowed = $false",
+            "counter_window_elapsed_seconds",
+            "canary-observation-start.json",
+            "canary-observation-end.json",
+            "canary-postprocess-state.json",
+            "failure_events",
+            "postprocess_integrity_failures",
+            "packet-clock-calibration-incomplete",
+            "bidirectional-rst-observed",
+            "Get-CollectorEvidenceHolds",
+            "collector failure was not classified as evidence hold",
+            "mismatched rollback baseline was accepted",
+            "spot-source-port-quarantine-v3",
+            "source_port_quarantine_safety_margin_seconds",
+            "source_port_minimum_required_pool_capacity",
+            "120-minute observation is blocked until the v1.0.22",
+            "preHandshakeAppSuccessDiscrepancyEligible",
+            "pre_handshake_packet_capture_or_flow_attribution_discrepancy_attempts",
+            "no_response_after_handshake_packet_capture_or_flow_attribution_discrepancy_attempts",
+            "self-test incomplete pre-handshake app outcome was not held",
+            "self-test pre-handshake SYN retransmission was not rejected",
+            "self-test pre-handshake reset evidence was not rejected",
+            'Phase -ceq "image-liveness-preflight"',
+            '"image-liveness-preflight-120m.json"',
+            "120-minute image liveness preflight did not pass",
+            "15-minute evidence path escapes the approved evidence root",
+            "reviewed 15-minute result does not satisfy the bound gate",
+        )
+        for fragment in required_fragments:
+            self.assertIn(fragment, source)
+
+    def test_controller_baselines_historical_failures_and_rejects_new_deltas(
+        self,
+    ) -> None:
+        controller = CONTROLLER.read_text(encoding="utf-8")
+        builder = BUILDER.read_text(encoding="utf-8")
+        verifier = VERIFIER.read_text(encoding="utf-8")
+        guide = GUIDE.read_text(encoding="utf-8")
+
+        for fragment in (
+            "Get-CumulativeFailureCounterNames",
+            "Confirm-StableHistoricalFailureBaseline",
+            "historical-failure-baseline.json",
+            "spot-canary-historical-failure-baseline-v1",
+            "STABLE_HISTORICAL_FAILURE_BASELINE",
+            "failure_counter_deltas",
+            "SPOT failure counter increased during canary",
+            "[PREFLIGHT BASELINE PROGRESS]",
+        ):
+            self.assertIn(fragment, controller)
+
+        self.assertIn(
+            'historical_failure_counter_policy = '
+            '"stable-preflight-baseline-and-zero-canary-delta"',
+            builder,
+        )
+        self.assertIn("historical_failure_stability_seconds = 30", builder)
+        self.assertIn(
+            "historical_failure_progress_interval_seconds -ne 10",
+            verifier,
+        )
+        self.assertIn("신규 transport/image/temperature", guide)
+        self.assertIn("77초", guide)
+
+        failure_names_start = controller.index(
+            "function Get-CumulativeFailureCounterNames"
+        )
+        failure_names_end = controller.index(
+            "function Get-CumulativeFailureCounterSnapshot"
+        )
+        failure_names = controller[failure_names_start:failure_names_end]
+        self.assertNotIn("source_port_request_event_drop_count", failure_names)
+        self.assertIn(
+            "source_port_request_failure_event_drop_count",
+            failure_names,
+        )
+        self.assertIn(
+            '"source_port_request_event_drop_count"',
+            controller[:failure_names_start],
+        )
+        self.assertIn(
+            "bounded-journal-eviction-observability-only",
+            verifier,
+        )
+        self.assertIn("failure event journal", guide)
+
+    def test_controller_handles_incomplete_operator_and_switch_evidence(self) -> None:
+        source = CONTROLLER.read_text(encoding="utf-8")
+        for fragment in (
+            "Test-SwitchEvidenceLimitation",
+            "Test-OperatorVisualConfirmationEligible",
+            "NOT_REQUESTED_INCOMPLETE_INTERVAL",
+            "prompted = $operatorEligible",
+            "switch_evidence_unavailable_declared",
+        ):
+            self.assertIn(fragment, source)
+
+    def test_verifier_and_guide_fix_exact_deployment_identity(self) -> None:
+        verifier = VERIFIER.read_text(encoding="utf-8")
+        guide = GUIDE.read_text(encoding="utf-8")
+        for expected in (
+            "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80",
+            "77577ABB08BD901365B2D366B5ABAF101217E90B8AA5F2E9CB47971FF03123E2",
+            "cd8cfa649203494cf087206cf656dc2197107ea1",
+            "F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19",
+            "E171DF1C3EB3C8DB78700E95913E87E7B1EE95460990F6B342AD4E0165448C2C",
+            "B13909D1A6067E94EC945750C82F17948FC597D3A29060323E807193650F0327",
+        ):
+            self.assertIn(expected, verifier)
+        for source in (
+            BUILDER.read_text(encoding="utf-8"),
+            verifier,
+            guide,
+            LAUNCHER.read_text(encoding="utf-8"),
+        ):
+            self.assertNotIn("1.0.16", source)
+            self.assertNotIn(
+                "42A076B37ADA66CEAEE816128A1FC67C40CCD1C5417F9BDED5E885478974F615",
+                source,
+            )
+        self.assertIn("every 30 seconds", guide)
+        self.assertIn("does not add SPOT or", guide)
+        self.assertIn("backend API requests", guide)
+        self.assertIn("PASS_WITH_SWITCH_LIMITATION", guide)
+        self.assertIn(
+            "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA",
+            BUILDER.read_text(encoding="utf-8"),
+        )
+        self.assertIn("120-minute-canary-only", guide)
+        self.assertIn("EVIDENCE_HOLD", guide)
+
+    def test_verifier_binds_the_exact_reviewed_15m_evidence(self) -> None:
+        verifier = VERIFIER.read_text(encoding="utf-8")
+        for expected in (
+            "spot-realtime-image-v1022-canary-kit-v10",
+            "approved-15m-v9-20260901-135039",
+            "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA",
+            "C3082C90D259A17D86BB5FF2D15A2861F7CAC195565EABA7FDAFB6667BDEDF6D",
+            "9361D97E07FD57534836B432F610F281449C3C6F2C1E3B3E1323B3DBF9FD7BD2",
+            "120-minute-canary-only",
+            "delayed-historical-server-validation",
+        ):
+            self.assertIn(expected, verifier)
+
+
+if __name__ == "__main__":
+    unittest.main()

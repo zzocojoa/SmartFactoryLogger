@@ -1,7 +1,13 @@
 import unittest
 
 from backend.FacilityData.drivers.spot_port_quarantine import (
+    CAPACITY_PLANNING_MAX_REQUESTS_PER_SECOND,
+    MINIMUM_REQUIRED_POOL_CAPACITY,
+    MINIMUM_REQUIRED_REUSE_INTERVAL_SECONDS,
     POLICY_VERSION,
+    POOL_CAPACITY,
+    QUARANTINE_SAFETY_MARGIN_SECONDS,
+    QUARANTINE_SECONDS,
     SourcePortLeasePool,
     SpotPortPoolError,
     SpotPortPoolExhausted,
@@ -90,7 +96,7 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         selected_clock = clock or _Clock()
         pool = SourcePortLeasePool(
             capacity=capacity,
-            quarantine_seconds=75.0,
+            quarantine_seconds=QUARANTINE_SECONDS,
             acquire_timeout_seconds=0.0,
             rebind_retry_interval_seconds=1.0,
             socket_factory=selected_factory,
@@ -167,17 +173,17 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         pool.mark_connect_started(first)
         pool.release(first)
 
-        clock.now = 74.999
+        clock.now = 76.999
         with self.assertRaises(SpotPortPoolExhausted):
             pool.acquire()
 
-        clock.now = 75.0
+        clock.now = 77.0
         second = pool.acquire()
         self.assertEqual(second.port, first.port)
         pool.mark_connect_started(second)
         diagnostics = pool.diagnostics()
 
-        self.assertEqual(diagnostics["source_port_minimum_reuse_interval_seconds"], 75.0)
+        self.assertEqual(diagnostics["source_port_minimum_reuse_interval_seconds"], 77.0)
         self.assertEqual(diagnostics["source_port_reuse_violation_count"], 0)
         pool.release(second)
 
@@ -192,7 +198,7 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         self.assertEqual(diagnostics["source_port_pool_quarantined_count"], 3)
         self.assertEqual(diagnostics["source_port_pool_guarded_count"], 0)
 
-        clock.now = 75.0
+        clock.now = 77.0
         reacquired = [pool.acquire() for _ in range(3)]
         self.assertEqual({lease.port for lease in reacquired}, {lease.port for lease in leases})
 
@@ -203,14 +209,14 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         pool.release(lease)
         factory.fail_rebind_count = 1
 
-        clock.now = 75.0
+        clock.now = 77.0
         with self.assertRaises(SpotPortPoolExhausted):
             pool.acquire()
         diagnostics = pool.diagnostics()
         self.assertEqual(diagnostics["source_port_pool_rebind_pending_count"], 1)
         self.assertEqual(diagnostics["source_port_rebind_retry_count"], 1)
 
-        clock.now = 76.0
+        clock.now = 78.0
         recovered = pool.acquire()
         self.assertEqual(recovered.port, lease.port)
 
@@ -232,7 +238,7 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         pool.mark_connect_started(first)
         pool.release(first)
 
-        clock.now = 75.0
+        clock.now = 77.0
         second = pool.acquire()
         clock.now = 74.0
         with self.assertRaises(SpotPortReuseViolation):
@@ -281,9 +287,51 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         diagnostics = pool.diagnostics()
 
         self.assertEqual(diagnostics["source_port_policy_version"], POLICY_VERSION)
+        self.assertEqual(
+            diagnostics["source_port_minimum_required_reuse_interval_seconds"],
+            MINIMUM_REQUIRED_REUSE_INTERVAL_SECONDS,
+        )
+        self.assertEqual(
+            diagnostics["source_port_quarantine_safety_margin_seconds"],
+            QUARANTINE_SAFETY_MARGIN_SECONDS,
+        )
+        self.assertEqual(
+            diagnostics["source_port_quarantine_seconds"],
+            QUARANTINE_SECONDS,
+        )
+        self.assertEqual(
+            diagnostics["source_port_minimum_required_pool_capacity"],
+            MINIMUM_REQUIRED_POOL_CAPACITY,
+        )
         self.assertEqual(diagnostics["source_port_pool_capacity"], 2)
         self.assertFalse(any("port_list" in key for key in diagnostics))
         self.assertFalse(any(isinstance(value, list) for value in diagnostics.values()))
+
+    def test_production_pool_covers_six_requests_per_second_for_full_quarantine(self) -> None:
+        self.assertEqual(CAPACITY_PLANNING_MAX_REQUESTS_PER_SECOND, 6.0)
+        self.assertEqual(MINIMUM_REQUIRED_POOL_CAPACITY, 462)
+        self.assertGreaterEqual(POOL_CAPACITY, MINIMUM_REQUIRED_POOL_CAPACITY)
+
+        pool, _factory, clock = self.make_pool(
+            capacity=POOL_CAPACITY,
+        )
+        for request_index in range(POOL_CAPACITY * 2):
+            clock.now = (
+                request_index
+                / CAPACITY_PLANNING_MAX_REQUESTS_PER_SECOND
+            )
+            lease = pool.acquire()
+            pool.mark_connect_started(lease)
+            pool.release(lease)
+
+        diagnostics = pool.diagnostics()
+        self.assertEqual(diagnostics["source_port_pool_acquire_wait_count"], 0)
+        self.assertEqual(diagnostics["source_port_pool_exhaustion_count"], 0)
+        self.assertEqual(diagnostics["source_port_reuse_violation_count"], 0)
+        self.assertGreaterEqual(
+            diagnostics["source_port_minimum_reuse_interval_seconds"],
+            QUARANTINE_SECONDS,
+        )
 
 
 if __name__ == "__main__":

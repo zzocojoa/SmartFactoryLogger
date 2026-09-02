@@ -237,6 +237,7 @@ _access_log_lock = threading.Lock()
 _quiet_access_state: dict[tuple[str, str, int], dict[str, float | int]] = {}
 _QUIET_ACCESS_PATHS = {
     "/api/spot/image.jpg",
+    "/api/spot/live_image.jpg",
     "/api/data",
     "/health",
     "/stats",
@@ -263,12 +264,15 @@ _ACCESS_LOG_SAMPLE_SEC = 5.0
 _INVALID_PATH_CHARS = set('<>:"|?*')
 _NETWORK_WARN_MS = 200
 _SPOT_IMAGE_PATH = "/api/spot/image.jpg"
+_SPOT_LIVE_IMAGE_PATH = "/api/spot/live_image.jpg"
+_SPOT_IMAGE_PATHS = {_SPOT_IMAGE_PATH, _SPOT_LIVE_IMAGE_PATH}
 _SPOT_PAYLOAD_REJECTION_CODES = {"invalid-image-html", "invalid-image-payload", "empty-body"}
 _SPOT_FOCUS_CONFIG_ERROR = "SPOT_FOCUS_URL is not configured"
 _SPOT_IMAGE_AT_HEADER = "X-Spot-Image-At"
 _SPOT_IMAGE_SOURCE_HEADER = "X-Spot-Image-Source"
 _SPOT_IMAGE_LATENCY_HEADER = "X-Spot-Image-Latency-Ms"
 _SPOT_IMAGE_AGE_HEADER = "X-Spot-Image-Age-Ms"
+_SPOT_IMAGE_PROFILE_HEADER = "X-Spot-Image-Profile"
 _SPOT_INTERNAL_TEMPERATURE_HEADER = "X-Spot-Internal-Temperature"
 _SPOT_INTERNAL_TEMPERATURE_AT_HEADER = "X-Spot-Internal-Temperature-At"
 _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER = "X-Spot-Internal-Temperature-Status"
@@ -1929,6 +1933,7 @@ app.add_middleware(
         _SPOT_IMAGE_SOURCE_HEADER,
         _SPOT_IMAGE_LATENCY_HEADER,
         _SPOT_IMAGE_AGE_HEADER,
+        _SPOT_IMAGE_PROFILE_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_AT_HEADER,
         _SPOT_INTERNAL_TEMPERATURE_STATUS_HEADER,
@@ -2145,7 +2150,7 @@ async def record_request_stats(request: Request, call_next):
             dict(response.headers),
         )
 
-        is_spot_image_route = request.url.path == _SPOT_IMAGE_PATH
+        is_spot_image_route = request.url.path in _SPOT_IMAGE_PATHS
         if status_code >= 500 and not is_spot_payload_rejection and not is_spot_image_route:
             try:
                 observability_service.record_error(
@@ -3369,7 +3374,9 @@ def verify_compare(payload: VerificationCompareRequest):
 @app.get("/api/spot/config")
 def spot_config():
     return {
-        "image_url": _SPOT_IMAGE_PATH,
+        "image_url": _SPOT_LIVE_IMAGE_PATH,
+        "snapshot_image_url": _SPOT_IMAGE_PATH,
+        "image_refresh_interval": spot_control.get_spot_live_image_refresh_interval_sec(),
         "refresh_interval": config.SPOT_REFRESH_INTERVAL,
         "crosshair_x": config.SPOT_CROSSHAIR_X,
         "crosshair_y": config.SPOT_CROSSHAIR_Y,
@@ -3441,7 +3448,7 @@ def _is_spot_payload_rejection_response(
     status_code: int,
     headers: dict[str, str] | None,
 ) -> bool:
-    if path != _SPOT_IMAGE_PATH:
+    if path not in _SPOT_IMAGE_PATHS:
         return False
     if status_code != 502:
         return False
@@ -3449,15 +3456,19 @@ def _is_spot_payload_rejection_response(
 
 
 @app.get(_SPOT_IMAGE_PATH)
-async def spot_image():
-    """Return the shared fresh JPEG, coalescing upstream refreshes when needed."""
+@app.get(_SPOT_LIVE_IMAGE_PATH)
+async def spot_image(request: Request):
+    """Return a profile-shaped JPEG from the one official upstream resource."""
+    route_path = request.url.path
+    profile = "operator_live" if route_path == _SPOT_LIVE_IMAGE_PATH else "snapshot"
     headers: dict[str, str] = {
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
         "Expires": "0",
+        _SPOT_IMAGE_PROFILE_HEADER: profile,
     }
     try:
-        data, meta = await spot_control.fetch_image_async()
+        data, meta = await spot_control.fetch_image_async(profile=profile)
         captured_at = meta.get("captured_at") or 0.0
         if captured_at:
             headers[_SPOT_IMAGE_AT_HEADER] = str(int(float(captured_at) * 1000))
@@ -3468,11 +3479,11 @@ async def spot_image():
         if meta.get("age_ms") is not None:
             headers[_SPOT_IMAGE_AGE_HEADER] = f"{float(meta['age_ms']):.1f}"
         headers.update(_spot_internal_temperature_headers())
-        observability_service.record_spot_image_result(200)
+        observability_service.record_spot_image_result(200, path=route_path)
         return Response(content=data, media_type="image/jpeg", headers=headers)
     except spot_control.SpotImageConfigError as exc:
         diagnostics = spot_control.get_spot_diagnostics()
-        observability_service.record_spot_image_result(404)
+        observability_service.record_spot_image_result(404, path=route_path)
         raise HTTPException(
             status_code=404,
             detail={
@@ -3498,12 +3509,12 @@ async def spot_image():
                 "request_elapsed_ms": request_elapsed_ms,
                 "payload_rejection": exc.code in _SPOT_PAYLOAD_REJECTION_CODES,
             }),
-            path=_SPOT_IMAGE_PATH,
+            path=route_path,
             status_code=502,
             error_type=observability_error_type,
             level="warning" if exc.code in _SPOT_PAYLOAD_REJECTION_CODES else "error",
         )
-        observability_service.record_spot_image_result(502)
+        observability_service.record_spot_image_result(502, path=route_path)
         raise HTTPException(
             status_code=502,
             detail={
@@ -3525,11 +3536,11 @@ async def spot_image():
                 "code": "unknown",
                 "error_type": exc.__class__.__name__,
             }),
-            path=_SPOT_IMAGE_PATH,
+            path=route_path,
             status_code=502,
             error_type=exc.__class__.__name__,
         )
-        observability_service.record_spot_image_result(502)
+        observability_service.record_spot_image_result(502, path=route_path)
         raise HTTPException(
             status_code=502,
             detail={

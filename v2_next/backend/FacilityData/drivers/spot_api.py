@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import io
 import json
 import logging
 import math
@@ -12,13 +13,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, TypeVar, TypedDict
+from typing import Any, Callable, Dict, Literal, Optional, TypeAlias, TypeVar, TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
 import httpx
+from PIL import Image, UnidentifiedImageError
 
 from backend import config
 from backend.FacilityData.drivers.spot_http_transport import (
@@ -115,12 +117,21 @@ class _SpotImageCacheEntry:
 
 _img_fetch_lock = asyncio.Lock()
 _spot_device_request_lock = asyncio.Lock()
-_SPOT_REQUEST_BUDGET_POLICY_VERSION = "spot-background-request-budget-v2"
+SpotImageProfile: TypeAlias = Literal["snapshot", "operator_live"]
+_SPOT_IMAGE_PROFILE_SNAPSHOT: SpotImageProfile = "snapshot"
+_SPOT_IMAGE_PROFILE_OPERATOR_LIVE: SpotImageProfile = "operator_live"
+_SPOT_IMAGE_PROFILES = {
+    _SPOT_IMAGE_PROFILE_SNAPSHOT,
+    _SPOT_IMAGE_PROFILE_OPERATOR_LIVE,
+}
+_SPOT_REQUEST_BUDGET_POLICY_VERSION = "spot-background-request-budget-v3"
 _SPOT_BACKGROUND_REQUEST_BUDGET_TARGET_PER_SEC = 6.0
-_SPOT_IMAGE_POLICY_VERSION = "spot-image-demand-shaping-v2"
+_SPOT_IMAGE_POLICY_VERSION = "spot-realtime-image-budget-v1"
 _SPOT_IMAGE_REFRESH_INTERVAL_DEFAULT_SEC = 3.0
 _SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC = 3.0
 _SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC = 10.0
+_SPOT_LIVE_IMAGE_DESIRED_MAX_PER_SEC = 4.0
+_SPOT_LIVE_IMAGE_MIN_PER_SEC = 1.0 / _SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC
 _SPOT_IMAGE_REFRESH_SHUTDOWN_TIMEOUT_SEC = 7.0
 _SPOT_HTTP_TRANSPORT_SHUTDOWN_TIMEOUT_SEC = 7.0
 _SPOT_DIAGNOSTICS_REFRESH_INTERVAL_MIN_SEC = 10.0
@@ -129,6 +140,8 @@ _img_refresh_task: Optional[asyncio.Task[_SpotImageCacheEntry]] = None
 _img_accepting_requests = True
 _img_last_source: Optional[str] = None
 _img_downstream_request_count = 0
+_img_snapshot_downstream_request_count = 0
+_img_live_downstream_request_count = 0
 _img_upstream_request_count = 0
 _img_cache_hit_count = 0
 _img_singleflight_leader_count = 0
@@ -678,6 +691,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
 def _reset_spot_image_request_state_for_tests() -> None:
     global _img_fetch_lock, _img_cache_entry, _img_refresh_task, _img_accepting_requests, _img_last_source
     global _img_downstream_request_count, _img_upstream_request_count, _img_cache_hit_count
+    global _img_snapshot_downstream_request_count, _img_live_downstream_request_count
     global _img_singleflight_leader_count, _img_coalesced_waiter_count
     global _img_refresh_success_count, _img_refresh_failure_count
     global _img_cache_clock_anomaly_count
@@ -694,6 +708,8 @@ def _reset_spot_image_request_state_for_tests() -> None:
     _img_accepting_requests = True
     _img_last_source = None
     _img_downstream_request_count = 0
+    _img_snapshot_downstream_request_count = 0
+    _img_live_downstream_request_count = 0
     _img_upstream_request_count = 0
     _img_cache_hit_count = 0
     _img_singleflight_leader_count = 0
@@ -961,7 +977,16 @@ def _response_content_type(response: httpx.Response) -> str:
 
 
 def _is_jpeg_payload(data: bytes) -> bool:
-    return data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")
+    if not data.startswith(b"\xff\xd8") or not data.endswith(b"\xff\xd9"):
+        return False
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != "JPEG":
+                return False
+            image.verify()
+    except (OSError, UnidentifiedImageError, ValueError):
+        return False
+    return True
 
 
 def _payload_looks_like_html(data: bytes) -> bool:
@@ -1008,10 +1033,34 @@ def _validate_spot_image_response(response: httpx.Response, image_url: str, data
 
 
 def _resolve_spot_image_url() -> str:
-    spot_ip = str(config.SPOT_IP or "").strip()
-    if not spot_ip:
+    spot_host = str(config.SPOT_IP or "").strip()
+    if not spot_host or any(character.isspace() for character in spot_host):
         raise SpotImageConfigError("")
-    return f"http://{spot_ip}/image.jpg"
+
+    parsed = urlsplit(f"http://{spot_host}")
+    if (
+        parsed.scheme != "http"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise SpotImageConfigError("")
+    hostname = parsed.hostname or ""
+    host_labels = hostname.split(".")
+    if not host_labels or any(
+        re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) is None
+        for label in host_labels
+    ):
+        raise SpotImageConfigError("")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise SpotImageConfigError("") from exc
+    authority = hostname if port is None else f"{hostname}:{port}"
+    return f"http://{authority}/image.jpg"
 
 
 def _spot_image_refresh_interval_sec() -> float:
@@ -1025,6 +1074,14 @@ def _spot_image_refresh_interval_sec() -> float:
         _SPOT_IMAGE_REFRESH_INTERVAL_MAX_SEC,
         max(_SPOT_IMAGE_REFRESH_INTERVAL_MIN_SEC, configured_interval),
     )
+
+
+def _normalize_spot_image_profile(profile: str) -> SpotImageProfile:
+    if profile == _SPOT_IMAGE_PROFILE_SNAPSHOT:
+        return _SPOT_IMAGE_PROFILE_SNAPSHOT
+    if profile == _SPOT_IMAGE_PROFILE_OPERATOR_LIVE:
+        return _SPOT_IMAGE_PROFILE_OPERATOR_LIVE
+    raise ValueError(f"unsupported SPOT image profile: {profile}")
 
 
 def _spot_poll_interval_sec() -> float:
@@ -1044,9 +1101,8 @@ def _spot_diagnostics_refresh_interval_sec() -> float:
     )
 
 
-def _spot_background_request_budget() -> Dict[str, float | bool | str]:
+def _spot_non_image_background_request_rates() -> Dict[str, float]:
     poll_interval = _spot_poll_interval_sec()
-    image_rate = 1.0 / _spot_image_refresh_interval_sec() if str(config.SPOT_IP or "").strip() else 0.0
     temperature_rate = 1.0 / poll_interval if str(config.SPOT_URL or "").strip() else 0.0
     internal_temperature_rate = (
         1.0 / poll_interval
@@ -1058,6 +1114,43 @@ def _spot_background_request_budget() -> Dict[str, float | bool | str]:
         if str(config.SPOT_URL or "").strip()
         else 0.0
     )
+    return {
+        "temperature": temperature_rate,
+        "internal_temperature": internal_temperature_rate,
+        "diagnostics": diagnostics_rate,
+    }
+
+
+def _spot_live_image_max_per_sec() -> float:
+    non_image_rate = sum(_spot_non_image_background_request_rates().values())
+    remaining_rate = _SPOT_BACKGROUND_REQUEST_BUDGET_TARGET_PER_SEC - non_image_rate
+    return max(
+        _SPOT_LIVE_IMAGE_MIN_PER_SEC,
+        min(_SPOT_LIVE_IMAGE_DESIRED_MAX_PER_SEC, remaining_rate),
+    )
+
+
+def _spot_live_image_refresh_interval_sec() -> float:
+    return 1.0 / _spot_live_image_max_per_sec()
+
+
+def get_spot_live_image_refresh_interval_sec() -> float:
+    """Return the server-owned operator image cadence in seconds."""
+    return _spot_live_image_refresh_interval_sec()
+
+
+def _spot_image_cache_ttl_sec(profile: SpotImageProfile) -> float:
+    if profile == _SPOT_IMAGE_PROFILE_OPERATOR_LIVE:
+        return _spot_live_image_refresh_interval_sec()
+    return _spot_image_refresh_interval_sec()
+
+
+def _spot_background_request_budget() -> Dict[str, float | bool | str]:
+    non_image_rates = _spot_non_image_background_request_rates()
+    image_rate = _spot_live_image_max_per_sec() if str(config.SPOT_IP or "").strip() else 0.0
+    temperature_rate = non_image_rates["temperature"]
+    internal_temperature_rate = non_image_rates["internal_temperature"]
+    diagnostics_rate = non_image_rates["diagnostics"]
     total_rate = image_rate + temperature_rate + internal_temperature_rate + diagnostics_rate
     return {
         "request_budget_policy_version": _SPOT_REQUEST_BUDGET_POLICY_VERSION,
@@ -1087,6 +1180,7 @@ def _spot_image_cache_age_ms(
 def _is_spot_image_cache_fresh(
     entry: Optional[_SpotImageCacheEntry],
     *,
+    profile: SpotImageProfile = _SPOT_IMAGE_PROFILE_SNAPSHOT,
     now_monotonic: Optional[float] = None,
     record_clock_anomaly: bool = False,
     expected_image_url: Optional[str] = None,
@@ -1106,12 +1200,13 @@ def _is_spot_image_cache_fresh(
                 extra={"code": "spot-image-cache-clock-anomaly"},
             )
         return False
-    return age_seconds < _spot_image_refresh_interval_sec()
+    return age_seconds < _spot_image_cache_ttl_sec(profile)
 
 
 def _spot_image_response(
     entry: _SpotImageCacheEntry,
     *,
+    profile: SpotImageProfile,
     source: str,
 ) -> tuple[bytes, Dict[str, Any]]:
     global _img_last_source
@@ -1123,6 +1218,7 @@ def _spot_image_response(
         "latency_ms": entry.upstream_latency_ms,
         "age_ms": _spot_image_cache_age_ms(entry),
         "image_path": "/image.jpg",
+        "profile": profile,
     }
 
 
@@ -2483,6 +2579,9 @@ def get_spot_diagnostics() -> Dict[str, Any]:
         "last_success_at": float(_img_last_success_at) if _img_last_success_at else None,
         "image_request_policy_version": _SPOT_IMAGE_POLICY_VERSION,
         "image_refresh_interval_sec_effective": _spot_image_refresh_interval_sec(),
+        "snapshot_image_refresh_interval_sec_effective": _spot_image_refresh_interval_sec(),
+        "live_image_refresh_interval_sec_effective": _spot_live_image_refresh_interval_sec(),
+        "live_image_max_fps_effective": _spot_live_image_max_per_sec(),
         "image_cache_present": cache_entry is not None,
         "image_cache_fresh": (
             _is_spot_image_cache_fresh(
@@ -2492,10 +2591,23 @@ def get_spot_diagnostics() -> Dict[str, Any]:
             if configured_image_url is not None
             else False
         ),
+        "live_image_cache_fresh": (
+            _is_spot_image_cache_fresh(
+                cache_entry,
+                profile=_SPOT_IMAGE_PROFILE_OPERATOR_LIVE,
+                expected_image_url=configured_image_url,
+            )
+            if configured_image_url is not None
+            else False
+        ),
         "image_cache_age_ms": cache_age_ms,
         "image_refresh_in_flight": bool(refresh_task is not None and not refresh_task.done()),
         "image_accepting_requests": bool(_img_accepting_requests),
         "image_downstream_request_count": int(_img_downstream_request_count),
+        "image_snapshot_downstream_request_count": int(
+            _img_snapshot_downstream_request_count
+        ),
+        "image_live_downstream_request_count": int(_img_live_downstream_request_count),
         "image_upstream_request_count": int(_img_upstream_request_count),
         "image_cache_hit_count": int(_img_cache_hit_count),
         "image_singleflight_leader_count": int(_img_singleflight_leader_count),
@@ -3000,13 +3112,21 @@ async def _refresh_spot_image_cache(image_url: str) -> _SpotImageCacheEntry:
     return entry
 
 
-async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
+async def fetch_image_async(
+    profile: str = _SPOT_IMAGE_PROFILE_SNAPSHOT,
+) -> tuple[bytes, Dict[str, Any]]:
     """Return a fresh process-local JPEG, coalescing concurrent upstream refreshes."""
     global _img_downstream_request_count, _img_cache_hit_count
+    global _img_snapshot_downstream_request_count, _img_live_downstream_request_count
     global _img_singleflight_leader_count, _img_coalesced_waiter_count
     global _img_refresh_task, _img_failure_count
 
+    normalized_profile = _normalize_spot_image_profile(profile)
     _img_downstream_request_count += 1
+    if normalized_profile == _SPOT_IMAGE_PROFILE_OPERATOR_LIVE:
+        _img_live_downstream_request_count += 1
+    else:
+        _img_snapshot_downstream_request_count += 1
     if not _img_accepting_requests:
         raise SpotImageFetchError(
             "shutdown",
@@ -3026,12 +3146,17 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
         cache_entry = _img_cache_entry
         if _is_spot_image_cache_fresh(
             cache_entry,
+            profile=normalized_profile,
             record_clock_anomaly=True,
             expected_image_url=image_url,
         ):
             assert cache_entry is not None
             _img_cache_hit_count += 1
-            return _spot_image_response(cache_entry, source="cache")
+            return _spot_image_response(
+                cache_entry,
+                profile=normalized_profile,
+                source="cache",
+            )
 
         is_leader = False
         async with _img_fetch_lock:
@@ -3045,11 +3170,16 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
             cache_entry = _img_cache_entry
             if _is_spot_image_cache_fresh(
                 cache_entry,
+                profile=normalized_profile,
                 expected_image_url=image_url,
             ):
                 assert cache_entry is not None
                 _img_cache_hit_count += 1
-                return _spot_image_response(cache_entry, source="cache")
+                return _spot_image_response(
+                    cache_entry,
+                    profile=normalized_profile,
+                    source="cache",
+                )
 
             refresh_task = _img_refresh_task
             if refresh_task is None or refresh_task.done():
@@ -3085,6 +3215,7 @@ async def fetch_image_async() -> tuple[bytes, Dict[str, Any]]:
 
         return _spot_image_response(
             refreshed_entry,
+            profile=normalized_profile,
             source="upstream" if is_leader else "coalesced",
         )
 

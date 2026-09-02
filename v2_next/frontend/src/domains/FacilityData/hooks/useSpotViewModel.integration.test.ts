@@ -653,6 +653,49 @@ describe('useSpotViewModel integration', () => {
     }
   });
 
+  it('uses the server-derived 250ms operator image cadence', async () => {
+    vi.useFakeTimers();
+    const originalCreateObjectURL = global.URL.createObjectURL;
+    const originalRevokeObjectURL = global.URL.revokeObjectURL;
+    global.URL.createObjectURL = vi.fn(() => `blob:operator-${mockFetchSpotImageResponse.mock.calls.length}`);
+    global.URL.revokeObjectURL = vi.fn();
+    mockFetchSpotConfig.mockResolvedValue({
+      ...BASE_SPOT_CONFIG,
+      image_url: '/api/spot/live_image.jpg',
+      snapshot_image_url: '/api/spot/image.jpg',
+      image_refresh_interval: 0.25,
+    });
+    mockFetchSpotImageResponse.mockImplementation(async () => buildValidJpegResponse());
+
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      await act(async () => {
+        result.current.refreshImage();
+        await Promise.resolve();
+      });
+      act(() => {
+        result.current.handleImageLoad(result.current.imageUrl);
+      });
+      expect(result.current.diagnostics.refresh_interval_ms).toBe(250);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(249);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+      global.URL.createObjectURL = originalCreateObjectURL;
+      global.URL.revokeObjectURL = originalRevokeObjectURL;
+    }
+  });
+
   it('reschedules a displayed image when only the configured interval changes', async () => {
     vi.useFakeTimers();
     const originalCreateObjectURL = global.URL.createObjectURL;

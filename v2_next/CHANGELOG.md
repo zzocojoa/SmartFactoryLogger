@@ -2,6 +2,62 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.22] - 2026-08-28
+
+### Changed
+
+- Raised the Windows SPOT source-port quarantine from 75 to 77 seconds while
+  retaining the 75-second minimum reuse requirement and adding a two-second
+  safety margin under `spot-source-port-quarantine-v3`.
+- Exposed the required reuse interval, safety margin, effective quarantine,
+  and minimum required pool capacity as aggregate `/api/spot/config`
+  diagnostics without exposing source-port values.
+- Added `/api/spot/live_image.jpg` to the sampled quiet access paths so the
+  operator refresh cadence does not emit two info-level access lines per frame.
+- Vendored the exact five-file diagnostic-core snapshot used by the Canary
+  builder and bound every source file to an approved SHA-256.
+
+### Validation
+
+- Fixed the 768-port production pool capacity contract against the maximum
+  six-request/s rate: 462 ports are required for a 77-second quarantine.
+- The commit-bound private Windows package completed the 15-minute prerequisite and
+  a 7200.908-second Canary with zero new app failures, ping failures, resets, SYN
+  retransmissions, or source-port reuse below 75 seconds.
+- The field result is `PASS_WITH_SWITCH_LIMITATION` because managed-switch counters
+  were unavailable. Production promotion remains a separate approval gate.
+- The quiet-path runtime fix was made after that field run. A new product build,
+  installer identity, 15-minute check, and 120-minute validation are required
+  before the post-review candidate can be promoted.
+
+## [1.0.21] - 2026-08-21
+
+### Added
+
+- Added a dedicated `/api/spot/live_image.jpg` operator-live profile while
+  preserving `/api/spot/image.jpg` as the existing snapshot contract.
+- Added profile-specific, payload-free SPOT image diagnostics and field QA
+  checks for live cadence, cache reuse, guarded transport, and request budget.
+
+### Changed
+
+- Made the dashboard use the server-declared live-image cadence with
+  completion-driven refresh, visibility pause, and bounded retry behavior.
+- Kept both image profiles on the manufacturer-defined `/image.jpg` resource
+  through one shared cache, single-flight refresh, serialized device access,
+  and the existing Windows source-port quarantine policy.
+
+### Security
+
+- Kept SPOT host validation strict and JPEG validation fail-closed without
+  exposing raw device addresses, URLs, source ports, or image payloads through
+  diagnostics.
+
+### Validation
+
+- Local automated checks and an HTTP/1.0 close benchmark passed. Physical SPOT
+  smoke and the 120-minute canary remain mandatory before release promotion.
+
 ## [1.0.20] - 2026-08-12
 
 ### Added

@@ -1,0 +1,498 @@
+[CmdletBinding()]
+param(
+    [string]$KitRoot = "",
+
+    [switch]$Quiet
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$expectedPackageFiles = @(
+    "SPOT_REALTIME_IMAGE_CANARY_120M_GUIDE.md",
+    "analyze-spot-http-framing.ps1",
+    "backend_bundle_integrity.psm1",
+    "canary_kit_files_sha256.txt",
+    "canary_kit_identity.json",
+    "collect-spot-connecttimeout-evidence.ps1",
+    "collect_operational_observability.ps1",
+    "invoke-spot-realtime-image-canary-120m.ps1",
+    "monitor-spot-connecttimeout-trigger.ps1",
+    "operator_attestation_15m.json",
+    "run-spot-realtime-image-canary-120m-as-admin.cmd",
+    "verify-spot-realtime-image-canary-kit.ps1"
+) | Sort-Object
+$manifestFileName = "canary_kit_files_sha256.txt"
+$expectedManifestFiles = @(
+    $expectedPackageFiles | Where-Object { $_ -ne $manifestFileName }
+) | Sort-Object
+
+if ([string]::IsNullOrWhiteSpace($KitRoot)) {
+    $KitRoot = $PSScriptRoot
+}
+if (-not (Test-Path -LiteralPath $KitRoot -PathType Container)) {
+    throw "The extracted v1.0.22 server-validation kit folder was not found."
+}
+$resolvedKitRoot = (Resolve-Path -LiteralPath $KitRoot).Path
+$manifestPath = Join-Path $resolvedKitRoot $manifestFileName
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    throw "canary_kit_files_sha256.txt is missing. Do not run the canary."
+}
+
+$rows = @()
+$seenNames = @{}
+foreach ($line in Get-Content -LiteralPath $manifestPath -Encoding ascii) {
+    if ([string]::IsNullOrWhiteSpace($line)) {
+        continue
+    }
+    if ($line -notmatch "^(?<hash>[A-Fa-f0-9]{64})  (?<name>[^\\/]+)$") {
+        throw "The canary kit hash manifest format is invalid."
+    }
+    $name = [string]$Matches.name
+    if ($seenNames.ContainsKey($name)) {
+        throw "Duplicate canary kit manifest file: $name"
+    }
+    $seenNames[$name] = $true
+    $rows += [pscustomobject]@{
+        Name = $name
+        ExpectedSha256 = ([string]$Matches.hash).ToUpperInvariant()
+    }
+}
+
+$manifestNames = @($rows.Name | Sort-Object)
+if (($manifestNames -join "`n") -cne ($expectedManifestFiles -join "`n")) {
+    throw "The canary kit hash manifest file list is not approved."
+}
+$actualFiles = @(
+    Get-ChildItem -LiteralPath $resolvedKitRoot -File |
+        Select-Object -ExpandProperty Name |
+        Sort-Object
+)
+if (($actualFiles -join "`n") -cne ($expectedPackageFiles -join "`n")) {
+    throw "The canary kit contains a missing or unexpected file."
+}
+
+$results = foreach ($row in $rows) {
+    $path = Join-Path $resolvedKitRoot $row.Name
+    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+    [pscustomobject]@{
+        FileName = $row.Name
+        Match = $actual -ceq $row.ExpectedSha256
+        Sha256 = $actual
+    }
+}
+if (@($results | Where-Object { -not $_.Match }).Count -ne 0) {
+    throw "A canary kit file SHA-256 does not match. Do not run the canary."
+}
+
+$identity = Get-Content `
+    -LiteralPath (Join-Path $resolvedKitRoot "canary_kit_identity.json") `
+    -Raw |
+    ConvertFrom-Json
+$expectedDiagnosticCoreFileSha256 = [ordered]@{
+    "analyze-spot-http-framing.ps1" =
+        "DBDDEB253E69174080243103474F77E34A6275A5F52B81273448C051C1D13A99"
+    "collect_operational_observability.ps1" =
+        "6D395373A7D2C9B70EA38F6DF681A5ED042D814829D82E0988D4B915672EC94C"
+    "collect-spot-connecttimeout-evidence.ps1" =
+        "9EF68A3251A74EED7DF3CF0B67D2FB04E7247352CBCF77B18F0597A5C92E9F3B"
+    "monitor-spot-connecttimeout-trigger.ps1" =
+        "A6D46F9FB979ED2247BA34C436AFA5A59F6EC6D7BDCD95DC4E5D8D069A9837F9"
+    "test_spot_connecttimeout_trigger_collector.py" =
+        "0706A89D68E84A871A64CD688449EFFE62EE18C72E00D1C267180358D6D55968"
+}
+$diagnosticCoreFileProperties = @(
+    $identity.diagnostic_core.source_files_sha256.PSObject.Properties
+)
+if ($diagnosticCoreFileProperties.Count -ne $expectedDiagnosticCoreFileSha256.Count) {
+    throw "The diagnostic core source snapshot file list is not approved."
+}
+foreach ($entry in $expectedDiagnosticCoreFileSha256.GetEnumerator()) {
+    $property = $identity.diagnostic_core.source_files_sha256.PSObject.Properties[
+        $entry.Key
+    ]
+    if ($null -eq $property -or [string]$property.Value -cne [string]$entry.Value) {
+        throw "A diagnostic core source snapshot SHA-256 is not approved: $($entry.Key)"
+    }
+}
+$approvedEvidenceFiles = @($identity.prerequisite_15m.evidence_files)
+$approvedEvidenceByName = @{}
+foreach ($entry in $approvedEvidenceFiles) {
+    $name = [string]$entry.file
+    if ($approvedEvidenceByName.ContainsKey($name)) {
+        throw "The approved 15-minute evidence list contains a duplicate path."
+    }
+    $approvedEvidenceByName[$name] = [string]$entry.sha256
+}
+$approvedResultFile =
+    "approved-15m-v9-20260901-135039\v9_15m_corrected_postrun_validation.json"
+$approvedSanitizedZip = (
+    "approved-15m-v9-20260901-135039\" +
+    "runtime_validation_20260901_135039_sanitized_share.zip"
+)
+$approvedControlZip = (
+    "approved-15m-v9-20260901-135039\" +
+    "canary-control-20260901-133801-for-runtime_validation_20260901_135039.zip"
+)
+if (
+    $identity.schema_version -cne "spot-realtime-image-v1022-canary-kit-v10" -or
+    $identity.classification -cne "PRIVATE_UNSIGNED_INTERNAL_CANARY_ONLY" -or
+    [bool]$identity.production_promotion_allowed -or
+    $identity.product.version -cne "1.0.22" -or
+    $identity.product.build_git_commit -cne
+        "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80" -or
+    $identity.product.release_kit_folder -cne
+        "spot-realtime-image-performance-v1.0.22-5cc34b4" -or
+    $identity.product.release_identity_file -cne "release_identity.json" -or
+    $identity.product.release_identity_sha256 -cne
+        "3AB24AE19B127C3344DE59A345E668ED429B77D29F5C2BE8EE032B7B15262F32" -or
+    $identity.product.installer_sha256 -cne
+        "77577ABB08BD901365B2D366B5ABAF101217E90B8AA5F2E9CB47971FF03123E2" -or
+    $identity.product.app_asar_sha256 -cne
+        "B13909D1A6067E94EC945750C82F17948FC597D3A29060323E807193650F0327" -or
+    $identity.product.backend_bundle_sha256 -cne
+        "E171DF1C3EB3C8DB78700E95913E87E7B1EE95460990F6B342AD4E0165448C2C" -or
+    [int]$identity.product.backend_bundle_file_count -ne 1501 -or
+    $identity.product.source_port_policy_version -cne
+        "spot-source-port-quarantine-v3" -or
+    [double]$identity.product.source_port_minimum_required_reuse_interval_seconds -ne
+        75.0 -or
+    [double]$identity.product.source_port_quarantine_safety_margin_seconds -ne
+        2.0 -or
+    [double]$identity.product.source_port_quarantine_seconds -ne 77.0 -or
+    [int]$identity.product.source_port_pool_capacity -ne 768 -or
+    [int]$identity.product.source_port_minimum_required_pool_capacity -ne 462 -or
+    $identity.product.config_sha256 -cne
+        "6841C848A443DF91966C991707C2B21CA57C575993DCA36FACFF2592D070147E" -or
+    $identity.rollback.version -cne "1.0.20" -or
+    $identity.rollback.build_git_commit -cne
+        "cd8cfa649203494cf087206cf656dc2197107ea1" -or
+    $identity.rollback.installer_file -cne
+        "smart-factory-logger-v2 Setup 1.0.20.exe" -or
+    $identity.rollback.installer_sha256 -cne
+        "F3C52902EFA2081A5060D4CD2C579E8B20B9DBA2DE34E174C946390BEDA0DE19" -or
+    $identity.rollback.baseline_preinstall_summary_file -cne
+        "preinstall-summary.json" -or
+    $identity.rollback.baseline_health_file -cne "health-before.json" -or
+    $identity.diagnostic_core.source_commit -cne
+        "9b38171a00616a732d1aa64853d114c946f3bb78" -or
+    $identity.diagnostic_core.source_delivery -cne
+        "vendored-hash-bound-snapshot-v1" -or
+    $identity.diagnostic_core.source_identity -cne
+        "spot-connecttimeout-trigger-field-kit-v10" -or
+    $identity.diagnostic_core.framing_schema -cne
+        "spot-http-framing-evidence-v10" -or
+    $identity.diagnostic_core.observation_boundary_schema -cne
+        "spot-canary-observation-boundary-v1" -or
+    $identity.diagnostic_core.packet_timestamp_ordering_policy -cne
+        "timestamp-sorted-stable-v1" -or
+    $identity.diagnostic_core.same_four_tuple_reuse_ordering_policy -cne
+        "timestamp-sorted-per-four-tuple-v1" -or
+    $identity.diagnostic_core.packet_timing_uncertainty_policy -cne
+        "evidence-hold" -or
+    $identity.diagnostic_core.packet_order_sensitive_response_policy -cne
+        "timestamp-and-capture-order-disagreement-is-evidence-hold" -or
+    $identity.diagnostic_core.trigger_monitor_error_event_schema -cne
+        "spot-trigger-monitor-error-event-raw-v1" -or
+    $identity.diagnostic_core.trigger_monitor_integrity_policy -cne
+        "recovered-errors-within-detection-threshold-are-complete" -or
+    $identity.diagnostic_core.trigger_monitor_completion_policy -cne
+        "observer-deadline-atomic-request" -or
+    $identity.diagnostic_core.trigger_monitor_completion_request_schema -cne
+        "spot-trigger-monitor-completion-request-v1" -or
+    [int]$identity.diagnostic_core.trigger_monitor_completion_request_grace_seconds -ne
+        30 -or
+    $identity.diagnostic_core.parent_capture_stop_signal_policy -cne
+        "parent-authoritative-monotonic-boundary-and-five-second-signal-integrity" -or
+    $identity.diagnostic_core.parent_completion_request_source -cne
+        "parent-authoritative-observation-boundary" -or
+    [int]$identity.diagnostic_core.capture_stop_signal_observation_max_delay_seconds -ne
+        5 -or
+    $identity.diagnostic_core.postprocess_state_schema -cne
+        "spot-canary-postprocess-state-v1" -or
+    $identity.diagnostic_core.observation_elapsed_source_policy -cne
+        "parent-authoritative-monotonic-boundary" -or
+    $identity.diagnostic_core.http_no_response_definition -cne
+        "handshake-complete-with-outbound-request-payload-and-no-response" -or
+    $identity.diagnostic_core.handshake_only_classification_policy -cne
+        "evidence-only-not-http-request-failure" -or
+    $identity.diagnostic_core.pre_handshake_failure_attribution_policy -cne
+        "requires-observation-window-app-failure-counter-or-event-delta" -or
+    -not [bool]$identity.diagnostic_core.product_request_behavior_changed -or
+    [int]$identity.canary.maximum_observation_minutes -ne 120 -or
+    [int]$identity.canary.post_trigger_capture_seconds -ne 75 -or
+    [int]$identity.canary.progress_interval_seconds -ne 30 -or
+    $identity.canary.progress_source -cne "local-clock-and-process-state-only" -or
+    -not [bool]$identity.canary.stop_on_new_spot_connecttimeout -or
+    -not [bool]$identity.canary.same_four_tuple_minimum_75s_required -or
+    $identity.canary.required_source_port_policy_version -cne
+        "spot-source-port-quarantine-v3" -or
+    [double]$identity.canary.source_port_minimum_required_reuse_interval_seconds -ne
+        75.0 -or
+    [double]$identity.canary.source_port_quarantine_safety_margin_seconds -ne
+        2.0 -or
+    [double]$identity.canary.source_port_quarantine_seconds -ne 77.0 -or
+    [int]$identity.canary.source_port_pool_capacity -ne 768 -or
+    [int]$identity.canary.source_port_minimum_required_pool_capacity -ne 462 -or
+    -not [bool]$identity.canary.packet_capture_full_window_required -or
+    $identity.canary.counter_rate_window -cne
+        "observation-start-to-observation-end" -or
+    $identity.canary.postprocess_failure_policy -cne
+        "separate-evidence-hold" -or
+    [int]$identity.canary.observation_end_snapshot_max_delay_seconds -ne 5 -or
+    $identity.canary.historical_failure_counter_policy -cne
+        "stable-preflight-baseline-and-zero-canary-delta" -or
+    $identity.canary.general_request_event_drop_policy -cne
+        "bounded-journal-eviction-observability-only" -or
+    [int]$identity.canary.historical_failure_stability_seconds -ne 30 -or
+    [int]$identity.canary.historical_failure_progress_interval_seconds -ne 10 -or
+    $identity.canary.collector_failure_without_runtime_hard_gate -cne
+        "evidence-hold" -or
+    $identity.canary.pre_handshake_failure_attribution_policy -cne
+        "requires-aggregate-observation-window-app-outcome-integrity-v1" -or
+    $identity.canary.app_success_packet_pre_handshake_failure_policy -cne
+        "capture-or-flow-attribution-discrepancy" -or
+    $identity.canary.uncorroborated_packet_pre_handshake_failure_policy -cne
+        "evidence-hold" -or
+    $identity.canary.no_response_after_handshake_attribution_policy -cne
+        "requires-aggregate-observation-window-app-outcome-integrity-v1" -or
+    $identity.canary.app_request_outcome_integrity_policy -cne
+        "aggregate-observation-window-started-success-and-zero-failure-delta-v1" -or
+    $identity.canary.app_success_packet_no_response_policy -cne
+        "capture-or-flow-attribution-discrepancy" -or
+    $identity.canary.uncorroborated_packet_no_response_policy -cne
+        "evidence-hold" -or
+    $identity.canary.packet_order_sensitive_no_response_policy -cne
+        "evidence-hold" -or
+    $identity.canary.zero_image_activity_policy -cne "evidence-hold" -or
+    $identity.canary.image_liveness_preflight_schema -cne
+        "spot-image-liveness-preflight-v1" -or
+    $identity.canary.image_liveness_preflight_policy -cne
+        "30-to-60-second-image-request-success-and-capture-file-progress-gate" -or
+    [int]$identity.canary.image_liveness_preflight_minimum_seconds -ne 30 -or
+    [int]$identity.canary.image_liveness_preflight_maximum_seconds -ne 60 -or
+    [int]$identity.canary.image_liveness_preflight_poll_interval_seconds -ne 5 -or
+    [bool]$identity.canary.image_liveness_preflight_adds_spot_image_requests -or
+    $identity.prerequisite_15m.result -cne "PASS" -or
+    -not [bool]$identity.prerequisite_15m.full_120m_allowed -or
+    $identity.prerequisite_15m.evidence_relative_path -cne
+        "server-evidence\v1022-pending" -or
+    $identity.prerequisite_15m.observation_date_kst -cne "2026-09-01" -or
+    $identity.prerequisite_15m.observation_start_kst -cne
+        "2026-09-01T13:51:03.1498905+09:00" -or
+    $identity.prerequisite_15m.observation_end_kst -cne
+        "2026-09-01T14:06:04.4812825+09:00" -or
+    $identity.prerequisite_15m.operator_attestation_file -cne
+        "operator_attestation_15m.json" -or
+    $identity.prerequisite_15m.approval_scope -cne
+        "120-minute-canary-only" -or
+    $identity.prerequisite_15m.reviewed_result_schema -cne
+        "spot-v1022-v9-corrected-postrun-validation-v1" -or
+    $identity.prerequisite_15m.reviewed_result_file -cne
+        $approvedResultFile -or
+    $identity.prerequisite_15m.reviewed_result_sha256 -cne
+        "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA" -or
+    $identity.prerequisite_15m.sanitized_zip_file -cne
+        $approvedSanitizedZip -or
+    $identity.prerequisite_15m.sanitized_zip_sha256 -cne
+        "C3082C90D259A17D86BB5FF2D15A2861F7CAC195565EABA7FDAFB6667BDEDF6D" -or
+    $identity.prerequisite_15m.control_zip_file -cne
+        $approvedControlZip -or
+    $identity.prerequisite_15m.control_zip_sha256 -cne
+        "9361D97E07FD57534836B432F610F281449C3C6F2C1E3B3E1323B3DBF9FD7BD2" -or
+    $identity.prerequisite_15m.source_canary_zip_sha256 -cne
+        "F38DE4BBECEA6D0F1BD9FF65BB82BC677221DEDACCDBE8E2BC6512C5C460AE82" -or
+    -not [bool]$identity.prerequisite_15m.switch_limitation -or
+    $approvedEvidenceFiles.Count -ne 3 -or
+    $approvedEvidenceByName[$approvedResultFile] -cne
+        "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA" -or
+    $approvedEvidenceByName[$approvedSanitizedZip] -cne
+        "C3082C90D259A17D86BB5FF2D15A2861F7CAC195565EABA7FDAFB6667BDEDF6D" -or
+    $approvedEvidenceByName[$approvedControlZip] -cne
+        "9361D97E07FD57534836B432F610F281449C3C6F2C1E3B3E1323B3DBF9FD7BD2" -or
+    [bool]$identity.contains_installer -or
+    [bool]$identity.contains_product_binary -or
+    [bool]$identity.changes_application_or_settings -or
+    [bool]$identity.restarts_application -or
+    [bool]$identity.clears_error_queue
+) {
+    throw "The canary kit identity is not the approved v1.0.22 validation contract."
+}
+if ($identity.tooling_source_commit -notmatch "^[0-9a-f]{40}$") {
+    throw "The canary tooling source commit is invalid."
+}
+
+$controllerSource = Get-Content `
+    -LiteralPath (
+        Join-Path $resolvedKitRoot "invoke-spot-realtime-image-canary-120m.ps1"
+    ) `
+    -Raw
+if (
+    $controllerSource -notmatch
+        "pre-handshake-failure-packet-only-uncorroborated" -or
+    $controllerSource -notmatch
+        "no-response-after-handshake-packet-only-uncorroborated" -or
+    $controllerSource -notmatch
+        "no-response-after-handshake-app-corroborated" -or
+    $controllerSource -notmatch
+        "app-success-corroborated-packet-discrepancy" -or
+    $controllerSource -notmatch
+        "pre_handshake_packet_capture_or_flow_attribution_discrepancy_attempts" -or
+    $controllerSource -notmatch
+        "no_response_after_handshake_packet_capture_or_flow_attribution_discrepancy_attempts" -or
+    $controllerSource -notmatch
+        "packet_capture_or_flow_attribution_discrepancy_attempts" -or
+    $controllerSource -notmatch
+        "aggregate-observation-window-started-success-and-zero-failure-delta-v1" -or
+    $controllerSource -notmatch
+        "no_response_after_handshake_correlation_status" -or
+    $controllerSource -notmatch
+        "requires-aggregate-observation-window-app-outcome-integrity-v1" -or
+    $controllerSource -notmatch
+        '\$holds\.Add\("image-counter-did-not-progress"\)' -or
+    $controllerSource -notmatch "SPOT_IMAGE_LIVENESS_EVIDENCE_HOLD" -or
+    $controllerSource -notmatch "capture_fact_row_count" -or
+    $controllerSource -notmatch "no added SPOT image request" -or
+    $controllerSource -notmatch "image-liveness-preflight-120m.json" -or
+    $controllerSource -notmatch
+        "reviewed 15-minute result does not satisfy the bound gate" -or
+    $controllerSource -notmatch
+        "15-minute evidence path escapes the approved evidence root" -or
+    $controllerSource -notmatch "120-minute-canary-only"
+) {
+    throw "The packet attribution or image liveness hold contract is missing."
+}
+
+$attestation = Get-Content `
+    -LiteralPath (Join-Path $resolvedKitRoot "operator_attestation_15m.json") `
+    -Raw |
+    ConvertFrom-Json
+if (
+    $attestation.schema_version -cne "spot-operator-visual-attestation-v1" -or
+    $attestation.product_version -cne "1.0.22" -or
+    $attestation.build_git_commit -cne
+        "5cc34b4fffd70195ec7fdd9d27acf4880cecbd80" -or
+    $attestation.evidence_kind -cne
+        "delayed-historical-server-validation" -or
+    $attestation.status -cne "CONFIRMED" -or
+    $attestation.observation_date_kst -cne "2026-09-01" -or
+    $attestation.observation_start_kst -cne
+        "2026-09-01T13:51:03.1498905+09:00" -or
+    $attestation.observation_end_kst -cne
+        "2026-09-01T14:06:04.4812825+09:00" -or
+    -not [bool]$attestation.continuous_spot_image_refresh -or
+    [bool]$attestation.screen_error_observed -or
+    $attestation.source -cne "v9_15m_corrected_postrun_validation.json" -or
+    $attestation.source_sha256 -cne
+        "A0B50C31D2E7120291F9BD5A65F5FB95D3C2CB2AFE92D05AF28974E0607355EA" -or
+    -not [bool]$attestation.delayed_attestation -or
+    [bool]$attestation.machine_generated
+) {
+    throw "The approved v1.0.22 15-minute attestation contract is invalid."
+}
+
+$collectorSource = Get-Content `
+    -LiteralPath (Join-Path $resolvedKitRoot "collect-spot-connecttimeout-evidence.ps1") `
+    -Raw
+if (
+    $collectorSource -notmatch "ProgressIntervalSeconds = 30" -or
+    $collectorSource -notmatch "\[CANARY PROGRESS\]" -or
+    $collectorSource -notmatch "local clock/process only; no added SPOT requests" -or
+    $collectorSource -notmatch "spot-canary-observation-boundary-v1" -or
+    $collectorSource -notmatch "canary-observation-start.json" -or
+    $collectorSource -notmatch "canary-observation-end.json" -or
+    $collectorSource -notmatch "Wait-CollectorObservationBoundary" -or
+    $collectorSource -notmatch "Write-ParentCollectorCompletionRequest" -or
+    $collectorSource -notmatch "Wait-CollectorStopSignal" -or
+    $collectorSource -notmatch "capture-stop-signal-observed-within-5s" -or
+    $collectorSource -notmatch "capture-stop-signal-after-boundary-within-5s" -or
+    $collectorSource -notmatch "parent-authoritative-observation-boundary" -or
+    $collectorSource -notmatch "capture_stop_signal_integrity_status" -or
+    $collectorSource -notmatch "canary-postprocess-state.json" -or
+    $collectorSource -notmatch "Get-ObservationTimingSummary" -or
+    $collectorSource -notmatch "parent-authoritative-monotonic-boundary" -or
+    $collectorSource -notmatch "app_observation_elapsed_seconds" -or
+    $collectorSource -notmatch "boundary_signal_nonblocking=true"
+) {
+    throw "The canary progress contract is missing."
+}
+$endSnapshotIndex = $collectorSource.IndexOf(
+    '$observationEndSnapshot = New-ObservationBoundarySnapshot',
+    [StringComparison]::Ordinal
+)
+$boundaryWaitIndex = if ($endSnapshotIndex -lt 0) {
+    -1
+} else {
+    $collectorSource.LastIndexOf(
+        '$boundaryResult = Wait-CollectorObservationBoundary',
+        $endSnapshotIndex,
+        [StringComparison]::Ordinal
+    )
+}
+$packetStopIndex = $collectorSource.IndexOf(
+    '$pktmonStarted = $false',
+    [Math]::Max(0, $endSnapshotIndex),
+    [StringComparison]::Ordinal
+)
+$integrityWaitIndex = $collectorSource.IndexOf(
+    '$signalIntegrityResult = Wait-CollectorStopSignal',
+    [Math]::Max(0, $endSnapshotIndex),
+    [StringComparison]::Ordinal
+)
+if ($boundaryWaitIndex -lt 0 -or
+    $endSnapshotIndex -le $boundaryWaitIndex -or
+    $packetStopIndex -le $endSnapshotIndex -or
+    $integrityWaitIndex -le $packetStopIndex -or
+    $collectorSource.Substring(
+        $boundaryWaitIndex,
+        $endSnapshotIndex - $boundaryWaitIndex
+    ) -match 'Receive-CollectorJobOutput|Wait-CollectorStopSignal') {
+    throw (
+        'The parent-authoritative boundary, packet stop, and signal integrity ' +
+        'order is invalid.'
+    )
+}
+$analyzerSource = Get-Content `
+    -LiteralPath (Join-Path $resolvedKitRoot "analyze-spot-http-framing.ps1") `
+    -Raw
+if (
+    $analyzerSource -notmatch "spot-http-framing-evidence-v10" -or
+    $analyzerSource -notmatch "request_no_response_after_handshake_attempts" -or
+    $analyzerSource -notmatch "handshake_only_without_request_attempts" -or
+    $analyzerSource -notmatch "pre_handshake_failed_attempts" -or
+    $analyzerSource -notmatch
+        "requires-observation-window-app-failure-counter-or-event-delta" -or
+    $analyzerSource -notmatch
+        "handshake-complete-with-outbound-request-payload-and-no-response" -or
+    $analyzerSource -notmatch "duplicate_initial_syn_count" -or
+    $analyzerSource -notmatch "monotonic_corrected" -or
+    $analyzerSource -notmatch "timestamp-sorted-stable-v1" -or
+    $analyzerSource -notmatch "initial_syn_timestamp_regression_max_ms" -or
+    $analyzerSource -notmatch "packet_order_sensitive_no_response_attempts" -or
+    $analyzerSource -notmatch
+        "timestamp-and-capture-order-disagreement-is-evidence-hold" -or
+    $analyzerSource -notmatch "excluded_before_count" -or
+    $analyzerSource -notmatch "excluded_after_count"
+) {
+    throw "The packet measurement v9 contract is missing."
+}
+$monitorSource = Get-Content `
+    -LiteralPath (Join-Path $resolvedKitRoot "monitor-spot-connecttimeout-trigger.ps1") `
+    -Raw
+if (
+    $monitorSource -notmatch "spot-trigger-monitor-error-event-raw-v1" -or
+    $monitorSource -notmatch
+        "complete-recovered-transient-errors" -or
+    $monitorSource -notmatch
+        "recovered-errors-within-detection-threshold-are-complete" -or
+    $monitorSource -notmatch "completion_request_source"
+) {
+    throw "The trigger monitor recoverability evidence contract is missing."
+}
+
+if (-not $Quiet) {
+    $results | Format-Table -AutoSize
+    Write-Host (
+        "[PASS] v1.0.22 server-validation kit identity and SHA-256 values are valid."
+    ) -ForegroundColor Green
+}

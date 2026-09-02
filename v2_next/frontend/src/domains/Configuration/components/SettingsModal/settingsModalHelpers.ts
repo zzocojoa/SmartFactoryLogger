@@ -25,6 +25,18 @@ interface StatusBadge {
   className: 'idle' | 'ok' | 'warn' | 'error';
 }
 
+type PollingPathStats = NonNullable<StatsSnapshot['polling']>['paths'][string];
+
+const SPOT_LIVE_IMAGE_STATS_PATH = '/api/spot/live_image.jpg';
+const SPOT_SNAPSHOT_IMAGE_STATS_PATH = '/api/spot/image.jpg';
+
+export const resolveSpotImagePollingStats = (
+  polling: StatsSnapshot['polling']
+): PollingPathStats | undefined => (
+  polling?.paths[SPOT_LIVE_IMAGE_STATS_PATH]
+  ?? polling?.paths[SPOT_SNAPSHOT_IMAGE_STATS_PATH]
+);
+
 export const SPOT_IMAGE_CAPTURE_MODE_OPTIONS: Array<{ value: SpotImageCaptureMode; label: string }> = [
   { value: 'off', label: 'Off' },
   { value: 'event', label: 'Event only' },

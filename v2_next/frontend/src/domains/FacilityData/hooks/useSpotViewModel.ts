@@ -29,7 +29,7 @@ import {
   getNextSpotImageRetryDelayMs,
   isSpotImageFailureRetryable,
 } from '../utils/spotImageRecoveryPolicy.pure';
-import { resolveSpotImageRefreshIntervalMs } from '../utils/spotImageRefreshPolicy.pure';
+import { resolveSpotOperatorImageRefreshIntervalMs } from '../utils/spotImageRefreshPolicy.pure';
 import type { UseSpotViewModel } from './useSpotViewModel.types';
 
 interface SpotImageState {
@@ -42,6 +42,8 @@ interface SpotImageState {
 const areSpotConfigsEqual = (first: SpotConfig, second: SpotConfig): boolean => {
   return (
     first.image_url === second.image_url &&
+    first.snapshot_image_url === second.snapshot_image_url &&
+    first.image_refresh_interval === second.image_refresh_interval &&
     first.refresh_interval === second.refresh_interval &&
     first.crosshair_x === second.crosshair_x &&
     first.crosshair_y === second.crosshair_y &&
@@ -260,7 +262,10 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       return;
     }
 
-    const intervalMs = resolveSpotImageRefreshIntervalMs(currentConfig.refresh_interval);
+    const intervalMs = resolveSpotOperatorImageRefreshIntervalMs(
+      currentConfig.image_refresh_interval,
+      currentConfig.refresh_interval
+    );
     const scheduledAt = Date.now() + intervalMs;
     normalRefreshTimerRef.current = window.setTimeout(() => {
       normalRefreshTimerRef.current = null;
@@ -339,7 +344,10 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       if (previousConfig?.image_url !== nextConfig.image_url) {
         cancelNormalImageRefresh();
         resetImageRecovery();
-      } else if (previousConfig?.refresh_interval !== nextConfig.refresh_interval) {
+      } else if (
+        previousConfig?.image_refresh_interval !== nextConfig.image_refresh_interval ||
+        previousConfig?.refresh_interval !== nextConfig.refresh_interval
+      ) {
         cancelNormalImageRefresh();
       }
       configRef.current = nextConfig;
@@ -347,12 +355,18 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       setDashboardSpotConfig(nextConfig);
       setDiagnostics((prev) => ({
         ...prev,
-        refresh_interval_ms: resolveSpotImageRefreshIntervalMs(nextConfig.refresh_interval),
+        refresh_interval_ms: resolveSpotOperatorImageRefreshIntervalMs(
+          nextConfig.image_refresh_interval,
+          nextConfig.refresh_interval
+        ),
         next_fetch_scheduled_at: null,
       }));
       if (
         previousConfig?.image_url === nextConfig.image_url &&
-        previousConfig.refresh_interval !== nextConfig.refresh_interval &&
+        (
+          previousConfig.image_refresh_interval !== nextConfig.image_refresh_interval ||
+          previousConfig.refresh_interval !== nextConfig.refresh_interval
+        ) &&
         hasImageRef.current &&
         !inFlightRef.current &&
         automaticRetryTimerRef.current === null
@@ -451,7 +465,10 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       setDiagnostics((prev) => ({
         ...prev,
         in_flight: true,
-        refresh_interval_ms: resolveSpotImageRefreshIntervalMs(currentConfig.refresh_interval),
+        refresh_interval_ms: resolveSpotOperatorImageRefreshIntervalMs(
+          currentConfig.image_refresh_interval,
+          currentConfig.refresh_interval
+        ),
         next_fetch_scheduled_at: null,
         fetch_count: prev.fetch_count + 1,
         last_fetch_started_at: startedAt,
@@ -470,7 +487,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
       }
 
       try {
-        const response = await fetchSpotImageResponse();
+        const response = await fetchSpotImageResponse(currentConfig.image_url);
         const responseReceivedAt = Date.now();
         const responseMetadata = resolveSpotImageResponseMetadata(
           response.headers,

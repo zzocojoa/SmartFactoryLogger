@@ -1,6 +1,10 @@
 # SPOT Live Image NSIS Deployment QA
 
-> **SUPERSEDED (2026-07-11):** 이 문서는 과거 구현 이력 보존용입니다. 현재 운영 계약은 `docs/02-design/features/spot-camera-rest-api-conformance.design.md`이며, 장비 `GET /image.jpg`와 앱 `GET /api/spot/image.jpg`만 사용합니다.
+> **SUPERSEDED (updated 2026-08-21):** 이 문서는 과거 구현 이력 보존용입니다.
+> 현재 장비 계약은 `GET /image.jpg` 하나이며, 앱의 snapshot/live 정책은
+> `docs/02-design/features/spot-realtime-image-performance.design.md`를 따릅니다.
+> 아래의 `/newjpeg.jpg`, `image.ssi`, 확장자 없는 앱 경로, 운영 결과는 현재
+> 구현 지침이 아닙니다.
 
 > Date: 2026-06-11
 > Scope: Phase 9 deployment runbook + zero-script QA

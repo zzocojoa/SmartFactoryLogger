@@ -9,7 +9,7 @@ import {
 } from '../../../shared/api/transport/spotService.transport';
 
 export const spotService = {
-  getImageUrl: () => buildSpotImageUrl(API_BASE),
+  getImageUrl: (configuredPath?: string) => buildSpotImageUrl(API_BASE, configuredPath),
   
   getConfig: fetchSpotConfig,
   
