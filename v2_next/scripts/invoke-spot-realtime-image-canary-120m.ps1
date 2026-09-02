@@ -3650,8 +3650,8 @@ try {
     )
     $operatorAnswer = if ($operatorEligible) {
         Read-Host (
-            "120분 전체 구간 동안 SPOT 영상이 계속 갱신되고 화면 오류가 없었습니까? " +
-            "정상인 경우 YES 입력"
+            "During the full 120-minute interval, did SPOT images keep " +
+            "updating with no new errors anywhere in the app? Enter YES only if true"
         )
     } else {
         $packet.evidence_holds += (
