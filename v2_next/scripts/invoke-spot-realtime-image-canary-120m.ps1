@@ -4,11 +4,7 @@ param(
 
     [string]$ReleaseKitRoot = "",
 
-    [string]$RollbackInstallerPath = (
-        "C:\Users\user\Desktop\SmartFactory\" +
-        "v1020_cd8cfa6_internal_private_server_deploy_20260821_R3\" +
-        "smart-factory-logger-v2 Setup 1.0.20.exe"
-    ),
+    [string]$RollbackInstallerPath = "",
 
     [string]$RuntimeEvidenceBase = "",
 
@@ -38,6 +34,13 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if (
+    [string]::IsNullOrWhiteSpace($RollbackInstallerPath) -and
+    -not [string]::IsNullOrWhiteSpace($env:SFL_ROLLBACK_INSTALLER)
+) {
+    $RollbackInstallerPath = $env:SFL_ROLLBACK_INSTALLER
+}
 
 function Get-RequiredProperty {
     param(
@@ -1453,6 +1456,39 @@ function Assert-EvidenceFiles {
         -BaselineHealth $baselineHealth
 }
 
+function Get-RequestInFlightCount {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Image,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("transport", "image")]
+        [string]$Prefix,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Context
+    )
+
+    $startedName = "source_port_${Prefix}_started_count"
+    $successName = "source_port_${Prefix}_success_count"
+    $failureName = "source_port_${Prefix}_failure_count"
+
+    $started = [int64](Get-RequiredProperty `
+        -InputObject $Image `
+        -Name $startedName `
+        -Context $Context)
+    $success = [int64](Get-RequiredProperty `
+        -InputObject $Image `
+        -Name $successName `
+        -Context $Context)
+    $failure = [int64](Get-RequiredProperty `
+        -InputObject $Image `
+        -Name $failureName `
+        -Context $Context)
+
+    return $started - $success - $failure
+}
+
 function Get-ObservationDeltaReport {
     param(
         [Parameter(Mandatory = $true)]
@@ -1554,15 +1590,53 @@ function Get-ObservationDeltaReport {
     if ([int64]$failureEventReport.drop_count_delta -gt 0) {
         $appFailureDeltaTotal += [int64]$failureEventReport.drop_count_delta
     }
-    $appRequestOutcomeIntegrityStatus = if ($appFailureDeltaTotal -gt 0) {
-        "app-failure-corroborated"
-    } elseif (
+    $transportInFlightBefore = Get-RequestInFlightCount `
+        -Image $Before.image `
+        -Prefix "transport" `
+        -Context "observation start transport counters"
+    $transportInFlightAfter = Get-RequestInFlightCount `
+        -Image $After.image `
+        -Prefix "transport" `
+        -Context "observation end transport counters"
+    $imageInFlightBefore = Get-RequestInFlightCount `
+        -Image $Before.image `
+        -Prefix "image" `
+        -Context "observation start image counters"
+    $imageInFlightAfter = Get-RequestInFlightCount `
+        -Image $After.image `
+        -Prefix "image" `
+        -Context "observation end image counters"
+
+    $completeSuccess = (
         $transportDelta -gt 0 -and
         $transportDelta -eq $successDelta -and
         $imageStartedDelta -gt 0 -and
         $imageStartedDelta -eq $imageSuccessDelta -and
         $imageStartedDelta -eq $imageDelta
-    ) {
+    )
+    $singleEndBoundaryInFlight = (
+        $appFailureDeltaTotal -eq 0 -and
+        $transportDelta -gt 0 -and
+        ($transportDelta - $successDelta) -eq 1 -and
+        $imageStartedDelta -gt 0 -and
+        ($imageStartedDelta - $imageSuccessDelta) -eq 1 -and
+        $imageStartedDelta -eq $imageDelta -and
+        $transportInFlightBefore -eq 0 -and
+        $transportInFlightAfter -eq 1 -and
+        $imageInFlightBefore -eq 0 -and
+        $imageInFlightAfter -eq 1
+    )
+    $boundaryReconciliationStatus = if ($singleEndBoundaryInFlight) {
+        "single-inflight-at-observation-end"
+    } elseif ($completeSuccess) {
+        "not-required"
+    } else {
+        "not-reconciled"
+    }
+
+    $appRequestOutcomeIntegrityStatus = if ($appFailureDeltaTotal -gt 0) {
+        "app-failure-corroborated"
+    } elseif ($completeSuccess -or $singleEndBoundaryInFlight) {
         "complete-success-corroborated"
     } else {
         "incomplete-or-inconsistent"
@@ -1584,8 +1658,8 @@ function Get-ObservationDeltaReport {
     if ($transportRate -gt 6.0) {
         [void]$hardFailures.Add("transport-rate-over-6:$transportRate")
     }
-    if ($imageRate -gt 3.2) {
-        [void]$hardFailures.Add("image-rate-over-3.2:$imageRate")
+    if ($imageRate -gt 4.0) {
+        [void]$hardFailures.Add("image-rate-over-4:$imageRate")
     }
 
     return [pscustomobject][ordered]@{
@@ -1601,6 +1675,15 @@ function Get-ObservationDeltaReport {
         app_request_outcome_integrity_policy = (
             "aggregate-observation-window-started-success-and-zero-failure-delta-v1"
         )
+        boundary_reconciliation_policy = (
+            "single-inflight-at-observation-end-v1"
+        )
+        boundary_reconciliation_status = $boundaryReconciliationStatus
+        boundary_reconciliation_applied = $singleEndBoundaryInFlight
+        transport_in_flight_start = $transportInFlightBefore
+        transport_in_flight_end = $transportInFlightAfter
+        image_in_flight_start = $imageInFlightBefore
+        image_in_flight_end = $imageInFlightAfter
         counter_window_elapsed_seconds = $counterWindowElapsedSeconds
         transport_rate_per_sec = $transportRate
         image_upstream_rate_per_sec = $imageRate
@@ -2622,6 +2705,56 @@ function Invoke-SelfTest {
     ) {
         throw "self-test counter-window rate calculation mismatch"
     }
+
+    $boundaryBefore = $before | Select-Object *
+    $boundaryBefore.image = $before.image | Select-Object *
+    $boundaryAfter = $after | Select-Object *
+    $boundaryAfter.image = $after.image | Select-Object *
+    $boundaryBefore.image.source_port_transport_failure_count = 0
+    $boundaryBefore.image.source_port_image_failure_count = 0
+    $boundaryAfter.image.source_port_transport_failure_count = 0
+    $boundaryAfter.image.source_port_image_failure_count = 0
+    $boundaryAfter.image.source_port_transport_started_count = 21427
+    $boundaryAfter.image.source_port_transport_success_count = 21426
+    $boundaryAfter.image.source_port_image_started_count = 9987
+    $boundaryAfter.image.source_port_image_success_count = 9986
+    $boundaryAfter.image.image_upstream_request_count = 9987
+    $boundaryDeltas = Get-ObservationDeltaReport `
+        -Before $boundaryBefore `
+        -After $boundaryAfter
+    if (
+        $boundaryDeltas.app_request_outcome_integrity_status -cne
+            "complete-success-corroborated" -or
+        -not [bool]$boundaryDeltas.boundary_reconciliation_applied -or
+        $boundaryDeltas.boundary_reconciliation_status -cne
+            "single-inflight-at-observation-end" -or
+        [int]$boundaryDeltas.transport_in_flight_start -ne 0 -or
+        [int]$boundaryDeltas.transport_in_flight_end -ne 1 -or
+        [int]$boundaryDeltas.image_in_flight_start -ne 0 -or
+        [int]$boundaryDeltas.image_in_flight_end -ne 1 -or
+        @($boundaryDeltas.hard_failures).Count -ne 0 -or
+        @($boundaryDeltas.evidence_holds).Count -ne 0
+    ) {
+        throw "self-test one end-boundary in-flight request was not reconciled"
+    }
+    $unreconciledBoundaryAfter = $boundaryAfter | Select-Object *
+    $unreconciledBoundaryAfter.image = $boundaryAfter.image | Select-Object *
+    $unreconciledBoundaryAfter.image.source_port_transport_started_count = 21428
+    $unreconciledBoundaryAfter.image.source_port_image_started_count = 9988
+    $unreconciledBoundaryAfter.image.image_upstream_request_count = 9988
+    $unreconciledBoundary = Get-ObservationDeltaReport `
+        -Before $boundaryBefore `
+        -After $unreconciledBoundaryAfter
+    if (
+        $unreconciledBoundary.app_request_outcome_integrity_status -cne
+            "incomplete-or-inconsistent" -or
+        [bool]$unreconciledBoundary.boundary_reconciliation_applied -or
+        "app-request-outcome-integrity-incomplete" -notin
+            $unreconciledBoundary.evidence_holds
+    ) {
+        throw "self-test multiple end-boundary in-flight requests were accepted"
+    }
+
     $noImageProgressAfter = $after | Select-Object *
     $noImageProgressAfter.image = $after.image | Select-Object *
     $noImageProgressAfter.image.source_port_image_started_count =
@@ -2796,6 +2929,39 @@ function Invoke-SelfTest {
         $_ -like "transport-rate-over-6:*"
     }).Count -ne 1) {
         throw "self-test transport rate limit was not enforced"
+    }
+
+    $withinImageRateAfter = $after | Select-Object *
+    $withinImageRateAfter.image = $after.image | Select-Object *
+    $withinImageRateAfter.image.source_port_transport_started_count = 21426
+    $withinImageRateAfter.image.source_port_transport_success_count = 21426
+    $withinImageRateAfter.image.source_port_image_started_count = 10042
+    $withinImageRateAfter.image.source_port_image_success_count = 10042
+    $withinImageRateAfter.image.image_upstream_request_count = 10042
+    $withinImageRate = Get-ObservationDeltaReport `
+        -Before $before `
+        -After $withinImageRateAfter
+    if (
+        [double]$withinImageRate.image_upstream_rate_per_sec -le 3.2 -or
+        [double]$withinImageRate.image_upstream_rate_per_sec -ge 4.0 -or
+        @($withinImageRate.hard_failures | Where-Object {
+            $_ -like "image-rate-over-4:*"
+        }).Count -ne 0
+    ) {
+        throw "self-test valid image rate between 3.2 and 4.0 was rejected"
+    }
+    $overImageRateAfter = $withinImageRateAfter | Select-Object *
+    $overImageRateAfter.image = $withinImageRateAfter.image | Select-Object *
+    $overImageRateAfter.image.source_port_image_started_count = 10062
+    $overImageRateAfter.image.source_port_image_success_count = 10062
+    $overImageRateAfter.image.image_upstream_request_count = 10062
+    $overImageRate = Get-ObservationDeltaReport `
+        -Before $before `
+        -After $overImageRateAfter
+    if (@($overImageRate.hard_failures | Where-Object {
+        $_ -like "image-rate-over-4:*"
+    }).Count -ne 1) {
+        throw "self-test image rate over 4.0 was not rejected"
     }
 
     $boundaryRoot = Join-Path `

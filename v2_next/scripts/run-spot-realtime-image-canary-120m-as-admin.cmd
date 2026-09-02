@@ -4,14 +4,16 @@ setlocal EnableExtensions
 fltmc >nul 2>&1
 if not errorlevel 1 goto :elevated
 
-echo [INFO] Requesting Windows administrator permission...
-set "SFL_CANARY_LAUNCHER=%~f0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; Start-Process -FilePath $env:ComSpec -Verb RunAs -ArgumentList @('/d','/c',($q+$q+$env:SFL_CANARY_LAUNCHER+$q+$q))"
-exit /b
+echo [FAILED] This unsigned internal kit cannot elevate itself safely.
+echo [ACTION] Use the independently hash-bound external bootstrap from an
+echo [ACTION] Administrator PowerShell after it verifies the unopened ZIP.
+exit /b 5
 
 :elevated
+if /I not "%SFL_CANARY_EXTERNAL_PROVENANCE_VERIFIED%"=="YES" goto :provenance_required
+if not defined SFL_ROLLBACK_INSTALLER goto :rollback_path_required
+
 pushd "%~dp0"
-set "SFL_ROLLBACK_INSTALLER=C:\Users\user\Desktop\SmartFactory\v1020_cd8cfa6_internal_private_server_deploy_20260821_R3\smart-factory-logger-v2 Setup 1.0.20.exe"
 
 echo [CHECK] Verifying the approved v1.0.22 120-minute kit.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-spot-realtime-image-canary-kit.ps1" -KitRoot "%~dp0"
@@ -19,7 +21,7 @@ if errorlevel 1 goto :verification_failed
 
 echo.
 echo [CHECK] Running a fresh fail-closed server preflight.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0invoke-spot-realtime-image-canary-120m.ps1" -KitRoot "%~dp0" -ReleaseKitRoot "%~dp0.." -RollbackInstallerPath "%SFL_ROLLBACK_INSTALLER%" -PreflightOnly
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0invoke-spot-realtime-image-canary-120m.ps1" -KitRoot "%~dp0" -ReleaseKitRoot "%~dp0.." -PreflightOnly
 if errorlevel 1 goto :preflight_failed
 
 echo.
@@ -33,7 +35,7 @@ if /I not "%SFL_CANARY_CONFIRM%"=="RUN-120M" goto :cancelled
 
 echo.
 echo [START] Starting the 120-minute observation.
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0invoke-spot-realtime-image-canary-120m.ps1" -KitRoot "%~dp0" -ReleaseKitRoot "%~dp0.." -RollbackInstallerPath "%SFL_ROLLBACK_INSTALLER%"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0invoke-spot-realtime-image-canary-120m.ps1" -KitRoot "%~dp0" -ReleaseKitRoot "%~dp0.."
 set "SFL_CANARY_EXIT=%ERRORLEVEL%"
 if "%SFL_CANARY_EXIT%"=="0" goto :passed
 if "%SFL_CANARY_EXIT%"=="2" goto :limited_pass
@@ -86,6 +88,19 @@ goto :finish
 set "SFL_CANARY_EXIT=4"
 echo.
 echo [CANCELLED] Confirmation did not match. No observation was started.
+goto :finish
+
+:provenance_required
+echo.
+echo [FAILED] External ZIP provenance verification was not recorded.
+echo [ACTION] Do not set SFL_CANARY_EXTERNAL_PROVENANCE_VERIFIED manually.
+echo [ACTION] Launch only through the independently hash-bound bootstrap.
+exit /b 5
+
+:rollback_path_required
+echo.
+echo [FAILED] SFL_ROLLBACK_INSTALLER was not supplied by the trusted bootstrap.
+exit /b 5
 
 :finish
 popd

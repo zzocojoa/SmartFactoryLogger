@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import tempfile
 import subprocess
 import unittest
 from pathlib import Path
@@ -18,28 +20,34 @@ GUIDE = (
     / "04-deploy"
     / "spot-realtime-image-v1022-validation.md"
 )
+QA_IMAGE_SERVER = SCRIPTS / "qa_spot_image_server.ps1"
+
+
+def windows_powershell_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["PSModulePath"] = os.pathsep.join(
+        (
+            str(
+                Path(environment.get("ProgramFiles", r"C:\Program Files"))
+                / "WindowsPowerShell"
+                / "Modules"
+            ),
+            str(
+                Path(environment.get("SystemRoot", r"C:\Windows"))
+                / "System32"
+                / "WindowsPowerShell"
+                / "v1.0"
+                / "Modules"
+            ),
+        )
+    )
+    return environment
 
 
 @unittest.skipUnless(os.name == "nt", "canary tooling is Windows-only")
 class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
     def test_controller_self_test(self) -> None:
-        environment = os.environ.copy()
-        environment["PSModulePath"] = os.pathsep.join(
-            (
-                str(
-                    Path(environment.get("ProgramFiles", r"C:\Program Files"))
-                    / "WindowsPowerShell"
-                    / "Modules"
-                ),
-                str(
-                    Path(environment.get("SystemRoot", r"C:\Windows"))
-                    / "System32"
-                    / "WindowsPowerShell"
-                    / "v1.0"
-                    / "Modules"
-                ),
-            )
-        )
+        environment = windows_powershell_environment()
         result = subprocess.run(
             [
                 "powershell.exe",
@@ -74,8 +82,124 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
         self.assertIn("No automatic rollback was performed", source)
         self.assertIn("PASS WITH LIMITATION", source)
         self.assertIn('if "%SFL_CANARY_EXIT%"=="2"', source)
+        self.assertIn("SFL_CANARY_EXTERNAL_PROVENANCE_VERIFIED", source)
+        self.assertIn("SFL_ROLLBACK_INSTALLER", source)
+        self.assertNotIn('"%SFL_ROLLBACK_INSTALLER%"', source)
+        self.assertNotIn("-Verb RunAs", source)
+        self.assertNotIn(r"C:\Users\user", source)
         self.assertEqual(source.count("-PreflightOnly"), 1)
         self.assertNotIn("v1.0.16", source)
+
+    def test_verifier_rejects_manifest_and_file_tampering(self) -> None:
+        expected_files = (
+            "SPOT_REALTIME_IMAGE_CANARY_120M_GUIDE.md",
+            "analyze-spot-http-framing.ps1",
+            "backend_bundle_integrity.psm1",
+            "canary_kit_files_sha256.txt",
+            "canary_kit_identity.json",
+            "collect-spot-connecttimeout-evidence.ps1",
+            "collect_operational_observability.ps1",
+            "invoke-spot-realtime-image-canary-120m.ps1",
+            "monitor-spot-connecttimeout-trigger.ps1",
+            "operator_attestation_15m.json",
+            "run-spot-realtime-image-canary-120m-as-admin.cmd",
+            "verify-spot-realtime-image-canary-kit.ps1",
+        )
+
+        def prepare_kit(root: Path) -> Path:
+            for name in expected_files:
+                if name == "canary_kit_files_sha256.txt":
+                    continue
+                (root / name).write_text("{}" if name.endswith(".json") else "fixture", encoding="utf-8")
+            manifest = root / "canary_kit_files_sha256.txt"
+            manifest.write_text(
+                "\n".join(
+                    f"{hashlib.sha256((root / name).read_bytes()).hexdigest().upper()}  {name}"
+                    for name in expected_files
+                    if name != manifest.name
+                ),
+                encoding="ascii",
+            )
+            return manifest
+
+        def run_verifier(root: Path) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(VERIFIER),
+                    "-KitRoot",
+                    str(root),
+                    "-Quiet",
+                ],
+                cwd=REPOSITORY,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=windows_powershell_environment(),
+            )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            kit = Path(temporary_directory)
+            manifest = prepare_kit(kit)
+            manifest.write_text(
+                manifest.read_text(encoding="ascii")
+                + "\n"
+                + manifest.read_text(encoding="ascii").splitlines()[0],
+                encoding="ascii",
+            )
+            duplicate = run_verifier(kit)
+            self.assertNotEqual(duplicate.returncode, 0)
+            self.assertIn("Duplicate canary kit manifest file", duplicate.stderr)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            kit = Path(temporary_directory)
+            prepare_kit(kit)
+            (kit / "unexpected.txt").write_text("unexpected", encoding="utf-8")
+            unexpected = run_verifier(kit)
+            self.assertNotEqual(unexpected.returncode, 0)
+            self.assertIn("missing or unexpected file", unexpected.stderr)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            kit = Path(temporary_directory)
+            prepare_kit(kit)
+            (kit / "analyze-spot-http-framing.ps1").write_text("tampered", encoding="utf-8")
+            hash_mismatch = run_verifier(kit)
+            self.assertNotEqual(hash_mismatch.returncode, 0)
+            self.assertIn("SHA-256 does not match", hash_mismatch.stderr)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            kit = Path(temporary_directory)
+            prepare_kit(kit)
+            identity = run_verifier(kit)
+            self.assertNotEqual(identity.returncode, 0)
+            self.assertIn("prerequisite_15m", identity.stderr)
+
+    def test_server_qa_rejects_non_positive_observation(self) -> None:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(QA_IMAGE_SERVER),
+                "-ObservationSeconds",
+                "0",
+            ],
+            cwd=REPOSITORY,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=windows_powershell_environment(),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must be greater than zero", result.stderr)
 
     def test_builder_binds_product_core_and_progress_contract(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")

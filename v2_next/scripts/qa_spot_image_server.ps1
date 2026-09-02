@@ -18,6 +18,9 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $OutputPath = Join-Path $env:TEMP "sfl-spot-image-server-qa-$stamp.json"
 }
+if ($ObservationSeconds -le 0) {
+    throw "ObservationSeconds must be greater than zero."
+}
 
 function Get-ConfiguredSpotIp {
     param([string]$Path)
@@ -237,6 +240,12 @@ if ($artifact.app_live_image.image_profile -ne "operator_live") {
 }
 if ($artifact.observation.failures -gt 0) {
     $blockers.Add("Completion-driven image observation contained failures.")
+}
+if (
+    $artifact.observation.requests -lt 1 -or
+    $artifact.observation.successes -lt 1
+) {
+    $blockers.Add("Completion-driven image observation contained no successful samples.")
 }
 $artifact.blockers = $blockers
 
