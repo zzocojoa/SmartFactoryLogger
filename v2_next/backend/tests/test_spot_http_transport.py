@@ -1237,7 +1237,11 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         transport.start()
         try:
             with self.assertRaises(SpotPortBindError):
-                await transport.request(_request())
+                await transport.request(
+                    _request(
+                        correlation_id="transport:55555555555555555555555555555555"
+                    )
+                )
             diagnostics = transport.diagnostics()
         finally:
             self.assertTrue(await transport.close())
@@ -1245,6 +1249,11 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(source_addresses), 2)
         self.assertTrue(all(address[1] > 0 for address in source_addresses))
         self.assertEqual(diagnostics["source_port_transport_failure_count"], 1)
+        self.assertEqual(diagnostics["source_port_bind_collision_count"], 2)
+        self.assertEqual(diagnostics["source_port_bind_retry_exhaustion_count"], 1)
+        failure_events = diagnostics["source_port_recent_request_failure_events"]
+        self.assertEqual(len(failure_events), 1)
+        self.assertEqual(failure_events[0]["exception_class"], "SpotPortBindError")
 
     async def test_connect_and_read_timeouts_are_mapped_and_quarantined(self) -> None:
         cases = (

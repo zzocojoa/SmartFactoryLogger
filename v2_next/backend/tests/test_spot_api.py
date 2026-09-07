@@ -25,6 +25,7 @@ from starlette.requests import Request as StarletteRequest
 
 from backend import app as backend_app
 from backend.FacilityData.drivers import spot_api
+from backend.FacilityData.drivers.spot_http_transport import SpotPortBindError
 from backend.FacilityData.repository import CSVLoggerService
 from backend.FacilityData.spot_diagnostic_observability import (
     SPOT_DIAGNOSTIC_FAILURE_JOURNAL_FILENAME,
@@ -161,6 +162,7 @@ class FakeSpotHttpTransport:
             "source_port_pool_acquire_wait_count": 0,
             "source_port_pool_exhaustion_count": 0,
             "source_port_bind_collision_count": 0,
+            "source_port_bind_retry_exhaustion_count": 0,
             "source_port_rebind_retry_count": 0,
             "source_port_reuse_violation_count": 0,
             "source_port_minimum_reuse_interval_seconds": None,
@@ -5060,6 +5062,12 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 spot_api.SpotRequestKind.DIAGNOSTIC,
             ],
         )
+        image_correlation_id = transport.requests[0].correlation_id
+        self.assertIsNotNone(image_correlation_id)
+        self.assertRegex(
+            str(image_correlation_id),
+            r"^transport:[0-9a-f]{32}$",
+        )
         client.request.assert_not_awaited()
 
     async def test_guarded_transport_preserves_connect_and_read_timeout_types(self) -> None:
@@ -5413,6 +5421,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             "source_port_transport_success_count",
             "source_port_transport_failure_count",
             "source_port_bind_collision_count",
+            "source_port_bind_retry_exhaustion_count",
             "source_port_transport_pending_count",
             "source_port_request_event_limit",
             "source_port_request_event_count_total",
@@ -5475,6 +5484,45 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(raised.exception.code, "upstream-request-error")
+        self.assertEqual(
+            raised.exception.transport_error_type,
+            "SpotTransportClosedError",
+        )
+        self.assertIsNotNone(raised.exception.request_elapsed_ms)
+        self.assertRegex(
+            str(raised.exception.transport_correlation_id),
+            r"^transport:[0-9a-f]{32}$",
+        )
+        client.request.assert_not_awaited()
+
+    async def test_image_request_preserves_bind_failure_details(self) -> None:
+        os_error = OSError(10048, "private endpoint detail")
+        bind_error = SpotPortBindError("source-port bind retry limit exhausted")
+        bind_error.__cause__ = os_error
+        transport = Mock(supported=True, active=True)
+        transport.request = AsyncMock(side_effect=bind_error)
+        transport.close = AsyncMock(return_value=True)
+        spot_api._spot_http_transport = transport
+        client = AsyncMock(spec=httpx.AsyncClient)
+
+        with self.assertRaises(spot_api.SpotImageFetchError) as raised:
+            await spot_api._request_spot_image(
+                client,
+                "http://spot.local/image.jpg",
+            )
+
+        error = raised.exception
+        request = transport.request.await_args.args[0]
+        self.assertEqual(error.code, "upstream-request-error")
+        self.assertEqual(error.transport_error_type, "SpotPortBindError")
+        self.assertEqual(error.transport_os_error_code, 10048)
+        self.assertIsNotNone(error.request_elapsed_ms)
+        self.assertEqual(error.transport_correlation_id, request.correlation_id)
+        self.assertRegex(
+            str(error.transport_correlation_id),
+            r"^transport:[0-9a-f]{32}$",
+        )
+        self.assertNotIn("private endpoint detail", repr(error.__dict__))
         client.request.assert_not_awaited()
 
     async def test_all_spot_device_http_requests_are_serialized(self) -> None:
@@ -5799,6 +5847,8 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             image_url="http://spot.local/image.jpg",
             upstream_status=None,
             transport_error_type="ConnectTimeout",
+            transport_os_error_code=10060,
+            transport_correlation_id="transport:66666666666666666666666666666666",
             request_elapsed_ms=1004.2,
         )
         with (
@@ -5815,11 +5865,21 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["detail"]["code"], "upstream-timeout")
         self.assertIsNone(response.json()["detail"]["upstream_status"])
         self.assertEqual(response.json()["detail"]["transport_error_type"], "ConnectTimeout")
+        self.assertEqual(response.json()["detail"]["transport_os_error_code"], 10060)
+        self.assertEqual(
+            response.json()["detail"]["transport_correlation_id"],
+            "transport:66666666666666666666666666666666",
+        )
         self.assertEqual(response.json()["detail"]["request_elapsed_ms"], 1004.2)
         error_mock.assert_called_once()
         self.assertEqual(error_mock.call_args.kwargs["error_type"], "ConnectTimeout")
         self.assertIn("'code': 'upstream-timeout'", error_mock.call_args.kwargs["detail"])
         self.assertIn("'transport_error_type': 'ConnectTimeout'", error_mock.call_args.kwargs["detail"])
+        self.assertIn("'transport_os_error_code': 10060", error_mock.call_args.kwargs["detail"])
+        self.assertIn(
+            "'transport_correlation_id': 'transport:66666666666666666666666666666666'",
+            error_mock.call_args.kwargs["detail"],
+        )
         self.assertIn("'request_elapsed_ms': 1004.2", error_mock.call_args.kwargs["detail"])
         self.assertEqual(error_mock.call_args.kwargs["level"], "error")
         result_mock.assert_called_once_with(502, path="/api/spot/image.jpg")
