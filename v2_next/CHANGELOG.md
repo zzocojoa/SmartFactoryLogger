@@ -2,6 +2,24 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.24] - 2026-09-07
+
+### Changed
+
+- Preserved the originating Windows transport exception type and numeric OS
+  error code for SPOT image failures without recording the device endpoint.
+- Added an opaque per-image transport correlation identifier and a dedicated
+  source-port bind retry-exhaustion counter to the diagnostic surfaces.
+
+### Validation
+
+- PR #185 passed the Windows artifact CI gate at source commit
+  `c7eeb05da0503687538db471e8d7658df4c0fd80` and was merged to `master` as
+  `80d77059639289906c4d486a7cf2e35df9a01e64`.
+- This release requires a new commit-bound Windows installer, release identity,
+  15-minute prerequisite, and 120-minute Canary before production promotion.
+  Existing v1.0.23 field evidence is not reused.
+
 ## [1.0.23] - 2026-09-02
 
 ### Changed
