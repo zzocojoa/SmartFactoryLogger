@@ -70,6 +70,7 @@ def _build_spot_http_transport_diagnostics(
     success_count: int,
     failure_count: int,
     bind_collision_count: int,
+    bind_retry_exhaustion_count: int,
     pending_count: int,
     kind_started_count: Mapping[str, int],
     kind_success_count: Mapping[str, int],
@@ -81,6 +82,7 @@ def _build_spot_http_transport_diagnostics(
         "source_port_transport_success_count": success_count,
         "source_port_transport_failure_count": failure_count,
         "source_port_bind_collision_count": bind_collision_count,
+        "source_port_bind_retry_exhaustion_count": bind_retry_exhaustion_count,
         "source_port_transport_pending_count": pending_count,
     }
     for kind in SpotRequestKind:
@@ -99,6 +101,7 @@ def empty_spot_http_transport_diagnostics() -> dict[str, object]:
         success_count=0,
         failure_count=0,
         bind_collision_count=0,
+        bind_retry_exhaustion_count=0,
         pending_count=0,
         kind_started_count=zero_counts,
         kind_success_count=zero_counts,
@@ -373,6 +376,7 @@ class SpotHttpTransport:
         self._success_count = 0
         self._failure_count = 0
         self._bind_collision_count = 0
+        self._bind_retry_exhaustion_count = 0
         self._kind_started_count = {kind.value: 0 for kind in SpotRequestKind}
         self._kind_success_count = {kind.value: 0 for kind in SpotRequestKind}
         self._kind_failure_count = {kind.value: 0 for kind in SpotRequestKind}
@@ -772,6 +776,7 @@ class SpotHttpTransport:
                 success_count=self._success_count,
                 failure_count=self._failure_count,
                 bind_collision_count=self._bind_collision_count,
+                bind_retry_exhaustion_count=self._bind_retry_exhaustion_count,
                 pending_count=len(self._pending),
                 kind_started_count=self._kind_started_count,
                 kind_success_count=self._kind_success_count,
@@ -894,6 +899,8 @@ class SpotHttpTransport:
                     with self._state_lock:
                         self._bind_collision_count += 1
                     if attempt + 1 >= self._bind_retry_limit:
+                        with self._state_lock:
+                            self._bind_retry_exhaustion_count += 1
                         raise SpotPortBindError(
                             "SPOT source-port bind retry limit was exhausted"
                         ) from exc

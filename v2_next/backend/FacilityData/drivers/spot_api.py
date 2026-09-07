@@ -258,6 +258,8 @@ class SpotImageFetchError(RuntimeError):
         image_url: str,
         upstream_status: Optional[int],
         transport_error_type: Optional[str] = None,
+        transport_os_error_code: Optional[int] = None,
+        transport_correlation_id: Optional[str] = None,
         request_elapsed_ms: Optional[float] = None,
     ) -> None:
         super().__init__(message)
@@ -265,6 +267,8 @@ class SpotImageFetchError(RuntimeError):
         self.image_url = image_url
         self.upstream_status = upstream_status
         self.transport_error_type = transport_error_type
+        self.transport_os_error_code = transport_os_error_code
+        self.transport_correlation_id = transport_correlation_id
         self.request_elapsed_ms = request_elapsed_ms
 
 
@@ -965,6 +969,38 @@ def _format_exception_message(exc: BaseException) -> str:
     return exc.__class__.__name__
 
 
+def _exception_chain(exc: BaseException) -> Iterable[BaseException]:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        if current.__cause__ is not None:
+            current = current.__cause__
+        elif not current.__suppress_context__:
+            current = current.__context__
+        else:
+            current = None
+
+
+def _transport_error_details(exc: BaseException) -> tuple[str, Optional[int]]:
+    chain = tuple(_exception_chain(exc))
+    transport_error_type = exc.__class__.__name__
+    for candidate in chain:
+        if isinstance(candidate, (SpotTransportError, SpotPortPoolError)):
+            transport_error_type = candidate.__class__.__name__
+            break
+
+    for candidate in chain:
+        if not isinstance(candidate, OSError):
+            continue
+        for attribute in ("winerror", "errno"):
+            value = getattr(candidate, attribute, None)
+            if isinstance(value, int) and not isinstance(value, bool):
+                return transport_error_type, value
+    return transport_error_type, None
+
+
 def _response_body_preview(response: httpx.Response, max_chars: int) -> str:
     body = response.text.strip()
     if len(body) <= max_chars:
@@ -1006,7 +1042,13 @@ def _is_spot_image_payload_rejection_code(error_code: str | None) -> bool:
     return error_code in _INVALID_IMAGE_PAYLOAD_REJECTION_CODES
 
 
-def _validate_spot_image_response(response: httpx.Response, image_url: str, data: bytes) -> None:
+def _validate_spot_image_response(
+    response: httpx.Response,
+    image_url: str,
+    data: bytes,
+    *,
+    transport_correlation_id: Optional[str] = None,
+) -> None:
     content_type = _response_content_type(response)
     if _payload_looks_like_html(data):
         raise SpotImageFetchError(
@@ -1018,6 +1060,7 @@ def _validate_spot_image_response(response: httpx.Response, image_url: str, data
             ),
             image_url=image_url,
             upstream_status=response.status_code,
+            transport_correlation_id=transport_correlation_id,
         )
     if not _is_jpeg_payload(data):
         raise SpotImageFetchError(
@@ -1029,6 +1072,7 @@ def _validate_spot_image_response(response: httpx.Response, image_url: str, data
             ),
             image_url=image_url,
             upstream_status=response.status_code,
+            transport_correlation_id=transport_correlation_id,
         )
 
 
@@ -1540,6 +1584,7 @@ async def _refresh_spot_diagnostics_safely(
 
 async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> bytes:
     request_started_at: Optional[float] = None
+    transport_correlation_id = f"transport:{uuid4().hex}"
     try:
         async with _spot_device_request_lock:
             request_started_at = time.monotonic()
@@ -1551,9 +1596,11 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
                 connect_timeout_sec=2.0,
                 read_timeout_sec=5.0,
                 max_response_bytes=HARD_MAX_RESPONSE_BYTES,
+                correlation_id=transport_correlation_id,
             )
             response.raise_for_status()
     except httpx.TimeoutException as exc:
+        transport_error_type, transport_os_error_code = _transport_error_details(exc)
         request_elapsed_ms = (
             max(0.0, (time.monotonic() - request_started_at) * 1000.0)
             if request_started_at is not None
@@ -1564,12 +1611,14 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
             "upstream-timeout",
             (
                 "SPOT image upstream timed out; "
-                f"url={image_url}; error_type={exc.__class__.__name__}; "
+                f"url={image_url}; error_type={transport_error_type}; "
                 f"request_elapsed_ms={elapsed_text}; error={_format_exception_message(exc)}"
             ),
             image_url=image_url,
             upstream_status=None,
-            transport_error_type=exc.__class__.__name__,
+            transport_error_type=transport_error_type,
+            transport_os_error_code=transport_os_error_code,
+            transport_correlation_id=transport_correlation_id,
             request_elapsed_ms=request_elapsed_ms,
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -1581,17 +1630,29 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
             ),
             image_url=image_url,
             upstream_status=exc.response.status_code,
+            transport_correlation_id=transport_correlation_id,
         ) from exc
     except httpx.RequestError as exc:
+        transport_error_type, transport_os_error_code = _transport_error_details(exc)
+        request_elapsed_ms = (
+            max(0.0, (time.monotonic() - request_started_at) * 1000.0)
+            if request_started_at is not None
+            else None
+        )
+        elapsed_text = "unknown" if request_elapsed_ms is None else f"{request_elapsed_ms:.1f}"
         raise SpotImageFetchError(
             "upstream-request-error",
             (
                 "SPOT image upstream request failed; "
-                f"url={image_url}; error_type={exc.__class__.__name__}; "
-                f"error={_format_exception_message(exc)}"
+                f"url={image_url}; error_type={transport_error_type}; "
+                f"request_elapsed_ms={elapsed_text}; error={_format_exception_message(exc)}"
             ),
             image_url=image_url,
             upstream_status=None,
+            transport_error_type=transport_error_type,
+            transport_os_error_code=transport_os_error_code,
+            transport_correlation_id=transport_correlation_id,
+            request_elapsed_ms=request_elapsed_ms,
         ) from exc
 
     data = response.content
@@ -1601,8 +1662,14 @@ async def _request_spot_image(client: httpx.AsyncClient, image_url: str) -> byte
             f"SPOT image upstream returned an empty body; url={image_url}",
             image_url=image_url,
             upstream_status=response.status_code,
+            transport_correlation_id=transport_correlation_id,
         )
-    _validate_spot_image_response(response, image_url, data)
+    _validate_spot_image_response(
+        response,
+        image_url,
+        data,
+        transport_correlation_id=transport_correlation_id,
+    )
     return data
 
 
