@@ -2,6 +2,29 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.25] - 2026-09-09
+
+### Fixed
+
+- Rounded a SPOT source-port quarantine deadline upward when floating-point
+  addition would otherwise make the measured wait shorter than 77 seconds.
+  The strict reuse check, 75-second minimum, two-second safety margin, pool
+  capacity, and genuine-violation fail-closed behavior remain unchanged.
+
+### Validation
+
+- PR #187 was merged to `master` as
+  `c225cf3ff320372c724483db5144dd44c1199f84`. Its regression tests cover the
+  floating-point boundary, repeated port reuse, release-time waiting, rebind
+  retries, and rejection of genuine early reuse.
+- This release candidate requires a new clean, merged-commit Windows installer,
+  release identity, and version-bound Canary with fresh 15-minute and 120-minute
+  server evidence. Existing v1.0.24 field evidence is not reused or promoted.
+- A passing build or offline test does not establish recovery of the field
+  incident. Installation, rollback, observation, and production promotion remain
+  separate actions; this version preparation changes no runtime configuration,
+  stored-data schema, or diagnostic counter contract.
+
 ## [1.0.24] - 2026-09-07
 
 ### Changed
