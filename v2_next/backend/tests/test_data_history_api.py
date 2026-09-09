@@ -476,9 +476,17 @@ class ElectronPreloadContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertEqual(root_package["version"], "1.0.24")
-        self.assertEqual(frontend_package["version"], "1.0.24")
-        self.assertIn('__version__ = "1.0.24"', backend_version)
+        self.assertEqual(root_package["version"], "1.0.25")
+        self.assertEqual(frontend_package["version"], "1.0.25")
+        self.assertIn('__version__ = "1.0.25"', backend_version)
+        for lock_path in (
+            self.repo_root / "package-lock.json",
+            self.repo_root / "frontend" / "package-lock.json",
+        ):
+            with self.subTest(lock_path=lock_path.name, parent=lock_path.parent.name):
+                lock = json.loads(lock_path.read_text(encoding="utf-8"))
+                self.assertEqual(lock["version"], "1.0.25")
+                self.assertEqual(lock["packages"][""]["version"], "1.0.25")
         self.assertEqual(
             root_package["build"]["nsis"]["artifactName"],
             "smart-factory-logger-v2 Setup ${version}.${ext}",
