@@ -1,4 +1,6 @@
+import math
 import unittest
+from unittest.mock import patch
 
 from backend.FacilityData.drivers.spot_port_quarantine import (
     CAPACITY_PLANNING_MAX_REQUESTS_PER_SECOND,
@@ -201,6 +203,164 @@ class SourcePortLeasePoolTests(unittest.TestCase):
         clock.now = 77.0
         reacquired = [pool.acquire() for _ in range(3)]
         self.assertEqual({lease.port for lease in reacquired}, {lease.port for lease in leases})
+
+    def test_rounded_down_deadline_keeps_lease_quarantined_until_full_interval(self) -> None:
+        # Monotonic clock samples never go backwards. Addition and subtraction
+        # disagree at these offsets even though diagnostics round both to 77.0.
+        for started_at in (32691.003, 32691.007, 32691.01):
+            with self.subTest(started_at=started_at):
+                pool, factory, clock = self.make_pool()
+                self.addCleanup(pool.close)
+                clock.now = started_at
+                first = pool.acquire()
+                pool.mark_connect_started(first)
+                pool.release(first)
+
+                rounded_deadline = started_at + QUARANTINE_SECONDS
+                self.assertLess(rounded_deadline - started_at, QUARANTINE_SECONDS)
+                clock.now = rounded_deadline
+                with self.assertRaises(SpotPortPoolExhausted):
+                    pool.acquire()
+                self.assertEqual(len(factory.guards), 1)
+                self.assertTrue(pool.active)
+                self.assertEqual(pool.diagnostics()["source_port_reuse_violation_count"], 0)
+
+                clock.now = math.nextafter(rounded_deadline, math.inf)
+                self.assertGreaterEqual(clock.now - started_at, QUARANTINE_SECONDS)
+                second = pool.acquire()
+                self.assertEqual(second.port, first.port)
+                pool.mark_connect_started(second)
+                pool.release(second)
+
+                clock.now += 1000.0
+                third = pool.acquire()
+                pool.mark_connect_started(third)
+                pool.release(third)
+                self.assertTrue(pool.active)
+                self.assertEqual(pool.diagnostics()["source_port_reuse_violation_count"], 0)
+
+    def test_rounded_deadline_uses_release_time_not_connect_start(self) -> None:
+        pool, _factory, clock = self.make_pool()
+        self.addCleanup(pool.close)
+        clock.now = 32600.0
+        first = pool.acquire()
+        pool.mark_connect_started(first)
+        released_at = 32691.003
+        clock.now = released_at
+        pool.release(first)
+
+        clock.now = released_at + QUARANTINE_SECONDS
+        with self.assertRaises(SpotPortPoolExhausted):
+            pool.acquire()
+
+        clock.now = math.nextafter(clock.now, math.inf)
+        second = pool.acquire()
+        pool.mark_connect_started(second)
+        pool.release(second)
+        self.assertTrue(pool.active)
+
+    def test_waiting_acquire_advances_past_rounded_down_deadline(self) -> None:
+        pool, _factory, clock = self.make_pool()
+        self.addCleanup(pool.close)
+        clock.now = 32691.003
+        first = pool.acquire()
+        pool.mark_connect_started(first)
+        pool.release(first)
+        clock.now += QUARANTINE_SECONDS
+        safe_deadline = math.nextafter(clock.now, math.inf)
+
+        def advance_clock(*, timeout: float) -> None:
+            self.assertGreater(timeout, 0.0)
+            self.assertLessEqual(timeout, 5.0)
+            clock.now = safe_deadline
+
+        with patch.object(pool._condition, "wait", side_effect=advance_clock) as wait:
+            second = pool.acquire(timeout_seconds=5.0)
+        wait.assert_called_once()
+        pool.mark_connect_started(second)
+        pool.release(second)
+        self.assertTrue(pool.active)
+        self.assertEqual(pool.diagnostics()["source_port_pool_exhaustion_count"], 0)
+        self.assertEqual(pool.diagnostics()["source_port_reuse_violation_count"], 0)
+
+    def test_fractional_clock_offsets_do_not_create_false_reuse_violations(self) -> None:
+        for boundary in (77.0, 2.0**15, 2.0**16, 2.0**24, 2.0**32):
+            for milliseconds in range(1000):
+                started_at = boundary - QUARANTINE_SECONDS + milliseconds / 1000.0
+                with self.subTest(started_at=started_at):
+                    pool, _factory, clock = self.make_pool()
+                    try:
+                        clock.now = started_at
+                        first = pool.acquire()
+                        pool.mark_connect_started(first)
+                        pool.release(first)
+
+                        clock.now = started_at + QUARANTINE_SECONDS
+                        if clock.now - started_at < QUARANTINE_SECONDS:
+                            with self.assertRaises(SpotPortPoolExhausted):
+                                pool.acquire()
+                            clock.now = math.nextafter(clock.now, math.inf)
+
+                        self.assertGreaterEqual(clock.now - started_at, QUARANTINE_SECONDS)
+                        second = pool.acquire()
+                        pool.mark_connect_started(second)
+                        pool.release(second)
+                        self.assertTrue(pool.active)
+                        self.assertEqual(pool.diagnostics()["source_port_reuse_violation_count"], 0)
+                    finally:
+                        pool.close()
+
+    def test_rounded_deadline_preserves_rebind_retry(self) -> None:
+        pool, factory, clock = self.make_pool()
+        self.addCleanup(pool.close)
+        clock.now = 32691.003
+        first = pool.acquire()
+        pool.mark_connect_started(first)
+        pool.release(first)
+        factory.fail_rebind_count = 1
+
+        clock.now += QUARANTINE_SECONDS
+        with self.assertRaises(SpotPortPoolExhausted):
+            pool.acquire()
+        self.assertEqual(pool.diagnostics()["source_port_rebind_retry_count"], 0)
+
+        clock.now = math.nextafter(clock.now, math.inf)
+        with self.assertRaises(SpotPortPoolExhausted):
+            pool.acquire()
+        self.assertEqual(pool.diagnostics()["source_port_rebind_retry_count"], 1)
+        self.assertEqual(pool.diagnostics()["source_port_pool_rebind_pending_count"], 1)
+
+        clock.now += 1.0
+        second = pool.acquire()
+        pool.mark_connect_started(second)
+        pool.release(second)
+        self.assertTrue(pool.active)
+
+    def test_sub_77_interval_still_latches_violation_even_if_diagnostics_round_up(self) -> None:
+        pool, _factory, clock = self.make_pool()
+        self.addCleanup(pool.close)
+        started_at = 32691.003
+        clock.now = started_at
+        first = pool.acquire()
+        pool.mark_connect_started(first)
+        pool.release(first)
+
+        rounded_deadline = started_at + QUARANTINE_SECONDS
+        clock.now = math.nextafter(rounded_deadline, math.inf)
+        second = pool.acquire()
+        # Deliberately break the clock after acquisition to exercise the
+        # independent invariant check; do not tolerate even this small deficit.
+        clock.now = rounded_deadline
+        with self.assertRaises(SpotPortReuseViolation):
+            pool.mark_connect_started(second)
+        pool.release(second)
+        clock.now += 1000.0
+        pool.initialize()
+        with self.assertRaises(SpotPortReuseViolation):
+            pool.acquire()
+        self.assertFalse(pool.active)
+        self.assertEqual(pool.diagnostics()["source_port_reuse_violation_count"], 1)
+        self.assertEqual(pool.diagnostics()["source_port_minimum_reuse_interval_seconds"], 77.0)
 
     def test_rebind_failure_never_returns_port_to_available_queue(self) -> None:
         pool, factory, clock = self.make_pool()

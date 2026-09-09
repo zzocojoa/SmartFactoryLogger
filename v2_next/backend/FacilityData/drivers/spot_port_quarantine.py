@@ -270,7 +270,14 @@ class SourcePortLeasePool:
             record = self._record_for_lease_locked(lease)
             now = self._monotonic()
             record.state = "quarantined"
-            record.quarantine_until = now + self._quarantine_seconds
+            ready_at = now + self._quarantine_seconds
+            # Float addition can round the deadline down so that ready_at - now
+            # is still below quarantine (e.g. 32691.003 + 77.0). Wait until the
+            # next representable instant instead of weakening the independent
+            # elapsed-time invariant in mark_connect_started.
+            if ready_at - now < self._quarantine_seconds:
+                ready_at = math.nextafter(ready_at, math.inf)
+            record.quarantine_until = ready_at
             record.retry_at = None
             self._condition.notify_all()
 
