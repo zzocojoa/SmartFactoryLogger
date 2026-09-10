@@ -12,7 +12,7 @@ import { operatorMetadataService } from '../../api/operatorMetadataService';
 
 const PRODUCT_NO_PATTERN = /^\d{1,40}$/;
 const OPERATOR_MOLD_NO_PATTERN = /^\d{1,32}$/;
-const REQUIRED_ALERT_RING_COUNT = 14;
+const REQUIRED_ALERT_RING_COUNT = 3;
 const OPERATOR_METADATA_REFRESH_INTERVAL_MS = 10_000;
 const REQUIRED_ALERT_RING_INDICES = Array.from({ length: REQUIRED_ALERT_RING_COUNT }, (_, index) => index);
 
@@ -396,18 +396,11 @@ export const OperatorMetadataComponent = React.memo(function OperatorMetadataCom
           data-alert-nonce={requiredAlertNonce}
           aria-hidden="true"
         >
-          <span className="operator-card-alert-base-glow" />
-          <span className="operator-card-alert-rays">
-            <span className="operator-card-alert-rays-line" />
-            <span className="operator-card-alert-rays-line operator-card-alert-rays-line-soft" />
-          </span>
           <span className="operator-card-alert-rings">
             {REQUIRED_ALERT_RING_INDICES.map((index) => (
               <span key={index} className="operator-card-alert-ring" />
             ))}
           </span>
-          <span className="operator-card-alert-core operator-card-alert-core-blur" />
-          <span className="operator-card-alert-core" />
         </div>
       )}
 

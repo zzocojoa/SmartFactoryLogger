@@ -4998,242 +4998,58 @@ body {
   z-index: 2;
   overflow: hidden;
   contain: paint;
-  --operator-alert-gradient: conic-gradient(
-    from 0deg,
-    #ff1155 0%,
-    #0055ff 25%,
-    #0088ff 35%,
-    #ffdd00 60%,
-    #ff8800 75%,
-    #ff3300 85%,
-    #ff1155 100%
-  );
 }
 
-.operator-card-alert-base-glow,
-.operator-card-alert-rays,
-.operator-card-alert-rays-line,
-.operator-card-alert-rings,
-.operator-card-alert-ring,
-.operator-card-alert-core {
+/* Three staggered border waves retain motion without repainting blur/masks,
+   resizing 14 rings or animating the card's shadows (software Electron too). */
+.operator-card-alert-rings {
   position: absolute;
+  inset: 4px;
   pointer-events: none;
 }
 
-.operator-card-alert-base-glow {
-  inset: 0;
-  border-radius: inherit;
-  padding: 12px;
-  background: var(--operator-alert-gradient);
-  filter: blur(24px);
-  mix-blend-mode: screen;
-  opacity: 0.7;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-}
-
-.operator-card-alert-rays {
-  inset: -180px;
-  overflow: hidden;
-  mix-blend-mode: screen;
-  opacity: 0.8;
-  -webkit-mask-image: radial-gradient(circle at center, transparent 35%, #000 50%, transparent 75%);
-  mask-image: radial-gradient(circle at center, transparent 35%, #000 50%, transparent 75%);
-}
-
-.operator-card-alert-rays-line {
-  inset: 0;
-  background: var(--operator-alert-gradient);
-  -webkit-mask-image: repeating-conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    #fff 0.05deg,
-    #fff 0.22deg,
-    transparent 0.28deg,
-    transparent 1.5deg
-  );
-  mask-image: repeating-conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    #fff 0.05deg,
-    #fff 0.22deg,
-    transparent 0.28deg,
-    transparent 1.5deg
-  );
-  animation: operator-alert-ray-spin 120s linear infinite;
-}
-
-.operator-card-alert-rays-line-soft {
-  filter: blur(3px);
-  opacity: 0.6;
-  -webkit-mask-image: repeating-conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    #fff 0.2deg,
-    #fff 0.6deg,
-    transparent 0.8deg,
-    transparent 5deg
-  );
-  mask-image: repeating-conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    #fff 0.2deg,
-    #fff 0.6deg,
-    transparent 0.8deg,
-    transparent 5deg
-  );
-  animation: operator-alert-ray-spin 90s reverse linear infinite;
-}
-
-.operator-card-alert-rings {
-  inset: 12px;
-  z-index: 10;
-}
-
 .operator-card-alert-ring {
+  position: absolute;
   inset: 0;
-  border-radius: calc(var(--card-radius) + 9px);
-  padding: 1px;
-  background: var(--operator-alert-gradient);
+  box-sizing: border-box;
+  border: 2px solid;
+  border-color: #ff1155 #ffbb00 #0088ff #ff1155;
+  border-radius: var(--card-radius);
+  pointer-events: none;
   opacity: 0;
-  mix-blend-mode: screen;
-  z-index: 5;
-  will-change: inset, border-radius, opacity, filter;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  animation: operator-alert-pulse-ring 3.5s linear infinite;
+  animation: operator-alert-border-wave 3.6s linear infinite;
 }
 
-.operator-card-alert-ring:nth-child(1) { animation-delay: 0s; }
-.operator-card-alert-ring:nth-child(2) { animation-delay: 0.25s; }
-.operator-card-alert-ring:nth-child(3) { animation-delay: 0.5s; }
-.operator-card-alert-ring:nth-child(4) { animation-delay: 0.75s; }
-.operator-card-alert-ring:nth-child(5) { animation-delay: 1s; }
-.operator-card-alert-ring:nth-child(6) { animation-delay: 1.25s; }
-.operator-card-alert-ring:nth-child(7) { animation-delay: 1.5s; }
-.operator-card-alert-ring:nth-child(8) { animation-delay: 1.75s; }
-.operator-card-alert-ring:nth-child(9) { animation-delay: 2s; }
-.operator-card-alert-ring:nth-child(10) { animation-delay: 2.25s; }
-.operator-card-alert-ring:nth-child(11) { animation-delay: 2.5s; }
-.operator-card-alert-ring:nth-child(12) { animation-delay: 2.75s; }
-.operator-card-alert-ring:nth-child(13) { animation-delay: 3s; }
-.operator-card-alert-ring:nth-child(14) { animation-delay: 3.25s; }
+/* Negative phases make the warning move immediately, including nonce restarts. */
+.operator-card-alert-ring:nth-child(2) { animation-delay: -1.2s; }
+.operator-card-alert-ring:nth-child(3) { animation-delay: -2.4s; }
 
 .operator-card.operator-card-alert-active {
-  animation: operator-alert-card-breathe 1800ms ease-in-out infinite;
   border-color: rgb(255 17 85 / 0.82);
   outline: 2px solid rgb(255 17 85 / 0.78);
   outline-offset: 4px;
+  box-shadow:
+    var(--dashboard-tile-shadow),
+    0 0 0 2px rgb(255 221 0 / 0.42);
 }
 
-.operator-card-alert-core {
-  inset: 11px;
-  border-radius: var(--card-radius);
-  padding: 1px;
-  background: var(--operator-alert-gradient);
-  opacity: 1;
-  mix-blend-mode: screen;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-}
-
-.operator-card-alert-core-blur {
-  inset: 9px;
-  filter: blur(5px);
-  opacity: 0.75;
-}
-
-[data-theme="day"] .operator-card-alert-base-glow,
-[data-theme="sunset"] .operator-card-alert-base-glow,
-[data-theme="day"] .operator-card-alert-rays,
-[data-theme="sunset"] .operator-card-alert-rays,
-[data-theme="day"] .operator-card-alert-ring,
-[data-theme="sunset"] .operator-card-alert-ring,
-[data-theme="day"] .operator-card-alert-core,
-[data-theme="sunset"] .operator-card-alert-core {
-  mix-blend-mode: normal;
-}
-
-[data-theme="day"] .operator-card-alert-base-glow,
-[data-theme="sunset"] .operator-card-alert-base-glow {
-  filter: blur(18px) saturate(1.25);
-  opacity: 0.62;
-}
-
-[data-theme="day"] .operator-card-alert-rays,
-[data-theme="sunset"] .operator-card-alert-rays {
-  opacity: 0.72;
-}
-
-[data-theme="day"] .operator-card-alert-core,
-[data-theme="sunset"] .operator-card-alert-core {
-  opacity: 0.9;
-}
-
-@keyframes operator-alert-pulse-ring {
+@keyframes operator-alert-border-wave {
   0% {
-    inset: 0;
-    border-radius: calc(var(--card-radius) + 9px);
+    transform: scale(0.99, 0.98);
     opacity: 0;
-    filter: blur(0);
   }
 
-  2% {
-    opacity: 1;
-    filter: blur(0);
+  20% {
+    opacity: 0.9;
   }
 
-  50% {
-    opacity: 0.6;
-    filter: blur(1px);
+  65% {
+    opacity: 0.65;
   }
 
   100% {
-    inset: -84px;
-    border-radius: calc(var(--card-radius) + 34px);
+    transform: scale(1.02, 1.04);
     opacity: 0;
-    filter: blur(4px);
-  }
-}
-
-@keyframes operator-alert-ray-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes operator-alert-card-breathe {
-  0%,
-  100% {
-    box-shadow:
-      var(--dashboard-tile-shadow),
-      0 0 0 2px rgb(255 17 85 / 0.72),
-      0 0 0 5px rgb(255 221 0 / 0.42),
-      0 0 0 8px rgb(0 136 255 / 0.28),
-      0 0 18px rgb(255 17 85 / 0.34),
-      0 0 32px rgb(255 221 0 / 0.24),
-      0 0 46px rgb(0 136 255 / 0.2);
-  }
-
-  50% {
-    box-shadow:
-      var(--dashboard-tile-shadow),
-      0 0 0 3px rgb(255 17 85 / 0.92),
-      0 0 0 7px rgb(255 221 0 / 0.62),
-      0 0 0 11px rgb(0 136 255 / 0.46),
-      0 0 28px rgb(255 17 85 / 0.56),
-      0 0 48px rgb(255 221 0 / 0.42),
-      0 0 68px rgb(0 136 255 / 0.36);
   }
 }
 
@@ -5461,15 +5277,9 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .operator-card-alert-rays,
   .operator-card-alert-ring {
     animation: none;
     display: none;
-  }
-
-  .operator-card-alert-base-glow {
-    filter: blur(12px);
-    opacity: 0.38;
   }
 
   .operator-card.operator-card-alert-active,

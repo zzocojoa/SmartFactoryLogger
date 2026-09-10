@@ -84,7 +84,7 @@ describe('OperatorMetadataComponent', () => {
     expect(screen.getByText('제품번호는 필수입니다.')).toBeInTheDocument();
     expect(screen.getByText('금형 번호는 필수입니다.')).toBeInTheDocument();
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '0');
-    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(3);
     const applyButton = screen.getByTestId('operator-metadata-apply');
     expect(applyButton).not.toBeDisabled();
     expect(applyButton).toHaveAttribute('data-disabled', 'true');
@@ -92,7 +92,7 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.click(applyButton);
 
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
-    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(3);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -135,7 +135,7 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.keyDown(productInput, { key: 'Enter' });
 
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
-    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(3);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -150,7 +150,7 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.click(changeButton);
 
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
-    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(3);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
@@ -362,6 +362,61 @@ describe('OperatorMetadataComponent', () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
+  it('retains the moving warning when saving the required values fails', async () => {
+    mocks.update.mockRejectedValueOnce(new Error('save unavailable'));
+    render(<OperatorMetadataComponent />);
+    const productInput = await screen.findByLabelText('제품번호');
+    fireEvent.change(productInput, { target: { value: '12345' } });
+    fireEvent.change(screen.getByLabelText('금형 번호'), { target: { value: '123' } });
+    fireEvent.click(screen.getByTestId('operator-metadata-apply'));
+
+    expect(await screen.findByText('서버 검증 또는 저장에 실패했습니다.')).toBeInTheDocument();
+    expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('aria-hidden', 'true');
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(3);
+  });
+
+  it.each(['제품번호', '금형 번호'])('shows the warning when only %s is cleared from applied values', async (label) => {
+    mocks.get.mockResolvedValueOnce(buildMetadata({
+      product_no: '12345', operator_mold_no: '123', valid: true, missing_fields: [],
+    }));
+    render(<OperatorMetadataComponent />);
+    await screen.findByLabelText('제품번호');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(label), { target: { value: '' } });
+
+    expect(screen.getByTestId('operator-metadata-card')).toHaveClass('operator-card-alert-active');
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(3);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('does not expand the missing-value animation to nonempty invalid edits of applied values', async () => {
+    mocks.get.mockResolvedValueOnce(buildMetadata({
+      product_no: '12345', operator_mold_no: '123', valid: true, missing_fields: [],
+    }));
+    render(<OperatorMetadataComponent />);
+    const productInput = await screen.findByLabelText('제품번호');
+    fireEvent.change(productInput, { target: { value: 'not-a-number' } });
+
+    expect(screen.getByTestId('operator-metadata-card')).toHaveAttribute('data-state', 'invalid');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('does not show the missing-value animation when resetting applied values fails', async () => {
+    mocks.get.mockResolvedValueOnce(buildMetadata({
+      product_no: '12345', operator_mold_no: '123', valid: true, missing_fields: [],
+    }));
+    mocks.reset.mockRejectedValueOnce(new Error('reset unavailable'));
+    render(<OperatorMetadataComponent />);
+    await screen.findByLabelText('제품번호');
+    fireEvent.click(screen.getByRole('button', { name: '서버 저장값 리셋' }));
+
+    expect(await screen.findByText('서버 저장값 리셋에 실패했습니다.')).toBeInTheDocument();
+    expect(screen.getByLabelText('제품번호')).toHaveValue('12345');
+    expect(screen.getByLabelText('금형 번호')).toHaveValue('123');
+    expect(screen.queryByTestId('operator-metadata-required-alert')).not.toBeInTheDocument();
+  });
+
   it('automatically refreshes clean fields when another client updates server metadata', async () => {
     vi.useFakeTimers();
     mocks.get
@@ -512,7 +567,7 @@ describe('OperatorMetadataComponent', () => {
     fireEvent.click(applyButton);
 
     expect(screen.getByTestId('operator-metadata-required-alert')).toHaveAttribute('data-alert-nonce', '1');
-    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(14);
+    expect(document.querySelectorAll('.operator-card-alert-ring')).toHaveLength(3);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 });
