@@ -46,11 +46,14 @@ v2-only 저장은 opt-in이며, 서버 실측 검증과 downstream 소비자 확
   표시한다. `적용`, `제품 변경`, Enter 저장 시도는 펄스 애니메이션을 처음부터 다시 시작시키지만, 필수값 누락 상태에서는
   저장 API를 호출하지 않는다. 작업자가 제품번호와 금형 번호를 입력하더라도 `적용`으로 서버 저장이 성공해
   `operator_metadata_valid=true`가 되기 전까지 펄스 경고는 유지한다.
-- 펄스 회귀가 의심되면 최신 NSIS 설치 여부를 먼저 확인하고, `http://localhost:8000/dashboard` 또는
-  `http://192.168.0.7:8000/dashboard`에서 필수값 누락 상태의 `작업 정보` 카드가 클릭 전부터
-  `operator-card-alert-active`, `operator-metadata-required-alert`, 14개 `operator-card-alert-ring`,
-  `operator-alert-pulse-ring` 애니메이션을 갖는지 확인한다. DOM은 있는데 보이지 않으면 테마별 `mix-blend-mode`,
-  `z-index`, overflow clipping, `prefers-reduced-motion` 상태를 우선 확인한다.
+- 펄스 회귀가 의심되면 설치된 NSIS의 버전·빌드 커밋과 점검 대상 소스가 일치하는지 먼저 확인한다.
+  경량화가 적용된 빌드의 `/dashboard`에서 필수값 누락 상태의 `작업 정보` 카드가 클릭 전부터
+  `operator-card-alert-active`, `operator-metadata-required-alert`, 3개 `operator-card-alert-ring`을 갖는지 확인한다.
+  일반 모션 설정에서는 각 링의 `operator-alert-border-wave`가 3.6초 주기로 반복되고, 시작 지연은 각각
+  `0s`, `-1.2s`, `-2.4s`이며 `transform`과 `opacity`만 움직인다. 경량화 이전 빌드에는 이 링 개수·이름 기준을 적용하지 않는다.
+  DOM은 있는데 강조가 보이지 않으면 링의 computed animation/opacity, 테마별 정적 outline, `z-index`, overflow clipping을 확인한다.
+  `prefers-reduced-motion: reduce`에서는 움직이는 링을 숨기고 애니메이션을 중지하므로 정적 경고 outline이 남는지를 확인한다.
+  경량화 강조에는 blur·mask·`mix-blend-mode`를 사용하지 않으며, 이를 추가하거나 GPU 설정을 바꾸어 진단하지 않는다.
 - 작업 정보 스냅카드는 안내 문구 대신 `이전 작업` 영역을 표시한다. 새 제품번호/금형 번호 적용 또는 리셋 직전의
   유효한 작업 정보가 최근 순서로 최대 3개까지 `operator_metadata.json` history에 보존된다.
 - History는 이전 유효 작업 정보의 제품번호 또는 금형 번호 중 하나만 달라져도 생성된다. 같은 제품번호/금형 번호 조합을 재적용하면
