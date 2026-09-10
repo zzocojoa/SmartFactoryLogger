@@ -2,6 +2,33 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.26] - 2026-09-11
+
+### Changed
+
+- Retained the animated missing-product/mold metadata emphasis while replacing
+  masked, blurred expanding rings and rays with three thin border waves animated
+  through transform and opacity. The static outline, reduced-motion behavior,
+  metadata apply/reset/Enter semantics, and SPOT request cadence are unchanged.
+- Documented a separate, explicitly approved unsigned internal development
+  exception for developer-controlled organizational test equipment. Exact-commit
+  builds, independent hash pins, security audits, package verification, separate
+  installation approval, and reviewed recovery paths remain required. The signed
+  release workflow and signature verifier are not relaxed.
+
+### Validation
+
+- The emphasis change was merged in PR #189 as
+  `e3d094b5f69ff4c7cee09c3eff33605376addc29`. Its regression tests cover the
+  lightweight animation contract and unchanged metadata interactions.
+- This is version preparation, not a packaged release or operational approval.
+  A new clean, merged-commit Windows installer, release identity, version-bound
+  Canary, and fresh server evidence are required. Previous v1.0.25 observations
+  are historical evidence only and are not reused as v1.0.26 results.
+- Actual factory-server responsiveness remains unverified. Installation, app
+  restart, rollback, and production promotion require separate approval; there
+  are no data-schema, runtime-configuration, or diagnostic-counter changes.
+
 ## [1.0.25] - 2026-09-09
 
 ### Fixed
