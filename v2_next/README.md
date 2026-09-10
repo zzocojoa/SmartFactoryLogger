@@ -21,11 +21,14 @@ npm start
 않습니다. lock 파일은 모든 SmartFactoryLogger 프로세스와 health endpoint가 종료된
 것을 확인한 뒤 실제 stale lock일 때만 제거합니다.
 
-현재 패키지 빌드는 다음 명령을 사용합니다. 외부·고객·상용 서버에는 서명과
-exact-commit 검증을 통과한 NSIS installer만 배포합니다. 소유자가 통제하는
-비공개 개인 사용 환경의 미서명 예외는 kit 외부의 신뢰된 출처에서 확보한
-SHA-256 및 commit-bound release identity 검증을 필수로 적용하며,
-[Windows Authenticode 서명 운영](docs/V2/05_운영_배포/windows_authenticode_signing.md)의 유예 조건을 따릅니다.
+현재 패키지 빌드는 다음 명령을 사용합니다. 외부·고객 배포 및 정식 상용 운영
+배포에는 서명과 exact-commit 검증을 통과한 NSIS installer를 사용합니다.
+비공개 개인 사용과 사내 개발·검증용 미서명 설치본은 서로 다른 예외이며,
+[Windows Authenticode 서명 운영](docs/V2/05_운영_배포/windows_authenticode_signing.md)의 각 조건을 따릅니다.
+조직 관리 장비라도 책임 개발자가 통제하는 제한된 개발·검증 목적에는 서명
+구매·등록을 유예할 수 있으나, 정식 운영 승인이나 자동 설치를 뜻하지 않습니다.
+kit 외부의 신뢰된 출처에서 확보한 SHA-256, commit-bound release identity,
+설치 전 점검과 복구 경로 검증은 미서명 개발본에도 필수입니다.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
