@@ -17,7 +17,7 @@ const uPlotMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('uplot', () => ({
-    default: vi.fn().mockImplementation(() => {
+    default: vi.fn().mockImplementation(function MockUPlot() {
         const instance: MockUPlotInstance = {
             setData: vi.fn(),
             setScale: vi.fn(),
