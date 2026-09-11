@@ -2,6 +2,8 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
+import { createRequire } from 'node:module';
+import type { Plugin } from 'vite';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -14,8 +16,46 @@ type UnknownObject = {
   [key: string]: unknown;
 };
 
-const SUPPORTED_GRAFANA_SCENES_VERSION = '6.52.0';
+const SUPPORTED_GRAFANA_SCENES_VERSION = '8.17.0';
 const MOMENT_TIMEZONE_BROWSER_ENTRY = 'node_modules/moment-timezone/builds/moment-timezone-with-data-10-year-range.js';
+
+const verifyRouterContract = createRequire(import.meta.url)('./scripts/verify_grafana_router_contract.cjs')
+  .verifyRouterContract as () => { routerVersion: string; routerRoot: string };
+const assertRouterCoreGraph = createRequire(import.meta.url)('./scripts/verify_grafana_router_contract.cjs')
+  .assertRouterCoreGraph as (ids: string[], root: string) => void;
+
+// Also check the actual Rollup graph: a valid npm tree alone cannot prove that
+// the ESM build uses one context (or that an unused legacy package stays unused).
+function routerGraphContract(): Plugin {
+  const contract = verifyRouterContract();
+  return {
+    name: 'sfl-router-graph-contract',
+    generateBundle() {
+      const moduleIds = Array.from(this.getModuleIds());
+      assertRouterCoreGraph(moduleIds, contract.routerRoot);
+      const routers = new Set<string>();
+      const reacts = new Set<string>();
+      for (const id of moduleIds) {
+        const clean = id.replace(/\\/g, '/').replace(/^\0/, '').split('?')[0];
+        const match = clean.match(/^(.*\/node_modules\/(react|react-router|react-router-dom|react-router-dom-v5-compat))\//);
+        if (!match) continue;
+        const [, root, name] = match;
+        if (name === 'react') reacts.add(root);
+        else {
+          const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { name: string; version: string };
+          if (pkg.version !== contract.routerVersion || !['react-router', 'react-router-dom'].includes(pkg.name)) {
+            this.error(`Unapproved Router in production graph: ${root}`);
+          }
+          if (name === 'react-router') routers.add(root);
+        }
+      }
+      if (reacts.size !== 1 || routers.size !== 1 || !routers.has(contract.routerRoot.replace(/\\/g, '/'))) {
+        this.error('Production graph must share one approved React/Router context.');
+      }
+      this.info('PASS: production graph has one approved React/Router context; no legacy Router.');
+    },
+  };
+}
 
 const isUnknownObject = (value: unknown): value is UnknownObject => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -145,9 +185,9 @@ const resolveGrafanaScenesEntry = (): string => {
     );
   }
 
-  const internalEsmEntry: string = resolve(packageRoot, 'dist/esm/packages/scenes/src/index.js');
+  const internalEsmEntry: string = resolve(packageRoot, 'dist/esm/index.js');
 
-  if (existsSync(internalEsmEntry)) {
+  if (packageJson.module === 'dist/esm/index.js' && existsSync(internalEsmEntry)) {
     return internalEsmEntry;
   }
 
@@ -187,7 +227,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: './',
-    plugins: [react()],
+    plugins: [react(), routerGraphContract()],
     server: {
       port: 3000,
       proxy: {
@@ -217,10 +257,6 @@ export default defineConfig(({ mode }) => {
           // Dashboard telemetry uses near-term ranges; keep the smaller direct dependency bundle.
           replacement: momentTimezoneBrowserEntry,
         },
-        {
-          find: /^react-router-dom$/,
-          replacement: resolve(process.cwd(), 'src/shims/react-router-dom.ts'),
-        },
       ],
     },
     define: {
@@ -230,6 +266,9 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: 'jsdom',
       globals: false,
+      // Exercise the real Grafana ESM graph through Vite (including the browser timezone
+      // alias). Native Node externalization cannot resolve its named CommonJS imports.
+      server: { deps: { inline: [/[/\\]@grafana[/\\]/] } },
       include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     },
     build: {

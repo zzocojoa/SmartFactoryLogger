@@ -15,6 +15,27 @@ All notable changes to Smart Factory Logger V2 are documented here.
   builds, independent hash pins, security audits, package verification, separate
   installation approval, and reviewed recovery paths remain required. The signed
   release workflow and signature verifier are not relaxed.
+- Pinned the Windows x64 Electron candidate to 44.3.0 after reviewing the 41.x
+  end-of-support boundary. Documented its Node >=22.12 prerequisite and explicit
+  binary preparation for offline checks. GPU settings, preload isolation,
+  lifecycle behavior, and the animated metadata emphasis are unchanged.
+- Updated Axios within 1.x (lock: 1.20.0),
+  and selected build-tool dependencies within their existing major ranges.
+  That initial step did not change Grafana, Router or Vitest; the separate frontend
+  correction below follows it. Python dependencies and animation behavior are unchanged.
+- Pinned Grafana data/runtime/ui to 12.4.10, Scenes to 8.17.0, and Vitest to 4.1.11.
+  The initial Router 6.30.6 compatibility baseline is superseded below. Scoped security overrides
+  update DOMPurify, immutable, uuid and react-use without changing React 18.
+- Preserved the Scenes 60/20/4 grid patch and made it fail closed on version or
+  source drift. Added an exact-version ESM/CJS bridge to schema's public table
+  defaults, fixing the upstream 12.4/Scenes export mismatch without empty aliases.
+  Updated the constructor mock for Vitest 4 and added real Scenes/Router contracts.
+- Isolated Grafana UI's sole v5-compat Link consumer using an official
+  react-router-dom@7.18.3 npm alias; upgraded the application's public Router API
+  and removed the unused legacy useHistory shim. Scenes' v6 peer boundary is
+  a project-owned, exact-version compatibility override, not upstream v7 support.
+  Added fail-closed consumer hashes, official alias identity/shared-context checks,
+  and a production graph guard against legacy Router or mixed CJS/ESM core branches.
 
 ### Validation
 
@@ -28,6 +49,21 @@ All notable changes to Smart Factory Logger V2 are documented here.
 - Actual factory-server responsiveness remains unverified. Installation, app
   restart, rollback, and production promotion require separate approval; there
   are no data-schema, runtime-configuration, or diagnostic-counter changes.
+- Added browser-adapter contract tests for JSON, HTTP/network errors, timeouts,
+  and cancellation without contacting a server. At that stage Grafana/Router/Vitest
+  audit findings remained. Electron 44.3.0 passed isolated
+  full-dashboard startup, preload/control IPC, moving-emphasis state transitions,
+  guarded navigation, and native close with an owned mock backend. The local
+  health suite passed (94 Electron, 281 frontend, 735 backend tests plus QA checks),
+  as did the frontend build and static x64 unpacked-package integrity checks.
+  The package used an older backend fixture and is not deployable. No NSIS
+  installer, factory-server test, or production approval is supplied by these checks.
+- The initial frontend correction reduced the audit from 23 affected package
+  entries (8 high / 15 moderate) to 6 moderate entries, all on the Router compatibility
+  chain. The subsequent scoped Router 7 migration removes the remaining chain
+  without an audit waiver or empty compatibility stub. Grafana's unused declared
+  Router 5 dependency stays installed but is prohibited in the production bundle.
+  No factory-server change, new installer or production promotion is implied.
 
 ## [1.0.25] - 2026-09-09
 
