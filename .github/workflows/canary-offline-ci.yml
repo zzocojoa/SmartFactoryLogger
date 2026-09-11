@@ -60,6 +60,17 @@ jobs:
           if (-not [IO.File]::Exists($env:CANARY_PYTHON)) {
             throw 'The setup-python executable output is missing.'
           }
+          # Keep Python and PS 5.1 on one long-form temp path; runner defaults may use 8.3 aliases.
+          $fixtureTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+          if (-not [IO.Directory]::Exists($fixtureTemp)) {
+            throw 'The runner temp directory is missing.'
+          }
+          if ((Resolve-Path -LiteralPath $fixtureTemp).Path -ine $fixtureTemp) {
+            throw 'The runner temp path is not canonical.'
+          }
+          $env:TEMP = $fixtureTemp
+          $env:TMP = $fixtureTemp
+          $env:TMPDIR = $fixtureTemp
           & .\scripts\canary-v1026\test-canary-ci.ps1 `
             -OutputRoot (Join-Path $env:RUNNER_TEMP 'sfl-canary-ci') `
             -PythonPath $env:CANARY_PYTHON `
