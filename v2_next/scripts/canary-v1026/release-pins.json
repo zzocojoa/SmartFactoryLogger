@@ -1,0 +1,90 @@
+{
+  "schema_version": "sfl-v1026-canary-release-pins-v1",
+  "product_version": "1.0.26",
+  "product_commit": "d7a1b20f96711fb07fc7add0867e79ee36506fce",
+  "source_tree": "d4c6af2dc72f7d7711ecfd4a8e3bbce217a0649a",
+  "release_folder": "installer-candidate-review-only",
+  "installer_sha256": "1096276CC7C82E765A7BD1F03597CC09FF285AE587AC6B666CC86A04A3BFC25F",
+  "release_identity_sha256": "7EB46147F55DAD515E507196A7E1FBACD7D1B075E870DB159F82580DA64E3493",
+  "app_asar_sha256": "E0D63E394C33DA5F8E6522AA7406CA371975ECAD7D1E34CCF3F63D00F04CC7D2",
+  "backend_bundle_sha256": "A69D08FCB44308309301A17A27FCD8D9B1AE89E34837601804138BEE11ECE55A",
+  "backend_bundle_file_count": 1518,
+  "installed_payload_file_count": 1645,
+  "installed_payload_tree_sha256": "0C18CE2E9F810A8636DA007BE00F02ADD5AEB7869E693E4827774B0E3C53F908",
+  "rollback_version": "1.0.25",
+  "rollback_commit": "a203baf62b544d38072a32d71ef411c7cf8b6490",
+  "rollback_installer_sha256": "9EE81CD9B809275B7E49E1441CBBF11C2B7BBC1E2A372A7D7163E4DCFFE6ADA1",
+  "rollback_operational_suitability": "REQUIRES_FRESH_SERVER_AND_RECOVERY_REVIEW",
+  "files": [
+    {
+      "name": "backend-build-provenance.json",
+      "length": 127,
+      "sha256": "95E35857C7A248888CED4F5648F356DC3E14D3CE5054F70ACC498CEF256EB5B9"
+    },
+    {
+      "name": "backend-bundle-manifest.json",
+      "length": 399196,
+      "sha256": "42EF3514A09E88720D4173114D9AC647345C79C874B9216E5F8D5E282DB03388"
+    },
+    {
+      "name": "extracted-electron-identity.json",
+      "length": 1615,
+      "sha256": "44B174D25A586A5FCCECEBA6143B7699F7AF9749FF2024F56BC0669ACBF94FB2"
+    },
+    {
+      "name": "extracted-payload-manifest.json",
+      "length": 458465,
+      "sha256": "D527AA7F8284AF6917FE1166F070871C07BCA379F03BD32740BDEF70CD48814F"
+    },
+    {
+      "name": "frontend-audit.json",
+      "length": 365,
+      "sha256": "D52D81DB5A367B1D03BF96D0B7EAB35DACEC61672B26FB6A4D99A5ADD0EE38A8"
+    },
+    {
+      "name": "installer-build-receipt.json",
+      "length": 823,
+      "sha256": "C223205412CD0F55AB6FA3FEC4932C84CE3D2C508DBC53DA3931492173F7CF7A"
+    },
+    {
+      "name": "packaged-electron-identity.json",
+      "length": 1624,
+      "sha256": "9B4A15A5C729F7B5D09FD72BF540099C843155E314A7616AAF2D57C42A31802F"
+    },
+    {
+      "name": "python-final-audit.json",
+      "length": 2365,
+      "sha256": "F7642100D38EE6A383732CA7658FE1EB607CDD0E9509C16CBF7A7773FE7FA63B"
+    },
+    {
+      "name": "python-lock-audit.json",
+      "length": 2314,
+      "sha256": "3C971446929BB238B335EDB0A3942CD1BE30A479AD8525D03705C80ADC8B6F70"
+    },
+    {
+      "name": "READ_ME_NOT_INSTALL_READY.txt",
+      "length": 354,
+      "sha256": "2369E288C63B132755B77577138FFE94E21954665307306E2122EDF8806EE593"
+    },
+    {
+      "name": "release_identity.json",
+      "length": 3743,
+      "sha256": "7EB46147F55DAD515E507196A7E1FBACD7D1B075E870DB159F82580DA64E3493"
+    },
+    {
+      "name": "root-audit.json",
+      "length": 364,
+      "sha256": "A3BF16D81C67F671ED56D51D06B8D9C6B2C920B544985FC4A11152F125851309"
+    },
+    {
+      "name": "smart-factory-logger-v2 Setup 1.0.26.exe",
+      "length": 164003067,
+      "sha256": "1096276CC7C82E765A7BD1F03597CC09FF285AE587AC6B666CC86A04A3BFC25F"
+    },
+    {
+      "name": "smart-factory-logger-v2 Setup 1.0.26.exe.blockmap",
+      "length": 170353,
+      "sha256": "5B1D604E890041E233A38FBABCB2F1008D77DE886BF7D49490E733B994D7CDE6"
+    }
+  ]
+}
