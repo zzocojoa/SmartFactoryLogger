@@ -1,2 +1,4 @@
 # The Canary builder binds this vendored snapshot to exact CRLF byte hashes.
 v2_next/scripts/pinned/spot-diagnostic-core-9b38171a/* text eol=crlf
+# The review kit also pins the existing backend integrity module's CRLF bytes.
+v2_next/scripts/backend_bundle_integrity.psm1 text eol=crlf

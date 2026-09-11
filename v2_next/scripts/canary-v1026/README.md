@@ -44,6 +44,34 @@ sidecar를 스스로 기대값으로 사용하면 외부 신뢰 검증이 되지
 변경하지 않는다. pinned Python trigger 시험의 HTTP는 전용 loopback fixture만 대상으로 한다.
 서버 설치·장시간 관측·GUI 체감 비교는 이 오프라인 시험으로 대체되지 않는다.
 
+## 공개 fixture 전용 CI
+
+`Canary Offline CI`는 GitHub-hosted Windows의 native x64 PowerShell 5.1에서 동작한다.
+같은 빌더에 `-OfflineCi -ReviewOnly`를 사용하므로 수집기 overlay, 해시 검증, 71개 이상
+회귀시험과 loopback 통합시험은 로컬 검토 빌드와 같은 경로를 사용한다. Python은 표준
+라이브러리만 사용하며 pip/npm 설치, 서버 접근, 실제 설치본 전송이 없다.
+
+```powershell
+& .\scripts\canary-v1026\test-canary-ci.ps1 `
+    -OutputRoot '<새 시험 결과 폴더>' `
+    -PythonPath '<로컬 python.exe>'
+```
+
+CI에서는 `-ExpectedCommit`에 PR HEAD를 전달하고 관련 입력 파일의 clean 상태를 요구한다.
+직접 로컬 시험할 때 생략하면 수정 중인 소스를 시험할 수 있지만 commit 검증은 주장하지 않는다.
+기본 release-review 모드는 여전히 정확한 `ReleaseKitRoot`를 요구하며 `OfflineCi`와 혼용할 수 없다.
+두 승인 switch의 false 값, 누락/없는 설치본, 혼합 인수는 negative test로 검사한다.
+
+CI 결과 `V1026_CANARY_OFFLINE_CI_PASS`는 공개 합성 fixture의 도구 시험 PASS다.
+`release_candidate_verified=false`이며 제품 설치본 검증 PASS나 서버 관측 PASS가 아니다.
+CI는 `fixture-kit-not-for-distribution.zip`만 내부 시험용으로 재검증한다. 검토 배포용 ZIP과
+`build-result.json`은 만들지 않으며, Actions 업로드 대상도 synthetic 시험 로그/CI 영수증으로
+제한한다. 실제 설치본의 전체 해시 검증은 별도의 로컬 release-review 빌드로 유지한다.
+
+Workflow는 관련 소스·pinned core·무결성 모듈·줄바꿈 정책 변경에서 실행된다.
+Actions는 SHA로 고정하고 token 권한은 contents read, checkout credential 저장은 끈다.
+실패하면 runner PASS를 발행하지 않으며 기존 결과를 덮어쓰지 않는다.
+
 ## 복구와 잔여 위험
 
 복구 후보 v1.0.25의 정확한 installer 해시만 등록했다. 설정/데이터 호환성, 실제 복구

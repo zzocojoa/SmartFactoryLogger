@@ -1,0 +1,76 @@
+name: Canary Offline CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/canary-offline-ci.yml"
+      - ".gitattributes"
+      - "v2_next/scripts/canary-v1026/**"
+      - "v2_next/scripts/backend_bundle_integrity.psm1"
+      - "v2_next/scripts/pinned/spot-diagnostic-core-9b38171a/**"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/canary-offline-ci.yml"
+      - ".gitattributes"
+      - "v2_next/scripts/canary-v1026/**"
+      - "v2_next/scripts/backend_bundle_integrity.psm1"
+      - "v2_next/scripts/pinned/spot-diagnostic-core-9b38171a/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary-offline-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canary-offline:
+    name: Canary offline regression (Windows PS 5.1)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+        working-directory: v2_next
+    env:
+      PYTHONNOUSERSITE: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      EXPECTED_CANARY_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout exact tooling revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Python for stdlib loopback fixtures
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12.6"
+          architecture: x64
+
+      - name: Run offline regressions without installer or server inputs
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+          & .\scripts\canary-v1026\test-canary-ci.ps1 `
+            -OutputRoot (Join-Path $env:RUNNER_TEMP 'sfl-canary-ci') `
+            -PythonPath $python `
+            -ExpectedCommit $env:EXPECTED_CANARY_COMMIT
+
+      - name: Preserve only synthetic test logs and CI receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: canary-offline-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sfl-canary-ci/ci-runner.log
+            ${{ runner.temp }}/sfl-canary-ci/ci-runner-result.json
+            ${{ runner.temp }}/sfl-canary-ci/**/ci-result.json
+            ${{ runner.temp }}/sfl-canary-ci/**/port-regression.json
+            ${{ runner.temp }}/sfl-canary-ci/**/trigger-integration.log
+            ${{ runner.temp }}/sfl-canary-ci/**/test-*.log
+          if-no-files-found: error
+          retention-days: 7

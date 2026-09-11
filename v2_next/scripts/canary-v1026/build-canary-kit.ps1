@@ -1,6 +1,7 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName='ReleaseReview')]
 param(
-    [Parameter(Mandatory=$true)][string]$ReleaseKitRoot,
+    [Parameter(Mandatory=$true,ParameterSetName='ReleaseReview')][string]$ReleaseKitRoot,
+    [Parameter(Mandatory=$true,ParameterSetName='OfflineCi')][switch]$OfflineCi,
     [Parameter(Mandatory=$true)][string]$OutputRoot,
     [Parameter(Mandatory=$true)][switch]$ReviewOnly,
     [string]$PythonPath=''
@@ -8,12 +9,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 if (-not $ReviewOnly) { throw 'Only explicit local review builds are supported.' }
+if ($PSCmdlet.ParameterSetName -ceq 'OfflineCi' -and -not $OfflineCi) { throw 'OfflineCi must be explicitly enabled.' }
 $native = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
 if (-not [Environment]::Is64BitProcess -or $PSVersionTable.PSEdition -cne 'Desktop' -or
     $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) { throw 'Use native x64 Windows PowerShell 5.1.' }
 Import-Module (Join-Path $PSScriptRoot 'evidence_zip_integrity.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'v1026_release_identity_integrity.psm1') -Force
-$candidate = Test-V1026ReleaseCandidate $ReleaseKitRoot
+$candidate = $null
+if (-not $OfflineCi) { $candidate = Test-V1026ReleaseCandidate $ReleaseKitRoot }
+$policy = Get-V1026CanaryPolicy
 $parentScripts = Split-Path -Parent $PSScriptRoot
 if ($PythonPath -eq '') { $PythonPath=Join-Path (Split-Path -Parent $parentScripts) 'backend\.venv\Scripts\python.exe' }
 Assert-EvidencePlainPath $PythonPath
@@ -104,10 +108,10 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     }
     Write-BytesNew (Join-Path $kit $item.Key) $bytes
 }
-Write-EvidenceJsonNew (Join-Path $kit 'canary_kit_identity.json') (Get-V1026CanaryPolicy) | Out-Null
+Write-EvidenceJsonNew (Join-Path $kit 'canary_kit_identity.json') $policy | Out-Null
 Write-EvidenceJsonNew (Join-Path $kit 'operator_attestation_15m.json') ([ordered]@{
     schema_version='spot-operator-visual-attestation-v1'; evidence_kind='pending-server-validation'
-    status='PENDING'; product_version='1.0.26'; build_git_commit=$candidate.product_commit
+    status='PENDING'; product_version='1.0.26'; build_git_commit=$policy.product.build_git_commit
     observation_recorded=$false; continuous_spot_image_refresh_confirmed=$false; no_new_app_error_confirmed=$false
     machine_generated=$true; statement='Placeholder only. No human observation or historic PASS is asserted.'
 }) | Out-Null
@@ -129,7 +133,8 @@ try {
         Tee-Object -FilePath (Join-Path $run 'port-regression.json') | Out-String)
     if ($LASTEXITCODE -ne 0) { throw 'Port regression tests failed.' }
     $regression=$regressionText | ConvertFrom-Json
-    if ($regression.result -cne 'V1026_CANARY_PORT_REGRESSION_PASS' -or $regression.tests_passed -lt 61) { throw 'Regression receipt missing.' }
+    if ($regression.result -cne 'V1026_CANARY_PORT_REGRESSION_PASS' -or $regression.tests_passed -lt 71 -or
+        $regression.tests_passed -ne @($regression.tests).Count) { throw 'Regression receipt missing or incomplete.' }
     Write-Host ('[PORT REGRESSION] passed='+$regression.tests_passed)
     $integrationRoot=Join-Path $run 'integration-fixture\scripts'
     $null=[IO.Directory]::CreateDirectory($integrationRoot)
@@ -152,10 +157,26 @@ foreach ($entry in $sourceSnapshot.entries) {
     $fact=Get-EvidenceFileFact (Join-Path $PSScriptRoot $entry.name)
     if ($fact.sha256 -cne $entry.sha256 -or $fact.length -ne $entry.length) { throw 'Tooling source changed during tests.' }
 }
-$zip=New-VerifiedEvidenceZip -SourceRoot $kit -Destination (Join-Path $run 'v1026-canary-review-only.zip')
-Write-BytesNew ($zip.path+'.sha256.txt') ([Text.Encoding]::ASCII.GetBytes($zip.sha256+"`n"))
 $parentCommit=(& git -C $PSScriptRoot rev-parse HEAD | Out-String).Trim()
 if ($LASTEXITCODE -ne 0 -or $parentCommit -cnotmatch '^[0-9a-f]{40}$') { throw 'Tooling parent commit unavailable.' }
+if ($OfflineCi) {
+    # Test the identical ZIP implementation without issuing a release-review receipt/package.
+    $fixtureZip=New-VerifiedEvidenceZip -SourceRoot $kit -Destination (Join-Path $run 'fixture-kit-not-for-distribution.zip')
+    Write-EvidenceJsonNew (Join-Path $run 'ci-result.json') ([ordered]@{
+        schema_version='v1026-canary-offline-ci-v1'; result='V1026_CANARY_OFFLINE_CI_PASS'
+        recorded_at=[DateTimeOffset]::Now.ToString('o'); tooling_parent_commit=$parentCommit
+        tooling_source_snapshot=$sourceSnapshot; fixture_archive=$fixtureZip; kit_root=$kit
+        kit_manifest_sha256=$manifestHash; port_regression=$regression; loopback_integration_passed=$true
+        fixture_kind='SYNTHETIC_TOOLING_ONLY_NOT_RELEASE_VALIDATION'
+        release_candidate_verified=$false; distribution_package_created=$false
+        server_context_bound=$false; server_execution_authorized=$false; observation_started=$false
+        full_120m_allowed=$false; production_promotion_allowed=$false
+    }) | Out-Null
+    Write-Host '[CI PASS] Synthetic offline tooling only. No installer validation or distribution package.'
+    return
+}
+$zip=New-VerifiedEvidenceZip -SourceRoot $kit -Destination (Join-Path $run 'v1026-canary-review-only.zip')
+Write-BytesNew ($zip.path+'.sha256.txt') ([Text.Encoding]::ASCII.GetBytes($zip.sha256+"`n"))
 $result=[ordered]@{
     schema_version='v1026-canary-offline-build-v1'; result='V1026_CANARY_PORT_OFFLINE_VERIFIED'
     recorded_at=[DateTimeOffset]::Now.ToString('o'); product=$candidate
