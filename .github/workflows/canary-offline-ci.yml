@@ -46,18 +46,23 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python for stdlib loopback fixtures
+        id: fixture-python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12.6"
           architecture: x64
 
       - name: Run offline regressions without installer or server inputs
+        env:
+          CANARY_PYTHON: ${{ steps.fixture-python.outputs.python-path }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $python = (Get-Command python -CommandType Application -ErrorAction Stop).Source
+          if (-not [IO.File]::Exists($env:CANARY_PYTHON)) {
+            throw 'The setup-python executable output is missing.'
+          }
           & .\scripts\canary-v1026\test-canary-ci.ps1 `
             -OutputRoot (Join-Path $env:RUNNER_TEMP 'sfl-canary-ci') `
-            -PythonPath $python `
+            -PythonPath $env:CANARY_PYTHON `
             -ExpectedCommit $env:EXPECTED_CANARY_COMMIT
 
       - name: Preserve only synthetic test logs and CI receipts
