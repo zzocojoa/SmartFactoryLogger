@@ -1,0 +1,13 @@
+& {
+    $ErrorActionPreference = 'Stop'
+    $path = 'C:\Users\user\Desktop\SmartFactory\collect-cleanup-overview.ps1'
+    $bytes = [IO.File]::ReadAllBytes($path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $actual = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','') }
+    finally { $sha.Dispose() }
+    if ($bytes.Length -ne 14969 -or
+        $actual -cne 'C32A5C42C1D13A4FE99DA48F68B9C3A77193A0E715793328A817C08665F6E223') {
+        throw 'Collector bytes differ. No execution.'
+    }
+    & ([scriptblock]::Create([Text.UTF8Encoding]::new($false,$true).GetString($bytes)))
+}

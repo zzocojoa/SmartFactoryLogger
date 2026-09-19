@@ -1,0 +1,12 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {decision,appendReview,referenceRole}=require('./review-build-intermediates.cjs');
+const base='backend/build/SmartFactoryBackend/';
+for(const name of ['Analysis-00.toc','COLLECT-00.toc','EXE-00.toc','PKG-00.toc','PYZ-00.toc','warn-SmartFactoryBackend.txt','xref-SmartFactoryBackend.html'])test('preserve evidence '+name,()=>assert.equal(decision(base+name),'KEEP_BUILD_DIAGNOSTICS'));
+for(const name of ['SmartFactoryBackend.exe','SmartFactoryBackend.pkg','PYZ-00.pyz','base_library.zip','localpycs/struct.pyc'])test('fixed intermediate '+name,()=>assert.equal(decision(base+name),'DELETE_CANDIDATE_NOT_AUTHORIZED'));
+test('QA intermediate',()=>assert.equal(decision('backend/build/spot-temperature-v25-qa/work/validate_csv_v2_shadow/validate_csv_v2_shadow.pkg'),'DELETE_CANDIDATE_NOT_AUTHORIZED'));
+for(const name of ['backend/dist/SmartFactoryBackend/SmartFactoryBackend.exe',base+'private.log',base+'../SmartFactoryBackend.exe',base+'SmartFactoryBackend.exe:secret','backend/build/SmartFactoryBackend-other/PYZ-00.pyz',base+'localpycs/unknown.pyc'])test('reject outside allowlist '+name,()=>assert.throws(()=>decision(name)));
+test('producer is not a runtime consumer',()=>assert.equal(referenceRole('scripts/deploy.ps1'),'BUILD_PRODUCER_OR_BUILD_INSTRUCTION'));
+test('unknown reference fails closed',()=>assert.equal(referenceRole('scripts/start_from_build.ps1'),'REQUIRES_REFERENCE_REVIEW'));
+test('retained old checkout review is management only',()=>assert.equal(referenceRole('scripts/review-build-cache.ps1'),'MANAGEMENT_MAPPING_NOT_PRODUCT_CONSUMER'));
+test('new history records its own kind and no deletion',()=>{const raw='{"audits":[],"history":[],"updated_at":"old","n":639249359473432800}',a={id:'x',kind:'new-kind',at:'now',state:'REVIEWED'};const out=appendReview(raw,a),j=JSON.parse(out);assert.equal(j.history[0].kind,a.kind);assert.equal(j.history[0].deleted_files,0);assert.ok(out.includes('639249359473432800'));assert.equal(j.audits.length,1);});

@@ -1,0 +1,4 @@
+*.ps1 text eol=lf
+SERVER_GUIDE.md text eol=lf
+# The cold-backup regression binds the historical engine source bytes.
+cold-backup-core.cs text eol=lf

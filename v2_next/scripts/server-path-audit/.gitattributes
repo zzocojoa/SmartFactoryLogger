@@ -1,0 +1,2 @@
+# Preserve historical hash-bound helper bytes across Windows checkout.
+*.ps1 text eol=lf
