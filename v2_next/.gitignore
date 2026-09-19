@@ -53,6 +53,16 @@ docs/data/Factory_Integrated_Log_v2_*.csv
 docs/data/Factory_Integrated_Log_v2_*.metadata.json
 
 # Local QA / Codex artifacts
+# Generated evidence may contain cookies, profiles, account ACLs and server data.
+# Checked-in synthetic fixtures belong under scripts/, not these output trees.
+/.tmp/
+/artifacts/
+verification-files.local.json
+verification-files.local.json.writing
+# Isolated dependency reinstall evidence/caches; paths are recorded in the local registry.
+.tmp/dep-*/
+# Private server evidence imported from the developer Desktop; never publish.
+artifacts/server-evidence/
 release_artifacts/
 .tmp_*
 .tmp_*/

@@ -1,0 +1,80 @@
+& {
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference='Stop'
+    $script='C:\Users\user\Desktop\SmartFactory\repair-sflops-acl-r2.ps1'
+    $expected='@@SHA256@@'
+    $expectedLength=[long]@@LENGTH@@
+    $stream=$null; $side=$null; $sha=$null
+    try {
+        $native=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
+        $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+        if (-not [Environment]::Is64BitProcess -or $PSVersionTable.PSEdition -cne 'Desktop' -or
+            $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1 -or
+            [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine $native -or
+            -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'Use native administrator x64 Windows PowerShell 5.1.'
+        }
+        foreach ($path in @($script,($script+'.sha256.txt'))) {
+            if (-not [IO.File]::Exists($path)) {throw ('Missing transfer file: '+$path)}
+            $node=[IO.FileInfo]::new([IO.Path]::GetFullPath($path))
+            while ($null -ne $node) {
+                if (($node.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {throw 'Reparse transfer path rejected.'}
+                if ($node -is [IO.FileInfo]) {$node=$node.Directory} else {$node=$node.Parent}
+            }
+        }
+        $side=[IO.File]::Open(($script+'.sha256.txt'),'Open','Read','Read')
+        if ($side.Length -gt 70) {throw 'Helper sidecar exceeds size limit.'}
+        $reader=[IO.StreamReader]::new($side,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
+        try {$sideText=$reader.ReadToEnd()} finally {$reader.Dispose()}
+        if ($sideText -cnotmatch ('\A'+$expected+'(?:\r?\n)?\z')) {throw 'Helper sidecar differs from external expected hash.'}
+        $stream=[IO.File]::Open($script,'Open','Read','Read')
+        if ($stream.Length -ne $expectedLength) {throw 'Helper length mismatch.'}
+        $sha=[Security.Cryptography.SHA256]::Create()
+        $actual=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','')
+        if ($actual -cne $expected) {throw ('Helper SHA256 mismatch: '+$actual)}
+        Write-Host '[LAUNCH] Approved exact two-folder ACL repair only. No deletion, cleanup retry or app changes.' -ForegroundColor Yellow
+        # Fresh child verifies and executes bytes from the SAME locked stream.
+        # Do not change this back to -File: that would reopen a path after hashing.
+        $childCode=@'
+Set-StrictMode -Version Latest
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+$verifiedStream=$null; $verifiedSha=$null; $verifiedReader=$null
+try {
+    $verifiedStream=[IO.File]::Open('C:\Users\user\Desktop\SmartFactory\repair-sflops-acl-r2.ps1','Open','Read','Read')
+    if ($verifiedStream.Length -ne @@LENGTH@@) {throw 'Child helper length mismatch.'}
+    $verifiedSha=[Security.Cryptography.SHA256]::Create()
+    $verifiedHash=[BitConverter]::ToString($verifiedSha.ComputeHash($verifiedStream)).Replace('-','')
+    if ($verifiedHash -cne '@@SHA256@@') {throw 'Child helper hash mismatch.'}
+    $verifiedStream.Position=0
+    $verifiedReader=[IO.StreamReader]::new($verifiedStream,[Text.UTF8Encoding]::new($false,$true),$false,4096,$true)
+    $verifiedBlock=[scriptblock]::Create($verifiedReader.ReadToEnd())
+    & $verifiedBlock -Execute 6>&1 | ForEach-Object {[Console]::WriteLine([string]$_)}
+    exit 0
+}
+catch {
+    [Console]::WriteLine('[HOLD] Verified-byte child stopped: '+$_.Exception.Message)
+    exit 1
+}
+finally {
+    if ($null -ne $verifiedReader) {$verifiedReader.Dispose()}
+    if ($null -ne $verifiedSha) {$verifiedSha.Dispose()}
+    if ($null -ne $verifiedStream) {$verifiedStream.Dispose()}
+}
+'@
+        $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childCode))
+        & $native -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand $encoded
+        $code=$LASTEXITCODE
+        if ($code -ne 0) {throw ('ACL repair HOLD: exit='+$code)}
+        Write-Host '[DONE] Return the complete output. Do not rerun cleanup yet.' -ForegroundColor Green
+    }
+    catch {
+        Write-Host '[HOLD] Preserve all output and ACL backup. No automatic retry, rollback, deletion or installation.' -ForegroundColor Yellow
+        throw
+    }
+    finally {
+        if ($null -ne $sha) {$sha.Dispose()}
+        if ($null -ne $stream) {$stream.Dispose()}
+        if ($null -ne $side) {$side.Dispose()}
+    }
+}

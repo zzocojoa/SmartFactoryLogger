@@ -1,0 +1,101 @@
+& {
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference='Stop'
+    $zipPath='C:\Users\user\Desktop\SmartFactory\pre-v1020-duplicate-cleanup-ready-r1.zip'
+    $expected='__ZIP_HASH__'
+    $expectedLength=[long]__ZIP_LENGTH__
+    $streams=[Collections.Generic.List[IDisposable]]::new()
+    $launchGuards=@{}; $archive=$null
+    $savedLaunchPath=$env:PATH; $savedLaunchModules=$env:PSModulePath
+    function LaunchPlain {
+        param([string]$Path)
+        $node=[IO.FileInfo]::new([IO.Path]::GetFullPath($Path))
+        while ($null -ne $node) {
+            if (($node.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse transfer path rejected.' }
+            if ($node -is [IO.FileInfo]) {$node=$node.Directory} else {$node=$node.Parent}
+        }
+    }
+    function LaunchHash {
+        param([IO.Stream]$Stream)
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try {$Stream.Position=0;return [BitConverter]::ToString($sha.ComputeHash($Stream)).Replace('-','')}
+        finally {$sha.Dispose()}
+    }
+    try {
+        $native=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
+        $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+        if (-not [Environment]::Is64BitProcess -or $PSVersionTable.PSEdition -cne 'Desktop' -or
+            $PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1 -or
+            [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ine $native -or
+            -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw 'Use native administrator x64 Windows PowerShell 5.1.'
+        }
+        $env:PATH=[Environment]::SystemDirectory+';'+[IO.Path]::GetDirectoryName($native)
+        $env:PSModulePath=[IO.Path]::GetDirectoryName($native)+'\Modules'
+        foreach($path in @($zipPath,($zipPath+'.sha256.txt'))){
+            if(-not [IO.File]::Exists($path)){throw ('Missing transfer file: '+$path)}
+            LaunchPlain $path
+        }
+        $side=[IO.File]::Open(($zipPath+'.sha256.txt'),'Open','Read','Read');$streams.Add($side)
+        if($side.Length -gt 70){throw 'Transfer sidecar exceeds size limit.'}
+        $reader=[IO.StreamReader]::new($side,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
+        try {$sideText=$reader.ReadToEnd()}finally{$reader.Dispose()}
+        if($sideText -cnotmatch ('\A'+$expected+'(?:\r?\n)?\z')){throw 'Transfer sidecar differs from external expected hash.'}
+        $zipStream=[IO.File]::Open($zipPath,'Open','Read','Read');$streams.Add($zipStream)
+        if($zipStream.Length -ne $expectedLength -or (LaunchHash $zipStream) -cne $expected){throw 'Transfer length/hash mismatch.'}
+        Add-Type -AssemblyName System.IO.Compression
+        $zipStream.Position=0;$archive=[IO.Compression.ZipArchive]::new($zipStream,'Read',$true)
+        $names=@('cleanup-pre-v1020.ps1','cleanup-archive-core.ps1','read-quarantine-pre-v1020.ps1','CLEANUP_GUIDE.md')
+        if($archive.Entries.Count -ne $names.Count){throw 'Unexpected transfer entry count.'}
+        $payload=@{};$hashes=@{}
+        foreach($entry in $archive.Entries){
+            if($entry.FullName -cnotin $names -or $payload.ContainsKey($entry.FullName) -or
+                $entry.Length -gt 200000 -or ($entry.ExternalAttributes -band 0x400) -ne 0 -or
+                (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000){throw 'Unexpected transfer entry.'}
+            $source=$entry.Open();$buffer=[IO.MemoryStream]::new()
+            try {
+                $chunk=New-Object byte[] 8192
+                while(($read=$source.Read($chunk,0,$chunk.Length)) -gt 0){
+                    if($buffer.Length+$read -gt $entry.Length){throw 'Transfer expansion exceeds pin.'}
+                    $buffer.Write($chunk,0,$read)
+                }
+                if($buffer.Length -ne $entry.Length){throw 'Transfer entry truncated.'}
+                $payload[$entry.FullName]=$buffer.ToArray();$hashes[$entry.FullName]=LaunchHash $buffer
+            }finally{$source.Dispose();$buffer.Dispose()}
+        }
+        # Verified package functions prepare protected staging, never the source archive.
+        foreach($name in @('read-quarantine-pre-v1020.ps1','cleanup-archive-core.ps1')){
+            $code=[Text.UTF8Encoding]::new($false,$true).GetString($payload[$name])
+            $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseInput($code,[ref]$tokens,[ref]$errors)
+            if(@($errors).Count -ne 0){throw 'Verified helper syntax error.'}
+            foreach($fn in $ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst]},$true)){
+                . ([scriptblock]::Create($fn.Extent.Text))
+            }
+        }
+        Initialize-CleanupNative
+        foreach($path in @('C:\ProgramData\SFLOps','C:\ProgramData\SFLOps\tmp')){
+            New-CleanupPrivateDirectory $path;Open-CleanupDirectoryGuard $path $launchGuards
+        }
+        $helperRoot='C:\ProgramData\SFLOps\tmp\q20-helper-'+[Guid]::NewGuid().ToString('N')
+        if([IO.File]::Exists($helperRoot) -or [IO.Directory]::Exists($helperRoot)){throw 'Helper staging collision.'}
+        New-CleanupPrivateDirectory $helperRoot;Open-CleanupDirectoryGuard $helperRoot $launchGuards
+        foreach($name in $names){
+            $target=Join-Path $helperRoot $name;$writer=[IO.File]::Open($target,'CreateNew','Write','None')
+            try{$bytes=$payload[$name];$writer.Write($bytes,0,$bytes.Length);$writer.Flush($true)}finally{$writer.Dispose()}
+            Assert-QPlain $target;$pin=[IO.File]::Open($target,'Open','Read','Read');$streams.Add($pin)
+            if((LaunchHash $pin) -cne $hashes[$name]){throw 'Staged helper bytes differ.'}
+        }
+        Write-Host ('[HELPER] '+$helperRoot)
+        Write-Host '[LAUNCH] Approved cleanup: only complete ZIP-backed duplicate folders in the fixed old quarantine. No app changes.' -ForegroundColor Yellow
+        & $native -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $helperRoot 'cleanup-pre-v1020.ps1') -Execute
+        if($LASTEXITCODE -ne 0){throw ('Cleanup HOLD: exit='+$LASTEXITCODE)}
+    }catch{
+        Write-Host '[HOLD] Preserve all output, receipt and ZIPs. No automatic retry, cleanup, restore, restart or installation.' -ForegroundColor Yellow
+        throw
+    }finally{
+        if($null -ne $archive){$archive.Dispose()}
+        foreach($s in $streams){$s.Dispose()}
+        foreach($g in $launchGuards.Values){$g.handle.Dispose()}
+        $env:PATH=$savedLaunchPath;$env:PSModulePath=$savedLaunchModules
+    }
+}
