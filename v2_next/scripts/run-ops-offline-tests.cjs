@@ -35,7 +35,7 @@ const auditMarkers = [
 const stage = [
   'test-stage', 'test-current-v1025', 'test-error-details-v1025',
   'test-storage-recovery-v1025', 'test-minimal-backup-preflight-v1025',
-  'test-cold-backup', 'test-install-cold-boundary-r2',
+  'test-cold-backup', 'test-install-cold-boundary-r2', 'test-transfer-binding-r2',
 ];
 const stageMarkers = [
   /^\[FIXTURE PASS\] \d+ checks\./m,
@@ -45,6 +45,7 @@ const stageMarkers = [
   /"result"\s*:\s*"V1025_MINIMAL_BACKUP_PREFLIGHT_LOCAL_TEST_PASS"/,
   /^result\s*:\s*COLD_BACKUP_SYNTHETIC_TEST_PASS\s*$/m,
   /"result"\s*:\s*"V1026_INSTALL_R2_COLD_BOUNDARY_TEST_PASS"/,
+  /"result"\s*:\s*"V1026_TRANSFER_R2_BINDING_TEST_PASS"/,
 ];
 const id = crypto.randomUUID();
 function plain(p) {

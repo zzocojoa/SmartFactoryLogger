@@ -18,6 +18,10 @@ PowerShell 7이 PATH에 없다면 SFL_TEST_PWSH 환경변수에 pwsh.exe 절대 
 - 관리기 명령의 PARTIAL 상태 차단 및 dist 합성 계약 시험 포함.
 - r2 설치 도우미는 실제 AssertBackup 함수까지 실행하되 원본/백업/복원은 모두
   fixture이며 앱 상태와 호스트 ACL 검사는 mock이다. COM 설치는 호출하지 않는다.
+- 전송 빌더 r2는 새 shallow Git 체크아웃에서 현재 HEAD 영수증 허용, Canary tree/
+  실제 파일 변조, 미추적·ignored 추가 파일, 잘못된 영수증 차단을 시험한다.
+  역사적 빌더·도우미는 그대로 보존한다. 실제 배포본 전체 패키징은 CI 합성 시험과
+  별도의 빌드 호스트 검증이며 서버 실행이 아니다.
 - dist PowerShell 시험의 관리자 ACL/copy 검사는 비관리자 실행 시 생략된다.
   summary.json의 administrator_acl_copy_tests 값을 확인한다.
 - repair-dependency-acl 시험은 -PureOnly로 실행한다. 비관리자 Set-Acl 권한 실패를

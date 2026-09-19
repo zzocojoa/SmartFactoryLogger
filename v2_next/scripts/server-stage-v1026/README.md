@@ -6,16 +6,34 @@ It preserves the committed v1.0.26 product/canary identity and uses the disabled
 
 ## Build host only
 
-Use native x64 Windows PowerShell 5.1. First generate a fresh offline review kit from committed
-tooling `c03f7c76ff6e75bfe330275ac0fa01326f357261` using `scripts/canary-v1026/build-canary-kit.ps1`.
+Use native x64 Windows PowerShell 5.1. **`build-transfer.ps1` is historical, not a new-build
+entrypoint:** its pre-commit HEAD check is intentionally preserved with the original bytes.
+Use **`build-transfer-r2.ps1`** in the current checkout. First generate a fresh offline review
+kit at that same HEAD using `scripts/canary-v1026/build-canary-kit.ps1 -ReviewOnly`.
 Retain its self-test/71-regression/loopback evidence and externally record the build-result SHA256.
 Never substitute the synthetic OfflineCi result for a real release-review receipt.
 
-Run `build-transfer.ps1` with the exact existing v1.0.26 release candidate directory,
+Run `build-transfer-r2.ps1` with the exact existing v1.0.26 release candidate directory,
 `-CanaryBuildResult`, `-ExpectedCanaryBuildResultSha256` and a new `-OutputRoot`.
 It verifies the candidate's 14 files, clean committed canary source, source snapshot and all kit
 bytes, and assembles the helper from explicit reviewed functions. No script from a transfer
 directory is imported on the server before external binding, extraction and read-lock verification.
+
+r2 accepts a newer repository HEAD only when its Canary subtree is exactly
+`df4ebc25261b78f355bad5f52884a18a77ba66b9`. It checks clean Git status, raw committed
+blob bytes, exact membership (including ignored extras), and every source-snapshot hash.
+The receipt must belong to the current HEAD; after any commit, regenerate the review kit.
+No old commit object or full Git history is needed, so a shallow checkout works.
+The original helper, launcher, guide and contract bytes are pinned and unchanged.
+The immutable v1 manifest's `tooling_commit` remains the historical Canary baseline
+`c03f7c76ff6e75bfe330275ac0fa01326f357261`, **not** the new builder HEAD. The separate
+`build-result.json` records `builder_head`, `canary_source_tree`, both revised builder input
+hashes, and the externally supplied receipt hash. Failure retains partial output, with no
+automatic cleanup or retry. Use a new output directory each time.
+
+This is build-host reproduction for review, not approval to run the historical staging
+launcher on a server. Its legacy server paths are unchanged for compatibility. Any new
+server execution helper must separately follow the SFLOps path policy and execution review.
 
 The transfer ZIP contains 32 entries: release 14, disabled kit 15, helper, guide and manifest.
 The existing v1.0.25 recovery EXE is not copied again: the helper verifies its fixed server path.
@@ -25,6 +43,11 @@ The external `START_V1026_STAGE.txt` pins ZIP, helper and manifest bytes, and ru
 bytes in memory. Only the ZIP and ZIP sidecar need transfer to the server.
 
 ## Local fixtures
+
+`test-transfer-binding-r2.ps1 -OutputRoot <new-fixture>` creates a fresh shallow Git checkout
+and checks the exact production source/receipt gates without private release assets. It does
+not mock the expected Canary tree or run a server main. Full release packaging remains a
+separate build-host check with the actual pinned release directory and a fresh review receipt.
 
 ```powershell
 & .\scripts\server-stage-v1026\test-stage.ps1 `
