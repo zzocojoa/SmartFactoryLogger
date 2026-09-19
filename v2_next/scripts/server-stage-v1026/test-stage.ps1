@@ -105,12 +105,12 @@ if ($TransferBuildResult -ne '') {
     $savedAction=$ErrorActionPreference
     try {
         $ErrorActionPreference='Continue'
-        $failureOutput=(& $native -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build-transfer.ps1') `
+        $failureOutput=(& $native -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build-transfer-r2.ps1') `
             -ReleaseRoot (Join-Path $full 'release') -CanaryBuildResult $build.canary_build_result `
             -ExpectedCanaryBuildResultSha256 ('0'*64) -OutputRoot (Join-Path $root 'rejected-build') 2>&1 | Out-String)
         $failureExit=$LASTEXITCODE
     } finally { $ErrorActionPreference=$savedAction }
-    Check ($failureExit -ne 0 -and $failureOutput -like '*Canary build receipt differs from externally recorded SHA256*') 'wrong-canary-receipt-pin-rejected'
+    Check ($failureExit -ne 0 -and $failureOutput -like '*Canary receipt SHA256 differs*') 'wrong-canary-receipt-pin-rejected'
     Check (-not (Test-Path -LiteralPath (Join-Path $root 'rejected-build'))) 'receipt-pin-rejection-before-build-output'
 }
 Write-EvidenceJsonNew (Join-Path $root 'test-result.json') ([ordered]@{
