@@ -1,0 +1,39 @@
+name: Operations offline fixtures
+
+on:
+  pull_request:
+    paths:
+      - 'v2_next/scripts/**'
+      - 'v2_next/docs/V2/05_운영_배포/server_validation_path_policy.md'
+      - 'v2_next/.gitignore'
+      - '.gitattributes'
+      - '.github/workflows/ops-offline-ci.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'v2_next/scripts/**'
+      - 'v2_next/docs/V2/05_운영_배포/server_validation_path_policy.md'
+      - 'v2_next/.gitignore'
+      - '.gitattributes'
+      - '.github/workflows/ops-offline-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22.22.2'
+      - name: Synthetic checks only (no installation or managed cleanup)
+        working-directory: v2_next
+        shell: pwsh
+        run: node scripts/run-ops-offline-tests.cjs
