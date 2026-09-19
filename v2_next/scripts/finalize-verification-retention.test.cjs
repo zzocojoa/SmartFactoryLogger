@@ -1,0 +1,50 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const {topLevelSpans, appendAuditText, buildContext, classify, totals, groupFor} = require('./finalize-verification-retention.cjs');
+const repo = path.resolve(__dirname, '..');
+const file = (relative, state = 'KEEP_NOT_PROVEN_DISPOSABLE') => ({path: path.resolve(repo, relative), relative, root: repo, bytes: 100, ledger_state: state});
+const context = () => ({tracked: new Set(), detailed: new Map(), preserved: new Map()});
+const binary = file('backend/build/SmartFactoryBackend/SmartFactoryBackend.pkg');
+test('generated backend intermediate is review-only', () => assert.deepEqual(classify(binary, context()), ['REVIEW_CANDIDATE', 'GENERATED_BUILD_INTERMEDIATE_NOT_DELETION_APPROVED']));
+test('QA workpath is exact', () => assert.equal(classify(file('backend/build/spot-temperature-v25-qa/work/validate_csv_v2_shadow/PYZ-00.pyz'), context())[0], 'REVIEW_CANDIDATE'));
+for (const name of ['warn-SmartFactoryBackend.txt', 'xref-SmartFactoryBackend.html']) test('build report retained: ' + name, () => assert.equal(classify(file('backend/build/SmartFactoryBackend/' + name), context())[0], 'KEEP'));
+for (const name of ['backend/build/SmartFactoryBackend-extra/thing.pkg', 'backend/build/spot-temperature-v25-qa/validate_csv_v2_shadow.spec', 'backend/dist/SmartFactoryBackend/SmartFactoryBackend.exe', 'frontend/dist/index.html']) test('outside generated candidate boundary: ' + name, () => assert.equal(classify(file(name), context())[0], 'KEEP'));
+test('ledger protection beats generated name', () => assert.equal(classify({...binary, ledger_state: 'PROTECT_DEPENDENCY_RECOVERY'}, context())[0], 'KEEP'));
+test('tracked file beats generated name', () => {const c = context(); c.tracked.add(binary.path.toLowerCase()); assert.deepEqual(classify(binary, c), ['KEEP', 'PROTECT_GIT_TRACKED']);});
+test('previous keeper beats generated name', () => {const c = context(); c.preserved.set(binary.path.toLowerCase(), 'KEEP_PRIOR_DELETION_KEEPER'); assert.equal(classify(binary, c)[0], 'KEEP');});
+test('prior link hold beats generated name', () => {const c = context(); c.detailed.set(binary.path.toLowerCase(), {decision: 'HOLD_LINKED_OR_PARTIAL_GROUP'}); assert.equal(classify(binary, c)[0], 'HOLD');});
+test('browser profile cannot become whole-folder cache candidate', () => assert.equal(classify(file('.tmp_chrome_profile_scene_surface/Default/Cookies'), context())[0], 'HOLD'));
+test('prior candidate is not automatically authorized', () => {const c = context(), f = file('dist/old.zip'); c.detailed.set(f.path.toLowerCase(), {decision: 'CANDIDATE_EXACT_DUPLICATE_REQUIRES_REFERENCE_REVIEW'}); assert.equal(classify(f, c)[0], 'HOLD');});
+test('tool environment needs dependency review', () => {const c = context(), f = file('.tmp/tool/python.exe'); c.detailed.set(f.path.toLowerCase(), {decision: 'KEEP_TOOL_ENVIRONMENT_REQUIRES_DEPENDENCY_REVIEW'}); assert.equal(classify(f, c)[0], 'HOLD');});
+test('preserved candidates override older duplicate review', () => {
+  const index = {plans: [], migrations: [], audits: [{id: 'old', kind: 'DESKTOP_DIST_READONLY_CLASSIFICATION', files: [{path: binary.path, decision: 'CANDIDATE_OLD'}]}, {preserved_candidates: [{path: binary.path, reason: 'KEEP_WHOLE_KIT'}]}]};
+  assert.deepEqual(classify(binary, buildContext(index, new Set())), ['KEEP', 'KEEP_WHOLE_KIT']);
+});
+test('completed cleanup protects both retained copy and outside evidence', () => {
+  const other = file('reports/result.json');
+  const index = {plans: [], migrations: [], audits: [{kind: 'DESKTOP_ATTESTATION_EXTRACTION_CLEANUP', state: 'COMPLETE', files: [{keeper: binary.path}], preserved_files: [{path: other.path}]}]};
+  const c = buildContext(index, new Set()); assert.equal(classify(binary, c)[0], 'KEEP'); assert.equal(c.preserved.has(other.path.toLowerCase()), true);
+});
+test('root membership reporting uses known external root', () => assert.equal(groupFor({...file('../outside/x'), root: 'outside-root'}), 'outside-root'));
+test('totals reconcile ledger bytes', () => assert.deepEqual(totals([{decision: 'KEEP', bytes: 2}, {decision: 'HOLD', bytes: 3}, {decision: 'KEEP', bytes: 4}]), {KEEP: {files: 2, ledger_bytes: 6}, HOLD: {files: 1, ledger_bytes: 3}}));
+
+const raw = '{\n "updated_at":"old", "audits":[{"n":639249359473432800,"s":"quoted \\\" } ] ","nested":[1,{"x":2}]}], "history":[], "other":1.234567890123456789e+30\n}';
+const audit = {id: 'new-id', at: 'new-time', state: 'CLASSIFIED', files: []};
+test('JSON scanner locates only top-level values', () => assert.deepEqual([...topLevelSpans(raw).keys()], ['updated_at', 'audits', 'history', 'other']));
+test('append keeps historical integer/exponent lexemes exactly', () => {const output = appendAuditText(raw, audit); assert.ok(output.includes('639249359473432800')); assert.ok(output.includes('1.234567890123456789e+30'));});
+test('append retains old audit text byte-for-byte', () => {const output = appendAuditText(raw, audit), before = topLevelSpans(raw).get('audits'), after = topLevelSpans(output).get('audits'); assert.ok(output.slice(after.start, after.end).startsWith(raw.slice(before.start, before.end - 1) + ','));});
+test('append adds exactly one audit/history and updates timestamp', () => {const j = JSON.parse(appendAuditText(raw, audit)); assert.equal(j.audits.length, 2); assert.equal(j.history.length, 1); assert.equal(j.history[0].deleted_files, 0); assert.equal(j.updated_at, 'new-time'); assert.equal(j.audits[1].id, 'new-id');});
+test('empty arrays receive no leading comma', () => assert.equal(JSON.parse(appendAuditText('{"updated_at":"old","audits":[],"history":[ ]}', audit)).audits.length, 1));
+test('reordered management properties supported', () => assert.equal(JSON.parse(appendAuditText('{"history":[true],"audits":[],"updated_at":"old"}', audit)).history.length, 2));
+test('duplicate top-level properties rejected', () => assert.throws(() => topLevelSpans('{"a":1,"a":2}'), /Duplicate/));
+test('non-object ledger rejected', () => assert.throws(() => topLevelSpans('[]'), /object/));
+test('malformed JSON rejected', () => assert.throws(() => topLevelSpans('{'), SyntaxError));
+test('wrong history type rejected', () => assert.throws(() => appendAuditText('{"updated_at":"old","audits":[],"history":{}}', audit), /array/));
+test('missing timestamp rejected', () => assert.throws(() => appendAuditText('{"audits":[],"history":[]}', audit), /timestamp/));
+test('escaped property names decoded and duplicates rejected', () => assert.throws(() => topLevelSpans('{"audits":[],"\\u0061udits":[]}'), /Duplicate/));
+test('completed migration destination stays retained', () => {
+  const c = buildContext({plans: [], migrations: [{files: [{destination: binary.path}]}], audits: []}, new Set());
+  assert.deepEqual(classify(binary, c), ['KEEP', 'KEEP_MIGRATED_SERVER_EVIDENCE']);
+});
