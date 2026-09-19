@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable, Optional, cast
+from backend.FacilityData.freshness import SPOT_CACHE_EXPIRY_THRESHOLD_SEC, cache_rejection_reason, finite_number
 
 from backend.FacilityData.spot_observation import (
     SPOT_OVER_RANGE_DEVICE_STATUS_CODE,
@@ -25,8 +26,8 @@ from backend.FacilityData.temperature_state import (
 )
 
 
-TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v4"
-SPOT_ROW_FRESHNESS_RULE_VERSION = "spot-row-freshness-v1"
+TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v5"
+SPOT_ROW_FRESHNESS_RULE_VERSION = "spot-row-freshness-v2"
 UNSUPPORTED_CAUSE_EVIDENCE_CODES = frozenset(
     {
         "actuator_position_changed",
@@ -73,7 +74,8 @@ class TemperatureOperationalInput:
     spot_effective_age_ms_at_row: Optional[float] = None
     spot_effective_value_age_ms_at_row: Optional[float] = None
     spot_value_age_clock_status: str = "unknown"
-    spot_row_freshness_threshold_ms: Optional[float] = None
+    spot_cache_ttl_ms: Optional[float] = SPOT_CACHE_EXPIRY_THRESHOLD_SEC * 1000.0
+    spot_row_freshness_threshold_ms: Optional[float] = 9000.0
     # Trusted phase input. Realtime callers must normalize externally supplied
     # pre_changeover_hold_candidate to stopped_after_production_candidate before calling.
     process_phase_candidate: str = "unknown"
@@ -128,7 +130,7 @@ def derive_temperature_operational_fields(
 ) -> TemperatureOperationalDecision:
     row_freshness, clock_status = derive_spot_row_freshness(
         input_state.spot_effective_age_ms_at_row,
-        threshold_ms=input_state.spot_row_freshness_threshold_ms or 9000.0,
+        threshold_ms=input_state.spot_row_freshness_threshold_ms,
     )
     state_decision = input_state.state_decision or derive_temperature_state(
         TemperatureStateInput(
@@ -202,16 +204,16 @@ def derive_temperature_operational_fields(
     )
 
 
-def derive_spot_row_freshness(age_ms: Optional[float], *, threshold_ms: float = 9000.0) -> tuple[str, str]:
-    if age_ms is None:
-        return "unknown", "unknown"
-    try:
-        age = float(age_ms)
-    except (TypeError, ValueError):
+def derive_spot_row_freshness(age_ms: Optional[float], *, threshold_ms: Optional[float] = 9000.0) -> tuple[str, str]:
+    age = finite_number(age_ms)
+    threshold = finite_number(threshold_ms)
+    if age is None:
         return "unknown", "unknown"
     if age < 0:
         return "unknown", "clock_anomaly"
-    if age > threshold_ms:
+    if threshold is None or threshold <= 0:
+        return "unknown", "unknown"
+    if age > threshold:
         return "stale", "ok"
     return "fresh", "ok"
 
@@ -251,6 +253,8 @@ def _derive_status_and_reason(
         return TemperatureOutputStatus.SOURCE_ERROR.value, "empty_body"
     if raw_validity == SpotRawValidity.OUT_OF_RANGE:
         return TemperatureOutputStatus.SOURCE_ERROR.value, "numeric_out_of_range"
+    if row_freshness == "unknown":
+        return TemperatureOutputStatus.UNKNOWN.value, "unknown_freshness"
     if effective_origin == TemperatureValueOrigin.CURRENT_OBSERVATION.value:
         return TemperatureOutputStatus.VALID.value, ""
     if raw_validity == SpotRawValidity.NOT_RECEIVED:
@@ -292,6 +296,11 @@ def _is_accepted_cached_fallback(
         and state_decision.temperature_value_origin == TemperatureValueOrigin.CACHED_OBSERVATION
         and input_state.cache_fallback_allowed is True
         and input_state.has_ttl_valid_cache is True
+        and not cache_rejection_reason(
+            input_state.spot_effective_value_age_ms_at_row,
+            input_state.spot_value_age_clock_status,
+            input_state.spot_cache_ttl_ms,
+        )
         and row_freshness == "fresh"
     )
 
@@ -324,6 +333,14 @@ def _cached_fallback_rejected_reason(
         return "fallback_disallowed"
     if is_transport_failure and state_decision.spot_cache_status == SpotCacheStatus.EXPIRED:
         return "cache_expired"
+    if is_transport_failure and input_state.cache_fallback_allowed:
+        rejection = cache_rejection_reason(
+            input_state.spot_effective_value_age_ms_at_row,
+            input_state.spot_value_age_clock_status,
+            input_state.spot_cache_ttl_ms,
+        )
+        if rejection:
+            return rejection
     if state_decision.spot_cache_status == SpotCacheStatus.REUSED:
         return "state_contract_mismatch"
     return ""

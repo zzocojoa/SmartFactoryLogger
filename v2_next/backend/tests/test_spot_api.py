@@ -398,89 +398,9 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(diagnostics["spot_last_valid_value_at"])
         self.assertIsNotNone(diagnostics["spot_raw_payload_hash"])
 
-    async def test_slow_observation_fact_write_does_not_block_health_or_data(self) -> None:
-        spot_api.config.SPOT_URL = "http://spot.local/temp"
-        writer_started = threading.Event()
-        release_writer = threading.Event()
-        writer_timed_out = threading.Event()
-        writer_thread_ids: list[int] = []
-        event_loop_thread_id = threading.get_ident()
+    # Async persistence ownership is tested with real writer Events in test_temperature_fact_queue.py.
 
-        async def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, text="448.5", request=request)
-
-        def blocking_fact_write(snapshot: dict[str, Any]) -> None:
-            self.assertEqual(snapshot["spot_temperature_observed_c"], 448.5)
-            writer_thread_ids.append(threading.get_ident())
-            writer_started.set()
-            if not release_writer.wait(timeout=1.0):
-                writer_timed_out.set()
-
-        with (
-            patch.object(
-                spot_api,
-                "_write_spot_observation_fact_safely",
-                side_effect=blocking_fact_write,
-            ),
-            patch.object(backend_app, "build_health_payload", return_value={"running": True}),
-        ):
-            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                refresh_task = asyncio.create_task(spot_api._refresh_spot_temperature(client))
-                try:
-                    started = await asyncio.wait_for(
-                        asyncio.to_thread(writer_started.wait, 0.5),
-                        timeout=1.0,
-                    )
-                    self.assertTrue(started)
-
-                    health_payload, data_payload = await asyncio.wait_for(
-                        asyncio.gather(backend_app.health(), backend_app.get_data()),
-                        timeout=0.5,
-                    )
-                    self.assertTrue(health_payload["running"])
-                    self.assertIsNotNone(data_payload)
-                    self.assertFalse(refresh_task.done())
-                finally:
-                    release_writer.set()
-
-                await asyncio.wait_for(refresh_task, timeout=1.0)
-
-        self.assertFalse(writer_timed_out.is_set())
-        self.assertEqual(len(writer_thread_ids), 1)
-        self.assertNotEqual(writer_thread_ids[0], event_loop_thread_id)
-
-    async def test_cancelled_refresh_waits_for_observation_fact_write(self) -> None:
-        spot_api.config.SPOT_URL = "http://spot.local/temp"
-        writer_started = threading.Event()
-        release_writer = threading.Event()
-
-        async def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, text="448.5", request=request)
-
-        def blocking_fact_write(_snapshot: dict[str, Any]) -> None:
-            writer_started.set()
-            release_writer.wait(timeout=1.0)
-
-        with patch.object(
-            spot_api,
-            "_write_spot_observation_fact_safely",
-            side_effect=blocking_fact_write,
-        ):
-            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-                refresh_task = asyncio.create_task(spot_api._refresh_spot_temperature(client))
-                started = await asyncio.wait_for(
-                    asyncio.to_thread(writer_started.wait, 0.5),
-                    timeout=1.0,
-                )
-                self.assertTrue(started)
-
-                refresh_task.cancel()
-                await asyncio.sleep(0)
-                self.assertFalse(refresh_task.done())
-
-                release_writer.set()
-                with self.assertRaises(asyncio.CancelledError):
-                    await asyncio.wait_for(refresh_task, timeout=1.0)
+    # Async persistence ownership is tested with real writer Events in test_temperature_fact_queue.py.
 
     async def test_temperature_cache_and_observation_snapshot_publish_atomically(self) -> None:
         spot_api.config.SPOT_URL = "http://spot.local/temp"
@@ -3643,82 +3563,7 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         payload = spot_api._missing_spot_diagnostics_payload()
         self.assertIsNone(payload["diagnostics_age_ms"])
 
-    async def test_stop_retains_pending_observation_writer_until_it_drains(
-        self,
-    ) -> None:
-        write_started = threading.Event()
-        release_write = threading.Event()
-
-        def blocking_write(_snapshot: dict[str, Any]) -> None:
-            write_started.set()
-            release_write.wait(timeout=2.0)
-
-        async def poll_with_observation_write() -> None:
-            await spot_api._write_spot_observation_fact_async({"poll_seq": 1})
-
-        poll_task: asyncio.Task[None] | None = None
-        try:
-            with patch.object(
-                spot_api,
-                "_write_spot_observation_fact_safely",
-                side_effect=blocking_write,
-            ):
-                poll_task = asyncio.create_task(poll_with_observation_write())
-                spot_api._spot_diagnostics_task = None
-                spot_api._spot_poll_task = poll_task
-                spot_api._internal_temperature_task = None
-                self.assertTrue(
-                    await asyncio.to_thread(write_started.wait, 1.0)
-                )
-
-                with (
-                    patch.object(
-                        spot_api,
-                        "_SPOT_BACKGROUND_SHUTDOWN_TIMEOUT_SEC",
-                        0.01,
-                    ),
-                    patch.object(
-                        spot_api,
-                        "_stop_spot_image_refresh_for_shutdown",
-                        new=AsyncMock(return_value=True),
-                    ),
-                    patch.object(
-                        spot_api,
-                        "_stop_spot_http_transport",
-                        new=AsyncMock(return_value=True),
-                    ),
-                ):
-                    stopped = await spot_api.stop_spot_poll_loop()
-
-                self.assertFalse(stopped)
-                self.assertIs(spot_api._spot_poll_task, poll_task)
-                self.assertFalse(
-                    spot_api.spot_observation_fact_writes_drained()
-                )
-                self.assertEqual(
-                    spot_api.get_spot_observation_fact_health()[
-                        "pending_write_count"
-                    ],
-                    1,
-                )
-
-                release_write.set()
-                with self.assertRaises(asyncio.CancelledError):
-                    await poll_task
-                await asyncio.sleep(0)
-
-                self.assertTrue(
-                    spot_api.spot_observation_fact_writes_drained()
-                )
-        finally:
-            release_write.set()
-            if poll_task is not None and not poll_task.done():
-                poll_task.cancel()
-                with self.assertRaises(asyncio.CancelledError):
-                    await poll_task
-            spot_api._spot_poll_task = None
-            spot_api._spot_diagnostics_task = None
-            spot_api._internal_temperature_task = None
+    # Async persistence ownership is tested with real writer Events in test_temperature_fact_queue.py.
 
     async def test_final_observation_drain_keeps_event_loop_alive_for_pending_write(
         self,

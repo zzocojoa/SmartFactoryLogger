@@ -259,7 +259,13 @@ class PLCService:
         return "changeover_candidate"
 
     def _compose_data(self, raw_data: FactoryData, captured_at_sec: Optional[float] = None) -> FactoryData:
+        from backend.FacilityData.freshness import plc_source_is_usable
+
         sample_at_sec = captured_at_sec if captured_at_sec is not None else time.time()
+        plc_age_ms = ((sample_at_sec - raw_data.captured_at_extruder) * 1000.0
+                      if raw_data.captured_at_extruder is not None else None)
+        plc_usable = plc_source_is_usable(raw_data.plc_source_usable, plc_age_ms,
+                                          raw_data.plc_source_freshness_threshold_ms, raw_data.plc_source_error)
         self._apply_operator_metadata_auto_reset(raw_data, sample_at_sec)
         operator_metadata = operator_metadata_store.get()
         extruder_process_state_online = self._derive_metadata_process_state_candidate(
@@ -277,6 +283,8 @@ class PLCService:
             float(jam_press_threshold),
         )
         return raw_data.model_copy(update={
+            "plc_source_age_ms": plc_age_ms,
+            "plc_source_usable": plc_usable,
             "Computed": computed,
             "Product_No_operator": operator_metadata.product_no,
             "Mold_No_operator": operator_metadata.operator_mold_no,
@@ -448,6 +456,7 @@ class PLCService:
         payload.update(
             {
                 "diagnostics_available": True,
+                "observation_persistence": fact_health.get("persistence"),
                 "validation_state": "shadow",
                 "operational_truth": False,
                 "v2_4_operational": v2_4_operational,

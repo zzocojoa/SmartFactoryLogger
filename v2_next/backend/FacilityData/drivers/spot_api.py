@@ -85,7 +85,12 @@ class _TemperatureCache(TypedDict):
 
 _temperature_cache: _TemperatureCache = {"temp": 0.0, "temp_time": 0.0}
 _internal_temp_cache: _TemperatureCache = {"temp": 0.0, "temp_time": 0.0}
-_TEMP_CACHE_TTL_SEC = 15.0
+from backend.FacilityData.freshness import (
+    SPOT_CACHE_EXPIRY_THRESHOLD_SEC, cache_rejection_reason, clock_domain_id, monotonic_age_ms,
+    finite_number,
+)
+
+_TEMP_CACHE_TTL_SEC = SPOT_CACHE_EXPIRY_THRESHOLD_SEC
 _SPOT_VERIFIED_NO_TARGET_VALUES: tuple[str, ...] = ()
 _SPOT_INVALID_SENTINEL_VALUES: tuple[str, ...] = SPOT_INVALID_SENTINEL_VALUES
 _SPOT_FOCUS_MIN_MM = 300
@@ -198,6 +203,31 @@ _spot_observation_seq = 0
 _spot_temperature_snapshot: Optional[Dict[str, Any]] = None
 _spot_observation_fact_writer_lock = threading.Lock()
 _spot_observation_fact_writer: Optional[SpotObservationFactWriter] = None
+from backend.FacilityData.spot_observation_queue import SpotObservationQueue, FactPersistencePending
+
+_spot_observation_queue: Optional[SpotObservationQueue] = None
+_spot_observation_queue_path: Optional[Path] = None
+_spot_observation_queue_lock = threading.Lock()
+
+
+def _get_spot_observation_queue() -> SpotObservationQueue:
+    global _spot_observation_queue, _spot_observation_queue_path
+    with _spot_observation_queue_lock:
+        if _spot_observation_queue is None:
+            expected_path = _spot_observation_fact_path().resolve()
+            _spot_observation_queue_path = expected_path
+            def create_writer():
+                global _spot_observation_fact_writer
+                with _spot_observation_fact_writer_lock:
+                    if _spot_observation_fact_writer is None:
+                        _spot_observation_fact_writer = SpotObservationFactWriter(expected_path)
+                    if _spot_observation_fact_writer.output_path.resolve() != expected_path:
+                        raise RuntimeError("observation writer belongs to a different path")
+                    return _spot_observation_fact_writer
+            _spot_observation_queue = SpotObservationQueue(create_writer)
+        return _spot_observation_queue
+
+
 _spot_observation_fact_write_tasks: set[asyncio.Task[None]] = set()
 _spot_diagnostics_task: Optional[asyncio.Task[None]] = None
 _spot_last_valid_value_at: Optional[float] = None
@@ -1999,12 +2029,11 @@ def _epoch_to_utc_iso(value: Optional[float]) -> Optional[str]:
     return datetime.fromtimestamp(float(value), timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _spot_poll_freshness_threshold_sec() -> float:
-    try:
-        refresh_interval = float(config.SPOT_REFRESH_INTERVAL or 1.0)
-    except (TypeError, ValueError):
-        refresh_interval = 1.0
-    return max(1.0, refresh_interval * 3.0)
+def _spot_poll_freshness_threshold_sec() -> Optional[float]:
+    refresh_interval = finite_number(getattr(config, "SPOT_REFRESH_INTERVAL", 1.0))
+    if refresh_interval is None or refresh_interval <= 0:
+        return None
+    return refresh_interval * 3.0
 
 
 def _begin_spot_temperature_poll() -> SpotPollContext:
@@ -2075,19 +2104,15 @@ def _write_spot_observation_fact_safely(snapshot: Dict[str, Any]) -> None:
 
 
 async def _write_spot_observation_fact_async(snapshot: Dict[str, Any]) -> None:
-    write_task = asyncio.create_task(
-        asyncio.to_thread(_write_spot_observation_fact_safely, snapshot)
-    )
-    _spot_observation_fact_write_tasks.add(write_task)
-    write_task.add_done_callback(_spot_observation_fact_write_tasks.discard)
-    try:
-        await asyncio.shield(write_task)
-    except asyncio.CancelledError:
-        await write_task
-        raise
+    if not bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)):
+        return
+    if not _get_spot_observation_queue().enqueue(snapshot):
+        _logger.error("SPOT observation persistence rejected an event", extra={"code": "spot-fact-enqueue-rejected"})
 
 
 def spot_observation_fact_writes_drained() -> bool:
+    if _spot_observation_queue is not None:
+        return bool(_spot_observation_queue.snapshot()["writes_drained"])
     if any(not task.done() for task in _spot_observation_fact_write_tasks):
         return False
     writer = _spot_observation_fact_writer
@@ -2099,9 +2124,25 @@ def spot_observation_fact_writes_drained() -> bool:
         return False
 
 
+def spot_observation_fact_closeout_deferred(fact_path: Path) -> bool:
+    """Only a healthy active owner at this path may defer a runtime rollover."""
+    if not config.SPOT_OBSERVATION_FACT_ENABLED or _spot_observation_queue is None:
+        return False
+    if _spot_observation_queue_path != fact_path.resolve():
+        return False
+    state = _spot_observation_queue.snapshot()
+    return bool(state["accepting"] and state["initialization_state"] != "failed"
+                and not state["write_failure_count"] and not state["rejected_count"]
+                and not state["spool_failure_count"] and not state["spool_pending_count"])
+
+
 async def wait_for_spot_observation_fact_writes_drain(
-    timeout_sec: float = _SPOT_OBSERVATION_FACT_DRAIN_TIMEOUT_SEC,
+    timeout_sec: Optional[float] = None,
 ) -> bool:
+    if timeout_sec is None:
+        timeout_sec = _SPOT_OBSERVATION_FACT_DRAIN_TIMEOUT_SEC
+    if _spot_observation_queue is not None:
+        return await asyncio.to_thread(_spot_observation_queue.close, timeout_sec)
     pending_tasks = tuple(
         task for task in _spot_observation_fact_write_tasks if not task.done()
     )
@@ -2124,6 +2165,7 @@ async def wait_for_spot_observation_fact_writes_drain(
 
 def get_spot_observation_fact_health() -> Dict[str, Any]:
     writer = _spot_observation_fact_writer
+    queue_health = _spot_observation_queue.snapshot() if _spot_observation_queue is not None else None
     with _spot_diagnostics_lock:
         diagnostics_status = (
             str(_spot_diagnostics_snapshot.get("diagnostics_capture_status"))
@@ -2141,9 +2183,12 @@ def get_spot_observation_fact_health() -> Dict[str, Any]:
         config_drift_detected_count = _spot_config_drift_detected_count
     return {
         "enabled": bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)),
-        "write_failure_count": int(writer.failure_count) if writer is not None else 0,
-        "spool_pending_count": int(writer.spool_pending_count()) if writer is not None else 0,
-        "pending_write_count": sum(
+        "write_failure_count": (queue_health["write_failure_count"] + queue_health["rejected_count"]
+                                if queue_health is not None else int(writer.failure_count) if writer is not None else 0),
+        "spool_pending_count": (queue_health["spool_pending_count"] if queue_health is not None
+                                else int(writer.spool_pending_count()) if writer is not None else 0),
+        "persistence": queue_health,
+        "pending_write_count": queue_health["pending_write_count"] if queue_health is not None else sum(
             not task.done()
             for task in _spot_observation_fact_write_tasks
         ),
@@ -2328,17 +2373,26 @@ def _spot_source_freshness_for_snapshot(
     if snapshot is None:
         return SpotSourceFreshness.UNKNOWN
     completed_monotonic = _positive_float_or_none(snapshot.get("_spot_last_poll_completed_monotonic"))
-    if completed_monotonic is not None and now_monotonic is not None:
-        age_sec = now_monotonic - completed_monotonic
-        if age_sec < 0:
+    if snapshot.get("_spot_last_poll_completed_monotonic") is not None:
+        age_ms, clock_status = monotonic_age_ms(now_monotonic, snapshot.get("_spot_last_poll_completed_monotonic"))
+        if clock_status != "ok" or age_ms is None:
             return SpotSourceFreshness.UNKNOWN
-        if age_sec > _spot_poll_freshness_threshold_sec():
+        threshold = finite_number(_spot_poll_freshness_threshold_sec())
+        if threshold is None or threshold <= 0:
+            return SpotSourceFreshness.UNKNOWN
+        if age_ms > threshold * 1000.0:
             return SpotSourceFreshness.STALE
         return SpotSourceFreshness.FRESH
     completed_at = snapshot.get("_spot_last_poll_completed_at_epoch")
     if not isinstance(completed_at, (float, int)) or completed_at <= 0:
         return SpotSourceFreshness.UNKNOWN
-    if now - float(completed_at) > _spot_poll_freshness_threshold_sec():
+    age = finite_number(now - float(completed_at))
+    if age is None or age < 0:
+        return SpotSourceFreshness.UNKNOWN
+    threshold = _spot_poll_freshness_threshold_sec()
+    if threshold is None:
+        return SpotSourceFreshness.UNKNOWN
+    if age > threshold:
         return SpotSourceFreshness.STALE
     return SpotSourceFreshness.FRESH
 
@@ -2375,7 +2429,6 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
         last_valid_value_at = _spot_last_valid_value_at
         last_valid_value_monotonic = _spot_last_valid_value_monotonic
         cached_temperature = _temperature_cache.get("temp")
-        cached_temperature_at = float(_temperature_cache.get("temp_time") or 0.0)
 
     if snapshot is None:
         decision = derive_temperature_state(
@@ -2427,8 +2480,10 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
     source_freshness = _spot_source_freshness_for_snapshot(snapshot, now, now_monotonic)
     poll_status = SpotPollStatus(str(snapshot["spot_poll_status"]))
     raw_validity = SpotRawValidity(str(snapshot["spot_raw_validity"]))
-    cache_age = max(0.0, now - cached_temperature_at) if cached_temperature_at > 0.0 else None
-    has_ttl_valid_cache = cache_age is not None and cache_age <= _TEMP_CACHE_TTL_SEC
+    value_age_ms, value_clock_status = monotonic_age_ms(now_monotonic, last_valid_value_monotonic)
+    has_ttl_valid_cache = not cache_rejection_reason(
+        value_age_ms, value_clock_status, _TEMP_CACHE_TTL_SEC * 1000.0,
+    )
     has_previous_valid_value = last_valid_value_at is not None
     decision = derive_temperature_state(
         TemperatureStateInput(
@@ -2446,12 +2501,9 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
     completed_monotonic = _positive_float_or_none(snapshot.get("_spot_last_poll_completed_monotonic"))
     snapshot_age_ms = None
     if completed_monotonic is not None:
-        snapshot_age_ms = max(0.0, (now_monotonic - completed_monotonic) * 1000.0)
+        snapshot_age_ms = (now_monotonic - completed_monotonic) * 1000.0
     elif isinstance(completed_at, (float, int)) and completed_at > 0:
-        snapshot_age_ms = max(0.0, (now - float(completed_at)) * 1000.0)
-    value_age_ms = None
-    if last_valid_value_at is not None:
-        value_age_ms = max(0.0, (now - float(last_valid_value_at)) * 1000.0)
+        snapshot_age_ms = (now - float(completed_at)) * 1000.0
 
     payload = {k: v for k, v in snapshot.items() if not k.startswith("_")}
     diagnostics_captured_monotonic = _positive_float_or_none(
@@ -2485,6 +2537,7 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
             ),
             "spot_last_valid_value_at": _epoch_to_utc_iso(last_valid_value_at),
             "spot_last_valid_value_monotonic": last_valid_value_monotonic,
+            "spot_clock_domain_id": clock_domain_id(),
             "spot_value_age_ms": value_age_ms,
             "spot_snapshot_age_ms": snapshot_age_ms,
             "spot_last_poll_completed_monotonic": completed_monotonic,
@@ -2734,6 +2787,10 @@ def get_spot_observation_fact_manifest_summary(
     realtime_rows: Iterable[Mapping[str, Any]] | None = None,
     allow_offline_rebuild: bool = True,
 ) -> Dict[str, Any]:
+    if _spot_observation_queue is not None:
+        if fact_path is not None and _spot_observation_queue_path != fact_path.resolve():
+            raise RuntimeError("observation queue path does not match manifest path")
+        return _spot_observation_queue.manifest_summary(realtime_rows=realtime_rows)
     writer = _get_spot_observation_fact_writer()
     if fact_path is not None and writer.output_path.resolve() != fact_path.resolve():
         if not allow_offline_rebuild:
@@ -2751,6 +2808,15 @@ def ensure_spot_observation_fact_initialized(
     fact_path: Path,
     allow_offline_rebuild: bool = True,
 ) -> bool:
+    if _spot_observation_queue is None and _spot_observation_fact_writer is None and not allow_offline_rebuild:
+        _get_spot_observation_queue()
+    if _spot_observation_queue is not None:
+        if _spot_observation_queue_path != fact_path.resolve():
+            raise RuntimeError("observation queue belongs to a different initialization path")
+        state = _spot_observation_queue.snapshot()["initialization_state"]
+        if state == "pending":
+            raise FactPersistencePending("observation writer is initializing")
+        return state == "ready"
     writer = _get_spot_observation_fact_writer()
     if writer.output_path.resolve() != fact_path.resolve():
         if not allow_offline_rebuild:
@@ -3396,8 +3462,16 @@ async def start_spot_poll_loop():
     global _spot_shutdown_transport_stopped
     global _spot_diagnostic_journal_shutdown_started
     global _spot_diagnostic_journal_closed_snapshot
+    global _spot_observation_queue
     if _spot_poll_task and not _spot_poll_task.done():
         return  # ??? ??쎈뻬 餓?
+
+    if bool(getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)):
+        if _spot_observation_queue is not None and not _spot_observation_queue.snapshot()["accepting"]:
+            if _spot_observation_queue.snapshot()["writer_alive"] or not spot_observation_fact_writes_drained():
+                raise RuntimeError("SPOT observation persistence shutdown is incomplete")
+            _spot_observation_queue = None
+        _get_spot_observation_queue()
 
     with _spot_diagnostic_journal_lock:
         if (
@@ -3547,7 +3621,7 @@ async def stop_spot_poll_loop() -> bool:
     with _spot_shutdown_state_lock:
         _spot_shutdown_image_refresh_stopped = image_refresh_stopped
         _spot_shutdown_transport_stopped = transport_stopped
-    observation_fact_drained = spot_observation_fact_writes_drained()
+    observation_fact_drained = await wait_for_spot_observation_fact_writes_drain()
     if not observation_fact_drained:
         _logger.warning(
             "SPOT observation fact writes did not drain before shutdown timeout",

@@ -86,3 +86,8 @@ config.pending.json
 # bkit-codex local install
 .bkit-codex/
 .agents/skills/
+
+# Source regressions (the parent repository ignores new backend test files).
+!backend/tests/test_temperature_remediation.py
+!backend/tests/test_temperature_fact_queue.py
+!backend/tests/test_temperature_poll_completeness.py

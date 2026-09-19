@@ -65,8 +65,8 @@ from backend.FacilityData.temperature_operational import (
 
 
 CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
-CSV_SCHEMA_VERSION_V2_4 = "2.4.0"
-CSV_SCHEMA_VERSION_V2_5 = "2.5.0"
+CSV_SCHEMA_VERSION_V2_4 = "2.4.1"
+CSV_SCHEMA_VERSION_V2_5 = "2.5.1"
 DERIVATION_VERSION = "cycle-heuristic-v1"
 PROCESS_STATE_ONLINE_RULE_VERSION = "process-state-online-v1"
 OPERATOR_METADATA_VERSION = "1.0.0"
@@ -74,7 +74,12 @@ TEMPERATURE_STATUS_RULE_VERSION = "temperature-status-shadow-v1"
 SPOT_FRESHNESS_RULE_VERSION = "spot-freshness-shadow-v1"
 SPOT_SENTINEL_MAP_VERSION = "spot-sentinel-ametek-rest-v1"
 SPOT_VERIFIED_NO_TARGET_VALUES: tuple[str, ...] = ()
-SPOT_CACHE_EXPIRY_THRESHOLD_SEC = 15.0
+from backend.FacilityData.freshness import (
+    SPOT_CACHE_EXPIRY_THRESHOLD_SEC, cache_rejection_reason, clock_domain_id, finite_number,
+    plc_source_is_usable,
+    monotonic_age_ms,
+)
+from backend.FacilityData.spot_observation_queue import FactPersistencePending
 SPOT_TEMPERATURE_RAW_MAX_LENGTH = 256
 TEMPERATURE_QUALITY_MAPPING_VERSION = "temperature-quality-operational-v1"
 
@@ -336,6 +341,8 @@ class CSVLoggerService:
         self._drop_count = 0
         self._last_drop_at: Optional[float] = None
         self._last_enqueue_at: Optional[float] = None
+        self._last_row_build_duration_ms: Optional[float] = None
+        self._last_csv_flush_duration_ms: Optional[float] = None
         self._last_write_at: Optional[float] = None
         self._payload_bytes_ema: Optional[float] = None
         self._runtime_lock = threading.Lock()
@@ -369,6 +376,7 @@ class CSVLoggerService:
         self._current_v2_csv_path: Optional[Path] = None
         self._v2_persisted_sample_seq_by_path: dict[str, int] = {}
         self._v2_persisted_at_by_path: dict[str, str] = {}
+        self._deferred_observation_closeouts: dict[Path, str] = {}
         self._shutdown_flush_succeeded: Optional[bool] = None
         self._runtime_write_failure_observed = False
         self._finalize_spot_image_manifest_on_stop = True
@@ -775,6 +783,14 @@ class CSVLoggerService:
             with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
                 reader = csv.reader(handle)
                 header = next(reader, None)
+                first_row = next(reader, None)
+            sidecar_path = csv_path.with_suffix(".metadata.json")
+            if sidecar_path.exists():
+                metadata = json.loads(sidecar_path.read_text(encoding="utf-8-sig"))
+                if metadata.get("schema_metadata", {}).get("schema_version") != active_contract.schema_version:
+                    return False
+            if first_row and first_row[0] != active_contract.schema_version:
+                return False
         except Exception as exc:
             self.logger.warning("Failed to read CSV v2 header for compatibility check: %s", exc)
             return False
@@ -826,7 +842,10 @@ class CSVLoggerService:
             "spot_temperature_min_c": SPOT_TEMPERATURE_MIN_C,
             "spot_temperature_max_c": SPOT_TEMPERATURE_MAX_C,
             "cache_expiry_threshold_sec": SPOT_CACHE_EXPIRY_THRESHOLD_SEC,
-            "poll_freshness_threshold_sec": float(getattr(config, "SPOT_REFRESH_INTERVAL", 3.0)) * 3.0,
+            "poll_freshness_threshold_sec": (
+                self._spot_row_freshness_threshold_ms() / 1000.0
+                if self._spot_row_freshness_threshold_ms() is not None else None
+            ),
             "poll_freshness_threshold_status": "candidate_unverified_server_pc",
             "raw_payload_realtime_csv_policy": "temporary validation-period repetition; long-term storage belongs in spot_observation_fact",
             "spot_temperature_raw_max_length": SPOT_TEMPERATURE_RAW_MAX_LENGTH,
@@ -960,6 +979,8 @@ class CSVLoggerService:
             )
             if initialized:
                 return 0
+        except FactPersistencePending:
+            raise
         except Exception as exc:
             self.logger.warning(
                 "Failed to initialize enabled SPOT observation fact: %s",
@@ -993,6 +1014,12 @@ class CSVLoggerService:
             health = {}
         enabled = bool(health.get("enabled", getattr(config, "SPOT_OBSERVATION_FACT_ENABLED", False)))
         fact_path = csv_path.parent / SPOT_OBSERVATION_FACT_FILENAME
+        persistence = health.get("persistence")
+        if enabled and persistence is not None and (
+            not health.get("writes_drained") or persistence.get("accepting") or persistence.get("writer_alive")
+        ):
+            self._suppress_spot_observation_fact_manifest_for_csv(csv_path, reason="observation-persistence-pending")
+            return None
         initialization_failure_count = self._ensure_spot_observation_fact_file(
             fact_path,
             enabled=enabled,
@@ -1060,6 +1087,13 @@ class CSVLoggerService:
             )
             return None
         payload.pop("spot_observation_fact_closeout", None)
+        if enabled and health.get("persistence") is not None:
+            current_health = spot_api_module.get_spot_observation_fact_health()
+            if (not current_health.get("writes_drained") or current_health["persistence"].get("accepting") or
+                current_health["persistence"].get("writer_alive") or
+                current_health["persistence"]["accepted_count"] != runtime_summary.get("_persistence_generation")):
+                self._suppress_spot_observation_fact_manifest_for_csv(csv_path, reason="observation-persistence-pending")
+                return None
         payload["spot_observation_fact_manifest"] = observation_fact_manifest
         payload["csv_closeout"] = {
             "finalized": True,
@@ -1145,7 +1179,15 @@ class CSVLoggerService:
                 "temperature_operational_rule_version": TEMPERATURE_OPERATIONAL_RULE_VERSION,
                 "temperature_quality_mapping_version": TEMPERATURE_QUALITY_MAPPING_VERSION,
                 "spot_row_freshness_rule_version": SPOT_ROW_FRESHNESS_RULE_VERSION,
+                "spot_row_freshness_policy": {
+                    "evaluation_time": "ingest_timestamp (row decision), not sampled_at or persisted_at",
+                    "clock": "same-process monotonic; UTC decision-minus-source only when domain absent",
+                    "foreign_domain": "unknown; no monotonic or wall fallback",
+                    "invalid_or_missing_clock": "unknown; never reuse snapshot ages",
+                    "cache_ttl": "finite nonnegative value age, clock ok, age <= configured TTL",
+                },
                 "process_phase_rule_version": PROCESS_PHASE_RULE_VERSION,
+                "plc_phase_source_policy": "collection-time usable=true, error=false, finite age within source grace; otherwise freeze lifecycle and phase unknown",
                 "posthoc_fact_manifests": [
                     "changeover_candidate_resolution_fact_manifest",
                     "process_phase_event_fact_manifest",
@@ -1428,6 +1470,11 @@ class CSVLoggerService:
         for manifest_key, closeout_key, build_manifest in runtime_manifests:
             try:
                 payload[manifest_key] = build_manifest()
+            except FactPersistencePending:
+                payload[closeout_key] = {
+                    "finalized": False, "writes_drained": False,
+                    "reason": "observation-persistence-pending-at-open",
+                }
             except Exception as exc:
                 # A runtime fact writer can remain bound to the previous configured
                 # directory while the CSV logger has already selected its durable
@@ -1488,8 +1535,20 @@ class CSVLoggerService:
         timestamp: datetime,
         sample_seq: int,
     ) -> ProcessPhaseDecision:
+        if not plc_source_is_usable(data.plc_source_usable, data.plc_source_age_ms,
+                                     data.plc_source_freshness_threshold_ms, data.plc_source_error):
+            # Freeze lifecycle/context; never confirm or open a candidate from stale PLC.
+            # Clear dwell evidence so outage duration is not counted as observed hold.
+            state = self._process_phase_runtime_state
+            state.count_value = None
+            state.count_first_observed_at = None
+            state.count_recent_production_motion = False
+            return ProcessPhaseDecision(process_phase_candidate="unknown")
         phase_input = self._process_phase_input_for_row(data, timestamp)
-        if data.process_phase_candidate:
+        if data.process_phase_candidate and not (
+            data.Count is not None and 0 <= data.Count <= 2
+            and data.process_phase_candidate in {"production_stable", "production_stabilizing"}
+        ):
             process_phase_candidate = self._normalize_external_process_phase_candidate(
                 data.process_phase_candidate,
             )
@@ -1519,6 +1578,10 @@ class CSVLoggerService:
             production_motion,
         )
         return ProcessPhaseInput(
+            plc_source_age_ms=data.plc_source_age_ms,
+            plc_source_freshness_threshold_ms=data.plc_source_freshness_threshold_ms,
+            plc_source_error=data.plc_source_error,
+            plc_source_usable=data.plc_source_usable,
             speed=data.Speed,
             press=data.Press,
             count=data.Count,
@@ -1713,8 +1776,9 @@ class CSVLoggerService:
             return default
         return str(value).strip().lower() in {"1", "true", "yes", "y", "on", "enabled"}
 
-    def _spot_row_freshness_threshold_ms(self) -> float:
-        return float(getattr(config, "SPOT_REFRESH_INTERVAL", 3.0) or 3.0) * 3.0 * 1000.0
+    def _spot_row_freshness_threshold_ms(self) -> Optional[float]:
+        interval = finite_number(getattr(config, "SPOT_REFRESH_INTERVAL", 3.0))
+        return interval * 3000.0 if interval is not None and interval > 0 else None
 
     def _timestamp_age_ms_at_row(self, row_timestamp: datetime, source_timestamp: Optional[str]) -> Optional[float]:
         source_dt = self._parse_utc_timestamp_text(source_timestamp)
@@ -1776,17 +1840,11 @@ class CSVLoggerService:
             row_created_monotonic=row_created_monotonic,
             source_completed_monotonic=source_completed_monotonic,
         )
-        timestamp_age = self._timestamp_age_ms_at_row(row_timestamp, source_timestamp)
-        if timestamp_age is not None and row_freshness_threshold_ms is not None:
-            if timestamp_age < 0 or timestamp_age > row_freshness_threshold_ms:
-                return timestamp_age
-        if monotonic_age is not None:
+        # row_timestamp is the decision/ingest time, never sampled_at. A threshold
+        # cannot choose a clock domain. Snapshot ages cannot measure queue residence.
+        if source_completed_monotonic is not None:
             return monotonic_age
-        if explicit_age_ms is not None:
-            return explicit_age_ms
-        if timestamp_age is not None:
-            return timestamp_age
-        return fallback_age_ms
+        return self._timestamp_age_ms_at_row(row_timestamp, source_timestamp)
 
     def _effective_value_age_ms_at_row(
         self,
@@ -1797,23 +1855,7 @@ class CSVLoggerService:
         source_timestamp: Optional[str],
     ) -> tuple[Optional[float], str]:
         if source_completed_monotonic is not None:
-            if (
-                row_created_monotonic is None
-                or isinstance(row_created_monotonic, bool)
-                or isinstance(source_completed_monotonic, bool)
-            ):
-                return None, "clock_anomaly"
-            try:
-                row_clock = float(row_created_monotonic)
-                source_clock = float(source_completed_monotonic)
-            except (TypeError, ValueError):
-                return None, "clock_anomaly"
-            if not math.isfinite(row_clock) or not math.isfinite(source_clock):
-                return None, "clock_anomaly"
-            age_ms = (row_clock - source_clock) * 1000.0
-            if not math.isfinite(age_ms) or age_ms < 0:
-                return None, "clock_anomaly"
-            return age_ms, "ok"
+            return monotonic_age_ms(row_created_monotonic, source_completed_monotonic)
 
         timestamp_age = self._timestamp_age_ms_at_row(row_timestamp, source_timestamp)
         if timestamp_age is None:
@@ -1831,30 +1873,32 @@ class CSVLoggerService:
         temperature_hardening_enabled: bool,
     ):
         row_freshness_threshold_ms = self._spot_row_freshness_threshold_ms()
-        if temperature_hardening_enabled:
+        same_clock = data.spot_clock_domain_id == clock_domain_id()
+        foreign_clock = bool(data.spot_clock_domain_id and not same_clock)
+        if foreign_clock or (same_clock and data.spot_last_valid_value_monotonic is None):
+            effective_value_age_ms, value_age_clock_status = None, "unknown"
+        else:
             effective_value_age_ms, value_age_clock_status = self._effective_value_age_ms_at_row(
                 row_timestamp=row_timestamp,
                 row_created_monotonic=row_created_monotonic,
-                source_completed_monotonic=data.spot_last_valid_value_monotonic,
+                source_completed_monotonic=data.spot_last_valid_value_monotonic if same_clock else None,
                 source_timestamp=data.spot_last_valid_value_at,
             )
-        else:
-            effective_value_age_ms = self._effective_age_ms_at_row(
-                row_timestamp=row_timestamp,
-                row_created_monotonic=None,
-                explicit_age_ms=data.spot_effective_value_age_ms_at_row,
-                source_completed_monotonic=None,
-                source_timestamp=data.spot_last_valid_value_at,
-                fallback_age_ms=data.spot_value_age_ms,
-            )
-            value_age_clock_status = "unknown"
         return derive_temperature_operational_fields(
             TemperatureOperationalInput(
                 poll_status=data.spot_poll_status or "not_attempted",
                 raw_validity=data.spot_raw_validity or "not_received",
                 source_freshness=data.spot_source_freshness or "unknown",
                 cache_fallback_allowed=bool(data.cache_fallback_allowed),
-                has_ttl_valid_cache=data.spot_cache_status in {"fresh", "reused", "available_not_used"},
+                has_ttl_valid_cache=(
+                    data.spot_cache_status in {"fresh", "reused", "available_not_used"}
+                    and not cache_rejection_reason(
+                        effective_value_age_ms, value_age_clock_status,
+                        (data.spot_cache_expiry_threshold_sec
+                         if data.spot_cache_expiry_threshold_sec is not None
+                         else SPOT_CACHE_EXPIRY_THRESHOLD_SEC) * 1000.0,
+                    )
+                ),
                 has_previous_valid_value=bool(data.spot_last_valid_value_at),
                 first_poll_completed=bool(data.spot_poll_status and data.spot_poll_status != "not_attempted"),
                 temperature_value_origin=data.temperature_value_origin or "none",
@@ -1862,17 +1906,22 @@ class CSVLoggerService:
                 spot_error_code=data.spot_error_code,
                 # Recompute row freshness at CSV write time. Snapshot-provided
                 # row age can be stale by the time this row is emitted.
-                spot_effective_age_ms_at_row=self._effective_age_ms_at_row(
+                spot_effective_age_ms_at_row=None if (
+                    foreign_clock or (same_clock and data.spot_last_poll_completed_monotonic is None)
+                ) else self._effective_age_ms_at_row(
                     row_timestamp=row_timestamp,
                     row_created_monotonic=row_created_monotonic,
                     explicit_age_ms=None,
-                    source_completed_monotonic=data.spot_last_poll_completed_monotonic,
+                    source_completed_monotonic=data.spot_last_poll_completed_monotonic if same_clock else None,
                     source_timestamp=data.spot_last_poll_completed_at,
                     fallback_age_ms=data.spot_snapshot_age_ms,
                     row_freshness_threshold_ms=row_freshness_threshold_ms,
                 ),
                 spot_effective_value_age_ms_at_row=effective_value_age_ms,
                 spot_value_age_clock_status=value_age_clock_status,
+                spot_cache_ttl_ms=(data.spot_cache_expiry_threshold_sec
+                    if data.spot_cache_expiry_threshold_sec is not None
+                    else SPOT_CACHE_EXPIRY_THRESHOLD_SEC) * 1000.0,
                 spot_row_freshness_threshold_ms=row_freshness_threshold_ms,
                 process_phase_candidate=process_phase_candidate,
                 evidence_codes=parse_spot_diagnostic_evidence_codes(data.spot_diagnostic_evidence_codes),
@@ -2104,6 +2153,7 @@ class CSVLoggerService:
         sample_seq: int,
         v1_row: list,
     ) -> list:
+        row_build_started = time.perf_counter()
         local_timestamp = self._to_local_timestamp(timestamp)
         utc_timestamp = local_timestamp.astimezone(timezone.utc)
         contract = self._get_active_v2_contract()
@@ -2122,7 +2172,7 @@ class CSVLoggerService:
         operational_decision = self._derive_temperature_operational_decision(
             data,
             process_phase_decision.process_phase_candidate,
-            utc_timestamp,
+            ingest_timestamp,
             row_created_monotonic,
             contract.temperature_hardening_enabled,
         )
@@ -2248,6 +2298,7 @@ class CSVLoggerService:
             operational_row.append(
                 self._escape_csv_text(operational_decision.spot_value_age_clock_status)
             )
+        self._last_row_build_duration_ms = (time.perf_counter() - row_build_started) * 1000.0
         return operational_row
 
     def _parse_timestamp(self, data: FactoryData) -> datetime:
@@ -2428,8 +2479,10 @@ class CSVLoggerService:
         if writer is None or handle is None:
             return False
         persistence = self._prepare_v2_rows_persisted(rows)
+        flush_started = time.perf_counter()
         writer.writerows([row for row, _ in rows])
         handle.flush()
+        self._last_csv_flush_duration_ms = (time.perf_counter() - flush_started) * 1000.0
         self._commit_v2_rows_persisted(persistence)
         self._mark_write_completed()
         return True
@@ -2534,7 +2587,21 @@ class CSVLoggerService:
                     "deadline; finalizing the manifest."
                 )
         if csv_path is not None and self.csv_v2_sidecar_enabled:
-            if (
+            from backend.FacilityData.drivers import spot_api
+
+            defer_closeout = (
+                closeout_succeeded and finalize_closeout
+                and closeout_reason in {"daily-rollover", "config-change"}
+                and spot_api.spot_observation_fact_closeout_deferred(csv_path.parent / SPOT_OBSERVATION_FACT_FILENAME)
+            )
+            if defer_closeout:
+                suppressed = self._suppress_spot_observation_fact_manifest_for_csv(
+                    csv_path, reason="active-observation-writer-deferred-until-shutdown")
+                if suppressed is None:
+                    closeout_succeeded = False
+                else:
+                    self._deferred_observation_closeouts[csv_path] = closeout_reason
+            elif (
                 closeout_succeeded
                 and finalize_closeout
                 and observation_manifest_ready
@@ -2587,7 +2654,7 @@ class CSVLoggerService:
                     "Skipped SPOT observation fact manifest because writes did not drain."
                 )
         self._close_file(handle)
-        if csv_path is not None:
+        if csv_path is not None and csv_path not in self._deferred_observation_closeouts:
             csv_path_key = str(csv_path)
             with self._runtime_lock:
                 self._v2_persisted_sample_seq_by_path.pop(csv_path_key, None)
@@ -2596,6 +2663,21 @@ class CSVLoggerService:
         if not closeout_succeeded:
             self._runtime_write_failure_observed = True
         return closeout_succeeded
+
+    def _finalize_deferred_observation_closeouts(self, *, safe: bool) -> bool:
+        succeeded = True
+        for csv_path, reason in list(self._deferred_observation_closeouts.items()):
+            if not safe or self.refresh_spot_observation_fact_manifest_for_csv(
+                csv_path, closeout_reason=reason
+            ) is None:
+                self._suppress_spot_observation_fact_manifest_for_csv(csv_path, reason="shutdown-deferred-closeout-incomplete")
+                succeeded = False
+                continue
+            del self._deferred_observation_closeouts[csv_path]
+            with self._runtime_lock:
+                self._v2_persisted_sample_seq_by_path.pop(str(csv_path), None)
+                self._v2_persisted_at_by_path.pop(str(csv_path), None)
+        return succeeded
 
     def get_runtime_state(self) -> dict[str, Any]:
         with self._config_lock:
@@ -2624,6 +2706,8 @@ class CSVLoggerService:
             "drop_count": drop_count,
             "last_drop_at": last_drop_at,
             "last_enqueue_at": last_enqueue_at,
+            "last_row_build_duration_ms": self._last_row_build_duration_ms,
+            "last_csv_flush_duration_ms": self._last_csv_flush_duration_ms,
             "last_write_at": last_write_at,
             "writer_lag_sec": writer_lag_sec,
             "payload_bytes_ema": payload_bytes_ema,
@@ -2958,6 +3042,8 @@ class CSVLoggerService:
             closeout_reason="shutdown",
             finalize_closeout=shutdown_flush_succeeded,
         ):
+            shutdown_flush_succeeded = False
+        if not self._finalize_deferred_observation_closeouts(safe=shutdown_flush_succeeded):
             shutdown_flush_succeeded = False
         if (
             self.csv_v2_enabled

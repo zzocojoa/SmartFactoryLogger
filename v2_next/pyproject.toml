@@ -20,6 +20,8 @@ select = ["E9", "F821"]
 [tool.mypy]
 python_version = "3.12"
 files = [
+  "backend/FacilityData/freshness.py",
+  "backend/FacilityData/spot_observation_queue.py",
   "backend/FacilityData/changeover_candidate_resolution_fact.py",
   "backend/FacilityData/process_phase.py",
   "backend/FacilityData/spot_observation_fact.py",

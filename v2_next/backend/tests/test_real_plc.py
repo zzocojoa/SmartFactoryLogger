@@ -1902,7 +1902,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.3.0")
             self.assertEqual(
                 metadata["schema_metadata"]["temperature_operational_rule_version"],
-                "temperature-operational-v4",
+            "temperature-operational-v5",
             )
             self.assertEqual(metadata["schema_metadata"]["operator_metadata_version"], "1.0.0")
             spot_image_linkage_policy = metadata["schema_metadata"]["spot_image_linkage_policy"]

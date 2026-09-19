@@ -1,0 +1,355 @@
+[
+  {
+    "id": "BASE-01",
+    "goal": "baseline",
+    "requirement": "원본 해시/109열/186878논리행/seq연속/metadata header",
+    "evidence_type": "actual_csv",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "scripts/verify_temperature_remediation.py:verify"
+    ],
+    "test_output": "replay-output.txt"
+  },
+  {
+    "id": "BASE-02",
+    "goal": "baseline",
+    "requirement": "raw sentinel24200=under24192+stale8; 누출0/quality불일치0",
+    "evidence_type": "actual_csv",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "scripts/verify_temperature_remediation.py:verify"
+    ],
+    "test_output": "replay-output.txt"
+  },
+  {
+    "id": "G1-01",
+    "goal": "G1",
+    "requirement": "TTL14999/15000/15001ms에서 허용/허용/거절",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.CacheAtRowTests.test_ttl_boundary"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G1-02",
+    "goal": "G1",
+    "requirement": "수집시14900ms이지만 row시15100ms이면 캐시 거절",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.CacheAtRowTests.test_snapshot_14900_row_15100_rejected"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G1-03",
+    "goal": "G1",
+    "requirement": "value age None/bool/NaN/±Inf/음수/clock anomaly 거절",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.CacheAtRowTests.test_invalid_value_age_or_clock_never_reuses"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G1-04",
+    "goal": "G1",
+    "requirement": "wall clock 역행에도 TTL 연장 금지; 같은 clock domain 검증",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.CacheAtRowTests.test_driver_sentinel_timeout_recovery_and_wall_clock_reversal",
+      "backend.tests.test_temperature_remediation.RowFreshnessTests.test_clock_domain_and_ingest_wall_fallback"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G1-05",
+    "goal": "G1",
+    "requirement": "valid→각 sentinel→timeout→valid까지 캐시 억제/해제",
+    "evidence_type": "synthetic_real_driver_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.CacheAtRowTests.test_driver_sentinel_timeout_recovery_and_wall_clock_reversal"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G2-01",
+    "goal": "G2",
+    "requirement": "age/threshold None/bool/NaN/±Inf/parse failure와 default 생략 구분",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.RowFreshnessTests.test_invalid_age_and_threshold_fail_closed",
+      "backend.tests.test_temperature_remediation.ValidatorAndRolloverTests.test_validator_cache_ttl_and_explicit_invalid_metadata"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G2-02",
+    "goal": "G2",
+    "requirement": "row freshness unknown이면 current origin이어도 valid 금지",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.RowFreshnessTests.test_unknown_cannot_be_valid_but_sentinel_and_transport_evidence_survive"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G2-03",
+    "goal": "G2",
+    "requirement": "freshness3000ms 경계/unknown/negative/sentinel 계약",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.RowFreshnessTests.test_invalid_age_and_threshold_fail_closed",
+      "backend.tests.test_temperature_remediation.RowFreshnessTests.test_unknown_cannot_be_valid_but_sentinel_and_transport_evidence_survive"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G2-04",
+    "goal": "G2",
+    "requirement": "seq26→27의 clock 선택 분기 재현과 동일 평가 기준 보장",
+    "evidence_type": "actual_fixture_plus_declared_clock_simulation",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.RowFreshnessTests.test_seq26_27_declared_synthetic_clock_never_switches_to_sample_age",
+      "replay_report.json:selected_timing"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G2-05",
+    "goal": "G2",
+    "requirement": "seq15 sample fresh/ingest delayed stale를 무조건 valid로 복원하지 않음",
+    "evidence_type": "actual_fixture_plus_declared_clock_simulation",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "replay_report.json:selected_timing.15",
+      "baseline_report.json:selected_timing.15"
+    ],
+    "test_output": "replay-output.txt"
+  },
+  {
+    "id": "G2-06",
+    "goal": "G2",
+    "requirement": "서로 다른 process/restart monotonic domain 재사용 금지",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.RowFreshnessTests.test_clock_domain_and_ingest_wall_fallback"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G3-01",
+    "goal": "G3",
+    "requirement": "PLC stale count0/20 past speed1.0→phase/under expectedness unknown",
+    "evidence_type": "synthetic_real_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.PlcSourceTests.test_plc_stale_error_gate_preserves_spot_and_freezes_lifecycle"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G3-02",
+    "goal": "G3",
+    "requirement": "fresh PLC online unknown 과도기와 실제 unusable 구분",
+    "evidence_type": "synthetic_real_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.PlcSourceTests.test_real_driver_service_collection_gate_and_writer_backlog"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G3-03",
+    "goal": "G3",
+    "requirement": "외부 phase 입력이 PLC source freshness gate 우회 금지",
+    "evidence_type": "synthetic_real_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.PlcSourceTests.test_missing_source_and_external_phase_cannot_bypass_gate"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G3-04",
+    "goal": "G3",
+    "requirement": "PLC만 실패해도 SPOT valid 유지, over-range 경고 보존",
+    "evidence_type": "synthetic_real_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.PlcSourceTests.test_plc_stale_error_gate_preserves_spot_and_freezes_lifecycle"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G3-05",
+    "goal": "G3",
+    "requirement": "recovery/Count0~2/미래정보 누설 방지/lifecycle 정지",
+    "evidence_type": "synthetic_real_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.PlcSourceTests.test_plc_stale_error_gate_preserves_spot_and_freezes_lifecycle",
+      "backend.tests.test_temperature_remediation.PlcSourceTests.test_real_driver_service_collection_gate_and_writer_backlog",
+      "backend.tests.test_process_phase"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G4-01",
+    "goal": "G4",
+    "requirement": "writer initialize Event block 중 다음 poll publish/enqueue 진행",
+    "evidence_type": "synthetic_real_async_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_fact_queue.FactPollingTests.test_initial_fact_scan_does_not_hold_next_poll"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G4-02",
+    "goal": "G4",
+    "requirement": "append Event block 중 다음 poll 진행, bounded queue 유지",
+    "evidence_type": "synthetic_real_async_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_fact_queue.FactPollingTests.test_fact_append_does_not_hold_next_poll",
+      "backend.tests.test_temperature_fact_queue.FactQueueTests.test_append_block_immutable_fifo_timeout_then_drain"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G4-03",
+    "goal": "G4",
+    "requirement": "queue포화/disk/spool 실패에 silent drop 또는 clean완료 없음",
+    "evidence_type": "synthetic_real_async_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_fact_queue.FactQueueTests.test_queue_saturation_is_bounded_and_cannot_be_clean",
+      "backend.tests.test_temperature_fact_queue.FactQueueTests.test_disk_and_spool_failure_observable"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G4-04",
+    "goal": "G4",
+    "requirement": "drain/recovery/restart dedup/order/cancel/shutdown timeout",
+    "evidence_type": "synthetic_real_async_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_fact_queue.FactPollingTests.test_actual_poll_stop_then_logger_closeout_success_and_timeout",
+      "backend.tests.test_temperature_fact_queue.FactPollingTests.test_cancelled_drain_keeps_writer_owned_until_actual_completion",
+      "backend.tests.test_temperature_fact_queue.FactQueueTests.test_restart_spool_recovery_and_duplicate_current_key",
+      "backend.tests.test_temperature_fact_queue.FactQueueTests.test_rollover_deferred_until_owner_stops_and_all_paths_finalize",
+      "backend.tests.test_temperature_fact_queue.FactPollingTests.test_logger_loop_daily_rollover_and_stop_propagate_deferred_failure"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G4-05",
+    "goal": "G4",
+    "requirement": "F01 cold start 정체를 원인별 계측, fake sleep만으로 결론내지 않음",
+    "evidence_type": "actual_fixture_plus_instrumented_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_fact_queue.FactPollingTests.test_f01_raw_inputs_poll_publish_csv_continue_during_fact_initialization",
+      "f01_event_timing.json",
+      "baseline_report.json"
+    ],
+    "test_output": "backend-final.txt",
+    "limitation": "F01 raw payloads plus controlled Event timing; historical 192.769-second root cause remains unverified."
+  },
+  {
+    "id": "G5-01",
+    "goal": "G5",
+    "requirement": "A={1,3},B={1,2,3} total gap1; duplicate 별도 집계",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_poll_completeness"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G5-02",
+    "goal": "G5",
+    "requirement": "runtime/readback/closeout/validator 동일 per-service 집계",
+    "evidence_type": "synthetic_real_integration",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_poll_completeness",
+      "backend.tests.test_temperature_fact_queue.FactQueueTests.test_rollover_deferred_until_owner_stops_and_all_paths_finalize"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G5-03",
+    "goal": "G5",
+    "requirement": "empty/single/restart/out-of-order/invalid service+seq",
+    "evidence_type": "synthetic_real_module",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_poll_completeness"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "G5-04",
+    "goal": "G5",
+    "requirement": "실fact link/gap/provenance 검산",
+    "evidence_type": "unverified_missing_fact_file",
+    "execution_status": "unverified_missing_original_fact",
+    "production_tests_or_artifacts": [
+      "baseline_report.json:actual_fact_verification"
+    ],
+    "test_output": "backend-final.txt",
+    "limitation": "Original observation fact absent. Metadata link=100%/gap=0 are claims, not independently verified evidence."
+  },
+  {
+    "id": "SAFE-01",
+    "goal": "all",
+    "requirement": "fingerprint mismatch→effective_verified=false 유지",
+    "evidence_type": "synthetic_real_module_plus_metadata",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_spot_config_provenance",
+      "baseline_report.json:attestation"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "SAFE-02",
+    "goal": "all",
+    "requirement": "fact_only/previous_poll 원인 억제와 comparator 미검증 gate",
+    "evidence_type": "synthetic_real_module_plus_metadata",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_operational",
+      "backend.tests.test_csv_v2_4_operational_contract",
+      "baseline_report.json:attestation"
+    ],
+    "test_output": "backend-final.txt"
+  },
+  {
+    "id": "SAFE-03",
+    "goal": "all",
+    "requirement": "source sentinel/정상 출력 raw 불변 및 old schema/rollover 호환",
+    "evidence_type": "actual_fixture_plus_contract_tests",
+    "execution_status": "pass",
+    "production_tests_or_artifacts": [
+      "backend.tests.test_temperature_remediation.ValidatorAndRolloverTests.test_same_header_old_version_rolls_over_without_rewriting",
+      "backend.tests.test_spot_temperature_stage5_verification",
+      "baseline_report.json"
+    ],
+    "test_output": "backend-final.txt"
+  }
+]

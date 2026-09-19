@@ -138,7 +138,9 @@ class SpotTemperatureStage5VerificationTests(unittest.TestCase):
         data = self._valid_data()
         timestamp = service._parse_timestamp(data)
         v1_row = service._build_row(data, timestamp)
-        row = service._build_v2_row(data, timestamp, datetime.now(timezone.utc), 1, v1_row)
+        # Controlled fresh artifact: use the explicit source epoch for the decision,
+        # not today's wall clock months after the synthetic observation.
+        row = service._build_v2_row(data, timestamp, timestamp, 1, v1_row)
         schema_suffix = schema_version.replace(".", "_")
         v2_path = log_dir / f"Factory_Integrated_Log_v2_20260711_023000_{schema_suffix}.csv"
         with v2_path.open("w", encoding="utf-8-sig", newline="") as handle:

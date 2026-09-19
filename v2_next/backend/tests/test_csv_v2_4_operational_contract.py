@@ -9,6 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from backend.FacilityData.freshness import clock_domain_id
 
 from backend.FacilityData.changeover_candidate_resolution_fact import (
     CHANGEOVER_CANDIDATE_RESOLUTION_FACT_COLUMNS,
@@ -67,6 +68,8 @@ class CsvV24OperationalContractTests(unittest.TestCase):
     def create_data(self) -> FactoryData:
         return FactoryData(
             Time="2026-06-25T08:00:00",
+            plc_source_age_ms=0, plc_source_freshness_threshold_ms=5000,
+            plc_source_error=False, plc_source_usable=True,
             Status="Running",
             Speed=0.0,
             Press=0.0,
@@ -98,6 +101,8 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         *,
         row_created_monotonic: float = 100.0,
     ) -> tuple[CSVLoggerService, list[str]]:
+        if data.spot_last_valid_value_monotonic is not None or data.spot_last_poll_completed_monotonic is not None:
+            data = data.model_copy(update={"spot_clock_domain_id": clock_domain_id()})
         service = CSVLoggerService()
         service.apply_config(
             csv_v2_operational_fields_enabled=True,
@@ -730,7 +735,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         row = self.build_v2_row(service, data)
 
         self.assertEqual(len(row), len(V2_4_CSV_COLUMNS))
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("schema_version")], "2.4.0")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("schema_version")], CSV_SCHEMA_VERSION_V2_4)
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("Temperature")], "")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "under_range")
@@ -1287,6 +1292,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "Time": row_timestamp.isoformat(),
                 "spot_last_poll_completed_at": poll_completed_at.isoformat().replace("+00:00", "Z"),
                 "spot_last_poll_completed_monotonic": 100.0,
+                "spot_clock_domain_id": clock_domain_id(),
                 "spot_effective_age_ms_at_row": 9999.0,
                 "spot_snapshot_age_ms": 10.0,
                 "spot_value_age_ms": 10.0,
@@ -1309,7 +1315,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "fresh")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
 
-    def test_v2_4_row_timestamp_age_prevents_monotonic_threshold_bypass(self) -> None:
+    def test_v2_4_row_timestamp_threshold_does_not_replace_same_domain_monotonic(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
         poll_completed_at = datetime(2026, 6, 25, 8, 0, 0, tzinfo=timezone.utc)
@@ -1319,6 +1325,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "Time": row_timestamp.isoformat(),
                 "spot_last_poll_completed_at": poll_completed_at.isoformat().replace("+00:00", "Z"),
                 "spot_last_poll_completed_monotonic": 100.0,
+                "spot_clock_domain_id": clock_domain_id(),
                 "spot_snapshot_age_ms": 10.0,
                 "spot_value_age_ms": 10.0,
             }
@@ -1336,12 +1343,12 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 service._build_row(data, row_timestamp),
             )
 
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_age_ms_at_row")], "3006.0")
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "stale")
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "stale")
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "stale_observation")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_age_ms_at_row")], "3000.0")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "fresh")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "under_range")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "under_range")
 
-    def test_v2_4_validator_accepts_source_stale_invalid_sentinel_with_fresh_effective_age(self) -> None:
+    def test_v2_4_validator_accepts_source_stale_invalid_sentinel_with_unknown_effective_age(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
         data = self.create_data().model_copy(
@@ -1357,7 +1364,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         timestamp = service._parse_timestamp(data)
         row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
 
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "fresh")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "unknown")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_output_status")], "stale")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")], "stale_observation")
         self.assertEqual(validate_spot_invalid_sentinel_invariants([row], V2_4_CSV_COLUMNS), [])
@@ -1380,6 +1387,8 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         row = service._build_v2_row(data, timestamp, timestamp.astimezone(), 1, service._build_row(data, timestamp))
         row = list(row)
         row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")] = "stale"
+        row[V2_4_CSV_COLUMNS.index("spot_effective_age_ms_at_row")] = "10000"
+        row[V2_4_CSV_COLUMNS.index("spot_row_age_clock_status")] = "ok"
         row[V2_4_CSV_COLUMNS.index("temperature_output_status")] = "stale"
         row[V2_4_CSV_COLUMNS.index("temperature_unavailable_reason")] = "stale_observation"
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_freshness_at_row")], "stale")
@@ -1489,6 +1498,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
     def test_v2_4_validator_rejects_timestamp_stale_row_left_fresh_valid(self) -> None:
         header = V2_4_CSV_COLUMNS
         row = self.build_valid_temperature_v2_4_row()
+        row[0] = "2.4.0"  # Historical rule still validated without rewriting old files.
         row[header.index("timestamp_utc")] = "2026-06-25T08:00:04Z"
 
         failures = validate_v2_4_operational_invariants(
@@ -2223,7 +2233,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             handle, _ = service._open_v2_log_file("20260626_000000", "Factory_Integrated_Log_v2")
             service._close_file(handle)
 
-            rollover_path = log_dir / "Factory_Integrated_Log_v2_20260626_000000_2_4_0.csv"
+            rollover_path = log_dir / "Factory_Integrated_Log_v2_20260626_000000_2_4_1.csv"
             self.assertTrue(rollover_path.exists())
             with original_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(next(csv.reader(handle)), prior_v2_4_columns)
@@ -2242,6 +2252,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "spot_device_status_code": None,
                 "spot_temperature_observed_c": 560.7,
                 "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
+                "spot_last_poll_completed_monotonic": 100.0,
                 "spot_last_valid_value_at": "2026-06-25T07:59:59Z",
                 "spot_last_valid_value_monotonic": 99.0,
             }
@@ -2390,7 +2401,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_effective_value_age_ms_at_row")], "")
         self.assertEqual(row[V2_5_CSV_COLUMNS.index("spot_value_age_clock_status")], "unknown")
 
-    def test_v2_4_contract_preserves_legacy_quality_and_value_age_semantics(self) -> None:
+    def test_v2_4_contract_preserves_legacy_quality_but_rejects_unanchored_value_age(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
         data = self.create_data().model_copy(
@@ -2409,7 +2420,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(list(service._get_active_v2_contract().columns), V2_4_CSV_COLUMNS)
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("Temperature_quality")], "ok")
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("Temperature_missing_reason")], "not_missing")
-        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_value_age_ms_at_row")], "321.0")
+        self.assertEqual(row[V2_4_CSV_COLUMNS.index("spot_effective_value_age_ms_at_row")], "")
         self.assertNotIn("spot_value_age_clock_status", V2_4_CSV_COLUMNS)
 
     def test_v2_5_validator_rejects_quality_and_clock_status_contradictions(self) -> None:
@@ -2422,6 +2433,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "spot_device_status_code": None,
                 "spot_temperature_observed_c": 560.7,
                 "spot_last_valid_value_monotonic": 99.0,
+                "spot_last_poll_completed_monotonic": 99.0,
             }
         )
         _, row = self.build_v2_5_row(data)
@@ -2451,6 +2463,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
                 "spot_device_status_code": None,
                 "spot_temperature_observed_c": 560.7,
                 "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
+                "spot_last_poll_completed_monotonic": 100.0,
                 "spot_last_valid_value_at": "2026-06-25T07:59:59Z",
                 "spot_last_valid_value_monotonic": 99.0,
             }

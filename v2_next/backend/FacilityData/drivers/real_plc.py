@@ -12,6 +12,7 @@ import httpx
 
 from .base import BasePLCDriver
 from .spot_api import get_cached_spot_temp, get_spot_diagnostics
+from backend.FacilityData.freshness import finite_number
 from backend.FacilityData.schemas import FactoryData
 from backend import config
 from ..processor import LogicProcessor
@@ -373,7 +374,8 @@ class RealPLCDriver(BasePLCDriver):
             return False
         if ext_snapshot_at is None:
             return False
-        return now_epoch - ext_snapshot_at <= self._ext_snapshot_grace_sec()
+        age = finite_number(now_epoch - ext_snapshot_at)
+        return age is not None and 0 <= age <= self._ext_snapshot_grace_sec()
 
     def _derive_extruder_process_state_online(
         self,
@@ -461,6 +463,8 @@ class RealPLCDriver(BasePLCDriver):
             "spot_last_poll_completed_monotonic",
             "spot_last_valid_value_at",
             "spot_last_valid_value_monotonic",
+            "spot_clock_domain_id",
+            "spot_cache_expiry_threshold_sec",
             "spot_snapshot_age_ms",
             "spot_value_age_ms",
             "diagnostics_snapshot_id",
@@ -582,6 +586,10 @@ class RealPLCDriver(BasePLCDriver):
             captured_at_ls=ls_snapshot_at,
             captured_at_spot=spot_snapshot_at,
             extruder_snapshot_error=ext_snapshot_error,
+            plc_source_age_ms=(now_epoch - ext_snapshot_at) * 1000.0 if ext_snapshot_at is not None else None,
+            plc_source_freshness_threshold_ms=self._ext_snapshot_grace_sec() * 1000.0,
+            plc_source_error=bool(ext_snapshot_error),
+            plc_source_usable=self._is_ext_snapshot_usable(ext_snapshot_at, ext_snapshot_error, now_epoch),
             ls_snapshot_error=ls_snapshot_error,
             spot_snapshot_error=spot_snapshot_error,
         )

@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from backend import constants
+from backend.FacilityData.freshness import plc_source_is_usable
 
 
-PROCESS_PHASE_RULE_VERSION = "process-phase-candidate-v3"
+PROCESS_PHASE_RULE_VERSION = "process-phase-candidate-v4"
 
 PROCESS_PHASE_CANDIDATES = {
     "production_stable",
@@ -29,6 +30,10 @@ _COUNT_HELD_FOR_CHANGEOVER_SEC = 30.0
 
 @dataclass(frozen=True)
 class ProcessPhaseInput:
+    plc_source_age_ms: Optional[float] = None
+    plc_source_freshness_threshold_ms: Optional[float] = None
+    plc_source_error: Optional[bool] = None
+    plc_source_usable: Optional[bool] = None
     speed: Optional[float] = None
     press: Optional[float] = None
     count: Optional[int] = None
@@ -54,6 +59,10 @@ class ProcessPhaseDecision:
 
 def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPhaseDecision:
     """Derive realtime process phase without SPOT temperature or future context."""
+
+    if not plc_source_is_usable(input_state.plc_source_usable, input_state.plc_source_age_ms,
+                                input_state.plc_source_freshness_threshold_ms, input_state.plc_source_error):
+        return ProcessPhaseDecision(process_phase_candidate="unknown")
 
     speed = _to_float(input_state.speed)
     press = _to_float(input_state.press)
