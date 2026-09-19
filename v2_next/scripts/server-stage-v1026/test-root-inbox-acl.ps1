@@ -52,8 +52,8 @@ Reject {AssertDescriptor $rootSddl ($rootSddl.Replace('G:BA','G:SY'))} 'Group ch
 Reject {AssertDescriptor $rootSddl ($rootSddl.Replace('FA;;;BA','FR;;;BA'))} 'Rights change rejected'
 Reject {AssertDescriptor ($rootSddl.Replace('D:P','D:PAI')) $rootSddl} 'AI flag removal rejected'
 
-# Filesystem fixtures never use server paths. Only the owner expectation in the
-# validator is adapted, since this non-elevated developer cannot set a foreign owner.
+# Filesystem fixtures never use server paths. Adapt only the expected owner to
+# the current account; do not depend on an elevated token's default owner.
 $devSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 Check ($devSid -cne $serverUser) 'Developer and server SID are distinct'
 $originalShape=(Get-Command AssertAclShape).ScriptBlock
@@ -78,6 +78,14 @@ foreach($mode in @('success','protected-inbox','extra-root-child','unprotected-r
     $root=$fixture+'\'+$mode;FixturePrivate $root -Extra
     foreach($name in @('backups','inventory','runs','tmp')){FixturePrivate ($root+'\'+$name)}
     [void][IO.Directory]::CreateDirectory($root+'\inbox\nested\deep')
+    # Hosted Windows runners may default new directory ownership to Administrators.
+    # Bind this synthetic inbox to the same explicit owner as FixturePrivate while
+    # retaining its inherited DACL; the production validator remains unchanged.
+    $inbox=$root+'\inbox'
+    $inboxAcl=[IO.Directory]::GetAccessControl($inbox)
+    $inboxAcl.SetOwner([Security.Principal.SecurityIdentifier]::new($devSid))
+    [IO.Directory]::SetAccessControl($inbox,$inboxAcl)
+    Check ((AclFacts $inbox).owner -ceq $devSid) ('Explicit fixture inbox owner '+$mode)
     [IO.File]::WriteAllText(($root+'\inbox\transfer.txt'),'untouched transfer fixture')
     [IO.File]::WriteAllText(($root+'\inbox\nested\deep\data.txt'),'untouched nested fixture')
     FixturePrivate ($root+'\inbox\protected-child')
