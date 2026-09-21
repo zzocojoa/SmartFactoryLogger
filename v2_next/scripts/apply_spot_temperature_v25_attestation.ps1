@@ -241,8 +241,8 @@ if ($null -eq $metadataFile) {
 $metadata = Get-Content -LiteralPath $metadataFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
 $schema = Get-ObjectProperty $metadata "schema_metadata"
 $snapshot = Get-ObjectProperty $metadata "spot_configuration_snapshot"
-if ([string](Get-ObjectProperty $schema "active_schema_version" "") -ne "2.5.0") {
-    throw "Latest metadata is not schema 2.5.0: $($metadataFile.Name)"
+if ([string](Get-ObjectProperty $schema "active_schema_version" "") -notin @("2.5.0", "2.5.1")) {
+    throw "Latest metadata is not a supported schema (2.5.0 or 2.5.1): $($metadataFile.Name)"
 }
 if (-not (Convert-ToBoolean (Get-ObjectProperty $schema "csv_v2_temperature_hardening_enabled" $false))) {
     throw "Latest metadata does not have temperature hardening enabled."

@@ -166,3 +166,19 @@ operator/comparator 미검증 상태와 기존 안전 제한은 그대로 유지
 공개 저장소에 불필요한 실제 제품·금형 식별값은 게시 문서에서 생략하고 원문은 로컬에 보존했다.
 로컬 증거 링크는 GitHub에서 재현 가능한 첨부물이 아니므로, 검토자는 저장소 내 합성 시험과
 기록된 현장 요약을 구분해야 한다. Git 작업 승인은 merge·서버 설치·운영 승격을 포함하지 않는다.
+
+## PR 검토 후 QA 호환성 보완
+
+PR #193의 `f0b3b86`에서 GitHub CI 2개는 통과했으나, 자동 리뷰가 기존 서버 QA·attestation의
+`2.5.0` 고정 판정을 발견했다. 실제 PowerShell 실행으로 후보 schema `2.5.1` 거부를 재현했다.
+`apply_spot_temperature_v25_attestation.ps1`과 `qa_spot_temperature_v25.ps1`에
+`2.5.0/2.5.1` 명시적 허용을 적용하고, QA runtime과 종료 sidecar의 버전 일치를 요구한다.
+미지원·결측 버전은 계속 거부하며 hardening·comparator·drift·fingerprint 제한은 유지한다.
+
+보완 후 PowerShell 진입점 회귀 8개와 정상 종료·현재 session 파일 선택·validator/rollover·replay
+관련 회귀 6개가 통과했다. Ruff·diff 검사 및 읽기 전용 독립 검토도 통과했다.
+새 QA 회귀는 실제 스크립트와 합성 health/파일을 사용하고, validator 없는 묶음의 최종 FAIL을
+명시적으로 요구한다. 개별 schema 검사 통과를 전체 CSV 검증 성공으로 보고하지 않는다.
+기존 고정 후보 앱·현장 증거와 운영 설정은 변경하지 않았고 서버 시험·attestation도 실행하지 않았다.
+변경된 QA 스크립트의 실장비 실행과 새 QA 묶음 전달은 이번 PR 보완의 검증 범위가 아니다.
+후속 commit의 CI는 이전 통과 기록과 구분하여 PR Checks에서 확인한다.

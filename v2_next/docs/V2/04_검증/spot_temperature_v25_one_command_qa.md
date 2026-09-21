@@ -3,6 +3,15 @@
 > 이 묶음은 SmartFactoryLogger를 업그레이드하거나 설정을 임의로 변경하지 않는다.
 > 서버에는 v2.5 설치본이 있어야 하며, 최초 한 번의 config attestation은 별도 도구로 적용한다.
 
+## 지원하는 CSV schema
+
+QA와 attestation은 `2.5.0` 및 `2.5.1`을 명시적으로 지원한다. `2.5.1`은 행 시점의
+온도 freshness/TTL 의미를 보완한 버전이며, 버전 문자열을 이전 값으로 바꾸지 않는다.
+QA는 관찰한 runtime과 종료 sidecar의 버전이 같아야 통과한다. 결측·다른 계열·미지원
+미래 버전은 거부하며, hardening·fingerprint·drift·comparator·정상 종료 검사는 그대로 유지한다.
+기존 QA 묶음은 `2.5.0`만 허용하므로 새 schema를 검증하려면 수정된 소스에서 묶음을 새로 만든다.
+이 호환성 수정은 실제 장비의 attestation을 자동 적용하거나 운영 승격을 승인하지 않는다.
+
 ## 서버로 옮길 파일
 
 개발 컴퓨터에서 다음 명령으로 portable QA 묶음을 만든다.
