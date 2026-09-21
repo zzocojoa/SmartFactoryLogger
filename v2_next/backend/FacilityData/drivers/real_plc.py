@@ -12,7 +12,7 @@ import httpx
 
 from .base import BasePLCDriver
 from .spot_api import get_cached_spot_temp, get_spot_diagnostics
-from backend.FacilityData.freshness import finite_number
+from backend.FacilityData.freshness import finite_number, plc_required_input_status
 from backend.FacilityData.schemas import FactoryData
 from backend import config
 from ..processor import LogicProcessor
@@ -364,6 +364,23 @@ class RealPLCDriver(BasePLCDriver):
     def _ext_snapshot_grace_sec(self) -> float:
         return max(self._connector_poll_interval_sec() * 3.0, self.ext_timeout * 2.0, 1.0)
 
+    @staticmethod
+    def _ext_required_input_status(payload: Dict[str, float]) -> Dict[str, str]:
+        """Proof for this payload only; never fill missing inputs from an older cycle.
+
+        Count, Speed and Press are required by phase/metadata decisions. Zero is
+        valid. Count must also be a nonnegative integer; physical thresholds are
+        deliberately not part of this acquisition contract.
+        """
+        return plc_required_input_status(count=payload.get("Count"), speed=payload.get("Speed"),
+                                         press=payload.get("Press"))
+
+    @classmethod
+    def _ext_required_input_error(cls, payload: Dict[str, float]) -> Optional[str]:
+        failed = [f"{key}:{value}" for key, value in cls._ext_required_input_status(payload).items()
+                  if value != "valid"]
+        return "required_input_incomplete:" + ",".join(failed) if failed else None
+
     def _is_ext_snapshot_usable(
         self,
         ext_snapshot_at: Optional[float],
@@ -384,8 +401,11 @@ class RealPLCDriver(BasePLCDriver):
         ext_snapshot_error: Optional[str],
         now_epoch: float,
     ) -> str:
-        if not self._is_ext_snapshot_usable(ext_snapshot_at, ext_snapshot_error, now_epoch):
+        if (self._ext_required_input_error(ext_data) or
+                not self._is_ext_snapshot_usable(ext_snapshot_at, ext_snapshot_error, now_epoch)):
             self._process_state_online = "unknown"
+            self._process_low_speed_since = None
+            self._process_high_speed_since = None
             return self._process_state_online
 
         speed = self._safe_float(ext_data.get("Speed"))
@@ -532,15 +552,22 @@ class RealPLCDriver(BasePLCDriver):
             now_epoch,
         )
         spot_factory_fields = self._spot_metadata_to_factory_fields(spot_snapshot_metadata)
+        plc_source_error = bool(ext_snapshot_error or self._ext_required_input_error(ext_data))
+        plc_source_usable = not plc_source_error and self._is_ext_snapshot_usable(
+            ext_snapshot_at, ext_snapshot_error, now_epoch,
+        )
 
         now = datetime.now()
 
-        die_id, billet_cycle_id = self.logic.update(
-            ext_data.get("Count"),
-            ext_data.get("Press"),
-            ext_data.get("Speed"),
-            now,
-        )
+        # Partial raw values must not advance derived IDs or their persisted state.
+        die_id, billet_cycle_id = "", ""
+        if plc_source_usable:
+            die_id, billet_cycle_id = self.logic.update(
+                ext_data.get("Count"),
+                ext_data.get("Press"),
+                ext_data.get("Speed"),
+                now,
+            )
 
         return FactoryData(
             Time=now.isoformat(),
@@ -588,8 +615,8 @@ class RealPLCDriver(BasePLCDriver):
             extruder_snapshot_error=ext_snapshot_error,
             plc_source_age_ms=(now_epoch - ext_snapshot_at) * 1000.0 if ext_snapshot_at is not None else None,
             plc_source_freshness_threshold_ms=self._ext_snapshot_grace_sec() * 1000.0,
-            plc_source_error=bool(ext_snapshot_error),
-            plc_source_usable=self._is_ext_snapshot_usable(ext_snapshot_at, ext_snapshot_error, now_epoch),
+            plc_source_error=plc_source_error,
+            plc_source_usable=plc_source_usable,
             ls_snapshot_error=ls_snapshot_error,
             spot_snapshot_error=spot_snapshot_error,
         )
@@ -612,8 +639,8 @@ class RealPLCDriver(BasePLCDriver):
     def _spot_poll_interval_sec(self) -> float:
         return max(0.5, float(config.SPOT_REFRESH_INTERVAL or 1.0))
 
-    def _sleep_until_next_cycle(self, started_at: float, interval_sec: float) -> None:
-        elapsed_sec = time.time() - started_at
+    def _sleep_until_next_cycle(self, started_monotonic: float, interval_sec: float) -> None:
+        elapsed_sec = time.monotonic() - started_monotonic
         sleep_sec = max(0.0, interval_sec - elapsed_sec)
         if sleep_sec > 0:
             self._worker_stop.wait(sleep_sec)
@@ -622,7 +649,9 @@ class RealPLCDriver(BasePLCDriver):
         with self._snapshot_lock:
             self._ext_snapshot = dict(payload)
             self._ext_snapshot_at = captured_at
-            self._ext_snapshot_error = None
+            # Snapshot error is the phase-input failure; optional transport errors
+            # remain observable through ext_in_error/last_error/read_failures.
+            self._ext_snapshot_error = self._ext_required_input_error(payload)
 
     def _update_ls_snapshot(self, payload: Dict[str, float], captured_at: float) -> None:
         with self._snapshot_lock:
@@ -742,40 +771,43 @@ class RealPLCDriver(BasePLCDriver):
 
     def _ext_worker_loop(self) -> None:
         while not self._worker_stop.is_set():
-            started_at = time.time()
+            started_monotonic = time.monotonic()
+            io_deadline_epoch = time.time() + max(self.ext_timeout, 1.0)
+            skipped = self.ext_skip_counter > 0
             try:
-                payload = self._read_extruder(started_at + max(self.ext_timeout, 1.0))
+                payload = self._read_extruder(io_deadline_epoch)
                 if payload:
                     self._update_ext_snapshot(payload, time.time())
-                elif self.ext_last_error:
-                    self._record_ext_snapshot_error(self.ext_last_error)
+                elif not skipped:
+                    self._record_ext_snapshot_error(self.ext_last_error or "required_input_not_collected")
             except Exception as exc:
                 self._record_ext_snapshot_error(str(exc))
-            self._sleep_until_next_cycle(started_at, self._connector_poll_interval_sec())
+            self._sleep_until_next_cycle(started_monotonic, self._connector_poll_interval_sec())
 
     def _ls_worker_loop(self) -> None:
         while not self._worker_stop.is_set():
-            started_at = time.time()
+            started_monotonic = time.monotonic()
+            io_deadline_epoch = time.time() + max(self.ls_timeout, 1.0)
             try:
-                payload = self._read_ls(started_at + max(self.ls_timeout, 1.0))
+                payload = self._read_ls(io_deadline_epoch)
                 if payload:
                     self._update_ls_snapshot(payload, time.time())
                 elif self.ls_last_error:
                     self._record_ls_snapshot_error(self.ls_last_error)
             except Exception as exc:
                 self._record_ls_snapshot_error(str(exc))
-            self._sleep_until_next_cycle(started_at, self._connector_poll_interval_sec())
+            self._sleep_until_next_cycle(started_monotonic, self._connector_poll_interval_sec())
 
     def _spot_worker_loop(self) -> None:
         while not self._worker_stop.is_set():
-            started_at = time.time()
+            started_monotonic = time.monotonic()
             try:
                 spot_val = self._read_spot()
                 if spot_val <= 0.0 and self.spot_last_error_time is not None:
                     self._record_spot_snapshot_error("spot_read_failed")
             except Exception as exc:
                 self._record_spot_snapshot_error(str(exc))
-            self._sleep_until_next_cycle(started_at, self._spot_poll_interval_sec())
+            self._sleep_until_next_cycle(started_monotonic, self._spot_poll_interval_sec())
 
     def _read_spot(self) -> float:
         get_cached_spot_temp()
@@ -816,16 +848,19 @@ class RealPLCDriver(BasePLCDriver):
                 return {}
 
         data: Dict[str, float] = {}
+        read_failures_before = self.ext_read_failures
         try:
             if self.ext_merge_blocks:
                 merged = self._read_extruder_merged(deadline)
                 if merged is not None:
                     data.update(merged)
+                if merged is not None and not self._ext_required_input_error(merged):
                     self.ext_merge_failures = 0
                     self.ext_merge_retry_pending = False
                     self.ext_merge_retry_current = self.ext_merge_retry_successes
                     self.ext_split_success_count = 0
-                    self._mark_ext_success()
+                    if self.ext_read_failures == read_failures_before:
+                        self._mark_ext_success()
                     return data
                 self.ext_merge_failures += 1
                 if self.ext_merge_failures >= self.ext_merge_fail_threshold:
@@ -842,6 +877,10 @@ class RealPLCDriver(BasePLCDriver):
 
             if not self.sock_ext:
                 return data
+
+            # A fallback split read is a new attempt. Do not mix a partial merged
+            # response with fields from this attempt.
+            data = {}
 
             b1 = self._melsec_read("D0020", 20, deadline)
             if len(b1) > 14:
@@ -867,23 +906,12 @@ class RealPLCDriver(BasePLCDriver):
 
             data.update(self._read_extruder_positions(deadline))
 
-            if data:
+            split_ok = (not self._ext_required_input_error(data)
+                        and self.ext_read_failures == read_failures_before)
+            if split_ok:
                 self._mark_ext_success()
 
             if not self.ext_merge_blocks:
-                split_ok = self.sock_ext is not None and any(
-                    v is not None for v in (
-                        data.get("Press"),
-                        data.get("Temp_F"),
-                        data.get("Temp_B"),
-                        data.get("Speed"),
-                        data.get("EndPos"),
-                        data.get("MainRamPosition_D0010"),
-                        data.get("ContainerPosition_D0012"),
-                        data.get("Count"),
-                        data.get("Billet"),
-                    )
-                )
                 if split_ok:
                     self.ext_split_success_count += 1
                     if self.ext_split_success_count >= self.ext_merge_retry_current:
@@ -1053,30 +1081,26 @@ class RealPLCDriver(BasePLCDriver):
                     pass
 
     def _read_extruder_merged(self, deadline: float) -> Optional[Dict[str, float]]:
+        # Preserve already received raw values when a later block fails. The
+        # caller validates required fields instead of treating a nonempty dict
+        # as proof of a complete collection.
+        data: Dict[str, float] = {}
         b1 = self._melsec_read("D0020", 16, deadline)
-        if not b1:
-            return None
+        if len(b1) <= 12:
+            return data
+        data.update(Press=b1[3] / 10.0, Temp_F=b1[11], Temp_B=b1[12])
         b2 = self._melsec_read("D0420", 6, deadline)
-        if not b2:
-            return None
+        if len(b2) > 1:
+            data["EndPos"] = b2[1] / 10.0
         b3 = self._melsec_read("D1500", 16, deadline)
-        if not b3:
-            return None
+        if len(b3) > 10:
+            data["Count"] = b3[10]
         b4 = self._melsec_read("D1900", 16, deadline)
-        if not b4:
-            return None
+        if len(b4) > 11:
+            data["Billet"] = b4[11]
         b_spd = self._melsec_read("B1502", 1, deadline)
-        if not b_spd:
-            return None
-        data = {
-            "Press": b1[3] / 10.0,
-            "Temp_F": b1[11],
-            "Temp_B": b1[12],
-            "EndPos": b2[1] / 10.0,
-            "Count": b3[10],
-            "Billet": b4[11],
-            "Speed": b_spd[0] / 10.0,
-        }
+        if b_spd:
+            data["Speed"] = b_spd[0] / 10.0
         data.update(self._read_extruder_positions(deadline))
         return data
 
@@ -1211,6 +1235,7 @@ class RealPLCDriver(BasePLCDriver):
         with self._snapshot_lock:
             ext_snapshot_at = self._ext_snapshot_at
             ext_snapshot_error = self._ext_snapshot_error
+            ext_process_input_status = self._ext_required_input_status(self._ext_snapshot)
             ls_snapshot_at = self._ls_snapshot_at
             ls_snapshot_error = self._ls_snapshot_error
             spot_snapshot_at = self._spot_snapshot_at
@@ -1240,6 +1265,7 @@ class RealPLCDriver(BasePLCDriver):
                 "snapshot_at": ext_snapshot_at,
                 "snapshot_age_sec": max(0.0, now - ext_snapshot_at) if ext_snapshot_at is not None else None,
                 "snapshot_error": ext_snapshot_error,
+                "process_input_status": ext_process_input_status,
             },
             "ls_plc": {
                 "connected": self.sock_ls is not None,

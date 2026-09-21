@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from backend.FacilityData.schemas import FactoryData, FactoryDataHistoryResponse, FactoryDataHistorySample
+from backend.FacilityData.freshness import finite_number, plc_source_is_usable
 from .drivers.base import BasePLCDriver
 from .drivers.mock_plc import MockPLCDriver
 from .drivers.real_plc import RealPLCDriver
@@ -177,9 +178,11 @@ class PLCService:
         self,
         *,
         sample_at_sec: float,
-        count: int,
+        raw_data: FactoryData,
         force: bool = False,
     ) -> None:
+        if not self._plc_source_at_sample(raw_data, sample_at_sec)[1]:
+            return
         with self.operator_metadata_state_lock:
             previous_write_at = self.operator_metadata_last_state_write_at
             if (
@@ -192,7 +195,7 @@ class PLCService:
             payload = {
                 "operator_metadata_runtime_state_version": OPERATOR_METADATA_RUNTIME_STATE_VERSION,
                 "last_normal_sample_at": sample_at_sec,
-                "last_count": count,
+                "last_count": raw_data.Count,
             }
             temp_path = self.operator_metadata_runtime_state_path.with_name(
                 f"{self.operator_metadata_runtime_state_path.name}.tmp"
@@ -210,6 +213,8 @@ class PLCService:
                 self._logger.warning("Operator metadata runtime state persist failed: %s", exc)
 
     def _apply_operator_metadata_auto_reset(self, raw_data: FactoryData, captured_at_sec: float) -> None:
+        if not self._plc_source_at_sample(raw_data, captured_at_sec)[1]:
+            return
         count = raw_data.Count
         if count is None:
             return
@@ -237,16 +242,19 @@ class PLCService:
         self.operator_metadata_last_normal_sample_at = captured_at_sec
         self._persist_operator_metadata_runtime_state(
             sample_at_sec=captured_at_sec,
-            count=count,
+            raw_data=raw_data,
             force=reset_reason is not None,
         )
 
     def _derive_metadata_process_state_candidate(
         self,
-        current_state: Optional[str],
+        raw_data: FactoryData,
         operator_metadata: Any,
+        captured_at_sec: float,
     ) -> str:
-        state = current_state or "unknown"
+        if not self._plc_source_at_sample(raw_data, captured_at_sec)[1]:
+            return "unknown"
+        state = raw_data.extruder_process_state_online or "unknown"
         context = (operator_metadata.product_no or "", operator_metadata.operator_mold_no or "")
         previous_context = self._process_operator_context
         self._process_operator_context = context
@@ -258,19 +266,26 @@ class PLCService:
             return state
         return "changeover_candidate"
 
-    def _compose_data(self, raw_data: FactoryData, captured_at_sec: Optional[float] = None) -> FactoryData:
-        from backend.FacilityData.freshness import plc_source_is_usable
+    @staticmethod
+    def _plc_source_at_sample(raw_data: FactoryData, captured_at_sec: float) -> tuple[Optional[float], bool]:
+        sample_at = finite_number(captured_at_sec)
+        source_at = finite_number(raw_data.captured_at_extruder)
+        age = ((sample_at - source_at) * 1000.0
+               if sample_at is not None and source_at is not None else None)
+        usable = plc_source_is_usable(raw_data.plc_source_usable, age,
+                                      raw_data.plc_source_freshness_threshold_ms, raw_data.plc_source_error,
+                                      count=raw_data.Count, speed=raw_data.Speed, press=raw_data.Press)
+        return age, usable
 
+    def _compose_data(self, raw_data: FactoryData, captured_at_sec: Optional[float] = None) -> FactoryData:
         sample_at_sec = captured_at_sec if captured_at_sec is not None else time.time()
-        plc_age_ms = ((sample_at_sec - raw_data.captured_at_extruder) * 1000.0
-                      if raw_data.captured_at_extruder is not None else None)
-        plc_usable = plc_source_is_usable(raw_data.plc_source_usable, plc_age_ms,
-                                          raw_data.plc_source_freshness_threshold_ms, raw_data.plc_source_error)
-        self._apply_operator_metadata_auto_reset(raw_data, sample_at_sec)
+        plc_age_ms, plc_usable = self._plc_source_at_sample(raw_data, sample_at_sec)
+        if plc_usable:
+            self._apply_operator_metadata_auto_reset(raw_data, sample_at_sec)
         operator_metadata = operator_metadata_store.get()
-        extruder_process_state_online = self._derive_metadata_process_state_candidate(
-            raw_data.extruder_process_state_online,
-            operator_metadata,
+        extruder_process_state_online = (
+            self._derive_metadata_process_state_candidate(raw_data, operator_metadata, sample_at_sec)
+            if plc_usable else "unknown"
         )
         snapshot = config_manager.get_snapshot()
         values = snapshot.get("values", {})

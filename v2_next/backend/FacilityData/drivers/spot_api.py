@@ -3403,7 +3403,7 @@ async def _spot_poll_loop():
     _spot_poll_running = True
 
     interval = _spot_poll_interval_sec()
-    next_tick = time.time()
+    next_tick = time.monotonic()
 
     while _spot_poll_running:
         try:
@@ -3444,15 +3444,16 @@ async def _spot_poll_loop():
             break
         # ??뺚봺?袁る뱜 獄쎻뫗?: ??쇱벉 ??쎈뻬 ??볦퍢 ?④쑴沅?
         next_tick += interval
-        now = time.time()
-        sleep_time = next_tick - now
-
-        if sleep_time > 0:
-            await asyncio.sleep(sleep_time)
-        else:
-            # ?臾믩씜????댭???살삋 椰꾨챶????쇱벉 ??쎈뻬 ??뽰젎????? 筌왖??野껋럩??癰귣똻???뺣뼄.
-            next_tick = now
-            await asyncio.sleep(0.1)  # 筌ㅼ뮇??0.1????곷뻼??곗쨮 ?袁⑥쨮?紐꾧퐣 ?癒?? 獄쎻뫗?
+        now_monotonic = time.monotonic()
+        if next_tick <= now_monotonic:
+            # Skip missed ticks. After an overrun, wait a full configured interval
+            # rather than issuing catch-up requests; I/O concurrency is unchanged.
+            next_tick = now_monotonic + interval
+        try:
+            await asyncio.sleep(next_tick - now_monotonic)
+        except asyncio.CancelledError:
+            break
+    _spot_poll_running = False
 
 
 async def start_spot_poll_loop():

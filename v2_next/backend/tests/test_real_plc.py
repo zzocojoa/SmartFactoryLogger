@@ -127,7 +127,7 @@ class SpotSnapshotTests(unittest.TestCase):
     def test_read_data_includes_spot_shadow_metadata(self) -> None:
         driver = RealPLCDriver()
         now = time.time()
-        driver._update_ext_snapshot({"Speed": 1.0, "Press": 10.0}, now)
+        driver._update_ext_snapshot({"Count": 20, "Speed": 1.0, "Press": 10.0}, now)
         driver._process_high_speed_since = now - 1.0
         driver._update_ls_snapshot({}, now)
         driver._update_spot_snapshot(
@@ -196,7 +196,7 @@ class SpotSnapshotTests(unittest.TestCase):
     def test_read_data_preserves_invalid_sentinel_device_status_without_snapshot_error(self) -> None:
         driver = RealPLCDriver()
         now = time.time()
-        driver._update_ext_snapshot({"Speed": 1.0, "Press": 10.0}, now)
+        driver._update_ext_snapshot({"Count": 20, "Speed": 1.0, "Press": 10.0}, now)
         driver._process_high_speed_since = now - 1.0
         driver._update_ls_snapshot({}, now)
         driver._update_spot_snapshot(
@@ -240,18 +240,18 @@ class OnlineProcessStateTests(unittest.TestCase):
         now = 1_773_040_825.0
 
         self.assertEqual(
-            driver._derive_extruder_process_state_online({"Speed": 1.0, "Press": 10.0}, None, None, now),
+            driver._derive_extruder_process_state_online({"Count": 20, "Speed": 1.0, "Press": 10.0}, None, None, now),
             "unknown",
         )
         self.assertEqual(
             driver._derive_extruder_process_state_online(
-                {"Speed": 1.0, "Press": 10.0}, now, "plc-timeout", now
+                {"Count": 20, "Speed": 1.0, "Press": 10.0}, now, "plc-timeout", now
             ),
             "unknown",
         )
         self.assertEqual(
             driver._derive_extruder_process_state_online(
-                {"Speed": 1.0, "Press": 10.0}, now - driver._ext_snapshot_grace_sec() - 0.1, None, now
+                {"Count": 20, "Speed": 1.0, "Press": 10.0}, now - driver._ext_snapshot_grace_sec() - 0.1, None, now
             ),
             "unknown",
         )
@@ -260,9 +260,9 @@ class OnlineProcessStateTests(unittest.TestCase):
         driver = RealPLCDriver()
         now = 1_773_040_825.0
 
-        first = driver._derive_extruder_process_state_online({"Speed": 1.0, "Press": 10.0}, now, None, now)
+        first = driver._derive_extruder_process_state_online({"Count": 20, "Speed": 1.0, "Press": 10.0}, now, None, now)
         second = driver._derive_extruder_process_state_online(
-            {"Speed": 1.0, "Press": 10.0},
+            {"Count": 20, "Speed": 1.0, "Press": 10.0},
             now + real_plc.PROCESS_STATE_ENTER_DWELL_SEC + 0.1,
             None,
             now + real_plc.PROCESS_STATE_ENTER_DWELL_SEC + 0.1,
@@ -275,9 +275,9 @@ class OnlineProcessStateTests(unittest.TestCase):
         driver = RealPLCDriver()
         now = 1_773_040_825.0
 
-        first = driver._derive_extruder_process_state_online({"Speed": 0.0, "Press": 0.0}, now, None, now)
+        first = driver._derive_extruder_process_state_online({"Count": 20, "Speed": 0.0, "Press": 0.0}, now, None, now)
         idle = driver._derive_extruder_process_state_online(
-            {"Speed": 0.0, "Press": 0.0},
+            {"Count": 20, "Speed": 0.0, "Press": 0.0},
             now + real_plc.IDLE_CANDIDATE_MIN_SEC + 0.1,
             None,
             now + real_plc.IDLE_CANDIDATE_MIN_SEC + 0.1,
@@ -293,7 +293,7 @@ class OnlineProcessStateTests(unittest.TestCase):
         driver._process_last_extruding_at = now - 1.0
         driver._process_low_speed_since = now - real_plc.PROCESS_STATE_EXIT_DWELL_SEC - 0.1
 
-        state = driver._derive_extruder_process_state_online({"Speed": 0.0, "Press": 10.0}, now, None, now)
+        state = driver._derive_extruder_process_state_online({"Count": 20, "Speed": 0.0, "Press": 10.0}, now, None, now)
 
         self.assertEqual(state, "stopped")
 class PLCServiceHealthTests(unittest.TestCase):
@@ -437,8 +437,8 @@ class OperatorMetadataApiTests(unittest.TestCase):
         backend_app.config.OPERATOR_METADATA_DOWNTIME_RESET_HOURS = self.original_reset_hours
         self.temp_dir.cleanup()
 
-    def _factory_data(self, count: int | None = 3) -> FactoryData:
-        return FactoryData(
+    def _factory_data(self, count: int | None = 3, captured_at: float | None = None) -> FactoryData:
+        raw = FactoryData(
             Time="2026-03-09T07:20:25.123",
             Status="Running",
             Speed=1.0,
@@ -459,6 +459,16 @@ class OperatorMetadataApiTests(unittest.TestCase):
             At_Temp=16.0,
             At_Pre=17.0,
         )
+
+        # Derive synthetic acquisition proof through the production driver gate.
+        driver = RealPLCDriver()
+        stamp = captured_at if captured_at is not None else time.time()
+        driver._update_ext_snapshot({"Count": count, "Speed": raw.Speed, "Press": raw.Press}, stamp)
+        with patch("backend.FacilityData.drivers.real_plc.time.time", return_value=stamp):
+            source = driver.read_data()
+        return raw.model_copy(update={name: getattr(source, name) for name in (
+            "captured_at_extruder", "plc_source_age_ms", "plc_source_freshness_threshold_ms",
+            "plc_source_error", "plc_source_usable")})
 
     def _set_operator_metadata_runtime_state(self, last_sample_at: float, count: int = 3) -> None:
         payload = {
@@ -838,7 +848,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         now = 1_773_040_825.0
         self._set_operator_metadata_runtime_state(now - (8 * 60 * 60) - 1, count=9)
 
-        composed = backend_app.plc_service._compose_data(self._factory_data(count=0), captured_at_sec=now)
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=0, captured_at=now), captured_at_sec=now)
 
         self.assertEqual(composed.Product_No_operator, "")
         self.assertEqual(composed.Mold_No_operator, "")
@@ -854,7 +864,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         now = 1_773_040_825.0
         self._set_operator_metadata_runtime_state(now - (8 * 60 * 60) - 1, count=9)
 
-        composed = backend_app.plc_service._compose_data(self._factory_data(count=2), captured_at_sec=now)
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=2, captured_at=now), captured_at_sec=now)
 
         self.assertEqual(composed.Product_No_operator, "")
         self.assertEqual(composed.Mold_No_operator, "")
@@ -868,7 +878,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         now = 1_773_040_825.0
         self._set_operator_metadata_runtime_state(now - (7 * 60 * 60), count=9)
 
-        composed = backend_app.plc_service._compose_data(self._factory_data(count=2), captured_at_sec=now)
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=2, captured_at=now), captured_at_sec=now)
 
         self.assertEqual(composed.Product_No_operator, "12345")
         self.assertEqual(composed.Mold_No_operator, "123")
@@ -881,8 +891,8 @@ class OperatorMetadataApiTests(unittest.TestCase):
         )
         now = 1_773_040_825.0
 
-        first = backend_app.plc_service._compose_data(self._factory_data(count=3), captured_at_sec=now)
-        second = backend_app.plc_service._compose_data(self._factory_data(count=0), captured_at_sec=now + 1)
+        first = backend_app.plc_service._compose_data(self._factory_data(count=3, captured_at=now), captured_at_sec=now)
+        second = backend_app.plc_service._compose_data(self._factory_data(count=0, captured_at=now + 1), captured_at_sec=now + 1)
 
         self.assertTrue(first.operator_metadata_valid)
         self.assertEqual(second.Product_No_operator, "")
@@ -894,7 +904,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         now = 1_773_040_825.0
         self._set_operator_metadata_runtime_state(now - (8 * 60 * 60) - 1, count=9)
 
-        composed = backend_app.plc_service._compose_data(self._factory_data(count=0), captured_at_sec=now)
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=0, captured_at=now), captured_at_sec=now)
 
         current = backend_app.operator_metadata_store.get()
         self.assertFalse(composed.operator_metadata_valid)
@@ -908,7 +918,7 @@ class OperatorMetadataApiTests(unittest.TestCase):
         )
         now = 1_773_040_825.0
         self._set_operator_metadata_runtime_state(now - (8 * 60 * 60) - 1, count=9)
-        composed = backend_app.plc_service._compose_data(self._factory_data(count=2), captured_at_sec=now)
+        composed = backend_app.plc_service._compose_data(self._factory_data(count=2, captured_at=now), captured_at_sec=now)
         service = CSVLoggerService()
         timestamp = service._parse_timestamp(composed)
         v1_row = service._build_row(composed, timestamp)

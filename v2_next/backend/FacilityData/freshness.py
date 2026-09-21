@@ -46,7 +46,20 @@ def cache_rejection_reason(age: object, clock: str, ttl_ms: object) -> str:
     return "cache_expired" if value > ttl else ""
 
 
-def plc_source_is_usable(usable: object, age_ms: object, threshold_ms: object, error: object) -> bool:
+def plc_required_input_status(*, count: object, speed: object, press: object) -> dict[str, str]:
+    """Current collection's required phase inputs; zero is valid, bool/nonfinite is not."""
+    status = {}
+    for name, raw in (("Count", count), ("Speed", speed), ("Press", press)):
+        value = finite_number(raw)
+        status[name] = ("missing" if raw is None else "invalid" if value is None or
+                        (name == "Count" and (value < 0 or not value.is_integer())) else "valid")
+    return status
+
+
+def plc_source_is_usable(usable: object, age_ms: object, threshold_ms: object, error: object,
+                         *, count: object, speed: object, press: object) -> bool:
     age, threshold = finite_number(age_ms), finite_number(threshold_ms)
     return (usable is True and error is False and age is not None and threshold is not None
-            and threshold > 0 and 0 <= age <= threshold)
+            and threshold > 0 and 0 <= age <= threshold
+            and all(value == "valid" for value in
+                    plc_required_input_status(count=count, speed=speed, press=press).values()))

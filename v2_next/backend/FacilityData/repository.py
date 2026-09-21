@@ -1187,7 +1187,7 @@ class CSVLoggerService:
                     "cache_ttl": "finite nonnegative value age, clock ok, age <= configured TTL",
                 },
                 "process_phase_rule_version": PROCESS_PHASE_RULE_VERSION,
-                "plc_phase_source_policy": "collection-time usable=true, error=false, finite age within source grace; otherwise freeze lifecycle and phase unknown",
+                "plc_phase_source_policy": "collection-time usable=true, error=false, finite age within source grace; current Count/Speed/Press complete and finite (Count nonnegative integer, zero valid); otherwise freeze lifecycle and phase unknown; optional inputs and transport health are separate",
                 "posthoc_fact_manifests": [
                     "changeover_candidate_resolution_fact_manifest",
                     "process_phase_event_fact_manifest",
@@ -1536,7 +1536,8 @@ class CSVLoggerService:
         sample_seq: int,
     ) -> ProcessPhaseDecision:
         if not plc_source_is_usable(data.plc_source_usable, data.plc_source_age_ms,
-                                     data.plc_source_freshness_threshold_ms, data.plc_source_error):
+                                     data.plc_source_freshness_threshold_ms, data.plc_source_error,
+                                     count=data.Count, speed=data.Speed, press=data.Press):
             # Freeze lifecycle/context; never confirm or open a candidate from stale PLC.
             # Clear dwell evidence so outage duration is not counted as observed hold.
             state = self._process_phase_runtime_state
