@@ -91,3 +91,4 @@ config.pending.json
 !backend/tests/test_temperature_remediation.py
 !backend/tests/test_temperature_fact_queue.py
 !backend/tests/test_temperature_poll_completeness.py
+!backend/tests/test_spot_temperature_qa_schema.py
