@@ -2,6 +2,7 @@ import struct
 import time
 import select
 import threading
+import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import socket
@@ -126,6 +127,10 @@ class RealPLCDriver(BasePLCDriver):
         self._snapshot_lock = threading.Lock()
         self._worker_stop = threading.Event()
         self._worker_threads: list[threading.Thread] = []
+        # Control callers only. Workers never acquire this lock, including I/O
+        # reconnect and snapshot publication, so bounded join cannot block them.
+        self._lifecycle_lock = threading.RLock()
+        self._close_incomplete = False
         self._ext_snapshot: Dict[str, float] = {}
         self._ext_snapshot_at: Optional[float] = None
         self._ext_snapshot_monotonic: Optional[float] = None
@@ -236,16 +241,27 @@ class RealPLCDriver(BasePLCDriver):
 
     def connect(self) -> bool:
         """Connect to both PLCs."""
-        ok_ext = self._connect_extruder()
-        ok_ls = self._connect_ls()
-        self.connected = ok_ext or ok_ls
-        self._connected_state = self.connected
-        self._connected_failure_count = 0
-        self._connected_recovery_count = 0
-        self._start_workers()
-        return self.connected
+        with self._lifecycle_lock:
+            self._check_worker_restart()
+            if self._worker_threads:
+                return self.connected
+            ok_ext = self._connect_extruder()
+            ok_ls = self._connect_ls()
+            self.connected = ok_ext or ok_ls
+            self._connected_state = self.connected
+            self._connected_failure_count = 0
+            self._connected_recovery_count = 0
+            self._start_workers()
+            # False still means offline PLCs, not lifecycle rejection. Workers
+            # continue the existing retry policy; lifecycle rejection raises.
+            return self.connected
 
     def apply_connection_config(self) -> None:
+        with self._lifecycle_lock:
+            self._check_worker_restart()
+            self._apply_connection_config()
+
+    def _apply_connection_config(self) -> None:
         # Force reconnect on next read with updated config values.
         if self.sock_ext:
             try:
@@ -335,26 +351,41 @@ class RealPLCDriver(BasePLCDriver):
             print(f"[RealDriver] LS PLC Connection Failed: {e}")
             return False
 
-    def close(self):
-        self._worker_stop.set()
-        for thread in self._worker_threads:
-            thread.join(timeout=1.0)
-        self._worker_threads = []
-        if self.sock_ext:
-            try:
-                self.sock_ext.close()
-            except Exception:
-                pass
-        if self.sock_ls:
-            try:
-                self.sock_ls.close()
-            except Exception:
-                pass
-        self.connected = False
-        self._connected_state = False
-        self._connected_failure_count = 0
-        self._connected_recovery_count = 0
-        print("[RealDriver] All Connections Closed.")
+    def close(self) -> bool:
+        with self._lifecycle_lock:
+            self._worker_stop.set()
+            self._close_incomplete = True
+            for thread in self._worker_threads:
+                # A failed start may leave a constructed but unstarted thread.
+                if thread.ident is not None and thread is not threading.current_thread():
+                    thread.join(timeout=1.0)
+            self._worker_threads = [thread for thread in self._worker_threads if thread.is_alive()]
+            self.connected = False
+            self._connected_state = False
+            self._connected_failure_count = 0
+            self._connected_recovery_count = 0
+            if self._worker_threads:
+                # An in-flight read may still publish a socket after join times
+                # out. Keep that generation's resources until its workers exit;
+                # racing socket cleanup here could falsely report full closure.
+                logging.getLogger('SmartFactoryLoggerV2').warning(
+                    'RealPLC close incomplete: live_workers=%s',
+                    [thread.name for thread in self._worker_threads])
+                return False
+            close_failed = False
+            for attr in ('sock_ext', 'sock_ls'):
+                sock = getattr(self, attr)
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        close_failed = True
+                        logging.getLogger('SmartFactoryLoggerV2').warning(
+                            'RealPLC resource close failed: %s', attr, exc_info=True)
+                    else:
+                        setattr(self, attr, None)
+            self._close_incomplete = close_failed
+            return not close_failed
 
     def _safe_float(self, value: Any) -> Optional[float]:
         if isinstance(value, bool) or value is None:
@@ -647,17 +678,32 @@ class RealPLCDriver(BasePLCDriver):
             spot_snapshot_error=spot_snapshot_error,
         )
 
+    def _check_worker_restart(self) -> None:
+        # Caller holds _lifecycle_lock. Check before any reconnect or Event clear.
+        self._worker_threads = [thread for thread in self._worker_threads if thread.is_alive()]
+        if self._close_incomplete or (self._worker_stop.is_set() and self._worker_threads):
+            raise RuntimeError('Previous RealPLC workers/resources have not stopped')
+
     def _start_workers(self) -> None:
-        if self._worker_threads:
-            return
-        self._worker_stop.clear()
-        self._worker_threads = [
-            threading.Thread(target=self._ext_worker_loop, name="RealPLC-Extruder", daemon=True),
-            threading.Thread(target=self._ls_worker_loop, name="RealPLC-LS", daemon=True),
-            threading.Thread(target=self._spot_worker_loop, name="RealPLC-SPOT", daemon=True),
-        ]
-        for thread in self._worker_threads:
-            thread.start()
+        with self._lifecycle_lock:
+            self._check_worker_restart()
+            if self._worker_threads:
+                return
+            self._worker_stop.clear()
+            try:
+                for target, name in (
+                    (self._ext_worker_loop, 'RealPLC-Extruder'),
+                    (self._ls_worker_loop, 'RealPLC-LS'),
+                    (self._spot_worker_loop, 'RealPLC-SPOT'),
+                ):
+                    thread = threading.Thread(target=target, name=name, daemon=True)
+                    self._worker_threads.append(thread)
+                    thread.start()
+            except BaseException:
+                self._worker_stop.set()
+                self._close_incomplete = True
+                self.connected = False
+                raise
 
     def _connector_poll_interval_sec(self) -> float:
         return max(0.25, float(config.INTERVAL_SEC))

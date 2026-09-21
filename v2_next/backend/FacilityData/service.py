@@ -91,31 +91,45 @@ class PLCService:
                 return
             if any(worker is not None and worker.is_alive() for worker in (self.driver_thread, self.thread)):
                 raise RuntimeError("Previous PLC service threads have not stopped")
-            self._stop_event.clear()
-            with self.driver_state_lock:
-                self.driver_last_data = None
-                self.driver_last_data_at = None
-            self.driver.connect()
-            self.running = True
-            self.driver_thread = threading.Thread(target=self._driver_loop, daemon=True)
-            self.thread = threading.Thread(target=self._loop, daemon=True)
-            self.driver_thread.start()
-            self.thread.start()
+            # Driver rejection must precede even the service's Event clear.
+            # connect=False means temporarily offline, with worker retry active.
+            try:
+                self.driver.connect()
+                self._stop_event.clear()
+                with self.driver_state_lock:
+                    self.driver_last_data = None
+                    self.driver_last_data_at = None
+                self.running = True
+                self.driver_thread = threading.Thread(target=self._driver_loop, daemon=True)
+                self.driver_thread.start()
+                self.thread = threading.Thread(target=self._loop, daemon=True)
+                self.thread.start()
+            except BaseException:
+                self.running = False
+                self._stop_event.set()
+                self._stop_owned_work()
+                raise
             print("[PLCService] Background Thread Started.")
 
     def stop(self) -> bool:
         with self._lifecycle_lock:
             self.running = False
             self._stop_event.set()
-            if self.driver_thread:
-                self.driver_thread.join(timeout=1.0)
-            if self.thread:
-                self.thread.join(timeout=1.0)
-            self.driver.close()
-            return not (
-                (self.driver_thread is not None and self.driver_thread.is_alive())
-                or (self.thread is not None and self.thread.is_alive())
-            )
+            return self._stop_owned_work()
+
+    def _stop_owned_work(self) -> bool:
+        # Lifecycle caller holds the lock; neither service loop acquires it.
+        for worker in (self.driver_thread, self.thread):
+            if worker is not None and worker.ident is not None and worker is not threading.current_thread():
+                worker.join(timeout=1.0)
+        try:
+            driver_stopped = self.driver.close() is True
+        except Exception:
+            self._logger.warning('PLC driver close failed', exc_info=True)
+            driver_stopped = False
+        return driver_stopped and not any(
+            worker is not None and worker.is_alive() for worker in (self.driver_thread, self.thread)
+        )
 
     def apply_interval(self, interval_sec: float) -> float:
         clamped = max(config.MIN_INTERVAL_SEC, min(config.MAX_INTERVAL_SEC, interval_sec))
@@ -124,12 +138,17 @@ class PLCService:
         return clamped
 
     def apply_connection_config(self) -> bool:
-        try:
-            if hasattr(self.driver, "apply_connection_config"):
-                self.driver.apply_connection_config()
-            return True
-        except Exception:
-            return False
+        with self._lifecycle_lock:
+            if self._stop_event.is_set() and any(
+                worker is not None and worker.is_alive() for worker in (self.driver_thread, self.thread)
+            ):
+                return False
+            try:
+                if hasattr(self.driver, "apply_connection_config"):
+                    self.driver.apply_connection_config()
+                return True
+            except Exception:
+                return False
 
     def _current_interval(self) -> float:
         with self.interval_lock:

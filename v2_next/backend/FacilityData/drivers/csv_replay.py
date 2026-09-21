@@ -281,5 +281,6 @@ class CsvReplayDriver(BasePLCDriver):
             Speed=0, Press=0, Spot=0, Temp_F=0, Temp_B=0
         )
 
-    def close(self):
+    def close(self) -> bool:
         self.connected = False
+        return True

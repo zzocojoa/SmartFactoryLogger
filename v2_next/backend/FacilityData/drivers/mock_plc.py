@@ -62,6 +62,7 @@ class MockPLCDriver(BasePLCDriver):
             At_Pre=45.0
         )
         
-    def close(self):
+    def close(self) -> bool:
         print("[MockDriver] Connection Closed.")
         self.connected = False
+        return True

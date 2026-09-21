@@ -165,7 +165,7 @@ class ServiceClockTests(unittest.TestCase):
                     if error:
                         raise OSError('synthetic read failure')
                     return FactoryData(Time='', Count=20, Speed=1, Press=30)
-                self.service.driver = SimpleNamespace(read_data=read, connect=lambda: True, close=lambda: None)
+                self.service.driver = SimpleNamespace(read_data=read, connect=lambda: True, close=lambda: True)
                 self.service.interval_sec = 5
                 fake_time = SimpleNamespace(time=time.time, monotonic=time.monotonic, sleep=stop.wait)
                 with patch.object(module, 'time', fake_time):
@@ -202,7 +202,7 @@ class ServiceClockTests(unittest.TestCase):
             entered.set()
             release.wait(5)
             return FactoryData(Time='', Count=20, Speed=1, Press=30)
-        self.service.driver = SimpleNamespace(read_data=read, connect=lambda: True, close=lambda: None)
+        self.service.driver = SimpleNamespace(read_data=read, connect=lambda: True, close=lambda: True)
         self.service.start()
         try:
             self.assertTrue(entered.wait(1))
@@ -223,7 +223,7 @@ class ServiceClockTests(unittest.TestCase):
         self.service._stop_event = stop
         self.service.interval_sec = 5
         self.service.driver = SimpleNamespace(read_data=lambda: FactoryData(Time='', Count=20, Speed=1, Press=30),
-                                             connect=lambda: True, close=lambda: None)
+                                             connect=lambda: True, close=lambda: True)
         enqueue_attempted = threading.Event()
         def fail_enqueue(data):
             enqueue_attempted.set()
