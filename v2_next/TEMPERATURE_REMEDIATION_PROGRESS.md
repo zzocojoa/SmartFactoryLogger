@@ -1,5 +1,9 @@
 # Temperature 개선 진행 기록
 
+> **현재 상태 안내 (2026-09-21):** [브랜치 완료 상태](TEMPERATURE_BRANCH_STATUS.md)에
+> 후속 commit `72a4103`, 후보 준비 완료, 7시간 현장 관찰 결과와 남은 범위를 연결했다.
+> 아래 기준 HEAD·미커밋·배포 전 단계는 당시 진행 이력으로 보존한다.
+
 - 기준 HEAD: `09e81777d3ca7823ae496e181668f521ebcd2d7a`
 - 브랜치: `codex/temperature-remediation-20260909`
 - 원본: 2026-09-09 패키지 inputs (읽기 전용). 다른 수집일과 혼합하지 않음.
