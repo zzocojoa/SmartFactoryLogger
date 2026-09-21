@@ -69,6 +69,8 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         return FactoryData(
             Time="2026-06-25T08:00:00",
             plc_source_age_ms=0, plc_source_freshness_threshold_ms=5000,
+            plc_source_completed_monotonic=1000, plc_sample_monotonic=1000,
+            plc_clock_domain_id=clock_domain_id(),
             plc_source_error=False, plc_source_usable=True,
             Status="Running",
             Speed=0.0,
@@ -199,6 +201,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             "spot_last_poll_started_at": "2026-06-25T07:59:59Z",
             "spot_last_poll_completed_at": "2026-06-25T08:00:00Z",
             "spot_poll_duration_ms": "50.0",
+            "spot_poll_duration_status": "ok",  # Declared synthetic monotonic measurement.
             "diagnostics_captured_at": "2026-06-25T08:00:00Z",
             "diagnostics_capture_status": "async_complete",
             "diagnostics_age_ms": "10.0",
@@ -2233,7 +2236,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             handle, _ = service._open_v2_log_file("20260626_000000", "Factory_Integrated_Log_v2")
             service._close_file(handle)
 
-            rollover_path = log_dir / "Factory_Integrated_Log_v2_20260626_000000_2_4_1.csv"
+            rollover_path = log_dir / "Factory_Integrated_Log_v2_20260626_000000_2_4_2.csv"
             self.assertTrue(rollover_path.exists())
             with original_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 self.assertEqual(next(csv.reader(handle)), prior_v2_4_columns)

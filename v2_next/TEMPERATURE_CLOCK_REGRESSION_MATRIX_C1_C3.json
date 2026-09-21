@@ -1,0 +1,712 @@
+{
+  "kind": "executed_temperature_clock_regression_matrix",
+  "audit_commit": "376618267aa52c822e1692d50de637d657ddf28e",
+  "branch_context": "codex/temperature-remediation-20260909",
+  "execution_order": [
+    "C1",
+    "C2",
+    "C3"
+  ],
+  "generated_for": "Local code remediation and validation only",
+  "new_tests_run_by_this_package_creation": true,
+  "original_audit_scope": "Isolated source-method/expression probes; full repository and physical tests not executed.",
+  "test_case_count": 21,
+  "test_cases": [
+    {
+      "id": "C1-01",
+      "goal": "C1",
+      "name": "service_wall_backward",
+      "stimulus": "interval=0.2s, read elapsed=0.01s, read 중 wall -60s, monotonic 정상 증가",
+      "expected_behavior": "정상 대조군과 같은 주기 계산. 합성 조건에서 다음 wait 약0.19s이며60.19s가 아님.",
+      "production_path_to_execute": "PLCService._driver_loop",
+      "allowed_synthetic_boundaries": [
+        "driver I/O",
+        "independent wall/monotonic",
+        "wait"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_real_driver_loop_normal_wall_backward_forward_and_repeated"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C1-02",
+      "goal": "C1",
+      "name": "service_wall_forward_repeated",
+      "stimulus": "wall +60s 및 -60/+60 반복, monotonic 정상 증가",
+      "expected_behavior": "wall 변화에 따른 긴 대기·연속 무대기 없음. 실제 read 경과로 주기 계산.",
+      "production_path_to_execute": "PLCService._driver_loop",
+      "allowed_synthetic_boundaries": [
+        "driver I/O",
+        "independent clocks",
+        "wait"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_real_driver_loop_normal_wall_backward_forward_and_repeated"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C1-03",
+      "goal": "C1",
+      "name": "service_publish_to_csv",
+      "stimulus": "새 FactoryData 표본을 연속 게시하면서 wall 보정",
+      "expected_behavior": "실제 소비 loop와 CSV enqueue까지 새 표본 전달. UTC 보존. 신규표본 식별 문제는 재현될 때만 최소 수정.",
+      "production_path_to_execute": "_driver_loop -> snapshot publish -> _loop -> _compose_data -> logger_service.enqueue",
+      "allowed_synthetic_boundaries": [
+        "driver/transport",
+        "independent clocks",
+        "temporary paths",
+        "enqueue observation spy"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_actual_consumer_enqueues_new_samples_with_equal_and_reversed_utc",
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_exception_retry_one_second_then_recovers_into_enqueue"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C1-04",
+      "goal": "C1",
+      "name": "interruptible_normal_and_error_wait",
+      "stimulus": "정상 wait 또는 driver exception의 retry wait 중 stop 요청",
+      "expected_behavior": "서비스 stop이 wait를 깨우며 거짓 종료 성공 없음. 동기 I/O 강제중단 보장과 구분.",
+      "production_path_to_execute": "_driver_loop -> stop",
+      "allowed_synthetic_boundaries": [
+        "driver I/O",
+        "controlled Events",
+        "temporary paths"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_stop_interrupts_normal_and_retry_wait_and_restart",
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_stop_interrupts_consumer_retry_wait",
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_blocked_io_reports_stop_failure_and_prevents_duplicate_restart"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C1-05",
+      "goal": "C1",
+      "name": "service_restart",
+      "stimulus": "start -> stop -> start -> stop, 이전 wait 진행 중 종료도 포함",
+      "expected_behavior": "stop Event 초기화와 worker 소유권 정합. 잔존 stop 신호·중복 thread 없음.",
+      "production_path_to_execute": "PLCService.start/stop/_driver_loop/_loop",
+      "allowed_synthetic_boundaries": [
+        "mock devices",
+        "bounded Events",
+        "temporary paths"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_stop_interrupts_normal_and_retry_wait_and_restart",
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_blocked_io_reports_stop_failure_and_prevents_duplicate_restart"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C1-06",
+      "goal": "C1",
+      "name": "service_overrun",
+      "stimulus": "read elapsed가 interval보다 짧음/같음/김 및 wall 보정",
+      "expected_behavior": "문서화한 기존 interval/overrun 정책을 적용. wall 보정으로 별도 왜곡 발생 안 함.",
+      "production_path_to_execute": "PLCService._driver_loop",
+      "allowed_synthetic_boundaries": [
+        "driver I/O",
+        "independent clocks",
+        "wait"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_overrun_preserves_existing_zero_wait_policy"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C2-01",
+      "goal": "C2",
+      "name": "complete_old_snapshot_wall_rollback",
+      "stimulus": "Count20/Speed1/Press30, 새 snapshot·error 없음, elapsed10.5s, grace1s, wall -10s",
+      "expected_behavior": "age10500ms 및 unusable. driver/service 모두 epoch500ms로 승인하지 않음.",
+      "production_path_to_execute": "source snapshot -> RealPLCDriver.read_data -> PLCService._plc_source_at_sample -> phase/expectedness",
+      "allowed_synthetic_boundaries": [
+        "transport",
+        "independent clocks",
+        "temporary paths"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_old_complete_source_rollback_through_temperature_and_automatic_state"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C2-02",
+      "goal": "C2",
+      "name": "fresh_and_grace_boundary",
+      "stimulus": "valid source의 age=0 및 grace 직전/동일/직후, wall 순행·역행",
+      "expected_behavior": "기존 grace 경계 유지. finite age<=grace usable, 초과 unusable. wall 변경은 age를 바꾸지 않음.",
+      "production_path_to_execute": "source/read_data/service freshness path",
+      "allowed_synthetic_boundaries": [
+        "transport",
+        "independent clocks"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_fresh_grace_boundary_and_forward_backward_wall"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C2-03",
+      "goal": "C2",
+      "name": "invalid_clock_proof",
+      "stimulus": "missing/foreign domain, endpoint None/bool/NaN/+Inf/-Inf, 음수 elapsed",
+      "expected_behavior": "unknown/unusable. 정상 epoch 차이나 현재시각 보충으로 재승격하지 않음.",
+      "production_path_to_execute": "freshness helper -> real driver -> service -> repository",
+      "allowed_synthetic_boundaries": [
+        "synthetic internal proof",
+        "independent clocks"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_invalid_proof_cannot_bypass_service_helpers_or_external_phase",
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_invalid_source_clock_does_not_drop_entire_temperature_sample",
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_invalid_audit_timestamp_cannot_mutate_runtime_state"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C2-04",
+      "goal": "C2",
+      "name": "snapshot_atomic_reuse_skip",
+      "stimulus": "완전·부분 snapshot을 게시한 뒤 반복 재사용/skip, controlled concurrency",
+      "expected_behavior": "payload/proof 동일 generation. 원천 monotonic이 소비·skip 시 갱신되지 않음.",
+      "production_path_to_execute": "_update_ext_snapshot -> cached read -> read_data",
+      "allowed_synthetic_boundaries": [
+        "transport",
+        "Events",
+        "independent clocks"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_atomic_payload_and_proof_generation",
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_skip_keeps_source_clocks_partial_then_complete_recovery_and_manual_edit"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C2-05",
+      "goal": "C2",
+      "name": "fresh_collection_delayed_consumption",
+      "stimulus": "수집 당시 fresh 표본을 채택한 뒤 service/CSV 처리를 지연",
+      "expected_behavior": "PLC collection proof는 동결. writer backlog만으로 phase를 PLC 장애로 바꾸지 않음. SPOT 행시점 정책은 독립.",
+      "production_path_to_execute": "snapshot -> driver publish -> service compose -> repository",
+      "allowed_synthetic_boundaries": [
+        "transport",
+        "independent clocks",
+        "writer delay/Event"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_fresh_adoption_survives_service_writer_delay_copy_and_queue"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C2-06",
+      "goal": "C2",
+      "name": "stale_source_downstream_safety",
+      "stimulus": "C2-01 source와 SPOT valid/under-range/over-range, valid metadata·active lifecycle",
+      "expected_behavior": "phase 및 공정 의존 under expectedness unknown, 자동 metadata/derived ID/lifecycle 변경 차단. SPOT 정상·over 경고 보존.",
+      "production_path_to_execute": "driver -> service state/store -> repository/temperature operational",
+      "allowed_synthetic_boundaries": [
+        "transport",
+        "temporary store/state",
+        "independent clocks"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_old_complete_source_rollback_through_temperature_and_automatic_state"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C2-07",
+      "goal": "C2",
+      "name": "recovery_required_zero_optional",
+      "stimulus": "완전한 과거 source -> 부분 실패/skip -> 새 완전 source, Count0/1/2·필수0·선택위치누락",
+      "expected_behavior": "새 유효 source만 복구. T1/T2의 raw보존·0값·선택필드 구분·수동 편집 계약 유지.",
+      "production_path_to_execute": "real parser/worker -> read_data -> service -> repository",
+      "allowed_synthetic_boundaries": [
+        "mock transport",
+        "temporary paths",
+        "clocks"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_skip_keeps_source_clocks_partial_then_complete_recovery_and_manual_edit"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C2-08",
+      "goal": "C2",
+      "name": "helper_external_phase_no_bypass",
+      "stimulus": "clock proof 불명확 source에 외부 phase 또는 helper 직접 호출, replay proof 없음",
+      "expected_behavior": "production usable 승격 금지. replay의 UTC 분석과 production 승인 분리. 값·시각 합성 금지.",
+      "production_path_to_execute": "service helpers -> process phase/repository source gates",
+      "allowed_synthetic_boundaries": [
+        "synthetic proof",
+        "temporary store/state"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_invalid_proof_cannot_bypass_service_helpers_or_external_phase",
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_invalid_audit_timestamp_cannot_mutate_runtime_state",
+        "backend.tests.test_temperature_clock_source.PlcSourceClockTests.test_fresh_adoption_survives_service_writer_delay_copy_and_queue"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C3-01",
+      "goal": "C3",
+      "name": "duration_wall_jump",
+      "stimulus": "elapsed200ms, wall 정상/-60/+60/반복 변경",
+      "expected_behavior": "동일 poll 측정구간 duration200ms 유지. UTC는 원래 보정된 값을 보존.",
+      "production_path_to_execute": "poll start context -> request/complete -> _publish_spot_temperature_snapshot",
+      "allowed_synthetic_boundaries": [
+        "mock transport",
+        "independent clocks"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_duration.PollDurationTests.test_all_completed_request_paths_wall_jumps_fact_csv_and_utc"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C3-02",
+      "goal": "C3",
+      "name": "duration_completed_paths",
+      "stimulus": "success numeric/sentinel, timeout, connection_error, http_error, config_missing",
+      "expected_behavior": "완료 snapshot을 생성하는 경로 전부 동일 elapsed 계약. 기존 raw/status/key 보존.",
+      "production_path_to_execute": "_refresh_spot_temperature -> error branches -> publisher -> fact queue",
+      "allowed_synthetic_boundaries": [
+        "mock transport/config fixture",
+        "independent clocks",
+        "temporary fact"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_duration.PollDurationTests.test_all_completed_request_paths_wall_jumps_fact_csv_and_utc",
+        "backend.tests.test_temperature_clock_duration.PollDurationTests.test_original_poll_start_includes_config_work_and_invalid_start_is_not_recreated"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C3-03",
+      "goal": "C3",
+      "name": "duration_invalid_or_zero",
+      "stimulus": "시작/완료 endpoint 누락·bool·nonfinite·negative delta 및 정상 동일 endpoint",
+      "expected_behavior": "검증불가 값은 blank/unknown+식별 가능한 사유, 실제0ms는 허용. duration 이상만으로 정상온도 삭제 금지.",
+      "production_path_to_execute": "production completion/publisher -> field contract validator",
+      "allowed_synthetic_boundaries": [
+        "synthetic endpoints",
+        "temporary paths"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_duration.PollDurationTests.test_invalid_original_endpoints_zero_and_publisher_delay",
+        "backend.tests.test_temperature_clock_duration.PollDurationTests.test_missing_and_foreign_duration_domain_do_not_hide_valid_temperature",
+        "backend.tests.test_temperature_clock_duration.DurationContractTests.test_validator_rejects_forged_duration_but_accepts_true_zero"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C3-04",
+      "goal": "C3",
+      "name": "duration_fact_csv_contract",
+      "stimulus": "동일 poll의 duration을 publish -> fact/FactoryData -> CSV로 전달",
+      "expected_behavior": "단위·값·의미 일치. 최소 rule/metadata/validator 동기화, 과거 자료 재작성 없음.",
+      "production_path_to_execute": "publisher -> fact writer and driver -> repository -> validator",
+      "allowed_synthetic_boundaries": [
+        "mock transport",
+        "temporary files",
+        "independent clocks"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_duration.PollDurationTests.test_all_completed_request_paths_wall_jumps_fact_csv_and_utc",
+        "backend.tests.test_temperature_clock_duration.DurationContractTests.test_historical_fact_meaning_manifest_and_rollover_bytes_are_preserved",
+        "backend.tests.test_temperature_clock_duration.DurationContractTests.test_all_csv_families_rollover_old_header_and_preserve_old_bytes"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "C3-05",
+      "goal": "C3",
+      "name": "duration_identity_incomplete_poll",
+      "stimulus": "publisher 진입 지연, startup, 완료 전 cancellation",
+      "expected_behavior": "기존 poll 시작 경계를 재생성하지 않음. 미완료 poll을 가짜완료 fact로 생성하지 않음. 기존 cadence/drain 유지.",
+      "production_path_to_execute": "poll context -> completion/publisher -> shutdown",
+      "allowed_synthetic_boundaries": [
+        "mock transport",
+        "Events",
+        "independent clocks"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "backend.tests.test_temperature_clock_duration.PollDurationTests.test_startup_and_cancelled_incomplete_poll_do_not_publish_facts",
+        "backend.tests.test_temperature_clock_duration.PollDurationTests.test_invalid_original_endpoints_zero_and_publisher_delay"
+      ],
+      "command": [
+        "backend/.venv/Scripts/python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_temperature_clock_service",
+        "backend.tests.test_temperature_clock_source",
+        "backend.tests.test_temperature_clock_duration",
+        "-v"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/clock-final.txt"
+      ]
+    },
+    {
+      "id": "SAFE-01",
+      "goal": "all",
+      "name": "existing_G_T_contracts",
+      "stimulus": "변경된 source와 기존 G1~G5/T1~T3 회귀를 연결",
+      "expected_behavior": "TTL/sentinel/key/Count/state/queue/drain/gap/comparator/attestation/fact_only 불변식 유지.",
+      "production_path_to_execute": "existing targeted G/T suites plus integrated backend path",
+      "allowed_synthetic_boundaries": [
+        "existing declared fixtures",
+        "temporary paths"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "unittest discover -s backend/tests (includes G1-G5, T1-T3, C1-C3, contract and shutdown suites)",
+        "npm run health (Electron, frontend typecheck/lint/tests, backend lint/typecheck/tests, QA selftests)"
+      ],
+      "command": [
+        "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "npm.cmd run health; exit $LASTEXITCODE"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/health-final.txt"
+      ]
+    },
+    {
+      "id": "SAFE-02",
+      "goal": "all",
+      "name": "compatibility_and_review_bundle",
+      "stimulus": "필드/proof/duration/rule 계약 변경 및 새 파일 제출",
+      "expected_behavior": "관련 lint/typecheck/schema/validator QA 및 diff 검토. 과거 evidence 불변, untracked test 누락 없음. 새 결과로 이전 통과 복사 금지.",
+      "production_path_to_execute": "current repository QA commands, public boundary consumers if affected",
+      "allowed_synthetic_boundaries": [
+        "test environment only"
+      ],
+      "evidence_type": "synthetic_current_production_modules",
+      "execution_status": "pass",
+      "test_functions": [
+        "unittest discover -s backend/tests (includes G1-G5, T1-T3, C1-C3, contract and shutdown suites)",
+        "npm run health (Electron, frontend typecheck/lint/tests, backend lint/typecheck/tests, QA selftests)"
+      ],
+      "command": [
+        "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "npm.cmd run health; exit $LASTEXITCODE"
+      ],
+      "exit_code": 0,
+      "output_artifacts": [
+        "artifacts/temperature-clock-c1-c3/health-final.txt"
+      ]
+    }
+  ],
+  "completion": {
+    "mandatory": "C1/C2/C3 acceptance, relevant existing regression/integration/contracts, diff review without new major regressions",
+    "not_required_for_this_goal": [
+      "new candidate build",
+      "new 7-hour observation",
+      "midnight physical trial",
+      "historical private CSV replay",
+      "production deployment"
+    ],
+    "forbidden_actions": [
+      "automatic commit/push/PR changes/merge",
+      "physical equipment connection",
+      "OS time change",
+      "production data/config change"
+    ]
+  },
+  "current_head": "376618267aa52c822e1692d50de637d657ddf28e",
+  "local_diff_only": true,
+  "completed_at": "2026-09-21T04:19:27.323279+00:00",
+  "current_scope": "Local synthetic production-path code validation; no field trial or deployment",
+  "validation_summary": {
+    "clock": {
+      "total": 23,
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0
+    },
+    "backend": {
+      "total": 818,
+      "passed": 818,
+      "failed": 0,
+      "skipped": 0
+    },
+    "health_exit_code": 0,
+    "field_validation": "not_run_outside_scope",
+    "known_nonblocking_limit": "Offline validator checks each duration/status contract; cross-file duration equality is covered by the production-path test, not an offline key-join check."
+  }
+}

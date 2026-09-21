@@ -393,8 +393,8 @@ Add-QaCheck -Name "SPOT diagnostics" -Passed (Convert-ToBoolean (Get-ObjectPrope
     -Actual ([string](Get-ObjectProperty $initialSpot "diagnostics_available" "missing")) -Expected "true"
 Add-QaCheck -Name "CSV operational logging" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialOperational "enabled" $false)) `
     -Actual ([string](Get-ObjectProperty $initialOperational "enabled" "missing")) -Expected "true"
-Add-QaCheck -Name "CSV schema" -Passed ($expectedSchemaVersion -in @("2.5.0", "2.5.1")) `
-    -Actual ([string](Get-ObjectProperty $initialOperational "schema_version" "missing")) -Expected "2.5.0 or 2.5.1"
+Add-QaCheck -Name "CSV schema" -Passed ($expectedSchemaVersion -in @("2.5.0", "2.5.1", "2.5.2")) `
+    -Actual ([string](Get-ObjectProperty $initialOperational "schema_version" "missing")) -Expected "2.5.0, 2.5.1 or 2.5.2"
 Add-QaCheck -Name "Temperature hardening" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialOperational "temperature_hardening_enabled" $false)) `
     -Actual ([string](Get-ObjectProperty $initialOperational "temperature_hardening_enabled" "missing")) -Expected "true"
 Add-QaCheck -Name "Observation fact writer" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialOperational "observation_fact_enabled" $false)) `
@@ -606,7 +606,7 @@ if ($null -eq $metadataFile) {
         -Expected "current-session shutdown closeout CSV"
         Add-QaCheck -Name "Sidecar schema" `
         -Passed (
-            $expectedSchemaVersion -in @("2.5.0", "2.5.1") -and
+            $expectedSchemaVersion -in @("2.5.0", "2.5.1", "2.5.2") -and
             ([string](Get-ObjectProperty $schemaMetadata "active_schema_version" "")) -eq $expectedSchemaVersion
         ) `
         -Actual ([string](Get-ObjectProperty $schemaMetadata "active_schema_version" "missing")) `

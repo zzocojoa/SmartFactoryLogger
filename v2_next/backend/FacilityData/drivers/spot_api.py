@@ -2049,6 +2049,7 @@ def _begin_spot_temperature_poll() -> SpotPollContext:
         poll_seq=poll_seq,
         started_at_epoch=started_at,
         started_monotonic=started_monotonic,
+        clock_domain=clock_domain_id(),
     )
 
 
@@ -2237,8 +2238,15 @@ def _latest_spot_diagnostics_for_poll(
     captured_epoch = snapshot.get("_diagnostics_captured_at_epoch")
     captured_monotonic = snapshot.get("_diagnostics_captured_monotonic")
     age_sec: float | None = None
-    if isinstance(captured_monotonic, (float, int)):
-        age_sec = poll_completed_monotonic - float(captured_monotonic)
+    if captured_monotonic is not None:
+        # Invalid completion proof must not crash publication or use an epoch fallback.
+        endpoints = (poll_completed_monotonic, captured_monotonic)
+        if all(isinstance(value, (float, int)) and not isinstance(value, bool) for value in endpoints):
+            age_ms, status = monotonic_age_ms(*endpoints)
+            if status == "ok" and age_ms is not None:
+                age_sec = age_ms / 1000.0
+            elif status == "clock_anomaly":
+                age_sec = -1.0  # Preserve the existing future-clock binding suppression.
     elif isinstance(captured_epoch, (float, int)) and captured_epoch > 0:
         age_sec = poll_completed_at - float(captured_epoch)
 
@@ -2272,6 +2280,8 @@ def _publish_spot_temperature_snapshot(
     temp_url: str,
     classification: SpotRawClassification,
     poll_completed_monotonic: Optional[float] = None,
+    poll_started_monotonic: Optional[float] = None,
+    poll_clock_domain: Optional[str] = None,
 ) -> Dict[str, Any]:
     global _spot_observation_seq
     global _spot_temperature_snapshot
@@ -2279,6 +2289,9 @@ def _publish_spot_temperature_snapshot(
     global _spot_last_valid_value_monotonic
     global _spot_temperature_cache_suppressed_until_valid
 
+    from backend.FacilityData.freshness import spot_poll_duration
+    duration_ms, duration_status = spot_poll_duration(
+        poll_started_monotonic, poll_completed_monotonic, poll_clock_domain)
     raw_value_text = classification.raw_value_text
     if classification.raw_validity == SpotRawValidity.NOT_EVALUATED:
         raw_value_text = None
@@ -2338,7 +2351,8 @@ def _publish_spot_temperature_snapshot(
             "spot_last_poll_completed_at": _epoch_to_utc_iso(poll_completed_at),
             "_spot_last_poll_completed_at_epoch": poll_completed_at,
             "_spot_last_poll_completed_monotonic": effective_completed_monotonic,
-            "spot_poll_duration_ms": max(0.0, (poll_completed_at - poll_started_at) * 1000.0),
+            "spot_poll_duration_ms": duration_ms,
+            "spot_poll_duration_status": duration_status,
             "spot_http_status_code": classification.http_status_code,
             "spot_response_content_length": classification.response_content_length,
             "spot_raw_payload_hash": classification.raw_payload_hash,
@@ -2471,6 +2485,7 @@ def _build_spot_temperature_snapshot_diagnostics(now: float) -> Dict[str, Any]:
             "cache_fallback_allowed": False,
             "spot_http_status_code": None,
             "spot_poll_duration_ms": None,
+            "spot_poll_duration_status": "not_attempted",
             "spot_response_content_length": None,
             "spot_raw_payload_hash": None,
             "spot_device_status_code": None,
@@ -2605,6 +2620,8 @@ async def _refresh_spot_temperature(
         snapshot_for_fact = _publish_spot_temperature_snapshot(
             poll_seq=poll_seq,
             poll_started_at=poll_started_at,
+            poll_started_monotonic=poll_context.started_monotonic,
+            poll_clock_domain=poll_context.clock_domain,
             poll_completed_at=poll_completed_at,
             poll_completed_monotonic=poll_completed_monotonic,
             temp_url=exc.temp_url,
@@ -2620,6 +2637,8 @@ async def _refresh_spot_temperature(
         snapshot_for_fact = _publish_spot_temperature_snapshot(
             poll_seq=poll_seq,
             poll_started_at=poll_started_at,
+            poll_started_monotonic=poll_context.started_monotonic,
+            poll_clock_domain=poll_context.clock_domain,
             poll_completed_at=poll_completed_at,
             poll_completed_monotonic=poll_completed_monotonic,
             temp_url=exc.temp_url,
@@ -2633,6 +2652,8 @@ async def _refresh_spot_temperature(
     snapshot_for_fact = _publish_spot_temperature_snapshot(
         poll_seq=poll_seq,
         poll_started_at=poll_started_at,
+        poll_started_monotonic=poll_context.started_monotonic,
+        poll_clock_domain=poll_context.clock_domain,
         poll_completed_at=poll_completed_at,
         poll_completed_monotonic=poll_completed_monotonic,
         temp_url=temp_url,

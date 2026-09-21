@@ -34,6 +34,9 @@ class ProcessPhaseInput:
     plc_source_freshness_threshold_ms: Optional[float] = None
     plc_source_error: Optional[bool] = None
     plc_source_usable: Optional[bool] = None
+    plc_source_completed_monotonic: Optional[float] = None
+    plc_sample_monotonic: Optional[float] = None
+    plc_clock_domain_id: Optional[str] = None
     speed: Optional[float] = None
     press: Optional[float] = None
     count: Optional[int] = None
@@ -62,7 +65,10 @@ def derive_process_phase_candidate(input_state: ProcessPhaseInput) -> ProcessPha
 
     if not plc_source_is_usable(input_state.plc_source_usable, input_state.plc_source_age_ms,
                                 input_state.plc_source_freshness_threshold_ms, input_state.plc_source_error,
-                                count=input_state.count, speed=input_state.speed, press=input_state.press):
+                                count=input_state.count, speed=input_state.speed, press=input_state.press,
+                                source_completed_monotonic=input_state.plc_source_completed_monotonic,
+                                sample_monotonic=input_state.plc_sample_monotonic,
+                                source_clock_domain=input_state.plc_clock_domain_id):
         return ProcessPhaseDecision(process_phase_candidate="unknown")
 
     speed = _to_float(input_state.speed)

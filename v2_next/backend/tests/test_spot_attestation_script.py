@@ -126,8 +126,15 @@ class SpotAttestationScriptTests(unittest.TestCase):
         self.assertIn(f"config_verified_fingerprint_sha256 = {'a' * 64}", updated_config)
         self.assertIn("low_signal_comparator = lt", updated_config)
 
+    def test_accepts_schema_252_without_changing_comparator(self) -> None:
+        result, updated_config = self._run_attestation(drift_fields=["spot_config_fingerprint_sha256"],
+            attestation_status="fingerprint_mismatch", schema_version="2.5.2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("ATTESTATION APPLIED", result.stdout)
+        self.assertIn("low_signal_comparator = lt", updated_config)
+
     def test_rejects_unsupported_schema_without_writing_config(self) -> None:
-        for version in (None, "", "2.4.1", "2.5.2", "2.5.10", "3.0.0"):
+        for version in (None, "", "2.4.1", "2.5.3", "2.5.10", "3.0.0"):
             with self.subTest(version=version):
                 result, config = self._run_attestation(
                     drift_fields=[], attestation_status="not_requested", schema_version=version,
@@ -144,10 +151,10 @@ class SpotAttestationScriptTests(unittest.TestCase):
             ({"drift_fields": ["device_config_readback_status"],
               "readback_status": "mismatch"}, "blocking config drift"),
         )
-        for overrides, message in cases:
-            with self.subTest(gate=message):
+        for version, (overrides, message) in ((version, case) for version in ["2.5.1", "2.5.2"] for case in cases):
+            with self.subTest(gate=message, version=version):
                 options = {"drift_fields": [], "attestation_status": "not_requested",
-                           "schema_version": "2.5.1", **overrides}
+                           "schema_version": version, **overrides}
                 result, config = self._run_attestation(**options)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stdout + result.stderr)

@@ -12,7 +12,7 @@ import httpx
 
 from .base import BasePLCDriver
 from .spot_api import get_cached_spot_temp, get_spot_diagnostics
-from backend.FacilityData.freshness import finite_number, plc_required_input_status
+from backend.FacilityData.freshness import clock_domain_id, finite_number, plc_required_input_status, plc_source_age_at_sample
 from backend.FacilityData.schemas import FactoryData
 from backend import config
 from ..processor import LogicProcessor
@@ -128,6 +128,8 @@ class RealPLCDriver(BasePLCDriver):
         self._worker_threads: list[threading.Thread] = []
         self._ext_snapshot: Dict[str, float] = {}
         self._ext_snapshot_at: Optional[float] = None
+        self._ext_snapshot_monotonic: Optional[float] = None
+        self._ext_snapshot_clock_domain: Optional[str] = None
         self._ext_snapshot_error: Optional[str] = None
         self._ls_snapshot: Dict[str, float] = {}
         self._ls_snapshot_at: Optional[float] = None
@@ -386,13 +388,17 @@ class RealPLCDriver(BasePLCDriver):
         ext_snapshot_at: Optional[float],
         ext_snapshot_error: Optional[str],
         now_epoch: float,
+        *,
+        source_completed_monotonic: Optional[float] = None,
+        sample_monotonic: Optional[float] = None,
+        source_clock_domain: Optional[str] = None,
     ) -> bool:
         if ext_snapshot_error:
             return False
-        if ext_snapshot_at is None:
+        if finite_number(ext_snapshot_at) is None or finite_number(now_epoch) is None:
             return False
-        age = finite_number(now_epoch - ext_snapshot_at)
-        return age is not None and 0 <= age <= self._ext_snapshot_grace_sec()
+        age, status = plc_source_age_at_sample(source_completed_monotonic, sample_monotonic, source_clock_domain)
+        return status == "ok" and age is not None and age <= self._ext_snapshot_grace_sec() * 1000.0
 
     def _derive_extruder_process_state_online(
         self,
@@ -400,9 +406,15 @@ class RealPLCDriver(BasePLCDriver):
         ext_snapshot_at: Optional[float],
         ext_snapshot_error: Optional[str],
         now_epoch: float,
+        *,
+        source_completed_monotonic: Optional[float] = None,
+        sample_monotonic: Optional[float] = None,
+        source_clock_domain: Optional[str] = None,
     ) -> str:
         if (self._ext_required_input_error(ext_data) or
-                not self._is_ext_snapshot_usable(ext_snapshot_at, ext_snapshot_error, now_epoch)):
+                not self._is_ext_snapshot_usable(ext_snapshot_at, ext_snapshot_error, now_epoch,
+                                                source_completed_monotonic=source_completed_monotonic,
+                                                sample_monotonic=sample_monotonic, source_clock_domain=source_clock_domain)):
             self._process_state_online = "unknown"
             self._process_low_speed_since = None
             self._process_high_speed_since = None
@@ -477,6 +489,7 @@ class RealPLCDriver(BasePLCDriver):
             "spot_device_status_code",
             "spot_error_code",
             "spot_poll_duration_ms",
+            "spot_poll_duration_status",
             "spot_response_content_length",
             "spot_last_poll_started_at",
             "spot_last_poll_completed_at",
@@ -541,6 +554,9 @@ class RealPLCDriver(BasePLCDriver):
             ls_snapshot_error,
             spot_snapshot_error,
             spot_snapshot_metadata,
+            ext_completed_monotonic,
+            ext_clock_domain,
+            sample_monotonic,
         ) = self._read_cached_snapshot_with_metadata()
 
         now_epoch = time.time()
@@ -550,12 +566,19 @@ class RealPLCDriver(BasePLCDriver):
             ext_snapshot_at,
             ext_snapshot_error,
             now_epoch,
+            source_completed_monotonic=ext_completed_monotonic,
+            sample_monotonic=sample_monotonic,
+            source_clock_domain=ext_clock_domain,
         )
         spot_factory_fields = self._spot_metadata_to_factory_fields(spot_snapshot_metadata)
         plc_source_error = bool(ext_snapshot_error or self._ext_required_input_error(ext_data))
         plc_source_usable = not plc_source_error and self._is_ext_snapshot_usable(
             ext_snapshot_at, ext_snapshot_error, now_epoch,
+            source_completed_monotonic=ext_completed_monotonic,
+            sample_monotonic=sample_monotonic,
+            source_clock_domain=ext_clock_domain,
         )
+        plc_source_age_ms, _ = plc_source_age_at_sample(ext_completed_monotonic, sample_monotonic, ext_clock_domain)
 
         now = datetime.now()
 
@@ -613,10 +636,13 @@ class RealPLCDriver(BasePLCDriver):
             captured_at_ls=ls_snapshot_at,
             captured_at_spot=spot_snapshot_at,
             extruder_snapshot_error=ext_snapshot_error,
-            plc_source_age_ms=(now_epoch - ext_snapshot_at) * 1000.0 if ext_snapshot_at is not None else None,
+            plc_source_age_ms=plc_source_age_ms,
             plc_source_freshness_threshold_ms=self._ext_snapshot_grace_sec() * 1000.0,
             plc_source_error=plc_source_error,
             plc_source_usable=plc_source_usable,
+            plc_source_completed_monotonic=ext_completed_monotonic,
+            plc_sample_monotonic=sample_monotonic,
+            plc_clock_domain_id=ext_clock_domain,
             ls_snapshot_error=ls_snapshot_error,
             spot_snapshot_error=spot_snapshot_error,
         )
@@ -646,9 +672,13 @@ class RealPLCDriver(BasePLCDriver):
             self._worker_stop.wait(sleep_sec)
 
     def _update_ext_snapshot(self, payload: Dict[str, float], captured_at: float) -> None:
+        completed = time.monotonic()
+        completed = finite_number(completed) if isinstance(completed, (int, float)) else None
         with self._snapshot_lock:
             self._ext_snapshot = dict(payload)
             self._ext_snapshot_at = captured_at
+            self._ext_snapshot_monotonic = completed
+            self._ext_snapshot_clock_domain = clock_domain_id()
             # Snapshot error is the phase-input failure; optional transport errors
             # remain observable through ext_in_error/last_error/read_failures.
             self._ext_snapshot_error = self._ext_required_input_error(payload)
@@ -700,6 +730,9 @@ class RealPLCDriver(BasePLCDriver):
         Optional[str],
         Optional[str],
         Dict[str, Any],
+        Optional[float],
+        Optional[str],
+        Optional[float],
     ]:
         with self._snapshot_lock:
             ext_data = dict(self._ext_snapshot)
@@ -712,6 +745,12 @@ class RealPLCDriver(BasePLCDriver):
             ls_snapshot_error = self._ls_snapshot_error
             spot_snapshot_error = self._spot_snapshot_error
             spot_snapshot_metadata = dict(self._spot_snapshot_metadata)
+            ext_completed_monotonic = self._ext_snapshot_monotonic
+            ext_clock_domain = self._ext_snapshot_clock_domain
+            # The integrated sample is adopted here, under the snapshot lock.
+            # This endpoint travels unchanged through service and the CSV queue.
+            adopted = time.monotonic()
+            sample_monotonic = finite_number(adopted) if isinstance(adopted, (int, float)) else None
         if spot_val is not None:
             self.last_spot = spot_val
         return (
@@ -725,6 +764,9 @@ class RealPLCDriver(BasePLCDriver):
             ls_snapshot_error,
             spot_snapshot_error,
             spot_snapshot_metadata,
+            ext_completed_monotonic,
+            ext_clock_domain,
+            sample_monotonic,
         )
 
     def _connected_grace_sec(self) -> float:

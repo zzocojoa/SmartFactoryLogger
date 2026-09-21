@@ -292,8 +292,8 @@ class MetadataSourceTests(PlcFixture):
         before = self.state()
         now = raw.captured_at_extruder
         cases = [
-            {"captured_at_extruder": now - 100}, {"plc_source_error": True},
-            {"plc_source_usable": None}, {"captured_at_extruder": now + 1},
+            {"plc_sample_monotonic": raw.plc_source_completed_monotonic + 100}, {"plc_source_error": True},
+            {"plc_source_usable": None}, {"plc_sample_monotonic": raw.plc_source_completed_monotonic - 1},
             {"captured_at_extruder": None}, {"captured_at_extruder": float("nan")},
             {"Speed": None}, {"Press": None},
         ]

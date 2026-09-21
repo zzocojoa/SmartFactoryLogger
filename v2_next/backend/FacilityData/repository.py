@@ -64,9 +64,9 @@ from backend.FacilityData.temperature_operational import (
 )
 
 
-CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
-CSV_SCHEMA_VERSION_V2_4 = "2.4.1"
-CSV_SCHEMA_VERSION_V2_5 = "2.5.1"
+CSV_SCHEMA_VERSION_V2_3 = "2.3.1"
+CSV_SCHEMA_VERSION_V2_4 = "2.4.2"
+CSV_SCHEMA_VERSION_V2_5 = "2.5.2"
 DERIVATION_VERSION = "cycle-heuristic-v1"
 PROCESS_STATE_ONLINE_RULE_VERSION = "process-state-online-v1"
 OPERATOR_METADATA_VERSION = "1.0.0"
@@ -78,6 +78,7 @@ from backend.FacilityData.freshness import (
     SPOT_CACHE_EXPIRY_THRESHOLD_SEC, cache_rejection_reason, clock_domain_id, finite_number,
     plc_source_is_usable,
     monotonic_age_ms,
+    spot_poll_duration_output, spot_poll_duration_metadata,
 )
 from backend.FacilityData.spot_observation_queue import FactPersistencePending
 SPOT_TEMPERATURE_RAW_MAX_LENGTH = 256
@@ -112,6 +113,7 @@ SPOT_TEMPERATURE_SHADOW_COLUMNS = [
     "spot_device_status_code",
     "spot_error_code",
     "spot_poll_duration_ms",
+    "spot_poll_duration_status",
     "spot_response_content_length",
     "spot_last_poll_started_at",
     "spot_last_poll_completed_at",
@@ -766,7 +768,10 @@ class CSVLoggerService:
         except Exception as exc:
             self.logger.warning("Failed to read CSV v2 header for schema rollover check: %s", exc)
             return False
-        if header in (V2_3_CSV_COLUMNS, V2_4_CSV_COLUMNS, V2_5_CSV_COLUMNS):
+        known_headers = (V2_3_CSV_COLUMNS, V2_4_CSV_COLUMNS, V2_5_CSV_COLUMNS)
+        legacy_headers = tuple([column for column in columns if column != "spot_poll_duration_status"]
+                               for columns in known_headers)
+        if header in (*known_headers, *legacy_headers):
             return True
         if not header:
             return False
@@ -839,6 +844,7 @@ class CSVLoggerService:
             "temperature_status_rule_version": TEMPERATURE_STATUS_RULE_VERSION,
             "process_state_online_rule_version": PROCESS_STATE_ONLINE_RULE_VERSION,
             "spot_freshness_rule_version": SPOT_FRESHNESS_RULE_VERSION,
+            "spot_poll_duration": spot_poll_duration_metadata(),
             "spot_temperature_min_c": SPOT_TEMPERATURE_MIN_C,
             "spot_temperature_max_c": SPOT_TEMPERATURE_MAX_C,
             "cache_expiry_threshold_sec": SPOT_CACHE_EXPIRY_THRESHOLD_SEC,
@@ -1187,7 +1193,7 @@ class CSVLoggerService:
                     "cache_ttl": "finite nonnegative value age, clock ok, age <= configured TTL",
                 },
                 "process_phase_rule_version": PROCESS_PHASE_RULE_VERSION,
-                "plc_phase_source_policy": "collection-time usable=true, error=false, finite age within source grace; current Count/Speed/Press complete and finite (Count nonnegative integer, zero valid); otherwise freeze lifecycle and phase unknown; optional inputs and transport health are separate",
+                "plc_phase_source_policy": "same-process/domain monotonic source completion to integrated sample adoption; frozen age, no consumer-time or epoch fallback; usable=true, error=false, finite age within configured source grace; current Count/Speed/Press complete and finite (Count nonnegative integer, zero valid); otherwise freeze lifecycle and phase unknown; optional inputs and transport health are separate",
                 "posthoc_fact_manifests": [
                     "changeover_candidate_resolution_fact_manifest",
                     "process_phase_event_fact_manifest",
@@ -1537,7 +1543,10 @@ class CSVLoggerService:
     ) -> ProcessPhaseDecision:
         if not plc_source_is_usable(data.plc_source_usable, data.plc_source_age_ms,
                                      data.plc_source_freshness_threshold_ms, data.plc_source_error,
-                                     count=data.Count, speed=data.Speed, press=data.Press):
+                                     count=data.Count, speed=data.Speed, press=data.Press,
+                                     source_completed_monotonic=data.plc_source_completed_monotonic,
+                                     sample_monotonic=data.plc_sample_monotonic,
+                                     source_clock_domain=data.plc_clock_domain_id):
             # Freeze lifecycle/context; never confirm or open a candidate from stale PLC.
             # Clear dwell evidence so outage duration is not counted as observed hold.
             state = self._process_phase_runtime_state
@@ -1583,6 +1592,9 @@ class CSVLoggerService:
             plc_source_freshness_threshold_ms=data.plc_source_freshness_threshold_ms,
             plc_source_error=data.plc_source_error,
             plc_source_usable=data.plc_source_usable,
+            plc_source_completed_monotonic=data.plc_source_completed_monotonic,
+            plc_sample_monotonic=data.plc_sample_monotonic,
+            plc_clock_domain_id=data.plc_clock_domain_id,
             speed=data.Speed,
             press=data.Press,
             count=data.Count,
@@ -2155,6 +2167,7 @@ class CSVLoggerService:
         v1_row: list,
     ) -> list:
         row_build_started = time.perf_counter()
+        duration_ms, duration_status = spot_poll_duration_output(data.spot_poll_duration_ms, data.spot_poll_duration_status)
         local_timestamp = self._to_local_timestamp(timestamp)
         utc_timestamp = local_timestamp.astimezone(timezone.utc)
         contract = self._get_active_v2_contract()
@@ -2252,7 +2265,8 @@ class CSVLoggerService:
             self._fmt_int(data.spot_http_status_code),
             self._escape_csv_text(data.spot_device_status_code or ""),
             self._escape_csv_text(data.spot_error_code or ""),
-            self._fmt(data.spot_poll_duration_ms),
+            self._fmt(duration_ms),
+            duration_status,
             self._fmt_int(data.spot_response_content_length),
             self._escape_csv_text(data.spot_last_poll_started_at or ""),
             self._escape_csv_text(data.spot_last_poll_completed_at or ""),

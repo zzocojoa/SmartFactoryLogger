@@ -127,7 +127,7 @@ exit $LASTEXITCODE
             return checks
 
     def test_accepts_supported_runtime_and_matching_sidecar_versions(self) -> None:
-        for version in ("2.5.0", "2.5.1"):
+        for version in ("2.5.0", "2.5.1", "2.5.2"):
             with self.subTest(version=version):
                 checks = self._run_qa(version, version)
                 self.assertTrue(checks["CSV schema"]["passed"])
@@ -136,14 +136,14 @@ exit $LASTEXITCODE
                                  ["Full CSV validator"])
 
     def test_rejects_missing_unknown_and_non_hardening_schema(self) -> None:
-        for version in (None, "", "2.4.1", "2.5.2", "2.5.10", "3.0.0"):
+        for version in (None, "", "2.4.1", "2.5.3", "2.5.10", "3.0.0"):
             with self.subTest(version=version):
                 checks = self._run_qa(version, version)
                 self.assertFalse(checks["CSV schema"]["passed"])
                 self.assertFalse(checks["Sidecar schema"]["passed"])
 
     def test_rejects_sidecar_version_mismatch_in_same_session(self) -> None:
-        for runtime, sidecar in (("2.5.1", "2.5.0"), ("2.5.0", "2.5.1"), ("2.5.1", None)):
+        for runtime, sidecar in (("2.5.1", "2.5.0"), ("2.5.0", "2.5.1"), ("2.5.1", None), ("2.5.2", "2.5.1"), ("2.5.1", "2.5.2")):
             with self.subTest(runtime=runtime, sidecar=sidecar):
                 checks = self._run_qa(runtime, sidecar)
                 self.assertTrue(checks["CSV schema"]["passed"])

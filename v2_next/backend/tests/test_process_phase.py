@@ -1,10 +1,13 @@
 import unittest
 
 from backend.FacilityData.process_phase import ProcessPhaseInput, derive_process_phase_candidate
+from backend.FacilityData.freshness import clock_domain_id
 
 
 def fresh_source(**kwargs):
     return ProcessPhaseInput(plc_source_age_ms=0, plc_source_freshness_threshold_ms=5000,
+                             plc_source_completed_monotonic=1000, plc_sample_monotonic=1000,
+                             plc_clock_domain_id=clock_domain_id(),
                              plc_source_error=False, plc_source_usable=True, **kwargs)
 
 

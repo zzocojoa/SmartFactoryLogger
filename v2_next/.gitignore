@@ -94,3 +94,6 @@ config.pending.json
 !backend/tests/test_spot_temperature_qa_schema.py
 !backend/tests/test_temperature_followup.py
 !backend/tests/test_temperature_followup_polling.py
+!backend/tests/test_temperature_clock_service.py
+!backend/tests/test_temperature_clock_source.py
+!backend/tests/test_temperature_clock_duration.py

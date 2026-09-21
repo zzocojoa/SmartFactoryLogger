@@ -27,7 +27,10 @@ from backend.FacilityData.spot_diagnostics import (
 )
 
 
-SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.3.0"
+from backend.FacilityData.freshness import spot_poll_duration_output, spot_poll_duration_metadata
+
+SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.4.0"
+SPOT_OBSERVATION_FACT_V1_3_0_SCHEMA_VERSION = "1.3.0"
 SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION = "1.2.1"
 SPOT_OBSERVATION_FACT_FILENAME = "spot_observation_fact.csv"
 _SPOT_OBSERVATION_FACT_FILE_LOCK = threading.Lock()
@@ -120,7 +123,7 @@ SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS = [
 _SPOT_OBSERVATION_FACT_EVIDENCE_INDEX = SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS.index(
     "spot_diagnostic_evidence_codes"
 )
-SPOT_OBSERVATION_FACT_COLUMNS = [
+SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS = [
     *SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS[:_SPOT_OBSERVATION_FACT_EVIDENCE_INDEX],
     "diagnostics_snapshot_id",
     "diagnostics_source_poll_seq",
@@ -132,6 +135,9 @@ SPOT_OBSERVATION_FACT_COLUMNS = [
     "evidence_provenance_json",
     *SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS[_SPOT_OBSERVATION_FACT_EVIDENCE_INDEX + 1 :],
 ]
+_DURATION_INDEX = SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS.index("spot_poll_duration_ms") + 1
+SPOT_OBSERVATION_FACT_COLUMNS = [*SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS[:_DURATION_INDEX],
+                                 "spot_poll_duration_status", *SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS[_DURATION_INDEX:]]
 SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS = {
     "alarmstatus": "alarmstatus_nonblank_count",
     "signalpc": "signalpc_nonblank_count",
@@ -646,9 +652,13 @@ def build_spot_observation_fact_manifest(
             realtime_rows=realtime_rows,
         )
     )
+    header = resolved_summary.get("header") or list(SPOT_OBSERVATION_FACT_COLUMNS)
+    historical_version = (SPOT_OBSERVATION_FACT_V1_3_0_SCHEMA_VERSION if header == SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS
+                          else SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION if header == SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS else None)
     return {
         "enabled": bool(enabled),
-        "schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+        "schema_version": historical_version or SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+        **({"spot_poll_duration": spot_poll_duration_metadata()} if historical_version is None else {}),
         "path": path or fact_path.name,
         "row_count": resolved_summary["row_count"],
         "distinct_observation_key_count": resolved_summary[
@@ -668,7 +678,7 @@ def build_spot_observation_fact_manifest(
             if spool_pending_count is not None
             else _spool_pending_count(fact_path.with_name(f"{fact_path.name}.failed.jsonl"))
         ),
-        "required_columns": list(SPOT_OBSERVATION_FACT_COLUMNS),
+        "required_columns": list(header),
         "link_coverage": resolved_summary["link_coverage"],
         "diagnostic_field_coverage": resolved_summary["diagnostic_field_coverage"],
         "diagnostics_capture_status_counts": resolved_summary[
@@ -1061,7 +1071,8 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
         "spot_raw_payload_encoding": "utf-8-replace" if snapshot.get("spot_raw_value_text") is not None else "",
         "spot_last_poll_started_at": _text(snapshot.get("spot_last_poll_started_at")),
         "spot_last_poll_completed_at": completed_at,
-        "spot_poll_duration_ms": _text(snapshot.get("spot_poll_duration_ms")),
+        "spot_poll_duration_ms": _text(spot_poll_duration_output(snapshot.get("spot_poll_duration_ms"), snapshot.get("spot_poll_duration_status"))[0]),
+        "spot_poll_duration_status": spot_poll_duration_output(snapshot.get("spot_poll_duration_ms"), snapshot.get("spot_poll_duration_status"))[1],
         "diagnostics_captured_at": diagnostics_captured_at,
         "diagnostics_capture_status": diagnostics_capture_status,
         "diagnostics_age_ms": diagnostics_age_ms,

@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from backend.FacilityData.schemas import FactoryData, FactoryDataHistoryResponse, FactoryDataHistorySample
-from backend.FacilityData.freshness import finite_number, plc_source_is_usable
+from backend.FacilityData.freshness import finite_number, plc_source_age_at_sample, plc_source_is_usable
 from .drivers.base import BasePLCDriver
 from .drivers.mock_plc import MockPLCDriver
 from .drivers.real_plc import RealPLCDriver
@@ -50,6 +50,8 @@ class PLCService:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.driver_thread: Optional[threading.Thread] = None
+        self._lifecycle_lock = threading.Lock()
+        self._stop_event = threading.Event()
         self.lock = threading.Lock()
         self.driver_state_lock = threading.Lock()
         self.interval_lock = threading.Lock()
@@ -61,9 +63,11 @@ class PLCService:
         self.status_evaluator = StatusEvaluator()
         self.driver_last_data: Optional[FactoryData] = None
         self.driver_last_data_at: Optional[float] = None
+        self.driver_last_data_seq = 0
         self.driver_last_error: Optional[str] = None
         self.driver_last_error_at: Optional[float] = None
         self.last_processed_driver_data_at: Optional[float] = None
+        self.last_processed_driver_data_seq = 0
         self.operator_metadata_runtime_state_path = (
             operator_metadata_runtime_state_path
             or (config.APP_DATA_DIR / "operator_metadata_runtime_state.json")
@@ -82,28 +86,36 @@ class PLCService:
         )
 
     def start(self):
-        if self.running:
-            return
-
-        self.driver.connect()
-        self.running = True
-        self.driver_thread = threading.Thread(target=self._driver_loop, daemon=True)
-        self.thread = threading.Thread(target=self._loop, daemon=True)
-        self.driver_thread.start()
-        self.thread.start()
-        print("[PLCService] Background Thread Started.")
+        with self._lifecycle_lock:
+            if self.running:
+                return
+            if any(worker is not None and worker.is_alive() for worker in (self.driver_thread, self.thread)):
+                raise RuntimeError("Previous PLC service threads have not stopped")
+            self._stop_event.clear()
+            with self.driver_state_lock:
+                self.driver_last_data = None
+                self.driver_last_data_at = None
+            self.driver.connect()
+            self.running = True
+            self.driver_thread = threading.Thread(target=self._driver_loop, daemon=True)
+            self.thread = threading.Thread(target=self._loop, daemon=True)
+            self.driver_thread.start()
+            self.thread.start()
+            print("[PLCService] Background Thread Started.")
 
     def stop(self) -> bool:
-        self.running = False
-        if self.driver_thread:
-            self.driver_thread.join(timeout=1.0)
-        if self.thread:
-            self.thread.join(timeout=1.0)
-        self.driver.close()
-        return not (
-            (self.driver_thread is not None and self.driver_thread.is_alive())
-            or (self.thread is not None and self.thread.is_alive())
-        )
+        with self._lifecycle_lock:
+            self.running = False
+            self._stop_event.set()
+            if self.driver_thread:
+                self.driver_thread.join(timeout=1.0)
+            if self.thread:
+                self.thread.join(timeout=1.0)
+            self.driver.close()
+            return not (
+                (self.driver_thread is not None and self.driver_thread.is_alive())
+                or (self.thread is not None and self.thread.is_alive())
+            )
 
     def apply_interval(self, interval_sec: float) -> float:
         clamped = max(config.MIN_INTERVAL_SEC, min(config.MAX_INTERVAL_SEC, interval_sec))
@@ -125,13 +137,14 @@ class PLCService:
 
     def _driver_loop(self) -> None:
         while self.running:
-            started_at = time.time()
+            started_monotonic = time.monotonic()
             try:
                 next_data = self.driver.read_data()
                 captured_at = time.time()
                 with self.driver_state_lock:
                     self.driver_last_data = next_data
                     self.driver_last_data_at = captured_at
+                    self.driver_last_data_seq += 1
                     self.driver_last_error = None
                     self.driver_last_error_at = None
             except Exception as exc:
@@ -142,15 +155,15 @@ class PLCService:
                     observability_service.record_error("plc_driver", str(exc))
                 except Exception:
                     pass
-                time.sleep(1.0)
+                self._stop_event.wait(1.0)
                 continue
 
-            sleep_sec = max(0.0, self._current_interval() - (time.time() - started_at))
-            time.sleep(sleep_sec)
+            sleep_sec = max(0.0, self._current_interval() - (time.monotonic() - started_monotonic))
+            self._stop_event.wait(sleep_sec)
 
-    def _get_driver_snapshot(self) -> tuple[Optional[FactoryData], Optional[float]]:
+    def _get_driver_snapshot(self) -> tuple[Optional[FactoryData], Optional[float], int]:
         with self.driver_state_lock:
-            return self.driver_last_data, self.driver_last_data_at
+            return self.driver_last_data, self.driver_last_data_at, self.driver_last_data_seq
 
     def _operator_metadata_downtime_reset_hours(self) -> int:
         fallback = getattr(config, "DEFAULT_OPERATOR_METADATA_DOWNTIME_RESET_HOURS", 8)
@@ -268,13 +281,18 @@ class PLCService:
 
     @staticmethod
     def _plc_source_at_sample(raw_data: FactoryData, captured_at_sec: float) -> tuple[Optional[float], bool]:
-        sample_at = finite_number(captured_at_sec)
-        source_at = finite_number(raw_data.captured_at_extruder)
-        age = ((sample_at - source_at) * 1000.0
-               if sample_at is not None and source_at is not None else None)
+        # read_data adopts the integrated sample once. Service/writer residence
+        # must neither rejuvenate the source nor age this already adopted sample.
+        age, _ = plc_source_age_at_sample(raw_data.plc_source_completed_monotonic,
+                                         raw_data.plc_sample_monotonic, raw_data.plc_clock_domain_id)
         usable = plc_source_is_usable(raw_data.plc_source_usable, age,
                                       raw_data.plc_source_freshness_threshold_ms, raw_data.plc_source_error,
-                                      count=raw_data.Count, speed=raw_data.Speed, press=raw_data.Press)
+                                      count=raw_data.Count, speed=raw_data.Speed, press=raw_data.Press,
+                                      source_completed_monotonic=raw_data.plc_source_completed_monotonic,
+                                      sample_monotonic=raw_data.plc_sample_monotonic,
+                                      source_clock_domain=raw_data.plc_clock_domain_id)
+        usable = (usable and finite_number(raw_data.captured_at_extruder) is not None
+                  and finite_number(captured_at_sec) is not None)
         return age, usable
 
     def _compose_data(self, raw_data: FactoryData, captured_at_sec: Optional[float] = None) -> FactoryData:
@@ -390,8 +408,8 @@ class PLCService:
     def _loop(self):
         while self.running:
             try:
-                raw_data, driver_data_at = self._get_driver_snapshot()
-                if raw_data is not None and driver_data_at is not None and driver_data_at != self.last_processed_driver_data_at:
+                raw_data, driver_data_at, driver_data_seq = self._get_driver_snapshot()
+                if raw_data is not None and driver_data_at is not None and driver_data_seq != self.last_processed_driver_data_seq:
                     next_data = self._compose_data(raw_data, driver_data_at)
                     timestamp_ms = int(driver_data_at * 1000)
                     current_data = self._with_timestamp_ms(next_data, timestamp_ms)
@@ -401,13 +419,14 @@ class PLCService:
                     self._record_history_sample(current_data, driver_data_at)
                     logger_service.enqueue(next_data)
                     self.last_processed_driver_data_at = driver_data_at
-                time.sleep(self._current_interval())
+                    self.last_processed_driver_data_seq = driver_data_seq
+                self._stop_event.wait(self._current_interval())
             except Exception as e:
                 try:
                     observability_service.record_error("plc_loop", str(e))
                 except Exception:
                     pass
-                time.sleep(1.0)
+                self._stop_event.wait(1.0)
 
     def get_latest_data(self) -> FactoryData:
         with self.lock:

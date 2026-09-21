@@ -193,6 +193,9 @@ class PlcSourceTests(unittest.TestCase):
         return FactoryData(Time="2026-09-09T00:00:00Z", Status="Running", Count=count,
             Speed=1, Press=30, plc_source_age_ms=age, plc_source_error=error,
             plc_source_usable=usable, plc_source_freshness_threshold_ms=5000,
+            plc_source_completed_monotonic=1000,
+            plc_sample_monotonic=1000 + age / 1000 if age is not None else None,
+            plc_clock_domain_id=clock_domain_id(),
             extruder_process_state_online="unknown", **kwargs)
 
     def test_plc_stale_error_gate_preserves_spot_and_freezes_lifecycle(self):
@@ -240,7 +243,7 @@ class PlcSourceTests(unittest.TestCase):
                                       (-1, None, False), (0, None, True)]:
             with patch.object(driver, "_read_cached_snapshot_with_metadata", return_value=(
                 {"Count": 0, "Speed": 1.0, "Press": 30}, {}, 500, epoch-age, None, epoch,
-                error, None, None, {})), patch("backend.FacilityData.drivers.real_plc.time.time", return_value=epoch):
+                error, None, None, {}, 1000-age, clock_domain_id(), 1000)), patch("backend.FacilityData.drivers.real_plc.time.time", return_value=epoch):
                 raw = driver.read_data()
             composed = service._compose_data(raw, epoch)
             self.assertEqual(composed.plc_source_usable, expected)

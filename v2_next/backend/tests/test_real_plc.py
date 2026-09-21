@@ -235,22 +235,30 @@ class SpotSnapshotTests(unittest.TestCase):
         self.assertEqual(data.spot_diagnostic_evidence_codes, '["alarm_low_signal"]')
 
 class OnlineProcessStateTests(unittest.TestCase):
+    def derive(self, driver, payload, source_utc, error, now_utc):
+        # Existing dwell scenarios use declared synthetic acquisition clocks.
+        # Production never derives these endpoints from UTC.
+        return driver._derive_extruder_process_state_online(payload, source_utc, error, now_utc,
+            source_completed_monotonic=1000 if source_utc is not None else None,
+            sample_monotonic=1000 + now_utc-source_utc if source_utc is not None else None,
+            source_clock_domain=real_plc.clock_domain_id())
+
     def test_ext_snapshot_stale_missing_or_error_forces_unknown(self) -> None:
         driver = RealPLCDriver()
         now = 1_773_040_825.0
 
         self.assertEqual(
-            driver._derive_extruder_process_state_online({"Count": 20, "Speed": 1.0, "Press": 10.0}, None, None, now),
+            self.derive(driver, {"Count": 20, "Speed": 1.0, "Press": 10.0}, None, None, now),
             "unknown",
         )
         self.assertEqual(
-            driver._derive_extruder_process_state_online(
+            self.derive(driver,
                 {"Count": 20, "Speed": 1.0, "Press": 10.0}, now, "plc-timeout", now
             ),
             "unknown",
         )
         self.assertEqual(
-            driver._derive_extruder_process_state_online(
+            self.derive(driver,
                 {"Count": 20, "Speed": 1.0, "Press": 10.0}, now - driver._ext_snapshot_grace_sec() - 0.1, None, now
             ),
             "unknown",
@@ -260,8 +268,8 @@ class OnlineProcessStateTests(unittest.TestCase):
         driver = RealPLCDriver()
         now = 1_773_040_825.0
 
-        first = driver._derive_extruder_process_state_online({"Count": 20, "Speed": 1.0, "Press": 10.0}, now, None, now)
-        second = driver._derive_extruder_process_state_online(
+        first = self.derive(driver, {"Count": 20, "Speed": 1.0, "Press": 10.0}, now, None, now)
+        second = self.derive(driver,
             {"Count": 20, "Speed": 1.0, "Press": 10.0},
             now + real_plc.PROCESS_STATE_ENTER_DWELL_SEC + 0.1,
             None,
@@ -275,8 +283,8 @@ class OnlineProcessStateTests(unittest.TestCase):
         driver = RealPLCDriver()
         now = 1_773_040_825.0
 
-        first = driver._derive_extruder_process_state_online({"Count": 20, "Speed": 0.0, "Press": 0.0}, now, None, now)
-        idle = driver._derive_extruder_process_state_online(
+        first = self.derive(driver, {"Count": 20, "Speed": 0.0, "Press": 0.0}, now, None, now)
+        idle = self.derive(driver,
             {"Count": 20, "Speed": 0.0, "Press": 0.0},
             now + real_plc.IDLE_CANDIDATE_MIN_SEC + 0.1,
             None,
@@ -293,7 +301,7 @@ class OnlineProcessStateTests(unittest.TestCase):
         driver._process_last_extruding_at = now - 1.0
         driver._process_low_speed_since = now - real_plc.PROCESS_STATE_EXIT_DWELL_SEC - 0.1
 
-        state = driver._derive_extruder_process_state_online({"Count": 20, "Speed": 0.0, "Press": 10.0}, now, None, now)
+        state = self.derive(driver, {"Count": 20, "Speed": 0.0, "Press": 10.0}, now, None, now)
 
         self.assertEqual(state, "stopped")
 class PLCServiceHealthTests(unittest.TestCase):
@@ -468,7 +476,8 @@ class OperatorMetadataApiTests(unittest.TestCase):
             source = driver.read_data()
         return raw.model_copy(update={name: getattr(source, name) for name in (
             "captured_at_extruder", "plc_source_age_ms", "plc_source_freshness_threshold_ms",
-            "plc_source_error", "plc_source_usable")})
+            "plc_source_error", "plc_source_usable", "plc_source_completed_monotonic",
+            "plc_sample_monotonic", "plc_clock_domain_id")})
 
     def _set_operator_metadata_runtime_state(self, last_sample_at: float, count: int = 3) -> None:
         payload = {
@@ -1005,6 +1014,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
             "spot_last_poll_started_at": "2026-03-09T07:20:24Z",
             "spot_last_poll_completed_at": "2026-03-09T07:20:25.123Z",
             "spot_poll_duration_ms": "50.0",
+            "spot_poll_duration_status": "ok",  # Declared synthetic monotonic measurement.
             "diagnostics_captured_at": "2026-03-09T07:20:25.123Z",
             "diagnostics_capture_status": "async_complete",
             "diagnostics_age_ms": "10.0",
@@ -1909,7 +1919,7 @@ class CSVLoggerV2ContractTests(unittest.TestCase):
 
             metadata = json.loads(v2_files[0].with_suffix(".metadata.json").read_text(encoding="utf-8"))
             self.assertIn("position-specific label", metadata["schema_metadata"]["header_policy"])
-            self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.3.0")
+            self.assertEqual(metadata["schema_metadata"]["schema_version"], "2.3.1")
             self.assertEqual(
                 metadata["schema_metadata"]["temperature_operational_rule_version"],
             "temperature-operational-v5",

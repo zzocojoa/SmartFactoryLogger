@@ -5,11 +5,15 @@
 
 ## 지원하는 CSV schema
 
-QA와 attestation은 `2.5.0` 및 `2.5.1`을 명시적으로 지원한다. `2.5.1`은 행 시점의
+QA와 attestation은 `2.5.0`, `2.5.1`, `2.5.2`를 명시적으로 지원한다. `2.5.1`은 행 시점의
 온도 freshness/TTL 의미를 보완한 버전이며, 버전 문자열을 이전 값으로 바꾸지 않는다.
 QA는 관찰한 runtime과 종료 sidecar의 버전이 같아야 통과한다. 결측·다른 계열·미지원
 미래 버전은 거부하며, hardening·fingerprint·drift·comparator·정상 종료 검사는 그대로 유지한다.
-기존 QA 묶음은 `2.5.0`만 허용하므로 새 schema를 검증하려면 수정된 소스에서 묶음을 새로 만든다.
+`2.5.2`의 `spot_poll_duration_ms`는 원래 poll 시작~완료 monotonic 경과시간이다.
+`spot_poll_duration_status=ok`인 경우만 유효한 수치이며, 검증 불가 값은 사유와 공백으로 남긴다.
+시작·완료 UTC는 별도로 보존한다. CSV `2.3.1`/`2.4.2`와 fact `1.4.0`도 같은 duration 계약을 사용한다.
+이전 schema의 epoch 기반 duration과 과거 검증 기록은 변경하거나 재해석하지 않는다.
+과거 QA 묶음의 지원 버전은 해당 묶음에 고정되어 있으므로 새 schema 검증에는 수정된 묶음이 필요하다.
 이 호환성 수정은 실제 장비의 attestation을 자동 적용하거나 운영 승격을 승인하지 않는다.
 
 ## 서버로 옮길 파일
