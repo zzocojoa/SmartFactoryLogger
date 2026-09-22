@@ -16,6 +16,7 @@ vi.mock('../client', () => ({
 
 import { fetchLatestMetric } from './metricService.transport';
 import { fetchHealth } from './systemService.transport';
+import { fetchMetricHistorySinceOnMainThreadWithLatency } from '../../../domains/FacilityData/hooks/useMetricsViewModel.service';
 
 describe('startup polling transport', () => {
   beforeEach(() => {
@@ -49,6 +50,17 @@ describe('startup polling transport', () => {
     await expect(fetchLatestMetric()).resolves.toBe(data);
     expect(mocks.get).toHaveBeenCalledWith('/api/data', {
       timeout: POLL_REQUEST_TIMEOUT_MS,
+    });
+  });
+
+  it('passes the history cursor through the production service and transport chain', async () => {
+    const cursor = `${'a'.repeat(32)}:42`;
+    const response = { samples: [], next_cursor: cursor };
+    mocks.get.mockResolvedValueOnce({ data: response });
+    const actual = await fetchMetricHistorySinceOnMainThreadWithLatency(60_000, cursor);
+    expect(actual.data).toBe(response);
+    expect(mocks.get).toHaveBeenCalledWith('/api/data/history', {
+      params: { since_ms: 60_000, limit: 20_000, cursor },
     });
   });
 });

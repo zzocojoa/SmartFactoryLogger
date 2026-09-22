@@ -3,6 +3,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { DashboardLeaderState, FactoryData } from '../../../shared/types';
 import { buildSeriesSampleAt } from '../timeseries/seriesSampling';
 import type { SeriesBuffer } from '../timeseries/seriesBuffer';
+import { parseHistoryCursor } from '../timeseries/seriesBuffer.service';
 import type { WorkerDataPayload, WorkerOutboundMessage } from '../workers/polling.worker.types';
 import {
   createPollingWorker,
@@ -316,23 +317,52 @@ export const useMetricsPollingEffects = ({
 
     const runHistoryBackfill = async (): Promise<void> => {
       const sinceMs = seriesBufferRef.current.getLatestTimestampMs();
-      if (sinceMs === null) {
+      let cursor = seriesBufferRef.current.getHistoryCursor();
+      let resyncLegacy = false;
+      if (sinceMs === null && cursor === null) {
         return;
       }
 
       try {
-        const payload = await fetchMetricHistorySinceOnMainThreadWithLatency(sinceMs);
-        if (disposed) {
-          return;
+        // Two pages cover the retained 36k samples at the existing 20k page size.
+        // Bound retries if a backend keeps resetting or sampling outruns catch-up.
+        for (let page = 0; page < 4; page += 1) {
+          const before = parseHistoryCursor(seriesBufferRef.current.getHistoryCursor());
+          const payload = cursor === null
+            ? await fetchMetricHistorySinceOnMainThreadWithLatency(sinceMs ?? 0)
+            : await fetchMetricHistorySinceOnMainThreadWithLatency(sinceMs ?? 0, cursor);
+          if (disposed) return;
+          const current = parseHistoryCursor(seriesBufferRef.current.getHistoryCursor());
+          if (current && current.instanceId !== before?.instanceId
+            && current.instanceId !== payload.data.history_instance_id) return;
+
+          const next = parseHistoryCursor(payload.data.next_cursor);
+          if (cursor === null && next) {
+            // A legacy buffer has no reliable position across a wall-clock reversal.
+            cursor = `${next.instanceId}:0`;
+            resyncLegacy = true;
+            continue;
+          }
+          if (resyncLegacy || payload.data.truncated || payload.data.reset_required
+            || (current && current.instanceId !== payload.data.history_instance_id)) {
+            seriesBufferRef.current.clear();
+            resyncLegacy = false;
+          }
+          const samples = payload.data.samples.map((item) => buildSeriesSampleAt({
+            ...item.data,
+            ...(item.sequence === undefined ? {} : {
+              history_instance_id: payload.data.history_instance_id, history_sequence: item.sequence,
+            }),
+          }, item.timestamp_ms));
+          seriesBufferRef.current.appendHistory(samples);
+          if (next) seriesBufferRef.current.advanceHistoryCursor(payload.data.next_cursor!);
+          if (!payload.data.has_more) return;
+          if (!next || payload.data.next_cursor === cursor) {
+            throw new Error('History cursor did not advance');
+          }
+          cursor = payload.data.next_cursor!;
         }
-        if (payload.data.truncated) {
-          seriesBufferRef.current.clear();
-        }
-        if (!payload.data.samples.length) {
-          return;
-        }
-        const samples = payload.data.samples.map((item) => buildSeriesSampleAt(item.data, item.timestamp_ms));
-        seriesBufferRef.current.appendHistory(samples);
+        throw new Error('History backfill page limit reached');
       } catch (error) {
         console.warn('Metric history backfill failed', {
           since_ms: sinceMs,

@@ -14,11 +14,12 @@ export const fetchLatestMetric = async (): Promise<LatestMetricResponse> => {
   return response.data;
 };
 
-export const fetchMetricHistorySince = async (sinceMs: number): Promise<MetricHistoryResponse> => {
+export const fetchMetricHistorySince = async (sinceMs: number, cursor?: string): Promise<MetricHistoryResponse> => {
   const response = await apiClient.get<MetricHistoryResponse>('/api/data/history', {
     params: {
       since_ms: sinceMs,
       limit: HISTORY_BACKFILL_LIMIT,
+      ...(cursor === undefined ? {} : { cursor }),
     },
   });
   return response.data;

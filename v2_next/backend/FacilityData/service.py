@@ -1,6 +1,7 @@
 from collections import deque
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any
 import threading
@@ -58,6 +59,7 @@ class PLCService:
         self.history_lock = threading.Lock()
         self.history: deque[FactoryDataHistorySample] = deque(maxlen=self.HISTORY_MAX_SAMPLES)
         self.history_instance_id = uuid.uuid4().hex
+        self._history_sequence = 0
         self.last_update: Optional[float] = None
         self.interval_sec = float(config.INTERVAL_SEC)
         self.status_evaluator = StatusEvaluator()
@@ -349,40 +351,74 @@ class PLCService:
     def _with_timestamp_ms(self, data: FactoryData, timestamp_ms: int) -> FactoryData:
         return data.model_copy(update={"timestamp_ms": timestamp_ms})
 
-    def _prune_history_locked(self, now_ms: int) -> None:
-        cutoff_ms = now_ms - self.HISTORY_MAX_AGE_MS
-        while self.history and self.history[0].timestamp_ms < cutoff_ms:
+    def _prune_history_locked(self, now_monotonic: float) -> None:
+        max_age_sec = self.HISTORY_MAX_AGE_MS / 1000
+        while self.history and self.history[0]._recorded_monotonic + max_age_sec < now_monotonic:
             self.history.popleft()
 
-    def _record_history_sample(self, data: FactoryData, captured_at_sec: float) -> None:
+    def _record_history_sample(self, data: FactoryData, captured_at_sec: float) -> FactoryData:
         timestamp_ms = int(captured_at_sec * 1000)
-        data_with_timestamp = self._with_timestamp_ms(data, timestamp_ms)
-        sample = FactoryDataHistorySample(
-            timestamp_ms=timestamp_ms,
-            data=data_with_timestamp.model_copy(deep=True),
-        )
         with self.history_lock:
-            self._prune_history_locked(timestamp_ms)
-            if self.history and self.history[-1].timestamp_ms == timestamp_ms:
-                self.history[-1] = sample
-                return
+            now = time.monotonic()
+            self._prune_history_locked(now)
+            self._history_sequence += 1
+            published = data.model_copy(update={
+                "timestamp_ms": timestamp_ms,
+                "history_instance_id": self.history_instance_id,
+                "history_sequence": self._history_sequence,
+            })
+            sample = FactoryDataHistorySample(
+                timestamp_ms=timestamp_ms, sequence=self._history_sequence,
+                data=published.model_copy(deep=True),
+            )
+            sample._recorded_monotonic = now
             self.history.append(sample)
+            return published
 
-    def get_data_history(self, since_ms: int, limit: int) -> FactoryDataHistoryResponse:
-        now_ms = int(time.time() * 1000)
-        cutoff_ms = max(since_ms, now_ms - self.HISTORY_MAX_AGE_MS)
+    def get_data_history(self, since_ms: int, limit: int, cursor: Optional[str] = None) -> FactoryDataHistoryResponse:
+        if not 1 <= limit <= self.HISTORY_MAX_SAMPLES or since_ms < 0:
+            raise ValueError("Invalid history range")
+        cursor_instance, after_sequence = None, 0
+        if cursor is not None:
+            if not re.fullmatch(r"[0-9a-f]{32}:(0|[1-9][0-9]{0,15})", cursor):
+                raise ValueError("Invalid history cursor")
+            cursor_instance, sequence = cursor.split(":")
+            after_sequence = int(sequence)
+            if after_sequence > 9_007_199_254_740_991:
+                raise ValueError("Invalid history cursor")
         with self.history_lock:
-            self._prune_history_locked(now_ms)
-            oldest_timestamp_ms = self.history[0].timestamp_ms if self.history else None
-            newest_timestamp_ms = self.history[-1].timestamp_ms if self.history else None
-            truncated = since_ms > 0 if oldest_timestamp_ms is None else since_ms < oldest_timestamp_ms
-            samples = [sample for sample in self.history if sample.timestamp_ms > cutoff_ms]
+            self._prune_history_locked(time.monotonic())
+            oldest_timestamp_ms = min((s.timestamp_ms for s in self.history), default=None)
+            newest_timestamp_ms = max((s.timestamp_ms for s in self.history), default=None)
+            reset_required = False
+            has_more = False
+            if cursor is not None:
+                oldest_sequence = self.history[0].sequence if self.history else self._history_sequence + 1
+                reset_required = (cursor_instance != self.history_instance_id
+                                  or after_sequence > self._history_sequence
+                                  or after_sequence < oldest_sequence - 1)
+                if reset_required:
+                    after_sequence = oldest_sequence - 1
+                eligible = [s for s in self.history if s.sequence > after_sequence]
+                samples = eligible[:limit]
+                has_more = len(eligible) > limit
+                truncated = reset_required
+            else:
+                # Keep the legacy UTC filter/latest-tail contract. New clients use cursor mode.
+                eligible = [s for s in self.history if s.timestamp_ms > since_ms]
+                samples = eligible[-limit:]
+                truncated = ((since_ms > 0 if oldest_timestamp_ms is None else since_ms < oldest_timestamp_ms)
+                             or len(eligible) > limit)
+            next_sequence = samples[-1].sequence if samples else self._history_sequence
             return FactoryDataHistoryResponse(
-                samples=samples[-limit:],
+                samples=samples,
                 oldest_timestamp_ms=oldest_timestamp_ms,
                 newest_timestamp_ms=newest_timestamp_ms,
                 history_instance_id=self.history_instance_id,
                 truncated=truncated,
+                next_cursor=f"{self.history_instance_id}:{next_sequence}",
+                has_more=has_more,
+                reset_required=reset_required,
             )
 
     def get_history_memory_summary(self, sample_size: int = 128) -> dict[str, Any]:
@@ -390,8 +426,8 @@ class PLCService:
         with self.history_lock:
             count = len(self.history)
             max_samples = self.HISTORY_MAX_SAMPLES
-            oldest_timestamp_ms = self.history[0].timestamp_ms if self.history else None
-            newest_timestamp_ms = self.history[-1].timestamp_ms if self.history else None
+            oldest_timestamp_ms = min((s.timestamp_ms for s in self.history), default=None)
+            newest_timestamp_ms = max((s.timestamp_ms for s in self.history), default=None)
             if count <= bounded_sample_size:
                 sample_items = list(self.history)
             else:
@@ -423,6 +459,7 @@ class PLCService:
         with self.history_lock:
             self.history.clear()
             self.history_instance_id = uuid.uuid4().hex
+            self._history_sequence = 0
 
     def _loop(self):
         while self.running:
@@ -430,12 +467,10 @@ class PLCService:
                 raw_data, driver_data_at, driver_data_seq = self._get_driver_snapshot()
                 if raw_data is not None and driver_data_at is not None and driver_data_seq != self.last_processed_driver_data_seq:
                     next_data = self._compose_data(raw_data, driver_data_at)
-                    timestamp_ms = int(driver_data_at * 1000)
-                    current_data = self._with_timestamp_ms(next_data, timestamp_ms)
+                    current_data = self._record_history_sample(next_data, driver_data_at)
                     with self.lock:
                         self.current_data = current_data
                         self.last_update = driver_data_at
-                    self._record_history_sample(current_data, driver_data_at)
                     logger_service.enqueue(next_data)
                     self.last_processed_driver_data_at = driver_data_at
                     self.last_processed_driver_data_seq = driver_data_seq

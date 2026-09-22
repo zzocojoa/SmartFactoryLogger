@@ -59,18 +59,37 @@ export const getLatestSeriesSampleTimestampMs = (samples: readonly SeriesSample[
   return samples.reduce<number>((latestTimestampMs, sample) => Math.max(latestTimestampMs, sample.timestampMs), samples[0].timestampMs);
 };
 
-export const filterUniqueSeriesSamplesByTimestamp = (
+export const parseHistoryCursor = (cursor: unknown): { instanceId: string; sequence: number } | null => {
+  if (typeof cursor !== 'string' || !/^[0-9a-f]{32}:(0|[1-9][0-9]{0,15})$/.test(cursor)) {
+    return null;
+  }
+  const [instanceId, sequenceText] = cursor.split(':');
+  const sequence = Number(sequenceText);
+  return Number.isSafeInteger(sequence) ? { instanceId, sequence } : null;
+};
+
+export const getSeriesSampleCursor = (sample: SeriesSample): string | null => {
+  const cursor = `${sample.historyInstanceId}:${sample.historySequence}`;
+  const identity = parseHistoryCursor(cursor);
+  return identity && identity.sequence > 0 ? cursor : null;
+};
+
+const sampleKey = (sample: SeriesSample): string =>
+  getSeriesSampleCursor(sample) ?? `legacy:${sample.timestampMs}`;
+
+export const filterUniqueSeriesSamples = (
   currentSamples: readonly SeriesSample[],
   incomingSamples: readonly SeriesSample[],
 ): SeriesSample[] => {
-  const knownTimestamps = new Set<number>(currentSamples.map((sample) => sample.timestampMs));
+  const knownSamples = new Set<string>(currentSamples.map(sampleKey));
   const uniqueSamples: SeriesSample[] = [];
 
   for (const sample of incomingSamples) {
-    if (knownTimestamps.has(sample.timestampMs)) {
+    const key = sampleKey(sample);
+    if (knownSamples.has(key)) {
       continue;
     }
-    knownTimestamps.add(sample.timestampMs);
+    knownSamples.add(key);
     uniqueSamples.push(sample);
   }
 

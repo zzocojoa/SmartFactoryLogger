@@ -62,9 +62,10 @@ export const fetchLatestMetricOnMainThreadWithLatency = async (): Promise<Metric
 
 export const fetchMetricHistorySinceOnMainThreadWithLatency = async (
   sinceMs: number,
+  cursor?: string,
 ): Promise<MetricHistoryFetchWithLatencyResult> => {
   const startedAt = performance.now();
-  const data = await metricService.getHistorySince(sinceMs);
+  const data = await metricService.getHistorySince(sinceMs, cursor);
   const endedAt = performance.now();
   return {
     data,

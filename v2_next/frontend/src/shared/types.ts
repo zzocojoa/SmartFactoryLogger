@@ -6,6 +6,8 @@ export interface FactoryData {
     Time: string;
     Status: string;
     timestamp_ms?: number | null;
+    history_instance_id?: string | null;
+    history_sequence?: number | null;
     
     // KPIs
     Speed: number | null;
