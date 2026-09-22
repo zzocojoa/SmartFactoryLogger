@@ -3,5 +3,5 @@ import { fetchLatestMetric, fetchMetricHistorySince } from '../../../shared/api/
 
 export const metricService = {
   getLatest: async (): Promise<LatestMetricResponse> => fetchLatestMetric(),
-  getHistorySince: async (sinceMs: number): Promise<MetricHistoryResponse> => fetchMetricHistorySince(sinceMs),
+  getHistorySince: async (sinceMs: number, cursor?: string): Promise<MetricHistoryResponse> => fetchMetricHistorySince(sinceMs, cursor),
 };

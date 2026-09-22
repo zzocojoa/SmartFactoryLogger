@@ -50,6 +50,37 @@ const data = await response.json();
 
 ---
 
+### GET `/api/data/history`
+
+2026-09-22 P2: UTC 표시 시각과 메모리 history 표본 식별을 분리합니다.
+실제 표본의 `/api/data` 응답에는 `history_instance_id`와 `history_sequence`가 추가됩니다.
+초기화 중 표본은 두 값이 `null`일 수 있습니다. `Time`·`timestamp_ms`의 UTC 의미는 그대로입니다.
+
+| Query | 계약 |
+| --- | --- |
+| `since_ms` | 필수, 0 이상 정수. cursor가 없으면 이 UTC보다 큰 표본을 선택합니다. |
+| `limit` | 1~36,000, 기본 36,000. |
+| `cursor` | 선택. `history_instance_id:sequence` 형식, UUID hex 32자 + JS safe integer. `since_ms`보다 우선합니다. |
+
+- Cursor 모드: 증가 순번으로 이후 표본을 오래된 순번부터 최대 `limit`개 반환합니다.
+  각 표본은 `sequence`, 원래 `timestamp_ms`, identity를 포함하는 `data`를 가집니다.
+  `next_cursor`를 다음 요청에 전달하고 `has_more=true`인 동안 다음 페이지를 조회합니다.
+  동일 UTC·UTC 역행에도 서로 다른 표본을 구분하며, 같은 요청 재시도는 같은 identity로 중복 제거합니다.
+- 인스턴스 변경·보존 범위 이전 cursor·미래 순번은 `reset_required=true`, `truncated=true`를 반환합니다.
+  클라이언트는 기존 history를 비우고 응답의 보존된 표본부터 재동기화합니다. 빈 응답에서도 `next_cursor`를 보존합니다.
+- Legacy 모드: 기존 `since_ms` 필터와 최신 `limit`개 반환을 유지합니다. 시간 경계 또는 limit으로
+  앞부분이 생략되면 `truncated=true`입니다. `has_more=false`이며 cursor 페이징이 아닙니다.
+  UTC 역행 복구를 보장하지 않으므로 새 클라이언트는 cursor를 사용합니다.
+- `oldest_timestamp_ms`·`newest_timestamp_ms`는 보존된 표본 UTC의 최솟값·최댓값입니다.
+  보존 시간 1시간은 프로세스 내 monotonic 경과시간으로, 표본 수는 기존 최대 36,000개로 제한합니다.
+  재시작·명시적 history clear는 새 instance와 순번 1부터 시작합니다. 영속 데이터 이관은 없습니다.
+- 잘못된 cursor/range는 HTTP 422입니다. cursor는 조회 위치이며 인증 토큰이 아닙니다.
+- 새 프론트는 live/history를 같은 identity로 중복 제거하고, 페이지 요청은 한 번의 복귀당 최대 4회로 제한합니다.
+  미지원 구 backend는 기존 응답 필드만으로 처리합니다. 구 표본 버퍼에서 새 cursor API로 전환할 때는
+  순번 0부터 재동기화합니다. 요청 실패·cursor 무진전·페이지 예산 초과는 경고를 기록하고 live polling을 재개합니다.
+
+CSV/fact 컬럼·버전·파일명과 PLC/SPOT 수집 정책은 이 API 변경으로 바뀌지 않습니다.
+
 ## Health & Monitoring
 
 ### GET `/health`

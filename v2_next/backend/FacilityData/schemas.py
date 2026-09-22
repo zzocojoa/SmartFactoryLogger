@@ -1,6 +1,6 @@
 import math
 import re
-from pydantic import BaseModel, Field, field_validator, model_validator, ValidationInfo
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator, ValidationInfo
 from typing import Optional, Dict, Any
 
 CSV_INJECTION_PREFIXES = ("=", "+", "-", "@")
@@ -197,6 +197,9 @@ class FactoryData(BaseModel):
     Time: str
     Status: str = "Running"
     timestamp_ms: Optional[int] = None
+    # API history identity; UTC remains a display/audit attribute, not a cursor.
+    history_instance_id: Optional[str] = None
+    history_sequence: Optional[int] = Field(default=None, ge=1)
     captured_at_extruder: Optional[float] = None
     captured_at_ls: Optional[float] = None
     captured_at_spot: Optional[float] = None
@@ -484,7 +487,9 @@ class SystemStatus(BaseModel):
 
 class FactoryDataHistorySample(BaseModel):
     timestamp_ms: int
+    sequence: int = Field(ge=1)
     data: FactoryData
+    _recorded_monotonic: float = PrivateAttr(default=0.0)
 
 
 class FactoryDataHistoryResponse(BaseModel):
@@ -493,3 +498,6 @@ class FactoryDataHistoryResponse(BaseModel):
     newest_timestamp_ms: Optional[int] = None
     history_instance_id: str
     truncated: bool
+    next_cursor: str
+    has_more: bool = False
+    reset_required: bool = False

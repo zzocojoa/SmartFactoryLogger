@@ -27,7 +27,12 @@ const buildSeriesValues = (data: FactoryData): Record<TimeSeriesKey, number | nu
 
 export const buildSeriesSampleAt = (data: FactoryData, timestampMs: number): SeriesSample => {
   const values = buildSeriesValues(data);
-  return { timestampMs, values };
+  const hasIdentity = typeof data.history_instance_id === 'string' && /^[0-9a-f]{32}$/.test(data.history_instance_id)
+    && Number.isSafeInteger(data.history_sequence) && (data.history_sequence ?? 0) > 0;
+  return {
+    timestampMs, values,
+    ...(hasIdentity ? { historyInstanceId: data.history_instance_id!, historySequence: data.history_sequence! } : {}),
+  };
 };
 
 export const buildSeriesSample = (data: FactoryData, fallbackMs: number = Date.now()): SeriesSample => {

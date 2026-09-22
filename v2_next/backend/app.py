@@ -2231,8 +2231,12 @@ async def get_data():
 async def get_data_history(
     since_ms: Annotated[int, Query(ge=0)],
     limit: Annotated[int, Query(ge=1, le=PLCService.HISTORY_MAX_SAMPLES)] = 36000,
+    cursor: Annotated[str | None, Query(max_length=49)] = None,
 ):
-    return plc_service.get_data_history(since_ms, limit)
+    try:
+        return plc_service.get_data_history(since_ms, limit, cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _netloc_from_header(value: str | None) -> str:

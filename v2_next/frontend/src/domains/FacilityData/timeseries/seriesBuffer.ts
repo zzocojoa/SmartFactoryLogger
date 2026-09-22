@@ -2,7 +2,9 @@ import type { SeriesSample } from './seriesSampling';
 import {
   areSeriesSamplesChronological,
   countTrimmedSeriesSamples,
-  filterUniqueSeriesSamplesByTimestamp,
+  filterUniqueSeriesSamples,
+  getSeriesSampleCursor,
+  parseHistoryCursor,
   getLatestSeriesSampleTimestampMs,
   sortSeriesSamplesByTimestamp,
 } from './seriesBuffer.service';
@@ -10,7 +12,7 @@ import type { SeriesBufferSnapshot } from './seriesBuffer.types';
 
 const buildBufferedSeriesSample = (sample: SeriesSample): SeriesSample =>
   Object.freeze({
-    timestampMs: sample.timestampMs,
+    ...sample,
     values: Object.freeze({ ...sample.values }),
   }) as SeriesSample;
 
@@ -23,6 +25,7 @@ export class SeriesBuffer {
   private generation = 0;
   private chronological = true;
   private lastTimestampMs: number | null = null;
+  private historyCursor: string | null = null;
 
   constructor(windowMs: number, maxPoints?: number) {
     this.windowMs = windowMs;
@@ -42,8 +45,9 @@ export class SeriesBuffer {
   }
 
   append(sample: SeriesSample): void {
+    this.advanceHistoryCursor(getSeriesSampleCursor(sample));
     const bufferedSample = buildBufferedSeriesSample(sample);
-    if (this.samples.some((currentSample) => currentSample.timestampMs === bufferedSample.timestampMs)) {
+    if (!filterUniqueSeriesSamples(this.samples, [bufferedSample]).length) {
       return;
     }
     if (this.lastTimestampMs !== null && bufferedSample.timestampMs < this.lastTimestampMs && this.chronological) {
@@ -57,14 +61,17 @@ export class SeriesBuffer {
   }
 
   appendHistory(samples: readonly SeriesSample[]): number {
-    const uniqueSamples = filterUniqueSeriesSamplesByTimestamp(this.samples, samples);
+    for (const sample of samples) {
+      this.advanceHistoryCursor(getSeriesSampleCursor(sample));
+    }
+    const uniqueSamples = filterUniqueSeriesSamples(this.samples, samples);
     if (!uniqueSamples.length) {
       return 0;
     }
 
     const bufferedSamples = uniqueSamples.map(buildBufferedSeriesSample);
     const canAppendChronologically =
-      areSeriesSamplesChronological(bufferedSamples) &&
+      this.chronological && areSeriesSamplesChronological(bufferedSamples) &&
       (this.lastTimestampMs === null || bufferedSamples[0].timestampMs >= this.lastTimestampMs);
 
     if (canAppendChronologically) {
@@ -86,6 +93,22 @@ export class SeriesBuffer {
 
   getLatestTimestampMs(): number | null {
     return getLatestSeriesSampleTimestampMs(this.samples);
+  }
+
+  getHistoryCursor(): string | null {
+    return this.historyCursor;
+  }
+
+  advanceHistoryCursor(cursor: string | null): void {
+    const next = parseHistoryCursor(cursor);
+    if (!next) return;
+    const current = parseHistoryCursor(this.historyCursor);
+    if (current && current.instanceId !== next.instanceId) {
+      this.clear();
+    }
+    if (!current || current.instanceId !== next.instanceId || next.sequence >= current.sequence) {
+      this.historyCursor = cursor;
+    }
   }
 
   getSamples(): SeriesSample[] {
@@ -116,6 +139,7 @@ export class SeriesBuffer {
     this.generation += 1;
     this.chronological = true;
     this.lastTimestampMs = null;
+    this.historyCursor = null;
   }
 
   private trimHead(nowMs: number): void {

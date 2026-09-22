@@ -8,6 +8,8 @@ export type TimeSeriesKey = Exclude<
   | 'Die_ID'
   | 'Billet_Cycle_ID'
   | 'timestamp_ms'
+  | 'history_instance_id'
+  | 'history_sequence'
   | 'Product_No_operator'
   | 'Mold_No_operator'
   | 'operator_metadata_valid'

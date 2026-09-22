@@ -106,6 +106,126 @@ describe('useMetricsPollingEffects', () => {
     vi.restoreAllMocks();
   });
 
+  const historyId = 'a'.repeat(32);
+  const identifiedData = (sequence: number, timestampMs: number, id = historyId) => ({
+    ...buildFactoryData(timestampMs, sequence, timestampMs), history_instance_id: id, history_sequence: sequence,
+  });
+  const cursorPage = (sequences: number[], timestamps: number[], more = false, reset = false, id = historyId) => ({
+    data: {
+      ...buildHistoryResponse(sequences.map((sequence, idx) => ({
+        timestamp_ms: timestamps[idx], sequence, data: identifiedData(sequence, timestamps[idx], id),
+      })), reset),
+      history_instance_id: id, next_cursor: `${id}:${sequences.at(-1) ?? 0}`, has_more: more, reset_required: reset,
+    }, latency: 1, timestamp: 1_000,
+  });
+  const seededBuffer = () => {
+    setVisibilityState('hidden');
+    const ref = { current: new SeriesBuffer(100_000, 100) };
+    ref.current.append(buildSeriesSample(identifiedData(1, 60_000)));
+    return ref;
+  };
+  const show = async () => {
+    await act(async () => {
+      setVisibilityState('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  };
+
+  it('backfills cursor pages with equal and reversed UTC before restarting polling', async () => {
+    const ref = seededBuffer();
+    mocks.fetchMetricHistorySinceOnMainThreadWithLatency
+      .mockResolvedValueOnce(cursorPage([2, 3], [60_000, 1_000], true))
+      .mockResolvedValueOnce(cursorPage([4], [2_000]));
+    const { unmount } = renderPollingEffects(ref);
+    try {
+      await show();
+      await waitFor(() => expect(mocks.startPollingWorker).toHaveBeenCalled());
+      expect(mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mock.calls).toEqual([
+        [60_000, `${historyId}:1`], [60_000, `${historyId}:3`],
+      ]);
+      expect(ref.current.getSamples().map(s => s.values.Spot)).toEqual([3, 4, 1, 2]);
+      expect(ref.current.getHistoryCursor()).toBe(`${historyId}:4`);
+    } finally { unmount(); }
+  });
+
+  it('resynchronizes a legacy timestamp buffer before adopting the new cursor', async () => {
+    const ref = seededBuffer();
+    ref.current.clear();
+    ref.current.append(buildSeriesSample(buildFactoryData(60_000, 999)));
+    mocks.fetchMetricHistorySinceOnMainThreadWithLatency
+      .mockResolvedValueOnce(cursorPage([], []))
+      .mockResolvedValueOnce(cursorPage([1, 2], [60_000, 1_000]));
+    const { unmount } = renderPollingEffects(ref);
+    try {
+      await show();
+      expect(mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mock.calls).toEqual([
+        [60_000], [60_000, `${historyId}:0`],
+      ]);
+      expect(ref.current.getSamples().map(s => s.values.Spot)).toEqual([2, 1]);
+      expect(ref.current.getHistoryCursor()).toBe(`${historyId}:2`);
+    } finally { unmount(); }
+  });
+
+  it('resets an expired cursor and preserves an empty new generation cursor', async () => {
+    const ref = seededBuffer();
+    const newId = 'b'.repeat(32);
+    mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mockResolvedValueOnce(cursorPage([], [], false, true, newId));
+    const { unmount } = renderPollingEffects(ref);
+    try {
+      await show();
+      expect(ref.current.getSamples()).toEqual([]);
+      expect(ref.current.getHistoryCursor()).toBe(`${newId}:0`);
+      mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mockResolvedValueOnce(cursorPage([1], [1_000], false, false, newId));
+      await show();
+      expect(mocks.fetchMetricHistorySinceOnMainThreadWithLatency).toHaveBeenLastCalledWith(0, `${newId}:0`);
+      expect(ref.current.getSamples().map(s => s.values.Spot)).toEqual([1]);
+    } finally { unmount(); }
+  });
+
+  it('bounds non-advancing and endlessly resetting history responses and resumes polling', async () => {
+    for (const advancing of [false, true]) {
+      const ref = seededBuffer();
+      mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mockReset();
+      mocks.startPollingWorker.mockClear();
+      let sequence = 1;
+      mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mockImplementation(async () =>
+        cursorPage([advancing ? ++sequence : sequence], [1_000], true));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { unmount } = renderPollingEffects(ref);
+      try {
+        await show();
+        await waitFor(() => expect(mocks.startPollingWorker).toHaveBeenCalled());
+        expect(mocks.fetchMetricHistorySinceOnMainThreadWithLatency).toHaveBeenCalledTimes(advancing ? 4 : 1);
+        expect(warn).toHaveBeenCalledWith('Metric history backfill failed', expect.objectContaining({ error: expect.any(Error) }));
+      } finally { unmount(); warn.mockRestore(); }
+    }
+  });
+
+  it('does not let an old in-flight response overwrite a newer live generation', async () => {
+    const ref = seededBuffer();
+    let resolve!: (value: ReturnType<typeof cursorPage>) => void;
+    mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    const { unmount } = renderPollingEffects(ref);
+    try {
+      await show();
+      ref.current.append(buildSeriesSample(identifiedData(1, 1_000, 'b'.repeat(32))));
+      await act(async () => { resolve(cursorPage([2], [60_000])); });
+      expect(ref.current.getHistoryCursor()).toBe(`${'b'.repeat(32)}:1`);
+      expect(ref.current.getSamples().map(s => s.timestampMs)).toEqual([1_000]);
+    } finally { unmount(); }
+  });
+
+  it('ignores cursor responses after disposal', async () => {
+    const ref = seededBuffer();
+    let resolve!: (value: ReturnType<typeof cursorPage>) => void;
+    mocks.fetchMetricHistorySinceOnMainThreadWithLatency.mockReturnValueOnce(new Promise(r => { resolve = r; }));
+    const { unmount } = renderPollingEffects(ref);
+    await show();
+    unmount();
+    await act(async () => { resolve(cursorPage([2], [1_000])); });
+    expect(ref.current.getHistoryCursor()).toBe(`${historyId}:1`);
+  });
+
   it('backfills missing history before resuming visible polling', async () => {
     setVisibilityState('hidden');
     const seriesBufferRef: MutableRefObject<SeriesBuffer> = {

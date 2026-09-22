@@ -1,0 +1,308 @@
+{
+  "base_sha": "1d4ec21d8b88ce6298742bc4cf21b75884e21b1a",
+  "branch": "codex/temperature-history-p2-20260922",
+  "kind": "local synthetic production-path tests; no field failure claim",
+  "cases": [
+    {
+      "id": "P2-B01",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_equal_utc_retains_distinct_acquisitions",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B02",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_cursor_finds_new_sample_after_wall_clock_reversal",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B03",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_retention_uses_elapsed_time_and_preserves_exact_boundary",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B04",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_cursor_pages_in_acquisition_order_and_retries_are_idempotent",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B05",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_count_eviction_reports_gap_and_resync_pages_from_oldest_retained",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B06",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_instance_reset_and_future_sequence_require_resync",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B07",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_legacy_since_ms_keeps_utc_filter_and_latest_limit",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B08",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_bad_cursor_and_limit_rejected_without_mutation",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B09",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_history_copy_cannot_be_changed_by_original_sample",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B10",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_concurrent_recorders_assign_unique_ordered_sequences",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B11",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_new_service_instance_resynchronizes_old_cursor",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-B12",
+      "test": "backend.tests.test_history_cursor.HistoryCursorTests.test_real_producer_consumer_latest_and_history_share_identity_without_changing_csv",
+      "kind": "production service/API synthetic",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/p2-final.txt"
+    },
+    {
+      "id": "P2-F01",
+      "file": "frontend/src/domains/FacilityData/timeseries/historyCursor.test.ts",
+      "test": "keeps equal UTC acquisitions and deduplicates repeated live/history identities",
+      "scope": "P2 buffer",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F02",
+      "file": "frontend/src/domains/FacilityData/timeseries/historyCursor.test.ts",
+      "test": "advances cursor through reversed UTC and preserves it after display trimming",
+      "scope": "P2 buffer",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F03",
+      "file": "frontend/src/domains/FacilityData/timeseries/historyCursor.test.ts",
+      "test": "clears old generation when a new backend publishes at the same UTC",
+      "scope": "P2 buffer",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F04",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "backfills cursor pages with equal and reversed UTC before restarting polling",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F05",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "resynchronizes a legacy timestamp buffer before adopting the new cursor",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F06",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "resets an expired cursor and preserves an empty new generation cursor",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F07",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "bounds non-advancing and endlessly resetting history responses and resumes polling",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F08",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "does not let an old in-flight response overwrite a newer live generation",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F09",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "ignores cursor responses after disposal",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F10",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "backfills missing history before resuming visible polling",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F11",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "recovers packaged startup data while hidden and a stale leader lock exists",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F12",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "does not re-enter packaged startup recovery after operational data later goes offline",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F13",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "resumes visible polling when history backfill fails",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F14",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "backfills a visible follower tab without starting duplicate polling",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F15",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "clears stale samples when history response says the requested range was truncated",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F16",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "ignores late worker data after visibility pauses polling",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F17",
+      "file": "frontend/src/domains/FacilityData/hooks/useMetricsViewModelEffects.test.ts",
+      "test": "uses transport timestamp for live samples instead of parsing FactoryData.Time",
+      "scope": "visibility/paging/legacy integration",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F18",
+      "file": "frontend/src/shared/api/transport/startupPolling.transport.test.ts",
+      "test": "uses the startup-specific timeout when the health caller requests it",
+      "scope": "transport/service contract",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F19",
+      "file": "frontend/src/shared/api/transport/startupPolling.transport.test.ts",
+      "test": "returns health requests to the steady polling timeout by default",
+      "scope": "transport/service contract",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F20",
+      "file": "frontend/src/shared/api/transport/startupPolling.transport.test.ts",
+      "test": "bounds the live-data request used by the polling worker",
+      "scope": "transport/service contract",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    },
+    {
+      "id": "P2-F21",
+      "file": "frontend/src/shared/api/transport/startupPolling.transport.test.ts",
+      "test": "passes the history cursor through the production service and transport chain",
+      "scope": "transport/service contract",
+      "status": "pass",
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    }
+  ],
+  "aggregate_checks": [
+    {
+      "command": [
+        "cmd.exe",
+        "/d",
+        "/c",
+        "npm.cmd run health"
+      ],
+      "exit_code": 0,
+      "backend": {
+        "pass": 843,
+        "fail": 0,
+        "skip": 0
+      },
+      "frontend_vitest": {
+        "files": 40,
+        "pass": 301,
+        "fail": 0,
+        "skip": 0
+      },
+      "frontend_node": {
+        "pass": 9,
+        "fail": 0,
+        "skip": 0
+      },
+      "electron": {
+        "pass": 94,
+        "fail": 0,
+        "skip": 0
+      },
+      "lint_typecheck": "pass; mypy configured 8 files",
+      "qa_selftest_suites": 5,
+      "evidence": "artifacts/temperature-history-p2/health-final.txt"
+    }
+  ],
+  "not_run": [
+    "new independent review",
+    "packaged build/install",
+    "real PLC/SPOT/network/OS clock changes",
+    "new field trial",
+    "commit/push/PR/merge"
+  ],
+  "previous_failures_preserved": [
+    "before.txt",
+    "frontend-before.txt",
+    "backend-first-after.txt",
+    "health.txt",
+    "health-wrapper-assessment.json"
+  ]
+}
