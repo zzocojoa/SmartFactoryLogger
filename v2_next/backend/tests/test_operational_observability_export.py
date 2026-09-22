@@ -280,6 +280,7 @@ class ServerSmokeCloseoutHelperTests(unittest.TestCase):
             "spot_device_status_code": source_observation["spot_device_status_code"],
             "spot_temperature_raw": source_observation["spot_temperature_raw"],
             "spot_last_poll_completed_at": source_observation["spot_last_poll_completed_at"],
+            "spot_poll_duration_status": "unknown",  # This fixture has no poll clock endpoints.
             "diagnostics_capture_status": "missing",
             "diagnostics_binding_status": "missing",
             "diagnostics_missing_fields": json.dumps(SPOT_DIAGNOSTIC_OUTPUT_FIELDS),

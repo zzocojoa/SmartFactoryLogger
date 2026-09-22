@@ -9,7 +9,7 @@ from backend.FacilityData.schemas import FactoryData
 from .base import BasePLCDriver
 
 
-CSV_TS_RE = re.compile(r"Factory_Integrated_Log(?:_v2)?_(\d{8}_\d{6})(?:_2_[345]_0)?\.csv$")
+CSV_TS_RE = re.compile(r"Factory_Integrated_Log(?:_v2)?_(\d{8}_\d{6})(?:_2_(?:3_[01]|[45]_[012]))?\.csv$")
 
 
 def _csv_sort_key(path: Path) -> tuple[str, str]:
@@ -128,6 +128,7 @@ class CsvReplayDriver(BasePLCDriver):
             "spot_device_status_code": self._optional_text(row.get("spot_device_status_code")),
             "spot_error_code": self._optional_text(row.get("spot_error_code")),
             "spot_poll_duration_ms": self._optional_float(row.get("spot_poll_duration_ms")),
+            "spot_poll_duration_status": self._optional_text(row.get("spot_poll_duration_status")),
             "spot_response_content_length": self._optional_int(row.get("spot_response_content_length")),
             "spot_last_poll_started_at": self._optional_text(row.get("spot_last_poll_started_at")),
             "spot_last_poll_completed_at": self._optional_text(row.get("spot_last_poll_completed_at")),
@@ -280,5 +281,6 @@ class CsvReplayDriver(BasePLCDriver):
             Speed=0, Press=0, Spot=0, Temp_F=0, Temp_B=0
         )
 
-    def close(self):
+    def close(self) -> bool:
         self.connected = False
+        return True

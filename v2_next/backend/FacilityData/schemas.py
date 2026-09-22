@@ -201,6 +201,14 @@ class FactoryData(BaseModel):
     captured_at_ls: Optional[float] = None
     captured_at_spot: Optional[float] = None
     extruder_snapshot_error: Optional[str] = None
+    # Collection-time evidence. CSV writer residence does not age PLC phase inputs.
+    plc_source_age_ms: Optional[float] = Field(default=None, exclude=True, strict=True, allow_inf_nan=False)
+    plc_source_freshness_threshold_ms: Optional[float] = Field(default=None, exclude=True, strict=True, allow_inf_nan=False)
+    plc_source_error: Optional[bool] = Field(default=None, exclude=True, strict=True)
+    plc_source_usable: Optional[bool] = Field(default=None, exclude=True, strict=True)
+    plc_source_completed_monotonic: Optional[float] = Field(default=None, exclude=True, strict=True, allow_inf_nan=False)
+    plc_sample_monotonic: Optional[float] = Field(default=None, exclude=True, strict=True, allow_inf_nan=False)
+    plc_clock_domain_id: Optional[str] = Field(default=None, exclude=True, strict=True)
     ls_snapshot_error: Optional[str] = None
     spot_snapshot_error: Optional[str] = None
 
@@ -258,13 +266,16 @@ class FactoryData(BaseModel):
     spot_device_status_code: Optional[str] = None
     spot_error_code: Optional[str] = None
     spot_poll_duration_ms: Optional[float] = None
+    spot_poll_duration_status: Optional[str] = None
     spot_response_content_length: Optional[int] = None
     spot_last_poll_started_at: Optional[str] = None
     spot_last_poll_completed_at: Optional[str] = None
-    spot_last_poll_completed_monotonic: Optional[float] = Field(default=None, exclude=True)
+    spot_last_poll_completed_monotonic: Optional[float] = Field(default=None, exclude=True, strict=True, allow_inf_nan=False)
     spot_last_response_at: Optional[str] = None
     spot_last_valid_value_at: Optional[str] = None
-    spot_last_valid_value_monotonic: Optional[float] = Field(default=None, exclude=True)
+    spot_last_valid_value_monotonic: Optional[float] = Field(default=None, exclude=True, strict=True, allow_inf_nan=False)
+    spot_clock_domain_id: Optional[str] = Field(default=None, exclude=True)
+    spot_cache_expiry_threshold_sec: Optional[float] = Field(default=None, exclude=True, strict=True, allow_inf_nan=False)
     spot_snapshot_age_ms: Optional[float] = None
     spot_value_age_ms: Optional[float] = None
 

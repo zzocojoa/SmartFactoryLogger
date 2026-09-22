@@ -383,6 +383,7 @@ try {
 
 $initialSpot = Get-ObjectProperty -Object $initialHealth -Name "spot_temperature"
 $initialOperational = Get-ObjectProperty -Object $initialSpot -Name "v2_4_operational"
+$expectedSchemaVersion = [string](Get-ObjectProperty $initialOperational "schema_version" "")
 $expectedLoggerServiceInstanceId = [string](
     Get-ObjectProperty $initialOperational "logger_service_instance_id" ""
 )
@@ -392,8 +393,8 @@ Add-QaCheck -Name "SPOT diagnostics" -Passed (Convert-ToBoolean (Get-ObjectPrope
     -Actual ([string](Get-ObjectProperty $initialSpot "diagnostics_available" "missing")) -Expected "true"
 Add-QaCheck -Name "CSV operational logging" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialOperational "enabled" $false)) `
     -Actual ([string](Get-ObjectProperty $initialOperational "enabled" "missing")) -Expected "true"
-Add-QaCheck -Name "CSV schema" -Passed (([string](Get-ObjectProperty $initialOperational "schema_version")) -eq "2.5.0") `
-    -Actual ([string](Get-ObjectProperty $initialOperational "schema_version" "missing")) -Expected "2.5.0"
+Add-QaCheck -Name "CSV schema" -Passed ($expectedSchemaVersion -in @("2.5.0", "2.5.1", "2.5.2")) `
+    -Actual ([string](Get-ObjectProperty $initialOperational "schema_version" "missing")) -Expected "2.5.0, 2.5.1 or 2.5.2"
 Add-QaCheck -Name "Temperature hardening" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialOperational "temperature_hardening_enabled" $false)) `
     -Actual ([string](Get-ObjectProperty $initialOperational "temperature_hardening_enabled" "missing")) -Expected "true"
 Add-QaCheck -Name "Observation fact writer" -Passed (Convert-ToBoolean (Get-ObjectProperty $initialOperational "observation_fact_enabled" $false)) `
@@ -604,8 +605,12 @@ if ($null -eq $metadataFile) {
         -Actual (Split-Path -Leaf $metadataMatch.csv_file) `
         -Expected "current-session shutdown closeout CSV"
         Add-QaCheck -Name "Sidecar schema" `
-        -Passed (([string](Get-ObjectProperty $schemaMetadata "active_schema_version")) -eq "2.5.0") `
-        -Actual ([string](Get-ObjectProperty $schemaMetadata "active_schema_version" "missing")) -Expected "2.5.0"
+        -Passed (
+            $expectedSchemaVersion -in @("2.5.0", "2.5.1", "2.5.2") -and
+            ([string](Get-ObjectProperty $schemaMetadata "active_schema_version" "")) -eq $expectedSchemaVersion
+        ) `
+        -Actual ([string](Get-ObjectProperty $schemaMetadata "active_schema_version" "missing")) `
+        -Expected "supported runtime schema: $expectedSchemaVersion"
         Add-QaCheck -Name "Sidecar hardening flag" `
         -Passed (Convert-ToBoolean (Get-ObjectProperty $schemaMetadata "csv_v2_temperature_hardening_enabled" $false)) `
         -Actual ([string](Get-ObjectProperty $schemaMetadata "csv_v2_temperature_hardening_enabled" "missing")) -Expected "true"

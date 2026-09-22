@@ -38,6 +38,8 @@ from backend.FacilityData.spot_observation_fact import (
     SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
     SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS,
     SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION,
+    SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS,
+    SPOT_OBSERVATION_FACT_V1_3_0_SCHEMA_VERSION,
     build_spot_observation_fact_manifest,
 )
 from backend.FacilityData.spot_diagnostics import (
@@ -57,6 +59,8 @@ from backend.FacilityData.temperature_operational import (
     TEMPERATURE_OPERATIONAL_RULE_VERSION,
     UNSUPPORTED_CAUSE_CANDIDATES,
 )
+from backend.FacilityData.freshness import (SPOT_CACHE_EXPIRY_THRESHOLD_SEC,
+    SPOT_POLL_DURATION_STATUSES, spot_poll_duration_metadata)
 
 
 REQUIRED_V1_COLUMNS = [
@@ -89,6 +93,7 @@ CSV_SCHEMA_VERSION_V2_3 = "2.3.0"
 CSV_SCHEMA_VERSION_V2_4 = "2.4.0"
 CSV_SCHEMA_VERSION_V2_5 = "2.5.0"
 SUPPORTED_CSV_SCHEMA_VERSIONS = {
+    "2.4.1", "2.5.1", "2.3.1", "2.4.2", "2.5.2",
     CSV_SCHEMA_VERSION_V2_1,
     CSV_SCHEMA_VERSION_V2_2,
     CSV_SCHEMA_VERSION_V2_3,
@@ -347,9 +352,9 @@ REQUIRED_METADATA_FIELDS_BY_SCHEMA = {
 }
 
 V1_NAME_RE = re.compile(r"^Factory_Integrated_Log_(\d{8}_\d{6})\.csv$")
-V2_NAME_RE = re.compile(r"^Factory_Integrated_Log_v2_(\d{8}_\d{6}(?:_2_[345]_0)?)\.csv$")
+V2_NAME_RE = re.compile(r"^Factory_Integrated_Log_v2_(\d{8}_\d{6}(?:_2_(?:3_[01]|[45]_[012]))?)\.csv$")
 METADATA_NAME_RE = re.compile(
-    r"^Factory_Integrated_Log_v2_(\d{8}_\d{6}(?:_2_[345]_0)?)\.metadata\.json$"
+    r"^Factory_Integrated_Log_v2_(\d{8}_\d{6}(?:_2_(?:3_[01]|[45]_[012]))?)\.metadata\.json$"
 )
 
 
@@ -459,9 +464,11 @@ def validate_spot_sequence_values(rows: list[list[str]], header: list[str]) -> l
 
 
 def _parse_finite_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not math.isfinite(parsed):
         return None
@@ -483,13 +490,18 @@ def _parse_utc_timestamp(value: object) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _metadata_row_time_freshness_threshold_ms(metadata: dict) -> float:
+def _metadata_threshold_ms(metadata: dict, key: str, default_ms: float) -> float | None:
     shadow_metadata = metadata.get("spot_temperature_shadow_metadata")
-    if isinstance(shadow_metadata, dict):
-        threshold_sec = _parse_finite_float(shadow_metadata.get("poll_freshness_threshold_sec"))
-        if threshold_sec is not None and threshold_sec >= 0:
-            return threshold_sec * 1000.0
-    return FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS
+    if isinstance(shadow_metadata, dict) and key in shadow_metadata:
+        threshold_sec = _parse_finite_float(shadow_metadata[key])
+        if threshold_sec is None or threshold_sec <= 0:
+            return None
+        return _parse_finite_float(threshold_sec * 1000.0)
+    return default_ms
+
+
+def _metadata_row_time_freshness_threshold_ms(metadata: dict) -> float | None:
+    return _metadata_threshold_ms(metadata, "poll_freshness_threshold_sec", FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS)
 
 
 def _parse_json_string_list(value: str) -> list[str]:
@@ -608,7 +620,8 @@ def validate_temperature_value_origin_invariants(rows: list[list[str]], header: 
                 observed_value = _parse_finite_float(observed)
                 if observed_value is None:
                     failures.append(f"row {row_number} populated spot_temperature_observed_c must be finite")
-                elif not _origin_none_allows_populated_observed(
+                elif not (row[0] in {"2.4.1", "2.5.1", "2.4.2", "2.5.2"} and output_status == "unknown"
+                          and row_freshness == "unknown" and raw_validity == "valid_temperature") and not _origin_none_allows_populated_observed(
                     cache_status=cache_status,
                     freshness=freshness,
                     row_freshness=row_freshness,
@@ -784,7 +797,7 @@ def validate_v2_4_operational_invariants(
     rows: list[list[str]],
     header: list[str],
     *,
-    row_time_freshness_threshold_ms: float = FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS,
+    row_time_freshness_threshold_ms: float | None = FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS,
     forbid_unsupported_causes: bool = False,
 ) -> list[str]:
     required_columns = [
@@ -814,6 +827,11 @@ def validate_v2_4_operational_invariants(
     missing_columns = [column for column in required_columns if column not in header]
     if missing_columns:
         return ["v2.4 header missing operational invariant columns: " + ", ".join(missing_columns)]
+
+    threshold = _parse_finite_float(row_time_freshness_threshold_ms)
+    if threshold is None or threshold <= 0:
+        return ["poll freshness threshold must be finite and positive; explicit invalid metadata cannot use a default"]
+    row_time_freshness_threshold_ms = threshold
 
     failures: list[str] = []
     indices = {column: header.index(column) for column in required_columns}
@@ -883,7 +901,31 @@ def validate_v2_4_operational_invariants(
                 failures.append(
                     f"row {row_number} startup_pending shadow status requires blank spot_observation_key"
                 )
-        if row_timestamp is not None and poll_timestamp is not None:
+        decision_time_contract = row[0] in {"2.4.1", "2.5.1", "2.4.2", "2.5.2"}
+        if decision_time_contract:
+            if "spot_effective_age_ms_at_row" not in header:
+                failures.append("decision-time contract requires spot_effective_age_ms_at_row")
+                continue
+            age = _parse_finite_float(row[header.index("spot_effective_age_ms_at_row")])
+            if row_freshness == "fresh" and (
+                age is None or age < 0 or age > row_time_freshness_threshold_ms or clock_status != "ok"
+            ):
+                failures.append(f"row {row_number} fresh requires finite nonnegative age within threshold and clock ok")
+            if row_freshness == "stale" and (
+                age is None or age <= threshold or clock_status != "ok"
+            ):
+                failures.append(f"row {row_number} stale requires finite age above threshold and clock ok")
+            if age is not None and age < 0 and (row_freshness != "unknown" or clock_status != "clock_anomaly"):
+                failures.append(f"row {row_number} negative age requires unknown freshness and clock anomaly")
+            if output_status == "valid" and (row_freshness != "fresh" or clock_status != "ok"):
+                failures.append(f"row {row_number} valid requires fresh row age and clock ok")
+            if output_status == "valid" and (
+                "temperature_value_origin" not in header or row[header.index("temperature_value_origin")] not in {"current_observation", "cached_observation"}
+            ):
+                failures.append(f"row {row_number} valid requires current or cached observation origin")
+            if clock_status == "clock_anomaly" and output_status not in {"unknown", "startup_pending"}:
+                failures.append(f"row {row_number} clock anomaly requires unknown output")
+        if not decision_time_contract and row_timestamp is not None and poll_timestamp is not None:
             actual_age_ms = (row_timestamp - poll_timestamp).total_seconds() * 1000.0
             if actual_age_ms < 0:
                 if clock_status != "clock_anomaly":
@@ -911,12 +953,13 @@ def validate_v2_4_operational_invariants(
                         f"row {row_number} timestamp row age {actual_age_ms:.3f}ms exceeds "
                         f"{row_time_freshness_threshold_ms:.3f}ms but temperature_output_status={output_status!r}"
                     )
-        if row_freshness == "stale" or source_freshness == "stale":
+        if clock_status != "clock_anomaly" and (row_freshness == "stale" or source_freshness == "stale"):
             if output_status != "stale":
                 failures.append(f"row {row_number} stale freshness requires temperature_output_status=stale")
             if unavailable_reason != "stale_observation":
                 failures.append(f"row {row_number} stale freshness requires temperature_unavailable_reason=stale_observation")
-        if raw_validity == "invalid_sentinel" and row_freshness != "stale" and source_freshness != "stale":
+        if (raw_validity == "invalid_sentinel" and row_freshness != "stale" and source_freshness != "stale"
+            and not (decision_time_contract and clock_status == "clock_anomaly")):
             expected_status = {
                 "temperature_under_range": "under_range",
                 "temperature_over_range": "over_range",
@@ -972,6 +1015,8 @@ V2_5_TEMPERATURE_QUALITY_BY_STATUS = {
 def validate_v2_5_temperature_hardening_invariants(
     rows: list[list[str]],
     header: list[str],
+    *,
+    cache_ttl_ms: float | None = SPOT_CACHE_EXPIRY_THRESHOLD_SEC * 1000.0,
 ) -> list[str]:
     required_columns = [
         "Temperature",
@@ -984,6 +1029,10 @@ def validate_v2_5_temperature_hardening_invariants(
     missing_columns = [column for column in required_columns if column not in header]
     if missing_columns:
         return ["v2.5 header missing temperature hardening columns: " + ", ".join(missing_columns)]
+
+    ttl = _parse_finite_float(cache_ttl_ms)
+    if ttl is None or ttl <= 0:
+        return ["cache TTL must be finite and positive; explicit invalid metadata cannot use a default"]
 
     failures: list[str] = []
     indices = {column: header.index(column) for column in required_columns}
@@ -1021,6 +1070,12 @@ def validate_v2_5_temperature_hardening_invariants(
             )
             continue
         parsed_value_age = _parse_finite_float(value_age_text) if value_age_text else None
+        if row[0] in {"2.5.1", "2.5.2"} and output_status == "valid":
+            origin = row[header.index("temperature_value_origin")] if "temperature_value_origin" in header else ""
+            if origin == "cached_observation" and (
+                parsed_value_age is None or not 0 <= parsed_value_age <= ttl or clock_status != "ok"
+            ):
+                failures.append(f"row {row_number} cached valid requires value age within TTL and clock ok")
         if clock_status == "ok":
             if parsed_value_age is None or parsed_value_age < 0:
                 failures.append(
@@ -1239,12 +1294,34 @@ def _parse_alarmstatus_byte(value: str) -> int | None:
     return parsed
 
 
+def validate_poll_duration_rows(rows: Sequence[list[str]], header: list[str]) -> list[str]:
+    required = ["spot_poll_duration_ms", "spot_poll_duration_status"]
+    if any(column not in header for column in required):
+        return ["monotonic duration contract requires duration and status columns"]
+    failures = []
+    duration_index, status_index = (header.index(column) for column in required)
+    for number, row in enumerate(rows, 2):
+        if len(row) != len(header):
+            failures.append(f"duration row {number} has incorrect column count")
+            continue
+        raw, status = row[duration_index].strip(), row[status_index].strip()
+        value = _parse_finite_float(raw)
+        if status not in SPOT_POLL_DURATION_STATUSES:
+            failures.append(f"duration row {number} has unknown status")
+        elif status == "ok" and (value is None or value < 0):
+            failures.append(f"duration row {number} ok requires finite nonnegative milliseconds")
+        elif status != "ok" and raw:
+            failures.append(f"duration row {number} invalid/unknown duration must be blank")
+    return failures
+
+
 def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
     header, rows = read_csv(fact_path)
-    is_current_schema = header == SPOT_OBSERVATION_FACT_COLUMNS
+    is_duration_schema = header == SPOT_OBSERVATION_FACT_COLUMNS
+    is_current_schema = is_duration_schema or header == SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS
     is_historical_schema = header == SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS
     if not is_current_schema and not is_historical_schema:
-        return ["spot_observation_fact header does not match schema 1.3.0 or historical 1.2.1"]
+        return ["spot_observation_fact header does not match schema 1.4.0 or historical 1.3.0/1.2.1"]
     required_columns = [
         "spot_observation_fact_schema_version",
         "spot_service_instance_id",
@@ -1276,7 +1353,7 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
     if missing_columns:
         return ["spot_observation_fact header missing columns: " + ", ".join(missing_columns)]
 
-    failures: list[str] = []
+    failures: list[str] = validate_poll_duration_rows(rows, header) if is_duration_schema else []
     indices = {column: header.index(column) for column in required_columns}
     for row_number, row in enumerate(rows, start=2):
         if len(row) != len(header):
@@ -1286,7 +1363,7 @@ def validate_spot_observation_fact_invariants(fact_path: Path) -> list[str]:
             continue
         expected_schema_version = (
             SPOT_OBSERVATION_FACT_SCHEMA_VERSION
-            if is_current_schema
+            if is_duration_schema else SPOT_OBSERVATION_FACT_V1_3_0_SCHEMA_VERSION if is_current_schema
             else SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION
         )
         if row[indices["spot_observation_fact_schema_version"]].strip() != expected_schema_version:
@@ -1590,13 +1667,19 @@ def validate_spot_observation_fact_manifest(
         expected_schema_version = SPOT_OBSERVATION_FACT_SCHEMA_VERSION
         expected_columns = SPOT_OBSERVATION_FACT_COLUMNS
         is_historical_schema = False
+        if manifest.get("spot_poll_duration") != spot_poll_duration_metadata():
+            failures.append("spot_observation_fact_manifest.spot_poll_duration does not match contract")
+    elif fact_header == SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS:
+        expected_schema_version = SPOT_OBSERVATION_FACT_V1_3_0_SCHEMA_VERSION
+        expected_columns = SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS
+        is_historical_schema = False  # Preserve all v1.3 provenance/diagnostic checks.
     elif fact_header == SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS:
         expected_schema_version = SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION
         expected_columns = SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS
         is_historical_schema = True
     else:
         failures.append(
-            "spot_observation_fact header does not match schema 1.3.0 or historical 1.2.1"
+            "spot_observation_fact header does not match schema 1.4.0 or historical 1.3.0/1.2.1"
         )
         return failures, summary
     if manifest.get("schema_version") != expected_schema_version:
@@ -1618,6 +1701,14 @@ def validate_spot_observation_fact_manifest(
         realtime_rows=realtime_row_dicts,
         path=SPOT_OBSERVATION_FACT_FILENAME,
     )
+    if manifest.get("poll_completeness_rule_version") == "spot-poll-completeness-v2":
+        for field in ("per_service_poll_ranges", "duplicate_observation_key_count", "invalid_poll_identity_count"):
+            if manifest.get(field) != actual_manifest.get(field):
+                failures.append(f"spot_observation_fact_manifest.{field} differs from the actual fact")
+    if actual_manifest.get("invalid_poll_identity_count", 0):
+        failures.append("spot_observation_fact contains invalid service/poll/key identities")
+    if actual_manifest.get("duplicate_observation_key_count", 0):
+        failures.append("spot_observation_fact contains duplicate observation keys (separate from poll gaps)")
 
     scalar_checks = [
         ("row_count", "row_count", True),
@@ -2560,13 +2651,24 @@ def validate(
         if len(v1_header) != 21:
             failures.append(f"v1 column count is {len(v1_header)}, expected 21")
 
-    v2_schema = metadata.get("schema_metadata", {}).get("schema_version")
+    recorded_schema = metadata.get("schema_metadata", {}).get("schema_version")
+    v2_schema = recorded_schema
     if v2_schema not in SUPPORTED_CSV_SCHEMA_VERSIONS:
         failures.append(
             f"metadata schema_version is {v2_schema!r}, expected one of "
             f"{', '.join(sorted(SUPPORTED_CSV_SCHEMA_VERSIONS))}"
         )
 
+    # Family checks remain shared; new duration columns/semantics are checked separately.
+    if recorded_schema in {"2.3.1", "2.4.2", "2.5.2"}:
+        failures.extend(validate_poll_duration_rows(v2_rows, v2_header))
+        if metadata.get("spot_temperature_shadow_metadata", {}).get("spot_poll_duration") != spot_poll_duration_metadata():
+            failures.append("spot_temperature_shadow_metadata.spot_poll_duration does not match contract")
+    v2_schema = {"2.4.1": "2.4.0", "2.5.1": "2.5.0", "2.3.1": "2.3.0",
+                 "2.4.2": "2.4.0", "2.5.2": "2.5.0"}.get(v2_schema, v2_schema)
+    for row_number, row in enumerate(v2_rows, 2):
+        if not row or row[0] != recorded_schema:
+            failures.append(f"row {row_number} schema version must match metadata")
     required_v2_columns = REQUIRED_V2_COLUMNS_BY_SCHEMA.get(v2_schema, REQUIRED_V2_COLUMNS)
     missing_v2 = [column for column in required_v2_columns if column not in v2_header]
     if missing_v2:
@@ -2630,12 +2732,15 @@ def validate(
                 )
             )
             if v2_schema == CSV_SCHEMA_VERSION_V2_5:
-                failures.extend(validate_v2_5_temperature_hardening_invariants(v2_rows, v2_header))
+                failures.extend(validate_v2_5_temperature_hardening_invariants(
+                    v2_rows, v2_header,
+                    cache_ttl_ms=_metadata_threshold_ms(metadata, "cache_expiry_threshold_sec", SPOT_CACHE_EXPIRY_THRESHOLD_SEC * 1000.0),
+                ))
                 expected_column_hash = hashlib.sha256(
                     json.dumps(v2_header, separators=(",", ":")).encode("utf-8")
                 ).hexdigest()
-                if schema_metadata.get("active_schema_version") != CSV_SCHEMA_VERSION_V2_5:
-                    failures.append("schema_metadata.active_schema_version must be '2.5.0'")
+                if schema_metadata.get("active_schema_version") != recorded_schema:
+                    failures.append("schema_metadata.active_schema_version must match recorded schema")
                 if schema_metadata.get("active_column_hash") != expected_column_hash:
                     failures.append("schema_metadata.active_column_hash must match the v2.5 CSV header")
                 if schema_metadata.get("csv_v2_temperature_hardening_enabled") is not True:

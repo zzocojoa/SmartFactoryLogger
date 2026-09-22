@@ -601,6 +601,8 @@ class TemperatureOperationalTests(unittest.TestCase):
                         has_previous_valid_value=True,
                         temperature_value_origin="cached_observation",
                         spot_effective_age_ms_at_row=10.0,
+                        spot_effective_value_age_ms_at_row=100.0,
+                        spot_value_age_clock_status="ok",
                     )
                 )
 

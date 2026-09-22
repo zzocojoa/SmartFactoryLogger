@@ -59,6 +59,7 @@ class SpotPollContext:
     poll_seq: int
     started_at_epoch: float
     started_monotonic: float
+    clock_domain: str = ""
 
 
 @dataclass(frozen=True)

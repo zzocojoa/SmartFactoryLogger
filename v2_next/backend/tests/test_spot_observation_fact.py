@@ -211,7 +211,7 @@ class SpotObservationFactTests(unittest.TestCase):
             )
 
         self.assertTrue(manifest["enabled"])
-        self.assertEqual(manifest["schema_version"], "1.3.0")
+        self.assertEqual(manifest["schema_version"], "1.4.0")
         self.assertEqual(manifest["row_count"], 2)
         self.assertEqual(manifest["distinct_observation_key_count"], 2)
         self.assertEqual(manifest["first_poll_seq"], 1)

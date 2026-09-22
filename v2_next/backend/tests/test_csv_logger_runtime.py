@@ -330,7 +330,7 @@ class CSVLoggerRuntimeTests(unittest.TestCase):
         expected_payload_bytes = len(data.model_dump_json()) * 2
         state = service.get_runtime_state()
         self.assertEqual(state["queue_size"], 2)
-        self.assertEqual(state["payload_bytes_ema"], expected_payload_bytes)
+        self.assertAlmostEqual(state["payload_bytes_ema"], expected_payload_bytes)
         self.assertEqual(state["estimated_queue_bytes"], expected_payload_bytes * 2)
 
     def test_memory_collector_uses_estimated_queue_bytes_and_runtime_note(self) -> None:

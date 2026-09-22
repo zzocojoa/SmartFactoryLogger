@@ -1,0 +1,801 @@
+{
+  "kind": "executed_temperature_worker_lifecycle_regression_matrix",
+  "audit_commit": "10821534b2e9b54f6be6494cafb4b7ee43d45395",
+  "branch_context": "codex/temperature-remediation-20260909",
+  "active_goal": "L1",
+  "execution_order": [
+    "L1-A",
+    "L1-B",
+    "L1-C"
+  ],
+  "deferred_goals": [
+    {
+      "id": "P2",
+      "name": "history UTC identity and cursor",
+      "execution_authorized_by_this_goal": false,
+      "blocking_for_L1": false
+    }
+  ],
+  "test_case_count": 12,
+  "tests_run_during_package_creation": false,
+  "audit_evidence_scope": "Pinned-source static review and isolated-method probes; not full pipeline or physical tests.",
+  "test_cases": [
+    {
+      "id": "L1-01",
+      "goal": "L1",
+      "name": "normal_stop",
+      "stimulus": "서비스와 실제 RealPLC worker가 정상 동작하다가 stop을 요청한다.",
+      "expected_behavior": "서비스 producer/consumer와 driver 내부 worker가 모두 종료된 뒤에만 stop=True이다.",
+      "production_path_to_execute": [
+        "PLCService.start/stop",
+        "RealPLCDriver.connect/close/_start_workers"
+      ],
+      "assertions": [
+        "서비스 및 driver 소유 thread 객체별 is_alive=False",
+        "실제 종료 전 성공 보고 없음",
+        "모든 합성 자원 정리"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_normal_stop_duplicate_start_and_repeated_restart"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Two full generations, duplicate start idempotent, all five owned thread objects terminate before True.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json"
+      ]
+    },
+    {
+      "id": "L1-02",
+      "goal": "L1",
+      "name": "blocked_internal_spot",
+      "stimulus": "내부 RealPLC-SPOT 읽기 경계만 Event로 join 예산보다 오래 막고 서비스 thread는 종료한다.",
+      "expected_behavior": "stop=False이고 old SPOT worker 참조와 stop 신호가 남는다.",
+      "production_path_to_execute": [
+        "RealPLCDriver._spot_worker_loop/close",
+        "PLCService.stop"
+      ],
+      "assertions": [
+        "상위 서비스 thread2개는 끝남",
+        "old worker is_alive=True",
+        "소유 목록 또는 명시적 소유 구조에 old 객체가 남음",
+        "stop 반환 False"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_blocked_children_preserve_ownership_and_reject_every_restart"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "SPOT subcase: producer/consumer dead, internal old worker alive and retained, stop=False.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json"
+      ]
+    },
+    {
+      "id": "L1-03",
+      "goal": "L1",
+      "name": "blocked_other_children",
+      "stimulus": "Extruder와 LS 내부 worker도 각각 같은 방식으로 막는다.",
+      "expected_behavior": "어느 역할의 내부 worker가 남더라도 종료 성공으로 보고하지 않는다.",
+      "production_path_to_execute": [
+        "RealPLCDriver._ext_worker_loop/_ls_worker_loop/close",
+        "PLCService.stop"
+      ],
+      "assertions": [
+        "역할별 subtest",
+        "원시 snapshot 읽기만 모의화",
+        "미종료 참조·정지 신호 유지"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_blocked_children_preserve_ownership_and_reject_every_restart"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Extruder and LS subcases reproduce the same ownership/stop/restart contract.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json"
+      ]
+    },
+    {
+      "id": "L1-04",
+      "goal": "L1",
+      "name": "guard_all_restart_entries",
+      "stimulus": "미종료 stop 이후 service.start 및 driver.connect/_start_workers 직접 진입을 시도한다.",
+      "expected_behavior": "재시작이 거부되며 이전 stop Event clear·소켓 재연결·새 worker 생성이 없다.",
+      "production_path_to_execute": [
+        "PLCService.start",
+        "RealPLCDriver.connect/_start_workers"
+      ],
+      "assertions": [
+        "old thread 객체가 동일하게 추적됨",
+        "Event clear 횟수 증가 없음",
+        "새 연결·thread 생성 증가 없음",
+        "가드가 side effect보다 먼저 실행됨"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_blocked_children_preserve_ownership_and_reject_every_restart",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_config_apply_waits_for_service_stop_and_rejects_lingering_read",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_reconnect_api_preserves_failed_stop_and_separate_shutdown_owners",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_direct_partial_start_requires_close_even_after_last_worker_exits"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Service/direct connect/_start_workers reject before either Event clear, new socket or worker creation; config and reconnect route also refuse incomplete stop. Direct partial construction/start failures also stay blocked after the last old worker exits until explicit close; no additional old cycle, Event clear, connection or thread creation.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/supplemental.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/supplemental.json"
+      ]
+    },
+    {
+      "id": "L1-05",
+      "goal": "L1",
+      "name": "late_exit_then_explicit_restart",
+      "stimulus": "재시작이 거부된 상태에서 old worker Event를 풀고 실제 종료를 확인한 뒤 다시 stop 및 명시 start를 호출한다.",
+      "expected_behavior": "old worker는 추가 반복 주기를 돌지 않고 자동 재시작도 없다. 종료 확인 후 한 세대만 시작한다.",
+      "production_path_to_execute": [
+        "RealPLCDriver worker loops/close/_start_workers",
+        "PLCService.stop/start"
+      ],
+      "assertions": [
+        "old is_alive=False 확인",
+        "old의 추가 주기 카운터 증가 없음",
+        "역할별 새 worker1개",
+        "새로운 정상 stop 성공"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_blocked_children_preserve_ownership_and_reject_every_restart",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_late_worker_socket_creation_is_retained_until_reconfirmed_close",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_direct_partial_start_requires_close_even_after_last_worker_exits"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Release old read, join actual object, unchanged per-thread cycle count and socket count; repeat close confirms resources, explicit start produces three new workers only. Direct partial construction/start failures also stay blocked after the last old worker exits until explicit close; no additional old cycle, Event clear, connection or thread creation.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/supplemental.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/supplemental.json"
+      ]
+    },
+    {
+      "id": "L1-06",
+      "goal": "L1",
+      "name": "idempotent_lifecycle",
+      "stimulus": "정상 running 중 start 반복, stop/close 반복 및 start→stop→start→stop을 실행한다.",
+      "expected_behavior": "중복 worker 없이 기존 멱등성을 유지하며 정상적인 재시작은 막지 않는다.",
+      "production_path_to_execute": [
+        "PLCService.start/stop",
+        "RealPLCDriver.close/_start_workers"
+      ],
+      "assertions": [
+        "정상 중복 start는 새 세대를 만들지 않음",
+        "반복 close 예외·참조 유실 없음",
+        "새 세대에도 stop 신호가 올바르게 초기화됨"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_normal_stop_duplicate_start_and_repeated_restart"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Two generations with duplicate start plus repeated close/stop preserve idempotency and distinct thread object sets.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json"
+      ]
+    },
+    {
+      "id": "L1-07",
+      "goal": "L1",
+      "name": "concurrent_start_stop",
+      "stimulus": "제어 Barrier/Event로 start와 stop의 검사·전환이 겹치는 호출을 실행한다.",
+      "expected_behavior": "동일 세대 소유권이 직렬화되고 join과 lock 사이 교착이나 중복 세대가 없다.",
+      "production_path_to_execute": [
+        "PLCService lifecycle",
+        "RealPLCDriver lifecycle"
+      ],
+      "assertions": [
+        "정해진 시간 안에 호출 종료 또는 명시적 미완료",
+        "검사-Event clear 경쟁 없음",
+        "살아 있는 thread 참조 보존",
+        "테스트 종료 시 잔여 thread 없음"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_concurrent_close_and_all_start_entries_are_serialized",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_start_in_progress_and_concurrent_stop_finish_without_orphans",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_config_apply_waits_for_service_stop_and_rejects_lingering_read"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Control Events overlap stop/socket close with all start entries, start/socket creation with stop, and service join with config apply; callers join without orphaned threads.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json"
+      ]
+    },
+    {
+      "id": "L1-08",
+      "goal": "L1",
+      "name": "partial_worker_start_failure",
+      "stimulus": "한 worker가 시작된 후 다음 thread 생성/시작을 의도적으로 실패시킨다.",
+      "expected_behavior": "이미 시작된 worker를 추적·중단·확인하며, 아직 시작하지 않은 thread 때문에 정리가 깨지지 않는다.",
+      "production_path_to_execute": [
+        "RealPLCDriver._start_workers/connect",
+        "PLCService.start"
+      ],
+      "assertions": [
+        "started thread 참조 보존",
+        "정상 running/종료 완료를 거짓 선언하지 않음",
+        "미종료 시 후속 start 차단",
+        "실제 생성된 thread cleanup"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_partial_driver_thread_creation_and_start_failures_keep_ownership",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_partial_service_start_failure_keeps_blocked_producer_owned",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_direct_partial_start_requires_close_even_after_last_worker_exits"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Second driver Thread construction/start failures preserve first live worker; partial service construction preserves blocked producer and denies restart. Direct partial construction/start failures also stay blocked after the last old worker exits until explicit close; no additional old cycle, Event clear, connection or thread creation.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/supplemental.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/supplemental.json"
+      ]
+    },
+    {
+      "id": "L1-09",
+      "goal": "L1",
+      "name": "io_cleanup_exception",
+      "stimulus": "지원되는 소켓/읽기 종료 경계가 실패하거나 worker를 바로 깨우지 못하는 상황을 모사한다.",
+      "expected_behavior": "예외·timeout을 숨기지 않고 기존 대기 예산 안에서 미완료를 보고한다.",
+      "production_path_to_execute": [
+        "RealPLCDriver.close",
+        "PLCService.stop"
+      ],
+      "assertions": [
+        "worker 잔존 중 True 금지",
+        "무한 join/강제 kill 없음",
+        "종료 대상 세대의 자원만 정리",
+        "finally에서 합성 block 해제"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_socket_close_failure_is_reported_and_retryable",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_late_worker_socket_creation_is_retained_until_reconfirmed_close"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Live worker retains its sockets; failed supported socket.close logs warning, returns False, retains object for retry. Late socket creation uses actual _read_extruder/_connect_extruder path.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json"
+      ]
+    },
+    {
+      "id": "L1-10",
+      "goal": "L1",
+      "name": "preserve_outer_service_block_guard",
+      "stimulus": "C1에서 이미 시험한 서비스 driver.read_data 정체와 정상/오류 Event wait 중 stop을 다시 검증한다.",
+      "expected_behavior": "상위 service thread가 남는 경우의 기존 실패·restart 가드를 유지한다.",
+      "production_path_to_execute": [
+        "PLCService._driver_loop/_loop/start/stop"
+      ],
+      "assertions": [
+        "이전 C1 테스트의 의미 유지",
+        "상위·하위 미종료를 함께 검사",
+        "정상 대기 종료 응답성 회귀 없음"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_partial_service_start_failure_keeps_blocked_producer_owned",
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_config_apply_waits_for_service_stop_and_rejects_lingering_read",
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_blocked_io_reports_stop_failure_and_prevents_duplicate_restart",
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_stop_interrupts_normal_and_retry_wait_and_restart",
+        "backend.tests.test_temperature_clock_service.ServiceClockTests.test_stop_interrupts_consumer_retry_wait"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Actual RealPLC snapshot adoption stall and existing C1 normal/retry waits and blocked I/O preserve False/restart gate.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json"
+      ]
+    },
+    {
+      "id": "L1-11",
+      "goal": "L1",
+      "name": "other_driver_close_compatibility",
+      "stimulus": "Base contract와 실제 Mock/CSV replay 종료 호출을 임시 데이터로 시험한다.",
+      "expected_behavior": "RealPLC 결과 전파를 위해 다른 driver의 정상 종료가 실패로 바뀌지 않는다. void 결과를 무비판적으로 성공 처리하지 않는다.",
+      "production_path_to_execute": [
+        "BasePLCDriver close contract",
+        "MockPLCDriver close",
+        "CsvReplayDriver close",
+        "PLCService.stop"
+      ],
+      "assertions": [
+        "구체 구현별 종료 근거 확인",
+        "기존 API/직접 호출부 호환",
+        "RealPLC는 실제 worker 종료 결과 필수"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_mock_and_csv_replay_have_explicit_close_contract"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Actual Mock/CSV service start/stop plus explicit close=True and connected=False; Base contract has explicit bool, no None-success adapter.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json"
+      ]
+    },
+    {
+      "id": "L1-12",
+      "goal": "L1",
+      "name": "temperature_safety_and_closeout_regression",
+      "stimulus": "관련 G/T/C 안전 시험과 기존 상위 종료/closeout QA를 새 diff 대상으로 실행한다.",
+      "expected_behavior": "Temperature 판정·clock proof·fact 무결성은 보존되고 driver 종료만으로 다른 소유자의 종료가 대체되지 않는다.",
+      "production_path_to_execute": [
+        "기존 G1~G5 회귀",
+        "기존 T1~T3 및 C1~C3 영향 범위",
+        "상위 종료 호출부 및 fact closeout"
+      ],
+      "assertions": [
+        "sentinel/TTL/freshness/PLC gate 보존",
+        "queue drain·서비스별 gap 보존",
+        "별도 HTTP poll/fact/image 소유자 검사 유지",
+        "새 코드 대상 실제 QA 로그"
+      ],
+      "allowed_test_boundaries": [
+        "모의 transport/장비 읽기 경계",
+        "제어 Event/Barrier",
+        "임시 파일/설정",
+        "thread factory 실패 주입은 해당 시험만"
+      ],
+      "execution_status": "passed",
+      "evidence_type": "executed_synthetic_production_path",
+      "test_functions": [
+        "backend.tests.test_temperature_worker_lifecycle.WorkerLifecycleTests.test_reconnect_api_preserves_failed_stop_and_separate_shutdown_owners"
+      ],
+      "commands": [
+        [
+          ".\\backend\\.venv\\Scripts\\python.exe",
+          "-m",
+          "unittest",
+          "-v",
+          "backend.tests.test_temperature_worker_lifecycle",
+          "backend.tests.test_temperature_remediation",
+          "backend.tests.test_temperature_fact_queue",
+          "backend.tests.test_temperature_poll_completeness",
+          "backend.tests.test_temperature_followup",
+          "backend.tests.test_temperature_followup_polling",
+          "backend.tests.test_temperature_clock_service",
+          "backend.tests.test_temperature_clock_source",
+          "backend.tests.test_temperature_clock_duration",
+          "backend.tests.test_shutdown_closeout_regression"
+        ],
+        [
+          "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "npm.cmd run health; exit $LASTEXITCODE"
+        ]
+      ],
+      "exit_code": 0,
+      "observed_result": "Recheck: G/T/C and closeout 132 pass; full health exit 0, backend 831, Electron 94, frontend 291+9, lint/typecheck and 5 QA selftests pass. Prior results preserved separately.",
+      "evidence_paths": [
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/targeted-final-source.json",
+        "artifacts/temperature-worker-lifecycle-l1/health-final.txt",
+        "artifacts/temperature-worker-lifecycle-l1/health-final.json",
+        "artifacts/temperature-worker-lifecycle-l1/INDEPENDENT_REVIEW.md",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/targeted.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/source.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/health.txt",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/health.json",
+        "artifacts/temperature-worker-lifecycle-l1/recheck-20260922/INDEPENDENT_REVIEW.md"
+      ]
+    }
+  ],
+  "completion_basis": "Current production-module tests and scoped diff review; old probe results are not acceptance results.",
+  "current_head": "10821534b2e9b54f6be6494cafb4b7ee43d45395",
+  "source_state": "uncommitted local diff; no staged changes",
+  "local_execution": {
+    "targeted": {
+      "count": 132,
+      "pass": 132,
+      "fail": 0,
+      "skip": 0,
+      "seconds": 63.279
+    },
+    "health": {
+      "exit_code": 0,
+      "backend": {
+        "count": 831,
+        "pass": 831,
+        "fail": 0,
+        "skip": 0,
+        "seconds": 173.551
+      },
+      "electron_pass": 94,
+      "frontend_node_pass": 9,
+      "frontend_vitest_files": 39,
+      "frontend_vitest_pass": 291,
+      "frontend_typecheck_lint": "pass",
+      "backend_ruff": "pass E9/F821",
+      "backend_mypy": "pass configured 8 source files",
+      "powershell_QA_suites": 5,
+      "started_at_utc": "2026-09-21T15:25:36.380418+00:00",
+      "finished_at_utc": "2026-09-21T15:29:11.355696+00:00"
+    }
+  },
+  "physical_equipment_access": false,
+  "full_real_driver_service_pipeline_run": true,
+  "full_pipeline_scope": "RealPLC/service lifecycle and snapshot paths with synthetic I/O; not hardware or complete application deployment",
+  "history_P2_status": "deferred; not implemented or accepted",
+  "prior_execution_20260921": {
+    "targeted": {
+      "count": 131,
+      "pass": 131,
+      "fail": 0,
+      "skip": 0,
+      "seconds": 65.222
+    },
+    "health": {
+      "exit_code": 0,
+      "backend": {
+        "count": 830,
+        "pass": 830,
+        "fail": 0,
+        "skip": 0,
+        "seconds": 175.249
+      },
+      "electron_pass": 94,
+      "frontend_node_pass": 9,
+      "frontend_vitest_files": 39,
+      "frontend_vitest_pass": 291,
+      "frontend_typecheck_lint": "pass",
+      "backend_ruff": "pass E9/F821",
+      "backend_mypy": "pass configured 8 source files",
+      "powershell_QA_suites": 5,
+      "started_at_utc": "2026-09-21T14:47:09.465542+00:00",
+      "finished_at_utc": "2026-09-21T14:51:48.408440+00:00"
+    }
+  },
+  "recheck_20260922": {
+    "status": "complete",
+    "production_changed_since_prior_run": false,
+    "new_test_methods": 1,
+    "new_subcases": 2,
+    "independent_review": "Approve; no blocker",
+    "evidence": "artifacts/temperature-worker-lifecycle-l1/recheck-20260922",
+    "old_evidence_preserved": 57
+  }
+}

@@ -6,6 +6,7 @@ import json
 import math
 import sqlite3
 import threading
+import time
 from datetime import datetime, timezone
 import re
 from collections import Counter
@@ -26,7 +27,10 @@ from backend.FacilityData.spot_diagnostics import (
 )
 
 
-SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.3.0"
+from backend.FacilityData.freshness import spot_poll_duration_output, spot_poll_duration_metadata
+
+SPOT_OBSERVATION_FACT_SCHEMA_VERSION = "1.4.0"
+SPOT_OBSERVATION_FACT_V1_3_0_SCHEMA_VERSION = "1.3.0"
 SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION = "1.2.1"
 SPOT_OBSERVATION_FACT_FILENAME = "spot_observation_fact.csv"
 _SPOT_OBSERVATION_FACT_FILE_LOCK = threading.Lock()
@@ -119,7 +123,7 @@ SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS = [
 _SPOT_OBSERVATION_FACT_EVIDENCE_INDEX = SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS.index(
     "spot_diagnostic_evidence_codes"
 )
-SPOT_OBSERVATION_FACT_COLUMNS = [
+SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS = [
     *SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS[:_SPOT_OBSERVATION_FACT_EVIDENCE_INDEX],
     "diagnostics_snapshot_id",
     "diagnostics_source_poll_seq",
@@ -131,6 +135,9 @@ SPOT_OBSERVATION_FACT_COLUMNS = [
     "evidence_provenance_json",
     *SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS[_SPOT_OBSERVATION_FACT_EVIDENCE_INDEX + 1 :],
 ]
+_DURATION_INDEX = SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS.index("spot_poll_duration_ms") + 1
+SPOT_OBSERVATION_FACT_COLUMNS = [*SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS[:_DURATION_INDEX],
+                                 "spot_poll_duration_status", *SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS[_DURATION_INDEX:]]
 SPOT_OBSERVATION_FACT_MANIFEST_DIAGNOSTIC_FIELDS = {
     "alarmstatus": "alarmstatus_nonblank_count",
     "signalpc": "signalpc_nonblank_count",
@@ -162,8 +169,16 @@ class SpotObservationFactWriter:
     spool_path: Optional[Path] = None
     load_existing_keys: bool = True
     failure_count: int = 0
+    spool_failure_count: int = 0
+    existing_fact_hash_ms: float = 0.0
+    existing_fact_index_ms: float = 0.0
     _seen_keys: set[str] = field(default_factory=set)
     _seen_poll_sequences: set[int] = field(default_factory=set, init=False, repr=False)
+    _polls_by_service: dict[str, set[int]] = field(default_factory=dict, init=False, repr=False)
+    _poll_bounds_by_service: dict[str, tuple[int, int]] = field(default_factory=dict, init=False, repr=False)
+    _duplicate_key_count: int = field(default=0, init=False, repr=False)
+    _invalid_identity_count: int = field(default=0, init=False, repr=False)
+    invalid_input_count: int = 0
     _manifest_digest: Any = field(default_factory=hashlib.sha256, init=False, repr=False)
     _manifest_state_ready: bool = field(default=True, init=False, repr=False)
     _manifest_tracked_size: int = field(default=0, init=False, repr=False)
@@ -230,6 +245,10 @@ class SpotObservationFactWriter:
             return False
 
     def write_fact(self, snapshot: Mapping[str, Any]) -> Optional[dict[str, str]]:
+        if _poll_identity(snapshot) is None and not _is_startup_pending_snapshot(snapshot):
+            self.invalid_input_count += 1
+            self.failure_count += 1
+            return None
         fact = build_spot_observation_fact(snapshot)
         key = fact["spot_observation_key"]
         if not key or key in self._seen_keys:
@@ -237,6 +256,8 @@ class SpotObservationFactWriter:
         try:
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
             self._flush_spool()
+            if key in self._seen_keys:
+                return None
             self._append_fact(fact)
             return fact
         except Exception:
@@ -371,7 +392,7 @@ class SpotObservationFactWriter:
                 if self._spool_pending_count_cache is not None:
                     self._spool_pending_count_cache += 1
         except Exception:
-            return
+            self.spool_failure_count += 1
 
     def _effective_spool_path(self) -> Path:
         if self.spool_path is not None:
@@ -431,24 +452,16 @@ class SpotObservationFactWriter:
                 realtime_row_count += 1
                 if key in self._seen_keys:
                     linked_rows += 1
-            first_poll_seq = (
-                min(self._seen_poll_sequences)
-                if self._seen_poll_sequences
-                else None
-            )
-            last_poll_seq = (
-                max(self._seen_poll_sequences)
-                if self._seen_poll_sequences
-                else None
-            )
-            poll_seq_gap_count = 0
-            if first_poll_seq is not None and last_poll_seq is not None:
-                poll_seq_gap_count = (
-                    last_poll_seq
-                    - first_poll_seq
-                    + 1
-                    - len(self._seen_poll_sequences)
-                )
+            first_poll_seq = min((bounds[0] for bounds in self._poll_bounds_by_service.values()), default=None)
+            last_poll_seq = max((bounds[1] for bounds in self._poll_bounds_by_service.values()), default=None)
+            per_service = {
+                service: {"first_poll_seq": self._poll_bounds_by_service[service][0],
+                          "last_poll_seq": self._poll_bounds_by_service[service][1],
+                          "distinct_poll_count": len(polls),
+                          "poll_seq_gap_count": self._poll_bounds_by_service[service][1]-self._poll_bounds_by_service[service][0]+1-len(polls)}
+                for service, polls in sorted(self._polls_by_service.items())
+            }
+            poll_seq_gap_count = sum(item["poll_seq_gap_count"] for item in per_service.values())
             missing_rows = realtime_row_count - linked_rows
             link_coverage_pct = (
                 linked_rows / realtime_row_count * 100.0
@@ -473,6 +486,10 @@ class SpotObservationFactWriter:
                 "first_poll_seq": first_poll_seq,
                 "last_poll_seq": last_poll_seq,
                 "poll_seq_gap_count": max(0, poll_seq_gap_count),
+                "poll_completeness_rule_version": "spot-poll-completeness-v2",
+                "per_service_poll_ranges": per_service,
+                "duplicate_observation_key_count": self._duplicate_key_count,
+                "invalid_poll_identity_count": self._invalid_identity_count,
                 "sha256": self._manifest_digest.copy().hexdigest(),
                 "link_coverage": {
                     "realtime_rows_with_observation_key": realtime_row_count,
@@ -508,7 +525,10 @@ class SpotObservationFactWriter:
             return
         try:
             expected_size = self.output_path.stat().st_size
+            hash_started = time.monotonic()
             self._manifest_digest = _file_sha256_digest(self.output_path)
+            self.existing_fact_hash_ms = (time.monotonic() - hash_started) * 1000.0
+            index_started = time.monotonic()
             with self.output_path.open("r", encoding="utf-8-sig", newline="") as handle:
                 reader = csv.DictReader(handle)
                 if list(reader.fieldnames or []) != SPOT_OBSERVATION_FACT_COLUMNS:
@@ -516,6 +536,7 @@ class SpotObservationFactWriter:
                     return
                 for row in reader:
                     self._record_manifest_row(row)
+            self.existing_fact_index_ms = (time.monotonic() - index_started) * 1000.0
             if self.output_path.stat().st_size != expected_size:
                 self._manifest_state_ready = False
                 return
@@ -527,10 +548,17 @@ class SpotObservationFactWriter:
         self._manifest_row_count += 1
         key = _text(row.get("spot_observation_key")).strip()
         if key:
+            self._duplicate_key_count += int(key in self._seen_keys)
             self._seen_keys.add(key)
-        poll_sequence = _positive_int_or_none(row.get("spot_poll_seq"))
-        if poll_sequence is not None:
+        identity = _poll_identity(row, check_key=True)
+        if identity is not None:
+            service, poll_sequence = identity
             self._seen_poll_sequences.add(poll_sequence)
+            self._polls_by_service.setdefault(service, set()).add(poll_sequence)
+            lower, upper = self._poll_bounds_by_service.get(service, (poll_sequence, poll_sequence))
+            self._poll_bounds_by_service[service] = (min(lower, poll_sequence), max(upper, poll_sequence))
+        else:
+            self._invalid_identity_count += 1
         self._capture_status_counts[
             _text(row.get("diagnostics_capture_status")).strip() or "missing"
         ] += 1
@@ -590,6 +618,10 @@ class SpotObservationFactWriter:
     def _reset_manifest_state(self) -> None:
         self._seen_keys.clear()
         self._seen_poll_sequences.clear()
+        self._polls_by_service.clear()
+        self._poll_bounds_by_service.clear()
+        self._duplicate_key_count = 0
+        self._invalid_identity_count = 0
         self._manifest_digest = hashlib.sha256()
         self._manifest_state_ready = True
         self._manifest_tracked_size = 0
@@ -620,9 +652,13 @@ def build_spot_observation_fact_manifest(
             realtime_rows=realtime_rows,
         )
     )
+    header = resolved_summary.get("header") or list(SPOT_OBSERVATION_FACT_COLUMNS)
+    historical_version = (SPOT_OBSERVATION_FACT_V1_3_0_SCHEMA_VERSION if header == SPOT_OBSERVATION_FACT_V1_3_0_COLUMNS
+                          else SPOT_OBSERVATION_FACT_V1_2_1_SCHEMA_VERSION if header == SPOT_OBSERVATION_FACT_V1_2_1_COLUMNS else None)
     return {
         "enabled": bool(enabled),
-        "schema_version": SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+        "schema_version": historical_version or SPOT_OBSERVATION_FACT_SCHEMA_VERSION,
+        **({"spot_poll_duration": spot_poll_duration_metadata()} if historical_version is None else {}),
         "path": path or fact_path.name,
         "row_count": resolved_summary["row_count"],
         "distinct_observation_key_count": resolved_summary[
@@ -631,6 +667,10 @@ def build_spot_observation_fact_manifest(
         "first_poll_seq": resolved_summary["first_poll_seq"],
         "last_poll_seq": resolved_summary["last_poll_seq"],
         "poll_seq_gap_count": resolved_summary["poll_seq_gap_count"],
+        "poll_completeness_rule_version": "spot-poll-completeness-v2",
+        "per_service_poll_ranges": resolved_summary.get("per_service_poll_ranges", {}),
+        "duplicate_observation_key_count": resolved_summary.get("duplicate_observation_key_count", 0),
+        "invalid_poll_identity_count": resolved_summary.get("invalid_poll_identity_count", 0),
         "sha256": resolved_summary["sha256"],
         "write_failure_count": int(write_failure_count),
         "spool_pending_count": (
@@ -638,7 +678,7 @@ def build_spot_observation_fact_manifest(
             if spool_pending_count is not None
             else _spool_pending_count(fact_path.with_name(f"{fact_path.name}.failed.jsonl"))
         ),
-        "required_columns": list(SPOT_OBSERVATION_FACT_COLUMNS),
+        "required_columns": list(header),
         "link_coverage": resolved_summary["link_coverage"],
         "diagnostic_field_coverage": resolved_summary["diagnostic_field_coverage"],
         "diagnostics_capture_status_counts": resolved_summary[
@@ -675,6 +715,9 @@ def summarize_spot_observation_fact(
     diagnostic_field_counts: Counter[str] = Counter()
     evidence_code_count = 0
     provenance_code_count = 0
+    per_service: dict[str, dict[str, int]] = {}
+    invalid_identity_count = 0
+    nonblank_key_count = 0
 
     distinct_state: sqlite3.Connection | None = None
     try:
@@ -686,14 +729,14 @@ def summarize_spot_observation_fact(
             "CREATE TABLE observation_keys (value TEXT PRIMARY KEY) WITHOUT ROWID"
         )
         distinct_state.execute(
-            "CREATE TABLE poll_sequences (value INTEGER PRIMARY KEY) WITHOUT ROWID"
+            "CREATE TABLE poll_sequences (service TEXT, value INTEGER, PRIMARY KEY(service, value)) WITHOUT ROWID"
         )
         distinct_state.execute(
             "CREATE TABLE realtime_keys "
             "(value TEXT PRIMARY KEY, occurrence_count INTEGER NOT NULL) WITHOUT ROWID"
         )
         observation_key_batch: list[tuple[str]] = []
-        poll_sequence_batch: list[tuple[int]] = []
+        poll_sequence_batch: list[tuple[str, int]] = []
         realtime_key_batch: list[tuple[str, int]] = []
 
         def flush_distinct_state() -> None:
@@ -705,7 +748,7 @@ def summarize_spot_observation_fact(
                 observation_key_batch.clear()
             if poll_sequence_batch:
                 distinct_state.executemany(
-                    "INSERT OR IGNORE INTO poll_sequences(value) VALUES (?)",
+                    "INSERT OR IGNORE INTO poll_sequences(service, value) VALUES (?, ?)",
                     poll_sequence_batch,
                 )
                 poll_sequence_batch.clear()
@@ -736,10 +779,13 @@ def summarize_spot_observation_fact(
                     row_count += 1
                     key = _text(row.get("spot_observation_key")).strip()
                     if key:
+                        nonblank_key_count += 1
                         observation_key_batch.append((key,))
-                    poll_sequence = _positive_int_or_none(row.get("spot_poll_seq"))
-                    if poll_sequence is not None:
-                        poll_sequence_batch.append((poll_sequence,))
+                    identity = _poll_identity(row, check_key=True)
+                    if identity is not None:
+                        poll_sequence_batch.append(identity)
+                    else:
+                        invalid_identity_count += 1
                     if (
                         len(observation_key_batch) >= _MANIFEST_SQL_BATCH_SIZE
                         or len(poll_sequence_batch) >= _MANIFEST_SQL_BATCH_SIZE
@@ -785,6 +831,11 @@ def summarize_spot_observation_fact(
             first_poll_seq = poll_sequence_summary[0]
             last_poll_seq = poll_sequence_summary[1]
             distinct_poll_sequence_count = int(poll_sequence_summary[2])
+        for service, first, last, count in distinct_state.execute(
+            "SELECT service, MIN(value), MAX(value), COUNT(*) FROM poll_sequences GROUP BY service ORDER BY service"
+        ):
+            per_service[service] = {"first_poll_seq": first, "last_poll_seq": last,
+                                    "distinct_poll_count": count, "poll_seq_gap_count": last-first+1-count}
         linked_summary = distinct_state.execute(
             "SELECT COALESCE(SUM(realtime_keys.occurrence_count), 0) "
             "FROM realtime_keys "
@@ -797,11 +848,7 @@ def summarize_spot_observation_fact(
         if distinct_state is not None:
             distinct_state.close()
 
-    poll_seq_gap_count = 0
-    if first_poll_seq is not None and last_poll_seq is not None:
-        poll_seq_gap_count = (
-            (last_poll_seq - first_poll_seq + 1) - distinct_poll_sequence_count
-        )
+    poll_seq_gap_count = sum(item["poll_seq_gap_count"] for item in per_service.values())
     missing_provenance_count = max(0, evidence_code_count - provenance_code_count)
     provenance_coverage_pct = (
         provenance_code_count / evidence_code_count * 100.0 if evidence_code_count else 100.0
@@ -817,6 +864,10 @@ def summarize_spot_observation_fact(
         "first_poll_seq": first_poll_seq,
         "last_poll_seq": last_poll_seq,
         "poll_seq_gap_count": max(0, poll_seq_gap_count),
+        "poll_completeness_rule_version": "spot-poll-completeness-v2",
+        "per_service_poll_ranges": per_service,
+        "duplicate_observation_key_count": nonblank_key_count-distinct_observation_key_count,
+        "invalid_poll_identity_count": invalid_identity_count,
         "sha256": _file_sha256(fact_path),
         "link_coverage": {
             "realtime_rows_with_observation_key": realtime_row_count,
@@ -875,12 +926,27 @@ def _positive_int_or_none(value: Any) -> int | None:
 
 
 def build_spot_observation_key(snapshot: Mapping[str, Any]) -> str:
-    service_id = _text(snapshot.get("spot_service_instance_id"))
-    poll_seq = _positive_poll_seq_text(snapshot.get("spot_poll_seq"))
+    identity = _poll_identity(snapshot)
     completed_at = _text(snapshot.get("spot_last_poll_completed_at"))
-    if not service_id or not poll_seq or not completed_at or _is_startup_pending_snapshot(snapshot):
+    if identity is None or not completed_at or _is_startup_pending_snapshot(snapshot):
         return ""
+    service_id, poll_seq = identity
     return f"{service_id}:{poll_seq}"
+
+
+def _poll_identity(snapshot: Mapping[str, Any], *, check_key: bool = False) -> tuple[str, int] | None:
+    service = snapshot.get("spot_service_instance_id")
+    seq = snapshot.get("spot_poll_seq")
+    if not isinstance(service, str) or not service.strip() or service != service.strip() or ":" in service:
+        return None
+    if isinstance(seq, bool) or not isinstance(seq, (str, int)) or not re.fullmatch(r"[1-9][0-9]*", str(seq)):
+        return None
+    number = int(seq)
+    if number > 2**63-1:
+        return None
+    if check_key and snapshot.get("spot_observation_key") != f"{service}:{number}":
+        return None
+    return service, number
 
 
 def _positive_poll_seq_text(value: Any) -> str:
@@ -1005,7 +1071,8 @@ def build_spot_observation_fact(snapshot: Mapping[str, Any]) -> dict[str, str]:
         "spot_raw_payload_encoding": "utf-8-replace" if snapshot.get("spot_raw_value_text") is not None else "",
         "spot_last_poll_started_at": _text(snapshot.get("spot_last_poll_started_at")),
         "spot_last_poll_completed_at": completed_at,
-        "spot_poll_duration_ms": _text(snapshot.get("spot_poll_duration_ms")),
+        "spot_poll_duration_ms": _text(spot_poll_duration_output(snapshot.get("spot_poll_duration_ms"), snapshot.get("spot_poll_duration_status"))[0]),
+        "spot_poll_duration_status": spot_poll_duration_output(snapshot.get("spot_poll_duration_ms"), snapshot.get("spot_poll_duration_status"))[1],
         "diagnostics_captured_at": diagnostics_captured_at,
         "diagnostics_capture_status": diagnostics_capture_status,
         "diagnostics_age_ms": diagnostics_age_ms,

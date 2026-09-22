@@ -25,8 +25,12 @@ class BasePLCDriver(ABC):
         pass
         
     @abstractmethod
-    def close(self):
-        """Close connection."""
+    def close(self) -> bool:
+        """Close owned resources; True only when all owned work has stopped.
+
+        Synchronous drivers with no background workers return True after cleanup.
+        A timeout or cleanup failure returns False and preserves remaining ownership.
+        """
         pass
 
     def get_comm_metrics(self) -> dict:

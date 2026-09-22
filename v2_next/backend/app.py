@@ -3197,7 +3197,8 @@ def sync_central_config():
 @app.post("/api/control/reconnect")
 def reconnect():
     try:
-        plc_service.stop()
+        if plc_service.stop() is not True:
+            raise RuntimeError("Previous PLC workers/resources have not stopped")
         plc_service.start()
         return {"ok": True, "running": plc_service.running}
     except Exception as exc:
