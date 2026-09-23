@@ -98,4 +98,5 @@ config.pending.json
 !backend/tests/test_temperature_clock_source.py
 !backend/tests/test_temperature_clock_duration.py
 !backend/tests/test_temperature_worker_lifecycle.py
+!backend/tests/test_temperature_diagnostics_reason.py
 !backend/tests/test_history_cursor.py

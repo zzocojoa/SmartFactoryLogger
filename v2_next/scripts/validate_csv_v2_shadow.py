@@ -56,7 +56,10 @@ from backend.FacilityData.spot_config_provenance import (
     DEVICE_CONFIG_READBACK_STATUSES,
 )
 from backend.FacilityData.temperature_operational import (
+    DIAGNOSTICS_EXCLUSION_EVIDENCE_CODES,
+    DIAGNOSTICS_EXCLUSION_EVIDENCE_PREFIX,
     TEMPERATURE_OPERATIONAL_RULE_VERSION,
+    TEMPERATURE_OPERATIONAL_STRICT_RULE_VERSIONS,
     UNSUPPORTED_CAUSE_CANDIDATES,
 )
 from backend.FacilityData.freshness import (SPOT_CACHE_EXPIRY_THRESHOLD_SEC,
@@ -799,6 +802,7 @@ def validate_v2_4_operational_invariants(
     *,
     row_time_freshness_threshold_ms: float | None = FALLBACK_ROW_TIME_FRESHNESS_THRESHOLD_MS,
     forbid_unsupported_causes: bool = False,
+    operational_rule_version: str = "",
 ) -> list[str]:
     required_columns = [
         "timestamp_utc",
@@ -868,6 +872,16 @@ def validate_v2_4_operational_invariants(
         cause = row[indices["temperature_under_range_cause_candidate"]].strip()
         confidence = row[indices["temperature_cause_confidence"]].strip()
         evidence_codes = _parse_json_string_list(row[indices["temperature_cause_evidence_codes"]].strip())
+        if operational_rule_version == TEMPERATURE_OPERATIONAL_RULE_VERSION:
+            exclusions = {code for code in evidence_codes if code.startswith(DIAGNOSTICS_EXCLUSION_EVIDENCE_PREFIX)}
+            if "diagnostics_missing_or_stale" in evidence_codes:
+                failures.append(f"row {row_number} v6 requires a specific diagnostics exclusion reason")
+            if exclusions - DIAGNOSTICS_EXCLUSION_EVIDENCE_CODES:
+                failures.append(f"row {row_number} unknown diagnostics exclusion reason")
+            if len(exclusions) > 1:
+                failures.append(f"row {row_number} multiple diagnostics exclusion reasons conflict with the primary reason contract")
+            if exclusions and output_status != "under_range":
+                failures.append(f"row {row_number} diagnostics exclusion evidence requires under_range output")
         spot_observation_key = row[indices["spot_observation_key"]].strip()
         image_capture_id = row[indices["spot_image_capture_id_nearest"]].strip()
         image_path = row[indices["spot_image_path_nearest"]].strip()
@@ -1214,7 +1228,7 @@ def validate_spot_configuration_snapshot(
         if isinstance(schema_metadata, dict)
         else ""
     )
-    if snapshot.get("spot_config_revision") or rule_version == TEMPERATURE_OPERATIONAL_RULE_VERSION:
+    if snapshot.get("spot_config_revision") or rule_version in TEMPERATURE_OPERATIONAL_STRICT_RULE_VERSIONS:
         failures.extend(validate_spot_config_provenance_snapshot(snapshot))
 
     threshold = _parse_finite_float(snapshot.get("low_signal_threshold_pc"))
@@ -2719,8 +2733,9 @@ def validate(
                             )
                             or ""
                         )
-                        == TEMPERATURE_OPERATIONAL_RULE_VERSION
+                        in TEMPERATURE_OPERATIONAL_STRICT_RULE_VERSIONS
                     ),
+                    operational_rule_version=str(schema_metadata.get("temperature_operational_rule_version") or ""),
                 )
             )
             failures.extend(

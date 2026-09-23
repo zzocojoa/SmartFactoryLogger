@@ -819,7 +819,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
             '["phase_setup_candidate","signal_below_threshold"]',
         )
 
-    def test_v2_4_row_ignores_stale_low_signal_evidence_without_config_inputs(self) -> None:
+    def test_v2_4_row_marks_fact_only_exclusion_without_config_inputs(self) -> None:
         service = CSVLoggerService()
         service.apply_config(csv_v2_operational_fields_enabled=True)
         data = self.create_data().model_copy(update={"spot_diagnostic_evidence_codes": '["signal_below_threshold"]'})
@@ -830,7 +830,7 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(row[V2_4_CSV_COLUMNS.index("temperature_cause_confidence")], "0.0")
         self.assertEqual(
             row[V2_4_CSV_COLUMNS.index("temperature_cause_evidence_codes")],
-            '["diagnostics_missing_or_stale","phase_setup_candidate"]',
+            '["diagnostics_excluded_fact_only","phase_setup_candidate"]',
         )
 
     def test_v2_4_row_suppresses_collectorless_cause_and_counts_it(self) -> None:
