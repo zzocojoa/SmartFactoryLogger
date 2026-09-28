@@ -1,5 +1,9 @@
 # D1 진단 제외 사유 결과
 
+최종 후보·현장 결과 및 9월 29일 승인은 [D1_CANDIDATE_RESULT.md](D1_CANDIDATE_RESULT.md),
+[D1_FIELD_RESULT.md](D1_FIELD_RESULT.md), [D1_PROMOTION_DECISION.md](D1_PROMOTION_DECISION.md)에 있다.
+아래 HEAD·미커밋·미실행·미승인 표기는 코드 시험 완료 당시 상태로 보존한다.
+
 2026-09-23. **D1 로컬 코드 보완·검증 완료. 현재 장비 설정 검증과 운영 승격은 미완료.**
 
 > 후속 실제 장비 조회: 같은 날 16:07–16:12 KST, 설정 14개 일치와 모델 표기 차이를 확인했다.

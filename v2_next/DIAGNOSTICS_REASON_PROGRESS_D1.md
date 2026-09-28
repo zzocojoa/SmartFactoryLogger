@@ -1,5 +1,8 @@
 # D1 진단 제외 사유 기록
 
+후속 진행은 [후보 검증](D1_CANDIDATE_RESULT.md), [현장 결과](D1_FIELD_RESULT.md),
+[최종 운영 후보 승인](D1_PROMOTION_DECISION.md)을 따른다. 아래는 로컬 코드 작업 당시 기록이다.
+
 2026-09-23. 로컬 코드·시험·결과 보고 범위. commit/push/PR/merge/설치/배포는 수행하지 않는다.
 
 ## 기준과 작업 분리

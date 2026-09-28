@@ -1,5 +1,9 @@
 # SPOT 현재 설정 대조와 후보 준비
 
+이 문서는 9월 23일 장비 조회·후보 준비 시점의 기록이다. 후속 [후보 검증](D1_CANDIDATE_RESULT.md),
+[현장 결과](D1_FIELD_RESULT.md), [최종 운영 후보 승인](D1_PROMOTION_DECISION.md)은 별도 기록으로 구분한다.
+operator/comparator 검증값과 모델 동등성의 미검증 상태는 후속 승인으로 변경하지 않았다.
+
 2026-09-23 16:07–16:12 KST. Chrome 원격 데스크톱의 서버 Chrome을 통해 장비 웹 UI를
 직접 읽었다. **화면에서 대조 가능한 설정 14개는 승인 fingerprint 재구성 자료와 일치한다.**
 모델 표기 동일성·비교기 적용 조건은 미검증이며 operator/comparator를 true로 변경하지 않았다.
