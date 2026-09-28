@@ -15,7 +15,12 @@ from unittest.mock import patch
 from backend import config
 from backend.FacilityData.freshness import clock_domain_id
 from backend.FacilityData.operator_metadata import OperatorMetadataStore
-from backend.FacilityData.repository import CSVLoggerService, V2_5_CSV_COLUMNS
+from backend.FacilityData.repository import (
+    CSVLoggerService,
+    CSV_SCHEMA_VERSION_V2_3,
+    V2_3_CSV_COLUMNS,
+    V2_5_CSV_COLUMNS,
+)
 from backend.FacilityData.schemas import FactoryData
 from backend.FacilityData.service import PLCService
 from backend.FacilityData.temperature_operational import (
@@ -140,6 +145,100 @@ class DiagnosticsReasonTests(unittest.TestCase):
 
 
 class DiagnosticsReasonCsvTests(unittest.TestCase):
+    def _prepare_existing_schema_rollover(self, root, rule):
+        writer = CSVLoggerService()
+        writer.apply_config(log_path=root, auto_save=True, csv_v1_enabled=False, csv_v2_enabled=True,
+                            csv_v2_sidecar_enabled=True, csv_v2_operational_fields_enabled=True,
+                            csv_v2_temperature_hardening_enabled=True)
+        timestamp = datetime(2026, 9, 29, 1, 0, 0, tzinfo=timezone.utc)
+        stamp = writer._filename_timestamp(timestamp)
+        base = root / f"Factory_Integrated_Log_v2_{stamp}.csv"
+        schema_target = base.with_name(f"{base.stem}_2_5_2.csv")
+        for path, columns, schema in (
+            (base, V2_3_CSV_COLUMNS, CSV_SCHEMA_VERSION_V2_3),
+            (schema_target, V2_5_CSV_COLUMNS, "2.5.2"),
+        ):
+            with path.open("w", encoding="utf-8-sig", newline="") as handle:
+                csv.writer(handle).writerows([columns, [schema] + [""] * (len(columns) - 1)])
+        base.with_suffix(".metadata.json").write_text(json.dumps({
+            "schema_metadata": {"schema_version": CSV_SCHEMA_VERSION_V2_3},
+        }), encoding="utf-8")
+        if rule is not None:
+            schema_target.with_suffix(".metadata.json").write_text(json.dumps({
+                "schema_metadata": {
+                    "schema_version": "2.5.2", "temperature_operational_rule_version": rule,
+                },
+            }), encoding="utf-8")
+        preserved = {path: path.read_bytes() for path in root.iterdir()}
+        return writer, timestamp, base, schema_target, preserved
+
+    def test_worker_writes_v6_after_existing_old_or_unknown_rule_schema_rollover(self):
+        for old_rule in ("temperature-operational-v5", None):
+            with self.subTest(old_rule=old_rule), tempfile.TemporaryDirectory() as tmp, \
+                    patch.object(config, "SPOT_OBSERVATION_FACT_ENABLED", False), \
+                    patch.object(config, "SPOT_IMAGE_CAPTURE_ENABLED", False):
+                root = Path(tmp)
+                writer, timestamp, base, schema_target, preserved = self._prepare_existing_schema_rollover(
+                    root, old_rule)
+                writer.start()
+                try:
+                    for count in (3, 4):
+                        writer.enqueue(FactoryData(Time=timestamp.isoformat(), Status="Running", Count=count))
+                finally:
+                    stopped = writer.stop()
+                self.assertTrue(stopped)
+                target = schema_target.with_name(f"{schema_target.stem}_temperature_operational_v6.csv")
+                self.assertTrue(target.is_file())
+                self.assertEqual(len(list(root.glob("*.csv"))), 3)
+                with target.open(encoding="utf-8-sig", newline="") as handle:
+                    rows = list(csv.DictReader(handle))
+                self.assertEqual([row["sample_seq"] for row in rows], ["1", "2"])
+                self.assertEqual([row["Count"] for row in rows], ["3", "4"])
+                metadata = json.loads(target.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+                self.assertEqual(metadata["schema_metadata"]["temperature_operational_rule_version"],
+                                 "temperature-operational-v6")
+                for path, original in preserved.items():
+                    self.assertEqual(path.read_bytes(), original)
+                if old_rule is None:
+                    self.assertFalse(schema_target.with_suffix(".metadata.json").exists())
+
+    def test_compatible_schema_rollover_is_reused_without_another_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            writer, timestamp, _, schema_target, preserved = self._prepare_existing_schema_rollover(
+                root, "temperature-operational-v6")
+            handle, csv_writer = writer._open_v2_log_file(writer._filename_timestamp(timestamp),
+                                                        "Factory_Integrated_Log_v2")
+            try:
+                self.assertIsNotNone(handle)
+                self.assertIsNotNone(csv_writer)
+                self.assertEqual(writer._current_v2_csv_path, schema_target)
+            finally:
+                writer._close_file(handle)
+            self.assertEqual(set(root.iterdir()), set(preserved))
+            for path, original in preserved.items():
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_conflicting_rule_target_after_schema_rollover_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            writer, timestamp, _, schema_target, _ = self._prepare_existing_schema_rollover(
+                root, "temperature-operational-v5")
+            target = schema_target.with_name(f"{schema_target.stem}_temperature_operational_v6.csv")
+            target.write_bytes(schema_target.read_bytes())
+            target.with_suffix(".metadata.json").write_bytes(schema_target.with_suffix(".metadata.json").read_bytes())
+            preserved = {path: path.read_bytes() for path in root.iterdir()}
+            handle, csv_writer = writer._open_v2_log_file(writer._filename_timestamp(timestamp),
+                                                        "Factory_Integrated_Log_v2")
+            try:
+                self.assertIsNone(handle)
+                self.assertIsNone(csv_writer)
+            finally:
+                writer._close_file(handle)
+            self.assertEqual(set(root.iterdir()), set(preserved))
+            for path, original in preserved.items():
+                self.assertEqual(path.read_bytes(), original)
+
     def test_unknown_rule_rollover_and_incompatible_target_preserve_existing_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
