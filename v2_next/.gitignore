@@ -100,3 +100,4 @@ config.pending.json
 !backend/tests/test_temperature_worker_lifecycle.py
 !backend/tests/test_temperature_diagnostics_reason.py
 !backend/tests/test_history_cursor.py
+!backend/tests/test_image_shutdown_evidence.py

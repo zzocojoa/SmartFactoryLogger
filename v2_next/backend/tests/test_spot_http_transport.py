@@ -1439,6 +1439,7 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         release_response = threading.Event()
+        response_started = threading.Event()
 
         def connection_factory(
             _scheme: str,
@@ -1449,6 +1450,7 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
         ) -> _FakeConnection:
             return _FakeConnection(
                 release_response=release_response,
+                response_started=response_started,
                 response_error=OSError(10054, "private endpoint detail"),
             )
 
@@ -1473,11 +1475,13 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                         )
                     )
                 )
-                await asyncio.sleep(0.02)
+                self.assertTrue(await asyncio.to_thread(response_started.wait, 1.0))
                 request_task.cancel()
-                release_response.set()
                 with self.assertRaises(asyncio.CancelledError):
                     await request_task
+                # The asserted order is cancellation followed by a late worker
+                # failure. Do not release the worker before cancellation runs.
+                release_response.set()
                 for _ in range(100):
                     if warning_mock.called:
                         break
@@ -1487,9 +1491,11 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
             gc.collect()
             await asyncio.sleep(0)
         finally:
+            release_response.set()
+            stopped = await transport.close()
             loop.set_exception_handler(previous_handler)
 
-        self.assertTrue(await transport.close())
+        self.assertTrue(stopped)
         self.assertEqual(loop_failures, [])
         warning_mock.assert_called_once()
         warning_call = warning_mock.call_args
@@ -1819,7 +1825,23 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
         )
-        await asyncio.sleep(0.01)
+        async def cleanup() -> None:
+            release_response.set()
+            await transport.close(timeout_sec=1.0)
+            await asyncio.gather(first, second, return_exceptions=True)
+        self.addAsyncCleanup(cleanup)
+        # A scheduled to_thread task is not proof that the request was queued.
+        # Observe the real submission before testing queued-request cancellation.
+        for _attempt in range(100):
+            submitted = any(
+                event["correlation_id"] == "transport:44444444444444444444444444444444"
+                and event["state"] == "submitted"
+                for event in transport.diagnostics()["source_port_recent_request_events"]
+            )
+            if submitted:
+                break
+            await asyncio.sleep(0.01)
+        self.assertTrue(submitted)
 
         self.assertFalse(await transport.close(timeout_sec=0.01))
         for task in (first, second):

@@ -1,0 +1,559 @@
+{
+  "date": "2026-09-30",
+  "scope": "local production code and synthetic tests only",
+  "base_commit": "586855d8b0185fb8ed36e44ab6998aae987cbdb5",
+  "branch": "codex/image-shutdown-evidence-20260930",
+  "source_test_file": "backend/tests/test_image_shutdown_evidence.py",
+  "source_test_sha256": "92c5e570fa833f9e8aa04c166816b330c79c09dee94e0d28cdb4b4b84234f421",
+  "cases": [
+    {
+      "test": "test_history_preserved_after_real_drain_and_repeat_stop",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_inflight_and_queued_timeout_late_exit_are_distinct",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_concurrent_begin_and_stop_keep_first_baseline",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_status_is_pure_memory_and_copies_baseline",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_receipt_no_clobber_tamper_missing_sidecar_and_fsync_failure",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_receipt_open_link_readback_and_redirect_fail_closed",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_attempt_binding_distinct_callers_and_late_observations",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_control_real_image_csv_shutdown_preserves_history_and_old_manifest",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_control_baseline_precedes_real_transport_drain",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_control_receipt_failure_still_stops_worker_and_exits_two",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_control_clean_shutdown_verified_receipt_and_exit_zero",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_control_timeout_receipt_is_not_rewritten_by_late_worker_exit",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_final_receipt_failure_preserves_begin_and_never_exits_zero",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_lifespan_partial_start_keeps_primary_error_and_records_real_csv_stop",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_evidence_io_stall_never_prevents_real_worker_cleanup",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_cancel_evidence_wait_keeps_cleanup_and_failure_decision",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_control_and_partial_lifespan_cleanup_overlap_without_mixing_receipts",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_partial_receipt_write_is_preserved_without_publication",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_other_entrypoint_receipt_stall_or_failure_blocks_control_exit",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_peer_start_during_last_exit_delay_is_rechecked",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_failed_attempt_cannot_be_hidden_by_new_successful_receipt",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_changed_begin_receipt_never_binds_to_successful_final",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    },
+    {
+      "test": "test_control_health_preserves_auth_and_additive_model_without_io",
+      "result": "pass",
+      "proof": "backend-final-r3.stderr.log"
+    }
+  ],
+  "final_validation": {
+    "backend-final-r3": {
+      "name": "backend-final-r3",
+      "command": [
+        "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "backend/tests",
+        "-v"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\backend-final-r3-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\backend-final-r3-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\backend-final-r3-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:31:35.892984+00:00",
+      "ended_utc": "2026-09-29T23:34:34.374916+00:00",
+      "exit_code": 0
+    },
+    "integrated-final": {
+      "name": "integrated-final",
+      "command": [
+        "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_image_shutdown_evidence",
+        "-v"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\integrated-final-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\integrated-final-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\integrated-final-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:22:00.934026+00:00",
+      "ended_utc": "2026-09-29T23:22:08.648957+00:00",
+      "exit_code": 0
+    },
+    "production-path-final": {
+      "name": "production-path-final",
+      "command": [
+        "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\backend\\.venv\\Scripts\\python.exe",
+        "scripts/image_hold_recovery/test_local_recovery.py",
+        "--source-root",
+        "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+        "--output",
+        "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\production-path-final"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\production-path-final-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\production-path-final-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\production-path-final-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:24:47.903138+00:00",
+      "ended_utc": "2026-09-29T23:24:50.382551+00:00",
+      "exit_code": 0
+    },
+    "electron-production-path-final": {
+      "name": "electron-production-path-final",
+      "command": [
+        "powershell.exe",
+        "-NoProfile",
+        "-Command",
+        "$env:SFL_RECOVERY_SOURCE = 'C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next'; $env:SFL_RECOVERY_CONTROL_RECEIPT = 'C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\production-path-final\\test_07_full_control_path_with_real_csv_worker_and_old_manifest.json'; & 'C:\\Program Files\\nodejs\\node.exe' --test scripts/image_hold_recovery/electron_contract.test.cjs; exit $LASTEXITCODE"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\electron-production-path-final-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\electron-production-path-final-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\electron-production-path-final-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:28:57.595671+00:00",
+      "ended_utc": "2026-09-29T23:28:58.007191+00:00",
+      "exit_code": 0
+    },
+    "electron-r1": {
+      "name": "electron-r1",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "--test",
+        "startupCoordinator.test.cjs",
+        "startupIpc.test.cjs",
+        "backendControlIpc.test.cjs",
+        "backendControlClient.test.cjs",
+        "backendStartupProgress.test.cjs",
+        "backendProcessLifecycle.test.cjs",
+        "electronRuntimeSafety.test.cjs",
+        "electronRuntimeSafetyBackpressure.test.cjs",
+        "shutdownDiagnosticTrace.test.cjs"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\electron-r1-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\electron-r1-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\electron-r1-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules"
+      },
+      "started_utc": "2026-09-29T23:12:41.430088+00:00",
+      "ended_utc": "2026-09-29T23:12:41.889458+00:00",
+      "exit_code": 0
+    },
+    "lint-final-r2": {
+      "name": "lint-final-r2",
+      "command": [
+        "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "backend"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\lint-final-r2-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\lint-final-r2-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\lint-final-r2-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:33:34.420320+00:00",
+      "ended_utc": "2026-09-29T23:33:34.541250+00:00",
+      "exit_code": 0
+    },
+    "types-final": {
+      "name": "types-final",
+      "command": [
+        "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "mypy"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\types-final-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\types-final-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\types-final-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:27:53.054544+00:00",
+      "ended_utc": "2026-09-29T23:27:53.428354+00:00",
+      "exit_code": 0
+    },
+    "qa-closeout-r1": {
+      "name": "qa-closeout-r1",
+      "command": [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/run_closeout_hang_reproduction.ps1",
+        "-SelfTest"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-closeout-r1-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-closeout-r1-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-closeout-r1-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules"
+      },
+      "started_utc": "2026-09-29T23:14:12.492442+00:00",
+      "ended_utc": "2026-09-29T23:14:14.219288+00:00",
+      "exit_code": 0
+    },
+    "qa-measure-r1": {
+      "name": "qa-measure-r1",
+      "command": [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/measure_nsis_operational_ready.ps1",
+        "-SelfTest"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-measure-r1-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-measure-r1-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-measure-r1-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules"
+      },
+      "started_utc": "2026-09-29T23:14:12.803673+00:00",
+      "ended_utc": "2026-09-29T23:14:13.873781+00:00",
+      "exit_code": 0
+    },
+    "qa-trace-r1": {
+      "name": "qa-trace-r1",
+      "command": [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/collect_nsis_startup_trace.ps1",
+        "-SelfTest"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-trace-r1-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-trace-r1-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-trace-r1-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules"
+      },
+      "started_utc": "2026-09-29T23:14:13.069540+00:00",
+      "ended_utc": "2026-09-29T23:14:13.588419+00:00",
+      "exit_code": 0
+    },
+    "qa-signature-r1": {
+      "name": "qa-signature-r1",
+      "command": [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/verify_windows_release_signature.ps1",
+        "-SelfTest"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-signature-r1-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-signature-r1-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-signature-r1-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules"
+      },
+      "started_utc": "2026-09-29T23:15:27.571783+00:00",
+      "ended_utc": "2026-09-29T23:15:28.707069+00:00",
+      "exit_code": 0
+    },
+    "qa-workflow-r2": {
+      "name": "qa-workflow-r2",
+      "command": [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "scripts/verify_windows_release_workflow_contract.ps1",
+        "-SelfTest"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-workflow-r2-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-workflow-r2-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\qa-workflow-r2-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:20:48.587794+00:00",
+      "ended_utc": "2026-09-29T23:20:49.968508+00:00",
+      "exit_code": 0
+    },
+    "transport-cancellation-final": {
+      "name": "transport-cancellation-final",
+      "command": [
+        "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_cancelled_worker_failure_emits_privacy_safe_bounded_warning",
+        "-v"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\transport-cancellation-final-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\transport-cancellation-final-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\transport-cancellation-final-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:27:52.278547+00:00",
+      "ended_utc": "2026-09-29T23:27:52.886908+00:00",
+      "exit_code": 0
+    },
+    "transport-submission-final": {
+      "name": "transport-submission-final",
+      "command": [
+        "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "unittest",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "backend.tests.test_spot_http_transport.SpotHttpTransportTests.test_sync_requests_share_worker_and_shutdown_drain_tracking",
+        "-v"
+      ],
+      "cwd": "C:\\Users\\user\\.codex\\worktrees\\temperature-diagnostics-reason-d1\\SmartFactoryLogger\\v2_next",
+      "explicit_env": {
+        "APPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\transport-submission-final-profile\\roaming",
+        "LOCALAPPDATA": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\transport-submission-final-profile\\local",
+        "SFL_CONFIG_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\IMAGE_SHUTDOWN_EVIDENCE_20260930_R1\\transport-submission-final-profile\\config.ini",
+        "V2_MODE": "MOCK",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHON_DOTENV_DISABLED": "1",
+        "TEMPERATURE_GOAL_PACKAGE": "C:\\Users\\user\\Downloads\\Codex_Temperature_20260909_Goal_Package",
+        "PSModulePath": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules;C:\\Program Files\\WindowsPowerShell\\Modules",
+        "NODE_PATH": "C:\\Users\\user\\Desktop\\SmartFactory\\D1_CANDIDATE_R2\\src\\v2_next\\node_modules"
+      },
+      "started_utc": "2026-09-29T23:31:35.674818+00:00",
+      "ended_utc": "2026-09-29T23:31:36.380408+00:00",
+      "exit_code": 0
+    }
+  },
+  "backend": {
+    "run": 862,
+    "pass": 862,
+    "fail": 0,
+    "skip": 0
+  },
+  "electron_existing": {
+    "run": 94,
+    "pass": 94,
+    "fail": 0,
+    "skip": 0
+  },
+  "prior_production_path": {
+    "python_pass": 10,
+    "electron_pass": 4
+  },
+  "not_executed": [
+    "real PLC/SPOT access",
+    "packaged build/install",
+    "server shutdown/handover",
+    "field observation",
+    "frontend typecheck/lint/tests (no frontend/Electron source change)"
+  ],
+  "operating_promotion": false,
+  "installation_clearance": false
+}
