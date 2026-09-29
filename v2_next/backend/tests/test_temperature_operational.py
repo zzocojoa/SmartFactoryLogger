@@ -168,7 +168,7 @@ class TemperatureOperationalTests(unittest.TestCase):
                 output_evidence = json.loads(decision.temperature_cause_evidence_codes)
                 if evidence_code in {"alarm_low_signal", "signal_below_threshold"}:
                     self.assertNotIn(evidence_code, output_evidence)
-                    self.assertIn("diagnostics_missing_or_stale", output_evidence)
+                    self.assertIn("diagnostics_excluded_fact_only", output_evidence)
                 else:
                     self.assertIn(evidence_code, output_evidence)
 
@@ -273,7 +273,7 @@ class TemperatureOperationalTests(unittest.TestCase):
         self.assertEqual(decision.diagnostics_cause_suppressed_reason, "fact_only")
         self.assertEqual(
             json.loads(decision.temperature_cause_evidence_codes),
-            ["diagnostics_missing_or_stale"],
+            ["diagnostics_excluded_fact_only"],
         )
 
     def test_legacy_async_enriched_diagnostics_without_identity_are_not_causal(self) -> None:

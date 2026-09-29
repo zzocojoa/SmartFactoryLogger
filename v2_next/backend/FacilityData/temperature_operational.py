@@ -15,7 +15,10 @@ from backend.FacilityData.spot_observation import (
     SpotSourceFreshness,
 )
 from backend.FacilityData.spot_low_signal import derive_low_signal_evidence
-from backend.FacilityData.spot_diagnostics import evaluate_diagnostics_eligibility
+from backend.FacilityData.spot_diagnostics import (
+    DIAGNOSTICS_SUPPRESSION_REASONS,
+    evaluate_diagnostics_eligibility,
+)
 from backend.FacilityData.temperature_state import (
     SpotCacheStatus,
     TemperatureStateDecision,
@@ -26,7 +29,15 @@ from backend.FacilityData.temperature_state import (
 )
 
 
-TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v5"
+TEMPERATURE_OPERATIONAL_RULE_VERSION = "temperature-operational-v6"
+# v6 changes exclusion evidence only. Keep v5's validation gates for historical CSVs.
+TEMPERATURE_OPERATIONAL_STRICT_RULE_VERSIONS = frozenset(
+    {"temperature-operational-v5", TEMPERATURE_OPERATIONAL_RULE_VERSION}
+)
+DIAGNOSTICS_EXCLUSION_EVIDENCE_PREFIX = "diagnostics_excluded_"
+DIAGNOSTICS_EXCLUSION_EVIDENCE_CODES = frozenset(
+    DIAGNOSTICS_EXCLUSION_EVIDENCE_PREFIX + reason for reason in DIAGNOSTICS_SUPPRESSION_REASONS
+)
 SPOT_ROW_FRESHNESS_RULE_VERSION = "spot-row-freshness-v2"
 UNSUPPORTED_CAUSE_EVIDENCE_CODES = frozenset(
     {
@@ -500,8 +511,13 @@ def _derive_under_range_cause(
         _eligible_low_signal_inputs(input_state, evidence)
     )
     evidence.difference_update(_LOW_SIGNAL_DIAGNOSTIC_EVIDENCE_CODES)
+    # Exclusion labels describe this decision, not caller-supplied diagnostic facts.
+    evidence = {
+        code for code in evidence
+        if code != "diagnostics_missing_or_stale" and not code.startswith(DIAGNOSTICS_EXCLUSION_EVIDENCE_PREFIX)
+    }
     if diagnostics_suppressed:
-        evidence.add("diagnostics_missing_or_stale")
+        evidence.add(DIAGNOSTICS_EXCLUSION_EVIDENCE_PREFIX + diagnostics_reason)
     phase_evidence: list[str] = []
     if input_state.process_phase_candidate in {
         "setup_candidate",

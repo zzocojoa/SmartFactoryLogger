@@ -708,6 +708,17 @@ class CSVLoggerService:
 
     def _v2_rollover_path_for_contract(self, csv_path: Path, contract: V2CsvContract) -> Path:
         schema_suffix = contract.schema_version.replace(".", "_")
+        schema_path = csv_path.with_name(f"{csv_path.stem}_{schema_suffix}{csv_path.suffix}")
+        if contract.operational_fields_enabled:
+            with csv_path.open("r", newline="", encoding="utf-8-sig") as handle:
+                same_columns = next(csv.reader(handle), None) == list(contract.columns)
+            if same_columns or (
+                schema_path.exists()
+                and schema_path.stat().st_size > 0
+                and not self._v2_header_matches_current_schema(schema_path, contract)
+            ):
+                # The base or an earlier schema rollover may carry an older rule.
+                schema_suffix += "_" + TEMPERATURE_OPERATIONAL_RULE_VERSION.replace("-", "_")
         candidate = csv_path.with_name(f"{csv_path.stem}_{schema_suffix}{csv_path.suffix}")
         if candidate == csv_path:
             return csv_path
@@ -794,6 +805,13 @@ class CSVLoggerService:
                 metadata = json.loads(sidecar_path.read_text(encoding="utf-8-sig"))
                 if metadata.get("schema_metadata", {}).get("schema_version") != active_contract.schema_version:
                     return False
+                if active_contract.operational_fields_enabled and metadata.get("schema_metadata", {}).get(
+                    "temperature_operational_rule_version"
+                ) != TEMPERATURE_OPERATIONAL_RULE_VERSION:
+                    return False
+            elif first_row and active_contract.operational_fields_enabled:
+                # A populated file without a rule identity cannot be relabelled as v6.
+                return False
             if first_row and first_row[0] != active_contract.schema_version:
                 return False
         except Exception as exc:
