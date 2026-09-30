@@ -28,6 +28,7 @@ files = [
   "backend/FacilityData/spot_image_fact.py",
   "backend/FacilityData/temperature_operational.py",
   "backend/FacilityData/drivers/spot_api.py",
+  "backend/FacilityData/shutdown_evidence.py",
 ]
 ignore_missing_imports = true
 follow_imports = "silent"

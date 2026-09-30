@@ -15,7 +15,7 @@ if str(project_root) not in sys.path:
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 import atexit
 from datetime import datetime, timezone
@@ -82,6 +82,7 @@ from backend.FacilityData.schemas import (
     OperatorMetadataUpdate,
 )
 from backend.FacilityData.service import PLCService, plc_service
+from backend.FacilityData.shutdown_evidence import ShutdownEvidenceAttempt
 from backend.FacilityData.repository import logger_service
 from backend.Observability.metrics_logger import comm_metrics_logger_service
 from backend.Observability.memory_service import estimate_size_bytes, memory_service
@@ -165,6 +166,8 @@ class ControlHealthResponse(BaseModel):
     backend_generation_id: str
     backend_session_id: str
     started_at: str
+    image_capture_shutdown: dict[str, Any] = Field(default_factory=dict)
+    shutdown_evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class FrontendErrorPayload(BaseModel):
@@ -223,6 +226,12 @@ _app_start_time = time.time()
 _app_started_at_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
 _app_session_id = uuid.uuid4().hex[:12]
 _backend_generation_id = os.environ.get("SFL_BACKEND_GENERATION_ID", "") or _app_session_id
+_shutdown_evidence_lock = threading.Lock()
+_shutdown_evidence_status: dict[str, dict[str, Any]] = {}
+_shutdown_evidence_attempts: dict[str, ShutdownEvidenceAttempt] = {}
+# Evidence is ancillary: do not extend any existing service/transport timeout.
+# Each pending receipt gets at most this much additional observation time.
+_SHUTDOWN_EVIDENCE_WAIT_SEC = 1.0
 _stats_lock = threading.Lock()
 _stats_total_requests = 0
 _stats_total_latency_ms = 0.0
@@ -1774,6 +1783,7 @@ async def lifespan(app: FastAPI):
             _logger.info("[Main] Lifespan shutdown begin %s", _lifecycle_log_fields())
             shutdown_has_primary_error = sys.exc_info()[0] is not None
             shutdown_failures: list[str] = []
+            shutdown_evidence = await _begin_shutdown_evidence("lifespan")
             image_capture_drained = True
             observation_fact_drained = True
             if spot_start_attempted:
@@ -1895,6 +1905,19 @@ async def lifespan(app: FastAPI):
                         spot_control.stop_spot_diagnostic_request_journal,
                     ):
                         shutdown_failures.append("spot_diagnostic_journal")
+            if not await _finish_shutdown_evidence(
+                "lifespan", shutdown_evidence,
+                stages={
+                    "started_services": sorted(started_services),
+                    "spot_start_attempted": spot_start_attempted,
+                    "failed_stages": list(shutdown_failures),
+                    "primary_error": shutdown_has_primary_error,
+                },
+                stage_exit_code=2 if shutdown_failures or shutdown_has_primary_error else 0,
+            ):
+                shutdown_failures.append("shutdown_evidence")
+            if not _all_shutdown_evidence_verified():
+                shutdown_failures.append("shutdown_evidence_peers")
             if shutdown_failures and not shutdown_has_primary_error:
                 raise RuntimeError(
                     "lifespan shutdown incomplete: "
@@ -3599,8 +3622,106 @@ async def log_status_change(payload: StatusLogRequest):
         return {"ok": False, "error": str(e)}
 
 
+def _get_shutdown_evidence_status() -> dict[str, Any]:
+    with _shutdown_evidence_lock:
+        latest = {
+            key: _shutdown_evidence_attempts[value["attempt_id"]].status()
+            for key, value in _shutdown_evidence_status.items()
+        }
+        latest["pending_writers"] = [
+            attempt.status() for attempt in _shutdown_evidence_attempts.values()
+            if attempt.status()["writer_alive"]
+        ]
+        states = [attempt.status() for attempt in _shutdown_evidence_attempts.values()]
+        latest["all_attempts_verified"] = bool(states) and all(
+            state["receipt_verified"] and not state["writer_alive"] for state in states
+        )
+        latest["failed_attempts"] = [state for state in states if state["error_phase"] is not None]
+        return latest
+
+
+def _all_shutdown_evidence_verified() -> bool:
+    # This process can have overlapping control and ASGI cleanup. An attempt's
+    # successful receipt cannot certify another owned writer or erase its error.
+    with _shutdown_evidence_lock:
+        states = [attempt.status() for attempt in _shutdown_evidence_attempts.values()]
+        return bool(states) and all(
+            state["receipt_verified"] and not state["writer_alive"] for state in states
+        )
+
+
+def _publish_shutdown_evidence_status(entrypoint: str, attempt: ShutdownEvidenceAttempt) -> None:
+    with _shutdown_evidence_lock:
+        _shutdown_evidence_attempts[attempt.attempt_id] = attempt
+        _shutdown_evidence_status[entrypoint] = attempt.status()
+
+
+async def _begin_shutdown_evidence(entrypoint: str) -> ShutdownEvidenceAttempt:
+    # Freeze before awaiting poll/transport or filesystem work, including when
+    # control shutdown and ASGI lifespan cleanup overlap.
+    image = spot_control.begin_spot_image_capture_shutdown()
+    attempt = ShutdownEvidenceAttempt(
+        Path(config.APP_DATA_DIR) / "shutdown_evidence",
+        entrypoint=entrypoint,
+        identity={
+            "backend_process_id": os.getpid(),
+            "backend_generation_id": _backend_generation_id,
+            "backend_session_id": _app_session_id,
+            "started_at": _app_started_at_iso,
+            "app_version": config.APP_VERSION,
+            "runtime_kind": "frozen" if getattr(sys, "frozen", False) else "dev",
+            "git_commit": spot_control._SPOT_RUNTIME_GIT_COMMIT,
+        },
+        image=image,
+    )
+    _publish_shutdown_evidence_status(entrypoint, attempt)
+    # A dedicated owned thread avoids a stalled fsync blocking either cleanup
+    # startup or asyncio's default-executor teardown. Daemon != completion;
+    # a still-live writer always invalidates successful closeout.
+    if not attempt.start_begin():
+        _logger.error("Shutdown begin evidence failed entrypoint=%s", entrypoint)
+    _publish_shutdown_evidence_status(entrypoint, attempt)
+    return attempt
+
+
+async def _finish_shutdown_evidence(
+    entrypoint: str, attempt: ShutdownEvidenceAttempt, *, stages: dict[str, Any], stage_exit_code: int,
+) -> bool:
+    async def wait_for_writer(phase: str) -> bool:
+        deadline = time.monotonic() + _SHUTDOWN_EVIDENCE_WAIT_SEC
+        try:
+            while attempt.status()["writer_alive"]:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    attempt.invalidate(phase, "EvidenceWriteTimeout")
+                    return False
+                await asyncio.sleep(min(.01, remaining))
+        except asyncio.CancelledError:
+            # All service cleanup precedes this wait. Cancellation cannot turn
+            # unverified evidence into exit 0 or abandon the closeout decision.
+            attempt.invalidate(phase, "EvidenceWaitCancelled")
+            return False
+        return True
+
+    verified = False
+    if await wait_for_writer("begin"):
+        image = spot_control.get_spot_image_capture_shutdown_status()
+        if attempt.start_finish(image=image, stages=stages, stage_exit_code=stage_exit_code):
+            if await wait_for_writer("final"):
+                verified = bool(attempt.status()["receipt_verified"])
+    _publish_shutdown_evidence_status(entrypoint, attempt)
+    if not verified:
+        state = attempt.status()
+        _logger.error(
+            "Shutdown final evidence failed entrypoint=%s attempt=%s phase=%s error_type=%s writer_alive=%s",
+            entrypoint, attempt.attempt_id, state["error_phase"], state["error_type"], state["writer_alive"],
+        )
+    return verified
+
+
 async def _run_control_shutdown(reason: str) -> None:
     shutdown_started_perf = time.perf_counter()
+    shutdown_evidence = await _begin_shutdown_evidence("control")
     try:
         _logger.info("Shutdown requested: reason=%s %s", reason, _lifecycle_log_fields())
     except Exception:
@@ -3659,6 +3780,14 @@ async def _run_control_shutdown(reason: str) -> None:
         1,
     )
     exit_code = _control_shutdown_exit_code(status)
+    if not await _finish_shutdown_evidence(
+        "control", shutdown_evidence, stages=status, stage_exit_code=exit_code,
+    ):
+        exit_code = 2
+    await asyncio.sleep(0.2)
+    if not _all_shutdown_evidence_verified():
+        exit_code = 2
+    status["total_elapsed_ms"] = round((time.perf_counter() - shutdown_started_perf) * 1000.0, 1)
     try:
         _logger.info(
             "[Main] Control shutdown complete success=%s exit_code=%d total_elapsed_ms=%.1f %s",
@@ -3669,7 +3798,6 @@ async def _run_control_shutdown(reason: str) -> None:
         )
     except Exception:
         pass
-    await asyncio.sleep(0.2)
     os._exit(exit_code)
 
 
@@ -3709,6 +3837,8 @@ async def control_health(
         "backend_generation_id": _backend_generation_id,
         "backend_session_id": _app_session_id,
         "started_at": _app_started_at_iso,
+        "image_capture_shutdown": spot_control.get_spot_image_capture_shutdown_status(),
+        "shutdown_evidence": _get_shutdown_evidence_status(),
     }
 
 # --- Static File Serving (Frontend) ---

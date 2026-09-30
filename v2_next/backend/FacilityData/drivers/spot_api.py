@@ -271,6 +271,7 @@ _spot_image_capture_written_count = 0
 _spot_image_capture_dropped_count = 0
 _spot_image_capture_failure_count = 0
 _spot_image_capture_last_fact: Optional[Dict[str, str]] = None
+_spot_image_shutdown_baseline: Optional[Dict[str, Any]] = None
 
 
 class SpotImageConfigError(ValueError):
@@ -675,8 +676,81 @@ def stop_spot_image_capture_writer(timeout_sec: float = 2.0) -> bool:
     )
 
 
+def _image_shutdown_status_locked() -> Dict[str, Any]:
+    # Outcome counters and task_done use this same lock order. No file I/O,
+    # writer initialization or thread join is permitted in this snapshot.
+    with _SPOT_IMAGE_CAPTURE_QUEUE.mutex:
+        queued = len(_SPOT_IMAGE_CAPTURE_QUEUE.queue)
+        unfinished = _SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks
+    baseline = _spot_image_shutdown_baseline or {}
+    historical = baseline.get("historical_failures")
+    failures = _spot_image_capture_failure_count
+    delta = failures - historical if isinstance(historical, int) and failures >= historical else None
+    alive = _spot_image_capture_thread is not None and _spot_image_capture_thread.is_alive()
+    accounting = (
+        0 <= queued <= unfinished
+        and _spot_image_capture_enqueued_count
+        == _spot_image_capture_written_count + failures + unfinished
+    )
+    blocked = _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set()
+    stopping = _SPOT_IMAGE_CAPTURE_STOP.is_set()
+    writes_drained = bool(baseline) and blocked and stopping and not alive and queued == 0 and unfinished == 0 and accounting
+    return {
+        "shutdown_id": baseline.get("shutdown_id"),
+        "requested_at": baseline.get("requested_at"),
+        "historical_failures": historical,
+        "historical_dropped_count": baseline.get("historical_dropped_count"),
+        "historical_last_error_at": baseline.get("historical_last_error_at"),
+        "new_failures_during_drain": delta,
+        "worker_started": _spot_image_capture_thread is not None,
+        "worker_alive": alive,
+        "worker_stopped": not alive,
+        "queue_size": queued,
+        "unfinished_tasks": unfinished,
+        "inflight_count": unfinished - queued,
+        "enqueue_disabled": blocked,
+        "stop_requested": stopping,
+        "enqueued_count": _spot_image_capture_enqueued_count,
+        "written_count": _spot_image_capture_written_count,
+        "failure_count": failures,
+        "dropped_count": _spot_image_capture_dropped_count,
+        "last_error_at": _spot_image_capture_last_error_at or None,
+        "accounting_consistent": accounting,
+        "writes_drained": writes_drained,
+        # This is evidence of unresolved writes, not an image-loss estimate.
+        "integrity_unresolved": failures > 0 or _spot_image_capture_dropped_count > 0
+        or not writes_drained or delta is None,
+    }
+
+
+def begin_spot_image_capture_shutdown() -> Dict[str, Any]:
+    """Freeze the first failure baseline before any asynchronous shutdown work.
+
+    Observing a late completion or repeating stop must never rebase failures.
+    Producer admission continues to follow the existing stop ordering.
+    """
+    global _spot_image_shutdown_baseline
+    with _spot_image_capture_lock:
+        if _spot_image_shutdown_baseline is None:
+            _spot_image_shutdown_baseline = {
+                "shutdown_id": uuid4().hex,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "historical_failures": _spot_image_capture_failure_count,
+                "historical_dropped_count": _spot_image_capture_dropped_count,
+                "historical_last_error_at": _spot_image_capture_last_error_at or None,
+            }
+        return _image_shutdown_status_locked()
+
+
+def get_spot_image_capture_shutdown_status() -> Dict[str, Any]:
+    """Return a fresh, memory-only snapshot; this does not request shutdown."""
+    with _spot_image_capture_lock:
+        return _image_shutdown_status_locked()
+
+
 def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
     global _spot_poll_running
+    begin_spot_image_capture_shutdown()
     with _spot_image_capture_lock:
         _spot_poll_running = False
         _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.set()
@@ -696,7 +770,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_enqueued_count, _spot_image_capture_written_count, _spot_image_capture_dropped_count
     global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
-    global _spot_image_capture_last_fact
+    global _spot_image_capture_last_fact, _spot_image_shutdown_baseline
     stop_spot_image_capture_writer(timeout_sec=0.5)
     while True:
         try:
@@ -718,6 +792,7 @@ def _reset_spot_image_capture_state_for_tests() -> None:
         _spot_image_capture_last_error_code = None
         _spot_image_capture_last_error_message = None
         _spot_image_capture_last_fact = None
+        _spot_image_shutdown_baseline = None
     _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.clear()
     _SPOT_IMAGE_CAPTURE_STOP.clear()
 

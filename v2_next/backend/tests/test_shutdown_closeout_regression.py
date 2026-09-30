@@ -34,6 +34,14 @@ from scripts.validate_csv_v2_shadow import validate_csv_closeout
 class ShutdownCloseoutRegressionTests(unittest.TestCase):
     repo_root = Path(__file__).resolve().parents[2]
 
+    def setUp(self) -> None:
+        # os._exit is intercepted by these tests; isolate its process-owned
+        # evidence registry between test cases without changing any assertion.
+        for name in ("_shutdown_evidence_status", "_shutdown_evidence_attempts"):
+            isolated = patch.object(backend_app, name, {})
+            isolated.start()
+            self.addCleanup(isolated.stop)
+
     def test_large_observation_manifest_is_streamed_with_bounded_memory(self) -> None:
         row_total = 200_000
         with tempfile.TemporaryDirectory() as temp_dir:

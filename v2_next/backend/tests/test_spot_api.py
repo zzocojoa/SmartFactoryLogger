@@ -174,6 +174,12 @@ class FakeSpotHttpTransport:
 
 class SpotApiTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
+        from backend import app as backend_app
+        # Each test represents a new process; production keeps failed attempts.
+        for name in ("_shutdown_evidence_status", "_shutdown_evidence_attempts"):
+            isolated = patch.object(backend_app, name, {})
+            isolated.start()
+            self.addCleanup(isolated.stop)
         self.original_spot_url: str = str(spot_api.config.SPOT_URL)
         self.original_spot_ip: str = str(spot_api.config.SPOT_IP)
         self.original_spot_refresh_interval: float = float(spot_api.config.SPOT_REFRESH_INTERVAL)

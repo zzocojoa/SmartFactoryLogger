@@ -805,6 +805,39 @@ origins or referrers with `403`.
 
 ### POST `/api/control/shutdown`
 
+2026-09-30 종료 증거 계약:
+
+- `/api/control/health`의 기존 인증·5개 identity 필드는 유지합니다. 선택적 additive
+  `image_capture_shutdown`과 `shutdown_evidence`를 함께 반환합니다. 이 조회는 메모리만 읽고
+  writer 초기화·파일 재스캔·장비 요청을 하지 않습니다.
+- `image_capture_shutdown`은 실제 worker 생존, queue/unfinished/inflight 작업 수,
+  enqueue 차단·stop 요청, accepted/written/failure 집계와 `writes_drained`를 구분합니다.
+  queue 0만으로 정리 완료를 주장하지 않습니다. 미완료·실패·drop은 `integrity_unresolved=true`입니다.
+- 최초 전체 종료 진입에서 `historical_failures`와 실패 시각을 고정하고,
+  이후 실패는 `new_failures_during_drain`에 기록합니다. 반복 호출·늦은 완료로 baseline을 바꾸지 않습니다.
+  기존 이미지 종료 bool, 과거 실패가 있을 때 exit 2, final manifest 차단은 유지합니다.
+- 각 control/lifespan 호출은 별도 attempt ID를 갖습니다. `APP_DATA_DIR/shutdown_evidence`에
+  `<attempt>.begin.json`, `<attempt>.final.json`과 각각의 `.sha256`을 create-only로 저장합니다.
+  PID·세션·앱 시작시각·backend generation·빌드 commit(확인 불가 시 null)을 결합하며
+  final은 begin의 해시와 같은 image shutdown ID를 확인합니다. 사용자 reason·토큰·장비 URL은 저장하지 않습니다.
+- fsync 후 NTFS hard-link로 덮어쓰기 없이 공개하고 재조회합니다. junction/symlink 경로와
+  지원하지 않는 파일시스템은 실패로 처리합니다. 실패한 partial/pending 파일은 보존합니다.
+  해시는 사본 무결성 검사이며 서명·출처 인증이나 정전 내구성 보장이 아닙니다.
+- 시작 증거 저장은 실제 서비스 정리와 병행합니다. 종료 정리 뒤 begin/final writer를 각각
+  최대 1초 관측하며, 기존 서비스/transport timeout·Electron 강제 종료 정책은 바꾸지 않습니다.
+  저장 실패·정체·취소 또는 같은 process의 다른 미검증 attempt가 있으면 정상 종료로 판정하지 않습니다.
+  참조·실패는 남고 늦은 저장도 실패 판정을 지우지 않습니다. 강제 thread 중단을 보장하지 않습니다.
+- `shutdown_evidence.control/lifespan`은 각 경로의 최신 attempt,
+  `pending_writers`는 살아 있는 저장 thread, `failed_attempts`는 보존한 증거 오류입니다.
+  `all_attempts_verified`는 모든 attempt의 파일 검증·저장 thread 종료 여부입니다.
+  실제 서비스 종료와 데이터 완전성은 각 stage/image 상태로 별도 판단해야 합니다.
+- final은 **process 종료 전 관측**입니다. `stage_exit_code`는 증거 저장 전 서비스 단계 판정이며
+  실제 OS 종료 코드가 아닙니다. timeout 뒤 늦게 생긴 파일·해시도 정상 exit 증명이 되지 않습니다.
+  `process_exit_observed=false`, `installation_clearance=false`를 유지합니다.
+  실제 process 종료·운영 인계는 외부에서 같은 세대를 별도로 확인해야 합니다.
+
+이 기능은 새 버전의 관찰성 보완입니다. 현재 실행 중인 구 원본의 부족한 종료 증거를 소급 보완하지 않습니다.
+
 The packaged Electron application supplies its per-launch
 `X-SFL-Control-Token`; direct embedded requests without the token return `403`.
 Standalone mode accepts shutdown requests only from a loopback client and rejects
