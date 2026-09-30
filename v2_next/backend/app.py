@@ -3806,9 +3806,22 @@ async def _run_control_shutdown(reason: str) -> None:
         "control", shutdown_evidence, stages=status, stage_exit_code=exit_code,
     ):
         exit_code = 2
-    # Spend the previous final 0.2-second delay on the actual file write. Do
-    # not stop/join QueueListener: a stalled sink must not hang process exit.
+    # Share the previous final 0.2-second delay between overlapping receipt
+    # writers and the actual log write. A pending peer is not a failed receipt.
+    # Do not stop/join QueueListener: a stalled sink must not hang process exit.
     log_deadline = time.monotonic() + 0.2
+    try:
+        while exit_code == 0:
+            evidence_state = _get_shutdown_evidence_status()
+            if evidence_state["all_attempts_verified"]:
+                break
+            remaining = log_deadline - time.monotonic()
+            if evidence_state["failed_attempts"] or remaining <= 0:
+                exit_code = 2
+                break
+            await asyncio.sleep(min(0.005, remaining))
+    except (Exception, asyncio.CancelledError):
+        exit_code = 2
     for revision in (1, 2):
         if not _all_shutdown_evidence_verified():
             exit_code = 2

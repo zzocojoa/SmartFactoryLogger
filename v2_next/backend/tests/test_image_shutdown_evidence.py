@@ -669,6 +669,85 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.assertFalse(attempt.status()['receipt_verified'])
 
     def test_control_and_partial_lifespan_cleanup_overlap_without_mixing_receipts(self):
+        self.run_overlapping_cleanup()
+
+    def test_control_waits_for_pending_peer_final_receipt(self):
+        self.run_overlapping_cleanup(hold_peer_final=True)
+
+    async def wait_control_receipt(self):
+        async with asyncio.timeout(3):
+            while True:
+                state = app._get_shutdown_evidence_status().get('control', {})
+                if state.get('receipt_verified') and not state['writer_alive']:
+                    return
+                await asyncio.sleep(.001)
+
+    async def peer_between_receipt_phases(self):
+        peer = await app._begin_shutdown_evidence('lifespan')
+        await asyncio.to_thread(peer._io_thread.join, 3)
+        self.assertFalse(peer.status()['writer_alive'])
+        self.assertTrue(peer.status()['before_verified'])
+        self.assertFalse(peer.status()['receipt_verified'])
+        self.assertIsNone(peer.status()['error_phase'])
+        return peer
+
+    def test_cancel_pending_peer_wait_cannot_exit_successfully(self):
+        async def run():
+            await self.peer_between_receipt_phases()
+            task = asyncio.create_task(app._run_control_shutdown('cancel-peer-wait'))
+            try:
+                await self.wait_control_receipt()
+                await asyncio.sleep(.03)
+                exit_process.assert_not_called()
+                self.assertFalse(app._all_shutdown_evidence_verified())
+                task.cancel()
+                await task
+                exit_process.assert_called_once_with(2)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await task
+        with patch.object(app.os, '_exit') as exit_process:
+            self.loop.run_until_complete(run())
+
+    def test_peer_and_log_wait_share_one_final_deadline(self):
+        _, log_entered, log_release, _, _ = self.final_log_sink(block=True)
+        tick = time.monotonic()
+        async def run():
+            nonlocal tick
+            peer = await self.peer_between_receipt_phases()
+            task = asyncio.create_task(app._run_control_shutdown('shared-final-budget'))
+            try:
+                await self.wait_control_receipt()
+                await asyncio.sleep(.03)
+                exit_process.assert_not_called()
+                # Spend part of the existing budget with the peer still pending.
+                tick += .1
+                self.assertTrue(peer.start_finish(
+                    image=spot.get_spot_image_capture_shutdown_status(), stages={}, stage_exit_code=0,
+                ))
+                self.assertTrue(await asyncio.to_thread(log_entered.wait, 3))
+                self.assertTrue(app._all_shutdown_evidence_verified())
+                self.assertFalse(log_release.is_set())
+                # This exceeds the original budget, but not a fresh .2s budget
+                # incorrectly started after the peer finished. Only the clock
+                # and the actual file stream boundary are substituted.
+                tick += .11
+                done, _ = await asyncio.wait({task}, timeout=.5)
+                self.assertIn(task, done, 'log wait restarted the final deadline')
+                await task
+                exit_process.assert_called_once_with(2)
+            finally:
+                # A failed assertion must not leave a pending task at a frozen
+                # tick. This advance is cleanup only, after the exit assertion.
+                tick += 2.
+                log_release.set()
+                await task
+        with patch.object(app, 'time', wraps=time) as clock, patch.object(app.os, '_exit') as exit_process:
+            clock.monotonic.side_effect = lambda: tick
+            self.loop.run_until_complete(run())
+
+    def run_overlapping_cleanup(self, *, hold_peer_final=False):
         self.enqueue()
         self.assertTrue(spot.flush_spot_image_capture_queue(3))
         logger = CSVLoggerService()
@@ -679,6 +758,19 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         lock = threading.Lock()
         stopped = []
         csv_threads = []
+        peer_entered, peer_release = threading.Event(), threading.Event()
+        self.releases.append(peer_release)
+        original_fsync = os.fsync
+        def fsync(fd):
+            name = threading.current_thread().name
+            if hold_peer_final and name == 'shutdown-evidence-final-lifespan':
+                peer_entered.set()
+                if not peer_release.wait(5):
+                    raise RuntimeError('peer final release missing')
+            if hold_peer_final and name == 'shutdown-evidence-final-control':
+                if not peer_entered.wait(3):
+                    raise RuntimeError('peer final did not start')
+            return original_fsync(fd)
         def fail_start():
             csv_threads.append(logger.thread)
             raise OSError('partial lifecycle start')
@@ -695,8 +787,21 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             tasks = [asyncio.create_task(partial()), asyncio.create_task(app._run_control_shutdown('overlap'))]
             try:
                 self.assertTrue(await asyncio.to_thread(reached.wait, 3))
+                release.set()
+                if hold_peer_final:
+                    await self.wait_control_receipt()
+                    # Hold the real peer fsync beyond the control writer's poll
+                    # tick, then release within the existing final 0.2s budget.
+                    await asyncio.sleep(.03)
+                    self.assertTrue(peer_entered.is_set())
+                    peer = app._get_shutdown_evidence_status()['lifespan']
+                    self.assertTrue(peer['writer_alive'])
+                    self.assertFalse(peer['receipt_verified'])
+                    self.assertIsNone(peer['error_phase'])
+                    exit_process.assert_not_called()
             finally:
                 release.set()
+                peer_release.set()
                 results = await asyncio.gather(*tasks, return_exceptions=True)
             self.assertIsInstance(results[0], OSError)
             self.assertIsNone(results[1])
@@ -705,6 +810,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                  patch.object(app, '_lock_path', self.root / 'instance.lock'), \
                  patch.object(app.config_sync_agent, 'start', side_effect=fail_start), \
                  patch.object(app.config_sync_agent, 'stop', side_effect=stop_config), \
+                 patch.object(evidence.os, 'fsync', fsync), \
                  patch.object(app.os, '_exit') as exit_process:
                 self.loop.run_until_complete(run())
             exit_process.assert_called_once_with(0)
