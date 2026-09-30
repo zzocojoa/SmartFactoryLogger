@@ -5,11 +5,17 @@ from contextlib import ExitStack
 import hashlib
 import io
 import json
+import logging
 import os
 from pathlib import Path
+import queue
 import socket
+import subprocess
+import sys
 import tempfile
+import textwrap
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -271,6 +277,160 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             self.loop.run_until_complete(app._run_control_shutdown('must-not-appear-in-receipt'))
         exit_process.assert_called_once()
         return exit_process.call_args.args[0]
+
+    def test_final_system_log_is_flushed_before_real_process_exit(self):
+        # Real app coroutine, logging queue/file handler and os._exit. Only the
+        # file stream boundary is controlled: it needs the event loop to yield
+        # before releasing the final write, making the former race repeatable.
+        script = textwrap.dedent('''
+            import asyncio, json, os, threading
+            from pathlib import Path
+            from backend import app
+
+            async def run():
+                loop = asyncio.get_running_loop()
+                final_release = threading.Event()
+                handler = next(h for listener in app._log_queue_listeners
+                    for h in listener.handlers
+                    if isinstance(h, app.SafeRotatingFileHandler)
+                    and Path(h.baseFilename).name == 'system.log')
+                original = handler.stream
+                class Stream:
+                    def __getattr__(self, name):
+                        return getattr(original, name)
+                    def write(self, value):
+                        if 'Control shutdown complete' in value:
+                            loop.call_soon_threadsafe(final_release.set)
+                            if not final_release.wait(3):
+                                raise OSError('final log never released')
+                        return original.write(value)
+                handler.stream = Stream()
+                Path(os.environ['FINAL_LOG_IDENTITY']).write_text(json.dumps({
+                    'pid': os.getpid(), 'session': app._app_session_id,
+                    'log': handler.baseFilename,
+                }), encoding='utf-8')
+                await app._run_control_shutdown('real-final-log-regression')
+            asyncio.run(run())
+        ''')
+        identity = self.root / 'child-identity.json'
+        child_env = os.environ.copy()
+        child_env.update(APPDATA=str(self.root/'child-appdata'),
+                         LOCALAPPDATA=str(self.root/'child-localappdata'),
+                         PYTHON_DOTENV_DISABLED='1', V2_MODE='MOCK',
+                         FINAL_LOG_IDENTITY=str(identity))
+        completed = subprocess.run(
+            [sys.executable, '-c', script], cwd=Path(__file__).resolve().parents[2],
+            env=child_env, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        owner = json.loads(identity.read_text(encoding='utf-8'))
+        records = [json.loads(line) for line in Path(owner['log']).read_text(encoding='utf-8').splitlines()
+                   if 'Control shutdown complete' in line]
+        final = [row for row in records if 'Control shutdown complete' in row['message']
+                 and f"pid={owner['pid']} " in row['message']
+                 and f"session={owner['session']} " in row['message']]
+        self.assertEqual(len(final), 1, 'Actual process exit lost the final system.log record')
+        self.assertIn('success=True exit_code=0', final[0]['message'])
+
+    def final_log_sink(self, *, block=False, error=None):
+        """Use the production handler with only its external stream controlled."""
+        path = self.root / f'final-{time.monotonic_ns()}.log'
+        handler = app.SafeRotatingFileHandler(path, encoding='utf-8')
+        handler.setFormatter(app.CustomJsonFormatter('%(message)s'))
+        original = handler.stream
+        entered, release = threading.Event(), threading.Event()
+        self.releases.append(release)
+        state = {'fault': error, 'final_write': False, 'entered_at': None}
+        class Stream:
+            def __getattr__(self, name):
+                return getattr(original, name)
+            def write(self, value):
+                state['final_write'] = 'Control shutdown complete' in value
+                if state['final_write']:
+                    if not entered.is_set():
+                        state['entered_at'] = time.monotonic()
+                        entered.set()
+                    if block and not release.wait(5):
+                        raise OSError('test final log release missing')
+                    if state['fault'] == 'write':
+                        raise OSError('synthetic final write failure')
+                return original.write(value)
+            def flush(self):
+                if state['final_write'] and state['fault'] == 'flush':
+                    raise OSError('synthetic final flush failure')
+                return original.flush()
+        handler.stream = Stream()
+        log_queue = queue.Queue()
+        logger = logging.Logger('isolated-shutdown')
+        logger.addHandler(logging.handlers.QueueHandler(log_queue))
+        listener = logging.handlers.QueueListener(log_queue, handler)
+        listener.start()
+        self.stack.enter_context(patch.object(app, '_logger', logger))
+        def cleanup():
+            release.set()
+            state['fault'] = None
+            listener.enqueue_sentinel()
+            listener._thread.join(3)
+            self.assertFalse(listener._thread.is_alive(), 'log listener leaked')
+            handler.close()
+        self.addCleanup(cleanup)
+        return path, entered, release, log_queue, state
+
+    def test_final_log_inflight_is_not_a_drained_empty_queue(self):
+        path, entered, release, log_queue, _ = self.final_log_sink(block=True)
+        async def run():
+            task = asyncio.create_task(app._run_control_shutdown('log-inflight'))
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+                self.assertTrue(log_queue.empty())
+                self.assertFalse(task.done())
+                exit_process.assert_not_called()
+            finally:
+                release.set()
+                await task
+        with patch.object(app.os, '_exit') as exit_process:
+            self.loop.run_until_complete(run())
+        exit_process.assert_called_once_with(0)
+        final = [json.loads(line) for line in path.read_text().splitlines()
+                 if 'Control shutdown complete' in line]
+        self.assertEqual(len(final), 1)
+        self.assertNotIn('_shutdown_log_ack', final[0])
+
+    def test_final_log_stall_is_bounded_and_late_ack_cannot_reverse_exit(self):
+        _, entered, release, _, state = self.final_log_sink(block=True)
+        try:
+            self.assertEqual(self.run_control(), 2)
+            elapsed = time.monotonic() - state['entered_at']
+            self.assertTrue(entered.is_set())
+            self.assertFalse(release.is_set())
+            self.assertLess(elapsed, 0.6, 'Final log wait exceeded the shared 0.2s budget')
+            self.assertTrue(app._get_shutdown_evidence_status()['control']['receipt_verified'])
+        finally:
+            release.set()
+
+    def test_final_log_write_and_flush_errors_cannot_acknowledge_success(self):
+        for boundary in ('write', 'flush'):
+            with self.subTest(boundary=boundary):
+                self.final_log_sink(error=boundary)
+                with patch.object(sys, 'stderr', io.StringIO()):
+                    self.assertEqual(self.run_control(), 2)
+                self.assertTrue(app._get_shutdown_evidence_status()['control']['receipt_verified'])
+
+    def test_cancel_final_log_wait_preserves_failure_exit(self):
+        _, entered, release, _, _ = self.final_log_sink(block=True)
+        async def run():
+            task = asyncio.create_task(app._run_control_shutdown('cancel-final-log'))
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+                task.cancel()
+                await task
+                exit_process.assert_called_once_with(2)
+            finally:
+                release.set()
+                if not task.done():
+                    await task
+        with patch.object(app.os, '_exit') as exit_process:
+            self.loop.run_until_complete(run())
 
     def final_control(self):
         state = app._get_shutdown_evidence_status()['control']
@@ -630,7 +790,7 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                         self.assertFalse(peer._io_thread.is_alive())
 
     def test_peer_start_during_last_exit_delay_is_rechecked(self):
-        original_sleep = asyncio.sleep
+        path, log_entered, log_release, _, _ = self.final_log_sink(block=True)
         entered, release = threading.Event(), threading.Event()
         self.releases.append(release)
         original_fsync = os.fsync
@@ -641,17 +801,28 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 if not release.wait(10):
                     raise RuntimeError('test release missing')
             return original_fsync(fd)
-        async def delay(seconds):
-            if seconds == .2:
+        async def run():
+            task = asyncio.create_task(app._run_control_shutdown('peer-during-log-ack'))
+            try:
+                self.assertTrue(await asyncio.to_thread(log_entered.wait, 3))
                 self.assertTrue(app._get_shutdown_evidence_status()['control']['receipt_verified'])
                 peers.append(await app._begin_shutdown_evidence('lifespan'))
                 self.assertTrue(await asyncio.to_thread(entered.wait, 3))
-            await original_sleep(seconds)
+            finally:
+                log_release.set()
+                await task
         try:
-            with patch.object(evidence.os, 'fsync', fsync), patch.object(app.asyncio, 'sleep', delay):
-                self.assertEqual(self.run_control(), 2)
+            with patch.object(evidence.os, 'fsync', fsync), patch.object(app.os, '_exit') as exit_process:
+                self.loop.run_until_complete(run())
+            exit_process.assert_called_once_with(2)
             self.assertEqual(len(peers), 1)
             self.assertTrue(peers[0].status()['writer_alive'])
+            self.assertFalse(app._all_shutdown_evidence_verified())
+            final = [json.loads(line) for line in path.read_text().splitlines()
+                     if 'Control shutdown complete' in line]
+            self.assertEqual(len(final), 2)
+            self.assertIn('success=False exit_code=2', final[-1]['message'])
+            self.assertEqual(final[-1]['shutdown_log_revision'], 2)
         finally:
             release.set()
             for peer in peers:
