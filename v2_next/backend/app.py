@@ -41,6 +41,8 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
         super().add_fields(log_record, record, message_dict)
         if hasattr(record, "trace_id"):
             log_record["trace_id"] = record.trace_id
+        # Process-local synchronization objects must never enter JSON output.
+        log_record.pop("_shutdown_log_ack", None)
 
 class TraceIDFilter(logging.Filter):
     def filter(self, record):
@@ -52,6 +54,26 @@ class SafeRotatingFileHandler(RotatingFileHandler):
     RotatingFileHandler that catches PermissionError/OSError during rollover (common on Windows)
     and continues logging to the same file instead of crashing.
     """
+    def emit(self, record):
+        ack = getattr(record, "_shutdown_log_ack", None)
+        try:
+            super().emit(record)
+        except Exception:
+            if ack is not None:
+                ack["failed"] = True
+            raise
+        finally:
+            if ack is not None:
+                # StreamHandler.emit includes flush. A swallowed write/flush
+                # exception is recorded by handleError before acknowledging.
+                ack["done"].set()
+
+    def handleError(self, record):
+        ack = getattr(record, "_shutdown_log_ack", None)
+        if ack is not None:
+            ack["failed"] = True
+        super().handleError(record)
+
     def doRollover(self):
         try:
             super().doRollover()
@@ -3784,20 +3806,55 @@ async def _run_control_shutdown(reason: str) -> None:
         "control", shutdown_evidence, stages=status, stage_exit_code=exit_code,
     ):
         exit_code = 2
-    await asyncio.sleep(0.2)
-    if not _all_shutdown_evidence_verified():
-        exit_code = 2
-    status["total_elapsed_ms"] = round((time.perf_counter() - shutdown_started_perf) * 1000.0, 1)
+    # Share the previous final 0.2-second delay between overlapping receipt
+    # writers and the actual log write. A pending peer is not a failed receipt.
+    # Do not stop/join QueueListener: a stalled sink must not hang process exit.
+    log_deadline = time.monotonic() + 0.2
     try:
-        _logger.info(
-            "[Main] Control shutdown complete success=%s exit_code=%d total_elapsed_ms=%.1f %s",
-            exit_code == 0,
-            exit_code,
-            float(status.get("total_elapsed_ms", 0.0)),
-            _lifecycle_log_fields(),
-        )
-    except Exception:
-        pass
+        while exit_code == 0:
+            evidence_state = _get_shutdown_evidence_status()
+            if evidence_state["all_attempts_verified"]:
+                break
+            remaining = log_deadline - time.monotonic()
+            if evidence_state["failed_attempts"] or remaining <= 0:
+                exit_code = 2
+                break
+            await asyncio.sleep(min(0.005, remaining))
+    except (Exception, asyncio.CancelledError):
+        exit_code = 2
+    for revision in (1, 2):
+        if not _all_shutdown_evidence_verified():
+            exit_code = 2
+        logged_code = exit_code
+        status["total_elapsed_ms"] = round((time.perf_counter() - shutdown_started_perf) * 1000.0, 1)
+        ack = {"done": threading.Event(), "failed": False}
+        try:
+            if time.monotonic() >= log_deadline:
+                exit_code = 2
+                break
+            _logger.info(
+                "[Main] Control shutdown complete success=%s exit_code=%d total_elapsed_ms=%.1f %s",
+                logged_code == 0,
+                logged_code,
+                float(status.get("total_elapsed_ms", 0.0)),
+                _lifecycle_log_fields(),
+                extra={"_shutdown_log_ack": ack, "shutdown_log_revision": revision},
+            )
+            while not ack["done"].is_set():
+                remaining = log_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(0.005, remaining))
+            if not ack["done"].is_set() or ack["failed"] or time.monotonic() > log_deadline:
+                exit_code = 2
+        except (Exception, asyncio.CancelledError):
+            exit_code = 2
+        # A peer receipt can start/fail while we yield for the log sink. Keep
+        # failure sticky and, if time remains, append one corrected decision.
+        if not _all_shutdown_evidence_verified():
+            exit_code = 2
+        if exit_code == logged_code:
+            break
     os._exit(exit_code)
 
 

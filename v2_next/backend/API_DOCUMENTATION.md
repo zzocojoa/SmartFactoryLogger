@@ -835,6 +835,20 @@ origins or referrers with `403`.
   실제 OS 종료 코드가 아닙니다. timeout 뒤 늦게 생긴 파일·해시도 정상 exit 증명이 되지 않습니다.
   `process_exit_observed=false`, `installation_clearance=false`를 유지합니다.
   실제 process 종료·운영 인계는 외부에서 같은 세대를 별도로 확인해야 합니다.
+- control의 마지막 `Control shutdown complete` 로그는 실제 system.log handler의 write/flush
+  완료를 확인합니다. 기존 마지막 0.2초를 하나의 monotonic 예산으로 사용하며 listener 전체를
+  stop/join하거나 서비스 timeout을 늘리지 않습니다. 저장 오류·정체·취소는 exit 2를 유지합니다.
+  이 확인은 fsync나 정전 내구성, OS process 종료의 증명이 아닙니다.
+- 최종 로그 판정 전 다른 종료 attempt가 아직 진행 중이면 남은 같은 0.2초 예산 안에서
+  검증 완료를 기다립니다. begin 완료~final 시작 사이도 미완료이며, writer가 없다는 이유로
+  성공 처리하지 않습니다. 증거 오류가 확정되면 기다림을 끝내고 exit 2를 유지합니다.
+  peer 대기와 로그 write/flush는 예산을 공유하므로 대기 후 새 0.2초를 부여하지 않습니다.
+- 로그 대기 중 다른 종료 attempt가 시작되거나 실패하면 receipt 상태를 다시 검사합니다.
+  로그 ack 후에도 미검증인 attempt는 즉시 실패로 판정하며 다시 성공으로 올리지 않습니다.
+  판정이 0에서 2로 바뀌면 같은 남은 예산 안에서 `shutdown_log_revision=2`를 최대 한 번
+  기록합니다. 이전 revision의 성공 문구만으로 종료를 승인하지 않습니다. 예산 소진으로
+  정정 로그도 남지 않을 수 있으므로 실제 OS 종료 코드·세대·receipt를 함께 확인해야 합니다.
+  내부 ack 객체는 JSON 로그에 포함하지 않으며 기존 receipt의 단계 판정을 덮어쓰지 않습니다.
 
 이 기능은 새 버전의 관찰성 보완입니다. 현재 실행 중인 구 원본의 부족한 종료 증거를 소급 보완하지 않습니다.
 

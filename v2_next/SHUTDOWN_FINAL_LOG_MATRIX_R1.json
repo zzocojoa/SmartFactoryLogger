@@ -1,0 +1,95 @@
+{
+  "status": "SOURCE_VERIFIED_CANDIDATE_PENDING",
+  "base_commit": "151de1408635df779696ac161501459498895c29",
+  "merged_equivalent": "507a93b3112d6f7c51b20ae67cde07d7baf884b7",
+  "environment": {
+    "os": "Windows",
+    "python": "3.12.6",
+    "node": "22.22.2",
+    "source": "current engineering worktree",
+    "appdata": "isolated QA directory",
+    "equipment": "mock transport only"
+  },
+  "checks": [
+    {
+      "requirement": "actual subprocess final log before os._exit",
+      "before": "FAIL final record count 0",
+      "after": "PASS",
+      "evidence": [
+        "before-real-exit-r2",
+        "after-real-exit-r2"
+      ]
+    },
+    {
+      "requirement": "write/flush ack and JSON private data excluded",
+      "result": "PASS",
+      "test": "test_final_log_inflight_is_not_a_drained_empty_queue"
+    },
+    {
+      "requirement": "bounded stall with sticky failure, write/flush errors, cancellation",
+      "result": "PASS",
+      "tests": [
+        "test_final_log_stall_is_bounded_and_late_ack_cannot_reverse_exit",
+        "test_final_log_write_and_flush_errors_cannot_acknowledge_success",
+        "test_cancel_final_log_wait_preserves_failure_exit"
+      ]
+    },
+    {
+      "requirement": "new peer during actual final log I/O retains exit2 and writer reference",
+      "result": "PASS",
+      "test": "test_peer_start_during_last_exit_delay_is_rechecked"
+    },
+    {
+      "requirement": "G/T/C/L1/image receipt and closeout regressions",
+      "result": "PASS",
+      "evidence": "backend-full",
+      "tests": 867,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "requirement": "Electron control/exit contract",
+      "result": "PASS",
+      "evidence": "electron-shutdown",
+      "tests": 94,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "requirement": "backend lint/typecheck, closeout/installer QA",
+      "result": "PASS",
+      "evidence": [
+        "ruff",
+        "mypy",
+        "qa-closeout",
+        "qa-nsis-readiness",
+        "qa-startup-trace",
+        "qa-signature",
+        "qa-workflow-r2"
+      ]
+    },
+    {
+      "requirement": "clean candidate rebuild and frozen install/shutdown QA",
+      "result": "NOT_RUN",
+      "reason": "source phase complete; clean commit and new build still required"
+    }
+  ],
+  "validation_commands": {
+    "backend-full": "python -m unittest discover -s backend/tests -v",
+    "focused": "python -m unittest backend.tests.test_image_shutdown_evidence -v",
+    "lint": "python -m ruff check backend",
+    "typecheck": "python -m mypy",
+    "electron": "node --test startupCoordinator.test.cjs startupIpc.test.cjs backendControlIpc.test.cjs backendControlClient.test.cjs backendStartupProgress.test.cjs backendProcessLifecycle.test.cjs electronRuntimeSafety.test.cjs electronRuntimeSafetyBackpressure.test.cjs shutdownDiagnosticTrace.test.cjs"
+  },
+  "raw_evidence_folder": "IMAGE_SHUTDOWN_LOG_R1/logs",
+  "preserved_failed_attempts": [
+    "before-real-exit (fixture parser error)",
+    "after-real-exit (fixture parser error)",
+    "before-real-exit-r2 (expected baseline failure)",
+    "qa-workflow (missing Node dependency)"
+  ],
+  "prior_engineering_untracked_files_preserved": 11,
+  "production_installation": false,
+  "server_hold_cleared": false,
+  "independent_review": "read-only agent; no blocking findings; frozen candidate not yet tested"
+}
