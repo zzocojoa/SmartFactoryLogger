@@ -83,6 +83,21 @@ Router는 `7.18.3`, Vitest는 `4.1.11`로 고정합니다. `frontend`에서 `npm
 잠금파일에 없으며, 공식 alias도 실제 Router 패키지 이름으로 npm 감사 대상입니다.
 감사는 시점 기반 결과이지 취약점 부재나 운영 승인을 보장하지 않습니다.
 
+2026-09-30 의존성 보완은 Grafana/Scenes/Router 버전을 유지하며 Moment를
+`2.31.0`으로 고정합니다. Grafana data/ui가 고정한 이전 Moment만 `$moment`
+override로 연결합니다. 이는 프로젝트가 검증하는 호환 계약이며 Grafana의
+공식 지원 범위를 확장한다는 뜻이 아닙니다. `moment-timezone` 버전과 10년 범위
+브라우저 데이터 번들은 유지합니다. brace-expansion은 각 기존 계열의
+`1.1.21`/`2.1.7`/`5.0.12`, fast-uri는 `3.1.8`을 잠금파일에 반영했습니다.
+
+루트와 frontend에서 `npm ci` 후 `npm run health`는 실제 의존성의 중첩 brace,
+반복 재작성 제한, URI 정규화, 비문자열 locale 로딩 차단도 검사합니다.
+프런트엔드 시험은 실제 Grafana 시간 범위·UTC/KST·DST 변환과 Moment 공유를
+확인합니다. 두 위치의 `npm audit --json` 결과는 별도로 기록해야 합니다.
+이 조합의 회귀가 있으면 package/lock과 검증 코드를 검증된 기준으로 함께
+되돌린 뒤 `npm ci`합니다. 기존 미서명 설치본과 현장 관찰 기록에는 이 수정이
+포함되지 않으며, 새 설치본 빌드·설치·운영 수용은 별도 단계입니다.
+
 Grafana UI가 선언하지만 사용하지 않는 Router 5는 전역 override하지 않았습니다.
 Vite 빌드는 구형 Router 유입, 다른 패키지 실체, CJS/ESM core 혼용을 거부합니다.
 업그레이드 시 `verify:router-contract`·실제 Grafana Link·Scenes 라우팅 테스트와
