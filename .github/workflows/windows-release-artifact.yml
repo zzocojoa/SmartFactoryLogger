@@ -25,6 +25,7 @@ on:
       - "v2_next/shutdownDiagnosticTrace.test.cjs"
       - "v2_next/shutdownDiagnosticTraceWorker.js"
       - "v2_next/scripts/verify_packaged_electron_sources.cjs"
+      - "v2_next/scripts/dependencySecurity.test.cjs"
       - "v2_next/scripts/deploy.ps1"
       - "v2_next/scripts/backend_bundle_integrity.psm1"
       - "v2_next/scripts/measure_nsis_operational_ready.ps1"
@@ -86,6 +87,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: v2_next/frontend
         run: npm ci
+
+      - name: Validate dependency security regressions
+        run: npm run health:dependencies
 
       - name: Prepare backend validation environment
         run: |
