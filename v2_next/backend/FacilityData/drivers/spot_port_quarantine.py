@@ -8,6 +8,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
+import psutil
+
 POLICY_VERSION = "spot-source-port-quarantine-v3"
 POOL_CAPACITY = 768
 MINIMUM_REQUIRED_REUSE_INTERVAL_SECONDS = 75.0
@@ -50,11 +52,28 @@ class GuardSocketFactory(Protocol):
 
     def create_guard(self, local_host: str, port: int = 0) -> tuple[_GuardSocket, int]: ...
 
+    def occupied_ports(self) -> set[int]: ...
+
 
 class SystemGuardSocketFactory:
     @property
     def supported(self) -> bool:
         return sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE")
+
+    def occupied_ports(self) -> set[int]:
+        # A wildcard exclusive bind can succeed while the same IPv4 TCP tuple
+        # remains in TIME_WAIT; only connect then reports WSAEADDRINUSE. Query
+        # system-wide state, including PID-less entries, before reusing ports.
+        # This is an additional gate, not a replacement for exclusive guards.
+        ports: set[int] = set()
+        for connection in psutil.net_connections(kind="tcp4"):
+            if not connection.laddr:
+                raise OSError("TCP occupancy query returned no local address")
+            port = connection.laddr.port
+            if isinstance(port, bool) or not isinstance(port, int) or not 0 < port <= 65535:
+                raise OSError("TCP occupancy query returned an invalid local port")
+            ports.add(port)
+        return ports
 
     def create_guard(self, local_host: str, port: int = 0) -> tuple[socket.socket, int]:
         if not self.supported:
@@ -206,11 +225,31 @@ class SourcePortLeasePool:
         deadline = self._monotonic() + timeout
         counted_wait = False
 
-        with self._condition:
-            while True:
+        while True:
+            with self._condition:
                 self._ensure_usable_locked()
                 now = self._monotonic()
-                self._refresh_rebinds_locked(now)
+                due = [
+                    (item, item.state, ready_at, item.last_connect_started)
+                    for item in self._records
+                    if (ready_at := self._rebind_ready_at(item)) is not None and ready_at <= now
+                ]
+            # The OS query may block. Do not hold the ownership lock: close()
+            # must remain able to retire the pool while a query is unfinished.
+            occupied_ports: set[int] = set()
+            if due:
+                try:
+                    occupied_ports = self._socket_factory.occupied_ports()
+                except Exception as exc:
+                    # Unknown OS state is never an empty-table success.
+                    raise SpotPortPoolError("source-port OS occupancy query failed") from exc
+            with self._condition:
+                self._ensure_usable_locked()
+                now = self._monotonic()
+                if timeout > 0.0 and now >= deadline:
+                    self._exhaustion_count += 1
+                    raise SpotPortPoolExhausted("source-port pool acquire timed out")
+                self._refresh_rebinds_locked(now, due, occupied_ports)
                 record = next((item for item in self._records if item.state == "guarded"), None)
                 if record is not None:
                     guard = record.guard
@@ -357,18 +396,31 @@ class SourcePortLeasePool:
             raise SpotPortPoolError("source-port lease is not active")
         return record
 
-    def _refresh_rebinds_locked(self, now: float) -> None:
-        for record in self._records:
-            ready_at = (
-                record.retry_at
-                if record.state == "rebind_pending"
-                else record.quarantine_until
-                if record.state == "quarantined"
-                else None
-            )
-            if ready_at is None or now < ready_at:
+    @staticmethod
+    def _rebind_ready_at(record: _PortRecord) -> float | None:
+        return (
+            record.retry_at if record.state == "rebind_pending"
+            else record.quarantine_until if record.state == "quarantined"
+            else None
+        )
+
+    def _refresh_rebinds_locked(
+        self,
+        now: float,
+        due: list[tuple[_PortRecord, str, float, float | None]],
+        occupied_ports: set[int],
+    ) -> None:
+        for record, state, ready_at, last_connect_started in due:
+            # A competing acquire/release can change a record during the query.
+            # Never apply the old snapshot to a different lease generation.
+            if (
+                record.state != state or self._rebind_ready_at(record) != ready_at
+                or record.last_connect_started != last_connect_started or now < ready_at
+            ):
                 continue
             try:
+                if record.port in occupied_ports:
+                    raise OSError("source port still has an OS TCP entry")
                 guard, rebound_port = self._socket_factory.create_guard(
                     self._local_host,
                     record.port,
@@ -397,6 +449,6 @@ class SourcePortLeasePool:
                 if record.state == "quarantined"
                 else None,
             )
-            if ready_at is not None and ready_at >= now
+            if ready_at is not None
         ]
         return min(candidates) if candidates else None

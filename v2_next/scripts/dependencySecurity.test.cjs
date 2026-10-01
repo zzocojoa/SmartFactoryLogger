@@ -6,6 +6,35 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
 
+for (const hook of ['beforeSanitizeElements', 'uponSanitizeElement', 'afterSanitizeElements', 'afterSanitizeAttributes']) {
+  test(`DOMPurify neutralizes a detached descendant through ${hook}`, () => {
+    const frontendRequire = Module.createRequire(path.join(root, 'frontend/package.json'));
+    const { JSDOM } = frontendRequire('jsdom');
+    const createDOMPurify = frontendRequire('dompurify');
+    const dom = new JSDOM('<!doctype html><body></body>');
+    try {
+      const doc = dom.window.document;
+      const container = doc.createElement('div');
+      const wrapper = doc.createElement('section');
+      const image = doc.createElement('img');
+      image.setAttribute('src', 'synthetic-image');
+      image.setAttribute('onerror', 'syntheticMarker()');
+      wrapper.append(image);
+      container.append(wrapper);
+      doc.body.append(container);
+      const sanitizer = createDOMPurify(dom.window);
+      sanitizer.addHook(hook, (node) => { if (node === wrapper) node.remove(); });
+      sanitizer.sanitize(container, { IN_PLACE: true });
+      // Observe the original detached node; checking only sanitized output misses the bug.
+      // jsdom does not load images or execute handlers in this fixture.
+      assert.equal(wrapper.parentNode, null);
+      assert.equal(image.hasAttribute('onerror'), false);
+    } finally {
+      dom.window.close();
+    }
+  });
+}
+
 // Exercise every locked copy, including build tooling and nested lint dependencies.
 for (const project of [root, path.join(root, 'frontend')]) {
   const lock = JSON.parse(readFileSync(path.join(project, 'package-lock.json'), 'utf8'));

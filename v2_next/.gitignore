@@ -101,3 +101,6 @@ config.pending.json
 !backend/tests/test_temperature_diagnostics_reason.py
 !backend/tests/test_history_cursor.py
 !backend/tests/test_image_shutdown_evidence.py
+
+!backend/tests/test_spot_tcp_reuse.py
+!backend/tests/test_temperature_terminal_integration.py

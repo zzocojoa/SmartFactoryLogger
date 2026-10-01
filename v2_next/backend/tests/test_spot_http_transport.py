@@ -38,6 +38,9 @@ from backend.FacilityData.drivers.spot_port_quarantine import (
 class _GuardSocketFactory:
     supported = True
 
+    def occupied_ports(self) -> set[int]:
+        return SystemGuardSocketFactory().occupied_ports()
+
     def __init__(self) -> None:
         self.created_ports: list[int] = []
 
@@ -52,6 +55,9 @@ class _GuardSocketFactory:
 
 class _UnsupportedSocketFactory:
     supported = False
+
+    def occupied_ports(self) -> set[int]:
+        raise AssertionError("unsupported factory must not query ports")
 
     def create_guard(self, _local_host: str, port: int = 0) -> tuple[socket.socket, int]:
         del port
@@ -87,6 +93,9 @@ class _RecordingSystemGuardSocketFactory:
     @property
     def supported(self) -> bool:
         return self._delegate.supported
+
+    def occupied_ports(self) -> set[int]:
+        return self._delegate.occupied_ports()
 
     def create_guard(
         self,
@@ -1895,6 +1904,9 @@ class SpotHttpTransportTests(unittest.IsolatedAsyncioTestCase):
 
             class GuardFactory:
                 supported = True
+
+                def occupied_ports(self):
+                    return set()  # Single blocked request; no port is reused.
 
                 def create_guard(self, local_host, port=0):
                     guard = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

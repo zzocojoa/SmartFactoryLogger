@@ -40,6 +40,9 @@ class _Guard:
 class _SocketFactory:
     supported = True
 
+    def occupied_ports(self) -> set[int]:
+        return set()  # This adapter models sockets without a real OS TCP table.
+
     def __init__(
         self,
         *,
