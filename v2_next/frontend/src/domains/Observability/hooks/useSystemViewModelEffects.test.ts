@@ -79,12 +79,12 @@ describe('useSystemViewModelEffects startup recovery', () => {
       expect(fetchHealth).toHaveBeenLastCalledWith(STARTUP_HEALTH_REQUEST_TIMEOUT_MS);
       expect(setHealthPolling).toHaveBeenLastCalledWith({
         degraded: false,
-        intervalMs: 5_000,
+        intervalMs: 2_000,
         failureCount: 0,
       });
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.advanceTimersByTimeAsync(2_000);
       });
       expect(fetchHealth).toHaveBeenCalledTimes(4);
       expect(fetchHealth).toHaveBeenLastCalledWith(POLL_REQUEST_TIMEOUT_MS);
@@ -142,6 +142,68 @@ describe('useSystemViewModelEffects startup recovery', () => {
       expect(fetchHealth).toHaveBeenCalledTimes(2);
     } finally {
       unmount();
+    }
+  });
+
+  it('accepts the leader health cadence on a follower without issuing its own request', async () => {
+    const now = Date.now();
+    window.localStorage.setItem('dashboard_polling_leader_v1', JSON.stringify({ tab_id: 'other-tab', updated_at: now }));
+    const fetchHealth = vi.fn().mockResolvedValue(null);
+    const fetchStats = vi.fn().mockResolvedValue(null);
+    const applyHealthSnapshot = vi.fn();
+    const setHealthPolling = vi.fn();
+    const health = { running: true } as HealthSnapshot;
+    const { unmount } = renderHook(() => useSystemViewModelEffects({
+      fetchHealth, fetchStats, reconnectBusy: false, setHealthPolling,
+      setStatsPolling: vi.fn(), applyHealthSnapshot, applyStatsSnapshot: vi.fn(),
+      setDashboardLeaderState: vi.fn(), setPollingPausedByVisibility: vi.fn(),
+    }));
+    try {
+      await act(async () => {
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'dashboard_system_broadcast_v1',
+          newValue: JSON.stringify({ tab_id: 'other-tab', kind: 'health', data: health, sent_at: now }),
+        }));
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+      expect(fetchHealth).not.toHaveBeenCalled();
+      expect(fetchStats).not.toHaveBeenCalled();
+      expect(applyHealthSnapshot).toHaveBeenCalledWith(health);
+      expect(setHealthPolling).toHaveBeenLastCalledWith({ degraded: false, intervalMs: 2000, failureCount: 0 });
+    } finally {
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+
+  it('keeps the full failure delay if publishing a successful response fails', async () => {
+    const setItem = Storage.prototype.setItem;
+    const storageSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key === 'dashboard_system_broadcast_v1') throw new Error('Synthetic storage failure');
+      return setItem.call(this, key, value);
+    });
+    const health = { running: true } as HealthSnapshot;
+    const fetchHealth = vi.fn(() => new Promise<HealthSnapshot>(resolve => {
+      window.setTimeout(() => resolve(health), 500);
+    }));
+    const setHealthPolling = vi.fn();
+    const { unmount } = renderHook(() => useSystemViewModelEffects({
+      fetchHealth, fetchStats: vi.fn().mockResolvedValue(null), reconnectBusy: false,
+      setHealthPolling, setStatsPolling: vi.fn(), applyHealthSnapshot: vi.fn(),
+      applyStatsSnapshot: vi.fn(), setDashboardLeaderState: vi.fn(), setPollingPausedByVisibility: vi.fn(),
+    }));
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      expect(setHealthPolling).toHaveBeenLastCalledWith({ degraded: true, intervalMs: 5000, failureCount: 1 });
+      await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+      expect(fetchHealth).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(fetchHealth).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      storageSpy.mockRestore();
+      expect(vi.getTimerCount()).toBe(0);
     }
   });
 });

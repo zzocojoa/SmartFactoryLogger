@@ -31,6 +31,9 @@ interface UseSystemViewModelEffectsParams {
 }
 
 const BASE_POLL_INTERVAL_MS = 5000;
+// Refresh the UI's health snapshot before the SPOT badge's 5s stale boundary.
+// This is API polling only; device sampling, timeouts and failure backoff stay unchanged.
+const HEALTH_POLL_INTERVAL_MS = 2000;
 const BACKOFF_MULTIPLIERS = [1, 2, 4, 10];
 const DASHBOARD_TAB_ID_KEY = 'dashboard_polling_tab_id_v1';
 const DASHBOARD_LEADER_KEY = 'dashboard_polling_leader_v1';
@@ -102,6 +105,7 @@ export const useSystemViewModelEffects = ({
     let channel: BroadcastChannel | null = null;
     let healthFailures = 0;
     let healthHasSucceeded = false;
+    let healthInFlight = false;
     let statsFailures = 0;
     let healthDelayMs = BASE_POLL_INTERVAL_MS;
     let statsDelayMs = BASE_POLL_INTERVAL_MS;
@@ -169,38 +173,52 @@ export const useSystemViewModelEffects = ({
     };
 
     const pollHealth = async () => {
-      if (!mounted || !canPollHealth()) return;
-      if (!reconnectBusy) {
-        try {
+      if (!mounted || !canPollHealth() || healthInFlight) return;
+      healthInFlight = true;
+      const cycleStartedAt = performance.now();
+      let succeeded = false;
+      try {
+        if (!reconnectBusy) {
           const healthTimeoutMs = healthHasSucceeded
             ? POLL_REQUEST_TIMEOUT_MS
             : STARTUP_HEALTH_REQUEST_TIMEOUT_MS;
           const data = await fetchHealth(healthTimeoutMs);
+          if (!mounted || !canPollHealth() || isHealthVisibilityBlocked()) return;
           if (data) {
             healthHasSucceeded = true;
             healthFailures = 0;
-            healthDelayMs = BASE_POLL_INTERVAL_MS;
+            healthDelayMs = HEALTH_POLL_INTERVAL_MS;
             broadcastSystem('health', data);
+            succeeded = true;
           } else {
             healthFailures += 1;
             healthDelayMs = healthHasSucceeded
               ? resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures)
               : BASE_POLL_INTERVAL_MS;
           }
-        } catch (e) {
-          console.error('Health poll failed', e);
-          healthFailures += 1;
-          healthDelayMs = healthHasSucceeded
-            ? resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures)
-            : BASE_POLL_INTERVAL_MS;
+        } else {
+          healthFailures = 0;
+          healthDelayMs = BASE_POLL_INTERVAL_MS;
         }
-      } else {
-        healthFailures = 0;
-        healthDelayMs = BASE_POLL_INTERVAL_MS;
+      } catch (e) {
+        console.error('Health poll failed', e);
+        healthFailures += 1;
+        healthDelayMs = healthHasSucceeded
+          ? resolveBackoffDelay(BASE_POLL_INTERVAL_MS, healthFailures)
+          : BASE_POLL_INTERVAL_MS;
+      } finally {
+        healthInFlight = false;
       }
+      if (!mounted) return;
       setHealthPolling(buildPollingState(healthDelayMs, healthFailures));
       if (mounted && canPollHealth() && !isHealthVisibilityBlocked()) {
-        healthTimeoutId = window.setTimeout(pollHealth, healthDelayMs);
+        const elapsedMs = performance.now() - cycleStartedAt;
+        // Successful polls use start-to-start cadence. A startup overrun skips
+        // missed ticks; it never creates a catch-up burst or overlaps a request.
+        const nextDelayMs = succeeded && elapsedMs >= 0 && elapsedMs < healthDelayMs
+          ? healthDelayMs - elapsedMs
+          : healthDelayMs;
+        healthTimeoutId = window.setTimeout(pollHealth, nextDelayMs);
       }
     };
 
@@ -324,7 +342,7 @@ export const useSystemViewModelEffects = ({
         applyHealthSnapshot(payload.data as HealthSnapshot);
         healthHasSucceeded = true;
         healthFailures = 0;
-        healthDelayMs = BASE_POLL_INTERVAL_MS;
+        healthDelayMs = HEALTH_POLL_INTERVAL_MS;
         setHealthPolling(buildPollingState(healthDelayMs, healthFailures));
       } else {
         applyStatsSnapshot(payload.data as StatsSnapshot);
