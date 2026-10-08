@@ -34,14 +34,18 @@ node node_modules/electron/install.js
 않습니다. lock 파일은 모든 SmartFactoryLogger 프로세스와 health endpoint가 종료된
 것을 확인한 뒤 실제 stale lock일 때만 제거합니다.
 
-현재 패키지 빌드는 다음 명령을 사용합니다. 외부·고객 배포 및 정식 상용 운영
-배포에는 서명과 exact-commit 검증을 통과한 NSIS installer를 사용합니다.
-비공개 개인 사용과 사내 개발·검증용 미서명 설치본은 서로 다른 예외이며,
+현재 패키지 빌드는 다음 명령을 사용합니다. 외부·고객 배포와 정식 상용 운영 배포는
+원칙적으로 서명과 exact-commit 검증을 통과한 NSIS installer를 사용합니다.
+비공개 개인 사용, 사내 개발·검증, 명시적으로 승인한 미서명 내부 운영은 별도 경로이며,
 [Windows Authenticode 서명 운영](docs/V2/05_운영_배포/windows_authenticode_signing.md)의 각 조건을 따릅니다.
-조직 관리 장비라도 책임 개발자가 통제하는 제한된 개발·검증 목적에는 서명
-구매·등록을 유예할 수 있으나, 정식 운영 승인이나 자동 설치를 뜻하지 않습니다.
-kit 외부의 신뢰된 출처에서 확보한 SHA-256, commit-bound release identity,
-설치 전 점검과 복구 경로 검증은 미서명 개발본에도 필수입니다.
+미서명 내부 운영은 대상 서버·정확한 설치본·검증 근거·수용한 한계·복구 조건을 기록합니다.
+게시자 서명과 기술 QA의 미검증 항목을 운영 승인으로 통과 처리하지 않습니다.
+kit 외부의 신뢰된 SHA-256, commit-bound identity, 설치 전 확인과 복구 경로 검증을 유지합니다.
+
+로직 개선 중에는 직전 운영본을 롤백 기준으로 보존합니다. 검증한 개선본을 운영으로 승격하고
+적용을 확인하면 그 버전을 다음 개선 작업의 롤백 기준으로 갱신합니다. 현재 운영본과
+기준 이력은 [운영본·롤백 기준](docs/V2/05_운영_배포/operating_rollback_baseline.md)에서 확인합니다.
+이 흐름은 특정 commit을 영구 사용하도록 고정하거나 새 설치를 자동 실행한다는 뜻이 아닙니다.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
