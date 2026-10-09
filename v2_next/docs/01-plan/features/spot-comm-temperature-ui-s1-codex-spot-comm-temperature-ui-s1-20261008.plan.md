@@ -670,3 +670,11 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - [x] 추가 읽기 helper/고정 참고 자료/PS5.1·실파일 검사·공유 SHA256·서버 최종 전달 및 화면 확인.
 - [ ] 사용자 추가 읽기 실행→Codex 전체 결과 회수/해시·이미지 저장 진행·현재 CSV 바이트 검토.
 - [ ] 세대에 결합한 정상 종료와 승인 후보 설치·시작·실화면/API·CSV/설정 보존·회수·다음rollback등록. 전체 목표 미완료,4c97d4a 복귀 기준 유지.
+
+### 14.14 후보 설치 후 검증 파일 기준 준비
+
+- 앞선 턴은 실제 PRE READ 결과 회수/84조건 검토/추가 읽기 helper25조건 검사/서버 최종 전달로 진행했다. 이번 재개 시 서버 탐색기 F5에서 추가 읽기 폴더는4파일만 있고 새 r-결과 없음, 공유 회수 폴더도 비어 있음을 확인했다. 사용자 실행 요청은 유지하며 반복 요청/자동 terminal 실행은 하지 않는다.
+- 대기와 독립적으로 승인된 후보 설치 후 검증의 고정 입력을 준비한다. 기존 reader의4c 전용 commit/critical hash는 보존하고 새 후보541d의 실제 installer payload 검증 기록과 win-unpacked에서 핵심4파일 및 제공 frontend50파일을 대조한 별도 JSON 기준을 만든다. 실제 후보파일/health commit 식별과 설정 보존 규칙을 구분한다. 기준 파일을 만드는 것이 설치·실서버 검증 PASS가 아니다.
+- 완료 조건: 실제1771 payload 기록에서 선택한54파일의 크기/SHA256 대조, 후보 build_provenance full commit 확인, 경계·중복·필수파일·최종 서버 경로240자 예산 및 불일치 거부 검사, 외부 해시 기록. 아직 설치되지 않은 후보의 PID/서비스 ID/CSV 이름을 추정하여 고정하지 않는다. 실제 정상 종료/설치와 적용 후 세대·CSV/설정 확인은 추가 읽기 검토 이후 단계다.
+- 별도 C:/Users/user/Desktop/SmartFactory/S1_POST_PREP_20261009_R1/candidate-installed-pins.json을 생성했다(11253bytes/SHA256=5FC82E1BA0353FACE9AB2A85E18019F6036EB15D9D332811307CD6DF4C99502D). prepare-post-install-pins.py는 실제 win-unpacked의 핵심4+frontend50파일을1771 payload 원문과 바이트/해시 대조하고 실제 build_provenance의541d full commit을 확인했다(exit0). 구commit/잘못된hash/중복/경로탈출/frontend필수파일누락5종 거부 확인; 최종 서버 선택파일 최대126자다. 결과는 result.json에 보존한다. 전수 설치파일 무결성이나 실서버 PASS가 아닌 선택54파일의 개발 원본 검증이다. 기존 app.asar와 Electron EXE는4c와 같을 수 있으므로 이 두 파일만으로 새 frontend/build를 식별하지 않는다.
+- 추가 읽기 결과가 없는 현재 상태에서는 정상 종료·설치·새 PID/서비스/설정/CSV 보존 기준을 확정하지 않는다. 다음 진행은14.13의 사용자 실행 결과 회수·이미지/CSV 검토다. 현재 명령 프로세스가 실행 중이라는 근거가 없으므로 이 대기를 live process verified wait로 분류하지 않는다. 같은 실행 입력 필요 조건이 재개 후2번째 턴에 이어졌고, 이번 턴에는 별도 후보 검증 기준 준비를 실제 진행했다. 아직blocked로 바꾸지 않는다.
