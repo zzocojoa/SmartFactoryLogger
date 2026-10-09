@@ -621,3 +621,10 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - 사용자가 이미 일반 Chrome 탭으로 DESKTOP-Extrusion에 접속 중이라고 직접 확인했다. 별도창/주소표시줄 부재가 원인이라는 이전 추정은 근거가 없으며 접속 방식 변경 요청을 철회한다. 실제 확인된 오류는 computer-use가 현재 URL을 확신할 수 없어 화면 조회를 거부했다는 것이다. 정확한 실패 원인은 제공 문서/공개 API에서 확인되지 않았다. 이전 감사 기록은 당시 사실/추정으로 보존한다.
 - 사용자 “그럼 다시 진행해라”에 따라 같은 연결에서 새 반환 창을 선택하고, 공식 guidance의 get_window→activate_window→get_window_state 순서로 재시도한다. URL 검사/보안 설정을 우회하지 않는다. 실패하면 해당 도구의 턴 종료 지시를 따르고 실제 미완료 항목을 보고한다.
 - 제품/installer/고정 전달 묶음은 바꾸지 않는다. 후보 build541d와 현재4c97d4a 복귀 기준 유지. 서버 최종 폴더 복사·현재 세대/CSV/설정·승인 후보 적용·회수·기준 갱신은 여전히 남았다.
+
+### 14.9 브라우저 플러그인 연결 확인과 로그인 대기
+
+- 사용자가 computer-use 또는 Browser 플러그인을 직접 지정했다. 이전 Computer Use의 Windows URL 판별 실패를 두 도구 모두의 실패로 확대하지 않고, 이번 턴에는 Browser의 공식 사용 지침과 지원 API로 별도 연결을 확인했다. 실제 Codex In-app Browser 연결과 탭 조회는 성공했다. 기존 Chrome 연결 방식 변경 요청은 철회한 상태다.
+- 사용자 제공 http://remotedesktop.google.com/access/session/8dac2c49-886b-3a5c-c6d6-39e1bcc173f0?hl=ko를 새 탭에서 열었다. HTTPS Google 계정 로그인 화면으로 이동했고 계정이 로그아웃됨으로 표시됐다. 링크 열기와 화면 조회 성공이며 서버 세션 접속/화면 입력 성공은 아직 검증하지 못했다. 실제 Chrome 세션의 로그인 상태를 변경하거나 검사한 결과가 아니다.
+- 해당 브라우저의 지원 인증 handoff capability는 제공되지 않았다. 로그인 화면을 사용자에게 표시하고 탭을 다음 턴에 유지하도록 설정했다. control-in-app-browser SKILL.md의 인증 차단 시 지정 브라우저에서 로그인 요청 규정에 따라, 사용자가 Codex 브라우저 패널에서 직접 로그인한 뒤 같은 탭에서 접속/화면/입력을 확인한다. 비밀번호/쿠키/프로필/저장된 인증 정보를 읽거나 정책 검사를 우회하지 않는다.
+- 증거: C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1/records/server-access-pending-001/browser-access-audit-20261009.json 및 browser-login-required-20261009.png. 제품/installer/고정 전송 묶음은 변경하지 않았고 build541d와 운영/복귀4c97d4a를 유지한다. 서버 최종 폴더 복사·현재 실행 세대/CSV/설정·승인 후보 적용·회수·기준 갱신은 미완료다.
