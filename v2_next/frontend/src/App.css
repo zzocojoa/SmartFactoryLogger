@@ -352,7 +352,7 @@ body {
 
 @media (max-width: 768px) {
   .app-header {
-    height: 56px;
+    height: auto;
     min-height: 56px;
     align-items: center;
     gap: 8px;
@@ -557,6 +557,10 @@ body {
   color: var(--text-muted);
 }
 
+.status-comm-item.status-temperature {
+  color: var(--text-primary);
+}
+
 .status-meta-item {
   display: inline-flex;
   align-items: baseline;
@@ -717,7 +721,10 @@ body {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  min-width: 180px;
+  min-width: min(360px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
+  max-height: calc(100dvh - var(--header-height) - 80px);
+  overflow-y: auto;
   background: var(--bg-menu);
   border: 1px solid var(--border-main);
   border-radius: 12px;
@@ -808,6 +815,33 @@ body {
 
 .mobile-menu-actions .menu-item {
   text-align: center;
+}
+
+.mobile-menu-comm .status-temperature {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mobile-menu-spot-details {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.mobile-menu-spot-details > div {
+  display: grid;
+  grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.mobile-menu-spot-details dt,
+.mobile-menu-spot-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .menu-item {
@@ -901,10 +935,17 @@ body {
   }
 
   .status-comm {
-    flex-wrap: nowrap;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
     gap: 4px;
     font-size: 0.68rem;
     white-space: nowrap;
+  }
+
+  .status-comm-item.status-temperature {
+    max-width: 100%;
+    padding-inline: 3px;
+    white-space: normal;
   }
 
   .status-badge {
@@ -974,6 +1015,7 @@ body {
     max-height: 100dvh;
     overflow-y: auto;
     padding: 14px;
+    padding-bottom: 80px;
     border-radius: 16px 0 0 16px;
     border-right: 0;
     opacity: 0;

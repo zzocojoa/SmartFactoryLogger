@@ -139,6 +139,33 @@ export interface HealthSnapshot {
   executable_path?: string;
   executable_mtime?: string | null;
   comm?: CommMetrics;
+  spot_temperature?: SpotTemperatureHealth;
+}
+
+export interface HealthReceiptTiming {
+  receivedAtMonotonicMs: number;
+  ageAtReceiptMs: number | null;
+}
+
+export interface SpotTemperatureHealth {
+  diagnostics_available?: boolean;
+  spot_service_instance_id?: string | null;
+  spot_poll_seq?: number | null;
+  spot_poll_status?: 'success' | 'timeout' | 'connection_error' | 'http_error' | 'config_missing' | 'not_attempted';
+  spot_raw_validity?: 'valid_temperature' | 'verified_no_target' | 'empty_body' | 'parse_error' | 'invalid_sentinel' | 'out_of_range' | 'not_received' | 'not_evaluated';
+  spot_source_freshness?: 'fresh' | 'stale' | 'unknown';
+  spot_device_status_code?: string | null;
+  temperature_status_shadow?: 'ok' | 'no_target' | 'startup_pending' | 'source_error' | 'invalid_value' | 'stale' | 'unknown_missing';
+  spot_cache_status?: 'fresh' | 'reused' | 'expired' | 'empty' | 'invalidated' | 'available_not_used';
+  temperature_value_origin?: 'current_observation' | 'cached_observation' | 'none';
+  cache_fallback_allowed?: boolean;
+  spot_snapshot_age_ms?: number | null;
+  spot_value_age_ms?: number | null;
+  spot_poll_freshness_threshold_sec?: number | null;
+  spot_cache_expiry_threshold_sec?: number | null;
+  temperature_last_success_at?: number | null;
+  temperature_last_error_at?: number | null;
+  temperature_last_error_code?: string | null;
 }
 
 export interface CommChannelMetrics {

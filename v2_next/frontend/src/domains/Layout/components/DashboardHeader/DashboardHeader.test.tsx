@@ -29,6 +29,10 @@ const buildHealthSnapshot = (): HealthSnapshot => ({
   last_update: Math.floor(Date.now() / 1000),
   driver_connected: true,
   mode: 'auto',
+  spot_temperature: {
+    spot_poll_status: 'success', spot_raw_validity: 'valid_temperature', spot_source_freshness: 'fresh',
+    temperature_value_origin: 'current_observation', spot_snapshot_age_ms: 0,
+  },
   comm: {
     extruder: { connected: true, last_success_time: Date.now() / 1000 },
     ls_plc: { connected: true, last_success_time: Date.now() / 1000 },
@@ -67,6 +71,7 @@ const buildStatsSnapshot = (): StatsSnapshot => ({
 
 const buildStatusPanelSource = (): StatusPanelSource => ({
   health: buildHealthSnapshot(),
+  healthReceipt: { receivedAtMonotonicMs: performance.now(), ageAtReceiptMs: 0 },
   stats: buildStatsSnapshot(),
   healthPollingDegraded: false,
   healthPollingIntervalMs: 1000,
@@ -163,11 +168,22 @@ describe('DashboardHeader mobile header', () => {
     expect(screen.getByLabelText('EX OK')).toBeInTheDocument();
     expect(screen.getByLabelText('LS OK')).toBeInTheDocument();
     expect(screen.getByLabelText('SPOT OK')).toBeInTheDocument();
+    expect(screen.getByLabelText('Temp OK')).toBeInTheDocument();
 
     const shortLabels = Array.from(container.querySelectorAll('.status-comm-label-mobile'))
       .map((element) => element.textContent);
 
-    expect(shortLabels).toEqual(['EX', 'LS', 'SPOT']);
+    expect(shortLabels).toEqual(['EX', 'LS', 'SPOT', 'Temp OK']);
+  });
+
+  it('R10b keeps the measurement state in the compact temperature label', () => {
+    const source = buildStatusPanelSource();
+    source.health!.spot_temperature = {...source.health!.spot_temperature,
+      spot_raw_validity: 'invalid_sentinel', spot_device_status_code: 'temperature_under_range',
+      temperature_value_origin: 'none', temperature_status_shadow: 'invalid_value'};
+    const {container} = render(<DashboardHeader {...buildProps({statusPanelSource: source})} />);
+    expect(container.querySelector('.status-temperature .status-comm-label-mobile')).toHaveTextContent('UNDER_RANGE');
+    expect(screen.getByText('Comm OK')).toHaveClass('ok');
   });
 
   it('connects the hamburger button to the detail drawer', () => {
@@ -208,6 +224,35 @@ describe('DashboardHeader mobile header', () => {
     expect(drawerScope.getByText('EX OK')).toBeInTheDocument();
     expect(drawerScope.getByText('LS OK')).toBeInTheDocument();
     expect(drawerScope.getByText('SPOT OK')).toBeInTheDocument();
+    expect(drawerScope.getByText('Temp OK')).toBeInTheDocument();
+  });
+
+  it('excludes under-range temperature from Comm and exposes both labels in the drawer', () => {
+    const source = buildStatusPanelSource();
+    source.health!.spot_temperature = { ...source.health!.spot_temperature,
+      spot_raw_validity: 'invalid_sentinel', spot_device_status_code: 'temperature_under_range',
+      temperature_value_origin: 'none', temperature_status_shadow: 'invalid_value' };
+    render(<DashboardHeader {...buildProps({ statusPanelSource: source, menuOpen: true })} />);
+    expect(screen.getByLabelText('SPOT OK')).toHaveClass('ok');
+    expect(screen.getByLabelText('Temp UNDER_RANGE')).toHaveClass('warn');
+    expect(screen.getByText('Comm OK')).toHaveClass('ok');
+    expect(screen.getByLabelText('Temp UNDER_RANGE')).toHaveAttribute('title', expect.stringContaining('temperature_under_range'));
+    const drawer = within(screen.getByRole('region', { name: '상세 메뉴' }));
+    expect(drawer.getByText('SPOT OK')).toBeInTheDocument();
+    expect(drawer.getByText('Temp UNDER_RANGE')).toBeInTheDocument();
+    const diagnostics = drawer.getByLabelText('SPOT 진단 상세');
+    const rows = Array.from(diagnostics.querySelectorAll('div')).map(row => ({
+      label: row.querySelector('dt')?.textContent, value: row.querySelector('dd')?.textContent,
+    }));
+    expect(rows).toEqual(expect.arrayContaining([
+      {label: 'poll', value: 'success'}, {label: 'raw', value: 'invalid_sentinel'},
+      {label: 'source', value: 'fresh'}, {label: '장비', value: 'temperature_under_range'},
+      {label: '온도 상태', value: 'invalid_value'}, {label: 'origin', value: 'none'},
+      {label: 'cache', value: 'unknown'}, {label: '관측 경과', value: expect.stringMatching(/^\d+\.\d+s$/)},
+      {label: '최근 유효 온도', value: expect.any(String)}, {label: '최근 오류', value: '--:--:--'},
+    ]));
+    const tooltip = screen.getByLabelText('Temp UNDER_RANGE').getAttribute('title');
+    rows.forEach(({label, value}) => expect(tooltip).toContain(`${label} ${value}`));
   });
 
   it('keeps diagnostics out of the topbar while grouping drawer commands', () => {
@@ -228,6 +273,8 @@ describe('DashboardHeader mobile header', () => {
   });
 
   it('keeps overflow drawer details visible outside compact media queries', () => {
+    expect(getCssRuleBody('.mobile-menu-comm .status-temperature')).toMatch(/white-space:\s*normal/);
+    expect(getCssRuleBody('.mobile-menu-spot-details dd')).toMatch(/overflow-wrap:\s*anywhere/);
     expect(getCssRuleBody('.mobile-menu-details')).toMatch(/display:\s*flex/);
     expect(getCssRuleBody('.mobile-menu-details')).not.toMatch(/display:\s*none/);
     expect(getCssRuleBody('.header-overflow-section')).toMatch(/display:\s*flex/);

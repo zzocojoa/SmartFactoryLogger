@@ -65,13 +65,11 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             cwd=REPOSITORY,
             check=False,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
             env=environment,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(
-            "SPOT_REALTIME_IMAGE_CANARY_120M_SELF_TEST_PASS",
+            b"SPOT_REALTIME_IMAGE_CANARY_120M_SELF_TEST_PASS",
             result.stdout,
         )
 
@@ -126,7 +124,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             )
             return manifest
 
-        def run_verifier(root: Path) -> subprocess.CompletedProcess[str]:
+        def run_verifier(root: Path) -> subprocess.CompletedProcess[bytes]:
             return subprocess.run(
                 [
                     "powershell.exe",
@@ -142,8 +140,6 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
                 cwd=REPOSITORY,
                 check=False,
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
                 env=windows_powershell_environment(),
             )
 
@@ -158,7 +154,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             )
             duplicate = run_verifier(kit)
             self.assertNotEqual(duplicate.returncode, 0)
-            self.assertIn("Duplicate canary kit manifest file", duplicate.stderr)
+            self.assertIn(b"Duplicate canary kit manifest file", duplicate.stderr)
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             kit = Path(temporary_directory)
@@ -166,7 +162,7 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             (kit / "unexpected.txt").write_text("unexpected", encoding="utf-8")
             unexpected = run_verifier(kit)
             self.assertNotEqual(unexpected.returncode, 0)
-            self.assertIn("missing or unexpected file", unexpected.stderr)
+            self.assertIn(b"missing or unexpected file", unexpected.stderr)
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             kit = Path(temporary_directory)
@@ -174,14 +170,14 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             (kit / "analyze-spot-http-framing.ps1").write_text("tampered", encoding="utf-8")
             hash_mismatch = run_verifier(kit)
             self.assertNotEqual(hash_mismatch.returncode, 0)
-            self.assertIn("SHA-256 does not match", hash_mismatch.stderr)
+            self.assertIn(b"SHA-256 does not match", hash_mismatch.stderr)
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             kit = Path(temporary_directory)
             prepare_kit(kit)
             identity = run_verifier(kit)
             self.assertNotEqual(identity.returncode, 0)
-            self.assertIn("diagnostic_core", identity.stderr)
+            self.assertIn(b"diagnostic_core", identity.stderr)
 
     def test_server_qa_rejects_non_positive_observation(self) -> None:
         result = subprocess.run(
@@ -198,12 +194,10 @@ class SpotRealtimeImageCanaryKitTests(unittest.TestCase):
             cwd=REPOSITORY,
             check=False,
             capture_output=True,
-            text=True,
-            encoding="utf-8",
             env=windows_powershell_environment(),
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("must be greater than zero", result.stderr)
+        self.assertIn(b"must be greater than zero", result.stderr)
 
     def test_builder_binds_product_core_and_progress_contract(self) -> None:
         source = BUILDER.read_text(encoding="utf-8")

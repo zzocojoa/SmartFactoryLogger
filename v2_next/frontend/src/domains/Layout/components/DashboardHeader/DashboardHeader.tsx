@@ -261,6 +261,8 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     errorQueueText,
     errorQueueTitle,
     commBadges,
+    spotTemperatureBadge,
+    spotStatusDetails,
     cameraStatus,
   } = useStatusPanel({
     ...statusPanelSource,
@@ -466,7 +468,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           <div className="status-panel" title={statusTitle}>
             <div className={`status-badge ${statusClass}`}>{statusLabel}</div>
             {commBadges.length > 0 && (
-              <div className="status-comm" aria-label="Communication status summary">
+              <div className="status-comm" aria-label="Communication and temperature status summary">
                 {commBadges.map((badge) => (
                   <span
                     key={badge.key}
@@ -478,6 +480,14 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                     <span className="status-comm-label-mobile" aria-hidden="true">{getMobileCommLabel(badge)}</span>
                   </span>
                 ))}
+                <span
+                  className={`status-comm-item status-temperature ${spotTemperatureBadge.state}`}
+                  title={spotTemperatureBadge.title}
+                  aria-label={spotTemperatureBadge.text}
+                >
+                  <span className="status-comm-label-full">{spotTemperatureBadge.text}</span>
+                  <span className="status-comm-label-mobile" aria-hidden="true">{spotTemperatureBadge.text}</span>
+                </span>
                 <span
                   className={`status-comm-summary status-comm-item ${commSummary.state}`}
                   title={commSummary.title}
@@ -577,13 +587,26 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                   </span>
                 </div>
                 {commBadges.length > 0 && (
-                  <div className="mobile-menu-comm">
-                    {commBadges.map((badge) => (
-                      <span key={badge.key} className={`status-comm-item ${badge.state}`} title={badge.title}>
-                        {badge.text}
+                  <>
+                    <div className="mobile-menu-comm">
+                      {commBadges.map((badge) => (
+                        <span key={badge.key} className={`status-comm-item ${badge.state}`} title={badge.title}>
+                          {badge.text}
+                        </span>
+                      ))}
+                      <span className={`status-comm-item status-temperature ${spotTemperatureBadge.state}`} title={spotTemperatureBadge.title}>
+                        {spotTemperatureBadge.text}
                       </span>
-                    ))}
-                  </div>
+                    </div>
+                    <dl className="mobile-menu-spot-details" aria-label="SPOT 진단 상세">
+                      {spotStatusDetails.map(({ label, value }) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </>
                 )}
               </div>
               <div className="header-overflow-section">

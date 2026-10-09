@@ -2,12 +2,13 @@ import { useMemo } from 'react';
 import type { SpotImageResponseMetadata } from '../../FacilityData/api/spotService.types';
 import type {
   HealthSnapshot,
+  HealthReceiptTiming,
   StatsSnapshot,
   SpotConfig,
   CommChannelMetrics,
   SettingsFormState,
 } from '../../../shared/types';
-import { CommBadge, buildCommBadge, buildSpotCommBadge, getCameraStatus } from '../../../shared/utils/commBadge';
+import { CommBadge, SpotStatusDetail, buildCommBadge, buildSpotStatusBadges, getCameraStatus } from '../../../shared/utils/commBadge';
 import {
   calcRecoverySec,
   formatOptionalNumber,
@@ -29,6 +30,7 @@ const {
 
 export interface StatusPanelInput {
   health: HealthSnapshot | null;
+  healthReceipt?: HealthReceiptTiming | null;
   stats: StatsSnapshot | null;
   nowTick: number;
   lastDataAt: number | null;
@@ -79,6 +81,8 @@ export interface StatusPanelOutput {
   // Comm badges (for header)
   commSnapshot: any;
   commBadges: CommBadge[];
+  spotTemperatureBadge: CommBadge;
+  spotStatusDetails: SpotStatusDetail[];
   commDetail: any;
   commSummaryItems: any[];
 
@@ -176,6 +180,7 @@ const buildDegradedPollingText = (
 export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
   const {
     health,
+    healthReceipt,
     stats,
     nowTick,
     lastDataAt,
@@ -299,19 +304,26 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
 
   // --- Comm badges ---
   const commSnapshot = health?.comm;
+  const refreshMs = spotConfig ? spotConfig.refresh_interval * 1000 : null;
+  const { commBadge: spotCommBadge, temperatureBadge: spotTemperatureBadge, details: spotStatusDetails } = buildSpotStatusBadges({
+    observation: health?.spot_temperature,
+    metrics: commSnapshot?.spot,
+    receipt: healthReceipt,
+    monotonicNowMs: performance.now(),
+    refreshMs,
+    apiDegraded: healthPollingDegraded,
+  });
   const commBadges = useMemo(() => {
     const comm = commSnapshot;
-    if (!comm) return [];
-    const refreshMs = spotConfig ? Math.max(500, Math.round(spotConfig.refresh_interval * 1000)) : null;
+    if (!comm && !health) return [];
     return [
-      buildCommBadge('EX', comm.extruder, nowTick),
-      buildCommBadge('LS', comm.ls_plc, nowTick),
-      buildSpotCommBadge('SPOT', comm.spot, nowTick, refreshMs),
+      buildCommBadge('EX', comm?.extruder, nowTick),
+      buildCommBadge('LS', comm?.ls_plc, nowTick),
+      spotCommBadge,
     ];
-  }, [commSnapshot, nowTick, spotConfig]);
+  }, [commSnapshot, health, nowTick, spotCommBadge]);
 
   const commDetail = useMemo(() => {
-    const refreshMs = spotConfig ? Math.max(500, Math.round(spotConfig.refresh_interval * 1000)) : null;
     return {
       extruder: {
         metrics: commSnapshot?.extruder,
@@ -323,11 +335,11 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
       },
       spot: {
         metrics: commSnapshot?.spot,
-        badge: buildSpotCommBadge('SPOT', commSnapshot?.spot, nowTick, refreshMs),
+        badge: spotCommBadge,
         refreshMs,
       },
     };
-  }, [commSnapshot, nowTick, spotConfig]);
+  }, [commSnapshot, nowTick, refreshMs, spotCommBadge]);
 
   const commSummaryItems = useMemo(() => {
     const list = [
@@ -376,6 +388,8 @@ export function useStatusPanel(input: StatusPanelInput): StatusPanelOutput {
     ageText,
     commSnapshot,
     commBadges,
+    spotTemperatureBadge,
+    spotStatusDetails,
     commDetail,
     commSummaryItems,
     statsWindow,
