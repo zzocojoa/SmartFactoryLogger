@@ -317,3 +317,24 @@ legacy identity없는cross-source fallback,외부Claude 미설치 및선택적me
 최신 검토 보고서: [실제 적용 후 검토](C:/Users/user/Desktop/SmartFactory/S1_POST_READ_PREP_20261009_R1/server-post-review-001.md).
 과거HOLD·실패·helper/manifest를재작성하지않았고신규작업으로정식QA/장비설정/과거누락해결을자동확대하지않는다.
 필수후속작업은없으며push/merge/PR·새개선/추가운영작업은이번범위에포함하지않았다.
+
+## 후속 승인 — 소스 병합과 기존 운영본 이력 연결
+
+사용자는 위 완료 상태를 설명한 TPM 로드맵에 "진행 승인"했다. 기존 승인된 UI-S1 제품·운영
+범위의 완료 기록은 유지하며, 이번 후속은 PR·보호된 master 병합·운영/복구 이력 연결이다.
+기준 계획15절과 운영 기준의 "UI-S1 소스 병합과 운영 인계"를 따른다.
+
+- 원격 master35959c41edee29573040d571ead952c073f1be13와 UI-S1 재개HEAD2808d103을 확인했다.
+- build541d와 현재 docs 밖818개 Git 항목·최종health 당시571개 입력이 동일하다. 기존
+  health 원문 전체·해시·exit0와 현 source를 대조했다. preflight.py exit0이며 새 제품 시험을
+  실행한 것으로 표시하지 않는다. 새 PR head의 GitHub 검사 결과는 별도로 확인한다.
+- 운영541d/installer08C와 이전4c/installerD453의 개발 보존 사본 크기·SHA256을 다시 확인했다.
+  실제 server POST 검토 원문과 기존 승격 기록의 참조 해시가 일치한다.
+- 상태별 현장 대응·현재/이전 복구본의 구분·승격 보류 조건과 정식 검증 후속 목록을 운영 기준에
+  기록했다. 정식QA/서명·전체성능/config/comparator/전수검증은 미완료 상태를 유지한다.
+- 기존 개발 checkout의 미커밋 변경은 별도 hash 목록으로 보존 대조한다. 기준 계획 사본만
+  동일 내용으로 동기화하며 기존 main checkout의 운영 기준·기타 파일을 덮어쓰지 않는다.
+- 새 근거 위치: `C:/Users/user/Desktop/SmartFactory/S1_MERGE_20261009_R1/preflight.json` 및
+  해당 실행의 PR/CI/실제mergeSHA 완료 영수증. 현재 이 절 준비 시점에는 PR·병합 대기다.
+- 제품 재빌드·서버 재설치·앱 시작/종료·자동복구는 이번 후속에 포함하지 않는다. CI의 별도
+  설치 아티팩트는 기존 운영 installer identity나 서명/정식QA 완료 근거를 대신하지 않는다.

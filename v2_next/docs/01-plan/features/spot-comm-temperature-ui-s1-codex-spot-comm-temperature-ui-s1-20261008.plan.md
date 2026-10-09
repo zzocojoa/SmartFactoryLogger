@@ -9,7 +9,7 @@
 > 생성 완료한 구현 브랜치명: `codex/spot-comm-temperature-ui-s1-20261008`
 > 구현 worktree: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next`
 > 문서 상태: 실제 Plan mode에서 계획 작성 완료, 구현 모드에서 파일 저장 완료
-> 실행 상태: 승인된 UI-S1 개선·최종 review/full health·541d locked package/API→UI·실제 서버 적용과 후속128조건/65파일 회수 검토 완료. 541d701d/08C를 미서명 내부 운영본·다음 개선 롤백 기준으로 등록했고 교체 전4c97d4a/D453과 과거 실패·미검증을 보존한다. 최초 적용 API timeout 원인/첫 후속health223ms·과거drop15·정식QA/서명/config/comparator/전수검증 한계는 PASS로 바꾸지 않는다. 최신 완료 근거는14.27–14.28절이다.
+> 실행 상태: 승인된 UI-S1 개선·서버 적용·운영/다음 롤백 등록은14.27–14.28절에서 완료했다. 후속 로드맵의 사용자 "진행 승인"에 따라 제품 변경 없이 원격 PR·보호된 master 병합·동일 운영 설치본과 소스 이력 연결을 진행한다(15절). 541d701d/08C 운영본과4c97d4a/D453 이전본을 유지하며 최초 timeout/223ms·과거drop15·정식QA/서명/config/comparator/전수검증 한계를 PASS로 바꾸지 않는다.
 > 현재 작업의 기준 계획 파일: `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 새 브랜치 worktree의 동일 내용 계획 사본: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 이전 준비 계획 원문(보존): `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-temperature-history-p2-20260922.plan.md`
@@ -810,3 +810,20 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - [x] 이번교체전이전본:4c97d4a00d79ae0d3da70b2e82af227345e21040 /164583937bytes/SHAD453C1D17EFC706D3E21FE6F8D09F739F159EBF9F3F24F2EB2349E92D4EF84FB/NotSigned와구증거보존. 두서버installer는S1_CAND_20261009_R1/installers에있으며원래설정/closedCSV보존을호환근거로남긴다.
 - [x] 운영기준문서의2026-10-09 새이력/최신보고·분석/PDCA상태와기준계획두사본을갱신한다. 기존main checkout의다른미커밋변경과baseline의기존문구차이는보존한다. oldhelper/result/promotionfalse 영수증은재작성하지않고새operating-promotion001로별도운영결정을등록했다.
 - 현재승인된UI-S1 작업은완료다. 설계10항목의충족률100%는UI-S1 범위의대조이며정식QA/서명·전체성능·CSV/개별image전수무결성/기존fallback 미보장까지PASS라는뜻이아니다. 외부Claude 미설치·legacy identity없는cross-source fallback·선택적memo7줄 advice 미적용/과거OOM·backendtimeout 원인미확정도유지한다. 과거절의미완료체크는그때상태이며현재결론은이절과최신보고다. push/merge/PR/추가운영행위는수행하지않는다.
+
+## 15. 승인된 소스 병합과 기존 운영본의 이력 연결
+
+### 15.1 승인·범위·완료 조건 (2026-10-09 후속 재개)
+
+- 사용자는 TPM 설명의 "UI-S1 승인 개선·운영 적용 완료 / 소스 병합 미완료 / 정식 전체 검증 미완료" 결론을 선택하고 "진행 승인"했다. 이 승인은 UI-S1 원격 브랜치 게시, PR 작성·검사 확인, 보호된 master 병합 및 병합 결과와 기존 운영 설치본·승인·복구 기록 연결에 적용한다.
+- 원격 master와 기준은35959c41edee29573040d571ead952c073f1be13, 재개 브랜치 HEAD는2808d103db9e80f61a3e28dc61c8cb5a00bcfc32다. 현재 제품/검증 입력은541d701d544eea6a8a4e4836047077eaf9cfaf30와 같으며 그 뒤 변경은 docs뿐이다. master는 PR 필수/관리자 포함 보호 적용, 필수 승인 수0, 필수 status check 등록 없음, 미해결 대화 해소 요구다. 보호를 해제하거나 우회하지 않는다.
+- 포함: 이 계획·보고서·운영 기준에 병합 절차와 인계 기준 기록, 제품 출처 비교, 변경에 필요한 최종 검증, GitHub PR/CI/병합 상태 확인, 병합 후 실제 SHA와 운영본 식별을 새 증거로 보존. 정식 QA·서명·성능·설정/전수 검증의 미완료 항목은 별도 후속 목록으로 관리한다.
+- 제외: 추가 제품 로직·설정 수정, 신규 installer 배포, 서버 앱 재설치·시작·종료·자동 롤백, 서명 인증서/비밀정보 구성, 과거 증거 재작성. CI가 생성하는 별도 시험 artifact는541d/08C 운영 설치본으로 간주하지 않는다. 새 제품 변경이 필요하면 이유·영향을 알리고 승인·계획 반영을 먼저 한다.
+- 현재 운영본/다음 개선 rollback은541d/08C, UI-S1 자체 장애의 교체 전 이전본은4c/D453이며 원래 설정/CSV 보존 근거와 복구 호환성을 유지한다. 동일 installer의 재승인·재빌드·반복120분 시험을 자동 추가하지 않는다.
+- 절차: 원격 재조회 → 최종 diff/제품 동일성 확인 → 문서·인계 항목 갱신 및 원문/exit 검토 → clean 문서 commit → branch push/PR → CI 결과 확인 → 승인된 PR merge → 원격 master와 실제 merge SHA/제품 동일성 재검증 → 새 병합 완료 영수증과 원격 기록 연결.
+- 증거 위치: `C:/Users/user/Desktop/SmartFactory/S1_MERGE_20261009_R1`의 새 실행 폴더. 기본 개발 폴더의 기존 미커밋 변경을 보존하고, 기준 계획의 동일 내용 사본만 동기화한다.
+- [x] 승인 범위 기록·기준 계획 재개, GitHub 로그인/원격·브랜치·보호 정책 확인, 운영/이전 installer SHA256 재대조.
+- [x] 최종 병합 대상 문서·인계 및 검증 근거 정리. preflight.py exit0: docs 밖818개 Git 항목/제품·검증571개 입력이541d 및 최종health exit0 당시와 동일, 원문전체/hash/exit 검토, 운영·이전 installer SHA 및 POST 검토 결합 확인. 현장 대응·복구·정식 검증 후속 목록은 운영 기준에 기록했다. 제품 변경 없는 기존 검증을 재실행한 것으로 표시하지 않는다.
+- [ ] PR 게시·연결, 해당 head의 CI 결과 확인.
+- [ ] 보호된 master 병합과 실제 원격 SHA/제품 동일성 확인.
+- [ ] 운영 build541d/installer08C와 merge SHA를 구분한 완료·인계 기록 및 기존 변경 보존 대조.
