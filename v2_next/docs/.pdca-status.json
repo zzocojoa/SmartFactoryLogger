@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-08-21T07:22:13.207Z",
+  "lastUpdated": "2026-10-09T07:25:16.089Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -29,7 +29,8 @@
     "runtime-error-root-cause-validation",
     "spot-request-churn-remediation",
     "spot-tcp-source-port-quarantine-v2",
-    "spot-realtime-image-performance"
+    "spot-realtime-image-performance",
+    "spot-comm-temperature-ui-s1"
   ],
   "primaryFeature": "spot-image-capture-settings-ui",
   "statusReaderPolicy": {
@@ -2312,6 +2313,552 @@
         "lastUpdated": "2026-08-21T07:22:13.207Z"
       },
       "completedAt": "2026-08-21T07:22:13.202Z"
+    },
+    "spot-comm-temperature-ui-s1": {
+      "phase": "check",
+      "matchRate": null,
+      "iterationCount": 3,
+      "documents": {
+        "plan": "docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md",
+        "design": "docs/02-design/features/spot-comm-temperature-ui-s1.design.md",
+        "analysis": "docs/03-analysis/spot-comm-temperature-ui-s1.analysis.md",
+        "report": "docs/04-report/spot-comm-temperature-ui-s1.report.md",
+        "review": "docs/03-analysis/spot-comm-temperature-ui-s1-closeout-review-20261009.md",
+        "previousReview": "docs/03-analysis/spot-comm-temperature-ui-s1-review-20261009.md"
+      },
+      "taskChain": [
+        {
+          "phase": "plan",
+          "status": "completed",
+          "createdAt": "2026-10-08T13:53:56.589Z",
+          "completedAt": "2026-10-08T13:56:06.422Z"
+        },
+        {
+          "phase": "design",
+          "status": "completed",
+          "createdAt": "2026-10-08T13:53:56.589Z",
+          "completedAt": "2026-10-08T14:00:03.300Z"
+        },
+        {
+          "phase": "do",
+          "status": "completed",
+          "createdAt": "2026-10-08T13:53:56.589Z",
+          "completedAt": "2026-10-08T14:10:22.405Z"
+        },
+        {
+          "phase": "check",
+          "status": "in_progress",
+          "createdAt": "2026-10-08T13:53:56.589Z"
+        },
+        {
+          "phase": "report",
+          "status": "pending",
+          "createdAt": "2026-10-08T13:53:56.589Z"
+        }
+      ],
+      "timestamps": {
+        "started": "2026-10-08T13:53:56.591Z",
+        "lastUpdated": "2026-10-09T07:25:16.089Z"
+      },
+      "reviewStatus": "fresh_final_review_completed_candidate_and_operations_pending",
+      "completionScope": "approved_logic_and_local_review_verified_candidate_and_operations_pending",
+      "operationalPromotionPerformed": false,
+      "reviewCorrection": {
+        "status": "completed",
+        "approval": "user",
+        "completedAt": "2026-10-08T15:12:13.052Z",
+        "scope": "broadcast_error_recovery_and_detail_drawer_diagnostics",
+        "frontendTests": 390,
+        "nodeTests": 9,
+        "browserDetails": 12,
+        "validationExitCodes": {
+          "test": 0,
+          "typecheck": 0,
+          "lint": 0,
+          "build": 0,
+          "browser": 0
+        },
+        "sourceManifest": ".tmp_ui_s1_verify/correction/final-source-sha256.json",
+        "evidenceManifest": ".tmp_ui_s1_verify/correction/evidence-sha256.json",
+        "initialFailureLog": ".tmp_ui_s1_verify/review/review-test.log",
+        "healthRerun": false,
+        "priorDefaultHealthExit": 1,
+        "operationalPromotionPerformed": false
+      },
+      "previousCompletion": {
+        "phase": "completed",
+        "matchRate": 100,
+        "completedAt": "2026-10-08T15:10:54.634Z",
+        "completionScope": "approved_frontend_implementation_and_local_verification",
+        "reviewStatus": "approved_corrections_complete_default_health_qa_unresolved",
+        "taskChain": [
+          {
+            "phase": "plan",
+            "status": "completed",
+            "createdAt": "2026-10-08T13:53:56.589Z",
+            "completedAt": "2026-10-08T13:56:06.422Z"
+          },
+          {
+            "phase": "design",
+            "status": "completed",
+            "createdAt": "2026-10-08T13:53:56.589Z",
+            "completedAt": "2026-10-08T14:00:03.300Z"
+          },
+          {
+            "phase": "do",
+            "status": "completed",
+            "createdAt": "2026-10-08T13:53:56.589Z",
+            "completedAt": "2026-10-08T14:10:22.405Z"
+          },
+          {
+            "phase": "check",
+            "status": "completed",
+            "createdAt": "2026-10-08T13:53:56.589Z",
+            "completedAt": "2026-10-08T14:27:14.835Z"
+          },
+          {
+            "phase": "report",
+            "status": "completed",
+            "createdAt": "2026-10-08T13:53:56.589Z",
+            "completedAt": "2026-10-08T14:27:14.866Z"
+          }
+        ],
+        "reopenedAt": "2026-10-08T15:49:31.477Z",
+        "reason": "Two replayed health broadcast ordering defects; prior evidence remains historical"
+      },
+      "review": {
+        "reviewedAt": "2026-10-08T16:20:33.190Z",
+        "completed": false,
+        "converged": false,
+        "cycles": 1,
+        "issuesFound": 0,
+        "critical": 0,
+        "informational": 0,
+        "productEdits": true,
+        "orderingCases": 3,
+        "orderingProbeExitCodes": [
+          0,
+          0
+        ],
+        "frontendTests": 398,
+        "nodeTests": 9,
+        "validationExitCodes": {
+          "test": 0,
+          "typecheck": 0,
+          "lint": 0,
+          "build": 0,
+          "browser": 0
+        },
+        "decision": "A_implemented_and_verified",
+        "independentReviewerCoverage": false,
+        "reviewStartCaptured": false,
+        "qaEvidence": ".tmp_ui_s1_verify/ordering-correction-20261009-001/evidence.json",
+        "report": "docs/03-analysis/spot-comm-temperature-ui-s1-review-20261009.md",
+        "healthRerun": false,
+        "priorDefaultHealthExit": 1,
+        "operationalPromotionPerformed": false,
+        "fixedDefects": 2
+      },
+      "orderingCorrection": {
+        "status": "locally_verified",
+        "approval": "user_A",
+        "completedAt": "2026-10-08T16:20:33.190Z",
+        "scope": "R1_R2_and_three_permanent_regressions",
+        "permanentRaceCases": 3,
+        "adjacentCases": 5,
+        "frontendTests": 398,
+        "nodeTests": 9,
+        "nativeFollowerCases": 3,
+        "browserDetails": 12,
+        "redExit": 1,
+        "validationExitCodes": {
+          "regression": 0,
+          "originalProbe": 0,
+          "test": 0,
+          "typecheck": 0,
+          "lint": 0,
+          "build": 0,
+          "browser": 0
+        },
+        "sourceManifest": ".tmp_ui_s1_verify/ordering-correction-20261009-001/source-manifest.json",
+        "qaEvidence": ".tmp_ui_s1_verify/ordering-correction-20261009-001/evidence.json",
+        "reviewCompleted": false,
+        "operationalPromotionPerformed": false
+      },
+      "refactoring": {
+        "status": "locally_verified",
+        "authorization": "user_continue_code_refactoring",
+        "scope": "behavior_preserving_health_receiver_extraction",
+        "startedAt": "2026-10-08T23:16:52.971Z",
+        "implementationFiles": [
+          "frontend/src/domains/Observability/hooks/useSystemViewModel.ts",
+          "frontend/src/domains/Observability/hooks/useSystemViewModel.health.ts"
+        ],
+        "focusedRegressionCases": 8,
+        "focusedExitCode": 0,
+        "evidenceRoot": ".tmp_ui_s1_verify/refactor-20261009-001",
+        "reviewCompleted": false,
+        "operationalPromotionPerformed": false,
+        "completedAt": "2026-10-08T23:24:23.304Z",
+        "changedExistingFrontendFiles": 1,
+        "newFrontendFiles": 1,
+        "otherFrontendFilesPreserved": 12,
+        "frontendTests": 398,
+        "nodeTests": 9,
+        "nativeFollowerCases": 3,
+        "browserDetailRows": 12,
+        "validationExitCodes": {
+          "focused": 0,
+          "typecheck": 0,
+          "lint": 0,
+          "test": 0,
+          "build": 0,
+          "browser": 0
+        },
+        "sourceManifest": ".tmp_ui_s1_verify/refactor-20261009-001/source-manifest.json",
+        "fullHealthRerun": false,
+        "priorDefaultHealthExit": 1
+      },
+      "lastUpdated": "2026-10-09T07:25:16.089Z",
+      "closeout": {
+        "status": "fresh_final_review_complete_candidate_pending",
+        "approval": "user_approved_QA_review_candidate_operational_closeout",
+        "startedAt": "2026-10-08T23:38:08.320Z",
+        "evidenceRoot": ".tmp_ui_s1_verify/closeout-20261009-001",
+        "readOnlyIndependentReviewAuthorized": true,
+        "rollbackCommitBeforeApply": "4c97d4a00d79ae0d3da70b2e82af227345e21040",
+        "operationalPromotionPerformed": false,
+        "lastUpdated": "2026-10-09T07:25:16.089Z",
+        "reviewCoverageCompleted": true,
+        "reviewCompleted": true,
+        "parentStartCaptured": true,
+        "parentReviewBinding": "verified",
+        "nativeAdversarialBinding": "verified",
+        "recommendedFixes": 8,
+        "critical": 6,
+        "informationalFixes": 2,
+        "investigationItems": 1,
+        "defaultHealthExit": 0,
+        "backendHostEncodingDiagnosed": true,
+        "qaCasingComplete": true,
+        "candidateCommitted": false,
+        "installerBuilt": false,
+        "qaVerdict": "local_and_review_pass_candidate_ops_pending",
+        "currentReview": "docs/03-analysis/spot-comm-temperature-ui-s1-closeout-review-20261009.md",
+        "followupApproval": "A안(권장): 추가 발견 8건 수정 + 응답 지연 조사 및 확인된 문제 보완.",
+        "followupApprovalEvidence": ".tmp_ui_s1_verify/followup-correction-20261009-001/approval.json",
+        "followupEvidenceRoot": ".tmp_ui_s1_verify/followup-correction-20261009-001",
+        "fullHealthRerun": true,
+        "latestHealthReceipt": ".tmp_ui_s1_verify/final-review-20261009-004/health/receipt.json",
+        "latestHealthAudit": ".tmp_ui_s1_verify/final-review-20261009-004/health/audit.json",
+        "qaChainReached": true,
+        "rollbackInstallerReverified": true,
+        "preflightEvidenceRoot": ".tmp_ui_s1_verify/closeout-preflight-20261009-001",
+        "finalCandidateChecksCompleted": false,
+        "localCorrectionsVerified": true,
+        "defaultHealthEvidence": ".tmp_ui_s1_verify/review2-correction-20261009-001/default-health-002/audit.json",
+        "finalCssHealthStatus": "passed",
+        "finalCssHealthEvidence": "followup-correction-20261009-001/default-health-adjacent-retry-006/audit.json",
+        "frontendTests": 434,
+        "browserViewportThemeCases": 9,
+        "nativeFollowerCases": 3,
+        "finalCssHealthExit": 0,
+        "priorPassedDefaultHealthEvidence": ".tmp_ui_s1_verify/i2-correction-20261009-001/default-health-003/audit.json",
+        "tempBadgeViewportThemeStateCases": 54,
+        "adjacentCorrectionsVerified": true,
+        "adjacentEvidenceRoot": ".tmp_ui_s1_verify/final-review-20261009-001",
+        "historicalNativeAdversarialBinding": "verified",
+        "review001WorkingTree": "3eea1dcca7731f39b0f2b6bbbffcfa55f2b83443",
+        "pendingAdditionalFinding": {
+          "0": "I",
+          "1": "2",
+          "2": " ",
+          "3": "i",
+          "4": "d",
+          "5": "e",
+          "6": "n",
+          "7": "t",
+          "8": "i",
+          "9": "t",
+          "10": "y",
+          "11": " ",
+          "12": "r",
+          "13": "e",
+          "14": "t",
+          "15": "e",
+          "16": "n",
+          "17": "t",
+          "18": "i",
+          "19": "o",
+          "20": "n",
+          "21": ";",
+          "22": " ",
+          "23": "s",
+          "24": "e",
+          "25": "p",
+          "26": "a",
+          "27": "r",
+          "28": "a",
+          "29": "t",
+          "30": "e",
+          "31": " ",
+          "32": "c",
+          "33": "a",
+          "34": "p",
+          "35": "a",
+          "36": "c",
+          "37": "i",
+          "38": "t",
+          "39": "y",
+          "40": "-",
+          "41": "c",
+          "42": "o",
+          "43": "n",
+          "44": "f",
+          "45": "i",
+          "46": "r",
+          "47": "m",
+          "48": "a",
+          "49": "t",
+          "50": "i",
+          "51": "o",
+          "52": "n",
+          "53": " ",
+          "54": "p",
+          "55": "o",
+          "56": "l",
+          "57": "i",
+          "58": "c",
+          "59": "y",
+          "60": " ",
+          "61": "p",
+          "62": "r",
+          "63": "o",
+          "64": "p",
+          "65": "o",
+          "66": "s",
+          "67": "a",
+          "68": "l",
+          "userDecision": "I2-A",
+          "status": "fixed_local_pending_fresh_review",
+          "evidence": ".tmp_ui_s1_verify/i2-correction-20261009-001/local-result.json"
+        },
+        "i2UserDecision": "A",
+        "health005ExistingBackendTimeoutObserved": true,
+        "health005RootCauseVerified": false,
+        "health005FocusedReplays": [
+          {
+            "exit": 0,
+            "seconds": 0.251
+          },
+          {
+            "exit": 0,
+            "seconds": 0.236
+          }
+        ],
+        "freshIndependentReviewCompleted": true,
+        "historicalReviewCounts": {
+          "recommendedFixes": 8,
+          "critical": 6,
+          "informationalFixes": 2,
+          "investigationItems": 1
+        },
+        "review001Counts": {
+          "critical": 2,
+          "informational": 2
+        },
+        "packagePreparation": {
+          "at": "2026-10-09T03:03:29.958Z",
+          "root": "C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1",
+          "releasePython": "C:\\Users\\user\\Desktop\\SmartFactory\\S1_PKG_20261009_R1\\venv\\Scripts\\python.exe",
+          "pythonVersion": "3.12.6",
+          "environmentPrepared": true,
+          "versionsMatched": 40,
+          "wheelHashMatches": 40,
+          "pipCheckExitCode": 0,
+          "releaseRuffExitCode": 0,
+          "releaseMypyExitCode": 0,
+          "releaseBackendTests": 880,
+          "releaseBackendTestSeconds": 225.868,
+          "releaseBackendTestSkipped": 1,
+          "releaseBackendTestExitCode": 0,
+          "browserResourcesPrepared": true,
+          "browserVersion": "151.0.7922.34",
+          "browserSmokeExitCode": 0,
+          "ownedBrowserProcessesRemaining": 0,
+          "browserResourceFiles": 610,
+          "browserResourceBytes": 735085639,
+          "browserManifestSha256": "284328585e6485fbbd59d132b8043a2d40d9c3c6f9c8fac9b3ff7eab62d4427f",
+          "longestBrowserResourcePath": 188,
+          "explorerAccessConfirmed": true,
+          "sourceFiles": 571,
+          "currentSourceChanges": [],
+          "mainEnvironmentInventoryAndConfigPreserved": true,
+          "rollbackInstallersPreserved": true,
+          "releaseLockPreserved": true,
+          "i2UserDecision": null,
+          "finalIndependentReviewCompleted": false,
+          "candidateCommitted": false,
+          "installerBuilt": false,
+          "serverApplied": false,
+          "rollbackBaselineUpdated": false
+        },
+        "remoteReadOnlyPreflight": {
+          "at": "2026-10-09T03:25:51.381Z",
+          "evidenceRoot": "C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1/records/server-preflight-001",
+          "sharedReturn": "Z:/SmartFactory/20261009/return/S1_PREFLIGHT_20261009_R1",
+          "remoteAlias": "DESKTOP-Extrusion",
+          "osHostNameVerified": false,
+          "healthSamples": 2,
+          "buildGitCommit": "4c97d4a00d79ae0d3da70b2e82af227345e21040",
+          "runningObserved": true,
+          "sameSpotService": true,
+          "sameLoggerService": true,
+          "spotPollDelta": 302,
+          "reportedCsvRowDelta": 1280,
+          "elapsedSeconds": 301.6857786178589,
+          "rawRetrievalHashMatched": true,
+          "serverLocalHashVerified": false,
+          "actualCsvFileRead": false,
+          "configFileHashVerified": false,
+          "processOwnerVerified": false,
+          "temporaryEdgeWindowClosed": true,
+          "operatingDashboardRestored": true,
+          "candidateApplied": false,
+          "baselineChanged": false
+        },
+        "candidatePackagingPreflight": {
+          "at": "2026-10-09T03:30:39.974Z",
+          "currentHead": "35959c41edee29573040d571ead952c073f1be13",
+          "candidateCommitted": false,
+          "i2UserDecision": null,
+          "dirtyWorktreeObserved": true,
+          "dirtyBuildRejected": true,
+          "dirtyPostPackagingRejected": true,
+          "provenanceFileWritten": false,
+          "builderConfigSchemaValidated": true,
+          "builderVersion": "26.15.3",
+          "onlyConfigOverrides": [
+            "directories.output",
+            "extraResources[0].from"
+          ],
+          "configPath": "C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1/records/candidate-preflight-001/candidate-builder.config.json",
+          "configSha256": "1ffcbe61e710c2f27e958972fd2ad55f6cc027f0f6908c109e65909fb67df1d1",
+          "specSha256": "1dc131ddc9e3f2d5408172ea2ff22740e08ff90bf14e4131b1057f7c27cb2fe8",
+          "packageVersion": "1.0.26",
+          "productSourceFiles": 571,
+          "productSourceChanges": [],
+          "pyinstallerExecuted": false,
+          "electronBuilderExecuted": false,
+          "installerBuilt": false,
+          "operationalBaselineChanged": false
+        },
+        "blocker": {
+          "kind": "missing_direct_i2_scope_decision",
+          "sinceProposal": "D2",
+          "consecutiveGoalTurnsObserved": 4,
+          "audit": "C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1/records/candidate-preflight-001/goal-blocked-audit.json",
+          "independentPrerequisitesPrepared": true,
+          "dependentSteps": [
+            "fresh_final_review",
+            "clean_candidate_commit",
+            "package_runtime",
+            "approved_server_apply",
+            "rollback_baseline_update"
+          ],
+          "userDecision": "I2-A",
+          "resolvedAt": "2026-10-09T03:41:53.416Z",
+          "resolved": true
+        },
+        "i2ApprovalEvidence": ".tmp_ui_s1_verify/i2-correction-20261009-001/approval.json",
+        "currentCandidateVerified": false,
+        "i2Correction": {
+          "approval": "direct_user_I2-A",
+          "at": "2026-10-09T03:41:53.416Z",
+          "status": "fixed_local_verified_final_independent_review_pending",
+          "evidenceRoot": ".tmp_ui_s1_verify/i2-correction-20261009-001",
+          "permanentRedVerified": true,
+          "focusedGreenVerified": true,
+          "finalVerificationCompleted": true,
+          "permanentRegressions": 10,
+          "localResult": ".tmp_ui_s1_verify/i2-correction-20261009-001/local-result.json",
+          "fullHealth": ".tmp_ui_s1_verify/review2-correction-20261009-001/default-health-002/audit.json",
+          "knownOOM": {
+            "rootCauseVerified": false,
+            "exitCode": null,
+            "evidence": ".tmp_ui_s1_verify/i2-correction-20261009-001/default-health-002/terminal-observation.json"
+          },
+          "latestLocalResult": ".tmp_ui_s1_verify/review2-correction-20261009-001/local-result.json",
+          "capacityArrivalPermanentRegressions": 2
+        },
+        "review002": {
+          "startTokens": {
+            "core": "b973c737-c2f4-4432-bcea-d7bc571a6ba9",
+            "native": "b97a0ba6-6357-4ac2-a7ee-a8a756476b1d"
+          },
+          "evidence": ".tmp_ui_s1_verify/final-review-20261009-002/merged-findings.json",
+          "findings": 3,
+          "critical": 2,
+          "informational": 1,
+          "cyclesBeforeCorrection": 2,
+          "cycleAfterCorrection": 3,
+          "completed": false,
+          "converged": false,
+          "localCorrectionVerified": true,
+          "fixedFindings": [
+            "I2a",
+            "R5a",
+            "R10b"
+          ],
+          "knownUnresolved": 0,
+          "cycles": 3,
+          "coreFinishPending": false,
+          "localResult": ".tmp_ui_s1_verify/review2-correction-20261009-001/local-result.json",
+          "coverageLimits": [
+            "The third edit cycle requires stopping this review invocation; no final zero-edit pass.",
+            "Mixed native-identity then identity-less legacy messages preserve the documented fallback without cross-source ordering guarantees.",
+            "The intermittent unchanged backend receipt timeout and earlier V8 OOM root causes are unverified.",
+            "Claude Code outside adversarial/structured review unavailable; current native review is in-host Codex.",
+            "Historical root Markdown was screened, not fully reread by core review002.",
+            "Browser API fixtures are synthetic; candidate installer, actual device and operational application remain unverified."
+          ],
+          "originalCoreTokenConsumed": true,
+          "coreFinishExit": 0,
+          "coreFinishReceipt": ".tmp_ui_s1_verify/final-review-20261009-002/core-finish-file.receipt.json",
+          "actualLoggedRecord": ".tmp_ui_s1_verify/final-review-20261009-002/actual-logged-cycle3-record.json",
+          "binding": {
+            "state": "changed",
+            "start_wtree": "8b6d1acc0614bab71e28ea5920c5d8d3c08269cf",
+            "end_wtree": "08cb61849cf4343e579bba3fe8279d43541eadcd",
+            "started_at": "2026-10-09T05:24:47.886Z",
+            "branch_id": "9c2034f3c27425533b4bbedcad8c7b3b4da0ce84ec7ecb7a54741d42ed86b782"
+          },
+          "fixedActionsRetained": 16,
+          "finalZeroEditReviewPerformed": false,
+          "stopReason": "Review skill maximum three fix cycles"
+        },
+        "freshFinalReview": {
+          "at": "2026-10-09T07:25:16.089Z",
+          "coreToken": "78831db9-56fc-475b-ba3d-fc5294f203c9",
+          "nativeToken": "91a2ea40-ad0c-4423-97d4-85ef3b1f5ea4",
+          "completed": true,
+          "converged": true,
+          "cycles": 0,
+          "binding": {
+            "state": "verified",
+            "start_wtree": "41c8617703ac175659609b2bbc640126339a4083",
+            "end_wtree": "41c8617703ac175659609b2bbc640126339a4083",
+            "started_at": "2026-10-09T06:58:58.371Z",
+            "branch_id": "9c2034f3c27425533b4bbedcad8c7b3b4da0ce84ec7ecb7a54741d42ed86b782"
+          },
+          "actualCoreRecord": ".tmp_ui_s1_verify/final-review-20261009-004/core-finish-actual.json",
+          "report": ".tmp_ui_s1_verify/final-review-20261009-004/final-review.md",
+          "defaultHealthExit": 0,
+          "sourceInputs": 571,
+          "outsideUnavailable": true,
+          "pendingOptionalMemoAdvice": true
+        }
+      }
     }
   },
   "pipeline": {
@@ -2323,7 +2870,7 @@
   "session": {
     "startedAt": "2026-06-11T01:56:04.880Z",
     "onboardingCompleted": false,
-    "lastActivity": "2026-08-21T07:22:13.207Z"
+    "lastActivity": "2026-10-08T15:10:54.641Z"
   },
   "history": [
     {
@@ -3963,6 +4510,126 @@
       "phase": "report",
       "nextPhase": "completed",
       "timestamp": "2026-08-21T07:22:13.204Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "from": "do",
+      "to": "check",
+      "timestamp": "2026-10-08T14:10:22.398Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "phase_complete",
+      "phase": "do",
+      "nextPhase": "check",
+      "timestamp": "2026-10-08T14:10:22.400Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "from": "check",
+      "to": "act",
+      "timestamp": "2026-10-08T14:27:14.829Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "phase_complete",
+      "phase": "check",
+      "nextPhase": "act",
+      "timestamp": "2026-10-08T14:27:14.831Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-10-08T14:27:14.861Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "from": "check",
+      "to": "report",
+      "timestamp": "2026-10-08T15:08:11.001Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "phase_complete",
+      "phase": "act",
+      "nextPhase": "report",
+      "timestamp": "2026-10-08T15:08:11.005Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "phase_complete",
+      "phase": "report",
+      "nextPhase": "completed",
+      "timestamp": "2026-10-08T15:10:54.636Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "closeout_review_new_findings_pending_choice",
+      "timestamp": "2026-10-09T00:29:00.717Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "followup_A_approved_scope_saved_before_repair",
+      "timestamp": "2026-10-09T00:44:06.191Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "approved_followup_local_corrections_verified_final_review_pending",
+      "timestamp": "2026-10-09T01:29:24.375Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "final_css_default_health_passed_review_pending",
+      "timestamp": "2026-10-09T01:34:04.176Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "adjacent_approved_contract_regressions_verified_health_timeout_and_i2_pending",
+      "timestamp": "2026-10-09T02:21:31.840Z"
+    },
+    {
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "final_local_health006_pass_original_timeout_preserved_i2_and_final_review_pending",
+      "timestamp": "2026-10-09T02:31:59.375Z"
+    },
+    {
+      "timestamp": "2026-10-09T03:03:29.958Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "locked_release_environment_prepared_backend_validated_i2_pending",
+      "detail": "Python3.12.6,40hash-lockedwheels,pipcheck/ruff/mypy/backend880(exit0,existing1skip),ownedChromiumsmokeandExploreraccessverified; finalreview/candidate/installer/ops remain incomplete",
+      "evidenceRoot": "C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1"
+    },
+    {
+      "timestamp": "2026-10-09T03:25:51.381Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "event": "read_only_remote_baseline_health_retrieved_no_candidate_apply"
+    },
+    {
+      "timestamp": "2026-10-09T03:33:12.664Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "event": "candidate_config_schema_and_dirty_guard_verified_i2_decision_blocker"
+    },
+    {
+      "timestamp": "2026-10-09T03:41:53.416Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "event": "direct_i2_A_approval_saved_before_permanent_tests_and_repair"
+    },
+    {
+      "timestamp": "2026-10-09T05:24:06.314Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "event": "i2_local_verification_complete_fresh_review_pending"
+    },
+    {
+      "timestamp": "2026-10-09T06:15:11.616Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "event": "review002_local_correction_verified_cycle3_incomplete"
+    },
+    {
+      "timestamp": "2026-10-09T06:19:32.978Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "event": "review_cycle3_original_token_finished_nonconverged_candidate_ops_pending"
     }
   ],
   "timeline": [

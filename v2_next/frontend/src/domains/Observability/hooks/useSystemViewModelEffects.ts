@@ -5,6 +5,7 @@ import {
   POLL_REQUEST_TIMEOUT_MS,
   STARTUP_HEALTH_REQUEST_TIMEOUT_MS,
 } from '../../../shared/api/pollingRequest';
+import { SUPERSEDED_HEALTH_REQUEST } from './useSystemViewModel.health';
 import {
   clearDashboardLeaderLock,
   readDashboardLeaderLock,
@@ -19,12 +20,12 @@ interface PollingState {
 }
 
 interface UseSystemViewModelEffectsParams {
-  fetchHealth: (timeoutMs?: number) => Promise<HealthSnapshot | null>;
+  fetchHealth: (timeoutMs?: number, mayApply?: () => boolean) => Promise<HealthSnapshot | null | typeof SUPERSEDED_HEALTH_REQUEST>;
   fetchStats: () => Promise<StatsSnapshot | null>;
   reconnectBusy: boolean;
   setHealthPolling: Dispatch<SetStateAction<PollingState>>;
   setStatsPolling: Dispatch<SetStateAction<PollingState>>;
-  applyHealthSnapshot: Dispatch<SetStateAction<HealthSnapshot | null>>;
+  applyHealthSnapshot: (snapshot: HealthSnapshot, sentAtMs?: number) => boolean | void;
   applyStatsSnapshot: Dispatch<SetStateAction<StatsSnapshot | null>>;
   setDashboardLeaderState: Dispatch<SetStateAction<DashboardLeaderState | null>>;
   setPollingPausedByVisibility: Dispatch<SetStateAction<boolean>>;
@@ -41,12 +42,16 @@ const DASHBOARD_SYSTEM_BROADCAST_KEY = 'dashboard_system_broadcast_v1';
 const COMM_LOG_BROADCAST_KEY = 'settings_comm_log_broadcast_v1';
 const LEADER_HEARTBEAT_MS = 4000;
 const LEADER_TAKEOVER_MS = 30000;
+const LEGACY_HEALTH_HISTORY_LIMIT = 256;
+const HEALTH_SOURCE_HISTORY_LIMIT = 256;
 
 interface DashboardSystemBroadcast {
   tab_id: string;
   kind: 'health' | 'stats';
   data: HealthSnapshot | StatsSnapshot;
   sent_at: number;
+  source_id?: string;
+  health_sequence?: number;
 }
 
 interface CommLogInfoBroadcast {
@@ -97,6 +102,9 @@ export const useSystemViewModelEffects = ({
   setDashboardLeaderState,
   setPollingPausedByVisibility,
 }: UseSystemViewModelEffectsParams) => {
+  const healthBroadcastRef = useRef<{ sourceId: string | null; sequence: number }>({ sourceId: null, sequence: 0 });
+  const receivedHealthSequencesRef = useRef(new Map<string, number>());
+  const receivedLegacyHealthRef = useRef(new Set<string>());
   useEffect(() => {
     let mounted = true;
     let healthTimeoutId: number | null = null;
@@ -106,6 +114,7 @@ export const useSystemViewModelEffects = ({
     let healthFailures = 0;
     let healthHasSucceeded = false;
     let healthInFlight = false;
+    let sourceConfirmation: { candidates: Map<string, number>; arriving: Map<string, number> } | null = null;
     let statsFailures = 0;
     let healthDelayMs = BASE_POLL_INTERVAL_MS;
     let statsDelayMs = BASE_POLL_INTERVAL_MS;
@@ -158,6 +167,13 @@ export const useSystemViewModelEffects = ({
         data,
         sent_at: Date.now(),
       };
+      if (kind === 'health') {
+        const broadcast = healthBroadcastRef.current;
+        broadcast.sourceId ??= typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID() : `health-${Math.random().toString(36).slice(2)}`;
+        payload.source_id = broadcast.sourceId;
+        payload.health_sequence = ++broadcast.sequence;
+      }
       try {
         channel?.postMessage(payload);
       } catch {
@@ -184,7 +200,10 @@ export const useSystemViewModelEffects = ({
             : STARTUP_HEALTH_REQUEST_TIMEOUT_MS;
           const data = await fetchHealth(healthTimeoutMs);
           if (!mounted || !canPollHealth() || isHealthVisibilityBlocked()) return;
-          if (data) {
+          if (data === SUPERSEDED_HEALTH_REQUEST) {
+            // A newer direct request owns this observation. Do not publish the
+            // old result or count supersession as a communication failure.
+          } else if (data) {
             healthHasSucceeded = true;
             healthFailures = 0;
             healthDelayMs = HEALTH_POLL_INTERVAL_MS;
@@ -337,9 +356,77 @@ export const useSystemViewModelEffects = ({
       });
     };
 
+    const rememberHealthSource = (history: Map<string, number>, source: string, sequence: number): void => {
+      if (!history.has(source) && history.size >= HEALTH_SOURCE_HISTORY_LIMIT) {
+        history.delete(history.keys().next().value!);
+      }
+      history.set(source, Math.max(sequence, history.get(source) ?? 0));
+    };
+
+    const canConfirmSource = (): boolean => mounted && !reconnectBusy
+      && document.visibilityState !== 'hidden' && !isLeader();
+
+    const confirmHealthSources = (sources: ReadonlyMap<string, number>): void => {
+      if (!canConfirmSource()) return;
+      const candidates = new Map<string, number>();
+      sources.forEach((sequence, source) => {
+        if (sequence > (receivedHealthSequencesRef.current.get(source) ?? 0)) rememberHealthSource(candidates, source, sequence);
+      });
+      if (!candidates.size) return;
+      if (sourceConfirmation) {
+        const pending = sourceConfirmation;
+        candidates.forEach((sequence, source) => {
+          if (sequence > (pending.candidates.get(source) ?? 0)) rememberHealthSource(pending.arriving, source, sequence);
+        });
+        return;
+      }
+      const confirmation = { candidates, arriving: new Map<string, number>() };
+      sourceConfirmation = confirmation;
+      const mayApply = () => canConfirmSource() && sourceConfirmation === confirmation;
+      // The evicted sender's payload cannot prove it is newer than the screen.
+      // Only the current API response owns the receipt; never replay that payload.
+      void fetchHealth(POLL_REQUEST_TIMEOUT_MS, mayApply).then(data => {
+        if (!mayApply() || !data || data === SUPERSEDED_HEALTH_REQUEST) return;
+        confirmation.candidates.forEach((sequence, source) =>
+          rememberHealthSource(receivedHealthSequencesRef.current, source, sequence));
+      }).catch(error => {
+        if (mayApply()) console.error('Health source confirmation failed', error);
+      }).finally(() => {
+        if (sourceConfirmation !== confirmation) return;
+        sourceConfirmation = null;
+        // Arrivals after the request began need their own authoritative check.
+        // Failed candidates stay unregistered and retry on the next message.
+        if (confirmation.arriving.size) confirmHealthSources(confirmation.arriving);
+      });
+    };
+
     const applyBroadcast = (payload: DashboardSystemBroadcast): void => {
       if (payload.kind === 'health') {
-        applyHealthSnapshot(payload.data as HealthSnapshot);
+        if (payload.source_id !== undefined || payload.health_sequence !== undefined) {
+          if (typeof payload.source_id !== 'string' || !payload.source_id
+            || !Number.isSafeInteger(payload.health_sequence) || (payload.health_sequence ?? 0) <= 0) return;
+          const source = JSON.stringify([payload.tab_id, payload.source_id]);
+          const sequence = payload.health_sequence as number;
+          const history = receivedHealthSequencesRef.current;
+          if (sequence <= (history.get(source) ?? 0)) return;
+          if (sourceConfirmation?.candidates.has(source) || sourceConfirmation?.arriving.has(source)
+            || (!history.has(source) && history.size >= HEALTH_SOURCE_HISTORY_LIMIT)) {
+            confirmHealthSources(new Map([[source, sequence]]));
+            return;
+          }
+          rememberHealthSource(history, source, sequence);
+        } else {
+          // The second transport can deliver A after B. Remember more than just
+          // the last payload without using wall-clock timestamps for ordering.
+          const fingerprint = JSON.stringify(payload);
+          const history = receivedLegacyHealthRef.current;
+          if (history.has(fingerprint)) return;
+          history.add(fingerprint);
+          if (history.size > LEGACY_HEALTH_HISTORY_LIMIT) history.delete(history.values().next().value!);
+        }
+        const accepted = applyHealthSnapshot(payload.data as HealthSnapshot,
+          typeof payload.sent_at === 'number' && Number.isFinite(payload.sent_at) ? payload.sent_at : NaN);
+        if (accepted === false) return;
         healthHasSucceeded = true;
         healthFailures = 0;
         healthDelayMs = HEALTH_POLL_INTERVAL_MS;

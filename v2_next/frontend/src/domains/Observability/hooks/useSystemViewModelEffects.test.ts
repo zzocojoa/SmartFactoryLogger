@@ -6,6 +6,7 @@ import {
   STARTUP_HEALTH_REQUEST_TIMEOUT_MS,
 } from '../../../shared/api/pollingRequest';
 import { useSystemViewModelEffects } from './useSystemViewModelEffects';
+import { SUPERSEDED_HEALTH_REQUEST } from './useSystemViewModel.health';
 
 const setVisibilityState = (visibilityState: DocumentVisibilityState): void => {
   Object.defineProperty(document, 'visibilityState', {
@@ -168,10 +169,85 @@ describe('useSystemViewModelEffects startup recovery', () => {
       });
       expect(fetchHealth).not.toHaveBeenCalled();
       expect(fetchStats).not.toHaveBeenCalled();
-      expect(applyHealthSnapshot).toHaveBeenCalledWith(health);
+      expect(applyHealthSnapshot).toHaveBeenCalledWith(health, now);
       expect(setHealthPolling).toHaveBeenLastCalledWith({ degraded: false, intervalMs: 2000, failureCount: 0 });
     } finally {
       unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+
+  it('keeps the sender identity and increasing sequence across clock corrections and effect restarts', async () => {
+    const health = {running: true} as HealthSnapshot;
+    const fetchHealth = vi.fn().mockResolvedValue(health);
+    const params = {
+      fetchHealth, fetchStats: vi.fn().mockResolvedValue(null), setHealthPolling: vi.fn(),
+      setStatsPolling: vi.fn(), applyHealthSnapshot: vi.fn(), applyStatsSnapshot: vi.fn(),
+      setDashboardLeaderState: vi.fn(), setPollingPausedByVisibility: vi.fn(),
+    };
+    const {unmount, rerender} = renderHook(({busy}) => useSystemViewModelEffects({...params, reconnectBusy: busy}),
+      {initialProps: {busy: false}});
+    const last = () => JSON.parse(window.localStorage.getItem('dashboard_system_broadcast_v1') ?? '{}');
+    try {
+      await act(async () => {await vi.advanceTimersByTimeAsync(0);});
+      const first = last();
+      expect(first.kind).toBe('health');
+      expect(first.source_id).toEqual(expect.any(String));
+      expect(first.source_id.length).toBeGreaterThan(0);
+      expect(first.health_sequence).toBe(1);
+      vi.setSystemTime(Date.now() - 60000);
+      await act(async () => {await vi.advanceTimersByTimeAsync(2000);});
+      expect(last().source_id).toBe(first.source_id);
+      expect(last().health_sequence).toBe(2);
+      expect(last().sent_at).toBeLessThan(first.sent_at);
+      rerender({busy: true});
+      rerender({busy: false});
+      await act(async () => {await vi.advanceTimersByTimeAsync(0);});
+      expect(last().source_id).toBe(first.source_id);
+      expect(last().health_sequence).toBe(3);
+      // jsdom queues storage events when the leader lock and payload are written.
+      await act(async () => {await vi.advanceTimersByTimeAsync(50);});
+    } finally {
+      unmount();
+      // Releasing the lock queues a final jsdom storage event after cleanup.
+      const callsAfterUnmount = fetchHealth.mock.calls.length;
+      await act(async () => {await vi.advanceTimersByTimeAsync(50);});
+      expect(vi.getTimerCount()).toBe(0);
+      expect(fetchHealth).toHaveBeenCalledTimes(callsAfterUnmount);
+    }
+  });
+
+  it('keeps the prior failure cadence and broadcast when a request is superseded', async () => {
+    const health = { running: true } as HealthSnapshot;
+    const fetchHealth = vi.fn<(timeoutMs?: number) => Promise<HealthSnapshot | null | typeof SUPERSEDED_HEALTH_REQUEST>>()
+      .mockResolvedValueOnce(health)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(SUPERSEDED_HEALTH_REQUEST)
+      .mockResolvedValue(health);
+    const setHealthPolling = vi.fn();
+    const { unmount } = renderHook(() => useSystemViewModelEffects({
+      fetchHealth, fetchStats: vi.fn().mockResolvedValue(null), reconnectBusy: false,
+      setHealthPolling, setStatsPolling: vi.fn(), applyHealthSnapshot: vi.fn(),
+      applyStatsSnapshot: vi.fn(), setDashboardLeaderState: vi.fn(), setPollingPausedByVisibility: vi.fn(),
+    }));
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(setHealthPolling).toHaveBeenLastCalledWith({ degraded: true, intervalMs: 5000, failureCount: 1 });
+      const broadcast = window.localStorage.getItem('dashboard_system_broadcast_v1');
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(fetchHealth).toHaveBeenCalledTimes(3);
+      expect(setHealthPolling).toHaveBeenLastCalledWith({ degraded: true, intervalMs: 5000, failureCount: 1 });
+      expect(window.localStorage.getItem('dashboard_system_broadcast_v1')).toBe(broadcast);
+      await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+      expect(fetchHealth).toHaveBeenCalledTimes(3);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(fetchHealth).toHaveBeenCalledTimes(4);
+      expect(fetchHealth).toHaveBeenLastCalledWith(POLL_REQUEST_TIMEOUT_MS);
+      expect(setHealthPolling).toHaveBeenLastCalledWith({ degraded: false, intervalMs: 2000, failureCount: 0 });
+    } finally {
+      unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(50); });
       expect(vi.getTimerCount()).toBe(0);
     }
   });

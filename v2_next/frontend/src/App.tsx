@@ -191,6 +191,7 @@ function App() {
 
   const {
     health,
+    healthReceipt,
     stats,
     observabilityErrors,
     observabilityLoading,
@@ -631,6 +632,7 @@ function App() {
 
   const statusPanelSource = useMemo(() => ({
     health,
+    healthReceipt,
     stats,
     healthPollingDegraded: healthPolling.degraded,
     healthPollingIntervalMs: healthPolling.intervalMs,
@@ -647,6 +649,7 @@ function App() {
     settingsBaseline,
   }), [
     health,
+    healthReceipt,
     stats,
     healthPolling.degraded,
     healthPolling.intervalMs,

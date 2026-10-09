@@ -4,6 +4,7 @@ import type {
   DashboardLeaderState,
   FrontendErrorEntry,
   HealthSnapshot,
+  HealthReceiptTiming,
   ObservabilityErrorsResponse,
   PathHealthState,
   StatsSnapshot,
@@ -18,6 +19,7 @@ export interface PollingState {
 
 export interface UseSystemViewModel {
   health: HealthSnapshot | null;
+  healthReceipt: HealthReceiptTiming | null;
   stats: StatsSnapshot | null;
   observabilityErrors: ObservabilityErrorsResponse | null;
   frontErrors: FrontendErrorEntry[];
