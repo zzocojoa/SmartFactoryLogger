@@ -338,3 +338,23 @@ legacy identity없는cross-source fallback,외부Claude 미설치 및선택적me
   해당 실행의 PR/CI/실제mergeSHA 완료 영수증. 현재 이 절 준비 시점에는 PR·병합 대기다.
 - 제품 재빌드·서버 재설치·앱 시작/종료·자동복구는 이번 후속에 포함하지 않는다. CI의 별도
   설치 아티팩트는 기존 운영 installer identity나 서명/정식QA 완료 근거를 대신하지 않는다.
+
+## 최신 상태 — PR203 제품 병합과 운영 이력 연결 완료 (2026-10-10 KST)
+
+[PR203](https://github.com/zzocojoa/SmartFactoryLogger/pull/203)은2026-10-09T15:11:42Z에MERGED됐으며
+실제master merge는`fb38b872f1f3ea371ac3dea29641a5939ed54074`다. merge와검증PR head401025ed의
+전체tree가같고 운영build541d와docs밖818항목/제품·검증571입력도같다. 후속문서이력으로
+운영541d/installer08C와이전4c/D453의identity를바꾸지않았다.
+
+- PR CI3개모두SUCCESS: frontend434+Node9/typecheck/lint/build, 운영Windows fixture27개,
+  Windows backend880(기존skip1)/ruff/mypy9/dependency14/Electron94/배포검사자체시험과
+  portable·NSIS생성/패키지출처검증. 원문전체와실제결과는pr-ci-final.json에결합했다.
+- preflight.py·verify-records.py core-merged-docs 및capture-ci.py 실제exit0다. 기존main49파일·
+  다른PDCA28feature·기존승격원문/검토hash를보존했고기준계획두사본은같다.
+- 보호된master의PR merge방식을썼고우회/force/보호설정변경없음. hook경고194MEDIUM과
+  LOW110은날짜·도구버전·시험key·generic user경로로분류했고credential HIGH0이다.
+- 운영기준에현장대응·복구기준·정식검증후속목록을인계했다. 기존서버적용/운영승격은유지하며
+  이번후속에서재설치/앱시작·종료/자동복구하지않았다. 최초timeout/223ms·과거drop15·
+  정식QA/서명/전체성능/config/comparator/전수검증·구형메시지한계는그대로다.
+- 실제merge완료원문: `C:/Users/user/Desktop/SmartFactory/S1_MERGE_20261009_R1/product-merge-complete.json`.
+  같은폴더의최종문서반영영수증에서문서후속PR/최종원격SHA를구분해확인한다.

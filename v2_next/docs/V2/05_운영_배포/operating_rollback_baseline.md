@@ -78,13 +78,21 @@ API와 화면은 각 관측 시점의 상태 종류를 대조했으며 동일 po
 2026-10-09 사용자의 후속 로드맵 "진행 승인"은 UI-S1 PR·보호된 master 병합과 기존 운영본의
 이력 연결에 적용한다. 실제 병합 전후의 SHA·PR·CI·출처 비교는
 `C:/Users/user/Desktop/SmartFactory/S1_MERGE_20261009_R1`의 새 영수증으로 기록한다.
-현재 이 절을 준비한 시점에는 원격 master가35959c41edee29573040d571ead952c073f1be13이며
-병합은 대기다. 후속 완료 기록에서 실제 merge SHA를 확인한다.
+[PR203](https://github.com/zzocojoa/SmartFactoryLogger/pull/203)은2026-10-09T15:11:42Z
+(2026-10-10 00:11:42 KST)에MERGED됐고 실제master merge는
+`fb38b872f1f3ea371ac3dea29641a5939ed54074`다. 검증한PR head는
+`401025ed3d31ca013269b11c1f4d20c814f90f6e`, 제품build는위의541d다.
+merge와PR head의전체tree가같고 docs밖818항목·제품/검증571입력이541d와같다.
+실제merge와제품build를별도로관리하며 문서후속commit으로 운영installer identity를바꾸지않는다.
 
 제품 build541d와 문서 후속 HEAD의 docs 밖818개 Git 항목이 동일하고 최종health 입력571개가
 최종 exit0 당시와 동일함을 대조했다(preflight.py exit0). health stdout/stderr를 모두 읽고
 원문 해시·실제 exit0·frontend434/backend880(기존skip1)/QA 결과를 확인했다. 동일 설치본을
 재빌드·재설치하지 않는다. PR CI가 생성하는 별도 시험 설치본은 운영08C installer가 아니다.
+
+PR203의Frontend CI/Operations offline fixtures/Windows PR Artifact 세결과는SUCCESS다.
+새병합완료영수증product-merge-complete.json과CI원문/메타데이터pr-ci-final.json을보존한다.
+기존operating-promotion-001.json 원문해시도유지했으며 서버재설치·시작/종료·재시작·자동복구는없다.
 
 ### 현장 대응과 복구 인계
 

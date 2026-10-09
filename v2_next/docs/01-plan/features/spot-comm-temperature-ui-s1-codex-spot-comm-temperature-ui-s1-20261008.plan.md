@@ -9,7 +9,7 @@
 > 생성 완료한 구현 브랜치명: `codex/spot-comm-temperature-ui-s1-20261008`
 > 구현 worktree: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next`
 > 문서 상태: 실제 Plan mode에서 계획 작성 완료, 구현 모드에서 파일 저장 완료
-> 실행 상태: 승인된 UI-S1 개선·서버 적용·운영/다음 롤백 등록은14.27–14.28절에서 완료했다. 후속 로드맵의 사용자 "진행 승인"에 따라 제품 변경 없이 원격 PR·보호된 master 병합·동일 운영 설치본과 소스 이력 연결을 진행한다(15절). 541d701d/08C 운영본과4c97d4a/D453 이전본을 유지하며 최초 timeout/223ms·과거drop15·정식QA/서명/config/comparator/전수검증 한계를 PASS로 바꾸지 않는다.
+> 실행 상태: 승인된 UI-S1 개선·서버 적용·운영/다음 롤백 등록과 후속 제품 소스 병합을 완료했다. PR203의 세 CI 통과 후 보호된 master에fb38b872f1f3ea371ac3dea29641a5939ed54074로 병합했고 기존 제품·검증571입력/운영541d701d·installer08C와 같은 제품임을 확인했다(15.2절). 최종 문서 이력을 같은 브랜치의 문서 PR로 반영한다. 4c97d4a/D453 이전본·최초timeout/223ms·과거drop15·정식QA/서명/config/comparator/전수검증 한계는 그대로 유지한다.
 > 현재 작업의 기준 계획 파일: `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 새 브랜치 worktree의 동일 내용 계획 사본: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 이전 준비 계획 원문(보존): `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-temperature-history-p2-20260922.plan.md`
@@ -824,6 +824,15 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - 증거 위치: `C:/Users/user/Desktop/SmartFactory/S1_MERGE_20261009_R1`의 새 실행 폴더. 기본 개발 폴더의 기존 미커밋 변경을 보존하고, 기준 계획의 동일 내용 사본만 동기화한다.
 - [x] 승인 범위 기록·기준 계획 재개, GitHub 로그인/원격·브랜치·보호 정책 확인, 운영/이전 installer SHA256 재대조.
 - [x] 최종 병합 대상 문서·인계 및 검증 근거 정리. preflight.py exit0: docs 밖818개 Git 항목/제품·검증571개 입력이541d 및 최종health exit0 당시와 동일, 원문전체/hash/exit 검토, 운영·이전 installer SHA 및 POST 검토 결합 확인. 현장 대응·복구·정식 검증 후속 목록은 운영 기준에 기록했다. 제품 변경 없는 기존 검증을 재실행한 것으로 표시하지 않는다.
-- [ ] PR 게시·연결, 해당 head의 CI 결과 확인.
-- [ ] 보호된 master 병합과 실제 원격 SHA/제품 동일성 확인.
-- [ ] 운영 build541d/installer08C와 merge SHA를 구분한 완료·인계 기록 및 기존 변경 보존 대조.
+- [x] PR 게시·연결, 해당 head의 CI 결과 확인. PR203/head401025ed에서 Frontend CI·Operations offline fixtures·Windows PR Artifact 모두SUCCESS, 전체원문/exit 검토(pr-ci-final.json).
+- [x] 보호된 master 병합과 실제 원격 SHA/제품 동일성 확인. 실제mergefb38b872f1f3ea371ac3dea29641a5939ed54074/부모35959c41·401025ed와 전체tree 일치 확인(product-merge-complete.json).
+- [x] 운영 build541d/installer08C와 merge SHA를 구분한 완료·인계 기록 및 기존 변경 보존 대조. `verify-records.py core-merged-docs` 실제exit0/571입력불변·다른28feature불변·기존main49파일보존·계획bytes동일을 확인했다.
+
+### 15.2 실제 제품 소스 병합·운영 이력 연결 (2026-10-10 KST)
+
+- [PR203](https://github.com/zzocojoa/SmartFactoryLogger/pull/203)는2026-10-09T15:11:42Z(2026-10-10 00:11:42 KST)에MERGED됐다. 실제master merge는fb38b872f1f3ea371ac3dea29641a5939ed54074, 검증한PR head는401025ed3d31ca013269b11c1f4d20c814f90f6e다. merge commit 방식으로541d 제품 commit 이력도 보존했다. 관리자 우회·보호 해제·force push는 없었다.
+- PR CI3개와 원문을 확인했다: Frontend434+Node9/typecheck/lint/build, Windows 운영 fixture27개, Windows backend880(기존skip1)/ruff/mypy9·dependency14/Electron94·배포gate 자체시험3·portable/NSIS 생성과 패키지source identity가SUCCESS다. Windows PR Artifact37948268787의 별도 결과물은head401025ed 시험 산출물이며 운영541d/08C로 재등록하지 않는다.
+- master와PR head 전체Git tree가같으며 docs밖818항목 SHA2564d9cd9b99fd3424c02c56ff7ed5b38afb8ff1bb29ca662283bc65160f59a2b96/제품·검증571입력은541d와같다. 운영본/다음개선rollback541d/08C와 교체전4c/D453·기존승격원문 SHA38330BA5FFA0162D1645D751DCDE37512A27F4A548145975BA9B25305B49CB8A를 유지했다. 서버재설치·앱시작/종료·재시작·자동rollback·counter초기화는없다.
+- 전송경고194MEDIUM은증거경로의날짜·review session번호·도구버전·시험localStorage key로 검토했고 credential HIGH0, LOW110은기준문서의generic user 경로다. redaction-review-final.json에304항목 분류와 원문행hash를 보존했다. hook·allowlist·보호 설정을 수정하지 않았다.
+- 운영기준에 상태별 현장 대응, 현재/이전 복구본, 새승격 보류 조건, 정식검증5항목의담당역할·완료근거를 인계했다. 정식QA/서명·전체성능/config/comparator/전수검증·원인미확정은미완료다. 다음기능 구현 또는 장비설정 변경으로 범위를 확대하지 않았다.
+- 완료원문은S1_MERGE_20261009_R1의preflight/pr-ci-final/product-merge-complete/core-merged-docs/redaction-review-final 및 최종문서반영 영수증이다. 최초문서경로누락·ANSI로그파싱·보존summary count 오차는validation-attempts.json에중간결과로보존하며 제품/시험기준을바꾸지않았다.
