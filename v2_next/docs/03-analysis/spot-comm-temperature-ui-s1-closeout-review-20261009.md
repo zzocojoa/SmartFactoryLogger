@@ -1,12 +1,12 @@
 # UI-S1 후속 독립 리뷰·수정 제안 — 2026-10-09
 
-I2-A와 인접3건 보완 및 현재 로컬 검증 완료. frontend434/typecheck/lint/build·health002 exit0. 리뷰는 cycles3, INCOMPLETE/nonconverged, 실제 binding=changed다. 최종 독립 검토·후보·운영 적용은 남았다. 과거 제안·실패·당시 결과는 보존하며 현재 상태는 마지막 결과 절을 따른다.
+새 독립 review 완료(미해결 결함0/cycles0/검토 snapshot binding verified), 최종 full health exit0 및 후보541d701d의 locked installer·실제 packaged API→UI 검증 완료. 서버 로컬 최종 복사·설치·CSV/설정/세대 확인·운영 기준 갱신은 미완료이며4c97d4a를 유지한다. 최신 근거는 계획14.3–14.6절과 candidate-final-validation-001이다. 과거 제안·실패·당시 결과는 아래 보존한다.
 
 - 브랜치: `codex/spot-comm-temperature-ui-s1-20261008`
-- HEAD·origin/master: `35959c41edee29573040d571ead952c073f1be13` + 미커밋 변경.
+- 구현 기준 origin/master: `35959c41edee29573040d571ead952c073f1be13`; 후보 build commit: `541d701d544eea6a8a4e4836047077eaf9cfaf30`. 진행문서 후속 commit은 별도다.
 - 작업 폴더: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next`
 - 기준 계획: `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
-- 원문 증거: [closeout 실행](../../.tmp_ui_s1_verify/closeout-20261009-001/merged-findings.json), [현재 입력 hash](../../.tmp_ui_s1_verify/closeout-20261009-001/review-input-manifest.json), [QA materialize](../../.tmp_ui_s1_verify/closeout-20261009-001/evidence.json).
+- 원문 증거: [closeout 실행](../../.tmp_ui_s1_verify/closeout-20261009-001/merged-findings.json), [최초 리뷰 입력 hash(보존)](../../.tmp_ui_s1_verify/closeout-20261009-001/review-input-manifest.json), [QA materialize](../../.tmp_ui_s1_verify/closeout-20261009-001/evidence.json).
 - 아래 제안 코드는 승인 전 당시 기록이다. 사용자 A승인 및 실제 영구 회귀/보완 결과는 마지막 절과 계획12절에 있다. 제안 코드를 실제 실행 source와 혼동하지 않는다.
 
 ## 승인 전 제안 순서 (보존)
