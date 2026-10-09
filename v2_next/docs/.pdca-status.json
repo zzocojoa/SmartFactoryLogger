@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-09T08:02:57.420Z",
+  "lastUpdated": "2026-10-09T14:02:03.420Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2315,8 +2315,8 @@
       "completedAt": "2026-08-21T07:22:13.202Z"
     },
     "spot-comm-temperature-ui-s1": {
-      "phase": "check",
-      "matchRate": null,
+      "phase": "completed",
+      "matchRate": 100,
       "iterationCount": 3,
       "documents": {
         "plan": "docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md",
@@ -2347,22 +2347,25 @@
         },
         {
           "phase": "check",
-          "status": "in_progress",
-          "createdAt": "2026-10-08T13:53:56.589Z"
+          "status": "completed",
+          "createdAt": "2026-10-08T13:53:56.589Z",
+          "completedAt": "2026-10-09T14:02:03.420Z"
         },
         {
           "phase": "report",
-          "status": "pending",
-          "createdAt": "2026-10-08T13:53:56.589Z"
+          "status": "completed",
+          "createdAt": "2026-10-08T13:53:56.589Z",
+          "completedAt": "2026-10-09T14:02:03.420Z"
         }
       ],
       "timestamps": {
         "started": "2026-10-08T13:53:56.591Z",
-        "lastUpdated": "2026-10-09T08:02:57.420Z"
+        "lastUpdated": "2026-10-09T14:02:03.420Z",
+        "completed": "2026-10-09T14:02:03.420Z"
       },
-      "reviewStatus": "fresh_final_review_completed_candidate_package_verified_operations_pending",
-      "completionScope": "approved_logic_review_candidate_package_verified_operations_pending",
-      "operationalPromotionPerformed": false,
+      "reviewStatus": "final_review_package_actual_application_verified_with_documented_limits",
+      "completionScope": "approved_ui_s1_logic_review_package_server_application_collection_preservation_and_next_rollback",
+      "operationalPromotionPerformed": true,
       "reviewCorrection": {
         "status": "completed",
         "approval": "user",
@@ -2519,9 +2522,9 @@
         "fullHealthRerun": false,
         "priorDefaultHealthExit": 1
       },
-      "lastUpdated": "2026-10-09T08:02:57.420Z",
+      "lastUpdated": "2026-10-09T14:02:03.420Z",
       "closeout": {
-        "status": "candidate_package_verified_operations_pending",
+        "status": "approved_ui_s1_completed_operating_and_next_rollback_registered_with_limits",
         "approval": "user_approved_QA_review_candidate_operational_closeout",
         "startedAt": "2026-10-08T23:38:08.320Z",
         "evidenceRoot": ".tmp_ui_s1_verify/closeout-20261009-001",
@@ -2865,8 +2868,8 @@
         "installerBytes": 163826264,
         "installerSignatureStatus": "NotSigned",
         "candidatePackageValidation": "C:\\Users\\user\\Desktop\\SmartFactory\\S1_PKG_20261009_R1\\records\\candidate-final-validation-001\\result.json",
-        "operatingApplied": false,
-        "operatingRollbackBaselineUpdated": false,
+        "operatingApplied": true,
+        "operatingRollbackBaselineUpdated": true,
         "candidatePackage": {
           "at": "2026-10-09T07:59:38.857Z",
           "evidence": "C:\\Users\\user\\Desktop\\SmartFactory\\S1_PKG_20261009_R1\\records\\candidate-final-validation-001\\result.json",
@@ -2876,7 +2879,7 @@
           "installed": false,
           "serverApplied": false
         },
-        "finalCandidateChecksScope": "local_review_locked_package_payload_and_packaged_api_to_ui",
+        "finalCandidateChecksScope": "local_review_locked_package_and_actual_server_application_with_documented_limits",
         "candidateDelivery": {
           "at": "2026-10-09T08:01:58.210Z",
           "delivery": "C:\\Users\\user\\Desktop\\SmartFactory\\S1_PKG_20261009_R1\\delivery\\S1_CAND_20261009_R1",
@@ -2892,7 +2895,53 @@
         },
         "serverDeliveryPrepared": true,
         "sharedCopyVerified": true,
-        "serverFinalCopied": false
+        "serverFinalCopied": true,
+        "operatingApplication": {
+          "recorded_at": "2026-10-09T14:02:03.420Z",
+          "status": "UNSIGNED_INTERNAL_OPERATING_PROMOTED_WITH_DOCUMENTED_LIMITS",
+          "authorization": "Persistent human approval for UI-S1 fixes, candidate verification, server application and next rollback baseline update; 2026-10-08 unsigned internal operating limitations retained.",
+          "server": "DESKTOP-CIIT7LK",
+          "server_user_sid": "S-1-5-21-2762931165-1280404403-2847611662-1001",
+          "current_operating_and_next_rollback": {
+            "version": "1.0.26",
+            "build_commit": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+            "installer_sha256": "08C061EE35A1A01788F05B00EE7395AA40774150C92C06726A92F3DF1BF75C3C",
+            "bytes": 163826264,
+            "signature": "NotSigned",
+            "server_installer": "C:/Users/user/Desktop/SmartFactory/S1_CAND_20261009_R1/installers/UI_S1_541d701_UNSIGNED.exe"
+          },
+          "previous_before_this_replacement": {
+            "build_commit": "4c97d4a00d79ae0d3da70b2e82af227345e21040",
+            "installer_sha256": "D453C1D17EFC706D3E21FE6F8D09F739F159EBF9F3F24F2EB2349E92D4EF84FB",
+            "bytes": 164583937,
+            "signature": "NotSigned",
+            "server_installer": "C:/Users/user/Desktop/SmartFactory/S1_CAND_20261009_R1/installers/ROLLBACK_4c97d4a_UNSIGNED.exe"
+          },
+          "installer_actual_exit": 0,
+          "installer_run": "r-20261009-220826-a3fbbb",
+          "application_read_run": "r-20261009-224441-1f2226",
+          "application_manifest_sha256": "8666510BABB8D0D6EAAF071DBAAD671554BC6EF782B745AC0723CF157150B92A",
+          "review_path": "C:\\Users\\user\\Desktop\\SmartFactory\\S1_POST_READ_PREP_20261009_R1\\server-post-review-001.json",
+          "review_sha256": "E36A9E84CF1280C8A5678C768A0E106F738E58922556C00A2419EEE54B6FCC1C",
+          "verified_scope": "Actual selected54 installed pins/provenance, same5 processes and port8000,15 API200/raw body, current collection/CSV windows and metadata, original config/closedCSV preservation, actual normal/under-range UI state categories, retrieved65files.",
+          "operating_promoted": true,
+          "next_rollback_baseline_updated": true,
+          "formal_operating_qa_passed": false,
+          "publisher_signature_verified": false,
+          "full_performance_gate_passed": false,
+          "full_csv_validator_run": false,
+          "individual_image_integrity_verified": false,
+          "config_attestation_or_comparator_verified": false,
+          "original_apply_timeout_preserved": true,
+          "original_apply_timeout_root_cause": "UNCONFIRMED",
+          "first_post_health_latency_ms": 223.4887,
+          "historical_previous_image_drop_count": 15,
+          "historical_image_drop_root_cause": "UNCONFIRMED",
+          "automatic_reinstall_restart_stop_rollback_or_counter_reset": false
+        },
+        "currentOperatingBuildCommit": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+        "previousOperatingBuildCommit": "4c97d4a00d79ae0d3da70b2e82af227345e21040",
+        "formalOperatingQaPassed": false
       }
     }
   },
@@ -4665,6 +4714,11 @@
       "timestamp": "2026-10-09T06:19:32.978Z",
       "feature": "spot-comm-temperature-ui-s1",
       "event": "review_cycle3_original_token_finished_nonconverged_candidate_ops_pending"
+    },
+    {
+      "timestamp": "2026-10-09T14:02:03.420Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "event": "actual_application_verified_unsigned_operating_and_next_rollback_registered_with_limits"
     }
   ],
   "timeline": [
@@ -4674,6 +4728,14 @@
       "phase": "report",
       "matchRate": 100,
       "timestamp": "2026-07-01T01:30:00.000Z"
+    },
+    {
+      "timestamp": "2026-10-09T14:02:03.420Z",
+      "feature": "spot-comm-temperature-ui-s1",
+      "action": "feature_pdca_completed",
+      "phase": "report",
+      "matchRate": 100,
+      "scope": "approved_ui_s1_logic_review_package_server_application_collection_preservation_and_next_rollback"
     }
   ]
 }

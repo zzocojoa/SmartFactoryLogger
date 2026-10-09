@@ -1,6 +1,6 @@
 # 운영본과 다음 개선 작업의 롤백 기준
 
-기준일: 2026-10-08 KST. 이 문서는 운영본·다음 개선의 복귀 기준·이번 교체 전 이전본을
+기준일: 2026-10-09 KST. 이 문서는 운영본·다음 개선의 복귀 기준·이번 교체 전 이전본을
 구분하고 갱신하는 기준이다. 특정 commit의 영구 사용 지시가 아니다.
 
 ## 기준을 갱신하는 원칙
@@ -20,7 +20,60 @@
 기준을 갱신하며 이전본과 증거는 보존한다. 승격 직후 그 본에 문제가 생긴 경우에는 보존된
 이전본의 호환성과 승인된 복구 경로를 확인한다. 같은 실패본 재설치를 롤백이라고 부르지 않는다.
 
-## 2026-10-08 운영 결정과 식별
+
+## 2026-10-09 UI-S1 적용 확인 후 현재 기준
+
+사용자가 승인한 UI-S1 개선·후보 검증·서버 적용·기준 갱신 범위에서 아래 설치본을
+미서명 내부 운영본과 다음 개선의 롤백 기준으로 등록했다. 기록 시각: 2026-10-09T14:02:03.420Z.
+실제 서버는 `DESKTOP-CIIT7LK`, 표준 사용자 SID `S-1-5-21-2762931165-1280404403-2847611662-1001`이다.
+아래 2026-10-08 절은 당시 운영 결정과 이전본 이력이며 최신 기준은 이 절이다.
+
+| 역할 | 표시 버전 / 전체 build commit | installer / bytes / SHA256 |
+| --- | --- | --- |
+| 현재 운영본·다음 개선의 롤백 기준 | v1.0.26 / `541d701d544eea6a8a4e4836047077eaf9cfaf30` | `UI_S1_541d701_UNSIGNED.exe` / 163826264 / `08C061EE35A1A01788F05B00EE7395AA40774150C92C06726A92F3DF1BF75C3C` |
+| 이번 교체 전 이전본 | v1.0.26 / `4c97d4a00d79ae0d3da70b2e82af227345e21040` | `ROLLBACK_4c97d4a_UNSIGNED.exe` / 164583937 / `D453C1D17EFC706D3E21FE6F8D09F739F159EBF9F3F24F2EB2349E92D4EF84FB` |
+| 더 이전 교체 이력 | v1.0.26 / `d7a1b20f96711fb07fc7add0867e79ee36506fce` | 아래 2026-10-08 기록의 파일·해시·원문을 보존 |
+
+두 설치본은 모두 `NotSigned`이며 게시자 서명과 정식 기술 QA는 PASS가 아니다.
+같은 표시 버전이므로 후속 문서 commit 대신 위 build commit과 installer 해시로 식별한다.
+후보 및 이전본의 서버 보존 위치는
+`C:/Users/user/Desktop/SmartFactory/S1_CAND_20261009_R1/installers`다.
+같은 바이트의 개발 사본은 `C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1/delivery/S1_CAND_20261009_R1/installers`,
+공유 사본은 `Z:/SmartFactory/20261009/send/S1_CAND_20261009_R1/installers`에 보존한다.
+기존4c/d7 보존 묶음과 hash 결합 증거도 그대로 둔다.
+
+설치1회 actual OS exit0와 설치 선택54파일/provenance를 확인했다. 첫 적용 도우미는
+초기 API timeout으로 EXIT1/HOLD였으며 원문 manifest `354E8911670F838144B51C24314DDA2D8369358A578EF61FE440424EDFF501CD`를 보존한다.
+재설치·재시작 없이 후속 읽기 `r-20261009-224441-1f2226`의 EXIT0와 65파일 전체 해시를 회수·검토했다.
+후속 manifest는 `8666510BABB8D0D6EAAF071DBAAD671554BC6EF782B745AC0723CF157150B92A`다.
+128조건/실패0: 동일5프로세스·main17012/backend17348·8000 listener·새SPOT/logger,
+15 GET HTTP200와 raw JSON, poll2127→2142/CSV rows9316→9379/image written1107→1121,
+현재 저장실패/drop/대기0, 새CSV 추가 저장·제한 레코드/metadata bytes,
+원래 config SHA와 닫힌CSV441853493bytes/metadata SHA 보존을 확인했다.
+실제 화면에서 정상값 `SPOT OK / Temp OK / Comm OK`와 앞선
+under-range의 `SPOT OK / Temp UNDER_RANGE / Comm OK` 및 별도 상태 패널을 관찰했다.
+API와 화면은 각 관측 시점의 상태 종류를 대조했으며 동일 poll의 정확한 온도값 검증으로 확대하지 않는다.
+
+수용·보존한 한계: 최초 timeout 원인 미확정, 후속 첫health223.4887ms는 운영200ms 기준 초과,
+전체 성능 gate 미통과, `formal_operating_qa_passed=false`, config fingerprint mismatch/drift·
+`async_fact_only`·comparator 미확인, 전체CSV validator/개별이미지 전수무결성 미검증이다.
+이전4c의 image drop15/원인 미확정·종료 시 오래된metadata snapshot 및 과거 종료502 기록도 보존한다.
+새 후보의 관찰구간 image drop0을 과거 누락 해결이나 기존 증거 PASS로 바꾸지 않는다.
+이번 기준 갱신은 위 검증 범위와 제한을 가진 내부 운영 결정이며 추가 설치·자동복귀를 실행하지 않는다.
+
+최신 근거:
+
+- `C:/Users/user/Desktop/SmartFactory/S1_POST_READ_PREP_20261009_R1/server-post-review-001.json` 및 `.md`
+- `C:/Users/user/Desktop/SmartFactory/S1_POST_READ_PREP_20261009_R1/operating-promotion-001.json`
+- `C:/Users/user/Desktop/SmartFactory/S1_POST_READ_PREP_20261009_R1/server-results-001/r-20261009-224441-1f2226`
+- `Z:/SmartFactory/20261009/return/S1_POST_READ_20261009_R1/r-20261009-224441-1f2226`
+- `C:/Users/user/Desktop/SmartFactory/S1_CLOSE_READ_PREP_20261009_R2/server-normal-shutdown-review-002.json`
+
+다음 개선 시작 때541d/08C를 복귀 기준으로 보존한다. 방금 교체한541d에 문제가 발생하면
+이전4c/D453의 호환성·현재 설정/데이터·정상 종료 상태와 해당 복구 승인을 확인한 뒤 복귀한다.
+이 문서만으로 강제 종료·자동rollback·데이터 삭제·counter 초기화를 수행하지 않는다.
+
+## 2026-10-08 당시 운영 결정과 식별
 
 사용자가 수용한 기존 한계, 미서명 운영 승격 의사와 이번 문서 반영 승인을 기록한다.
 대상은 기존 승인 서버다. 실제 서버 식별값은 아래 로컬 적용 기록에 결합돼 있다. 현재 확인된 설치·검증본을 미서명 내부 운영본과
@@ -107,6 +160,7 @@ PASS/true로 편집하지 않는다. 수용한 한계를 새 필수 시험으로
 | --- | --- | --- |
 | 2026-10-08 | 개선·검증·운영 승격에 따라 다음 변경의 롤백 기준을 갱신하는 원칙 확정 | 사용자 설명 및 문서 반영 승인. 특정 commit의 영구 사용 고정 아님 |
 | 2026-10-08 | 확인된 4c97d4a 운영본을 다음 개선의 기준으로 등록, d7a1b20은 이전 교체 이력으로 보존 | R7·실제 적용 확인과 이번 로컬 installer 재검사. 새 설치나 현장 재시험 없음 |
+| 2026-10-09 | UI-S1 적용 확인 후541d701d/08C를 운영본·다음 개선의 기준으로 갱신,4c97d4a/D453은 이번 교체 전 이전본 | 실제 installer exit0·선택54파일·후속READ EXIT0/128조건·수집/CSV/config보존·UI·65파일 회수. 미서명·정식QA/성능/전수검증 한계 유지 |
 
 로컬 보존 자료(원문을 Git에 추가하는 지정이 아님):
 

@@ -2,8 +2,8 @@
 
 > 2026-10-09 KST 승인 보완 재검증 / `codex/spot-comm-temperature-ui-s1-20261008`
 > [설계](../02-design/features/spot-comm-temperature-ui-s1.design.md) · [계획](../01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md)
-> 현재 상태: I2-A와 인접3건 보완 및 현재 로컬 검증 완료. frontend434/typecheck/lint/build·health002 exit0. 리뷰는 cycles3, INCOMPLETE/nonconverged, 실제 binding=changed다. 최종 독립 검토·후보·운영 적용은 남았다.
-> 범위: 계획11·12절의 승인 목표를 이어 수행한다. 이 문서의 현재 PASS는 로컬 소스 검증이며 패키지·실장비·운영 승격은 아직 미검증이다.
+> 현재 상태: 새최종독립review/fullhealth exit0·541d/08C 패키지/실제서버적용 확인 및65파일/128조건 검토와운영·다음rollback등록 완료. 설계10항목충족10/10=100%(UI-S1 범위). 정식QA·서명·전체성능/전수검증 및기존fallback 한계는유지한다.
+> 범위: 계획의승인목표를완료했다. 아래 과거실패·미완료는당시기록이며 최신판정은이현재상태와마지막완료대조다. 실제장비관찰·패키지합성시험·원문hash검토의범위를구분한다.
 
 ## 1. 설계 항목과 근거
 
@@ -18,7 +18,7 @@
 | API→실제 view-model→hook→헤더 | Axios synthetic transport 88개 통합시험; production App 로컬 HTTP + native follower 세 순서/복구 | 로컬 검증 충족 |
 | 벽시계·재마운트·broadcast | backend service/poll 순서와 최근256개 legacy 이력, same-poll 경과/캐시 TTL·restart·API 뒤 지연 수신·기존 시계/재마운트 시험 PASS | 로컬 검증 충족 |
 | polling 정책 보존 | cadence, 5/10/20/50초 backoff, visibility, no-overlap, startup-overrun, unmount 시험 | 충족 |
-| 최종 검사·계획 대조·보고 | 현재 frontend434개 + Node9개, typecheck/lint/build/Chrome·health002 exit0; 최종review는cycles3 INCOMPLETE/binding changed | 로컬 검증 충족·전체 review 미완료 |
+| 최종 검사·계획 대조·보고 | 최종health006 exit0·frontend434+Node9/Chrome·새독립review binding verified/결함0·locked541d package·실제server128조건/65파일 및기준갱신 | 승인범위충족;기존제한보존 |
 
 ## 2. Check/Act에서 보완한 사항
 
@@ -194,3 +194,15 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - [ ] clean 후보 commit·locked installer의 commit/SHA256/서명·패키지 실제 API→화면 검증.
 - [ ] 승인 서버 최종 폴더 전달·적용 확인/수집/CSV/설정/실행 세대·결과 회수·다음 롤백 기준 갱신.
 - 운영 복귀 기준 4c97d4a를 유지한다. 새 installer/서버 적용/기준 갱신을 수행하지 않았다.
+
+## 최신 완료 대조 (2026-10-09T14:02:03.420Z)
+
+위10개 설계항목을최종변경과14.3/14.5/14.27–14.28의검증에대조해10/10충족을확인했다.
+설계일치율100%는UI-S1의타입·수신순서·상태분리·age/TTL·Comm·UI·polling·보고범위다.
+새independent review의completed/converged·unchanged binding/결함0,fullhealth exit0,
+실제541d/08C locked패키지7전환과승인server설치/현재수집·CSV/config·UI·회수검토를확인했다.
+현재운영본/다음rollback은541d/08C,4c/D453은교체전이전본으로보존한다.
+실제후속검토128조건/실패0/exit0·65파일 manifest `8666510BABB8D0D6EAAF071DBAAD671554BC6EF782B745AC0723CF157150B92A`가근거다.
+최초APPLY timeout/원인미확정·후속health223ms/성능gate미통과·정식QA/서명/
+config/comparator/전체CSV·개별image전수검증미실행·과거drop15와기존legacyfallback을
+설계일치율때문에PASS로바꾸지않는다. 과거cycles3 INCOMPLETE·FAIL은당시원문으로유지한다.

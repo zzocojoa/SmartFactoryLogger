@@ -1,7 +1,7 @@
-# UI-S1(P2) 구현·로컬 검증 보고서
+# UI-S1(P2) 구현·검증·운영 적용 보고서
 
 > 작성일: 2026-10-08 KST / 승인 보완 갱신: 2026-10-09 KST / 브랜치: `codex/spot-comm-temperature-ui-s1-20261008`
-> 현재 상태: 새 독립 review 완료(미해결 결함0/cycles0/검토 snapshot binding verified), 최종 full health exit0 및 후보541d701d의 locked installer·실제 packaged API→UI 검증 완료. 서버 로컬 최종 복사·설치·CSV/설정/세대 확인·운영 기준 갱신은 미완료이며4c97d4a를 유지한다. 최신 근거는 계획14.3–14.6절과 candidate-final-validation-001이다.
+> 현재 상태: 승인된UI-S1 개선·최종review/fullhealth·후보541d/08C 패키지 검증·실제 서버 적용 확인·65파일 회수/128조건 검토와 운영/다음rollback기준등록 완료. 4c/D453은 이번 교체전 이전본으로보존한다. 정식QA/서명/전체성능·전수검증 및 과거 실패·미확정 원인은 유지한다. 아래 과거절의 미완료는 당시 기록이며 최신 결론은 마지막 적용 완료절이다.
 > 구현 기준 origin/master:35959c41edee29573040d571ead952c073f1be13. 후보 build commit:541d701d544eea6a8a4e4836047077eaf9cfaf30. installer SHA256:08C061EE35A1A01788F05B00EE7395AA40774150C92C06726A92F3DF1BF75C3C / NotSigned. 후속 진행문서 commit과 build commit은 구분한다.
 > worktree: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next`
 > [기준 계획](../01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md) · [설계](../02-design/features/spot-comm-temperature-ui-s1.design.md) · [분석](../03-analysis/spot-comm-temperature-ui-s1.analysis.md)
@@ -287,3 +287,33 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 새review 결함0/최종health exit0에 이어 build commit541d701d544eea6a8a4e4836047077eaf9cfaf30의 locked 패키징과 실제packaged API→UI7전환이 PASS했다. installer163826264bytes/SHA256 08C061EE35A1A01788F05B00EE7395AA40774150C92C06726A92F3DF1BF75C3C/NotSigned, 추출payload1771개·내/외부frontend50개가 실제runtime package와 동일하다. 제품571개 유지, owned프로세스 정상종료/CIM부재를 확인했다.
 
 [패키지검증보고서](C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1/records/candidate-final-validation-001/candidate-package-validation.md), 기준계획14.5절 및 같은records raw/receipts가 근거다. 설치실행·서버적용·실장비/CSV/설정보존·결과회수·운영기준갱신은 미완료이며4c97d4a를 유지한다. metadata후속commit은541d build commit과 구분한다.
+
+## 최신 상태 — 실제 적용 확인과 다음 롤백 기준 등록 (2026-10-09T14:02:03.420Z)
+
+승인된 UI-S1 작업을 완료했다. 현재 미서명 내부 운영본과 다음 개선의 롤백 기준은
+`541d701d544eea6a8a4e4836047077eaf9cfaf30` / installer SHA256 `08C061EE35A1A01788F05B00EE7395AA40774150C92C06726A92F3DF1BF75C3C` /163826264bytes/NotSigned다.
+이번 교체전4c/D453 installer와과거증거는보존한다.
+[운영·롤백 기준](../V2/05_운영_배포/operating_rollback_baseline.md)의2026-10-09 이력이 최신이다.
+구현 build commit과 후속 문서 commit은 구분한다.
+
+| 최종 검증 | 실제 결과와 범위 | 증거 |
+| --- | --- | --- |
+| 기본 npm run health | 실제exit0,frontend434+Node9/typecheck/lint/Electron94/backend880(기존skip1)/QA5 | final-review-20261009-004/health/receipt.json·raw·audit; 이후제품571입력불변 |
+| 최종독립review·패키지 | 결함0/converged/cycles0·binding verified,locked payload1771/frontend50·실packaged7전환 | S1_PKG_20261009_R1/records/candidate-final-validation-001 |
+| 설치·실행본 | installer1회actualOS exit0,full541d provenance/선택54pins·새단일5process | S1_APPLY_PREP_20261009_R1/server-application-partial-review-001 |
+| 서버 후속읽기·회수 | READ EXIT0,65파일/64manifest/19553736bytes 전파일hash·128조건/실패0 | S1_POST_READ_PREP_20261009_R1/server-post-retrieval-001.json·server-post-review-001 |
+| 현재수집/CSV/설정 | 15HTTP200,rows9316→9379,poll2127→2142,image1107→1121/drop0;CSV+79780bytes/제한110열·seq·겹침행·rawmetadata·원래config/closedCSV 해시보존 | 후속read r-20261009-224441-1f2226 |
+| 실제API·화면 | 같은설치본의정상SPOT OK/Temp OK/Comm OK와앞선UNDER_RANGE/통신OK·상태패널 | post-normal001/post-panel001 및APPLY status-panel001 원본; 관측시점차이·동일poll값미대조 |
+| 기준갱신 | 541d/08C 운영·다음rollback,4c/D453 교체전이전본,추가설치/자동복귀없음 | operating-promotion-001.json·운영기준문서·계획14.28 |
+
+검토 실행 명령 `python retrieve-post.py`, `python review-post.py`는 각각exit0다.
+최초APPLY EXIT1/timeout 원문은남기고후속읽기로적용을확인했으며재설치/재시작하지않았다.
+첫후속health223.4887ms와최초timeout 원인미확정을보존한다. 전체성능gate/정식QA/서명·
+configattestation/comparator/전체CSV·개별image전수검증은PASS가아니다.
+old4c image drop15/원인미확정·오래된open metadata와shutdown502,
+legacy identity없는cross-source fallback,외부Claude 미설치 및선택적memo미적용도유지한다.
+설계10항목대조100%는UI-S1 범위이며 위미검증결과와구분한다.
+
+최신 검토 보고서: [실제 적용 후 검토](C:/Users/user/Desktop/SmartFactory/S1_POST_READ_PREP_20261009_R1/server-post-review-001.md).
+과거HOLD·실패·helper/manifest를재작성하지않았고신규작업으로정식QA/장비설정/과거누락해결을자동확대하지않는다.
+필수후속작업은없으며push/merge/PR·새개선/추가운영작업은이번범위에포함하지않았다.

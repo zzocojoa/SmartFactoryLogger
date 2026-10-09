@@ -9,7 +9,7 @@
 > 생성 완료한 구현 브랜치명: `codex/spot-comm-temperature-ui-s1-20261008`
 > 구현 worktree: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next`
 > 문서 상태: 실제 Plan mode에서 계획 작성 완료, 구현 모드에서 파일 저장 완료
-> 실행 상태: UI-S1 최종 review/full health·후보541d locked installer/packaged API→UI 검증 완료. 실제 서버 정상 종료 요청1회 뒤 CLOSE EXIT1 원문41파일을 보존하고 후속READ EXIT0의34파일 전체해시/46조건 검토로OS exit0·cold3회빈상태·forced=false·단계별drain·closedCSV 마지막seq495480/설정보존을확인했다. 이전cold충돌원인·과거이미지drop15/이미지metadata스냅샷과전수validator 미검증은남긴다. 다음은승인된후보설치와적용후검증이며운영/다음rollback갱신은미완료다.
+> 실행 상태: 승인된 UI-S1 개선·최종 review/full health·541d locked package/API→UI·실제 서버 적용과 후속128조건/65파일 회수 검토 완료. 541d701d/08C를 미서명 내부 운영본·다음 개선 롤백 기준으로 등록했고 교체 전4c97d4a/D453과 과거 실패·미검증을 보존한다. 최초 적용 API timeout 원인/첫 후속health223ms·과거drop15·정식QA/서명/config/comparator/전수검증 한계는 PASS로 바꾸지 않는다. 최신 완료 근거는14.27–14.28절이다.
 > 현재 작업의 기준 계획 파일: `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 새 브랜치 worktree의 동일 내용 계획 사본: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 이전 준비 계획 원문(보존): `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-temperature-history-p2-20260922.plan.md`
@@ -81,9 +81,9 @@
 | **Plan** | 실제 계획 모드에서 작성한 계획을 새 브랜치명 규칙으로 저장한다. 원격 `master`와 `origin/master`의 SHA 일치 및 D1의 `temperature-operational-v6`를 확인했고, 그 기준에서 독립 worktree와 UI-S1 브랜치를 생성했다. | 계획 작성·최신 기준 확인·D1 확인·worktree·구현 브랜치 생성·계획 저장 완료 |
 | **Design** | 이 기준 계획을 읽고 스킬 지정 경로에 설계 문서를 저장하며 PDCA feature를 등록한다. 위 표시 계약, freshness 계산, 캐시 표시, 타입 호환성, 테스트 기대값을 설계에 고정한다. | 상세 설계 저장·PDCA 단계 완료 |
 | **Do** | 타입·수신 시각 전달 → 순수 상태 판정 → 상태 hook → 헤더·상세 메뉴 → 회귀시험 순서로 구현한다. 기존 polling 주기·backoff·leader/visibility 정책은 유지한다. | 최초 구현·승인 보완과 순수 수신 helper 분리 완료(10절) |
-| **Check** | 설계와 최종 diff를 대조하고 관련 검증을 실행한다. 핵심 요구사항과 아래 필수 시나리오는 모두 충족해야 한다. | 최종 frontend434+Node9/typecheck/lint/build·전체 health exit0·새 독립 review 완료. 실제 후보 패키지7상태 PASS. 현재본 PRE/R2 회수 및87조건·CSV window/이미지 진행 검토 완료;14.20절 HOLD 보존·14.21절 후속34파일/46조건 검토 exit0·실제 정상 종료 확인 완료; 후보 설치/적용후 확인 대기. |
+| **Check** | 설계와 최종 diff·필수 회귀·후보 및 실제 적용 검증을 대조한다. | frontend434+Node9/typecheck/lint/build·전체health exit0·최종독립review·packaged7상태, 실제설치54pins/15API/수집·CSV/config·UI/65파일/128조건 검토 완료(14.27). |
 | **Act** | 불일치나 실패를 수정하고 영향받은 검증을 재실행한다. 스킬 기준 최대 5회 반복 후에도 남은 문제가 있으면 미완료로 기록한다. | A/I2-A 승인 보완과 응답 지연 조사·최종 회귀 완료. 과거11절 실패와 원인 미확정 항목은 보존. R1 읽기 CSV 경로 오류를 별도R2로 보완·검증했고 현재 저장 진행 확인. 기존 이미지 dropped15 원인 미확정 유지. |
-| **Report** | 변경 사항, 최종 commit, 검증 명령·exit code, 미실행·미관찰 항목을 기록한다. Match Rate 90%만으로 필수 요구사항의 누락을 완료 처리하지 않는다. | 후보 build541d와 locked installer 확정·로컬 패키지 검증 보고 완료. 운영/복귀4c97d4a 유지, 후보 설치·현장 적용 확인·다음 기준 갱신 미완료. |
+| **Report** | build commit·installer hash·검증exit·미실행/한계를 기록하고 승인 적용 후 기준을 갱신한다. | 541d build/08C installer의 실제 적용 확인과 내부 운영 승격·다음rollback등록 완료. 이전4c/D453·실패원문·정식QA false 보존. 최종 보고/근거는14.28 및 운영기준 문서. |
 
 - 검증 일정은 **설계 → 구현 → 로컬 검증 → 후보 패키지 검증 → 승인 범위의 적용 확인** 순서로 잡는다. 착수·완료 시각은 실제 수행 시 기록하며 확정되지 않은 날짜나 소요 시간을 완료 약속으로 쓰지 않는다.
 - 기존 브랜치·worktree·미커밋 파일과 과거 PDCA 기록은 자동 정리하거나 덮어쓰지 않는다. 새 사용자 채팅은 사용하지 않는다. subagent는 11절의 사용자 승인에 따른 읽기 전용 독립 리뷰에 한해 사용하며 구현·최종 검증은 부모가 담당한다.
@@ -124,7 +124,7 @@ npm --prefix frontend run build
 - [x] 합성 UI 시험과 실제 설치본·실장비 확인 결과를 구분해 보고한다.
 - [x] 운영 적용까지 수행한 경우에만 후보 검증·적용 확인·롤백 기준 갱신을 완료로 기록한다.
 
-### 4.4 검증 결과 기록 양식
+### 4.4 최초 검증 결과 기록 (당시 상태 보존; 최신 결과는14.28절)
 
 | 검증 항목 / 명령 | 대상 commit·설치본 | 결과 / exit code | 증거 위치 | 미검증·남은 항목 |
 |---|---|---|---|---|
@@ -135,7 +135,7 @@ npm --prefix frontend run build
 
 ## 5. 운영 적용과 위험 관리
 
-- 현재 확인된 운영본 `4c97d4a00d79ae0d3da70b2e82af227345e21040`과 installer SHA256을 복귀 기준으로 보존한다.
+- 이번 개선 시작 시 운영본 `4c97d4a00d79ae0d3da70b2e82af227345e21040`을 교체 전 복귀본으로 보존했다. 적용 확인 후 현재 운영·다음 개선 기준은541d/08C이며4c/D453은 이전본으로 보존한다(14.28).
 - 새 후보는 **전체 build commit·installer SHA256·서명 상태**로 식별하고, 패키지에서 새 상태 표시와 API 연결을 확인한다.
 - 서버 검증 자료가 필요하면 개발 PC 준비, `Z:\SmartFactory\YYYYMMDD\send` 전송, 서버 바탕화면 `SmartFactory`의 실행별 새 폴더까지 최종 복사·파일 확인을 수행한다.
 - 운영 적용은 새 설치본에 해당하는 승인 범위에서 진행한다. 적용 후 실제 `/health`와 화면을 대조하고 수집·CSV 추가 저장·설정 보존을 확인한다.
@@ -773,3 +773,40 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - 재개3번째 턴의 같은 Browser 탭/fresh 탐색기 F5에서도 최종 S1_APPLY_20261009_R1는 기존6파일만 보이고 새r-결과를 관측하지 못했다. 공유 return/S1_APPLY_READ_20261009_R1의 실제 자식은0개다. live 도우미 실행 handle은 확인되지 않았으며 초기guard 실패를 배제하지 않는다. Browser 연결을 installer/도우미의 verified wait로 취급하지 않는다.
 - 첫 턴의 최종검증·공유해시·서버최종복사·인계는 progress, 둘째와 이번 셋째 재개는 no progress다. 같은 실제 실행 결과 입력이3턴 연속 필요했고 안전하게 수행할 독립 준비는 완료했다. Windows terminal UI 직접·간접 실행 금지 규정을 우회하지 않고 기존 사용자 실행 요청을 유지한다. 실제 설치·새세대·UI/API·CSV/config 보존 증거 없이 운영승격/다음rollback등록을 수행할 수 없으므로 blocked 감사 기준을 충족한다. 목표complete/paused로 바꾸지 않고blocked 상태변경을 요청한다.
 - 감사 원문·fresh 화면은 S1_APPLY_PREP_20261009_R1/apply-execution-blocked-audit-002.json 및 apply-execution-blocked-002.jpg다. 재개 조건은 기존 서버 최종 폴더의 APPLY_UI_S1.cmd 실행 후 UI-S1 APPLY EXIT/실제콘솔 또는 새r-결과 확인이다. EXIT1/HOLD이면 재실행하지 않고 원문부터 회수한다. 기준4c/후보541d/검증한installer 및 원래 증거를 보존한다.
+
+### 14.25 실제 후보 설치와 API timeout HOLD 회수
+
+- 사용자 실행완료 후 실제 콘솔 UI-S1 APPLY EXIT1/GetResponse timeout/HOLD를 확인했다. r-20261009-220826-a3fbbb 전체18파일/17manifest항목/63130bytes를 서버→공유 return/S1_APPLY_READ_20261009_R1→개발 S1_APPLY_PREP_20261009_R1/server-results-001로 회수했다. 콘솔·공유·개발 manifest SHA256=354E8911670F838144B51C24314DDA2D8369358A578EF61FE440424EDFF501CD와 개별 크기/해시/파일집합이 일치한다(retrieve-apply.py exit0). 이전 실행 입력blocker는 해소됐고 목표active다.
+- 부분 검토32조건/실패0/exit0: installer PID25388 actual OS exit0(22:08:42.171~22:09:22.534 KST), 정확한541d provenance와 선택54설치파일, 새main17012/backend17348·전체5process/owner/session/parent/8000 listener binding이 일치한다. 자동launch된 후보를 관측했으며 helper의 별도 app-start 요청은false다. 설치 전cold3회0, 설치 직후 원래 config SHA6841... 및 닫힌CSV441853493bytes/SHA D414.../metadata A855...도 그대로다. 전체payload 설치무결성/운영승격 PASS가 아니다.
+- 초기health2회200/latency362.4042ms·26.2021ms, 새SPOT9f93aea7-b9c8-4882-b833-34a029741881/logger9307deb8-6b70-4005-8d0c-400f5a27f217, poll20→24/success/fresh를 확인했다. 두health의 logger rows1/current CSV=null이어서 전체수집·CSV 준비 완료가 아니다. 원래 helper의 startup-ready는 SPOT poll>0만 확인했고CSV/image 준비를 요구하지 않았다는 한계를 기록한다.
+- 순차helper에서 sample001health만 생성되고 다음spot-config가 없으며 GetResponse timeout 원문이 있으므로 실패route는 /api/spot/config로 추론된다. source의 image-capture health는 capture lock 안의 writer생성→기존 fact 전체hash/CSV행수 초기화를 통과한다. 이경로와 app/spot-image source는4c→541d에서동일함을git diff로 확인했다(exit0). 실제 서버의 timeout 원인은 미확정이다. 제품backend 수정/재빌드·재설치·재시작·force/자동rollback은 하지 않는다.
+- 실제 후보 UI에서 SPOT OK / Temp UNDER_RANGE / Comm OK와poll=success/raw=invalid_sentinel/source=fresh/온도invalid_value/cacheempty를 별도로 표시하는 상태 패널을 관찰했다. under-range를 통신장애로 집계하지 않는다. 원래Temperature 값/안전gate 계약은 유지한다. 서버 UI 원본·패널 화면, APPLY EXIT1, 부분검토JSON/MD를 S1_APPLY_PREP_20261009_R1에 보존한다. 초기 API와 이후 UI는 시간대가 달라 이 두개만으로 전체실API→화면·수집/CSV보존 완료라고 하지 않는다.
+- 승인된 적용후 검증 누락을 채우기 위해 새 S1_POST_READ_20261009_R1의읽기전용묶음을 준비한다. 실제APPLY manifest/부분검토/고정541d·54pins/원래CSV/meta/config·실제main/backend·SPOT/logger IDs를reference로 결합한다. 기존후보를 설치·시작·종료하지 않고현재세대만 읽는다. 현재전체runtime를 새binding으로 기록하되 main/backend의원래PID/시작ticks/path/owner/session/parent가 동일해야 한다. 나머지Electron자식도현재단일main/path/owner/session에속해야 하며조회 전후새전체binding을유지한다.
+- 세번의같은5 GET/고정5초timeout·2MiB/원문body·route/실제latency/error/status를기록하고독립조회실패도보존한다. 전체조회/세대/신선poll·온도유효성분리/실제새CSV·수집과이미지진행/설정·옛closedCSV/meta hash보존은별도criteria로판정한다. 실패를없애기위해timeout을늘리거나신규오류·image drop을지우지않는다. 현재CSV의제한prefix/tail과raw metadata(원래bytes/hash)를읽고제한system/Electron log를회수한다. 과거이미지15drop/원인미확정·전수CSV/schema/개별image/정식QA미검증은유지한다.
+- 새reader는nativePS5.1 parser/self-test/거짓commit·runtime·service·route/실파일window·source보존·충돌/junction·actualHTTP200/503/timeout기록·hostguard를검증하고공유해시·서버최종복사후일반실행을인계한다. 기존APPLY installerhelper는재실행하지않는다. 후속read와실UI를대조하고전체수집·CSV/config보존을검토한뒤운영승격/다음rollback기준을갱신한다. 현재그단계는미완료이며4c복귀설치본을보존한다.
+
+### 14.26 설치 후 읽기 도우미 검증과 서버 최종 전달
+
+- 새S1_POST_READ_20261009_R1의6파일/81758bytes를 준비했다. 최종 read-post.ps1 29034bytes/SHA2561594D9E2CCF159AA894B529703AFCC4947992B8044F48A3E64EAA26CA2781CE4,reference42336bytes/5EEB7C85B81D5975EFEEBB617C1D8938797CAF42E6C0D989752A6C4F03CEE765,READ_POST.cmd1137bytes/EF2803D61198A05F6CD33FC20A135EB610F6DD57367BD354B760D147836611AA다. 18개의기존 검증함수를source hash/AST로 추출했고 설치·시작·종료 함수는 포함하지 않는다. 초안prepared001은보존하며 최종prepared002에실제시험을결합했다.
+- native WinPS5.1 run-validation.ps1 실제exit0:자체37개/실파일6개·parser0·source보존/충돌/junction거부exit0,actualCMD개발host거부는기대exit1/POST_READ_HOLD:server-host·UI-S1 POST READ EXIT1이다. raw stdout/stderr/exit 전체를읽었고stderr0이다. 자식에만PSModulePath를제외했으며부모/배포환경은변경하지않는다.
+- 별도고립loopback actualHTTP4case는200 JSON/503 원문·status/2MiB초과거부/5초timeout(5011.8097ms)을확인했다. runtime endpoint/예산/에러원인을저장하고 성공·503 raw body를보존한다. 실제fixturechild의exit0/stderr0, static제품실행·종료금지0,helper원본 hash불변을검증했다(validation-http002 exit0). fixture 전용port치환은shiphelper에없고server/장비요청0이다. 최초HTTP001은4case결과를저장했지만 oversize client abort의Windows10053를fixture가stderr에남겨parent exit1이었다. 원문을보존하고fixture의예상ConnectionAbortedError 처리만보완했다. shiphelper 바이트는수정하지않았다.
+- 개발→Z:/SmartFactory/20261009/send/S1_POST_READ_20261009_R1 전체6파일 SHA256/크기대조exit0. 서버탐색기자체Copy/Paste로 C:/Users/user/Desktop/SmartFactory/S1_POST_READ_20261009_R1에새복사했고 정확한절대경로/6파일/READ_POST1137bytes속성·선택을확인했다. 4화면·server-copy001·공유records에확인범위를기록한다. 서버로컬helper/reference hash는실제사용자launcher의pin검증대기이며 화면확인을hash PASS로바꾸지않는다. 기존파일덮어쓰기/terminal자동실행없다.
+- 새return/S1_POST_READ_20261009_R1를준비했고 선택된READ_POST.cmd의일반1회실행/UI-S1 POST READ EXIT결과를요청했다. 읽기전용이며설치·앱시작·종료없음,EXIT1/HOLD이면재실행하지않고원문회수,기존APPLY도재실행하지않음을명시했다. Computer Use필수guidance의Windows terminal UI직접·간접실행금지때문에사용자실행이필요하며재승인요청이아니다.
+- 이번재개는실제18파일 회수·부분검토32조건·UI의under-range와정상복구관찰·후속reader47검사/hostguard·공유해시·서버최종전달을완료한progress다. 새로운읽기실행입력의첫턴이며목표active/전체미완료다. UI 정상값복구원본도보존했다(server-candidate-normal002). current제품/금형값은변동가능하며과거값강제/물리작업상태단정은하지않는다. 결과회수·3회실API/새CSV/config보존검토·UI대조·운영승격/다음rollback등록은남아있다.
+
+### 14.27 실제 후속 POST READ 완료·회수·독립 검토
+
+- 사용자 실행 완료 뒤 실제 콘솔 POST READ COMPLETE/EXIT0, `r-20261009-224441-1f2226`을 확인했다. 처음 조회에는 새폴더가 아직 보이지 않았으나 이후 실제 완료창과 새r-폴더를 확인했다. 재실행하지 않았다. 처음 저장한 complete001/002 화면은 탐색기 상태이며 콘솔 증거는 complete003 원본이다. 구스냅샷을 완료창의 증거로 사용하지 않는다.
+- 서버→공유return/S1_POST_READ_20261009_R1→개발S1_POST_READ_PREP_20261009_R1/server-results-001로65파일/64manifest항목/19553736bytes를 회수했다. 콘솔·공유·개발 manifest SHA256 `8666510BABB8D0D6EAAF071DBAAD671554BC6EF782B745AC0723CF157150B92A`와 모든파일 크기/해시/정확한 집합이 일치한다(retrieve-post.py exit0). helper/reference 서버pin 검사를 통과한 실제결과이며 기존APPLY/installer는 재실행하지 않았다.
+- review-post.py 실제exit0/128조건/실패0다. installed54pins/provenance/full541d, 동일5runtime/main17012/backend17348·start/parent/path/owner/session·8000listener 및SPOT9f93/logger9307 유지. 15 GET 모두HTTP200/원문JSON 일치, 5000ms/2MiB 예산 유지. poll2127→2134→2142,rows9316→9349→9379,imagewritten1107→1114→1121/factrows4092934→4092941→4092948,새image drop·저장/source/HTTP오류·대기0.
+- 실제 새CSV Factory_Integrated_Log_v2_20261009_220923.csv 크기12528968→12568695→12608748bytes(+79780),prefix2MiB 유지/겹침tail행 보존/110열/schema2.5.2/연속seq/최근행을확인했다. 마지막seq9316→9345→9376이며API보다늦게읽어도항상API와동일행이라고추정하지않는다. 첫10행SPOT ID없음은startup_pending/Temperature공란이고그뒤세대는동일하다. under/stale/초기 온도공란·sentinel 미기록을확인했다. metadata raw24499bytes/SHA C3076C70F5BA60F1EF4C9312A246D149D083935D3BDB5D658059D92ADCD1BCB2를3회 보존·객체/hash대조했다. 전체CSV/이미지 전수validator는미실행이다.
+- 원래config6841.../닫힌CSV441853493bytes·D414.../rawmetadataA855... 전후동일해시다. actual UI정상SPOT OK/Temp OK/Comm OK·success/valid_temperature/fresh 패널,앞선UNDER_RANGE/통신OK 패널을보존했다. API와화면은각관측시점의상태종류를대조했으며동일poll/정확온도값대조로확대하지않는다. 실제현재작업60383/8과API/CSVtail이일치하고agent의설정/작업정보변경은없다.
+- 최초APPLY EXIT1 timeout/원인미확정 원문은유지한다. 후속spot-config47.3727/32.7931/31.8358ms로응답했지만첫health223.4887ms는운영200ms기준초과다. 다음health13.7190/9.9844ms도전체성능PASS근거로확대하지않는다. 과거4c drop15/원인미확정과shutdown502·metadataopen snapshot/configfingerprint mismatch/async_fact_only/comparator미확인·정식QA false를보존한다. 과거증거수정·counter초기화·제품변경/재빌드·재설치·재시작/stop/force/자동rollback은없다.
+
+### 14.28 승인 범위 완료·운영본과 다음 롤백 기준 등록 (2026-10-09T14:02:03.420Z)
+
+- 승인된4단계 목표를대조했다: QA Get-FileHash 범위보완/최종fullhealth exit0(14.3),새independentreview completed/converged·binding verified/결함0,541d cleanbuild commit·lockedinstaller08C/NotSigned·payload1771/frontend50·packaged7state(14.5),실제server최종전달/old정상종료/installeractualexit0/후속수집·CSV/config/UI·전체결과회수(14.21/14.25/14.27)가준비됐다. 후속제품/검증입력은541d 이후변경없고이번문서검증에빌드·health를반복하지않는다.
+- [x] 새운영본/다음변경rollback:541d701d544eea6a8a4e4836047077eaf9cfaf30 /163826264bytes/SHA08C061EE35A1A01788F05B00EE7395AA40774150C92C06726A92F3DF1BF75C3C/NotSigned.
+- [x] 이번교체전이전본:4c97d4a00d79ae0d3da70b2e82af227345e21040 /164583937bytes/SHAD453C1D17EFC706D3E21FE6F8D09F739F159EBF9F3F24F2EB2349E92D4EF84FB/NotSigned와구증거보존. 두서버installer는S1_CAND_20261009_R1/installers에있으며원래설정/closedCSV보존을호환근거로남긴다.
+- [x] 운영기준문서의2026-10-09 새이력/최신보고·분석/PDCA상태와기준계획두사본을갱신한다. 기존main checkout의다른미커밋변경과baseline의기존문구차이는보존한다. oldhelper/result/promotionfalse 영수증은재작성하지않고새operating-promotion001로별도운영결정을등록했다.
+- 현재승인된UI-S1 작업은완료다. 설계10항목의충족률100%는UI-S1 범위의대조이며정식QA/서명·전체성능·CSV/개별image전수무결성/기존fallback 미보장까지PASS라는뜻이아니다. 외부Claude 미설치·legacy identity없는cross-source fallback·선택적memo7줄 advice 미적용/과거OOM·backendtimeout 원인미확정도유지한다. 과거절의미완료체크는그때상태이며현재결론은이절과최신보고다. push/merge/PR/추가운영행위는수행하지않는다.
