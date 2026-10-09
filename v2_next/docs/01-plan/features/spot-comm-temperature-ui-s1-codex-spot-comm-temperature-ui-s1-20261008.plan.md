@@ -628,3 +628,23 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - 사용자 제공 http://remotedesktop.google.com/access/session/8dac2c49-886b-3a5c-c6d6-39e1bcc173f0?hl=ko를 새 탭에서 열었다. HTTPS Google 계정 로그인 화면으로 이동했고 계정이 로그아웃됨으로 표시됐다. 링크 열기와 화면 조회 성공이며 서버 세션 접속/화면 입력 성공은 아직 검증하지 못했다. 실제 Chrome 세션의 로그인 상태를 변경하거나 검사한 결과가 아니다.
 - 해당 브라우저의 지원 인증 handoff capability는 제공되지 않았다. 로그인 화면을 사용자에게 표시하고 탭을 다음 턴에 유지하도록 설정했다. control-in-app-browser SKILL.md의 인증 차단 시 지정 브라우저에서 로그인 요청 규정에 따라, 사용자가 Codex 브라우저 패널에서 직접 로그인한 뒤 같은 탭에서 접속/화면/입력을 확인한다. 비밀번호/쿠키/프로필/저장된 인증 정보를 읽거나 정책 검사를 우회하지 않는다.
 - 증거: C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1/records/server-access-pending-001/browser-access-audit-20261009.json 및 browser-login-required-20261009.png. 제품/installer/고정 전송 묶음은 변경하지 않았고 build541d와 운영/복귀4c97d4a를 유지한다. 서버 최종 폴더 복사·현재 실행 세대/CSV/설정·승인 후보 적용·회수·기준 갱신은 미완료다.
+
+### 14.10 로그인 완료 후 서버 최종 복사와 읽기 준비
+
+- 사용자의 로그인 완료 응답 후 같은 Codex Browser 탭에서 DESKTOP-Extrusion 연결됨과 운영 대시보드를 확인했다. 탐색기 열기/최대화/경로 이동 및 서버 자체 복사 메뉴로 실제 마우스·키보드·텍스트 입력이 전달됨을 확인했다. 브라우저 Ctrl+V는 가상 클립보드 데이터 없음으로 실행되지 않아, 서버 탐색기 복사/붙여넣기 메뉴를 사용했다. 이는 정책 거부를 우회한 실행이 아니다. 별도 인증/보안/클립보드 공유 설정은 변경하지 않았다. 사용자가 지정했던 화면 입력 기능을 이 세션에서도 켰다.
+- 공유 S1_CAND_20261009_R1를 서버 실제 바탕화면 SmartFactory 아래 새 C:/Users/user/Desktop/SmartFactory/S1_CAND_20261009_R1에 복사했다. 기존 동명 항목/덮어쓰기 없이 복사가 끝났고 폴더 속성에서 파일69개/폴더12개와 서버 로컬 위치를 확인했다. 화면/파일 존재 확인이며 서버 로컬 SHA256/reparse 검증 PASS가 아니다. 14.6 전달 묶음의 고정 바이트/manifest는 재작성하지 않는다.
+- 승인된 서버 검증 단계 안에서 별도 S1_READ_20261009_R1 읽기 전용 묶음을 준비한다. 고정 원본 manifest와 서버 로컬69개 파일 SHA256, Desktop 경계·reparse·표준 사용자/대상 host를 확인한 뒤 기존 해시 고정4c97d4a reader를 변경 없이 실행해 현재 PID/시작시각/listener/config/3회 API 조회를 기록한다. 새 결과만 생성하고 운영 시작/정지/설치·장비 직접 요청·설정/CSV 수정·실패 초기화는 하지 않는다. 새 도우미의 PS5.1 파싱·경로/해시 거부·실제 개발 원본 해시·기존 reader self-test를 검증한다.
+- Computer Use guidance의 필수 규칙은 Windows 터미널 명령의 UI 직접/간접 실행을 금지한다. Browser에서 Windows 탐색기를 사용해 이 규칙을 우회해 cmd/PowerShell을 실행하지 않는다. Codex가 읽기 묶음도 서버 최종 폴더까지 복사하고 파일/경로를 확인한 뒤, 사용자에게 정확한 읽기 launcher의 일반 더블클릭 한 단계만 요청한다. 이후 Codex가 결과 회수/검토를 담당한다. 적용/설치 승인 범위를 다시 묻는 요청이 아니다.
+- 현재 서버 읽기 및 로컬 파일 SHA256 확인 전에는 신규 적용 도우미의 실행 세대/설정/CSV 기준을 확정하거나 후보를 설치하지 않는다. 운영/복귀4c97d4a 및 후보 build541d 유지, 서버 적용/회수/다음 기준 갱신은 미완료다.
+
+### 14.11 서버 읽기 묶음 최종 전달·검증과 사용자 실행 대기
+
+- 개발 원본 고정69개/330566480bytes의 전체 SHA256/두installer NotSigned를 새 helper self-test14개로 확인했다(exit0). 기존4c reader self-test12개도exit0다. 실제 READ_SERVER.cmd의 고정helper bootstrap→자식 실행을 개발PC에서 시험해 server-host HOLD/exit1을 정상적으로 확인했으며 운영 조회/API/결과 폴더 생성은0회다. 파싱·최종launcher pin/실제3개 공유사본 SHA256이 정상이며 제품 소스/기존helper/installer/고정candidate manifest를 바꾸지 않았다.
+- 새 read-server.ps1 SHA256=91591E9B608BC8D4D92B4D0B8B8F0E1C67AB8E8FC4EA93051EDF9CF5D8A3F518, READ_SERVER.cmd= B07D24EB08588C4AD842EAE570A2A8785C858FD40D881E1C86E2A1A746B3DE17다. 처음 helper 검증의 raw DirectoryInfo/PSIsContainer 문제는 .NET type 판정으로 수정한 후 최종 검증했다. validation001의 inherited PSModulePath/WinPS5 autoload 실패와 CP949 원문은 보존했다. validation002는 test 자식에서만 PSModulePath를 제거하며 부모/배포helper 환경은 바꾸지 않았다. 각 실제 exit를 먼저 저장하고 CMD pause의 CP949까지 전체원문을 다시 읽어 완료했으며 성공 시험을 다시 실행하지 않았다.
+- 3개 파일을 Z:/SmartFactory/20261009/send/S1_READ_20261009_R1에서 서버 C:/Users/user/Desktop/SmartFactory/S1_READ_20261009_R1에 최종 복사했다. 일반 탐색기에서 절대경로/3개파일/READ_SERVER.cmd의1126bytes를 확인하고 launcher를 선택한 상태로 남겼다. 복사 후 목록 정렬이 늦게 반영되어 기존hash 텍스트 문서가 의도치 않게 열렸고, 입력/편집 없이 기존Notepad 탭을 보존해 최소화했다. 이후 정확한 폴더 절대경로로 이동했다. 터미널/launcher/installer를 UI 자동 실행하지 않았다.
+- 증거: C:/Users/user/Desktop/SmartFactory/S1_READ_PREP_20261009_R1/validation-002/result.json과전체raw/exit, development-copy.json/server-copy.json. 공유records/S1_READ_20261009_R1-server-copy.json은 actual server-local path와 화면파일확인/해시확인 범위를 구분한다. candidate69개/reader3개는 서버최종복사·화면확인 완료, 서버로컬 SHA256/OS host·현재세대/config/API3samples는 사용자읽기 실행 대기다. 과거 개발전달receipt의serverFinalCopied:false는 당시기록으로 보존한다.
+- Windows terminal 명령 UI 직접/간접 실행 금지 규정 때문에 사용자에게 서버 READ_SERVER.cmd 일반더블클릭1회와 PRE READ EXIT 결과를 요청했다. 필요한 사본/해시고정/로컬시험/정확한서버폴더 준비는 완료했으며 승인범위 재선택 요청이 아니다. 해당완료 전에는 반복자동실행/정지/설치를 하지 않는다. 회수용 Z:/SmartFactory/20261009/return/S1_PRE_READ_20261009_R1를 새로 준비했으며 아직결과를회수한상태가 아니다.
+- [x] Browser로그인/원격화면·입력, candidate69개와읽기3개 서버최종복사 및 실제경로·파일확인.
+- [x] 읽기helper 최종 PS5.1/hash·경로guard·기존reader self-test·실launcher 환경거부·공유사본 검증.
+- [ ] 사용자읽기실행→서버로컬 SHA256·현재PID/owner/listener/세대/config/API→Codex결과회수/수집검토.
+- [ ] 현재설정/CSV·정상종료세대에 결합한 승인후보적용/실API→화면·수집·CSV·설정보존/결과회수·다음rollback등록. 기록된운영/복귀4c97d4a를 유지하며 전체목표는 미완료다.
