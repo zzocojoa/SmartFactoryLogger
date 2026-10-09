@@ -9,7 +9,7 @@
 > 생성 완료한 구현 브랜치명: `codex/spot-comm-temperature-ui-s1-20261008`
 > 구현 worktree: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next`
 > 문서 상태: 실제 Plan mode에서 계획 작성 완료, 구현 모드에서 파일 저장 완료
-> 실행 상태: 새 독립 review·최종 full health exit0·후보541d701d locked installer/packaged API→UI 검증 완료. 서버 최종 복사와 최초 사용자 읽기 실행(exit0), 로컬69파일 SHA256·현재4c97d4a 세대·설정 및 결과38파일 회수 검증 완료. 이미지 저장 진행·CSV 확인용 추가 읽기 묶음의 서버 전달과 로컬 시험까지 완료했으나 그 실행 결과는 미확인이다. 동일 실행 입력 필요 조건3턴 반복으로blocked 감사 기준 충족(14.15절). 정상 종료·후보 적용·다음rollback 갱신은 미완료다.
+> 실행 상태: 새 독립 review·최종 full health exit0·후보541d701d locked installer/packaged API→UI 검증 완료. 최초 서버 읽기(exit0) 결과38파일 회수 검증 완료. 추가R1은 실제EXIT1/CSV 기본경로 부재HOLD이며10파일 전체 해시·부분 결과 검토 완료. 실제logs/test_data 경로에 결합한 별도R2는 PS5.1 검사23+실파일6 및 host 거부(exit1) 검증과 공유4파일 SHA256·서버 최종 복사/화면 확인 완료(14.16절). R2 사용자 실행 결과·이미지 누락/CSV 바이트 검토, 정상 종료·후보 적용·다음rollback 갱신은 미완료다.
 > 현재 작업의 기준 계획 파일: `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 새 브랜치 worktree의 동일 내용 계획 사본: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 이전 준비 계획 원문(보존): `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-temperature-history-p2-20260922.plan.md`
@@ -685,3 +685,18 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - 1번째 턴은 최초 PRE READ 결과 회수·84조건 검토 및 추가 READY helper25조건 검증·최종 전달로 진행했다. 2번째 턴은 실제 후보54파일의 설치 후 기준 생성·5종 거부 검증으로 진행했다. 두 턴 모두 추가 READY 실행 결과가 필요했고, 이번3번째 확인에서도 동일하다. 옛 Computer Use URL 실패나 이미 완료된 최초 READ 대기 기록을 이 새3턴 감사에 합산하지 않는다.
 - 적용 전 저장 진행/CSV 증거가 없어 현재 세대 정상 종료·설치를 확정할 수 없고, 해당 실행을 Windows UI로 자동화하는 것은 Computer Use의 필수 guidance 금지 사항이다. 동일 승인/실행 요청을 다시 묻거나 다른 자동 실행 경로로 우회하지 않는다. 독립적으로 필요한 후보 파일 기준 준비는 완료했다. 의미 있는 다음 작업은 사용자 실행 결과 또는 외부 상태 변경에 의존하므로blocked 기준을 충족한다. 목표를complete나paused로 바꾸지 않고blocked 상태 갱신을 요청한다.
 - 감사 원문과 현재 화면은 S1_READY_PREP_20261009_R1/read-execution-blocked-audit-002.json 및 .jpg에 보존한다. 재개 조건: 기존 서버 최종 폴더의 READ_READINESS.cmd를 일반 실행한 READY READ EXIT 결과/콘솔 또는 새 r-결과 폴더 확인. HOLD/오류이면 자동 재실행하지 않고 원문을 회수해 조사한다. 결과가 확인되면 전체 manifest/이미지 진행·CSV 검토부터 이어가며4c97d4a 복귀 기준과 기존 증거를 보존한다.
+
+### 14.16 추가 읽기 HOLD 회수와 실제 CSV 경로 보완
+
+- 사용자 READY READ EXIT0 응답으로 재개했다. 실제 서버 콘솔은 EXIT1/READY READ HOLD이며 CSV 기본 경로 logs/data의 현재 파일을 찾지 못했다. 원문 result.json도 sampling/ItemNotFoundException을 기록한다. 결과 r-20261009-195655-7675d8 전체10파일/712843bytes를 서버에서 공유 return/S1_READY_READ_20261009_R1로 복사하고 개발 server-results-001로 회수했다. manifest9항목/개별 SHA256 및 콘솔 manifest B942C83A035D786E436B2DEDE4DB76263494E954F3A810C65C98B7E3B29F2AAA가 일치한다(exit0). 보고된0과 관측1의 충돌을 보존하며 실패를 PASS로 바꾸지 않는다.
+- 운영4c 설치 핵심4파일/기존5프로세스 세대/config-before hash는 유지됐다. 1회4API HTTP200, 같은 SPOT/logger 세대 및 수집 증가를 확인했다. CSV window/후속2sample/runtime-after/config-after는 생성되지 않아 읽기 완료로 판정하지 않는다. 이미지 written93823/enqueued93823/queue0으로 이전 대기열이 처리됐지만 dropped15가 발생했다. 최신 이미지 시각은19:01경으로 추가 연속성/누락 원인과 actual CSV 바이트 검토는 미완료다. 원인/설치 보존 PASS로 추정하지 않는다.
+- 서버 일반 탐색기에서 실제 C:/Users/user/AppData/Roaming/SmartFactoryLogger/logs/test_data 절대경로와 동일 current V2 CSV의 비어 있지 않은 파일 속성을 확인했다. 목록의 지연된0KB 표시를 데이터 없음으로 오판하지 않았다. 기본 logs/data 하드코딩은 도우미의 경로 확인 오류이며 운영 데이터/설정을 이동·수정하지 않는다.
+- 승인된 적용 전 읽기 단계 안에서 별도 S1_READY_20261009_R2를 준비한다. 실제 확인한 csv_root를 새 reference.json에 원본 HOLD manifest/경로 화면과 함께 결합하고, root와 health CSV basename이 모두 일치해야 읽는다. CSV 경로 거부 회귀/PS5.1 파싱·self-test/실제 prefix-tail·소스 보존·충돌·junction 및 launcher host 거부를 검사한다. 기존R1/helper/reference/installer/고정candidate는 재작성하지 않는다. 서버 최종 복사·파일/경로 확인 이후에만 새 launcher의 사용자 일반 실행을 요청한다. 제품 코드·장비 직접 요청·새 종료 정책·범위 밖 기능 변경은 없다.
+- [x] R1 HOLD 전체 결과 회수/콘솔·manifest·개별 해시 검증 및 실제 CSV 경로 화면 확인.
+- [x] R2 실제 CSV 경로 결합/새 해시·읽기 회귀 검증·서버 최종 전달.
+- [ ] R2 사용자 실행→해시·이미지/CSV/세대·설정 검토→정상 종료·후보 적용·적용 확인·회수·다음 기준 갱신. 전체 목표 미완료, 운영/복귀4c97d4a 유지.
+
+- 새R2 helper SHA256=894DF2BF021027BF381412227BD8016B4FD04B03BDAD73AF4B357A11EF5E57DA(14290bytes), reference=27D8BDE6CA8EDDA1EC11184336112D4B7BCEA3EBC3624A82FB99D35DB230E70A(3803bytes), launcher=464FAB72510E0D4504E48F8BA3836D43A0F0CE0DB6309D883FAA3FA4A68AD521(1143bytes)다. 기존 hash 고정R1을 읽어 별도 파일을 생성했고 기존기준/후보를 변경하지 않았다. default logs/data 거부와 실제root/current CSV 결합, 잘못된 이름 거부를 추가했다.
+- C:/Users/user/Desktop/SmartFactory/S1_READY_PREP_20261009_R2/run-validation.ps1 실제exit0: nativePS5.1 self-test23/실파일6 exit0, 실제launcher 개발host 거부는 기대exit1/READY_HOLD:server-host다. 전체 raw/exit를 먼저 기록하고 모두 읽었으며 validation-001/result.json에3case PASS가 있다. CMD CP949와 자식전용PSModulePath 제거를 기록했다. R1 부분 결과 검토12조건 일치는 완료 QA가 아니다. 프로세스 목록은 순서만 달라 PID별 전체 필드/리스너 일치를 확인했다.
+- 개발4파일→Z:/SmartFactory/20261009/send/S1_READY_20261009_R2 전체 SHA256 일치를 확인했다(exit0). 서버 탐색기 자체Copy/Paste로 실제 C:/Users/user/Desktop/SmartFactory/S1_READY_20261009_R2에 새 폴더를 최종 복사했다. 절대경로/4파일/launcher1143bytes와 선택 상태를 화면·속성으로 확인했다. 덮어쓰기/자동terminal 실행은 없다. server-copy.json과3화면, 공유records 영수증에 실제경로와 확인 범위를 구분했다. 서버 로컬 helper/reference SHA256은 사용자 실행 시 pin 검증 대기이며 화면 확인을 SHA256 PASS로 바꾸지 않는다.
+- 회수용 Z:/SmartFactory/20261009/return/S1_READY_READ_20261009_R2를 준비했다. 기존R1 HOLD는 재실행하지 않는다. Windows UI로 terminal 명령을 직접·간접 실행하지 말라는 Computer Use 필수 guidance 때문에, 원인 보완·검증·서버 전달까지 완료한 새R2의 일반 사용자 실행 결과가 다음 필요 입력이다. 적용 승인 범위를 다시 묻지 않는다. 이전blocked 조건은 R1 결과 회수로 해소됐고, 새 보완본 결과 필요 조건의 첫 턴이며 현재 목표는active/전체 미완료다.
