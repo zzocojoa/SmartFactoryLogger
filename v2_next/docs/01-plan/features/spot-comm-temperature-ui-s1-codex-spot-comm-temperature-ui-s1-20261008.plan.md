@@ -578,3 +578,32 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - [x] 새 zero-edit 독립 review·현재 필수 로컬검증·unchanged binding.
 - [ ] clean 후보 commit·locked installer commit/SHA256/서명·packaged API→UI.
 - [ ] 서버 최종 폴더 전달·승인 적용/CSV/설정/실행 세대·회수·다음 롤백 기준 갱신. 적용 확인 전4c97d4a 유지.
+
+### 14.4 후보 커밋과 패키징 환경 출처 검증
+
+- 후보541d701d544eea6a8a4e4836047077eaf9cfaf30을 실제 커밋했다. 24개 승인 파일/제품571개 유지, clean Git 상태이며 push/merge는 수행하지 않았다. fresh review 뒤 추가한 변경은 진행 문서와 해당 feature PDCA 메타데이터다. candidate-commit-001은 상태 파서의 앞 공백 trim 문제로 stage 전에 중단된 기록이며, -002가 실제 커밋/clean 증거다.
+- 첫 PyInstaller exit0/provenance commit 일치이나 Analysis-00.toc3482개에서 도구 cache의 DLL44개가 포함돼 출처 검사 FAIL이다. 산출물을 실행/승격하지 않고 보존한다. records/candidate-pyinstaller/audit.json을 최초 결과로 유지한다.
+- 승인된 locked packaging의 실행 환경 확인을 위해 다음 build 자식에만 Python -I와 제한 PATH(locked venv/Python312/Windows/Git)를 적용하고 PYTHONPATH/PYTHONHOME을 제외한다. 부모/운영 설정·의존성 lock·spec·제품 코드 변경은 없다. 새 backend-dist-2/backend-work-2에 빌드하며 첫 산출물을 덮어쓰지 않는다. TOC 실제 source, provenance, bundle manifest와 frontend bytes 확인 후 Electron 패키징한다.
+- 이 실행 기록은 기본 작업 폴더의 기준 계획에 먼저 저장한다. 후보 checkout의 계획 사본은 clean provenance 확보를 위해 빌드 중 변경하지 않으며 패키지 검증 뒤 문서만 동기화한다. candidate와 메타데이터 후속 commit을 구분한다. installer/패키지 실API→UI/운영 적용/롤백 갱신은 미완료다.
+
+
+### 14.5 후보 installer와 실제 패키지 연결 검증 완료 (2026-10-09T07:59:38.857Z)
+
+- 후보 build commit은541d701d544eea6a8a4e4836047077eaf9cfaf30, branch는codex/spot-comm-temperature-ui-s1-20261008이다. 진행 문서 후속 commit은 이 build commit과 구분하며 재빌드/서버 승격을 뜻하지 않는다. push/merge는 하지 않았다.
+- locked Python -I/child 제한 PATH PyInstaller는 exit0, TOC3439개 실제 source 검사에서 ambient 파일0개다. 첫 ambient DLL44개 산출물은 제외·보존했다. Electron 첫 child PATH powershell.exe ENOENT도 실패 그대로 보존하고 새 output에 필수 WindowsPowerShell/Node PATH를 추가한 child-only 실행이 exit0다. lock/spec/제품/부모 환경 변경은 없다.
+- installer는 바탕화면SmartFactory/S1_PKG_20261009_R1/packaging/electron-2/smart-factory-logger-v2 Setup 1.0.26.exe,163826264bytes,SHA256 08C061EE35A1A01788F05B00EE7395AA40774150C92C06726A92F3DF1BF75C3C,Authenticode NotSigned다. backend manifest1644개/C4AA5DE5B1B4889EE0B09B8450CB9B29392CFC4C327CF4272305B513A19CC6D3,ASAR runtime11개가 후보와 일치한다.
+- installer를 실행하지 않고 archive를 안전한 새 경로에 추출했다. 전체1771개 파일이 실제 시험한win-unpacked와 길이/SHA256까지 일치하며 outer/embedded frontend50개도 production build와 같다. 7za의 trailing NSIS data 경고는 원문 보존했다. 설치 UI·설치 전환 PASS로 확대하지 않는다.
+- 실제 packaged Electron44.3.0/frozen backend/후보commit의 /health→renderer를 own localhost SPOT/Mock PLC로 시험했다. 정상/under/over/timeout(SOURCE_ERROR)/복구/timeout(CACHED)/복구7전환 PASS, 실제health11응답/JS오류0/외부요청0이다. under/over는SPOT OK/온도개별상태, timeout은SPOT DOWN이다. Mock PLC2개 기준Comm2이며 timeout때만Comm3, 복구Comm2를 확인했다. 기존 Temperature/TTL/gate는 바꾸지 않았다.
+- owned Electron/backend exit0/forced:false(1042.7ms), CIM에 stage소유 프로세스0개이며 실제candidate/rollback installer의 SHA와NotSigned를 재확인했다. 첫runtime의 health shape 기대 오류와2초지연 fixture 실패는 원문을 보존하고 shape수정/12초지연 및 유효이미지 fixture를 사용한003에서 PASS했다. 실제transport timeout/config 변경은 없다.
+- 검증 후제품/시험/명령입력571개가 fresh review 및build 전과 동일하다. 증거는 [candidate-package-validation.md](C:/Users/user/Desktop/SmartFactory/S1_PKG_20261009_R1/records/candidate-final-validation-001/candidate-package-validation.md), 같은폴더 result.json/process-signature-audit.json과records/installer-payload-001/packaged-runtime-003에 있다. 외부review 미설치·legacy fallback·장비설정/정식운영QA 미검증은 그대로다.
+- [x] 새 독립review·최종로컬health/build/browser.
+- [x] clean후보commit·lockedinstaller commit/SHA/서명상태·실제packaged API→UI·installer payload일치.
+- [ ] 서버최종폴더 전달·승인적용·단일실행세대/CSV/설정·회수·다음롤백기준갱신. 현재4c97d4a00d79ae0d3da70b2e82af227345e21040은 적용확인 전까지 유지한다.
+
+
+### 14.6 서버 전달 묶음의 개발 PC·공유 사본 준비 (2026-10-09T08:02:57.420Z)
+
+- 새S1_CAND_20261009_R1 묶음69개/330566480bytes를개발PC 바탕화면SmartFactory/S1_PKG_20261009_R1/delivery와Z:/SmartFactory/20261009/send에 준비했다. 전체공유사본 SHA256이개발원본과 일치하며manifest SHA256=286dd373d34adae7a203ab49d693842ee4eaada8fb84a11efd284fd3af16ffd8다. 해당 묶음의계획은14.5시점사본이며이후진행기록과구분한다. 공유전달은서버최종복사가아니다.
+- 후보541d/복귀4c97d4a installer, local검증원문, baseline/경로정책, 기존4c97d4a read-only reader를포함했다. 기존reader/launcher/고정해시 바이트는 바꾸지 않았고 후보541d의설치후검증으로 사용하지 않는다. 새로운적용코드·종료·설치·운영설정변경은 없다.
+- 서버실제 절대경로/파일존재·로컬해시, 현재실행세대/CSV/설정, 후보승인적용·결과회수·다음롤백기준은 아직미확인이다. Chrome원격은computer-use허용경로만사용하며URL확인실패/정책중단이면우회하지않고실제완료위치와제한을보고한다.
+- 로컬검증문서4개만후속metadata commit에저장한다. installer build commit541d와구분하고제품571개불변을커밋전후확인한다.

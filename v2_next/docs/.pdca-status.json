@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-09T07:25:16.089Z",
+  "lastUpdated": "2026-10-09T08:02:57.420Z",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2358,10 +2358,10 @@
       ],
       "timestamps": {
         "started": "2026-10-08T13:53:56.591Z",
-        "lastUpdated": "2026-10-09T07:25:16.089Z"
+        "lastUpdated": "2026-10-09T08:02:57.420Z"
       },
-      "reviewStatus": "fresh_final_review_completed_candidate_and_operations_pending",
-      "completionScope": "approved_logic_and_local_review_verified_candidate_and_operations_pending",
+      "reviewStatus": "fresh_final_review_completed_candidate_package_verified_operations_pending",
+      "completionScope": "approved_logic_review_candidate_package_verified_operations_pending",
       "operationalPromotionPerformed": false,
       "reviewCorrection": {
         "status": "completed",
@@ -2519,16 +2519,16 @@
         "fullHealthRerun": false,
         "priorDefaultHealthExit": 1
       },
-      "lastUpdated": "2026-10-09T07:25:16.089Z",
+      "lastUpdated": "2026-10-09T08:02:57.420Z",
       "closeout": {
-        "status": "fresh_final_review_complete_candidate_pending",
+        "status": "candidate_package_verified_operations_pending",
         "approval": "user_approved_QA_review_candidate_operational_closeout",
         "startedAt": "2026-10-08T23:38:08.320Z",
         "evidenceRoot": ".tmp_ui_s1_verify/closeout-20261009-001",
         "readOnlyIndependentReviewAuthorized": true,
         "rollbackCommitBeforeApply": "4c97d4a00d79ae0d3da70b2e82af227345e21040",
         "operationalPromotionPerformed": false,
-        "lastUpdated": "2026-10-09T07:25:16.089Z",
+        "lastUpdated": "2026-10-09T08:02:57.420Z",
         "reviewCoverageCompleted": true,
         "reviewCompleted": true,
         "parentStartCaptured": true,
@@ -2541,9 +2541,9 @@
         "defaultHealthExit": 0,
         "backendHostEncodingDiagnosed": true,
         "qaCasingComplete": true,
-        "candidateCommitted": false,
-        "installerBuilt": false,
-        "qaVerdict": "local_and_review_pass_candidate_ops_pending",
+        "candidateCommitted": true,
+        "installerBuilt": true,
+        "qaVerdict": "local_review_package_pass_operations_pending",
         "currentReview": "docs/03-analysis/spot-comm-temperature-ui-s1-closeout-review-20261009.md",
         "followupApproval": "A안(권장): 추가 발견 8건 수정 + 응답 지연 조사 및 확인된 문제 보완.",
         "followupApprovalEvidence": ".tmp_ui_s1_verify/followup-correction-20261009-001/approval.json",
@@ -2554,7 +2554,7 @@
         "qaChainReached": true,
         "rollbackInstallerReverified": true,
         "preflightEvidenceRoot": ".tmp_ui_s1_verify/closeout-preflight-20261009-001",
-        "finalCandidateChecksCompleted": false,
+        "finalCandidateChecksCompleted": true,
         "localCorrectionsVerified": true,
         "defaultHealthEvidence": ".tmp_ui_s1_verify/review2-correction-20261009-001/default-health-002/audit.json",
         "finalCssHealthStatus": "passed",
@@ -2857,7 +2857,42 @@
           "sourceInputs": 571,
           "outsideUnavailable": true,
           "pendingOptionalMemoAdvice": true
-        }
+        },
+        "candidateBuildCommit": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+        "packagedApiToUiVerified": true,
+        "installerPayloadVerified": true,
+        "installerSha256": "08C061EE35A1A01788F05B00EE7395AA40774150C92C06726A92F3DF1BF75C3C",
+        "installerBytes": 163826264,
+        "installerSignatureStatus": "NotSigned",
+        "candidatePackageValidation": "C:\\Users\\user\\Desktop\\SmartFactory\\S1_PKG_20261009_R1\\records\\candidate-final-validation-001\\result.json",
+        "operatingApplied": false,
+        "operatingRollbackBaselineUpdated": false,
+        "candidatePackage": {
+          "at": "2026-10-09T07:59:38.857Z",
+          "evidence": "C:\\Users\\user\\Desktop\\SmartFactory\\S1_PKG_20261009_R1\\records\\candidate-final-validation-001\\result.json",
+          "sourceInputs": 571,
+          "payloadFiles": 1771,
+          "runtimePhases": 7,
+          "installed": false,
+          "serverApplied": false
+        },
+        "finalCandidateChecksScope": "local_review_locked_package_payload_and_packaged_api_to_ui",
+        "candidateDelivery": {
+          "at": "2026-10-09T08:01:58.210Z",
+          "delivery": "C:\\Users\\user\\Desktop\\SmartFactory\\S1_PKG_20261009_R1\\delivery\\S1_CAND_20261009_R1",
+          "shared": "Z:/SmartFactory/20261009/send/S1_CAND_20261009_R1",
+          "files": 69,
+          "totalBytes": 330566480,
+          "allSharedFilesSha256Match": true,
+          "manifestSha256": "286dd373d34adae7a203ab49d693842ee4eaada8fb84a11efd284fd3af16ffd8",
+          "serverFinalCopied": false,
+          "serverLocalPath": null,
+          "serverApplied": false,
+          "aclChanged": false
+        },
+        "serverDeliveryPrepared": true,
+        "sharedCopyVerified": true,
+        "serverFinalCopied": false
       }
     }
   },
