@@ -9,7 +9,7 @@
 > 생성 완료한 구현 브랜치명: `codex/spot-comm-temperature-ui-s1-20261008`
 > 구현 worktree: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next`
 > 문서 상태: 실제 Plan mode에서 계획 작성 완료, 구현 모드에서 파일 저장 완료
-> 실행 상태: 새 독립 review 완료(미해결 결함0/cycles0/검토 snapshot binding verified), 최종 full health exit0 및 후보541d701d의 locked installer·실제 packaged API→UI 검증 완료. 서버 로컬 최종 복사·설치·CSV/설정/세대 확인·운영 기준 갱신은 미완료이며4c97d4a를 유지한다. 최신 근거는 계획14.3–14.6절과 candidate-final-validation-001이다.
+> 실행 상태: 새 독립 review·최종 full health exit0·후보541d701d locked installer/packaged API→UI 검증 완료. 서버 최종 복사와 사용자 읽기 실행(exit0), 서버 로컬69파일 SHA256·현재4c97d4a 세대·설정 보존 및 결과38파일 회수 검증 완료. 원본 이미지 저장 완료 수가3회 조회에서 증가하지 않아 추가 읽기 확인 중이며, 실제 CSV/정상 종료·후보 적용·다음 rollback 갱신은 미완료다. 최신 근거는14.12절과 server-read-review-001.json이다.
 > 현재 작업의 기준 계획 파일: `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 새 브랜치 worktree의 동일 내용 계획 사본: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 이전 준비 계획 원문(보존): `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-temperature-history-p2-20260922.plan.md`
@@ -81,9 +81,9 @@
 | **Plan** | 실제 계획 모드에서 작성한 계획을 새 브랜치명 규칙으로 저장한다. 원격 `master`와 `origin/master`의 SHA 일치 및 D1의 `temperature-operational-v6`를 확인했고, 그 기준에서 독립 worktree와 UI-S1 브랜치를 생성했다. | 계획 작성·최신 기준 확인·D1 확인·worktree·구현 브랜치 생성·계획 저장 완료 |
 | **Design** | 이 기준 계획을 읽고 스킬 지정 경로에 설계 문서를 저장하며 PDCA feature를 등록한다. 위 표시 계약, freshness 계산, 캐시 표시, 타입 호환성, 테스트 기대값을 설계에 고정한다. | 상세 설계 저장·PDCA 단계 완료 |
 | **Do** | 타입·수신 시각 전달 → 순수 상태 판정 → 상태 hook → 헤더·상세 메뉴 → 회귀시험 순서로 구현한다. 기존 polling 주기·backoff·leader/visibility 정책은 유지한다. | 최초 구현·승인 보완과 순수 수신 helper 분리 완료(10절) |
-| **Check** | 설계와 최종 diff를 대조하고 관련 검증을 실행한다. 핵심 요구사항과 아래 필수 시나리오는 모두 충족해야 한다. | 이전398+9/PASS 보존. 후속 독립 coverage·실제 start 확보; 새 회귀/desktop UI/QA casing FAIL, 전체 health exit1. current review INCOMPLETE(11.2절). |
-| **Act** | 불일치나 실패를 수정하고 영향받은 검증을 재실행한다. 스킬 기준 최대 5회 반복 후에도 남은 문제가 있으면 미완료로 기록한다. | 이전 A 승인 R1/R2 완료. 새 수정 권장8건·조사1건은 미해결/미승인; proposal 저장 후 사용자 선택 대기. |
-| **Report** | 변경 사항, 최종 commit, 검증 명령·exit code, 미실행·미관찰 항목을 기록한다. Match Rate 90%만으로 필수 요구사항의 누락을 완료 처리하지 않는다. | 구현·로컬 검증 보고서 저장; 미커밋·패키지/운영 미실행 명시 |
+| **Check** | 설계와 최종 diff를 대조하고 관련 검증을 실행한다. 핵심 요구사항과 아래 필수 시나리오는 모두 충족해야 한다. | 최종 frontend434+Node9/typecheck/lint/build·전체 health exit0·새 독립 review 완료. 실제 후보 패키지7상태 PASS. 서버 현재본 읽기/회수 검토 완료; 적용 검증은14.12–14.13절의 추가 읽기부터 진행 중. |
+| **Act** | 불일치나 실패를 수정하고 영향받은 검증을 재실행한다. 스킬 기준 최대 5회 반복 후에도 남은 문제가 있으면 미완료로 기록한다. | A/I2-A 승인 보완과 응답 지연 조사·최종 회귀 완료. 과거11절 실패와 원인 미확정 항목은 보존. 현재 운영 이미지 저장 진행 확인을 위한 읽기 도우미 준비·서버 전달 완료. |
+| **Report** | 변경 사항, 최종 commit, 검증 명령·exit code, 미실행·미관찰 항목을 기록한다. Match Rate 90%만으로 필수 요구사항의 누락을 완료 처리하지 않는다. | 후보 build541d와 locked installer 확정·로컬 패키지 검증 보고 완료. 운영/복귀4c97d4a 유지, 후보 설치·현장 적용 확인·다음 기준 갱신 미완료. |
 
 - 검증 일정은 **설계 → 구현 → 로컬 검증 → 후보 패키지 검증 → 승인 범위의 적용 확인** 순서로 잡는다. 착수·완료 시각은 실제 수행 시 기록하며 확정되지 않은 날짜나 소요 시간을 완료 약속으로 쓰지 않는다.
 - 기존 브랜치·worktree·미커밋 파일과 과거 PDCA 기록은 자동 정리하거나 덮어쓰지 않는다. 새 사용자 채팅은 사용하지 않는다. subagent는 11절의 사용자 승인에 따른 읽기 전용 독립 리뷰에 한해 사용하며 구현·최종 검증은 부모가 담당한다.
@@ -117,9 +117,9 @@ npm --prefix frontend run build
 
 ### 4.3 완료 조건
 
-- [ ] 현재 후보의 필수 UI-S1 계약과 모든 승인 보완 회귀시험을 충족. 이전398+9 PASS는 보존하되, 11.2절의 새 실패/수정 선택·최종 검증이 남음.
-- [ ] 최종 수정 상태의 frontend 검사/build와 기본 health를 통과하고 실제 결과를 기록한다. 현재 frontend 이전PASS와 전체 health exit1 원인 기록은 보존; 최종 전체 재실행 남음.
-- [ ] 현재 상세 메뉴·순서 계약·새 후속 결함을 보완하고 최종 review를 완료한다. 이전 R1/R2 완료와 후속 coverage 확보를 전체 PASS로 대체하지 않음.
+- [x] 현재 후보의 필수 UI-S1 계약과 모든 승인 보완 회귀시험 충족. 승인 수정과 최종434+Node9 및 실제 packaged 상태7단계 PASS; 과거 실패는11–14절에 보존한다.
+- [x] 최종 frontend 검사/build와 기본 health exit0 확인. 전체 최종 health의 시각·원문·exit와 실제 대상은14.3–14.6절에 기록한다.
+- [x] 상세 메뉴·순서 계약·승인 후속 결함 보완 및 새 독립 review 완료. 현재 review 미해결0/cycles0/binding verified이며 외부 Claude 미설치 범위는 별도로 유지한다.
 - [x] 실제 변경과 검증 결과를 이 계획의 목표·범위·완료 조건에 대조하고 진행 상태를 갱신한다.
 - [x] 합성 UI 시험과 실제 설치본·실장비 확인 결과를 구분해 보고한다.
 - [x] 운영 적용까지 수행한 경우에만 후보 검증·적용 확인·롤백 기준 갱신을 완료로 기록한다.
@@ -648,3 +648,25 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - [x] 읽기helper 최종 PS5.1/hash·경로guard·기존reader self-test·실launcher 환경거부·공유사본 검증.
 - [ ] 사용자읽기실행→서버로컬 SHA256·현재PID/owner/listener/세대/config/API→Codex결과회수/수집검토.
 - [ ] 현재설정/CSV·정상종료세대에 결합한 승인후보적용/실API→화면·수집·CSV·설정보존/결과회수·다음rollback등록. 기록된운영/복귀4c97d4a를 유지하며 전체목표는 미완료다.
+
+### 14.12 사용자 읽기 실행 완료·결과 회수와 현재 저장 상태 검토
+
+- 사용자 “실행 완료” 후 서버 콘솔 PRE READ EXIT0과 결과 폴더 C:/Users/user/Desktop/SmartFactory/S1_READ_20261009_R1/r-20261009-185450-33c511을 확인했다. 콘솔을 자동 조작하지 않고 탐색기의 서버 자체 Copy/Paste로 Z:/SmartFactory/20261009/return/S1_PRE_READ_20261009_R1에 결과 전체를 복사했다. 개발 PC의 S1_READ_PREP_20261009_R1/server-results-001에 회수하고38파일/1235311bytes/manifest37entries 전체를 해시 검증했다(exit0). 콘솔 화면과 회수 manifest SHA256=0C4DECE3EA448452B8FFDCA5BBCC5653EC3AB306092CEFECF8E4364E851AB4CC가 일치한다. 최초 원본 JPEG와 확대 판독 사본을 보존한다.
+- 서버 실제 host DESKTOP-CIIT7LK/승인 SID, 최종 전달69파일/330566480bytes의 고정 manifest·개별 SHA256·두installer NotSigned를 확인했다. 운영 설치 핵심4파일은4c97d4a와 일치한다. UI9580/backend9036 및 모든5프로세스의 PID/시작ticks/부모/owner/session과8000 listener가 읽기 전후 동일하다. config SHA256=6841C848A443DF91966C991707C2B21CA57C575993DCA36FACFF2592D070147E도 동일하다. 이는 설치 완료가 아닌 현재 운영본의 읽기 검증이다.
+- 실제18 API 원문 모두200/ok, raw collector18hash와 원본 reader 사본30파일 해시를 대조했다. 새 자체 검토84조건 PASS/0fail/exit0, server-read-review-001.json에 각 조건을 기록했다. 같은 SPOT/logger 세대에서 poll107027→107061(+34), API rows463167→463299(+132), 동일 current_v2_csv_file_name=Factory_Integrated_Log_v2_20261009_000000.csv다. API counter 증가를 실제 CSV 바이트 연속성/설치 보존 PASS로 바꾸지 않는다. HTTP 오류0, 과거 LS No Body1건 및 drift1은 유지됐으며 storage 오류 증가0이다.
+- 새 우려: image written93439/fact_rows4091224/fact SHA256은3회 조회에서 동일하고 queue32→47→63/enqueued93472→93503으로 증가했다. failure/drop은0이나 저장 완료 진행을 확인하지 못했다. 실제 writer는 write_capture 및 retention 처리가 반환된 뒤 완료 counter를 올리는 로직이다. retention 지연 등은 가능한 설명일 뿐 원인이 확정된 것은 아니다. 정상 종료·설치 전에 현재 이미지 진행과 실제 CSV 파일을 추가 읽기로 확인한다. 제품 로직/장비 설정/종료 정책의 수정 범위는 확대하지 않는다.
+- 다음 준비는 승인된 서버 적용 전 읽기 단계의 별도 짧은 S1_READY 묶음이다. 현재4c 세대/핵심 파일/설정 pin과 참고 자료를 동봉하고,3회 새 health·spot/config·stats·data 조회, 현재 단일 V2 CSV의 제한된 prefix/tail 및 system.log tail을 읽기만 하여 저장 진행·근거를 회수한다. 운영 데이터 전체 복사/새 대형 백업/재귀 이미지 탐색/정지·설치·설정 변경/장비 직접 요청은 하지 않는다. 새 helper를 PS5.1과 경계·상한·환경 거부 시험 후 공유→서버 최종 폴더까지 전달한다. 이미지가 회복돼도 실제 정상 종료와 후보 설치 후 적용 확인을 별도로 수행한다.
+- [x] 사용자 읽기 실행/서버 로컬 SHA256/현재 세대/config/API 근거와 결과 회수 검토.
+- [ ] 현재 이미지 저장 진행 추가 확인·실제 CSV 바이트/수집 확인.
+- [ ] 정상 종료·승인 후보 적용·실API→화면·CSV/설정 보존·결과 회수·다음rollback등록. 운영/복귀4c97d4a 유지, 전체 목표 미완료.
+
+### 14.13 이미지 진행·CSV 추가 읽기 묶음 준비와 서버 최종 전달
+
+- 새 별도 C:/Users/user/Desktop/SmartFactory/S1_READY_PREP_20261009_R1/S1_READY_20261009_R1의4파일을 작성했다. 기존 candidate/read/installer/서버 결과의 바이트는 변경하지 않는다. reference.json은14.12 실제 세대·critical4파일·설정·SPOT/logger ID·현재 CSV 이름과 원문 manifest 해시에 결합돼 있다. 이전 제품·금형을 강제하지 않으며 설정 내용은 복사하지 않는다.
+- read-readiness.ps1 SHA256=BC4C1F22E50193DA8157F97428423C74B53644B3F3CDCFB59DB5D12D16A6B0BE, reference SHA256=3DC041DECC7EF00ADC93B219FED641282031D0CB146C9BE55966B78974842AEA, READ_READINESS.cmd SHA256=4516CEA442FD9C6BA87E420012B0AEFB0E4B927BA7DFAD5381B69E1FCF68BF06이다. launcher는 잠근 helper 바이트의 SHA256을 확인한 뒤 동일 자식을 실행하고 결과 exit를 전파한다. 파일명·세대 변경은 HOLD, 새 결과 폴더만 사용한다.
+- native WinPS5.1 self-test19개 exit0(validation001), 실제 파일 prefix/tail6개·소스 보존·충돌 거부·junction 부모 거부·AST오류0 exit0(validation002)다. 실제 CMD launcher의 개발 host guard는 기대 exit1/READY_HOLD:server-host이며 정상 거부 PASS다. raw stdout/stderr와 exit를 먼저 저장하고 모두 읽었다. 시험 자식만 PSModulePath를 제거했고 부모/배포 환경은 바꾸지 않았다. 새 제품/서버 시험으로 계산하지 않는다.
+- Z:/SmartFactory/20261009/send/S1_READY_20261009_R1의4파일을 전체 원본과 SHA256 비교했다. 서버 탐색기 자체 Copy/Paste로 C:/Users/user/Desktop/SmartFactory/S1_READY_20261009_R1에 최종 복사했다. 새 폴더와4파일/절대경로, launcher1143bytes를 속성으로 확인했다. 화면 파일·경로 확인과 서버 로컬 SHA256 확인을 구분하며 후자는 실제 launcher 실행 때 helper/reference pin으로 확인한다. 공유 목록은 F5 갱신 후 새 폴더를 선택했고 자동 launcher/terminal 실행은 하지 않았다.
+- server-copy.json 및 서버 절대경로/속성/선택 화면3장을 S1_READY_PREP_20261009_R1에 보존한다. 공유records에도 새 전달 기록을 남긴다. 회수용 Z:/SmartFactory/20261009/return/S1_READY_READ_20261009_R1를 새로 준비했다. 사용자가 Windows UI 실행을 해야 하는 정확한 규정과 한 단계 경로를 안내하고 READY READ EXIT 결과를 요청했다. 같은 승인 범위의 재승인 요청이 아니다.
+- [x] 추가 읽기 helper/고정 참고 자료/PS5.1·실파일 검사·공유 SHA256·서버 최종 전달 및 화면 확인.
+- [ ] 사용자 추가 읽기 실행→Codex 전체 결과 회수/해시·이미지 저장 진행·현재 CSV 바이트 검토.
+- [ ] 세대에 결합한 정상 종료와 승인 후보 설치·시작·실화면/API·CSV/설정 보존·회수·다음rollback등록. 전체 목표 미완료,4c97d4a 복귀 기준 유지.
