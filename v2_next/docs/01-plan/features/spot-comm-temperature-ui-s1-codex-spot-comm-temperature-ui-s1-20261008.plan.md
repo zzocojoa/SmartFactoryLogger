@@ -9,7 +9,7 @@
 > 생성 완료한 구현 브랜치명: `codex/spot-comm-temperature-ui-s1-20261008`
 > 구현 worktree: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next`
 > 문서 상태: 실제 Plan mode에서 계획 작성 완료, 구현 모드에서 파일 저장 완료
-> 실행 상태: 새 독립 review·최종 full health exit0·후보541d701d locked installer/packaged API→UI 검증 완료. 서버 최종 복사와 사용자 읽기 실행(exit0), 서버 로컬69파일 SHA256·현재4c97d4a 세대·설정 보존 및 결과38파일 회수 검증 완료. 원본 이미지 저장 완료 수가3회 조회에서 증가하지 않아 추가 읽기 확인 중이며, 실제 CSV/정상 종료·후보 적용·다음 rollback 갱신은 미완료다. 최신 근거는14.12절과 server-read-review-001.json이다.
+> 실행 상태: 새 독립 review·최종 full health exit0·후보541d701d locked installer/packaged API→UI 검증 완료. 서버 최종 복사와 최초 사용자 읽기 실행(exit0), 로컬69파일 SHA256·현재4c97d4a 세대·설정 및 결과38파일 회수 검증 완료. 이미지 저장 진행·CSV 확인용 추가 읽기 묶음의 서버 전달과 로컬 시험까지 완료했으나 그 실행 결과는 미확인이다. 동일 실행 입력 필요 조건3턴 반복으로blocked 감사 기준 충족(14.15절). 정상 종료·후보 적용·다음rollback 갱신은 미완료다.
 > 현재 작업의 기준 계획 파일: `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 새 브랜치 worktree의 동일 내용 계획 사본: `C:/Users/user/.codex/worktrees/spot-comm-temperature-ui-s1/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-spot-comm-temperature-ui-s1-20261008.plan.md`
 > 이전 준비 계획 원문(보존): `C:/Users/user/Documents/GitHub/SmartFactoryLogger/v2_next/docs/01-plan/features/spot-comm-temperature-ui-s1-codex-temperature-history-p2-20260922.plan.md`
@@ -678,3 +678,10 @@ health006은2026-10-09T02:19:32.320Z~02:24:28.509Z, 입력571개 불변이다. �
 - 완료 조건: 실제1771 payload 기록에서 선택한54파일의 크기/SHA256 대조, 후보 build_provenance full commit 확인, 경계·중복·필수파일·최종 서버 경로240자 예산 및 불일치 거부 검사, 외부 해시 기록. 아직 설치되지 않은 후보의 PID/서비스 ID/CSV 이름을 추정하여 고정하지 않는다. 실제 정상 종료/설치와 적용 후 세대·CSV/설정 확인은 추가 읽기 검토 이후 단계다.
 - 별도 C:/Users/user/Desktop/SmartFactory/S1_POST_PREP_20261009_R1/candidate-installed-pins.json을 생성했다(11253bytes/SHA256=5FC82E1BA0353FACE9AB2A85E18019F6036EB15D9D332811307CD6DF4C99502D). prepare-post-install-pins.py는 실제 win-unpacked의 핵심4+frontend50파일을1771 payload 원문과 바이트/해시 대조하고 실제 build_provenance의541d full commit을 확인했다(exit0). 구commit/잘못된hash/중복/경로탈출/frontend필수파일누락5종 거부 확인; 최종 서버 선택파일 최대126자다. 결과는 result.json에 보존한다. 전수 설치파일 무결성이나 실서버 PASS가 아닌 선택54파일의 개발 원본 검증이다. 기존 app.asar와 Electron EXE는4c와 같을 수 있으므로 이 두 파일만으로 새 frontend/build를 식별하지 않는다.
 - 추가 읽기 결과가 없는 현재 상태에서는 정상 종료·설치·새 PID/서비스/설정/CSV 보존 기준을 확정하지 않는다. 다음 진행은14.13의 사용자 실행 결과 회수·이미지/CSV 검토다. 현재 명령 프로세스가 실행 중이라는 근거가 없으므로 이 대기를 live process verified wait로 분류하지 않는다. 같은 실행 입력 필요 조건이 재개 후2번째 턴에 이어졌고, 이번 턴에는 별도 후보 검증 기준 준비를 실제 진행했다. 아직blocked로 바꾸지 않는다.
+
+### 14.15 추가 읽기 실행 입력 필요 조건 재검증과 blocked 감사
+
+- 재개 후3번째 목표 턴에 같은 Browser 탭을 조회하고 서버 탐색기 F5를 다시 수행했다. C:/Users/user/Desktop/SmartFactory/S1_READY_20261009_R1는4파일뿐이며 새 r-결과 폴더를 확인하지 못했다. 공유 Z:/SmartFactory/20261009/return/S1_READY_READ_20261009_R1도 실제 자식0개다. 실행 중인 도우미 process/session handle은 확인되지 않았으며, 원격 Browser 연결 자체를 도우미의 live verified wait로 취급하지 않는다. 실행했지만 초기 guard에서 실패했을 가능성도 결과 없이 배제하지 않는다.
+- 1번째 턴은 최초 PRE READ 결과 회수·84조건 검토 및 추가 READY helper25조건 검증·최종 전달로 진행했다. 2번째 턴은 실제 후보54파일의 설치 후 기준 생성·5종 거부 검증으로 진행했다. 두 턴 모두 추가 READY 실행 결과가 필요했고, 이번3번째 확인에서도 동일하다. 옛 Computer Use URL 실패나 이미 완료된 최초 READ 대기 기록을 이 새3턴 감사에 합산하지 않는다.
+- 적용 전 저장 진행/CSV 증거가 없어 현재 세대 정상 종료·설치를 확정할 수 없고, 해당 실행을 Windows UI로 자동화하는 것은 Computer Use의 필수 guidance 금지 사항이다. 동일 승인/실행 요청을 다시 묻거나 다른 자동 실행 경로로 우회하지 않는다. 독립적으로 필요한 후보 파일 기준 준비는 완료했다. 의미 있는 다음 작업은 사용자 실행 결과 또는 외부 상태 변경에 의존하므로blocked 기준을 충족한다. 목표를complete나paused로 바꾸지 않고blocked 상태 갱신을 요청한다.
+- 감사 원문과 현재 화면은 S1_READY_PREP_20261009_R1/read-execution-blocked-audit-002.json 및 .jpg에 보존한다. 재개 조건: 기존 서버 최종 폴더의 READ_READINESS.cmd를 일반 실행한 READY READ EXIT 결과/콘솔 또는 새 r-결과 폴더 확인. HOLD/오류이면 자동 재실행하지 않고 원문을 회수해 조사한다. 결과가 확인되면 전체 manifest/이미지 진행·CSV 검토부터 이어가며4c97d4a 복귀 기준과 기존 증거를 보존한다.
