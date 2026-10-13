@@ -506,3 +506,18 @@ root/frontend npm audit는 high 1/5를 포함해 각각 exit 1이다.
 627개 증거 파일의 스냅샷 검산·공유 보존 exit 0이며 설치 환경 바이너리/cache는 명시적으로 제외했다.
 제품·기존 개발 환경·서버 변경은 없다. 최종 빌드와 설치/현장 QA는 진행하지 않았고,
 전체 목표 active, 미서명 내부 운영 정책, R1–R6 HOLD와 full_data_gate=NOT_EVALUATED를 유지한다.
+
+## 2026-10-13 v1.0.27 미서명 후보 빌드·정적 검증
+
+clean `19e0e314f7c1dc29b38691382aeda637f4ff3032`에서 미서명 v1.0.27을 만들었다.
+installer SHA256은 `f17040fc65d5856c29b04c2b919c6a4bebfca46520dccbb3ea046de2c034166d`다.
+clean checkout에서 빠졌던 기존 테스트 17개를 추적하도록 보완한 뒤 출시 잠금 환경의
+전체 health exit 0(backend 919통과/비공개 F01 1skip), 빌드·정적 패키지 검사 exit 0을 확인했다.
+실제 installer payload 1,814파일, frontend 50파일의 두 배치, backend manifest 1,687파일,
+ASAR 소스·provenance 및 installer/앱/backend의 `NotSigned`를 검증했다.
+
+[상세 범위·실패 원문·소스/설치본 identity·보존 해시](production-release-risk-validation-unsigned-candidate-20261013.report.md)를 따른다.
+275개 입력 파일과 ZIP/공유 사본 검산 exit 0이며 환경/cache·합성 ADS fixture는 제외했다.
+간헐 종료 timeout 원인·npm audit 항목·tzdata 빌드 경고와 실제 런타임/설치/업그레이드/복구/
+현장 QA는 남아 있다. 서버 적용·승격·기준 갱신은 수행하지 않았다.
+전체 목표 active, R1–R6 HOLD와 full_data_gate=NOT_EVALUATED를 유지한다.

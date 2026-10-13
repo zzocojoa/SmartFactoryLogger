@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-12T22:49:47.737441+00:00",
+  "lastUpdated": "2026-10-13T03:50:30.468628+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2961,7 +2961,8 @@
         "temperatureArchiveReport": "docs/04-report/production-release-risk-validation-temperature-archive-20261012.report.md",
         "appStartReport": "docs/04-report/production-release-risk-validation-app-start-20261013.report.md",
         "runtimePerformanceReport": "docs/04-report/production-release-risk-validation-runtime-performance-20261013.report.md",
-        "candidatePreflightReport": "docs/04-report/production-release-risk-validation-candidate-preflight-20261013.report.md"
+        "candidatePreflightReport": "docs/04-report/production-release-risk-validation-candidate-preflight-20261013.report.md",
+        "unsignedCandidateReport": "docs/04-report/production-release-risk-validation-unsigned-candidate-20261013.report.md"
       },
       "taskChain": [
         {
@@ -2995,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-12T22:49:47.737441+00:00"
+        "lastUpdated": "2026-10-13T03:50:30.468628+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; exact clean commit/hash/payload/provenance and installation/recovery/device/performance/full-data/field QA remain required; no new installer applied or promotion",
@@ -3033,7 +3034,7 @@
           "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending",
           "R4": "full_NAS_metadata and named temperature/plain source copies verified; all439 outer ZIP member audit records committed with2 BadZipFile preserved, final original rehash pending; known17046 archive CSV structure inspected, prior5 and delta149 findings classified by format with historical cause/business completeness open;127158 PLC CSV final job78990 running; server cold-copy final verification and all-image QA pending",
           "R5": "historical_drop15_and_current_541d_session_drop44_separate_UNCONFIRMED; local_reason_counters_verified",
-          "R6": "signing_requirement_REMOVED_BY_DIRECT_USER_UNSIGNED_INTERNAL_POLICY_20261012; certificate_or_signer_not_blocking; final_clean_unsigned_installer_identity_payload_provenance_install_recovery_formal_QA_pending; npm_audit_findings_open"
+          "R6": "signing_requirement_REMOVED_BY_DIRECT_USER_UNSIGNED_INTERNAL_POLICY_20261012; v1.0.27_clean_19e0e314_installer_f17040fc_built; locked_environment_full_health_exit0_919passed_1private_fixture_skip; 1814_payload_files_frontend_backend_ASAR_provenance_and_NotSigned_verified; runtime_install_upgrade_recovery_field_QA_pending; prior_receipt_timeout_cause_and_npm_audit_findings_open; HOLD"
         },
         "followup": {
           "goalStatus": "active",
@@ -6426,6 +6427,55 @@
               "release-env"
             ],
             "next": "Resolve intermittent shutdown receipt timeout and outstanding candidate/field prerequisites"
+          },
+          "unsignedCandidateBuildStage": {
+            "recordedAt": "2026-10-13T03:50:30.468628+00:00",
+            "status": "CANDIDATE_BUILD_AND_STATIC_PAYLOAD_VERIFIED_RUNTIME_QA_PENDING",
+            "report": "docs/04-report/production-release-risk-validation-unsigned-candidate-20261013.report.md",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_UNSIGNED_CANDIDATE_20261013_a6f804d2",
+            "candidateCommit": "19e0e314f7c1dc29b38691382aeda637f4ff3032",
+            "version": "1.0.27",
+            "installerSha256": "f17040fc65d5856c29b04c2b919c6a4bebfca46520dccbb3ea046de2c034166d",
+            "installerBytes": 164617594,
+            "sourceArchiveSha256": "2a3a4422afa47131e4831b102492c7a676115822b50d88b418bf52622713c6e3",
+            "healthActualExitCode": 0,
+            "backendTests": 920,
+            "backendPassed": 919,
+            "privateFixtureSkipped": 1,
+            "missingTestCoverageRestored": 17,
+            "payloadFilesVerified": 1814,
+            "backendManifestFilesVerified": 1687,
+            "frontendFilesVerifiedAtBothLocations": 50,
+            "signatureRequirement": "NOT_REQUIRED_BY_APPROVED_UNSIGNED_POLICY",
+            "authenticode": {
+              "installer": "NotSigned",
+              "electron_app": "NotSigned",
+              "backend": "NotSigned"
+            },
+            "installedOrStarted": false,
+            "serverMutation": false,
+            "promoted": false,
+            "priorReceiptTimeoutRootCause": "UNRESOLVED",
+            "remaining": [
+              "isolated packaged runtime",
+              "new installation and upgrade",
+              "restart and previous-version recovery with preserved config/data",
+              "approved equipment profile and physical comparison",
+              "historical timeout/drop and full-data disposition",
+              "browser/CDP OFF",
+              "actual server starts 3 times",
+              "field QA initial 15 min and canary 120 min",
+              "operating promotion and applied identity"
+            ],
+            "buildWarning": "PyInstaller hidden import tzdata not found; runtime not yet tested",
+            "archiveSha256": "c8421737cc7b1c89fc87788b40d53b2e1a030dceff3408d24f1008a48adcddf5",
+            "manifestSha256": "8dce9a90c1c1a1762d98f0c7046a278877fd11ba8630dfebfb4ec3dc6da0a348",
+            "archiveInputs": 275,
+            "sharedDirectory": "Z:\\SmartFactory\\20261013\\records\\PDCA_UNSIGNED_CANDIDATE_a6f804d2",
+            "serverDelivered": false,
+            "workRootSealed": false,
+            "r1R6": "HOLD",
+            "fullDataGate": "NOT_EVALUATED"
           }
         }
       }
@@ -8458,6 +8508,15 @@
       "phase": "check",
       "timestamp": "2026-10-12T20:58:51.172100+00:00",
       "action": "Completed_PLC_127158_file_15329516_row_numeric_time_syntax_inspection_and_independent_179_order_event_reconciliation",
+      "goalStatus": "active",
+      "formalReleaseGate": "HOLD",
+      "fullDataGate": "NOT_EVALUATED"
+    },
+    {
+      "feature": "production-release-risk-validation",
+      "phase": "check",
+      "timestamp": "2026-10-13T03:50:30.468628+00:00",
+      "action": "Built_unsigned_1.0.27_19e0e314_and_verified_locked_health_static_payload_and_evidence_snapshot",
       "goalStatus": "active",
       "formalReleaseGate": "HOLD",
       "fullDataGate": "NOT_EVALUATED"
