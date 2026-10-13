@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T09:31:40.462565+00:00",
+  "lastUpdated": "2026-10-13T09:50:25.700888+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3031,8 +3031,8 @@
         "releaseRiskStatus": {
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
           "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD",
-          "R3": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; observed_operational_profile_APPROVED_BY_USER_SELF_record94873cc2; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD; physical_test_requires_App1_AL_E_firmware40_38_alarm_applicability_and_internal_equality_method; family_manual_and_integer_REST_output_insufficient; software_guard_tests7_exit0",
-          "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed",
+          "R3": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; observed_operational_profile_APPROVED_BY_USER_SELF_record94873cc2; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD; physical_test_requires_App1_AL_E_firmware40_38_alarm_applicability_and_internal_equality_method; family_manual_and_integer_REST_output_insufficient; software_guard_tests7_exit0; USER_SELF_reports_CMD_OUT_not_connected_to_PLC_or_machine_control; independent_wiring_inspection_false; physical_trial_NOT_TESTED",
+          "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed",
           "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
           "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; field_QA_and_other_gates_pending; HOLD"
         },
@@ -7115,6 +7115,40 @@
               "manifest_sha256": "f1209e55a1dcf6f5ab7bb325cc866c239ba8a2d76fa6157b9db7967fcbb63030"
             },
             "turnProgress": "PROGRESS_HISTORICAL_CONVERTER_CANDIDATE_FOUND_WITH_LINEAGE_LIMITS"
+          },
+          "wiringAndProducerScopeStage": {
+            "recordedAt": "2026-10-13T09:50:25.700888+00:00",
+            "priorR3Summary": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; observed_operational_profile_APPROVED_BY_USER_SELF_record94873cc2; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD; physical_test_requires_App1_AL_E_firmware40_38_alarm_applicability_and_internal_equality_method; family_manual_and_integer_REST_output_insufficient; software_guard_tests7_exit0",
+            "priorR4Summary": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_SOURCE_SCOPE_20261013_5bbfe655",
+            "sharedRecord": {
+              "destination": "Z:\\SmartFactory\\20261013\\records\\PDCA_SOURCE_SCOPE_5bbfe655",
+              "files_including_manifest": 24,
+              "bytes_excluding_manifest": 87284,
+              "manifest_sha256": "994b445f45a6741b2d7abfb9c963981a4105457f88860ee65a8ed0a64c528b48"
+            },
+            "reports": [
+              "docs/04-report/production-release-risk-validation-device-profile-20261013.report.md",
+              "docs/04-report/production-release-risk-validation-comparator-readiness-20261013.report.md",
+              "docs/04-report/production-release-risk-validation-plc-csv-20261013.report.md",
+              "docs/04-report/production-release-risk-validation-current-gates-20261013.report.md"
+            ],
+            "wiringReplyVerbatim": "연결되어 있지 않음",
+            "wiringRecordSha256": "1fddad2aefa36b7882695498e2013b46a1bc44d0760cfeaab008e0e6e8b05b6b",
+            "physicalWiringIndependentlyInspected": false,
+            "physicalComparator": "NOT_TESTED",
+            "sourceInspectionExit": 0,
+            "sourceReviewExit": 0,
+            "helperRuffExit": 0,
+            "preservedInventoryRows": 1032015,
+            "outerArchiveSourceMembers": 5997,
+            "selectedSourceMembersVerified": 14,
+            "exactProducerConfirmed": false,
+            "sourceExecuted": false,
+            "productServerOrOtherRepoChanged": false,
+            "releaseGate": "HOLD",
+            "fullDataGate": "NOT_EVALUATED",
+            "turnProgress": "PROGRESS_DIRECT_WIRING_STATEMENT_AND_ARCHIVE_REFERENCED_SOURCE_EVIDENCE"
           }
         }
       }

@@ -83,3 +83,20 @@ CRLF를 정규화한 내용이 같음을 대조했다. 이것은 소프트웨어
 HTTP200 응답은 7,291바이트 HTML이므로 PDF 다운로드 성공으로 세지 않는다.
 실제 물리 경계 시험 `NOT_TESTED`, 관찰 운영 프로파일 승인 완료, 정식 출시 **HOLD**다.
 이 보고서의 기존 증거 묶음 안 승인 대기 표시는 당시 기록으로 보존한다.
+
+## 후속 배선 확인과 Modbus 자료 대조
+
+USER_SELF는 CMD OUT 알람 접점이 PLC/설비의 정지·제어 입력에 “연결되어 있지 않음”이라고
+답했다. [질문·답변 원문](C:/Users/user/Desktop/SmartFactory/PDCA_SOURCE_SCOPE_20261013_5bbfe655/wiring-statement.json)에
+사용자 확인과 독립 배선 검사를 구분해 기록했다. 실제 물리 시험·알람 변경은 수행하지 않았다.
+
+제조사의 [SPOT Modbus Controls User Guide 809557 Issue 10](https://www.ametek-land.com/-/media/ameteklandinstruments/documentation/products/fixedspotnoncontactthermometers/spot/ametek_land_809557_spot_modbus_controls_user_guide_issue_10_enpdf.pdf?la=en&revision=1bb46776-24d3-450f-9c84-f3db645b2171)
+색인 본문 PDF8쪽도 Low Signal 알람의 적용 범위를 ratio 모드로 설명한다.
+이는 별도 SPOT 프로토콜 자료이며 현재 SPOT+ AL/펌웨어40.38/App1의 지원 여부나
+내부 비교 정밀도를 확정하는 근거는 아니다. PDF10쪽의 신호 register249 설명에도
+내부 알람 비교값과의 동일성·반올림 계약은 확인되지 않았다.
+[출처·확인 범위](C:/Users/user/Desktop/SmartFactory/PDCA_SOURCE_SCOPE_20261013_5bbfe655/manufacturer-addendum.json)를
+보존하며 실제 장비에 Modbus 요청을 보내지 않았다.
+
+다음 단계는 App1/40.38에서의 알람 적용 및 동일값 확인 방법에 대한 제조사 근거 또는
+해당 조건을 입증할 격리 시험 설계다. 배선 답변만으로 물리 경계·attestation을 PASS로 바꾸지 않는다.

@@ -249,3 +249,34 @@ NAS 휴지통 보존 경로에서 `data_combine.ipynb`를 발견했다. 목록�
 [사본 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_PLC_PRODUCER_20261013_a912de42/notebook-receipt.json)을 보존했다.
 검색·사본·AST 대조는 각각 actual exit0이며 신규 CSV 전수 검사를 반복한 결과가 아니다.
 원본 수정0, 원인 `NOT_CONFIRMED`, 전체 데이터/정식 출시 판정은 그대로다.
+
+## 보존 ZIP과 참조된 개발 소스까지 탐색 확장
+
+기존 NAS 목록의 모든 최상위 폴더를 포함해 노트북과 변환 관련 소스 파일명을 확인했다.
+노트북은 앞서 발견한 `data_combine.ipynb` 1개였고, 지정 변환 이름의 다른 소스 후보는
+없었다. 파일명 조건에 따른 결과이며 모든 파일의 내용이나 프로그램 부재를 증명하지 않는다.
+
+보존 ZIP 내용 DB의 전후 SHA256을 확인했다. `PLC 모니터링/Documents.zip`의
+47,136개 member는 CSV5,892개·DAT41,244개였다. 이 파일에서 소스는 찾지 못했다.
+이 확인은 기존 검증 DB의 목록 분석이며 47,136개 내용을 다시 검사한 결과가 아니다.
+전체 outer ZIP 목록의 py/ipynb/cs/vb member는5,997개, 고유 내용 해시는2,748개였다.
+이 중 `#recycle/docker/MES_Data_V2.zip`에서 관련 소스·문서14개를 선택해 보존 ZIP 및
+각 member의 해시·크기·EOF/CRC와 새 텍스트 사본을 대조했다.
+
+| 확인한 소스 | 실제 동작과 한계 |
+| --- | --- |
+| MES_Data_V2 `Pipeline_Logic.py` | CSV를 읽고 열을 매핑해 StringIO를 거쳐 DB COPY에 넣음. 검사 대상 정리 CSV를 디스크에 생성하는 코드로 확인되지 않음 |
+| MES_Data_V2 `watcher.py` | 입력 CSV 삭제 코드가 있지만 실행 여부·과거 누락과의 연결 증거는 없음. 실행하지 않음 |
+| 문서가 참조한 개발 PC `Extrusion_data/core/transform.py` | 현재 소스는 DataFrame을 반환하며 디스크 CSV 쓰기 호출 없음. legacy 날짜를 파일명에서 붙이나 과거 정리 CSV 생성 증거는 아님 |
+
+개발 소스11,005바이트의 SHA256은
+`161d40164ac4585efbd90f783246b6bdba3fdf02d7433a2c7474556ee88a8d52`다.
+해당 저장소 HEAD 내용과 줄바꿈 정규화 후 일치했다. 지정 현재 소스/문서 검색에서
+`PLCData_`·`to_csv`·지정 시각 포맷은 없었고(exit1은 검색 일치 없음), 보존된 모든 ref의
+py/ipynb 변경 이력에서 `PLCData_` 추가/삭제 검색도 결과가 없었다(exit0).
+이는 보유 Git 이력 범위이며 모든 과거 실행·배포본을 확인한 결과가 아니다.
+
+[탐색 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_SOURCE_SCOPE_20261013_5bbfe655/source-inspection.json)과
+[소스 검토](C:/Users/user/Desktop/SmartFactory/PDCA_SOURCE_SCOPE_20261013_5bbfe655/source-review.json)를 보존했다.
+두 도우미 actual exit0. 코드·노트북 실행0, NAS 원본·다른 저장소 변경0이다.
+정확한 CSV 생성 프로그램·과거 시계/날짜 원인은 미확정이며 자동 보정하지 않았다.

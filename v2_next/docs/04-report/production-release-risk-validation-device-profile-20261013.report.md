@@ -89,6 +89,11 @@ attestation 또는 전체 출시 QA의 통과를 대신하지 않는다.
 기존 장비 조회 묶음의 PENDING 기록과 해시는 당시 상태로 보존하며 재작성하지 않았다.
 이 답변으로 장비 설정 변경·알람 활성화·미검증 항목 PASS·설치 전 조건의 예외를 만들지 않는다.
 
+후속 배선 질문에 USER_SELF는 CMD OUT 알람 접점이 PLC/설비의 정지·제어 입력에
+“연결되어 있지 않음”이라고 답했다. [답변 기록](C:/Users/user/Desktop/SmartFactory/PDCA_SOURCE_SCOPE_20261013_5bbfe655/wiring-statement.json)을
+보존한다. 이는 사용자 직접 확인이며 Codex의 물리 배선 검사 결과가 아니다.
+App1 알람 적용·동일값 검증 또는 실제 시험을 위해 알람을 켜도 된다는 승인으로 확대하지 않는다.
+
 ## 검증
 
 `read_app.py before/after` actual exit0, 수정된 `review.py` exit0, Ruff F/E9 exit0.
