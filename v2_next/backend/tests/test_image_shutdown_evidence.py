@@ -672,7 +672,12 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
         self.run_overlapping_cleanup()
 
     def test_control_waits_for_pending_peer_final_receipt(self):
-        self.run_overlapping_cleanup(hold_peer_final=True)
+        # This checks peer ordering, not native filesystem latency. Real receipt
+        # I/O must not spend the deadline while the test intentionally holds a
+        # peer. Timeout behaviour is covered by the explicit stall tests.
+        with patch.object(app, 'time', wraps=time) as clock:
+            clock.monotonic.return_value = time.monotonic()
+            self.run_overlapping_cleanup(hold_peer_final=True)
 
     async def wait_control_receipt(self):
         async with asyncio.timeout(3):
@@ -707,7 +712,11 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
                 if not task.done():
                     task.cancel()
                     await task
-        with patch.object(app.os, '_exit') as exit_process:
+        # Reach the pending-peer state even if real receipt I/O is slow; this
+        # test's cancellation must be the reason that successful exit is denied.
+        with patch.object(app, 'time', wraps=time) as clock, \
+             patch.object(app.os, '_exit') as exit_process:
+            clock.monotonic.return_value = time.monotonic()
             self.loop.run_until_complete(run())
 
     def test_peer_and_log_wait_share_one_final_deadline(self):
@@ -802,7 +811,11 @@ class ImageShutdownEvidenceTests(unittest.TestCase):
             finally:
                 release.set()
                 peer_release.set()
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # The test-controlled app clock must not make a broken peer
+                # handshake hang the runner. asyncio retains its real clock.
+                results = await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True), timeout=3,
+                )
             self.assertIsInstance(results[0], OSError)
             self.assertIsNone(results[1])
         try:

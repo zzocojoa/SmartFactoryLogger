@@ -2,6 +2,8 @@
 
 작성일: 2026-10-10. 전체 목표 진행 중, R1~R6 정식 출시 **HOLD**.
 
+2026-10-13 후속: [종료 영수증 검사 보완](production-release-risk-validation-receipt-test-20261013.report.md). 테스트 시계만 분리했고 제품 제한·현장 gate는 유지한다.
+
 최신 완료 범위와 남은 조건은 [현재 gate 검토](production-release-risk-validation-current-gates-20261013.report.md)를 따른다.
 아래 누적 기록의 “실행 중/대기”는 각 기록 시점의 상태다. PLC·서버 이미지·NAS ZIP 최종
 검사가 완료된 뒤의 요약을 연결했으며 과거 실패·미검증을 PASS로 변경하지 않았다.
