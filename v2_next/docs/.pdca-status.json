@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T23:25:23.686643+00:00",
+  "lastUpdated": "2026-10-13T23:35:11.857837+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8494,6 +8494,20 @@
             "fieldQaExecuted": false,
             "canaryStarted": false,
             "fullDataGate": "NOT_EVALUATED",
+            "releaseGate": "HOLD",
+            "promotionAllowed": false
+          },
+          "physicalTestEquipmentStage": {
+            "recordedAt": "2026-10-13T23:35:11.857837+00:00",
+            "status": "USER_REPORTED_NO_DEDICATED_TEST_EQUIPMENT",
+            "userStatement": "그런 시험 장비는 없다.",
+            "independentlyInspected": false,
+            "report": "docs/04-report/production-release-risk-validation-comparator-readiness-20261013.report.md",
+            "physicalBoundaryTest": "NOT_TESTED",
+            "manufacturerReplyConfirmed": false,
+            "limitedFieldSequenceProposal": "PREPARED_NOT_APPROVED_OR_IMPLEMENTED",
+            "installationPerformed": false,
+            "settingsChanged": false,
             "releaseGate": "HOLD",
             "promotionAllowed": false
           }
