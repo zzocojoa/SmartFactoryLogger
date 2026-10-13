@@ -71,13 +71,18 @@ drop 증가0이었다. 원인·프레임/행 식별·복구 가능성은 미확�
 모델 미정 상태를 보완했으며 현재 관찰 설정표를 USER_SELF 승인 대상으로 준비했다.
 이 확인으로 앱의 readback 구현이나 fingerprint_mismatch, 물리 경계 미검증이 해소되지는 않는다.
 
+후속 [Low Signal 시험 준비 검토](production-release-risk-validation-comparator-readiness-20261013.report.md)에서
+제조사 색인 설명의 Ratio/Multi 범위와 REST 정수 % 정밀도를 확인했다.
+App1/펌웨어40.38 적용 근거와 정확한 동일값 확인 방법을 먼저 확보해야 한다.
+기존 소프트웨어 경계·attestation 차단 검사7개 exit0는 물리 장비 검증과 구분한다.
+
 ## 남은 조건과 실행 순서
 
 | 항목 | 남은 조건 | 다음 증거 |
 | --- | --- | --- |
 | R1 | 원래 timeout/223ms 사건의 인과, 격리 검사에서 간헐적으로 발생한 receipt timeout 원인 미확정 | 원래 시점의 근거 또는 재현 순간 상태와 수정 전후 검증. 반복 통과만으로 종결하지 않음 |
 | R2 | 실제 서버 정상 시작3회, 최종 설치본 현장15분/120분·물리 디스크·전체 성능 계약 | 첫 요청을 포함한 현장 원시값·오류·종료 증거. 브라우저 추가 계측 비교는 아래 후속 보고서에서 완료 |
-| R3 | 장비 직접 응답 SPOT+ AL 및 모드7=App1: AL E 확인; 관찰 프로파일의 USER_SELF 승인·물리 경계 comparator·최종 fingerprint/attestation 미완료 | 관찰 설정표의 운영 기준 승인, 물리 경계 시험, 같은 build/세대의 시작·종료 대조 |
+| R3 | 장비 직접 응답 SPOT+ AL 및 모드7=App1: AL E 확인; 관찰 프로파일의 USER_SELF 승인·App1 알람 적용/동일값 근거·물리 경계 comparator·최종 fingerprint/attestation 미완료 | 관찰 설정표의 운영 기준 승인, 적용 모드/정밀도를 확인한 물리 경계 시험, 같은 build/세대의 시작·종료 대조 |
 | R4 | 과거 누락·미참조·손상·시간 순서의 원인/영향/처리, 최종 현장 종료 delta 미완료 | 항목별 원시 증거와 데이터 책임자 처리 기록, 새 후보 데이터 전체 검증 |
 | R5 | 이전4c drop15·다른541d 세대 drop44·현재e9a785c0/efca4313 세대 drop173의 원인/처리 미확정 | 별도 세대별 수량·영향·복구 가능성·처리 결정; 저장실패16과 합산 금지 |
 | R6 | 최종 installer의 현장 설정·one-command QA·정상 종료·승격 미실행 | 정확한 동일 installer의 FINAL PASS·현장 결과·적용 확인 후 기준 갱신 |
