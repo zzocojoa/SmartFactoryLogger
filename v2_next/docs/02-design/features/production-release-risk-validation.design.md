@@ -199,3 +199,28 @@ stdout/stderr/구조화 결과/manifest를 새 파일로 쓰고 결과 경로·m
 검증 기준: 정확한 바이트 실행, 변조/경로 거부, 실행 중 쓰기·삭제 잠금, 실패/timeout의 HOLD,
 결과 원문·해시·새 경로/ACL·재실행 보존, 비관리자 무변경 거부다. 개발 PC 권한 치환 fixture와
 실제 관리자 서버 실행을 구분하며, 후자가 끝나기 전 서버 hash 검증 완료로 표시하지 않는다.
+
+### 현장 HTTP 계측의 독립 주기와 전체 응답 경계
+
+`field_http_sampling.py`는 후속 현장 collector에서 사용할 loopback HTTP 수집 모듈이다.
+health2초/data6초/image250ms 각각 단일 worker와 같은 monotonic 원점을 사용한다.
+느린 이미지·본문 해석·결과 쓰기가 다른 endpoint의 예정 요청을 직렬로 막지 않는다.
+각 worker는 요청을 겹치지 않게 하고 지나간 슬롯을 누락 기록으로 남긴다. 지연 뒤 burst로
+과거 슬롯을 메우지 않는다. 첫 요청·최대·분위수·HTTP 실패·timeout·스케줄 지연을 보존한다.
+
+연결·송신·헤더 대기·본문 수신과 JSON/JPEG 해석을 분리한다. socket의 각 blocking read에
+단일 요청의 남은 deadline을 적용하여 조금씩 계속 들어오는 헤더/본문도 무한 대기하지 않는다.
+전체 본문을 받지 못한 성공 상태 코드, 길이 부족, 잘못된 JSON/JPEG, 크기 상한 초과는 실패다.
+부분 본문·원시 헤더·해시·실제 시각을 새 파일로 보존하고 같은 출력 경로를 재사용하지 않는다.
+출력/메모리 예산 초과·worker 실패·수동 중단은 불완전 수집으로 기록한다.
+
+이 모듈의 시험은 loopback fixture에서 독립 주기, 느린 헤더/본문의 전체 deadline, 누락 슬롯,
+첫 실패 포함 요약, 중단, 파일 충돌과 원문 해시를 확인한다. 제품 실행/종료·장비 요청·설치는 없다.
+실제 서버 실행 entrypoint는 아직 제공하지 않는다. 최종 build/프로세스/logger/fingerprint 결합,
+보호된 결과 폴더·잠긴 배포 실행, resource/physical disk/web vitals/packet·정상 종료와 합쳐야
+전체15분/120분 collector가 된다. HTTP 모듈 성공에도 전체 현장 gate는 NOT_EVALUATED/HOLD다.
+
+요약은 단순한 배열 길이 대신 고유 sequence coverage를 확인한다. NaN/Infinity/음수/bool/null
+시간값, 중복·누락 순번은 NOT_MEASURED이며 첫 실패 표본을 삭제하지 않는다. 정상6.2초
+fixture의 기본 주기와 느린 이미지에 대한 독립성을 별도로 검사한다. 이 설계의 수집/쓰기
+오버헤드는 최종 field collector의 실제 부하 검증에 포함하며 기존 보조 계측 결과로 대체하지 않는다.

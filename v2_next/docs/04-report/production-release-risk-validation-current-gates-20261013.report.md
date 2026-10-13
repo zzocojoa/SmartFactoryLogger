@@ -199,3 +199,14 @@ SmartFactory/PDCA_FIELD128_20261013_450e9f1b로 복사하고 절대경로·파�
 미확인이다. 129개 시험/전달 기록은 공유 records에 전체 SHA를 대조해 보존했다.
 전체15분/120분 수집·판정 도구, 실제 설치/설정 QA·최종 delta·승격은 계속 남는다.
 현재541d/08C 운영·롤백 identity, 미서명 정책, R1–R6 HOLD와 전체 목표 active를 유지한다.
+
+## 후속 HTTP 계측 구성요소
+
+[독립 주기 HTTP 수집·실패 보존](production-release-risk-validation-http-collector-20261013.report.md)을
+구현하고 최종 unittest31조건 exit0, Ruff F/E9·원문/manifest 검산 exit0을 확인했다.
+health2초/data6초/image250ms 각각 비중첩 worker로 실행하고 늦어진 예정 슬롯을 보존한다.
+요약의 비정상 시간/중복 sequence 문제는 수정 전 실패2건을 재현한 뒤 NOT_MEASURED로 보완했다.
+실제 loopback6.2초의 health4/data2/image25 표본과 결과 manifest11개를 검산했고 기록309파일을
+공유 records에 보존했다. 실제 서버 앱·15분/120분 관찰이나 전체 성능 PASS가 아니다.
+최종 build/session 결합·자원/물리 디스크/화면/packet·종료 경계와 실행 묶음 통합이 남는다.
+기존 패키지 읽기 명령의 서버 실행 결과와 기존 R1–R6 미완료 조건도 그대로 유지한다.

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T22:22:18.997910+09:00",
+  "lastUpdated": "2026-10-13T22:48:44.542980+09:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3030,11 +3030,11 @@
         },
         "releaseRiskStatus": {
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
-          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD",
+          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD; independent_HTTP_component_health2s_data6s_image250ms_loopback31_tests_exit0; invalid_timing_and_duplicate_sequence_red2_green_preserved; full_candidate_field_binding_resources_physical_disk_UI_packet_and_15_120_pending",
           "R3": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; observed_operational_profile_APPROVED_BY_USER_SELF_record94873cc2; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD; physical_test_requires_App1_AL_E_firmware40_38_alarm_applicability_and_internal_equality_method; family_manual_and_integer_REST_output_insufficient; software_guard_tests7_exit0; USER_SELF_reports_CMD_OUT_not_connected_to_PLC_or_machine_control; independent_wiring_inspection_false; physical_trial_NOT_TESTED; REST_alarm_bit4_footnote_includes_Application_models_but_App1_40_38_mode_contract_unconfirmed; manufacturer_inquiry_SENT_Gmail_readback_verified_20261013_190627KST; physical_boundary_NOT_TESTED",
           "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed; historical_SpotViewer17966329_rows_NULL1689070_context0_correlated_with_adjacent_fast199_all1633135_mixed39418_other16517; reverse_numeric_all199_4613; raw_temperature_time_reversals4; encoding_cause_and_business_disposition_unconfirmed; archived_SpotViewer5.2.0.7443_static_contract_context0Unknown_1Celsius_invalid_to_NULL_and_multiple_invalid_paths_confirmed; five_DB_schemas_match; historical_executable_configuration_row_causes_and_disposition_unconfirmed; current_server_SpotViewer17_copied_files_match_archived5.2.0.7443; settings8_and_logs8_6738533_lines_verified; historical_connection_warnings_file_lock_network_path_and_timer_errors_recorded; conditional_NULL_window_overlap_not_causation; historical_identity_clock_row_impact_disposition_pending; long_NULL_run_contains172413_consecutive_blocks_repeating_same_two_fast_ticks199; selected_CSV4_2057323_rows_have689652_matching_ms_pair_rows_and344826_repeat_pair_time_decreases; SQL_rg_prior_audit_reconciled; not_fresh_acquisition_count_or_one_to_one_copy; historical_clock_all_NULL_causes_and_business_disposition_pending",
           "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
-          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD"
+          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution"
         },
         "followup": {
           "goalStatus": "active",
@@ -7467,6 +7467,75 @@
             "releaseGate": "HOLD",
             "fullDataGate": "NOT_EVALUATED",
             "turnProgress": "PROGRESS_LOCKED_PACKAGE_READ_LAUNCHER_VERIFIED_DELIVERED_AND_RECORDS_PRESERVED"
+          },
+          "fieldHttpSamplingStage": {
+            "recordedAt": "2026-10-13T22:48:44.542980+09:00",
+            "priorRiskSummaries": {
+              "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD",
+              "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD"
+            },
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HTTP128_20261013_0c6db624",
+            "preparationBaseHead": "1ebcded398e349565ad18a4fafd7d146e8e88767",
+            "reports": [
+              "docs/04-report/production-release-risk-validation-http-collector-20261013.report.md",
+              "docs/04-report/production-release-risk-validation-current-gates-20261013.report.md"
+            ],
+            "sourceSha256": {
+              "field_http_sampling.py": "a1a5bcb7fbdfaabe8bb6b5e8e0659f60a889217af35eff216b6547eea3340a53",
+              "test_field_http_sampling.py": "d2a623954e63646d0ba956bcc359e1c608be4b595cc272aaf11fda9a2fa2c37e"
+            },
+            "initialPytestInvocationExit": 1,
+            "initialPytestTestsExecuted": 0,
+            "initialUnittestTests": 27,
+            "initialUnittestExit": 0,
+            "summaryRedTests": 2,
+            "summaryRedExit": 1,
+            "finalUnittestTests": 31,
+            "finalUnittestExit": 0,
+            "finalRuffExit": 0,
+            "retainedResultManifestsVerified": 11,
+            "defaultCadenceObservationSeconds": 6.2,
+            "defaultCadences": {
+              "health": {
+                "samples": 4,
+                "actual_gap_ms_min": 1994.5728,
+                "actual_gap_ms_max": 2006.6533
+              },
+              "data": {
+                "samples": 2,
+                "actual_gap_ms_min": 6006.2519,
+                "actual_gap_ms_max": 6006.2519
+              },
+              "image": {
+                "samples": 25,
+                "actual_gap_ms_min": 241.0084,
+                "actual_gap_ms_max": 261.3726
+              }
+            },
+            "reviewExit": 0,
+            "sharedRecord": {
+              "shared": "Z:\\SmartFactory\\20261013\\records\\PDCA_HTTP128_0c6db624",
+              "files_including_manifest": 309,
+              "bytes_excluding_manifest": 370021,
+              "manifest_sha256": "fe047eddc2fa420c61b4fcde3af6e8f9b10c4465f2e722638a93ee1b3c19a414",
+              "all_shared_sha256_equal": true,
+              "this_receipt_in_sealed_records": false
+            },
+            "serverDeliveredOrExecuted": false,
+            "productionAppOrDeviceExecuted": false,
+            "completeFieldCollectorReady": false,
+            "remainingIntegration": [
+              "installed-build-and-session-binding",
+              "protected-result-and-pinned-launch",
+              "resource-physical-disk-UI-packet",
+              "normal-shutdown-and-delta-boundary",
+              "probe-overhead"
+            ],
+            "productOrInstallerChanged": false,
+            "fieldGate": "NOT_EVALUATED",
+            "releaseGate": "HOLD",
+            "fullDataGate": "NOT_EVALUATED",
+            "turnProgress": "PROGRESS_INDEPENDENT_HTTP_SAMPLING_COMPONENT_IMPLEMENTED_RED_GREEN_AND_EVIDENCE_PRESERVED"
           }
         }
       }
