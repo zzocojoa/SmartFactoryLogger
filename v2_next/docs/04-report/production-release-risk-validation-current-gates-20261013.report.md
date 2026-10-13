@@ -234,3 +234,14 @@ health1/image17 예정 슬롯 누락으로 FAIL이다. 응답 오류·timeout은
 오류 후 가용 공간과 재실행 통과는 과거18슬롯의 정확한 host 원인이나 ENOSPC 원인의 확정이 아니다.
 수집기 구성요소의 개발 검증이며 실제 제품/서버 QA·전체 계측 부하·승격은 미완료다.
 기존 R1–R6 HOLD와 운영/롤백 기준을 유지한다.
+
+## 2026-10-14 설치 파일·프로세스·서비스 식별 결합
+
+[새 식별 모듈](production-release-risk-validation-installation-binding-20261014.report.md)은 고정된 후보
+payload의 잠긴 읽기/종료 전 재검사와 PID/create-time/exe·listener·SPOT/CSV logger ID 대조를 제공한다.
+최종23시험·Ruff exit0, 실제 추출1,814파일/562,754,082바이트 대조와 기존 NSIS health15표본의
+오프라인 파서 검증을 통과했다. 최초18시험의 파일명/Python 실행기 PID 오류2개는 수정 후
+통과했으며 실패 원문·소스를 보존했다. 기록457파일을 공유 records에 해시 검산해 보존했다.
+서버 기존 패키지 읽기의 결과 폴더는00:00 화면에서 관찰되지 않았고 실제 실행/hash 검증은 미확정이다.
+새 모듈의 서버 전달/실행, 전체 collector·watchdog·fingerprint/generation·최종 현장 QA와 승격은
+남아 있다. R1–R6 HOLD, full_data_gate NOT_EVALUATED 및 기존 운영/롤백 기준을 유지한다.

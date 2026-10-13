@@ -255,3 +255,17 @@ HTTP 응답/해석 뒤의 원문·JSON 저장은 하나의 전용 worker로 처�
 대기 자료는 내구성이 확정되지 않았으며 프로세스 손실 시 완전한 manifest가 성립하지 않는다.
 동기 파일/드라이버 호출이 무기한 멈출 경우의 외부 watchdog은 현장 launcher 통합 조건이다.
 검증과 실패 기록은 [저장 분리 보고](../../04-report/production-release-risk-validation-persistence-20261013.report.md)에 연결한다.
+
+### 5.7 설치 파일과 관찰된 실행 식별값의 결합
+
+`field_installation_binding.py`는 고정 reference SHA의 후보 payload 전체 기본 스트림과
+clean provenance를 확인하고 read-sharing 핸들을 컨텍스트 종료까지 유지한다.
+NSIS 추가 파일은 별도 출처의 정확한 크기/SHA가 있어야 허용한다. 경로·reparse·hardlink·
+파일 집합·바이트 제한을 적용하며 종료 전 `recheck()`로 이름/ID/해시를 다시 대조한다.
+OS의 PID/create-time/exe, main→backend 관계, IPv4/IPv6 listener 소유자를 health GET 앞뒤로
+읽고 version/frozen/REAL/build, SPOT/CSV logger UUID를 결합한다. 모호함·권한 오류·
+서비스 교체는 FAIL이다. raw body와 HTTP 계측을 보존하며 식별용 첫 GET도 전체 성능 판정에 포함한다.
+이 구성요소의 PASS는 표본의 식별 범위이며 서버 전체/실행 메모리/표본 사이 무변경의 증거가 아니다.
+최종 fingerprint·authenticated backend generation·watchdog·화면/packet/종료 경계와의
+전체 collector 통합은 계속 필요하다. 개발 PC23시험, 실제 추출1814파일 및 기존15표본 파서
+검증의 범위는 [식별 결합 보고](../../04-report/production-release-risk-validation-installation-binding-20261014.report.md)에 기록한다.

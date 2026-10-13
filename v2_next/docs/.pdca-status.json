@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T23:48:30.763273+09:00",
+  "lastUpdated": "2026-10-13T15:19:42.962495+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3030,11 +3030,11 @@
         },
         "releaseRiskStatus": {
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
-          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD; independent_HTTP_component_health2s_data6s_image250ms_loopback31_tests_exit0; invalid_timing_and_duplicate_sequence_red2_green_preserved; full_candidate_field_binding_resources_physical_disk_UI_packet_and_15_120_pending; local_resource_native_physical_disk_collector23_tests_and_HTTP31_exit0; 420s_fixture_resources85_observation61_complete_but_HTTP_health1_image17_missed_FAIL; post_fetch_delay_exact_cause_unconfirmed; per_file_persistence_timing_added_not_fixed; final_long_integration_overhead_and_server_QA_pending; bounded_async_durable_HTTP_writer_controlled120ms_red1_green0_and_1s_stall31requests_verified; final_resource_persistence28_HTTP31_tests_exit0; final420s_fixture_HTTP1960_missing_error_timeout0_persisted1960_resources85_observation61; original_host_delay_and_transient_ENOSPC_causes_unconfirmed; actual_product_overhead_and_server_QA_pending",
+          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD; independent_HTTP_component_health2s_data6s_image250ms_loopback31_tests_exit0; invalid_timing_and_duplicate_sequence_red2_green_preserved; full_candidate_field_binding_resources_physical_disk_UI_packet_and_15_120_pending; local_resource_native_physical_disk_collector23_tests_and_HTTP31_exit0; 420s_fixture_resources85_observation61_complete_but_HTTP_health1_image17_missed_FAIL; post_fetch_delay_exact_cause_unconfirmed; per_file_persistence_timing_added_not_fixed; final_long_integration_overhead_and_server_QA_pending; bounded_async_durable_HTTP_writer_controlled120ms_red1_green0_and_1s_stall31requests_verified; final_resource_persistence28_HTTP31_tests_exit0; final420s_fixture_HTTP1960_missing_error_timeout0_persisted1960_resources85_observation61; original_host_delay_and_transient_ENOSPC_causes_unconfirmed; actual_product_overhead_and_server_QA_pending; installation_process_listener_SPOT_logger_identity_component23_tests_exit0; complete_field_integration_watchdog_fingerprint_generation_and_server_QA_pending",
           "R3": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; observed_operational_profile_APPROVED_BY_USER_SELF_record94873cc2; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD; physical_test_requires_App1_AL_E_firmware40_38_alarm_applicability_and_internal_equality_method; family_manual_and_integer_REST_output_insufficient; software_guard_tests7_exit0; USER_SELF_reports_CMD_OUT_not_connected_to_PLC_or_machine_control; independent_wiring_inspection_false; physical_trial_NOT_TESTED; REST_alarm_bit4_footnote_includes_Application_models_but_App1_40_38_mode_contract_unconfirmed; manufacturer_inquiry_SENT_Gmail_readback_verified_20261013_190627KST; physical_boundary_NOT_TESTED",
           "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed; historical_SpotViewer17966329_rows_NULL1689070_context0_correlated_with_adjacent_fast199_all1633135_mixed39418_other16517; reverse_numeric_all199_4613; raw_temperature_time_reversals4; encoding_cause_and_business_disposition_unconfirmed; archived_SpotViewer5.2.0.7443_static_contract_context0Unknown_1Celsius_invalid_to_NULL_and_multiple_invalid_paths_confirmed; five_DB_schemas_match; historical_executable_configuration_row_causes_and_disposition_unconfirmed; current_server_SpotViewer17_copied_files_match_archived5.2.0.7443; settings8_and_logs8_6738533_lines_verified; historical_connection_warnings_file_lock_network_path_and_timer_errors_recorded; conditional_NULL_window_overlap_not_causation; historical_identity_clock_row_impact_disposition_pending; long_NULL_run_contains172413_consecutive_blocks_repeating_same_two_fast_ticks199; selected_CSV4_2057323_rows_have689652_matching_ms_pair_rows_and344826_repeat_pair_time_decreases; SQL_rg_prior_audit_reconciled; not_fresh_acquisition_count_or_one_to_one_copy; historical_clock_all_NULL_causes_and_business_disposition_pending",
           "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
-          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution; resource_collector_and_common_origin_local_validation_complete; HTTP_persistence_trace_added_after_native_slot_miss_FAIL; protected_launcher_watchdog_full_candidate_binding_and_field_QA_pending; bounded_HTTP_persistence_and_drain_verified_local420s_only; original_ENOSPC_failed_runs_preserved; field_launcher_watchdog_identity_full_QA15_120_promotion_still_pending"
+          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution; resource_collector_and_common_origin_local_validation_complete; HTTP_persistence_trace_added_after_native_slot_miss_FAIL; protected_launcher_watchdog_full_candidate_binding_and_field_QA_pending; bounded_HTTP_persistence_and_drain_verified_local420s_only; original_ENOSPC_failed_runs_preserved; field_launcher_watchdog_identity_full_QA15_120_promotion_still_pending; pinned_payload1814_default_stream_files_verified_on_actual_extracted_candidate_with_lock_and_closeout_checks; current_running_server_candidate_not_verified; HOLD"
         },
         "followup": {
           "goalStatus": "active",
@@ -7637,6 +7637,65 @@
               "verified": true
             },
             "actualServerExecution": false,
+            "fullFieldGate": "NOT_EVALUATED",
+            "releaseGate": "HOLD",
+            "promotionAllowed": false
+          },
+          "fieldInstallationBindingStage": {
+            "recordedAt": "2026-10-13T15:19:42.962495+00:00",
+            "preparationBaseHead": "35aca6cbaaa9582d437cc48f5eae43059f7ca139",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_BIND128_20261014_71b290fa",
+            "report": "docs/04-report/production-release-risk-validation-installation-binding-20261014.report.md",
+            "sourceSha256": {
+              "field_installation_binding.py": "851f21190109cfb78f12930ea0331a4d676064d45d57a2020b1b08ab569a3d6c",
+              "test_field_installation_binding.py": "43e9bb188bf5539769325affd9f7c504787f2de97ca3f05a3fb79ee8f0832fc1",
+              "field_http_sampling.py": "e32ecdab54e3c02c9bfe67859c32016920780a82a43d3bb5da8f586df9e4fddb",
+              "field_resource_sampling.py": "517a28f6de00e495ac16c74099f1e8c949d67d5b0e76069bbe4e9ec8bb91816c"
+            },
+            "priorRiskSummaries": {
+              "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD; independent_HTTP_component_health2s_data6s_image250ms_loopback31_tests_exit0; invalid_timing_and_duplicate_sequence_red2_green_preserved; full_candidate_field_binding_resources_physical_disk_UI_packet_and_15_120_pending; local_resource_native_physical_disk_collector23_tests_and_HTTP31_exit0; 420s_fixture_resources85_observation61_complete_but_HTTP_health1_image17_missed_FAIL; post_fetch_delay_exact_cause_unconfirmed; per_file_persistence_timing_added_not_fixed; final_long_integration_overhead_and_server_QA_pending; bounded_async_durable_HTTP_writer_controlled120ms_red1_green0_and_1s_stall31requests_verified; final_resource_persistence28_HTTP31_tests_exit0; final420s_fixture_HTTP1960_missing_error_timeout0_persisted1960_resources85_observation61; original_host_delay_and_transient_ENOSPC_causes_unconfirmed; actual_product_overhead_and_server_QA_pending",
+              "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution; resource_collector_and_common_origin_local_validation_complete; HTTP_persistence_trace_added_after_native_slot_miss_FAIL; protected_launcher_watchdog_full_candidate_binding_and_field_QA_pending; bounded_HTTP_persistence_and_drain_verified_local420s_only; original_ENOSPC_failed_runs_preserved; field_launcher_watchdog_identity_full_QA15_120_promotion_still_pending"
+            },
+            "finalTests": 23,
+            "finalTestsExit": 0,
+            "skipped": 0,
+            "ruffExit": 0,
+            "initialTestsExit": 1,
+            "initialErrors": 2,
+            "initialFailureReasons": [
+              "incorrect_NSIS_uninstaller_name",
+              "test_assumed_venv_launcher_owned_listener"
+            ],
+            "correctedTestsExit": 0,
+            "realExtractedCandidatePayloadFiles": 1814,
+            "realExtractedCandidatePayloadBytes": 562754082,
+            "realPayloadTotalMilliseconds": 22441.047,
+            "actualRunningInstallationVerified": false,
+            "nativeProcessListenerFixture": true,
+            "rawApiFixtureResults": {
+              "PASS": 3,
+              "FAIL": 22
+            },
+            "offlinePriorNsisHealthSamples": 15,
+            "recordsTransfer": {
+              "destination": "Z:\\SmartFactory\\20261014\\records\\PDCA_BIND128_71b290fa",
+              "files": 457,
+              "bytes_excluding_manifest": 1647294,
+              "manifest_sha256": "bd10e0bd0dfb08495cc8bf7292a11f0fb10ab7a368185459bc79122d9740de7b",
+              "reparse_items_excluded": 1,
+              "verified": true
+            },
+            "serverPackageReadResult": "NOT_OBSERVED_IN_EXPECTED_FOLDER_AT_20261014_0000_KST",
+            "newModuleDeliveredToServer": false,
+            "actualServerExecution": false,
+            "remaining": [
+              "protected_launcher_external_watchdog",
+              "authenticated_backend_generation",
+              "final_configuration_fingerprint_attestation",
+              "full_HTTP_resource_UI_packet_shutdown_integration",
+              "server_install_recovery_3_starts_field15_120_QA",
+              "historical_finding_disposition_and_release_gates"
+            ],
             "fullFieldGate": "NOT_EVALUATED",
             "releaseGate": "HOLD",
             "promotionAllowed": false
