@@ -98,6 +98,12 @@ App1/40.38 적용·내부 비교 정밀도는 아직 미확정이다. 사용자 
 [문의·발송 근거](production-release-risk-validation-comparator-readiness-20261013.report.md)에
 이전 사용자 직접 전달 의사의 변경과 답변 확인 항목을 기록했다. 문의 발송은 기술 QA 통과가 아니다.
 
+후속 [SpotViewer NULL 관계 분석](production-release-risk-validation-profile-search-20261013.report.md)에서
+DB 17,966,329행을 읽기 전용으로 대조했다. NULL 1,689,070행은 모두 DataContext0이며,
+이 중 1,633,135행은 뒤따르는 고속 값이 모두199.0인 저장 구간에 있었다. 나머지55,935구간과
+반대쪽4,613구간은 별도 목록으로 보존했다. 이 관계는 같은 측정·NULL 원인·대체 온도를
+증명하지 않으며 실제 저장 소프트웨어의 변환 계약과 과거 영향/처리는 계속 미확정이다.
+
 ## 남은 조건과 실행 순서
 
 | 항목 | 남은 조건 | 다음 증거 |

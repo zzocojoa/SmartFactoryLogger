@@ -93,3 +93,52 @@ manifest SHA256은 `ba3fae36f46ed3c04c9e2100b87b4b22d1437d3d2b59daa4a74dd77534a5
 대형 DB는 앞서 검증한 return 폴더에 보존하고 manifest의 외부 데이터 항목에
 경로·크기·해시를 기록했다. 작업 폴더 전체 봉인이나 서버 원본 해시 검증을 뜻하지 않는다.
 공유 보존·최종 문서/PDCA 정합성 검산 및 `git diff --check`는 exit0으로 확인했다.
+
+## 후속: NULL 온도와 고속 온도 기록의 관계
+
+이 절은 위 역사 DB의 의미를 추가 조사한 결과다. 장비 모델과 관찰 프로파일 승인은 이후
+[장비 직접 조회·승인 기록](production-release-risk-validation-device-profile-20261013.report.md)으로
+보완됐으며, 앞부분의 모델·승인 미정은 최초 탐색 시점의 기록이다.
+
+같은 개발 사본의 17,966,329행을 읽기 전용으로 순회했다. 분석 전후 SHA256은 위의
+`95ca1fe9…`와 같았다. SQL 교차 집계에서 `Temperature=NULL` 1,689,070행은 모두
+`DataContext=0`이고, 나머지 Temperature 3,805,787행과 TemperatureFast 12,471,472행은
+모두 `DataContext=1`이었다. 이는 저장된 값의 관계이며 enum의 의미를 확정한 것은 아니다.
+
+`DataTagId` 순서의 Temperature 한 행부터 다음 Temperature 직전까지의 TemperatureFast를
+한 저장 구간으로 묶었다. **행 인접성만 비교했으며 같은 취득 시점·원자적 측정으로 간주하지 않는다.**
+
+| Temperature가 NULL인 구간 | 구간 수 | NULL 전체 대비 |
+| --- | ---: | ---: |
+| 뒤따르는 고속 값이 모두 199.0 | 1,633,135 | 96.69% |
+| 199.0과 다른 고속 숫자가 섞임 | 39,418 | 2.33% |
+| 뒤따르는 고속 값에 199.0이 없음 | 16,517 | 0.98% |
+| 합계 | 1,689,070 | 100.00% |
+
+반대로 Temperature가 숫자인데 뒤따르는 고속 값이 모두 199.0인 구간도 4,613개다.
+따라서 NULL 1,689,070행을 모두 199.0과 같은 의미로 판정하거나, 인접 고속 값으로
+채워 넣을 근거는 없다. NULL 쪽 예외 55,935구간과 반대쪽 4,613구간을 합친
+60,548구간의 행ID·원시 시각·값 범위를 별도 CSV에 보존했다.
+예: 행98529의 Temperature는 NULL이나 뒤따르는 두 고속 값은 343.1과 445.5다.
+
+Temperature 태그 순서의 연속 NULL 구간은 49,558개이고, 가장 긴 구간은 179,455행이다.
+실제 경과 시간의 단위·epoch·시간대 및 공정 상태 계약을 확인하지 못했으므로 이를
+정지 시간이나 통신 장애 횟수로 해석하지 않는다. 행ID 연속성도 취득 데이터의 무누락을 증명하지 않는다.
+Temperature 태그 안에서 원시 DateTime이 앞선 값보다 감소한 지점4개도 별도 SQL로 확인했다.
+해당 행ID는 7023557, 7559151, 7974596, 10982315이며 시계 보정·저장 순서 등 원인은 미확정이다.
+
+[제조사 SPOTPro 안내서 812953 Issue3](https://ameteklandinstrumentscn.cdn.ametekweb.com/-/media/ameteklandinstruments/documentation/products/software/spotpro/ametek_land_812953_spotpro_user_guide_issue-3_en.pdf?la=zh-cn&revision=29448605-2d36-48ac-9767-6714ea97a8b5)의
+6-2쪽 색인 표는 현재 온도와 장비 속도의 고속 온도 스트림을 구분한다. 다른 소프트웨어의
+이 설명은 이번 SpotViewer DB의 NULL·199.0·DataContext 계약을 증명하지 않는다.
+SpotViewer 안내서 후속 검색의 점검 HTML 응답도 문서 안에 설명이 없다는 증거로 사용하지 않았다.
+
+[전체 분석](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_NULL_20261013_c1b03095/null-analysis.json),
+[예외 구간 목록](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_NULL_20261013_c1b03095/contradictory-or-unpaired-blocks.csv),
+[연속 NULL 구간](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_NULL_20261013_c1b03095/null-runs.csv),
+[문서 근거와 한계](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_NULL_20261013_c1b03095/source-review.json)를 보존했다.
+전체 집계 정산과 별도 SQL로 재조회한 6분류 표본72개가 일치했고 분석 actual exit0이다.
+[독립 검산](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_NULL_20261013_c1b03095/analysis-review.json)에서
+CSV 60,548구간·연속 NULL 49,558구간/1,689,070행과 원시 시각 감소4지점을 대조해 exit0을 확인했다.
+원본 DB·서버·후보 코드는 변경하지 않았다. 다음 확인 대상은 실제 기록 소프트웨어의 버전과
+NULL/199.0/DataContext 변환 계약, 예외 구간의 취득 관계다. R4 원인·영향·처리 및
+서버 원본 해시/사본 원자성은 미완료이며 `full_data_gate=NOT_EVALUATED`를 유지한다.
