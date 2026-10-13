@@ -3,7 +3,9 @@
 2026-10-13. **현재 App1: AL E에서 물리 comparator가 검증됐다고 판정할 근거는 아직 없다.**
 제조사 설명서의 적용 모드와 신호값 정밀도를 확인해, 단순히 화면의 1/2/3%를 모으는
 방법으로는 임계값 2%의 미만/동일/초과 검증을 마칠 수 없다는 조건을 구체화했다.
-운영 기준 승인 요청은 답변 대기다. 장비 설정·서버 앱·후보 설치본은 변경하지 않았다.
+이후 USER_SELF가 [관찰 프로파일](production-release-risk-validation-device-profile-20261013.report.md)을
+운영 기준으로 승인했다. 아래 물리 시험의 적용 범위·정밀도 조건은 별도로 남는다.
+장비 설정·서버 앱·후보 설치본은 변경하지 않았다.
 
 ## 제조사 자료와 실제 장비의 범위
 
@@ -79,4 +81,5 @@ CRLF를 정규화한 내용이 같음을 대조했다. 이것은 소프트웨어
 [직접 다운로드 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_COMPARATOR_20261013_4cb184e9/download.json),
 [소프트웨어 검사 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_COMPARATOR_20261013_4cb184e9/software-guards.json)을 연결한다.
 HTTP200 응답은 7,291바이트 HTML이므로 PDF 다운로드 성공으로 세지 않는다.
-실제 물리 경계 시험 `NOT_TESTED`, 운영 프로파일 승인 대기, 정식 출시 **HOLD**를 유지한다.
+실제 물리 경계 시험 `NOT_TESTED`, 관찰 운영 프로파일 승인 완료, 정식 출시 **HOLD**다.
+이 보고서의 기존 증거 묶음 안 승인 대기 표시는 당시 기록으로 보존한다.
