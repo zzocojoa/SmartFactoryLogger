@@ -173,3 +173,15 @@ R1~R6 각각: FACT 또는 INFERENCE / evidence 경로·해시 / PASS·FAIL·HOLD
 
 통과 기준은 회복 후에도 로그 하나로 실패한 고립 이미지 바이트를 식별할 수 있는 것이다.
 저장 방식·자동 복구·서버 설치는 이 변경에 포함하지 않는다. R5 원인 판정은 HOLD다.
+
+## 2026-10-13 현장 준비 패키지의 식별 계약
+
+후보1.0.28/4cc7393e/8821746b와 현재 롤백541d701d/08C061EE를 동일 묶음에 보존한다.
+`scripts/field-v1028/verify-field-package.ps1`은 외부 고정 manifest SHA와 전체 선언 파일의
+잠긴 read handle로 정확한 목록·크기·SHA·미서명 상태·기존 payload/backend/QA 출처를 검사한다.
+파일 경로와 실제 reparse, 변조된 버전/출처 및 승인 주장도 거부해야 한다.
+성공 범위는 전달 패키지 확인이며 installed tree/현장 QA와 분리한다. 성공 시에도
+설치·canary·승격 false/HOLD다. 자동 설치·HTTP·프로세스/설정 변경은 포함하지 않는다.
+같은 잠긴 도구 바이트를 실행하는 launcher와 전체 현장 수집·판정은 후속 단계다.
+정상2·부정16 실행과 서버 최종 경로/파일 존재 근거는
+[패키지 보고](../../04-report/production-release-risk-validation-field-package-20261013.report.md)에 기록한다.
