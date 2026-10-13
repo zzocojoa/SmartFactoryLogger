@@ -295,3 +295,15 @@ health의 build/logger/CSV/schema/sample을 원문 SHA와 보존하고 정확한
 충돌은 없었다. 계획에서 과거 프로파일 회귀와 최종 pinned attestation의 적용 범위를 명확히 했다.
 증거6,811항목의 ZIP 내부 SHA/CRC 및 공유 사본 SHA를 검산했다. 실제 정상 종료/CSV 전수 검증,
 보호된 launcher·UI/packet·현장15분/120분과 승격은 남는다. 운영/롤백·R1–R6 HOLD를 유지한다.
+
+## 2026-10-14 개별 이미지 검사 실행 파일
+
+[portable 이미지 검사](production-release-risk-validation-portable-image-qa-20261014.report.md)를
+clean 후보4cc의 기존 소스에서 빌드했다. 보존 I4/I5 사본 이미지133/199개와6가지 오류 조건,
+총24실행에서 Python/EXE 결과가 일치했다. 단위10시험·최종 도우미 Ruff exit0/skip0이다.
+누락/변조/디코딩/고립 이미지는 CSV 검사만 통과했고 최종 manifest 불일치는 이미지 검사만
+통과해 두 검사를 함께 적용해야 함을 확인했다. 원본344파일과 후보 소스1,009파일은 보존됐다.
+설명서 수정본6파일의 공유 SHA를 대조하고 서버 `Desktop/SmartFactory/IMG128_20261014_6cac921a_r2`
+최종 절대경로/파일 존재를 UI로 확인했다. 서버 로컬 해시·실행/전체 현장 QA는 미완료다.
+선택적 외부 fact 경로 부재는 실행 전후 확인에 한정되며 보호된 전체 입력 경계는 남는다.
+R1–R6 HOLD·full_data_gate NOT_EVALUATED·운영/다음 롤백541d/08C·미서명 정책을 유지한다.

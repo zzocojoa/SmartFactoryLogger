@@ -350,3 +350,23 @@ NOT_EVALUATED이고 release는 HOLD다. 앱 종료·설치·설정 변경은 이
 유지한다. 기존 CSV validator의 opt-in `--require-current-server-promotion-profile`은 특정
 과거 운영값(comparator verified=false 포함)의 회귀 조건이다. 최종 QA 실제 호출처럼 일반
 CSV 계약을 검사하고 별도의 최종 pinned attestation 조건을 적용하며 과거 상수는 바꾸지 않는다.
+
+### 5.12 전체 CSV 계약과 JPEG 바이트 검사의 별도 실행 파일
+
+기존 `validate_spot_image_files.py`를 후보4cc의 clean source와 잠긴 의존성 환경으로 패키징한다.
+제품/설치본과 기존 CSV 검사기 바이트는 변경하지 않는다. frozen 실행의 `__file__` 해시 기록을
+유지하기 위해 같은 원본 스크립트를 데이터로 동봉하고, 실행 결과의 tool SHA도 대조한다.
+빌드 전후 전체 tracked source·의존성·installer SHA와 새 EXE provenance를 보존한다.
+
+실제 보존 I4/I5 종료 사본의 이미지 subtree와 fact를 전수 검사한다. 외부에서 고정한 원본
+목록/크기/SHA를 복사 전후 확인하며 같은 입력으로 Python과 EXE의 요약·판정을 비교한다.
+복사본에만 이미지 누락·바이트 변조·fact와 SHA를 맞춘 디코딩 불가 파일·고립 파일·최종
+manifest 불일치를 주입한다. 기존 CSV 검사기만 통과하는 이미지 오류와 별도 이미지 검사만
+통과하는 manifest 오류를 보존한다. 두 결과를 함께 사용하며 어느 한 검사로 전체 QA를 대신하지 않는다.
+
+이 단계는 도구 준비와 보존된 격리 후보 자료의 검증이다. 전체 운영 데이터/실제 장비/현장
+승격 PASS가 아니다. CSV의 부가 fact 경로 소비 범위, 잠긴 입력과 결과/정상 종료의 연결,
+보호된 실행기·서버 로컬 전달/실행 및 실제15분/120분 조건은 후속 통합에 남긴다.
+
+구현 확인: portable 이미지 묶음의 서버 로컬 전달/파일 존재는 2026-10-14 r2 영수증으로
+확인했다. 서버 로컬 해시·실행 및 보호된 통합 실행기 전달은 아직 미완료다.
