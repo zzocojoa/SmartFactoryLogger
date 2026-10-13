@@ -391,3 +391,20 @@ posthoc fact/report를 외부 고정 목록의 SHA·크기에 대조하고 Windo
 이미지 바이트 검사·정상 종료·attestation·보호된 외부 실행기·최종 현장 QA는 함께 연결해야 한다.
 `shutdown_csv_inputs`는 앞서 관찰한 종료 기대값과 고정 설정 기준을 같은 잠긴 원본 metadata에
 적용한 뒤에만 명령을 노출한다. 실제 보존 attestation FAIL은 유지하고 합성 기준의 PASS와 구분한다.
+
+### 5.14 종료 사본 CSV·이미지 검사와 자손 종료의 단일 흐름
+
+CSV 입력 context와 동일 image fact를 사용해 전체 선택 이미지 subtree의 고정 목록을 대조하고
+각 기본 스트림과 이미지 EXE를 읽기 공유로 잠근다. 이미지 도구의 실행 전후 inventory도
+외부 고정 목록과 정확히 대조한다. 새 미선언 파일·누락·경로 교체·출력 불일치는 실패다.
+선택 입력의 출처/승인과 서버 전체 snapshot 증명은 외부 실행기의 책임으로 유지한다.
+
+두 고정 EXE는 새 gated worker를 Windows Job에 등록한 뒤 순차 실행한다. 원문 stdout/stderr,
+실제 exit와 worker exit, Job 잔존/강제 종료 여부를 보존한다. 시간·출력 예산 초과나 자손 잔존은
+FAIL이며 새 검사 자손만 정리한다. CSV·이미지 내용 검사와 두 입력 context 종료를 모두 통과한
+뒤에만 선택한 종료 사본 검사 PASS를 기록한다. 실제 종료 기대값/최종 설정을 필수로 받는
+상위 API와 데이터 소비 자체의 시험 API를 구분한다. 전체 현장/출시 gate는 계속 HOLD다.
+
+보존 I4/I5 이미지133/199개와 CSV를 함께 실행하고, 누락/변조/고립 이미지·잘못된 manifest,
+새 파일·잘못된 도구 출력·worker timeout/자손 잔존/감독자 손실을 검사한다. 기존 앱이나
+운영 설정은 변경하지 않는다. 실제 현장 물리 attestation·보호된 launcher 통합은 별도로 남는다.

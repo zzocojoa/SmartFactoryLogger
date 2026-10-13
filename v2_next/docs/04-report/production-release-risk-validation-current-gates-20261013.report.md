@@ -319,3 +319,14 @@ R1–R6 HOLD·full_data_gate NOT_EVALUATED·운영/다음 롤백541d/08C·미서
 실제 보존 attestation FAIL은 유지하며 합성 기준의 PASS는 현장 승인이 아니다.
 현재는 개발 모듈로, 보호된 통합 실행기·입력 inventory 출처 인증·이미지 바이트 결합·실제
 정상 종료·현장15분/120분·물리 경계와 승격이 남는다. R1–R6 HOLD 및 운영/롤백 기준을 유지한다.
+
+## 2026-10-14 같은 종료 사본의 CSV·이미지 QA 통합
+
+[종료 사본 QA](production-release-risk-validation-closed-data-qa-20261014.report.md)는 잠긴
+CSV/image fact와 선택 이미지 전체를 두 고정 EXE에 연결하고 실제 소비 목록도 대조한다.
+설치/재시작 사본 이미지133/199개 및 오류 주입에서 실제14실행의 예상 exit0 12개/exit1 2개를
+확인했다. 최종15시험·Ruff exit0/skip0, 원본344파일/두 EXE 불변, 기록된19 Job 잔존0이다.
+감독자 손실·timeout·잔류 자손·출력 초과·context 종료 오류는 FAIL을 유지했다.
+실제 보존 attestation FAIL은 명령 실행 전 거부했고 합성 기준의 성공은 현장 승인과 구분했다.
+보호된 외부 실행기·출처 인증·실제 정상 종료/관찰 연결·UI/packet·현장15분/120분·물리 경계와
+승격은 남는다. R1–R6 HOLD, full_data_gate NOT_EVALUATED, 현재 운영/롤백·미서명 정책을 유지한다.
