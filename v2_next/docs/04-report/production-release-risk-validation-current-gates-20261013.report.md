@@ -245,3 +245,16 @@ payload의 잠긴 읽기/종료 전 재검사와 PID/create-time/exe·listener·
 서버 기존 패키지 읽기의 결과 폴더는00:00 화면에서 관찰되지 않았고 실제 실행/hash 검증은 미확정이다.
 새 모듈의 서버 전달/실행, 전체 collector·watchdog·fingerprint/generation·최종 현장 QA와 승격은
 남아 있다. R1–R6 HOLD, full_data_gate NOT_EVALUATED 및 기존 운영/롤백 기준을 유지한다.
+
+## 2026-10-14 통합 관찰·시간 제한과 계측 자식 정리
+
+[HTTP/자원/식별 통합 관찰](production-release-risk-validation-observation-20261014.report.md)의
+최종21시험과 Ruff exit0, 합성 앱420초 재시험의1960요청·자원85/OS 식별85표본을 확인했다.
+GIL 유지350ms의 제어된 재현에서 이전 구조 이미지4슬롯 누락→프로세스 분리 후 누락0이었다.
+감독자 종료·고아 자식·Job 오류도 계측 Job만 정리하며 관찰 앱이 유지되는지 시험했다.
+첫420초 시도의 실제 ENOSPC·불완전 원문은 FAIL로 보존했다. 재시험 공간2094표본의 최솟값은
+13,723,275,264바이트였으나 과거 ENOSPC 순간과 원인은 미확정이다.
+부모 파일 쓰기까지 감싸는 보호된 launcher, generation/fingerprint, 화면/packet/정상 종료와
+실제 후보/서버15분·120분 QA 및 승격은 계속 남는다. 새 소스의 서버 실행/설치는 없었다.
+00:58 원격 폴더 새로 고침에도 기존 읽기 검증 결과는 관찰되지 않아 실제 실행/hash는 미확정이다.
+R1–R6 HOLD·full_data_gate NOT_EVALUATED·현재 운영/롤백541d/08C를 유지한다.

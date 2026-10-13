@@ -269,3 +269,25 @@ OS의 PID/create-time/exe, main→backend 관계, IPv4/IPv6 listener 소유자�
 최종 fingerprint·authenticated backend generation·watchdog·화면/packet/종료 경계와의
 전체 collector 통합은 계속 필요하다. 개발 PC23시험, 실제 추출1814파일 및 기존15표본 파서
 검증의 범위는 [식별 결합 보고](../../04-report/production-release-risk-validation-installation-binding-20261014.report.md)에 기록한다.
+
+### 5.8 같은 관찰 구간과 계측 프로세스의 종료 범위
+
+`field_observation.py`는 초기 설치/실행 식별 검사를 통과한 뒤 하나의 future monotonic 원점으로
+HTTP·자원·OS 식별 조회를 각각 별도 프로세스에서 실행한다. 첫/마지막 식별용 health GET과
+관찰 중 모든 health 본문에 같은 SPOT/logger UUID·build·backend 경로를 요구한다.
+원문 manifest의 정확한 파일 집합·크기·SHA를 재검산하고 자원 표본마다 backend 식별값을 확인한다.
+작업 종료 전에 설치 payload를 다시 검사한다. 짧은 개발 시험의 자원 범위는 NOT_MEASURED이며
+420초 이상 관찰은 기존 준비120초/측정300초 coverage 조건도 만족해야 한다.
+
+Windows 대기 함수 반환 뒤 monotonic deadline을 다시 확인하여 예정 시각 전 요청을 방지한다.
+HTTP 요청과 동기 native 조회는 별도 Python 프로세스에 둔다. GIL을 유지한 native 호출350ms의
+제어된 재현은 이전 thread 구조의 이미지4슬롯 누락과 새 구조의 누락0을 확인했다.
+이 결과를 기존 서버 timeout/drop 또는 주입하지 않은 host 지연의 원인 확정으로 확대하지 않는다.
+
+`field_windows_job.py`는 새 감독 자식의 생성 HANDLE을 이름 없는 Windows Job에 등록한 뒤
+실행 gate를 연다. 기존 관찰 대상 앱은 Job에 넣지 않는다. 준비/최종화 예산은 각각 최대180초,
+관찰은 최대7200초이며 finalizing 이벤트가 전체 deadline을 연장하지 않는다.
+종료·시간 초과·감독 프로세스 손실 때 Job의 계측 자식만 정리하고 실제 앱은 계속 실행한다.
+IPC 누락/과대 frame·해시 불일치·원문 손실·첫 health 지연·서비스 교체·중단은 FAIL/HOLD다.
+부모의 결과 쓰기까지 감싸는 보호된 외부 launcher, generation/fingerprint, 화면/packet/정상 종료
+증거와 실제 서버 설치/복구/15분/120분 QA는 여전히 필요하다. 이 API는 서버 실행 entrypoint가 아니다.
