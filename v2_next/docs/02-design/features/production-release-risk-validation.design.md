@@ -241,3 +241,17 @@ fixture의 기본 주기와 느린 이미지에 대한 독립성을 별도로 �
 HTTP `writes.json`은 원시 파일별 open/write/flush/fsync/close 시간을 보존한다.
 계측 추가가 누락 수정 또는 최종 통합/현장 QA 통과를 뜻하지 않는다. native API의 카운터
 활성화 효과와 단위·범위·프로세스/장치 식별 한계도 보고서와 결과에 기록한다.
+
+### 5.6 느린 원문 저장과 요청 주기의 분리
+
+HTTP 응답/해석 뒤의 원문·JSON 저장은 하나의 전용 worker로 처리한다. 대기열 기본 한도는
+256레코드·직렬화된 metadata+body64MiB이며 저장 중 레코드도 계산한다. 초과 시 수집을 실패로
+중단하고 일부 미보존 슬롯을 PASS로 세지 않는다. 전체 body4GiB 예산도 별도로 유지한다.
+요청 worker는 비중첩·원래 주기를 유지하며 밀린 요청을 연속 실행하지 않는다.
+저장 worker가 body→metadata를 각각 flush/fsync/close한 뒤에만 해당 요청을 persisted로 센다.
+수동 중단도 이미 수락한 자료를 배출한 뒤 FAIL을 기록한다. 저장 실패는 생성된 부분 파일의
+실제 크기/해시·failed_write 표시와 오류를 보존하고 성공 판정을 차단한다.
+대기/최대 적체·제출/저장/폐기 수·배출 시간·파일별 저장 시간을 분리한다. 아직 메모리에 있는
+대기 자료는 내구성이 확정되지 않았으며 프로세스 손실 시 완전한 manifest가 성립하지 않는다.
+동기 파일/드라이버 호출이 무기한 멈출 경우의 외부 watchdog은 현장 launcher 통합 조건이다.
+검증과 실패 기록은 [저장 분리 보고](../../04-report/production-release-risk-validation-persistence-20261013.report.md)에 연결한다.

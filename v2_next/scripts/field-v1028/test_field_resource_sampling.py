@@ -270,14 +270,110 @@ class ResourceTests(unittest.TestCase):
             result = http.collect_http_window(server.server_port, self.output, duration_seconds=.4,
                                               endpoints=(replace(http.ENDPOINTS[0], interval_seconds=.1),),
                                               origin_ns=time.perf_counter_ns() + 500_000_000)
-        self.assertEqual(result['http_component_status'], 'FAIL')
-        self.assertGreater(result['channels']['health']['missed_slots'], 0)
+        self.assertEqual(result['http_component_status'], 'PASS')
+        self.assertEqual(result['channels']['health']['missed_slots'], 0)
+        self.assertEqual(result['channels']['health']['requests'], 4)
+        self.assertEqual(result['persistence']['submitted_records'], result['persistence']['persisted_records'])
+        self.assertEqual(result['persistence']['pending_bytes'], 0)
+        self.assertEqual(result['persistence']['pending_records'], 0)
+        self.assertGreater(result['persistence_drain_ms'], 100)
         self.assertGreaterEqual(result['file_persistence_max_ms'], 120)
         trace = json.loads((self.output / 'writes.json').read_text())
         self.assertTrue(any(r['file'].endswith('.body') for r in trace['writes']))
         for row in trace['writes']:
             self.assertEqual(row['file_persistence_ms'], (row['finished_ns'] - row['started_ns']) / 1e6)
             self.assertGreaterEqual(row['file_persistence_ms'], 120)
+        verify_manifest(self.output)
+
+    def test_pending_budgets_fail_without_dropping_a_pass(self):
+        original = os.fsync
+
+        def slow_fsync(fd):
+            time.sleep(.12)
+            return original(fd)
+
+        self.output.mkdir()
+        for key, value in [('pending_byte_budget', 1), ('pending_record_budget', 1)]:
+            target = self.output / key
+            with local_server() as server, patch.object(http.os, 'fsync', slow_fsync):
+                result = http.collect_http_window(server.server_port, target, duration_seconds=.4,
+                                                  endpoints=(replace(http.ENDPOINTS[0], interval_seconds=.05),),
+                                                  origin_ns=time.perf_counter_ns() + 500_000_000,
+                                                  **{key: value})
+            self.assertEqual(result['http_component_status'], 'FAIL')
+            self.assertTrue(result['worker_errors'])
+            self.assertIn(key.replace('_', '-'), result['worker_errors'][0]['reason'])
+            self.assertEqual(result['persistence']['pending_records'], 0)
+            self.assertEqual(result['persistence']['pending_bytes'], 0)
+            verify_manifest(target)
+
+    def test_persistence_failure_preserves_partial_evidence(self):
+        original = os.fsync
+        counts = {'requests': 0}
+
+        def fail_first_request(fd):
+            if threading.current_thread().name == 'field-http-persistence':
+                counts['requests'] += 1
+                if counts['requests'] == 1:
+                    raise OSError('injected durable write failure')
+            return original(fd)
+
+        with local_server() as server, patch.object(http.os, 'fsync', fail_first_request):
+            result = http.collect_http_window(server.server_port, self.output, duration_seconds=.5,
+                                              endpoints=(replace(http.ENDPOINTS[0], interval_seconds=.1),))
+        self.assertEqual(result['http_component_status'], 'FAIL')
+        self.assertTrue(result['persistence_errors'])
+        self.assertGreater(result['persistence']['discarded_records'], 0)
+        self.assertEqual(result['channels']['health']['requests'], 0)
+        manifest = json.loads((self.output / 'manifest.json').read_text())
+        self.assertTrue(manifest['files']['health-00000.body']['failed_write'])
+        verify_manifest(self.output)
+
+    def test_cancellation_drains_accepted_records(self):
+        original = os.fsync
+        stop = threading.Event()
+
+        def cancel_during_request(fd):
+            if threading.current_thread().name == 'field-http-persistence':
+                stop.set()
+            return original(fd)
+
+        with local_server() as server, patch.object(http.os, 'fsync', cancel_during_request):
+            result = http.collect_http_window(server.server_port, self.output, duration_seconds=.5,
+                                              endpoints=(replace(http.ENDPOINTS[0], interval_seconds=.1),), stop_event=stop)
+        self.assertEqual(result['http_component_status'], 'FAIL')
+        self.assertEqual(result['persistence']['submitted_records'], result['persistence']['persisted_records'])
+        self.assertEqual(result['persistence']['discarded_records'], 0)
+        self.assertEqual(result['persistence']['pending_records'], 0)
+        verify_manifest(self.output)
+
+    def test_invalid_pending_budgets_before_output(self):
+        for args in ({'pending_byte_budget': 0}, {'pending_byte_budget': 256 * 1024**2 + 1},
+                     {'pending_record_budget': 0}, {'pending_record_budget': True}, {'pending_record_budget': 4097}):
+            with self.assertRaises(ValueError):
+                http.collect_http_window(1, self.output, duration_seconds=1, **args)
+            self.assertFalse(self.output.exists())
+
+    def test_default_channels_survive_one_second_durable_stall(self):
+        original = os.fsync
+        stalled = threading.Event()
+
+        def stall_once(fd):
+            if threading.current_thread().name == 'field-http-persistence' and not stalled.is_set():
+                stalled.set()
+                time.sleep(1)
+            return original(fd)
+
+        with local_server() as server, patch.object(http.os, 'fsync', stall_once):
+            result = http.collect_http_window(server.server_port, self.output, duration_seconds=6.2)
+        self.assertEqual(result['http_component_status'], 'PASS')
+        self.assertEqual({name: r['requests'] for name, r in result['channels'].items()},
+                         {'health': 4, 'data': 2, 'image': 25})
+        self.assertTrue(all(r['missed_slots'] == 0 for r in result['channels'].values()))
+        self.assertGreaterEqual(result['persistence']['peak_pending_records'], 4)
+        self.assertGreaterEqual(result['file_persistence_max_ms'], 1000)
+        self.assertEqual(result['persistence']['submitted_records'], 31)
+        self.assertEqual(result['persistence']['persisted_records'], 31)
         verify_manifest(self.output)
 
     def test_invalid_contracts_rejected_before_write(self):

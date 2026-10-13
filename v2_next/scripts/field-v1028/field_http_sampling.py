@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
 import socket
 import threading
 import time
@@ -268,7 +269,7 @@ def _prepare_output(output):
 
 def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                         timeout_seconds=5.0, stop_event=None, body_byte_budget=4 * 1024**3,
-                        origin_ns=None):
+                        origin_ns=None, pending_byte_budget=64 * 1024**2, pending_record_budget=256):
     """Collect a bounded component window. Caller owns installation/session binding."""
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('Loopback port required')
@@ -278,6 +279,10 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
         raise ValueError('Invalid timeout')
     if type(body_byte_budget) is not int or body_byte_budget <= 0:
         raise ValueError('Positive body byte budget required')
+    if type(pending_byte_budget) is not int or not 1 <= pending_byte_budget <= 256 * 1024**2:
+        raise ValueError('Pending byte budget must be in [1, 256 MiB]')
+    if type(pending_record_budget) is not int or not 1 <= pending_record_budget <= 4096:
+        raise ValueError('Pending record budget must be in [1, 4096]')
     endpoints = tuple(endpoints)
     if not endpoints or len({endpoint.name for endpoint in endpoints}) != len(endpoints):
         raise ValueError('Nonempty unique endpoints required')
@@ -297,13 +302,32 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
     files, rows, errors = {}, {e.name: [] for e in endpoints}, []
     write_timings = []
     body_bytes = 0
+    pending = queue.Queue(maxsize=pending_record_budget)
+    writer_failed = threading.Event()
+    persistence_errors = []
+    backlog = {'pending_bytes': 0, 'pending_records': 0, 'peak_pending_bytes': 0,
+               'peak_pending_records': 0, 'submitted_records': 0, 'persisted_records': 0,
+               'discarded_records': 0, 'byte_budget': pending_byte_budget, 'record_budget': pending_record_budget}
 
     def write_new(name, data):
         started = time.perf_counter_ns()
-        with (output / name).open('xb') as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
+        created = False
+        try:
+            with (output / name).open('xb') as stream:
+                created = True
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except Exception as error:
+            # Preserve a created partial file as failed evidence, never as a
+            # persisted request. Do not claim ownership of a pre-existing file.
+            if created:
+                raw = (output / name).read_bytes()
+                with lock:
+                    files[name] = {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
+                                   'failed_write': True, 'expected_bytes': len(data),
+                                   'error_type': type(error).__name__}
+            raise
         finished = time.perf_counter_ns()
         with lock:
             files[name] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
@@ -313,9 +337,56 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
     def write_json(name, record):
         write_new(name, (json.dumps(record, ensure_ascii=False, allow_nan=False) + '\n').encode('utf-8'))
 
+    def enqueue(name, record, body):
+        record['queued_ns'] = time.perf_counter_ns()
+        metadata = (json.dumps(record, ensure_ascii=False, allow_nan=False) + '\n').encode('utf-8')
+        size = len(metadata) + (len(body) if body is not None else 0)
+        with lock:
+            if writer_failed.is_set():
+                raise RuntimeError('persistence-worker-failed')
+            if backlog['pending_bytes'] + size > pending_byte_budget:
+                raise ValueError('pending-byte-budget')
+            if backlog['pending_records'] >= pending_record_budget:
+                raise ValueError('pending-record-budget')
+            pending.put_nowait((name, record, metadata, body, size))
+            backlog['pending_bytes'] += size
+            backlog['pending_records'] += 1
+            backlog['submitted_records'] += 1
+            for key in ('bytes', 'records'):
+                backlog['peak_pending_' + key] = max(backlog['peak_pending_' + key], backlog['pending_' + key])
+
+    def persist():
+        while True:
+            job = pending.get()
+            if job is None:
+                pending.task_done()
+                return
+            name, record, metadata, body, size = job
+            saved = False
+            try:
+                if not writer_failed.is_set():
+                    if body is not None:
+                        write_new(record['body_file'], body)
+                    write_new(f'{name}-{record["sequence"]:05d}.json', metadata)
+                    rows[name].append(record)
+                    saved = True
+            except Exception as error:
+                persistence_errors.append({'endpoint': name, 'sequence': record['sequence'],
+                                           'error_type': type(error).__name__, 'reason': str(error)[:2048]})
+                writer_failed.set()
+                stop.set()
+            finally:
+                with lock:
+                    backlog['pending_bytes'] -= size
+                    backlog['pending_records'] -= 1
+                    backlog['persisted_records' if saved else 'discarded_records'] += 1
+                pending.task_done()
+
     # Allow workers to be ready before a shared first slot; no unrecorded HTTP warmup.
     write_json('origin.json', {'origin_ns': origin, 'recorded_utc': datetime.now(timezone.utc).isoformat(),
                'duration_ns': duration, 'period_ns': period, 'expected_slots': counts,
+               'persistence_mode': 'BOUNDED_ASYNC_FSYNC_BEFORE_COMPLETION',
+               'pending_byte_budget': pending_byte_budget, 'pending_record_budget': pending_record_budget,
                'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                'scope': 'HTTP_COMPONENT_ONLY', 'field_gate': 'NOT_EVALUATED', 'release_gate': 'HOLD'})
 
@@ -326,12 +397,13 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
         try:
             for sequence in range(counts[name]):
                 target = origin + sequence * step
+                body = None
                 if stop.is_set():
                     record = {'kind': 'cancelled_remaining', 'sequence': sequence, 'scheduled_ns': target,
                               'remaining_slots': counts[name] - sequence}
                 elif previous_finished is not None and previous_finished >= target:
                     record = {'kind': 'missed_slot', 'sequence': sequence, 'scheduled_ns': target,
-                              'reason': 'previous-request-decode-or-persistence-overrun'}
+                              'reason': 'previous-request-decode-or-enqueue-overrun'}
                 elif stop.wait(max(0, (target - time.perf_counter_ns()) / 1e9)):
                     record = {'kind': 'cancelled_remaining', 'sequence': sequence, 'scheduled_ns': target,
                               'remaining_slots': counts[name] - sequence}
@@ -347,9 +419,7 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                         if body_bytes + len(body) > body_byte_budget:
                             raise ValueError('window-body-byte-budget')
                         body_bytes += len(body)
-                    write_new(record['body_file'], body)
-                write_json(f'{name}-{sequence:05d}.json', record)
-                rows[name].append(record)
+                enqueue(name, record, body)
                 if record['kind'] == 'request':
                     previous_finished = time.perf_counter_ns()
                 if record['kind'] == 'cancelled_remaining':
@@ -359,10 +429,19 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
                 errors.append({'endpoint': name, 'error_type': type(error).__name__, 'reason': str(error)})
             stop.set()
 
-    with ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix='field-http') as executor:
-        futures = [executor.submit(worker, endpoint) for endpoint in endpoints]
-        for future in futures:
-            future.result()
+    writer = threading.Thread(target=persist, name='field-http-persistence')
+    writer.start()
+    try:
+        with ThreadPoolExecutor(max_workers=len(endpoints), thread_name_prefix='field-http') as executor:
+            futures = [executor.submit(worker, endpoint) for endpoint in endpoints]
+            for future in futures:
+                future.result()
+    finally:
+        capture_finished = time.perf_counter_ns()
+        pending.put(None)
+        pending.join()
+        writer.join()
+    persistence_finished = time.perf_counter_ns()
     # Finish the planned observation interval even when its final request ended early.
     stop.wait(max(0, (origin + duration - time.perf_counter_ns()) / 1e9))
     # Preserve open/write/flush/fsync/close wall time separately from network latency.
@@ -371,11 +450,14 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
     write_json('writes.json', {'scope': 'ORIGIN_AND_REQUEST_FILES', 'writes': observed_writes})
     summary = {'scope': 'HTTP_COMPONENT_ONLY', 'origin_ns': origin, 'finished_ns': time.perf_counter_ns(),
                'duration_ns': duration, 'body_bytes': body_bytes, 'worker_errors': errors,
+               'capture_finished_ns': capture_finished, 'persistence_finished_ns': persistence_finished,
+               'persistence_drain_ms': (persistence_finished - capture_finished) / 1e6,
+               'persistence': dict(backlog), 'persistence_errors': persistence_errors,
                'stop_requested': stop.is_set(), 'channels': {
                    e.name: summarize_channel(e, rows[e.name], counts[e.name]) for e in endpoints},
                'file_persistence_max_ms': max((r['file_persistence_ms'] for r in observed_writes), default=None),
                'field_gate': 'NOT_EVALUATED', 'release_gate': 'HOLD', 'promotion_allowed': False}
-    summary['http_component_status'] = 'PASS' if not errors and not stop.is_set() and all(
+    summary['http_component_status'] = 'PASS' if not errors and not persistence_errors and not stop.is_set() and all(
         row['http_component_status'] == 'PASS' for row in summary['channels'].values()) else 'FAIL'
     write_json('summary.json', summary)
     write_json('manifest.json', {'schema_version': 'sfl-field-http-component-v1', 'files': dict(files)})
