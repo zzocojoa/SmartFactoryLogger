@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T08:21:32.588271+00:00",
+  "lastUpdated": "2026-10-13T08:57:25.440671+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3031,7 +3031,7 @@
         "releaseRiskStatus": {
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
           "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD",
-          "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending; metadata411798_name_search_and_manufacturer_DB17966329_rows_checked_no_approved_profile; official_indexed_Name_description_user_defined_not_exact_model; physical_SKU_UNDETERMINED_HOLD",
+          "R3": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; full_observed_profile_prepared_USER_SELF_approval_requested_pending; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD",
           "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD",
           "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
           "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; field_QA_and_other_gates_pending; HOLD"
@@ -6953,6 +6953,86 @@
             "serverOriginalDatabaseOrSettingsChanged": false,
             "promoted": false,
             "turnProgress": "PROGRESS_NEW_DATABASE_SCOPE_AND_EVIDENCE"
+          },
+          "deviceDirectIdentityAndProfileStage": {
+            "recordedAt": "2026-10-13T08:57:25.440671+00:00",
+            "status": "DEVICE_MODEL_AND_MODE_MAPPING_CONFIRMED_PROFILE_APPROVAL_PENDING",
+            "report": "docs/04-report/production-release-risk-validation-device-profile-20261013.report.md",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_DEVICE_INFO_20261013_e1c047c0",
+            "priorR3Summary": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending; metadata411798_name_search_and_manufacturer_DB17966329_rows_checked_no_approved_profile; official_indexed_Name_description_user_defined_not_exact_model; physical_SKU_UNDETERMINED_HOLD",
+            "deviceModel": "SPOT+ AL",
+            "deviceModelRaw": "SPOT+ AL    ",
+            "source": "Device GET /control?p=info viewed on server and saved as browser DOM HTML",
+            "firmware": "40.38",
+            "deviceModeMapping": {
+              "value": "7",
+              "label": "App1: AL E",
+              "appDiagnosticValue": "7"
+            },
+            "headerFields": {
+              "Type": "AL",
+              "Name": "Spot"
+            },
+            "browserFilesVerified": 28,
+            "httpAppGetsVerified": 4,
+            "appSnapshots": [
+              {
+                "stage": "before",
+                "build": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+                "spot": "efca4313-f987-4bb2-bcc8-4de40712396c",
+                "logger": "e9a785c0-46a2-45d2-bf7a-4187cce08771",
+                "rows": 223821,
+                "written": 44480,
+                "drops": 173,
+                "writer_failures": 0,
+                "settings_file_sha256": "55ea6a48ea1480891f8eeebf60969e3a25791335614aea5ab7c250466b31b220",
+                "fingerprint": "f84f9d9ddc3b958b1048cbf7bba37933d9e9e83e5b98ba666c6326154c2f74d5",
+                "config_operator_verified": false,
+                "comparator_verified": false,
+                "attestation_status": "fingerprint_mismatch"
+              },
+              {
+                "stage": "after",
+                "build": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+                "spot": "efca4313-f987-4bb2-bcc8-4de40712396c",
+                "logger": "e9a785c0-46a2-45d2-bf7a-4187cce08771",
+                "rows": 225927,
+                "written": 44913,
+                "drops": 173,
+                "writer_failures": 0,
+                "settings_file_sha256": "55ea6a48ea1480891f8eeebf60969e3a25791335614aea5ab7c250466b31b220",
+                "fingerprint": "f84f9d9ddc3b958b1048cbf7bba37933d9e9e83e5b98ba666c6326154c2f74d5",
+                "config_operator_verified": false,
+                "comparator_verified": false,
+                "attestation_status": "fingerprint_mismatch"
+              }
+            ],
+            "profileApproval": "PENDING_USER_SELF_CONFIRMATION",
+            "approvalQuestionScope": "Observed configuration as operational baseline only; not physical comparator proof or release PASS",
+            "physicalComparatorBoundary": "NOT_TESTED",
+            "automaticAppReadbackImplemented": false,
+            "reviewExit": 0,
+            "reviewerPriorFailure": "Wrong metadata key analog_low_c caused KeyError exit1; preserved and corrected to spot_analog_4ma_c",
+            "sharedRecord": {
+              "export_exit": 0,
+              "destination": "Z:\\SmartFactory\\20261013\\records\\PDCA_DEVICE_INFO_e1c047c0",
+              "files_including_manifest": 45,
+              "evidence_bytes_excluding_manifest": 1847695,
+              "manifest_sha256": "9290604178e4b67eebc31da433561faa8aa927adb863a1706885e3ce508e0295"
+            },
+            "releaseGate": "HOLD",
+            "fullDataGate": "NOT_EVALUATED",
+            "productSourceChanged": false,
+            "deviceSettingsChanged": false,
+            "installedOrRestarted": false,
+            "promoted": false,
+            "turnProgress": "PROGRESS_DEVICE_REPORTED_MODEL_AND_MODE_MAPPING_RESOLVED",
+            "limitations": [
+              "Browser save is DOM, not original HTTP wire bytes/headers.",
+              "Sequential pages are not an atomic whole-device snapshot.",
+              "Approval, physical boundary, and final-build attestation remain distinct.",
+              "Part number and calibration certificate validity were not established."
+            ]
           }
         }
       }
