@@ -258,3 +258,15 @@ GIL 유지350ms의 제어된 재현에서 이전 구조 이미지4슬롯 누락�
 실제 후보/서버15분·120분 QA 및 승격은 계속 남는다. 새 소스의 서버 실행/설치는 없었다.
 00:58 원격 폴더 새로 고침에도 기존 읽기 검증 결과는 관찰되지 않아 실제 실행/hash는 미확정이다.
 R1–R6 HOLD·full_data_gate NOT_EVALUATED·현재 운영/롤백541d/08C를 유지한다.
+
+## 2026-10-14 인증된 백엔드 세대의 경계 결합
+
+[인증 식별 모듈과 통합 관찰](production-release-risk-validation-generation-binding-20261014.report.md)에
+loopback control 인증·PID/generation/session/시작 시각 대조를 추가했다. 첫/마지막 인증 GET도
+각각200ms 조건을 적용한다. 최종 인증8·통합23·HTTP31시험 및 Ruff는 exit0/skip0이다.
+Unicode escape 토큰 응답의 수정 전 실패1개와 보완 후 결과를 보존했고, 최종 증거6,600항목을
+ZIP 내부 SHA/크기/CRC 및 공유 ZIP/manifest SHA로 검산했다.
+개발 fixture의 시작·종료 경계 검증이며 실제 후보/서버 QA나 중간 모든 순간의 인증은 아니다.
+보호된 외부 launcher·fingerprint/attestation·UI/packet·정상 종료/최종 delta 통합과 실제 현장
+설치/복구/15분/120분·승격이 남는다. 이번 새 소스의 장시간 성능 검사는 수행하지 않았다.
+R1–R6 HOLD·full_data_gate NOT_EVALUATED·현재 운영/롤백541d/08C와 미서명 정책을 유지한다.

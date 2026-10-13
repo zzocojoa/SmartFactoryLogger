@@ -291,3 +291,20 @@ HTTP 요청과 동기 native 조회는 별도 Python 프로세스에 둔다. GIL
 IPC 누락/과대 frame·해시 불일치·원문 손실·첫 health 지연·서비스 교체·중단은 FAIL/HOLD다.
 부모의 결과 쓰기까지 감싸는 보호된 외부 launcher, generation/fingerprint, 화면/packet/정상 종료
 증거와 실제 서버 설치/복구/15분/120분 QA는 여전히 필요하다. 이 API는 서버 실행 entrypoint가 아니다.
+
+### 5.9 인증된 백엔드 세대의 시작·종료 경계
+
+`field_generation_binding.py`는 잠긴 payload와 main/backend 경로를 확인한 후 OS 식별·listener를
+대조한다. 선택한 backend의 환경 API에서 embedded 표시·control token·generation만 사용한다.
+환경 사전 전체나 token/request header를 결과로 보존하지 않는다. 환경 조회 앞뒤와 GET 뒤의
+OS 식별값을 대조하고 접근 거부·프로세스 변경·누락 값은 실패로 처리한다.
+토큰을 보낼 수 있는 곳은 고정 `127.0.0.1:<확인한 포트>/api/control/health`의 GET뿐이다.
+기존 전체 요청 deadline과 크기/JSON 제한을 사용하며 redirect는 따라가지 않는다.
+응답에 토큰 원문·대소문자 변형·ASCII JSON unicode escape가 있으면 본문/헤더를 보존하지 않고 FAIL이다.
+환경 조회 예외는 타입만 기록하여 provider가 포함한 민감 문자열의 전달을 막는다.
+
+실제 후보 소스의 PID·32자리 generation·12자리 session·UTC 시작 시각 계약을 검사한다.
+첫 인증 GET과 종료 인증 GET은 각각200ms 조건을 적용하며 같은 identity를 요구한다.
+첫 인증 실패는 주기 관찰을 시작하지 않고, 종료 실패는 전체 관찰을 FAIL로 남긴다.
+이 검사는 시작·종료 경계 표본이며 모든 중간 순간의 증거는 아니다. 장비 fingerprint/attestation,
+보호된 외부 실행기·화면/packet·정상 종료/최종 delta·실제 현장 QA는 별도로 남는다.

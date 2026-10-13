@@ -1,7 +1,7 @@
 """Combine field components in a supervised, read-only observation worker.
 
 Development entry API, not the protected server launcher. UI, packet, device
-attestation, authenticated backend generation and shutdown evidence remain gates.
+attestation and shutdown evidence remain gates.
 The supervisor owns an unnamed Windows job. Its gated controller spawns only
 collector processes; the already running application is never assigned to it.
 """
@@ -20,6 +20,7 @@ import threading
 import time
 
 import field_installation_binding as binding
+import field_generation_binding as generation_binding
 import field_http_sampling as http
 import field_resource_sampling as resource
 from field_windows_job import CollectorJob
@@ -277,6 +278,9 @@ def run_observation(spec, output, duration_seconds, stop, notify):
             write_json(output / 'initial.json', initial)
             binding.require(initial['binding_status'] == 'PASS', 'initial-binding-failed')
             sessions = initial['sessions']
+            control_initial = generation_binding.capture_generation(payload, spec.main, spec.backend, spec.port)
+            write_json(output / 'control-initial.json', control_initial)
+            binding.require(control_initial['generation_status'] == 'PASS', 'initial-control-binding-failed')
             origin = time.perf_counter_ns() + 3_000_000_000
             result['origin_ns'] = origin
             write_json(output / 'observation.json', {'origin_ns': origin, 'duration_seconds': duration_seconds,
@@ -306,16 +310,22 @@ def run_observation(spec, output, duration_seconds, stop, notify):
             final = binding.capture_runtime_binding(payload, spec.main, spec.backend, spec.port,
                                                     expected_sessions=sessions)
             write_json(output / 'final.json', final)
+            control_final = generation_binding.capture_generation(payload, spec.main, spec.backend, spec.port,
+                expected_identity=control_initial['identity'])
+            write_json(output / 'control-final.json', control_final)
+            result['control_binding'] = dict(initial=control_initial, final=control_final,
+                                             scope='AUTHENTICATED_BOUNDARY_SAMPLES')
             result['closeout'] = payload.recheck()
             result['review'] = review_window(spec, output, origin, duration_seconds, sessions, [initial, final])
             if (result['review']['status'] == 'PASS' and not stop.is_set()
+                    and control_final['generation_status'] == 'PASS'
                     and all(code == 0 for code in result['component_exits'].values())):
                 result['observation_status'] = 'PASS'
     except Exception as error:
         result['errors'].append(resource.error_record(error))
         stop.set()
     result.update(stop_requested=stop.is_set(), finished_ns=time.perf_counter_ns())
-    result['remaining_gates'] = ['authenticated_backend_generation', 'device_fingerprint_attestation',
+    result['remaining_gates'] = ['device_fingerprint_attestation',
                                 'UI_web_vitals', 'packet_contract', 'normal_application_shutdown_and_final_delta',
                                 'all_release_plan_gates']
     return result

@@ -81,10 +81,11 @@ def after_ready_hang_worker(spec, output, duration, stop, sender):
         time.sleep(1)
 
 
-MAIN_SOURCE = '''import json,os,subprocess,sys
+MAIN_SOURCE = '''import json,os,secrets,subprocess,sys
 from pathlib import Path
 r=Path(__file__).parent
-p=subprocess.Popen([str(r/'resources/backend/SmartFactoryBackend.exe'),str(r/'backend.py'),sys.argv[1]],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=sys.stderr,text=True)
+env=dict(os.environ,SFL_CONTROL_TOKEN=secrets.token_hex(32),SFL_BACKEND_GENERATION_ID=secrets.token_hex(16),SFL_EMBEDDED_ELECTRON='1')
+p=subprocess.Popen([str(r/'resources/backend/SmartFactoryBackend.exe'),str(r/'backend.py'),sys.argv[1]],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=sys.stderr,text=True,env=env)
 line=p.stdout.readline()
 if not line: raise RuntimeError('Backend fixture failed to start')
 print(json.dumps(dict(main_pid=os.getpid(),backend=json.loads(line))),flush=True)
@@ -94,14 +95,17 @@ assert p.returncode==0,p.returncode
 '''
 
 BACKEND_SOURCE = '''import json,os,sys,threading,time
+from datetime import datetime,timezone
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 r=Path(__file__).parent
 mode=sys.argv[1]
 count=0
+control_count=0
+started=datetime.now(timezone.utc).isoformat(timespec='seconds')
 class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
-  global count
+  global count,control_count
   status=200
   if self.path=='/health':
    count+=1
@@ -110,6 +114,13 @@ class Handler(BaseHTTPRequestHandler):
    logger='22222222-2222-4222-8222-222222222222'
    if mode=='changed-service' and count>=3: logger='33333333-3333-4333-8333-333333333333'
    body=json.dumps(dict(app_version='1.0.28',runtime_kind='frozen',mode='REAL',executable_path=sys.executable,frontend_source='resources',frontend_static_ready=True,spot_temperature=dict(build_git_commit='4cc7393e1bafbf90a329726aed9470fe0daacb21',diagnostics_available=True,spot_service_instance_id='11111111-1111-4111-8111-111111111111',v2_4_operational=dict(enabled=True,logger_service_instance_id=logger)))).encode()
+  elif self.path=='/api/control/health':
+   control_count+=1
+   if mode=='slow-control': time.sleep(.25)
+   session='abcdef123456'
+   if mode=='control-changed' and control_count>=2: session='abcdef654321'
+   if self.headers.get('X-SFL-Control-Token')!=os.environ['SFL_CONTROL_TOKEN']: status=403
+   body=json.dumps(dict(running=True,backend_process_id=os.getpid(),backend_generation_id=os.environ['SFL_BACKEND_GENERATION_ID'],backend_session_id=session,started_at=started)).encode()
   elif self.path=='/api/spot/live_image.jpg': body=(r/'image.jpg').read_bytes()
   elif self.path=='/api/data': body=b'{"fixture":true}'
   else: status=404;body=b'{}'
@@ -379,6 +390,23 @@ class ObservationTests(unittest.TestCase):
             self.assertEqual(result['supervisor_status'], 'FAIL')
             worker, _ = observation.read_json(self.folder / 'out/worker-result.json')
             self.assertIn('health-1-session', worker['review']['issues'])
+
+    def test_authenticated_backend_session_change_is_not_passed(self):
+        with fixture_app(self.folder, 'control-changed') as spec:
+            result = observation.supervise_observation(spec, self.folder / 'out', duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'], 'FAIL')
+            worker, _ = observation.read_json(self.folder / 'out/worker-result.json')
+            self.assertEqual(worker['control_binding']['initial']['generation_status'], 'PASS')
+            self.assertEqual(worker['control_binding']['final']['generation_status'], 'FAIL')
+
+    def test_first_authenticated_health_latency_is_not_discarded(self):
+        with fixture_app(self.folder, 'slow-control') as spec:
+            result = observation.supervise_observation(spec, self.folder / 'out', duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'], 'FAIL')
+            control, _ = observation.read_json(self.folder / 'out/control-initial.json')
+            self.assertGreater(control['control_record']['client_request_and_body_ms'], 200)
+            self.assertEqual(control['generation_status'], 'FAIL')
+            self.assertFalse((self.folder / 'out/http').exists())
 
     def test_initial_failure_is_durable_and_collection_does_not_start(self):
         with fixture_app(self.folder, 'initial-error') as spec:

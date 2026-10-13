@@ -15,6 +15,7 @@ import math
 import os
 from pathlib import Path
 import queue
+import re
 import socket
 import threading
 import time
@@ -38,10 +39,11 @@ ENDPOINTS = (
     Endpoint('data', '/api/data', 6.0, 'json', 100, 500, 8 * 1024 * 1024),
     Endpoint('image', '/api/spot/live_image.jpg', .25, 'jpeg', 500, None, 2 * 1024 * 1024),
 )
+CONTROL_HEALTH = Endpoint('control_health', '/api/control/health', 5.0, 'json', 50, 200, 1024 * 1024)
 
 
 def _validate_endpoint(endpoint):
-    reference = next((item for item in ENDPOINTS if item.name == endpoint.name), None)
+    reference = next((item for item in (*ENDPOINTS, CONTROL_HEALTH) if item.name == endpoint.name), None)
     if reference is None or any(getattr(reference, key) != getattr(endpoint, key)
                                 for key in ('path', 'kind', 'warning_ms', 'failure_ms', 'max_body_bytes')):
         raise ValueError('Endpoint contract mismatch')
@@ -97,9 +99,22 @@ def _invalid_constant(value):
     raise ValueError('Non-finite JSON constant: ' + value)
 
 
-def fetch_sample(port, endpoint, *, timeout_seconds=5.0):
+def _contains_control_token(raw, token):
+    # Check ASCII JSON unicode escapes even in partial/invalid JSON. Credentials
+    # are lowercase ASCII hex; raw evidence containing that echo is withheld.
+    decoded_ascii = re.sub(rb'\\u00([0-9a-f]{2})',
+                           lambda match: bytes([int(match.group(1), 16)]), bytes(raw).lower())
+    return token.encode('ascii') in decoded_ascii.lower()
+
+
+def fetch_sample(port, endpoint, *, timeout_seconds=5.0, control_token=None):
     """Preserve full/partial response bytes; elapsed time excludes decoding/I/O."""
     _validate_endpoint(endpoint)
+    if endpoint.name == CONTROL_HEALTH.name:
+        if not isinstance(control_token, str) or re.fullmatch('[0-9a-f]{64}', control_token) is None:
+            raise ValueError('Control health requires a valid embedded token')
+    elif control_token is not None:
+        raise ValueError('Control token forbidden for other endpoints')
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('Loopback port required')
     if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 30:
@@ -120,8 +135,11 @@ def fetch_sample(port, endpoint, *, timeout_seconds=5.0):
         connection.connect()
         connected = time.perf_counter_ns()
         result['connect_ms'] = (connected - started) / 1e6
-        connection.request('GET', endpoint.path, headers={
-            'Connection': 'close', 'Accept-Encoding': 'identity', 'User-Agent': 'SFL-Field-HTTP-Probe/1'})
+        request_headers = {'Connection': 'close', 'Accept-Encoding': 'identity',
+                           'User-Agent': 'SFL-Field-HTTP-Probe/1'}
+        if control_token is not None:
+            request_headers['X-SFL-Control-Token'] = control_token
+        connection.request('GET', endpoint.path, headers=request_headers)
         sent = time.perf_counter_ns()
         result['send_ms'] = (sent - connected) / 1e6
         response = connection.getresponse()
@@ -178,6 +196,15 @@ def fetch_sample(port, endpoint, *, timeout_seconds=5.0):
     result.update(response_finished_ns=response_finished, finished_ns=time.perf_counter_ns(),
                   client_request_and_body_ms=(response_finished - started) / 1e6,
                   body_bytes=len(raw), body_sha256=hashlib.sha256(raw).hexdigest())
+    if control_token is not None and (_contains_control_token(raw, control_token)
+            or _contains_control_token(json.dumps(result, ensure_ascii=True).encode(), control_token)):
+        # A credential echo is never persisted as raw evidence. Fail closed and
+        # retain only the timing/status and the fact that content was withheld.
+        raw = bytearray()
+        result.update(headers=[], headers_bytes=0, headers_sha256=hashlib.sha256(b'').hexdigest(),
+                      body_bytes=0, body_sha256=hashlib.sha256(b'').hexdigest(),
+                      body_complete=False, decode_complete=False, sensitive_response_withheld=True,
+                      error_type='SensitiveResponse', error_reason='control-token-echo-withheld')
     result['request_success'] = (result['status'] == 200 and result['body_complete']
                                  and result['decode_complete'] and result['error_type'] is None)
     return result, bytes(raw)
