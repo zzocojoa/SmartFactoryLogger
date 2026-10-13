@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T10:22:14.600410+00:00",
+  "lastUpdated": "2026-10-13T10:46:22.574663+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3032,7 +3032,7 @@
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
           "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD",
           "R3": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; observed_operational_profile_APPROVED_BY_USER_SELF_record94873cc2; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD; physical_test_requires_App1_AL_E_firmware40_38_alarm_applicability_and_internal_equality_method; family_manual_and_integer_REST_output_insufficient; software_guard_tests7_exit0; USER_SELF_reports_CMD_OUT_not_connected_to_PLC_or_machine_control; independent_wiring_inspection_false; physical_trial_NOT_TESTED; REST_alarm_bit4_footnote_includes_Application_models_but_App1_40_38_mode_contract_unconfirmed; manufacturer_inquiry_SENT_Gmail_readback_verified_20261013_190627KST; physical_boundary_NOT_TESTED",
-          "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed; historical_SpotViewer17966329_rows_NULL1689070_context0_correlated_with_adjacent_fast199_all1633135_mixed39418_other16517; reverse_numeric_all199_4613; raw_temperature_time_reversals4; encoding_cause_and_business_disposition_unconfirmed",
+          "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed; historical_SpotViewer17966329_rows_NULL1689070_context0_correlated_with_adjacent_fast199_all1633135_mixed39418_other16517; reverse_numeric_all199_4613; raw_temperature_time_reversals4; encoding_cause_and_business_disposition_unconfirmed; archived_SpotViewer5.2.0.7443_static_contract_context0Unknown_1Celsius_invalid_to_NULL_and_multiple_invalid_paths_confirmed; five_DB_schemas_match; historical_executable_configuration_row_causes_and_disposition_unconfirmed",
           "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
           "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; field_QA_and_other_gates_pending; HOLD"
         },
@@ -7217,6 +7217,51 @@
             "releaseGate": "HOLD",
             "fullDataGate": "NOT_EVALUATED",
             "turnProgress": "PROGRESS_FULL_NULL_CORRELATION_AND_COUNTEREXAMPLES_RULE_OUT_UNIVERSAL_199_SUBSTITUTION"
+          },
+          "spotViewerPackagedContractStage": {
+            "recordedAt": "2026-10-13T10:46:22.574663+00:00",
+            "priorR4Summary": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed; historical_SpotViewer17966329_rows_NULL1689070_context0_correlated_with_adjacent_fast199_all1633135_mixed39418_other16517; reverse_numeric_all199_4613; raw_temperature_time_reversals4; encoding_cause_and_business_disposition_unconfirmed",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_SPOTVIEWER_SOFTWARE_20261013_be7bb618",
+            "reports": [
+              "docs/04-report/production-release-risk-validation-profile-search-20261013.report.md",
+              "docs/04-report/production-release-risk-validation-current-gates-20261013.report.md"
+            ],
+            "sharedRecord": {
+              "path": "Z:\\SmartFactory\\20261013\\records\\PDCA_SPOTVIEWER_SOFTWARE_be7bb618",
+              "files_including_manifest": 54,
+              "bytes_excluding_manifest": 16269459,
+              "manifest_sha256": "e3219c0b2ee002a3ce4364b1b91a50fc47eb38be6093ce80b76ef3f72f8bc1e2"
+            },
+            "reviewSha256": "ad299daba0526186cd872c4b817f13d7fb626703435a4bd25349533e487fcec5",
+            "verificationSha256": "218c064aa0ec3ba1cab9f8ed52c45fdffcb86e5b42dfaf793fe1c7b28779c890",
+            "verificationExit": 0,
+            "helperRuffExit": 0,
+            "selectedFilesVerified": 17,
+            "csharpExtractionExits": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "ilExtractionExits": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "matchingTableSchemas": 5,
+            "packagedVersion": "SpotViewer5.2.0.7443 / LandLibraries1.6.3.7443",
+            "installerSha256": "d0a29b4225343292c027f21c1e1aa21bc5f12d9fd94bae9de7ae9a1f1512e0bd",
+            "vendorCodeExecuted": false,
+            "historicalProducerIdentityConfirmed": false,
+            "rowSpecificNullCauseConfirmed": false,
+            "rawTimestampOrNullRewritten": false,
+            "sourceProductOrServerChanged": false,
+            "releaseGate": "HOLD",
+            "fullDataGate": "NOT_EVALUATED",
+            "turnProgress": "PROGRESS_PACKAGED_STORAGE_CONTRACT_AND_SCHEMA_VERIFIED_WITH_PROVENANCE_LIMIT"
           }
         }
       }

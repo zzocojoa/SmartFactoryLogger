@@ -142,3 +142,59 @@ CSV 60,548구간·연속 NULL 49,558구간/1,689,070행과 원시 시각 감소4
 원본 DB·서버·후보 코드는 변경하지 않았다. 다음 확인 대상은 실제 기록 소프트웨어의 버전과
 NULL/199.0/DataContext 변환 계약, 예외 구간의 취득 관계다. R4 원인·영향·처리 및
 서버 원본 해시/사본 원자성은 미완료이며 `full_data_gate=NOT_EVALUATED`를 유지한다.
+
+## 후속: 보존된 SPOTViewer 5.2 설치 자료의 저장 규칙
+
+NAS 보존 목록의 `99. 참고/SpotViewerV520.zip` 사본에서 설치 파일을 추출했다.
+ZIP의 전후 SHA256과 멤버 EOF·CRC를 확인했으며, `SpotViewerSetup.exe`는
+124,828,528바이트/SHA256 `d0a29b4225343292c027f21c1e1aa21bc5f12d9fd94bae9de7ae9a1f1512e0bd`다.
+MSI File 표에서 SpotViewer 실행 파일 버전은 `5.2.0.7443`, 주요 Land 라이브러리는
+`1.6.3.7443`이었다. 설치 프로그램과 제조사 코드를 실행하지 않고, CAB·MSI를 읽기 전용으로
+열어 선택 파일17개를 추출·해시 대조한 뒤 ILSpy 9.1.0.7988로 C#와 IL을 정적 분석했다.
+
+**아래는 이 설치 자료의 구현이며 역사 DB의 실제 실행본·설정 경로는 아직 확정하지 않았다.**
+서버 보존 목록에 같은 이름/크기의 ZIP이 있다는 사실도 동일 바이트나 당시 실행 이력을 증명하지 않는다.
+
+| 확인한 구현 경로 | 이 바이트에서 확인한 규칙 | 해석의 한계 |
+| --- | --- | --- |
+| `TagDataContext` | `0=Unknown`, `1=TemperatureC`, `2=TemperatureF`, `3=TemperatureK` | 0 자체를 실패 플래그로 해석하지 않음 |
+| `DataLogService`의 무효 `TimedDouble` | `-`와 기본 context0을 전달; 숫자 파싱 실패 시 nullable Value를 비워 둠 | 다른 비숫자 입력도 같은 결과 가능; 행별 무효 사유 미저장 |
+| `SqlLiteDataLogger.Log` | Value가 없으면 null 매개변수, 있으면 소수2자리 반올림; 시각은 `DateTime.Ticks` 저장 | 원인·원시 레지스터·시간대는 이 열에 남지 않음 |
+| `System5.ParseTemperature` | unsigned65534는 하한−1/무효, 65535는 상한+1/무효, 그 외 signed short는 10으로 나눠 유효 값으로 구성 | 장비가 당시 어느 레지스터를 보냈는지는 미확인 |
+| `System5.ParseLiveReadings` | 스캔 중 온도 유지 상태에서도 일반/검출기 온도를 무효로 구성 | 당시 스캔 유지 사용·작동을 증명하지 않음 |
+| `FileDataLogger.ReadValue` | Value 부재 시 `-` 출력; 단위 context가 있으면 표시 단위로 변환 | 모든 과거 CSV의 생성 경로·placeholder 원인이 확인된 것은 아님 |
+
+일반 `TimedDouble`을 저장하는 DataLogService 경로는 기록할 때의 `DateTime.Now`를 쓰고,
+컬렉션 직접 저장 경로는 원소의 `TimeStamp`를 쓴다. 그러나 cached 컬렉션 경로는 원소를
+일반 경로에 다시 넘기므로 시각을 새로 만들 수 있다. 별도의 `ConditionalDataLoggingStrategy`는
+TimeStamp를 유지하고 DataContext를 지정하지 않는 경로도 있다. 당시 선택된 기록 전략을
+확인하기 전에는 모든 고속 온도 시각이 장비 자체 시각이라고 해석하지 않는다.
+
+System5의 실제 통신 분기에서는 고속 버퍼 시각을 `DateTime.Now`에서
+`deviceUpdateRate` 간격으로 역산하며, 일반 온도 태그에는 경과300ms 이상에서 갱신하는
+분기가 있다. 이는 정적 구현의 조건이고, 당시 실제 취득 주기·기록 설정을 측정한 결과가 아니다.
+이 차이 때문에 인접 Temperature/TemperatureFast 행을 같은 취득의 대체 값으로 사용할 수 없다.
+
+[Microsoft DateTime.Ticks 문서](https://learn.microsoft.com/en-us/dotnet/api/system.datetime.ticks?view=net-8.0)는
+0001-01-01 자정 기준 100ns 단위와 Kind에 따른 시간대 의미를 설명한다.
+이번 IL에서 해당 속성 사용은 확인했으나, 역사 실행본·시간대 확인 없이 원시 정수를
+확정된 UTC/KST 시각으로 바꾸거나 시간 역전을 시계 보정으로 단정하지 않았다.
+
+Common의 생성문과 역사 DB의 DataTag/Recording/Settings/Frame/SystemInfo 정의5개는
+대소문자·공백·대괄호·선택적 IF NOT EXISTS·세미콜론을 정규화한 뒤 모두 일치했다.
+DB는 immutable/read-only로 열었고 전후 SHA256 `95ca1fe9…`가 같았다.
+이 구조 일치는 조사한 구현과의 일관성 근거이며 정확한 역사 버전의 증명은 아니다.
+NULL 1,689,070행을 일괄 저온/통신 실패/199.0으로 바꾸거나 복구하지 않았다.
+
+[구현 검토와 한계](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_SOFTWARE_20261013_be7bb618/static-contract-review.json),
+[바이트·스키마 대조](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_SOFTWARE_20261013_be7bb618/contract-verification.json),
+[설치 자료 출처](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_SOFTWARE_20261013_be7bb618/installer-extraction.json)를 보존했다.
+7z의 MSI 조회 exit1과 ILSpy 최신 버전 설치 exit1은 보존하고, 각각 Windows MSI 읽기 전용
+API와 ILSpy 9.1로 진행했다. MSI의 Burn SHA1과 추출 CAB 검증이 성공했으므로
+7z 메시지만으로 설치 자료 손상을 판정하지 않았다. 상세 실패·대체 절차는 검토 기록에 있다.
+
+C# 추출6개·IL 추출4개와 `verify_contract.py`는 actual exit0이다.
+후속 체크리스트는 당시 실행본/기록 설정의 연결, 동시기 레지스터·스캔·시계 로그 또는
+행 대조 가능한 내보내기 자료, 데이터 책임자의 영향·보존/처리 결정이다.
+제품·서버·원본을 변경하지 않아 health·NSIS·현장 시험을 반복하지 않았다.
+R4의 원인/영향/처리와 최종 현장 종료 delta는 미완료이며 전체 출시 HOLD를 유지한다.
