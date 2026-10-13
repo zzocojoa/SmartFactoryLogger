@@ -545,3 +545,15 @@ profile 보존, 네 앱/backend 정상 종료0을 확인했다. CSV v1/v2 각각
 총6건 때문이다. 시각 분류 exit0은 원래 실패를 PASS로 바꾸지 않는다. 회수 후 시험 Sandbox를
 종료했다. 제품 소스·서버·운영/롤백 기준 변경은 없다. 종료 이미지502·현장/전체 데이터/
 성능·설정·승격 근거가 남아 전체 목표 active, R1–R6 HOLD를 유지한다.
+
+
+## 2026-10-13 종료 이미지 502 보완 후보 v1.0.28
+
+renderer 이미지 응답 처리를 기다린 뒤 backend 종료를 시작하도록 보완했다.
+clean4cc7393e / installer8821746b의 출시 잠금 전체 health·빌드·정적 검증은 exit0이다.
+새 NSIS 설치/업그레이드/재시작/541d복구와 네 앱/backend native exit0, 설정/데이터/profile 보존,
+CSV각각1232행·이미지264개 및 validator8회 exit0을 확인했다.
+후보 두 종료의 신규502는0이며, 기존541d의 종료502 2건과
+누적 오류 조건 실패4개는 보존한다.
+[원인·실패/통과·실제 설치본·검산·보존](production-release-risk-validation-shutdown-image-20261013.report.md)을 따른다.
+서버 적용·승격은 없으며 전체 목표 active, R1–R6 HOLD와 운영/롤백 기준을 유지한다.

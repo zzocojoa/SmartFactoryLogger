@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T04:42:42.246438+00:00",
+  "lastUpdated": "2026-10-13T05:34:15.910399+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3034,7 +3034,7 @@
           "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending",
           "R4": "full_NAS_metadata and named temperature/plain source copies verified; all439 outer ZIP member audit records committed with2 BadZipFile preserved, final original rehash pending; known17046 archive CSV structure inspected, prior5 and delta149 findings classified by format with historical cause/business completeness open;127158 PLC CSV final job78990 running; server cold-copy final verification and all-image QA pending",
           "R5": "historical_drop15_and_current_541d_session_drop44_separate_UNCONFIRMED; local_reason_counters_verified",
-          "R6": "signing_requirement_REMOVED_BY_DIRECT_USER_UNSIGNED_INTERNAL_POLICY_20261012; v1.0.27_clean_19e0e314_installer_f17040fc_built_health_and_static_verified; offline_NSIS_clean_upgrade_previous_version_recovery_and_four_packaged_Electron_native_exit0_verified; config_data_profile_preserved; CSV_image_validators8_exit0; independent107of111_exit1_due_six_postclose_shutdown_image502_OPEN; field_QA_and_other_gates_pending; HOLD"
+          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; field_QA_and_other_gates_pending; HOLD"
         },
         "followup": {
           "goalStatus": "active",
@@ -6600,6 +6600,54 @@
             "r1R6": "HOLD",
             "fullDataGate": "NOT_EVALUATED",
             "next": "Shutdown image request lifecycle; browser/CDP OFF and three server starts; approved physical config/comparator; historic timeout/drop/full-data dispositions; final field15/120minute QA and promotion"
+          },
+          "shutdownImageCandidateStage": {
+            "recordedAt": "2026-10-13T05:34:15.910399+00:00",
+            "status": "CANDIDATE_SHUTDOWN_IMAGE_REGRESSION_VERIFIED_FIELD_QA_PENDING",
+            "report": "docs/04-report/production-release-risk-validation-shutdown-image-20261013.report.md",
+            "candidateCommit": "4cc7393e1bafbf90a329726aed9470fe0daacb21",
+            "version": "1.0.28",
+            "installerSha256": "8821746bbed47850ead68c66894e5580afac63483b1569865915dadc30cfc848",
+            "installerBytes": 164618981,
+            "healthActualExitCode": 0,
+            "backendPassed": 919,
+            "privateFixtureSkipped": 1,
+            "frontendVitestPassed": 437,
+            "electronTestsPassed": 100,
+            "payloadFiles": 1814,
+            "nativeCloseRuns": 4,
+            "candidateOrderedShutdownRuns": 2,
+            "newCandidateImage502": 0,
+            "originalVersionImage502": 2,
+            "independentReviewExitCode": 1,
+            "cumulativeErrorChecksFailed": 4,
+            "classificationExitCode": 0,
+            "csvRowsPerVersion": 1232,
+            "observations": 98,
+            "images": 264,
+            "csvImageValidatorExitCodes": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "archiveSha256": "159de979e539dd3ee3f6b96ac52007ab8c068bcc8494be9aba76069fcae6f852",
+            "manifestSha256": "6b0a91a131fa23687c0272ee089156980ba204c74ddaec0964b65dc13fdb5fec",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_SHUTDOWN_20261013_6b39ce41",
+            "runtimeRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_NSIS_FIX_20261013_6b39ce41",
+            "recordsRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_SHUTDOWN_RECORDS_20261013_6b39ce41",
+            "sharedDirectory": "Z:\\SmartFactory\\20261013\\records\\PDCA_SHUTDOWN_6b39ce41",
+            "signatureRequirement": "NOT_REQUIRED_BY_APPROVED_UNSIGNED_POLICY",
+            "sandboxDisposed": true,
+            "serverMutation": false,
+            "serverDelivered": false,
+            "promoted": false,
+            "r1R6": "HOLD",
+            "fullDataGate": "NOT_EVALUATED"
           }
         }
       }
