@@ -1,8 +1,9 @@
 # v1.0.27 미서명 후보 빌드·정적 패키지 검증
 
 2026-10-13. clean commit `19e0e314f7c1dc29b38691382aeda637f4ff3032`에서 미서명
-후보를 빌드했고 실제 설치본의 앱 payload와 출처를 검증했다. 설치·실행·서버 적용·운영 승격은
-아직 수행하지 않았다. 전체 목표 active, R1–R6 HOLD, full_data_gate=NOT_EVALUATED다.
+후보를 빌드했고 실제 설치본의 앱 payload와 출처를 검증했다. 후속 frozen backend 격리
+실행은 아래 추가 기록을 따른다. installer·Electron 전체 앱·서버 적용·운영 승격은 아직
+수행하지 않았다. 전체 목표 active, R1–R6 HOLD, full_data_gate=NOT_EVALUATED다.
 
 ## 후보와 운영본 식별
 
@@ -112,3 +113,60 @@ portable ZIP, 합성 junction/ADS fixture는 제외했다. 기본 스트림 스�
    실제 서버 시작 3회 등 남은 근거를 확보한다. 실장비 모델명은 기존 사용자 답변대로 미정이다.
 3. 최종 설치본의 현장 초기 15분/120분 canary·전체 새 데이터 QA 및 승격/적용 확인 후에만
    운영본과 다음 롤백 기준을 갱신한다. 이번 정적 검증만으로 R6를 완료 처리하지 않는다.
+
+## 2026-10-13 frozen backend 격리 시작·수집·재시작·정상 종료
+
+같은 installer에서 추출한 backend를 새 폴더에 복사해 파일별 해시를 대조한 뒤 실행했다.
+`V2_MODE=MOCK`, loopback 합성 SPOT, 별도 AppData/config/데이터 경로를 사용했다.
+제품 코드·installer 바이트는 변경하지 않았다. Electron 화면·installer·실장비는 실행하지 않았다.
+frontend HTML/JS를 HTTP로 읽은 검사는 화면 렌더링 QA가 아니다.
+
+| 시행 | 결과 | 범위 |
+|---|---|---|
+| 최초 도우미 `6f217cb9` | helper exit1, backend 정상 정리 exit0 | 실제 `./assets` 경로를 `/assets`로만 가정해 관측 전 중단. 실패 원문 보존 |
+| 기본 API `9c8470ad` | 30초/20초 두 실행 모두 OS exit0 | HTTP104개 성공, CSV246행·observation19행. 이미지 요청이 없어 이미지0 |
+| 이미지 포함 `f52b83d6` | 30초/20초 두 실행 모두 OS exit0 | HTTP129개 성공(이미지25 포함), CSV176행·observation19행·이미지25개 |
+
+기본 API 시행은 backend-only 배치로 내부 frontend fallback과 `legacy_meipass` 경고2개가
+발생했다. 이미지 시행은 actual payload의 frontend resource도 실제 상대 위치에 복사해
+`frontend_source=resources`, `frontend_runtime_warning=none`, HTML/JS HTTP200을 확인했다.
+이미지 저장은 log 하위 별도 폴더이며 기존 파일을 덮어쓰지 않는 새 실행별 루트를 사용했다.
+
+이미지 시행의 두 시작 준비는1.625/1.531초, health27개 최대30.2997ms였다. 이는 짧은 합성
+backend 시험이며 정식 120초 준비/300초 성능이나 실장비 시작3회를 대체하지 않는다.
+각 실행은 버전1.0.27/`runtime_kind=frozen`과 exact executable path를 반환했다.
+shutdown begin/final의 SHA sidecar·commit·PID·generation을 실제 OS 종료0과 연결했다.
+sidecar의 `process_exit_observed=false`·`installation_clearance=false`는 그대로 보존한다.
+
+독립 `verify_runtime.py`는 actual exit0이었다. 이미지 시행의 두 CSV103/73행 sequence와
+같은 logger 세대의 final closeout, 누적 observation19개/hash, 첫 실행 뒤 파일18개의 재시작
+후 접두부 보존을 검산했다. 이미지 writer는 각각15/10개 저장, 종료 시 실패/drop/queue/
+inflight/unfinished0, writes_drained/worker_stopped true이며 총25개 fact와 일치했다.
+초기 실패를 포함해 소유한 backend PID5개는 모두 종료됐음을 확인했다.
+
+기존 최종 source의 실제 검사 명령은 기록 묶음의 terminal JSON argv를 따른다.
+
+- `validate_spot_image_files.py`: exit0,25개 길이·해시·디코딩·fact 일치, 고아0/문제0.
+- `validate_csv_v2_shadow.py`: exit0, 마지막 CSV73행과 누적 observation19개/image25개 및
+  final manifest 확인. 첫103행은 별도 독립 sequence/closeout 검산 범위다.
+- CSV 검사에는 MOCK의 두 position 열 값 없음 경고2개가 있다. realtime observation 연결0,
+  v1 비교 미실행, server promotion profile 요구false, phase/changeover/linkage 일부
+  unknown/not applicable을 보존한다. 이 PASS는 실장비/전체 데이터/정식 QA 통과가 아니다.
+- 관찰한 로그에는 tzdata 관련 import/timezone 오류가 없었다. 모든 timezone 경로를
+  검증하거나 기존 빌드 경고를 제거한 것은 아니다.
+
+세 시행과 검산의166파일/6,556,200 bytes를 ZIP167항목과 전수 대조하고 공유 사본을
+확인했다. 보존 도우미 actual exit0. backend/frontend 바이너리 중복·tmp/localappdata·
+validator 임시 환경은 제외했으며 실제 installer는 앞선 후보 묶음에 보존한다.
+기본 스트림 스냅샷이고 전체 환경/ADS 백업·작업 루트 봉인은 아니다.
+
+- [runtime 검토 ZIP](C:/Users/user/Desktop/SmartFactory/PDCA_RUNTIME_RECORDS_20261013_f52b83d6/PDCA_FROZEN_RUNTIME_f52b83d6.zip):980,314 bytes.
+- ZIP SHA256 `cb10e613bfc69371530873d2d59a68996434c52783c09b1a0519e5058ae06a91`.
+- manifest SHA256 `f97c44d13c5420d4e3c30cba010e26b1764005d18e1508280ef7275110184703`.
+- [독립 검산](C:/Users/user/Desktop/SmartFactory/PDCA_RUNTIME_RECORDS_20261013_f52b83d6/runtime-verification.json),
+  [보존 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_RUNTIME_RECORDS_20261013_f52b83d6/snapshot-receipt.json).
+- 공유 `Z:/SmartFactory/20261013/records/PDCA_FROZEN_RUNTIME_f52b83d6`; 서버 최종 전달 아님.
+
+후속은 동일 installer의 격리 신규 설치·업그레이드·이전본 복구와 packaged Electron 전체 앱,
+설정/데이터 보존이다. 승인 장비 프로파일·물리 비교, 과거 timeout/drop 처리, 전체 데이터·
+성능·현장15분/120분 QA·승격/적용 확인은 남아 있다. 운영본/다음 롤백 기준은 유지한다.

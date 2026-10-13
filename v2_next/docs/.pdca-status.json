@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T03:50:30.468628+00:00",
+  "lastUpdated": "2026-10-13T04:09:14.335445+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-13T03:50:30.468628+00:00"
+        "lastUpdated": "2026-10-13T04:09:14.335445+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; exact clean commit/hash/payload/provenance and installation/recovery/device/performance/full-data/field QA remain required; no new installer applied or promotion",
@@ -3034,7 +3034,7 @@
           "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending",
           "R4": "full_NAS_metadata and named temperature/plain source copies verified; all439 outer ZIP member audit records committed with2 BadZipFile preserved, final original rehash pending; known17046 archive CSV structure inspected, prior5 and delta149 findings classified by format with historical cause/business completeness open;127158 PLC CSV final job78990 running; server cold-copy final verification and all-image QA pending",
           "R5": "historical_drop15_and_current_541d_session_drop44_separate_UNCONFIRMED; local_reason_counters_verified",
-          "R6": "signing_requirement_REMOVED_BY_DIRECT_USER_UNSIGNED_INTERNAL_POLICY_20261012; v1.0.27_clean_19e0e314_installer_f17040fc_built; locked_environment_full_health_exit0_919passed_1private_fixture_skip; 1814_payload_files_frontend_backend_ASAR_provenance_and_NotSigned_verified; runtime_install_upgrade_recovery_field_QA_pending; prior_receipt_timeout_cause_and_npm_audit_findings_open; HOLD"
+          "R6": "signing_requirement_REMOVED_BY_DIRECT_USER_UNSIGNED_INTERNAL_POLICY_20261012; v1.0.27_clean_19e0e314_installer_f17040fc_built; locked_environment_full_health_exit0_919passed_1private_fixture_skip; 1814_payload_files_frontend_backend_ASAR_provenance_and_NotSigned_verified; frozen_backend_MOCK_loopback_restart_data_shutdown_verified; packaged_Electron_install_upgrade_recovery_field_QA_pending; prior_receipt_timeout_cause_and_npm_audit_findings_open; HOLD"
         },
         "followup": {
           "goalStatus": "active",
@@ -6476,6 +6476,59 @@
             "workRootSealed": false,
             "r1R6": "HOLD",
             "fullDataGate": "NOT_EVALUATED"
+          },
+          "frozenCandidateRuntimeStage": {
+            "recordedAt": "2026-10-13T04:09:14.335445+00:00",
+            "status": "FROZEN_BACKEND_SYNTHETIC_SMOKE_VERIFIED_INSTALL_ELECTRON_FIELD_QA_PENDING",
+            "report": "docs/04-report/production-release-risk-validation-unsigned-candidate-20261013.report.md",
+            "candidateCommit": "19e0e314f7c1dc29b38691382aeda637f4ff3032",
+            "installerSha256": "f17040fc65d5856c29b04c2b919c6a4bebfca46520dccbb3ea046de2c034166d",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_RUNTIME_RECORDS_20261013_f52b83d6",
+            "successfulTrialRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_RUNTIME_20261013_f52b83d6",
+            "mockPLCAndLoopbackSPOT": true,
+            "backendRuns": 2,
+            "observationSeconds": [
+              30,
+              20
+            ],
+            "httpRequests": 129,
+            "httpFailures": 0,
+            "csvRows": 176,
+            "observationFactRows": 19,
+            "imageFilesAndFactRows": 25,
+            "normalOsExitCodes": [
+              0,
+              0
+            ],
+            "restartPrefixFilesVerified": 18,
+            "independentVerificationExitCode": 0,
+            "imageValidatorExitCode": 0,
+            "csvValidatorExitCode": 0,
+            "csvValidatorWarnings": [
+              "Two MOCK position columns have no values"
+            ],
+            "csvValidatorLimits": [
+              "Last 73-row CSV validated by existing CLI; 103-row first CSV independently reconciled",
+              "No v1 comparison",
+              "Realtime observation-key links 0",
+              "No current-server promotion profile requirement",
+              "Phase/changeover/linkage partly unknown or not applicable"
+            ],
+            "failedHelperAndFallbackWarningPreserved": true,
+            "tzdataRuntimeErrorObserved": false,
+            "allTimezonePathsValidated": false,
+            "electronOrBrowserStarted": false,
+            "installerExecuted": false,
+            "serverMutation": false,
+            "promoted": false,
+            "archiveSha256": "cb10e613bfc69371530873d2d59a68996434c52783c09b1a0519e5058ae06a91",
+            "manifestSha256": "f97c44d13c5420d4e3c30cba010e26b1764005d18e1508280ef7275110184703",
+            "snapshotInputFiles": 166,
+            "sharedDirectory": "Z:\\SmartFactory\\20261013\\records\\PDCA_FROZEN_RUNTIME_f52b83d6",
+            "serverDelivered": false,
+            "r1R6": "HOLD",
+            "fullDataGate": "NOT_EVALUATED",
+            "next": "Same installer isolated install/upgrade/previous-version recovery and packaged Electron QA; field gates remain"
           }
         }
       }
@@ -8517,6 +8570,15 @@
       "phase": "check",
       "timestamp": "2026-10-13T03:50:30.468628+00:00",
       "action": "Built_unsigned_1.0.27_19e0e314_and_verified_locked_health_static_payload_and_evidence_snapshot",
+      "goalStatus": "active",
+      "formalReleaseGate": "HOLD",
+      "fullDataGate": "NOT_EVALUATED"
+    },
+    {
+      "feature": "production-release-risk-validation",
+      "phase": "check",
+      "timestamp": "2026-10-13T04:09:14.335445+00:00",
+      "action": "Verified_exact_unsigned_candidate_frozen_backend_2_synthetic_runs_176_CSV_rows_25_images_and_normal_exit",
       "goalStatus": "active",
       "formalReleaseGate": "HOLD",
       "fullDataGate": "NOT_EVALUATED"

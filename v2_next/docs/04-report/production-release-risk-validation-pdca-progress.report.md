@@ -521,3 +521,14 @@ ASAR 소스·provenance 및 installer/앱/backend의 `NotSigned`를 검증했다
 간헐 종료 timeout 원인·npm audit 항목·tzdata 빌드 경고와 실제 런타임/설치/업그레이드/복구/
 현장 QA는 남아 있다. 서버 적용·승격·기준 갱신은 수행하지 않았다.
 전체 목표 active, R1–R6 HOLD와 full_data_gate=NOT_EVALUATED를 유지한다.
+
+## 2026-10-13 후보 frozen backend 격리 실행
+
+v1.0.27/19e0e314의 실제 추출 backend를 새 MOCK/loopback 환경에서 시작·재시작·정상 종료했다.
+기본 API 두 실행과 이미지 포함 두 실행의 OS exit는 모두0이다. 이미지 시행은 HTTP129개 성공,
+CSV176행·observation19개·이미지25개이며 종료 증거/세대/접두부 보존 검산과 기존 image/CSV
+validator는 exit0이었다. 최초 도우미의 상대 자산 경로 오류와 backend-only fallback 경고를
+보존했고, 실제 frontend 상대 배치에서는 resources/경고none을 확인했다.
+[범위·경고/미검증·원문·보존 해시](production-release-risk-validation-unsigned-candidate-20261013.report.md#2026-10-13-frozen-backend-격리-시작수집재시작정상-종료)를 따른다.
+짧은 합성 backend 시험이며 Electron 전체 앱·실제 설치/업그레이드/복구·현장 QA는 남아 있다.
+전체 목표 active, R1–R6 HOLD, full_data_gate=NOT_EVALUATED와 현재 운영·롤백 기준을 유지한다.
