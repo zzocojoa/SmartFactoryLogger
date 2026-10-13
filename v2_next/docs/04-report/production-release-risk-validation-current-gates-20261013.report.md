@@ -343,3 +343,17 @@ Python9시험, native12조건, portable6실행, bootstrap4조건 및 최종 감�
 8파일을 탐색기에서 확인했다. 실제 서버 해시/실행·최종 요청/attestation·정상 종료와
 최종 사본 연결·UI/packet·현장15분/120분·물리 경계 및 운영 승격은 남는다.
 R1–R6 HOLD, full_data_gate NOT_EVALUATED, 현재 운영/롤백541d/08C와 미서명 정책을 유지한다.
+
+## 2026-10-14 FREAD 서버 패키지 검증 완료
+
+[FREAD 후속 실행 결과](production-release-risk-validation-field-launch-20261013.report.md)의
+서버 관리자 실행은 `FIELD_PACKAGE_READ_VERIFIED`, child exit0·timeout false·stderr0,
+콘솔 `LAUNCH_EXIT=0`이었다. 결과4파일/3,896바이트를 서버 탐색기에서 새 공유 회수 폴더로
+복사하고 개발 PC로 회수했다. 콘솔 manifest SHA `3b60653c…`와 두 사본의 파일별 길이/SHA,
+서버·SID·후보4cc/882·롤백541d/08C·미서명 상태·검증 범위 등39조건의 검산이 exit0이었다.
+서버 전달 패키지의 manifest와26파일을 확인했으며, 이전 준비 단계의 서버 실행 미확인을
+이 후속 결과로 해소했다. 과거 준비 기록은 보존한다.
+
+이 완료는 FREAD의 패키지 읽기에 한정된다. 별도 RUN128 실행·최종 요청/attestation,
+설치된 트리·정상 종료/최종 사본·현장 QA·15분/120분·물리 경계·과거 finding 처리·운영 승격은
+남아 있다. R1–R6 HOLD, full_data_gate NOT_EVALUATED와 현재 운영/롤백541d/08C를 유지한다.

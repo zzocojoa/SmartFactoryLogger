@@ -2,8 +2,9 @@
 
 2026-10-13. 이미 전달한 후보·롤백·QA 패키지를 같은 잠금 바이트로 검증하고 결과를 보존하는
 도우미를 구현·시험했다. 서버 로컬 5파일과 절대경로를 화면으로 확인하고 명령문을 열어 두었다.
-실제 서버 관리자 실행·서버 패키지 SHA 확인은 아직 미확인이다. 설치·현장 QA·15분/120분
-canary·승격은 이번 도우미 범위에 없으며 R1–R6 HOLD, `full_data_gate=NOT_EVALUATED`를 유지한다.
+10월13일 준비 당시 서버 관리자 실행·서버 패키지 SHA 확인은 미확인이었다. 10월14일
+사용자 실행 결과를 회수해 아래 후속 절에서 확인했다. 설치·현장 QA·15분/120분 canary·승격은
+이번 도우미 범위에 없으며 R1–R6 HOLD, `full_data_gate=NOT_EVALUATED`를 유지한다.
 
 ## 식별과 실행 계약
 
@@ -90,11 +91,38 @@ SHA256은 `2b503f75147a9777cdb776f622c5f525ea2a1d6ef3abda21980315cf5a745796`다.
 
 ## 다음 단계
 
-1. 사용자 실행 뒤 콘솔의 경로·manifest SHA·종료 코드를 확인하고 결과4파일을 새 `return` 폴더로 회수한다.
-2. 콘솔 SHA와 회수 바이트, 실제 서버·SID·child exit·패키지 identity·HOLD 범위를 대조한다.
+1. 완료(10월14일): 콘솔 경로·manifest SHA·종료 코드를 확인하고 결과4파일을 새 `return` 폴더로 회수했다.
+2. 완료(10월14일): 콘솔 SHA와 회수 바이트, 서버·SID·child exit·패키지 identity·HOLD 범위를 대조했다.
 3. 전체15분/120분 수집·판정 도구와 설정 attestation·현장 QA를 준비한다. 현재 도우미는 패키지 읽기 단계다.
 4. 제조사 App1 경계 근거·물리 시험, 과거 finding 영향/처리, 최종 delta 등 기존 gate를 해결한 뒤
    동일 설치본의 현장 검증·운영 승격·실제 적용 확인과 다음 롤백 기준 갱신을 수행한다.
 
 제품 변경이 없어 전체 health/NSIS·대규모 원본 전수 검사는 반복하지 않았다.
 이번 기록은 설치나 승격의 선행 조건 면제 또는 정식 출시 완료가 아니다.
+
+## 2026-10-14 서버 관리자 실행·결과 회수 확인
+
+사용자 실행 후 실제 서버 `DESKTOP-CIIT7LK`의 콘솔에서 `FIELD_PACKAGE_READ_VERIFIED`,
+`LAUNCH_EXIT=0`을 확인했다. 검증 자식 PID9760은 08:06:48 KST에 시작해 08:07:00 KST에
+결과를 기록했다. child exit0, timeout false, stderr0바이트다. 서버 SID는
+`S-1-5-21-2762931165-1280404403-2847611662-1001`로 기준과 일치한다.
+
+- 서버 결과: `C:/Users/user/Desktop/SmartFactory/FREAD128_20261013_06df50b9/r-20261014-080648-1c87b62635884ed2a1fdefa956e0cd35`.
+- 공유 회수: `Z:/SmartFactory/20261014/return/FREAD128_080648_3b60653c/r-20261014-080648-1c87b62635884ed2a1fdefa956e0cd35`.
+- 개발 PC 증거: [회수·검산 기록](C:/Users/user/Desktop/SmartFactory/PDCA_FREAD_RESULT_20261014_3b60653c/verification-reviewed.json).
+- 콘솔 및 두 사본의 결과 manifest SHA256: `3b60653c50b117b9274ba98c35cd22b9d5432987797163f08891e3dd647e678c`.
+
+Codex가 탐색기로 결과를 공유 폴더에 복사하고 개발 PC로 회수했다. 결과4파일은 총3,896바이트다.
+[검산 명령](C:/Users/user/Desktop/SmartFactory/PDCA_FREAD_RESULT_20261014_3b60653c/verify-result.ps1)을
+실행해 실제39조건/exit0을 확인했다. 두 사본의 정확한 파일 집합, manifest 외부 SHA,
+3개 member의 길이/SHA, stdout과 result의 의미 일치, 서버·패키지 식별 및 판정 범위를 검사했다.
+
+서버 검증기는 패키지 manifest와 파일26개를 확인했다. 후보 `4cc7393e…`/installer `8821746b…`,
+롤백 `541d701d…`/installer `08c061ee…` 및 두 설치본의 `NotSigned`가 기준과 일치했다.
+컨트롤러의 결과 폴더 ACL 검사는 콘솔 manifest 출력 전에 통과했으며 탐색기 읽기·복사도
+성공했다. 원시 ACL을 별도로 회수하거나 다른 RUN128 실행기의 관리자 ACL을 검증한 것은 아니다.
+
+검증 범위는 `DELIVERY_PACKAGE_ONLY_NOT_INSTALLED_TREE_OR_FIELD_QA`다. 설치된 앱의 파일 대조,
+설정 attestation, 현장 QA, 15분/120분, 승격은 미실행으로 유지한다. RUN128의 실제 서버 실행과
+최종 요청 준비도 별도 미완료다. 기존 준비 시점의 미실행 표지와 봉인 자료는 보존한다.
+제품 코드 변경이 없어 health·재빌드·변경 없는 회귀시험은 반복하지 않았다.
