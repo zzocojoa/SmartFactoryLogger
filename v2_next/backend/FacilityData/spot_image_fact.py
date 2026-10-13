@@ -106,6 +106,23 @@ class SpotImageCaptureWriter:
                 return None
             return self._fact_digest.copy().hexdigest()
 
+    def try_manifest_stats(self) -> tuple[int, Optional[str], bool] | None:
+        """Read one coherent snapshot without waiting for capture file I/O."""
+        if not _SPOT_IMAGE_FACT_FILE_LOCK.acquire(blocking=False):
+            return None
+        try:
+            try:
+                self._validate_manifest_tracked_size()
+            except OSError:
+                self._manifest_state_ready = False
+            row_count = int(self._fact_row_count or 0)
+            if not self._manifest_state_ready:
+                return row_count, None, False
+            digest = self._fact_digest.copy().hexdigest() if self._fact_has_content else None
+            return row_count, digest, True
+        finally:
+            _SPOT_IMAGE_FACT_FILE_LOCK.release()
+
     def write_capture(
         self,
         *,

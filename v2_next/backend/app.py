@@ -1846,7 +1846,7 @@ async def lifespan(app: FastAPI):
                 if not image_capture_drained:
                     shutdown_failures.append("spot_image_capture")
                     _logger.error(
-                        "SPOT image capture queue did not drain before lifespan shutdown; "
+                        "SPOT image capture shutdown did not complete cleanly; "
                         "the final image fact manifest will be suppressed"
                     )
             if "comm_metrics" in started_services:
@@ -2098,7 +2098,10 @@ def _stop_services_for_control_shutdown(
         status=status,
     )
     if not image_capture_drained:
-        _logger.warning("SPOT image capture queue did not drain before control shutdown")
+        _logger.warning(
+            "SPOT image capture shutdown did not complete cleanly; "
+            "review pending writes and recorded write failures"
+        )
 
     _run_control_shutdown_stage(
         stage="plc_service",
@@ -3444,7 +3447,7 @@ def spot_config():
         "actuator_url": config.SPOT_ACTUATOR_URL,
         "focus_diagnostics": _spot_focus_diagnostics(),
         "image": spot_control.get_spot_diagnostics(),
-        "image_capture": spot_control.get_spot_image_capture_health(),
+        "image_capture": spot_control.get_spot_image_capture_health(wait_for_manifest=False),
     }
 
 @app.post("/api/spot/focus")

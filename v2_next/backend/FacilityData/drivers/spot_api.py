@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import hashlib
 import io
 import json
 import logging
@@ -258,6 +259,9 @@ _SPOT_IMAGE_CAPTURE_QUEUE: queue.Queue[_SpotImageCaptureEvent] = queue.Queue(max
 _SPOT_IMAGE_CAPTURE_STOP = threading.Event()
 _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED = threading.Event()
 _spot_image_capture_lock = threading.Lock()
+# Historical fact hashing/row scans must not block producer accounting or
+# memory-only shutdown snapshots. Writer construction has its own lock.
+_spot_image_capture_writer_lock = threading.Lock()
 _spot_image_capture_thread: Optional[threading.Thread] = None
 _spot_image_capture_writer: Optional[SpotImageCaptureWriter] = None
 _spot_image_capture_writer_signature: Optional[tuple[Path, Path, int, float]] = None
@@ -269,6 +273,8 @@ _spot_image_capture_last_error_message: Optional[str] = None
 _spot_image_capture_enqueued_count = 0
 _spot_image_capture_written_count = 0
 _spot_image_capture_dropped_count = 0
+_spot_image_capture_dropped_oversize_count = 0
+_spot_image_capture_dropped_queue_full_count = 0
 _spot_image_capture_failure_count = 0
 _spot_image_capture_last_fact: Optional[Dict[str, str]] = None
 _spot_image_shutdown_baseline: Optional[Dict[str, Any]] = None
@@ -573,7 +579,7 @@ def _spot_image_capture_config_signature() -> tuple[Path, Path, int, float]:
 
 def _get_spot_image_capture_writer() -> SpotImageCaptureWriter:
     global _spot_image_capture_writer, _spot_image_capture_writer_signature
-    with _spot_image_capture_lock:
+    with _spot_image_capture_writer_lock:
         signature = _spot_image_capture_config_signature()
         if _spot_image_capture_writer is None or _spot_image_capture_writer_signature != signature:
             _spot_image_capture_writer = SpotImageCaptureWriter(
@@ -604,6 +610,33 @@ def _start_spot_image_capture_worker(*, force: bool = False) -> None:
         _spot_image_capture_thread.start()
 
 
+def _spot_image_capture_failure_evidence(
+    event: _SpotImageCaptureEvent, error: Exception, *, stage: str, error_at: float, failure_count: int,
+) -> Dict[str, Any]:
+    sha256 = hashlib.sha256(event.image_bytes).hexdigest()
+    try:
+        captured_dt = datetime.fromtimestamp(event.captured_at, timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        # A bad capture timestamp must not prevent the next queued write.
+        captured_dt = None
+    return {
+        "schema_version": 1,
+        "event": "spot_image_capture_failure",
+        "error_at": error_at,
+        "captured_at": captured_dt.isoformat().replace("+00:00", "Z") if captured_dt is not None else None,
+        "capture_id": (f"spotimg_{captured_dt.strftime('%Y%m%dT%H%M%S%fZ')}_{sha256[:12]}"
+                       if captured_dt is not None else None),
+        "image_sha256": sha256,
+        "image_bytes": len(event.image_bytes),
+        "spot_service_instance_id": _spot_service_instance_id,
+        "failure_count": failure_count,
+        "stage": stage,
+        "error_type": error.__class__.__name__,
+        "errno": getattr(error, "errno", None) if isinstance(getattr(error, "errno", None), int) else None,
+        "winerror": getattr(error, "winerror", None) if isinstance(getattr(error, "winerror", None), int) else None,
+    }
+
+
 def _spot_image_capture_worker() -> None:
     global _spot_image_capture_failure_count, _spot_image_capture_last_fact
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
@@ -615,8 +648,12 @@ def _spot_image_capture_worker() -> None:
             continue
         fact: Optional[Dict[str, str]] = None
         capture_error: Optional[Exception] = None
+        failure_stage = "writer_initialization"
+        failure_at = 0.0
+        failure_count = 0
         try:
             writer = _get_spot_image_capture_writer()
+            failure_stage = "write_capture"
             fact = writer.write_capture(
                 image_bytes=event.image_bytes,
                 captured_at=event.captured_at,
@@ -645,12 +682,19 @@ def _spot_image_capture_worker() -> None:
                     assert capture_error is not None
                     _spot_image_capture_failure_count += 1
                     _spot_image_capture_last_error_at = time.time()
+                    failure_at = _spot_image_capture_last_error_at
+                    failure_count = _spot_image_capture_failure_count
                     _spot_image_capture_last_error_code = capture_error.__class__.__name__
                     _spot_image_capture_last_error_message = "capture writer failed"
                 _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
         if capture_error is not None:
+            # Default stderr formatting drops LogRecord.extra. Keep the safe
+            # capture identity in the message even after later writes recover.
             _logger.warning(
-                "SPOT image capture writer failed",
+                "SPOT image capture writer failed %s",
+                json.dumps(_spot_image_capture_failure_evidence(
+                    event, capture_error, stage=failure_stage, error_at=failure_at, failure_count=failure_count,
+                ), ensure_ascii=True, allow_nan=False, separators=(",", ":")),
                 extra={
                     "error_type": capture_error.__class__.__name__,
                 },
@@ -714,6 +758,8 @@ def _image_shutdown_status_locked() -> Dict[str, Any]:
         "written_count": _spot_image_capture_written_count,
         "failure_count": failures,
         "dropped_count": _spot_image_capture_dropped_count,
+        "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
+        "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
         "last_error_at": _spot_image_capture_last_error_at or None,
         "accounting_consistent": accounting,
         "writes_drained": writes_drained,
@@ -768,6 +814,7 @@ def stop_spot_image_capture_for_shutdown(timeout_sec: float = 2.0) -> bool:
 def _reset_spot_image_capture_state_for_tests() -> None:
     global _spot_image_capture_writer, _spot_image_capture_writer_signature, _spot_image_capture_thread
     global _spot_image_capture_enqueued_count, _spot_image_capture_written_count, _spot_image_capture_dropped_count
+    global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
     global _spot_image_capture_failure_count, _spot_image_capture_last_enqueue_at, _spot_image_capture_last_write_at
     global _spot_image_capture_last_error_at, _spot_image_capture_last_error_code, _spot_image_capture_last_error_message
     global _spot_image_capture_last_fact, _spot_image_shutdown_baseline
@@ -778,13 +825,16 @@ def _reset_spot_image_capture_state_for_tests() -> None:
             _SPOT_IMAGE_CAPTURE_QUEUE.task_done()
         except queue.Empty:
             break
-    with _spot_image_capture_lock:
+    with _spot_image_capture_writer_lock:
         _spot_image_capture_writer = None
         _spot_image_capture_writer_signature = None
+    with _spot_image_capture_lock:
         _spot_image_capture_thread = None
         _spot_image_capture_enqueued_count = 0
         _spot_image_capture_written_count = 0
         _spot_image_capture_dropped_count = 0
+        _spot_image_capture_dropped_oversize_count = 0
+        _spot_image_capture_dropped_queue_full_count = 0
         _spot_image_capture_failure_count = 0
         _spot_image_capture_last_enqueue_at = 0.0
         _spot_image_capture_last_write_at = 0.0
@@ -876,9 +926,23 @@ def _spot_image_capture_fact_stats() -> tuple[int, Optional[str], bool]:
         return writer.fact_row_count, None, False
 
 
-def get_spot_image_capture_health() -> Dict[str, Any]:
+def _spot_image_capture_fact_stats_if_available() -> tuple[Optional[int], Optional[str], bool]:
+    if not _spot_image_capture_writer_lock.acquire(blocking=False):
+        return None, None, False
+    try:
+        writer = _spot_image_capture_writer
+        if writer is None or _spot_image_capture_writer_signature != _spot_image_capture_config_signature():
+            return None, None, False
+        snapshot = writer.try_manifest_stats()
+        return snapshot if snapshot is not None else (None, None, False)
+    finally:
+        _spot_image_capture_writer_lock.release()
+
+
+def get_spot_image_capture_health(*, wait_for_manifest: bool = True) -> Dict[str, Any]:
     fact_row_count, fact_sha256, fact_manifest_state_ready = (
-        _spot_image_capture_fact_stats()
+        _spot_image_capture_fact_stats() if wait_for_manifest
+        else _spot_image_capture_fact_stats_if_available()
     )
     with _spot_image_capture_lock:
         last_fact = _spot_image_capture_last_fact or {}
@@ -893,6 +957,8 @@ def get_spot_image_capture_health() -> Dict[str, Any]:
             "fact_sha256": fact_sha256,
             "fact_manifest_state_ready": fact_manifest_state_ready,
             "dropped_count": _spot_image_capture_dropped_count,
+            "dropped_oversize_count": _spot_image_capture_dropped_oversize_count,
+            "dropped_queue_full_count": _spot_image_capture_dropped_queue_full_count,
             "failure_count": _spot_image_capture_failure_count,
             "last_enqueue_at": _spot_image_capture_last_enqueue_at or None,
             "last_write_at": _spot_image_capture_last_write_at or None,
@@ -1024,6 +1090,7 @@ def _maybe_enqueue_spot_image_capture(
     image_age_ms: Optional[float] = None,
 ) -> None:
     global _spot_image_capture_dropped_count, _spot_image_capture_enqueued_count, _spot_image_capture_last_enqueue_at
+    global _spot_image_capture_dropped_oversize_count, _spot_image_capture_dropped_queue_full_count
     if _SPOT_IMAGE_CAPTURE_ENQUEUE_DISABLED.is_set():
         return
     mode = _spot_image_capture_mode()
@@ -1033,6 +1100,7 @@ def _maybe_enqueue_spot_image_capture(
     if len(image_bytes) > max_bytes:
         with _spot_image_capture_lock:
             _spot_image_capture_dropped_count += 1
+            _spot_image_capture_dropped_oversize_count += 1
         return
     link_checked_at: Optional[float] = None
     snapshot = None
@@ -1061,6 +1129,7 @@ def _maybe_enqueue_spot_image_capture(
             _SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(event)
         except queue.Full:
             _spot_image_capture_dropped_count += 1
+            _spot_image_capture_dropped_queue_full_count += 1
             return
         _spot_image_capture_enqueued_count += 1
         _spot_image_capture_last_enqueue_at = now

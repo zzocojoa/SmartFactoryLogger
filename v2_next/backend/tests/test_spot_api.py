@@ -1,9 +1,12 @@
 import asyncio
 import csv
+import errno
 import hashlib
 import io
 import json
+import logging
 import os
+import queue
 import tempfile
 import threading
 import time
@@ -11,6 +14,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from collections.abc import AsyncIterator, Mapping
 from contextlib import ExitStack, asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.request import Request as UrlRequest
@@ -24,6 +28,7 @@ from PIL import Image
 from starlette.requests import Request as StarletteRequest
 
 from backend import app as backend_app
+from backend.FacilityData import spot_image_fact
 from backend.FacilityData.drivers import spot_api
 from backend.FacilityData.drivers.spot_http_transport import SpotPortBindError
 from backend.FacilityData.repository import CSVLoggerService
@@ -3991,6 +3996,130 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health["failure_count"], 1)
         self.assertTrue(outcome_and_task_done_are_atomic)
 
+    async def test_capture_failure_log_identifies_orphan_after_recovery_with_default_formatter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            writer = spot_api._get_spot_image_capture_writer()
+            append_fact = writer._append_fact
+            failure = PermissionError(errno.EACCES, "private-path http://secret.invalid/?token=secret")
+            failure.winerror = 32
+            attempts = 0
+
+            def fail_first_append(fact: Mapping[str, str]) -> None:
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise failure
+                append_fact(fact)
+
+            failed_bytes = _jpeg_bytes("orphan-after-fact-append-failure")
+            captured_at = time.time()
+            for offset, image_bytes in enumerate((failed_bytes, _jpeg_bytes("recovered"))):
+                spot_api._SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(spot_api._SpotImageCaptureEvent(
+                    image_bytes=image_bytes,
+                    captured_at=captured_at + offset,
+                    source_url="http://secret.invalid/?token=secret",
+                    source="private-source",
+                    image_age_ms=0.0,
+                    link_checked_at=None,
+                    observation_snapshot=None,
+                ))
+            with spot_api._spot_image_capture_lock:
+                spot_api._spot_image_capture_enqueued_count += 2
+            output = io.StringIO()
+            logger = logging.Logger("capture-failure-test")
+            handler = logging.StreamHandler(output)
+            self.addCleanup(handler.close)
+            logger.addHandler(handler)
+            with patch.object(writer, "_append_fact", side_effect=fail_first_append), patch.object(
+                spot_api, "_logger", logger,
+            ):
+                drained = spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2.0)
+            health = spot_api.get_spot_image_capture_health()
+            rows = self.read_spot_image_fact_rows(log_path)
+            orphans = [path for path in (log_path / "spot_images").rglob("*.jpg")
+                       if path.read_bytes() == failed_bytes]
+
+            self.assertFalse(drained)
+            self.assertEqual(spot_api._SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks, 0)
+            self.assertEqual(health["failure_count"], 1)
+            self.assertEqual(health["written_count"], 1)
+            self.assertIsNone(health["last_error_code"])
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(len(orphans), 1)
+            lines = output.getvalue().splitlines()
+            self.assertEqual(len(lines), 1)
+            prefix = "SPOT image capture writer failed "
+            self.assertTrue(lines[0].startswith(prefix))
+            evidence = json.loads(lines[0][len(prefix):])
+            self.assertEqual(evidence["schema_version"], 1)
+            self.assertEqual(evidence["event"], "spot_image_capture_failure")
+            self.assertEqual(evidence["capture_id"], orphans[0].stem)
+            self.assertEqual(evidence["image_sha256"], hashlib.sha256(failed_bytes).hexdigest())
+            self.assertEqual(evidence["image_bytes"], len(failed_bytes))
+            self.assertEqual(evidence["captured_at"], datetime.fromtimestamp(
+                captured_at, timezone.utc,
+            ).isoformat().replace("+00:00", "Z"))
+            self.assertEqual(evidence["error_at"], health["last_error_at"])
+            self.assertEqual(evidence["spot_service_instance_id"], "test-spot-service-instance")
+            self.assertEqual(evidence["failure_count"], 1)
+            self.assertEqual(evidence["stage"], "write_capture")
+            self.assertEqual(evidence["error_type"], "PermissionError")
+            self.assertEqual(evidence["errno"], errno.EACCES)
+            self.assertEqual(evidence["winerror"], 32)
+            self.assertNotIn("secret", lines[0])
+            self.assertNotIn("private", lines[0])
+            self.assertNotIn(temp_dir, lines[0])
+
+    async def test_capture_initialization_failure_with_invalid_time_does_not_stop_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            log_path = Path(temp_dir)
+            self.configure_image_capture(log_path, mode="all")
+            writer = spot_api._get_spot_image_capture_writer()
+            for captured_at in (float("nan"), time.time()):
+                spot_api._SPOT_IMAGE_CAPTURE_QUEUE.put_nowait(spot_api._SpotImageCaptureEvent(
+                    image_bytes=_jpeg_bytes("initialization-failure"),
+                    captured_at=captured_at,
+                    source_url="http://secret.invalid/",
+                    source="test",
+                    image_age_ms=None,
+                    link_checked_at=None,
+                    observation_snapshot=None,
+                ))
+            with spot_api._spot_image_capture_lock:
+                spot_api._spot_image_capture_enqueued_count += 2
+            output = io.StringIO()
+            logger = logging.Logger("capture-initialization-test")
+            handler = logging.StreamHandler(output)
+            self.addCleanup(handler.close)
+            logger.addHandler(handler)
+            spot_api._SPOT_IMAGE_CAPTURE_STOP.set()
+            with patch.object(spot_api, "_get_spot_image_capture_writer", side_effect=[
+                OSError(errno.ENOSPC, "private-path"), writer,
+            ]), patch.object(spot_api, "_logger", logger):
+                spot_api._spot_image_capture_worker()
+
+            self.assertFalse(spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2.0))
+            self.assertEqual(spot_api._SPOT_IMAGE_CAPTURE_QUEUE.unfinished_tasks, 0)
+            health = spot_api.get_spot_image_capture_health()
+            self.assertEqual(health["failure_count"], 1)
+            self.assertEqual(health["written_count"], 1)
+            self.assertIsNone(health["last_error_code"])
+            self.assertEqual(len(self.read_spot_image_fact_rows(log_path)), 1)
+            lines = output.getvalue().splitlines()
+            self.assertEqual(len(lines), 1)
+            evidence = json.loads(lines[0].removeprefix("SPOT image capture writer failed "))
+            self.assertIsNone(evidence["capture_id"])
+            self.assertIsNone(evidence["captured_at"])
+            self.assertEqual(evidence["stage"], "writer_initialization")
+            self.assertEqual(evidence["errno"], errno.ENOSPC)
+            self.assertIsNone(evidence["winerror"])
+            self.assertEqual(evidence["error_at"], health["last_error_at"])
+            self.assertNotIn("private", lines[0])
+            self.assertNotIn("secret", lines[0])
+            self.assertNotIn("NaN", lines[0])
+
     async def test_shutdown_helper_rejects_capture_failures_from_before_shutdown(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self.configure_image_capture(Path(temp_dir), mode="all")
@@ -4000,6 +4129,164 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
             drained = spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2.0)
 
         self.assertFalse(drained)
+
+    def test_image_writer_initialization_does_not_block_shutdown_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            initialization_started = threading.Event()
+            release_initialization = threading.Event()
+            snapshot_completed = threading.Event()
+            initialize = SpotImageCaptureWriter._initialize_manifest_state
+
+            def slow_initialize(writer: SpotImageCaptureWriter) -> None:
+                initialization_started.set()
+                if not release_initialization.wait(5.0):
+                    raise RuntimeError("test initialization was not released")
+                initialize(writer)
+
+            def snapshot() -> dict[str, Any]:
+                result = spot_api.begin_spot_image_capture_shutdown()
+                snapshot_completed.set()
+                return result
+
+            with patch.object(SpotImageCaptureWriter, "_initialize_manifest_state", slow_initialize):
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    writer_task = executor.submit(spot_api._get_spot_image_capture_writer)
+                    try:
+                        self.assertTrue(initialization_started.wait(2.0))
+                        snapshot_task = executor.submit(snapshot)
+                        self.assertTrue(
+                            snapshot_completed.wait(1.0),
+                            "memory-only shutdown snapshot waited for historical fact I/O",
+                        )
+                        self.assertTrue(snapshot_task.result(timeout=1.0)["accounting_consistent"])
+                    finally:
+                        release_initialization.set()
+                        writer_task.result(timeout=2.0)
+
+    def test_concurrent_image_writer_requests_construct_one_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            with patch.object(spot_api, "SpotImageCaptureWriter", wraps=SpotImageCaptureWriter) as construct:
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    writers = list(executor.map(
+                        lambda _: spot_api._get_spot_image_capture_writer(), range(8),
+                    ))
+            self.assertEqual(construct.call_count, 1)
+            self.assertTrue(all(writer is writers[0] for writer in writers))
+
+    def test_config_does_not_wait_for_image_writer_initialization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            initialization_started = threading.Event()
+            release_initialization = threading.Event()
+            response_completed = threading.Event()
+            initialize = SpotImageCaptureWriter._initialize_manifest_state
+
+            def slow_initialize(writer: SpotImageCaptureWriter) -> None:
+                initialization_started.set()
+                if not release_initialization.wait(5.0):
+                    raise RuntimeError("test initialization was not released")
+                initialize(writer)
+
+            def request_config() -> dict[str, Any]:
+                result = backend_app.spot_config()
+                response_completed.set()
+                return result
+
+            with patch.object(SpotImageCaptureWriter, "_initialize_manifest_state", slow_initialize):
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    writer_task = executor.submit(spot_api._get_spot_image_capture_writer)
+                    try:
+                        self.assertTrue(initialization_started.wait(2.0))
+                        config_task = executor.submit(request_config)
+                        self.assertTrue(
+                            response_completed.wait(1.0),
+                            "config response waited for historical image fact I/O",
+                        )
+                        capture = config_task.result(timeout=1.0)["image_capture"]
+                        self.assertIsNone(capture["fact_row_count"])
+                        self.assertIsNone(capture["fact_sha256"])
+                        self.assertFalse(capture["fact_manifest_state_ready"])
+                    finally:
+                        release_initialization.set()
+                        writer_task.result(timeout=2.0)
+
+    def test_image_writer_constructor_failure_can_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            with patch.object(spot_api, "SpotImageCaptureWriter", side_effect=OSError("synthetic read failure")):
+                with self.assertRaises(OSError):
+                    spot_api._get_spot_image_capture_writer()
+            self.assertIsNone(spot_api._spot_image_capture_writer)
+            self.assertIsNone(spot_api._spot_image_capture_writer_signature)
+            self.assertTrue(spot_api.get_spot_image_capture_shutdown_status()["accounting_consistent"])
+            writer = spot_api._get_spot_image_capture_writer()
+            self.assertIs(writer, spot_api._spot_image_capture_writer)
+            self.assertEqual(writer.fact_row_count, 0)
+
+    def test_cold_config_reports_unknown_manifest_without_starting_file_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            with patch.object(spot_api, "SpotImageCaptureWriter", wraps=SpotImageCaptureWriter) as construct:
+                response = TestClient(backend_app.app).get("/api/spot/config")
+            construct.assert_not_called()
+            self.assertEqual(response.status_code, 200)
+            capture = response.json()["image_capture"]
+            self.assertIsNone(capture["fact_row_count"])
+            self.assertIsNone(capture["fact_sha256"])
+            self.assertFalse(capture["fact_manifest_state_ready"])
+
+    def test_config_does_not_wait_for_image_fact_file_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            spot_api._get_spot_image_capture_writer()
+            file_lock_held = threading.Event()
+            release_file_lock = threading.Event()
+            response_completed = threading.Event()
+
+            def hold_file_lock() -> None:
+                with spot_image_fact._SPOT_IMAGE_FACT_FILE_LOCK:
+                    file_lock_held.set()
+                    if not release_file_lock.wait(5.0):
+                        raise RuntimeError("test file lock was not released")
+
+            def request_config() -> dict[str, Any]:
+                result = backend_app.spot_config()
+                response_completed.set()
+                return result
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                lock_task = executor.submit(hold_file_lock)
+                try:
+                    self.assertTrue(file_lock_held.wait(2.0))
+                    config_task = executor.submit(request_config)
+                    self.assertTrue(response_completed.wait(1.0))
+                    capture = config_task.result(timeout=1.0)["image_capture"]
+                    self.assertIsNone(capture["fact_row_count"])
+                    self.assertIsNone(capture["fact_sha256"])
+                    self.assertFalse(capture["fact_manifest_state_ready"])
+                finally:
+                    release_file_lock.set()
+                    lock_task.result(timeout=2.0)
+
+    def test_config_does_not_report_previous_path_manifest_after_path_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first_path = Path(temp_dir) / "first"
+            self.configure_image_capture(first_path, mode="all")
+            previous = spot_api._get_spot_image_capture_writer()
+            self.configure_image_capture(Path(temp_dir) / "second", mode="all")
+            capture = backend_app.spot_config()["image_capture"]
+            self.assertFalse(capture["fact_manifest_state_ready"])
+            self.assertIsNone(capture["fact_row_count"])
+            self.assertIsNone(capture["fact_sha256"])
+            self.assertIs(spot_api._spot_image_capture_writer, previous)
+            # Evidence consumers still initialize and validate the new path.
+            self.assertTrue(spot_api.get_spot_image_capture_health()["fact_manifest_state_ready"])
+            current = spot_api._spot_image_capture_writer
+            assert current is not None
+            self.assertNotEqual(current.fact_path, previous.fact_path)
+            self.assertTrue(backend_app.spot_config()["image_capture"]["fact_manifest_state_ready"])
 
     def test_image_capture_health_separates_worker_writes_from_fact_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4040,6 +4327,21 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
                 manifest_stats["fact_sha256"],
                 health["fact_sha256"],
             )
+            config_capture = backend_app.spot_config()["image_capture"]
+            self.assertTrue(config_capture["fact_manifest_state_ready"])
+            self.assertEqual(config_capture["fact_row_count"], 1)
+            self.assertEqual(config_capture["fact_sha256"], health["fact_sha256"])
+            # An external append must invalidate even the nonblocking snapshot.
+            with (log_path / "spot_image_fact.csv").open("ab") as handle:
+                handle.write(b"external-change\n")
+            invalid_capture = backend_app.spot_config()["image_capture"]
+            self.assertFalse(invalid_capture["fact_manifest_state_ready"])
+            self.assertIsNone(invalid_capture["fact_sha256"])
+            self.assertEqual(spot_api._spot_image_capture_fact_stats(), (1, None, False))
+            writer = spot_api._spot_image_capture_writer
+            assert writer is not None
+            with self.assertRaises(RuntimeError):
+                _ = writer.fact_sha256
 
     def test_image_capture_writer_dedupes_same_capture_id_after_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4208,7 +4510,51 @@ class SpotApiTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(spot_api.flush_spot_image_capture_queue(timeout_sec=1.0))
             self.assertEqual(self.read_spot_image_fact_rows(log_path), [])
-            self.assertEqual(spot_api.get_spot_image_capture_health()["dropped_count"], 1)
+            health = spot_api.get_spot_image_capture_health()
+            self.assertEqual(health["dropped_count"], 1)
+            self.assertEqual(health["dropped_oversize_count"], 1)
+            self.assertEqual(health["dropped_queue_full_count"], 0)
+
+    def test_image_drop_reasons_preserve_size_boundary_queue_and_shutdown_accounting(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.configure_image_capture(Path(temp_dir), mode="all")
+            image_bytes = _jpeg_bytes("queue-size-boundary")
+            spot_api.config.SPOT_IMAGE_CAPTURE_MAX_BYTES = len(image_bytes)
+
+            def enqueue(payload: bytes) -> None:
+                spot_api._maybe_enqueue_spot_image_capture(
+                    image_bytes=payload, captured_at=time.time(),
+                    image_url="http://spot.local/image.jpg", source="test",
+                )
+
+            with patch.object(spot_api, "_SPOT_IMAGE_CAPTURE_QUEUE", queue.Queue(maxsize=1)):
+                with patch.object(spot_api, "_start_spot_image_capture_worker"):
+                    enqueue(image_bytes)  # Equal to the maximum is accepted.
+                    enqueue(image_bytes)  # Same size, but the queue is full.
+                    enqueue(image_bytes + b"x")  # Exceeds the size maximum.
+                    spot_api.config.SPOT_IMAGE_CAPTURE_MODE = "off"
+                    enqueue(image_bytes + b"x")  # Policy off is not a drop.
+                    spot_api.config.SPOT_IMAGE_CAPTURE_MODE = "all"
+                    spot_api.config.SPOT_IMAGE_CAPTURE_MIN_INTERVAL_SEC = 10.0
+                    enqueue(image_bytes)  # Interval exclusion is not a drop.
+                before = spot_api.begin_spot_image_capture_shutdown()
+                self.assertTrue(spot_api.stop_spot_image_capture_for_shutdown(timeout_sec=2.0))
+                after = spot_api.get_spot_image_capture_shutdown_status()
+                health = spot_api.get_spot_image_capture_health()
+                rows = self.read_spot_image_fact_rows(Path(temp_dir))
+
+            self.assertEqual(before["enqueued_count"], 1)
+            self.assertEqual(before["unfinished_tasks"], 1)
+            self.assertEqual(after["written_count"], 1)
+            self.assertEqual(len(rows), 1)
+            for result in (before, after, health):
+                self.assertEqual(result["dropped_count"], 2)
+                self.assertEqual(result["dropped_oversize_count"], 1)
+                self.assertEqual(result["dropped_queue_full_count"], 1)
+                self.assertEqual(result["failure_count"], 0)
+            self.assertTrue(after["writes_drained"])
+            self.assertTrue(after["accounting_consistent"])
+            self.assertTrue(after["integrity_unresolved"])
 
     def test_image_capture_writer_rebuilds_when_capture_path_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

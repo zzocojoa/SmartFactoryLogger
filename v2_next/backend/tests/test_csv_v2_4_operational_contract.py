@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import tracemalloc
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -439,6 +440,72 @@ class CsvV24OperationalContractTests(unittest.TestCase):
         self.assertEqual(summary["spot_image_fact_final_manifest_file"], "spot_image_fact_manifest.final.json")
         self.assertEqual(summary["spot_image_fact_row_count_match"], "true")
         self.assertEqual(summary["spot_image_fact_sha256_match"], "true")
+
+    def test_spot_image_fact_manifest_large_valid_file_has_bounded_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            fact_path = log_dir / "spot_image_fact.csv"
+            row = ["capture-1", "spot_images/image.jpg", "a" * 64, "9064", "image/jpeg",
+                   "125.0", "fresh", "svc-1:42", "x" * 512]
+            row_count = 20000
+            with fact_path.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(self.image_fact_header + ["extra_metadata"])
+                for _ in range(row_count):
+                    writer.writerow(row)
+            metadata = self.image_fact_metadata(
+                fact_path, log_dir / "spot_images", row_count=row_count,
+                sha256=hashlib.sha256(fact_path.read_bytes()).hexdigest(),
+            )
+            # Isolate CSV/hash allocation from OS path lookup and mock call recording.
+            # The path rejection tests below still exercise the real resolver.
+            with patch.object(Path, "resolve", lambda path: path):
+                tracemalloc.start()
+                try:
+                    failures, summary = validate_spot_image_fact_manifest(
+                        metadata, log_dir / "sample.metadata.json",
+                    )
+                    _, peak_bytes = tracemalloc.get_traced_memory()
+                finally:
+                    tracemalloc.stop()
+        self.assertEqual(failures, [])
+        self.assertEqual(summary["spot_image_fact_actual_row_count"], str(row_count))
+        self.assertLess(peak_bytes, 8 * 1024 * 1024)
+
+    def test_spot_image_fact_manifest_parse_error_does_not_report_partial_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log_dir = Path(tmp)
+            fact_path = log_dir / "spot_image_fact.csv"
+            # A bad SHA precedes a late decoding error, beyond the text read buffer.
+            row = ["capture-1", "spot_images/image.jpg", "bad-sha", "9064", "image/jpeg",
+                   "125.0", "fresh", "svc-1:42"]
+            self.write_image_fact(fact_path, [row] * 200)
+            with fact_path.open("ab") as handle:
+                handle.write(b"\xff\n")
+            metadata = self.image_fact_metadata(
+                fact_path, log_dir / "spot_images", row_count=200,
+                sha256=hashlib.sha256(fact_path.read_bytes()).hexdigest(),
+            )
+            failures, summary = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
+        self.assertEqual(failures, ["spot_image_fact CSV read failed: UnicodeDecodeError"])
+        self.assertEqual(summary["spot_image_fact_actual_row_count"], "unknown")
+
+    def test_spot_image_fact_manifest_empty_and_header_only_contract(self) -> None:
+        for contents, expected_failures, expected_count in (
+            (b"", ["spot_image_fact CSV read failed: ValueError"], "unknown"),
+            (b"only_header\r\n", [], "0"),
+        ):
+            with self.subTest(contents=contents), tempfile.TemporaryDirectory() as tmp:
+                log_dir = Path(tmp)
+                fact_path = log_dir / "spot_image_fact.csv"
+                fact_path.write_bytes(contents)
+                metadata = self.image_fact_metadata(
+                    fact_path, log_dir / "spot_images", row_count=0,
+                    sha256=hashlib.sha256(contents).hexdigest(),
+                )
+                failures, summary = validate_spot_image_fact_manifest(metadata, log_dir / "sample.metadata.json")
+                self.assertEqual(failures, expected_failures)
+                self.assertEqual(summary["spot_image_fact_actual_row_count"], expected_count)
 
     def test_spot_image_fact_final_manifest_validator_rejects_mismatch_even_with_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

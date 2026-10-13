@@ -8,6 +8,7 @@ import json
 import math
 import re
 import sys
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -2048,7 +2049,11 @@ def validate_spot_image_fact_manifest(
         return failures, summary
 
     try:
-        fact_hash = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        with fact_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        fact_hash = digest.hexdigest()
     except OSError:
         failures.append("spot_image_fact could not be read")
         return failures, summary
@@ -2058,26 +2063,38 @@ def validate_spot_image_fact_manifest(
     if manifest_sha and fact_hash != manifest_sha and strict_manifest_stats:
         failures.append(f"{manifest_label}.sha256 does not match fact file")
 
-    try:
-        header, rows = read_csv(fact_path)
-    except Exception as exc:  # pragma: no cover - defensive CLI guard
-        failures.append(f"spot_image_fact CSV read failed: {exc.__class__.__name__}")
-        return failures, summary
+    with ExitStack() as stack:
+        try:
+            handle = stack.enter_context(fact_path.open("r", encoding="utf-8-sig", newline=""))
+            reader = csv.reader(handle)
+            header = next(reader, None)
+            if header is None:
+                raise ValueError("CSV file is empty")
+            # Count before row checks to preserve failure ordering and avoid partial
+            # row diagnostics when decoding/parsing fails late in a large file.
+            actual_row_count = sum(1 for _ in reader)
+        except Exception as exc:  # pragma: no cover - defensive CLI guard
+            failures.append(f"spot_image_fact CSV read failed: {exc.__class__.__name__}")
+            return failures, summary
 
-    summary["spot_image_fact_actual_row_count"] = str(len(rows))
-    row_count_matches = len(rows) == row_count
-    summary["spot_image_fact_row_count_match"] = _bool_text(row_count_matches)
-    if not row_count_matches and strict_manifest_stats:
-        failures.append(f"{manifest_label}.row_count={row_count}, actual spot_image_fact rows={len(rows)}")
-    missing_columns = [column for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS if column not in header]
-    if missing_columns and rows:
-        failures.append("spot_image_fact header missing columns: " + ", ".join(missing_columns))
-        return failures, summary
+        summary["spot_image_fact_actual_row_count"] = str(actual_row_count)
+        row_count_matches = actual_row_count == row_count
+        summary["spot_image_fact_row_count_match"] = _bool_text(row_count_matches)
+        if not row_count_matches and strict_manifest_stats:
+            failures.append(f"{manifest_label}.row_count={row_count}, actual spot_image_fact rows={actual_row_count}")
+        missing_columns = [column for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS if column not in header]
+        if missing_columns and actual_row_count:
+            failures.append("spot_image_fact header missing columns: " + ", ".join(missing_columns))
+            return failures, summary
 
-    if rows:
+        if not actual_row_count:
+            return failures, summary
         indices = {column: header.index(column) for column in SPOT_IMAGE_FACT_REQUIRED_COLUMNS}
         fact_parent = fact_path.parent.resolve()
-        for row_number, row in enumerate(rows, start=2):
+        handle.seek(0)
+        reader = csv.reader(handle)
+        next(reader)  # Header already checked on the same open file.
+        for row_number, row in enumerate(reader, start=2):
             if len(row) != len(header):
                 failures.append(f"spot_image_fact row {row_number} has {len(row)} columns, expected {len(header)}")
                 continue

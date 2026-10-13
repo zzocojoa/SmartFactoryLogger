@@ -2,6 +2,35 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.27] - Candidate, 2026-10-13
+
+### Changed
+
+- Keep image writer initialization and historical fact scans off producer
+  accounting locks; serve nonblocking, coherent manifest availability in SPOT
+  configuration reads. Startup and shutdown integrity checks remain required.
+- Distinguish oversized images from full-queue drops and retain safe capture
+  identity and failure-stage details when a write fails. Clarify shutdown
+  warnings when historical write failures remain after the queue drains.
+- Stream large image-fact validation, add image-file integrity checks, and
+  retain full client response latency, failed requests, and first samples in
+  operational collection. Add read-only inventory and stream-aware copy checks.
+- Update source-map-js to 1.2.2 within the existing dependency range and cover
+  indexed source-map offset limits.
+- Apply the user's ongoing unsigned internal operation policy while retaining
+  exact source identity, installer hashes, payload verification, and technical QA.
+
+### Validation status
+
+- This entry identifies a candidate; installation and operating promotion are
+  pending. The prior operating installer remains the rollback baseline.
+- Earlier isolated tests and performance evidence have explicit limits. Release
+  lock versions differ from the development environment for nine packages.
+  Fresh candidate validation must use the release lock and this source version.
+- Intermittent shutdown receipt timeouts, remaining npm audit findings, device
+  profile and full data dispositions, final package and field QA remain open.
+  Later passing runs do not erase earlier failures or supply missing evidence.
+
 ## [1.0.26] - 2026-09-11
 
 ### Changed

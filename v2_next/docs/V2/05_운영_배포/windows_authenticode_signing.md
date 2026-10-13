@@ -1,5 +1,22 @@
 # Windows Authenticode 서명 운영
 
+## 현재 SmartFactoryLogger 사내 서버 운영 정책
+
+`정책 변경 기준: 2026-10-12 사용자 지시`
+
+사용자는 코드 서명 인증서가 없으며 앞으로도 미서명으로만 운영하겠다고 지시하고,
+출시계획의 서명된 설치본 조건을 변경하도록 요청했다. 해당 사내 서버의 운영·이후 개선본에는
+**미서명 내부 운영 경로**를 계속 적용한다. 이 결정은 일시적 인증서 확보 대기가 아니다.
+인증서·서명 담당자·`production-signing` 설정·서명자·Authenticode `Valid`·타임스탬프는
+이 운영 경로의 선행 조건에서 제외하며, 같은 미서명 정책 승인을 반복 요구하지 않는다.
+installer와 packaged Electron 앱의 실제 상태는 `NotSigned`, 서명 요구 판정은
+`NOT_REQUIRED_BY_APPROVED_UNSIGNED_POLICY`로 기록한다. 서명 검증 PASS로 표시하지 않는다.
+정확한 clean commit·버전/태그·SHA256·manifest/provenance·payload 및 설치/복구·현장 QA는 유지한다.
+아래의 미서명 내부 운영 절과 [현재 출시 계획](../../01-plan/features/production-release-risk-validation-codex-production-release-risk-validation-20261010.plan.md)을 함께 적용한다.
+미서명 상태나 인증서 부재만으로 현재 출시 작업을 HOLD하지 않으며, 남은 기술 검증은 각각 판정한다.
+기존 signed workflow/서명 검사기는 별도 서명 경로로 보존한다. 기존 봉인 증거·Windows 보안 설정은 변경하지 않는다.
+이 지시의 범위는 해당 내부 운영이며 외부 제공 승인을 추가하지 않는다.
+
 ## 목적
 
 Windows 외부·고객 배포와 정식 상용 운영 설치본은 원칙적으로 정확한 Git commit에서 생성되고,

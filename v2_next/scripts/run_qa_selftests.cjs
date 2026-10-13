@@ -2,6 +2,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const selfTests = [
+  'collect_operational_observability.ps1',
   'measure_nsis_operational_ready.ps1',
   'collect_nsis_startup_trace.ps1',
   'run_closeout_hang_reproduction.ps1',

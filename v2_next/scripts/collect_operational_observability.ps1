@@ -87,6 +87,100 @@ function Test-CollectionProgressDue {
 }
 
 function Invoke-SelfTest {
+  # Dynamic local scope keeps the timing regression entirely offline.
+  function Invoke-WebRequest {
+    param($Uri, $Method, $TimeoutSec, [switch]$UseBasicParsing)
+    $response = [pscustomobject]@{ StatusCode = 200 }
+    $response | Add-Member -MemberType ScriptProperty -Name Content -Value {
+      Start-Sleep -Milliseconds 30
+      return '{"status":"ok"}'
+    }
+    return $response
+  }
+  $timedResponse = Invoke-ReadOnlyEndpoint -Uri 'http://synthetic.invalid/health' -Timeout 1
+  if ($null -eq $timedResponse.client_elapsed_ms -or $timedResponse.client_elapsed_ms -lt 20 -or
+      -not $timedResponse.ok -or $timedResponse.body -ne '{"status":"ok"}') {
+    throw 'Self-test failed: full client response timing was not preserved.'
+  }
+  Remove-Item -LiteralPath Function:Invoke-WebRequest
+
+  function Invoke-WebRequest {
+    param($Uri, $Method, $TimeoutSec, [switch]$UseBasicParsing)
+    Start-Sleep -Milliseconds 30
+    throw [System.Net.WebException]::new('synthetic timeout', [System.Net.WebExceptionStatus]::Timeout)
+  }
+  $timedFailure = Invoke-ReadOnlyEndpoint -Uri 'http://synthetic.invalid/health' -Timeout 1
+  if ($timedFailure.ok -or -not $timedFailure.timed_out -or
+      $timedFailure.client_elapsed_ms -lt 20 -or $timedFailure.status_code -ne 0 -or
+      $timedFailure.error -ne 'WebException' -or $null -eq $timedFailure.request_started_at) {
+    throw 'Self-test failed: timeout and its elapsed time were not preserved.'
+  }
+  Remove-Item -LiteralPath Function:Invoke-WebRequest
+  function Invoke-WebRequest {
+    param($Uri, $Method, $TimeoutSec, [switch]$UseBasicParsing)
+    throw [System.IO.IOException]::new('synthetic read failure')
+  }
+  $readFailure = Invoke-ReadOnlyEndpoint -Uri 'http://synthetic.invalid/health' -Timeout 1
+  if ($readFailure.ok -or $readFailure.timed_out -or $readFailure.error -ne 'IOException' -or
+      $null -eq $readFailure.client_elapsed_ms) {
+    throw 'Self-test failed: read failure was lost or misclassified as a timeout.'
+  }
+  Remove-Item -LiteralPath Function:Invoke-WebRequest
+
+  $firstSlow = Get-ClientHealthLatencySummary -ExpectedSamples 3 -RawIndex @(
+    [pscustomobject]@{ endpoint = 'health'; sample = 1; ok = $true; status_code = 200; client_elapsed_ms = 223.4887 },
+    [pscustomobject]@{ endpoint = 'health'; sample = 2; ok = $true; status_code = 200; client_elapsed_ms = 5.0 },
+    [pscustomobject]@{ endpoint = 'health'; sample = 3; ok = $true; status_code = 200; client_elapsed_ms = 200.0 }
+  )
+  if ($firstSlow.status -ne 'FAIL' -or $firstSlow.first_ms -ne 223.4887 -or
+      $firstSlow.max_ms -ne 223.4887 -or $firstSlow.over_200ms_count -ne 1 -or
+      $firstSlow.p50_ms -ne 200.0 -or $firstSlow.p95_ms -ne 223.4887) {
+    throw 'Self-test failed: first slow request or inclusive 200ms boundary was hidden.'
+  }
+  $boundary = Get-ClientHealthLatencySummary -ExpectedSamples 1 -RawIndex @(
+    [pscustomobject]@{ endpoint = 'health'; sample = 1; ok = $true; status_code = 200; client_elapsed_ms = 200.0 }
+  )
+  if ($boundary.status -ne 'PASS' -or $boundary.over_50ms_warning_count -ne 1 -or
+      $boundary.full_performance_gate -ne 'NOT_EVALUATED' -or $boundary.p99_ms -ne 200.0) {
+    throw 'Self-test failed: health boundary or full performance scope.'
+  }
+  foreach ($invalidTiming in @($null, -1.0, [double]::NaN, [double]::PositiveInfinity, $true, '2.0', 'unknown')) {
+    $unmeasured = Get-ClientHealthLatencySummary -ExpectedSamples 1 -RawIndex @(
+      [pscustomobject]@{ endpoint = 'health'; sample = 1; ok = $true; status_code = 200; client_elapsed_ms = $invalidTiming }
+    )
+    if ($unmeasured.status -ne 'NOT_MEASURED' -or $unmeasured.invalid_timing_count -ne 1 -or
+        $null -ne $unmeasured.first_ms -or $null -ne $unmeasured.max_ms) {
+      throw 'Self-test failed: missing/invalid timing became a passing or zero latency.'
+    }
+  }
+  $empty = Get-ClientHealthLatencySummary -ExpectedSamples 1 -RawIndex @()
+  $duplicated = Get-ClientHealthLatencySummary -ExpectedSamples 2 -RawIndex @(
+    [pscustomobject]@{ endpoint = 'health'; sample = 1; ok = $true; status_code = 200; client_elapsed_ms = 5.0 },
+    [pscustomobject]@{ endpoint = 'health'; sample = 1; ok = $true; status_code = 200; client_elapsed_ms = 5.0 }
+  )
+  if ($empty.status -ne 'NOT_MEASURED' -or $empty.missing_sample_count -ne 1 -or
+      $duplicated.status -ne 'NOT_MEASURED' -or $duplicated.sample_coverage_valid) {
+    throw 'Self-test failed: absent/duplicated planned samples became PASS.'
+  }
+  $httpFailure = Get-ClientHealthLatencySummary -ExpectedSamples 1 -RawIndex @(
+    [pscustomobject]@{ endpoint = 'health'; sample = 1; ok = $false; status_code = 500; client_elapsed_ms = 5.0 }
+  )
+  $timeoutFailure = Get-ClientHealthLatencySummary -ExpectedSamples 1 -RawIndex @(
+    [pscustomobject]@{ endpoint = 'health'; sample = 1; ok = $false; status_code = 0; timed_out = $true; client_elapsed_ms = 5.0 }
+  )
+  if ($httpFailure.status -ne 'FAIL' -or $httpFailure.request_error_count -ne 1 -or
+      $timeoutFailure.status -ne 'FAIL' -or $timeoutFailure.timeout_count -ne 1) {
+    throw 'Self-test failed: a fast HTTP error/timeout became PASS.'
+  }
+  $safeCapture = ConvertTo-SafeImageCaptureStatus -ImageCapture ([pscustomobject]@{
+    dropped_count = 3; dropped_oversize_count = 1; dropped_queue_full_count = 2
+    capture_root = 'C:\Users\operator\private'; last_error_message = 'secret'
+  })
+  if ($safeCapture.dropped_oversize_count -ne 1 -or $safeCapture.dropped_queue_full_count -ne 2 -or
+      ($safeCapture | ConvertTo-Json -Compress) -match 'private|secret') {
+    throw 'Self-test failed: sanitized drop reasons were lost or private fields leaked.'
+  }
+
   if ((Format-ConsoleDuration -Duration ([TimeSpan]::FromSeconds(-1))) -ne '00:00:00') {
     throw 'Self-test failed: negative duration was not clamped.'
   }
@@ -222,15 +316,23 @@ function Invoke-ReadOnlyEndpoint {
     [int]$Timeout
   )
 
+  $requestStartedAt = [DateTime]::UtcNow.ToString('o')
+  $requestTimer = [System.Diagnostics.Stopwatch]::StartNew()
   try {
     $response = Invoke-WebRequest -Uri $Uri -Method Get -TimeoutSec $Timeout -UseBasicParsing
+    $body = [string]$response.Content
+    $requestTimer.Stop()
     return [ordered]@{
       ok = $true
       status_code = [int]$response.StatusCode
-      body = [string]$response.Content
+      body = $body
       error = $null
+      timed_out = $false
+      request_started_at = $requestStartedAt
+      client_elapsed_ms = $requestTimer.Elapsed.TotalMilliseconds
     }
   } catch {
+    $requestError = $_.Exception
     $statusCode = 0
     $body = ""
     if ($_.Exception.Response) {
@@ -241,12 +343,94 @@ function Invoke-ReadOnlyEndpoint {
       }
       $body = Read-ResponseBody -Response $_.Exception.Response
     }
+    $requestTimer.Stop()
+    $timedOut = $false
+    for ($cause = $requestError; $null -ne $cause; $cause = $cause.InnerException) {
+      if (($cause -is [System.Net.WebException] -and
+           $cause.Status -eq [System.Net.WebExceptionStatus]::Timeout) -or
+          $cause -is [System.OperationCanceledException]) {
+        $timedOut = $true
+      }
+    }
     return [ordered]@{
       ok = $false
       status_code = $statusCode
       body = $body
-      error = $_.Exception.GetType().Name
+      error = $requestError.GetType().Name
+      timed_out = $timedOut
+      request_started_at = $requestStartedAt
+      client_elapsed_ms = $requestTimer.Elapsed.TotalMilliseconds
     }
+  }
+}
+
+function Get-LatencyPercentile {
+  param([double[]]$Values, [double]$Quantile)
+
+  if ($Values.Count -eq 0) { return $null }
+  $sorted = @($Values | Sort-Object)
+  $index = [math]::Max(0, [math]::Ceiling($Quantile * $sorted.Count) - 1)
+  return $sorted[$index]
+}
+
+function Get-ClientHealthLatencySummary {
+  param([object[]]$RawIndex, [int]$ExpectedSamples)
+
+  $healthSamples = @($RawIndex | Where-Object { $_.endpoint -eq 'health' } | Sort-Object sample)
+  $durations = @()
+  $firstMs = $null
+  $invalidTimingCount = 0
+  $requestErrorCount = 0
+  $timeoutCount = 0
+  foreach ($item in $healthSamples) {
+    $rawDuration = $item.client_elapsed_ms
+    $validTiming = $false
+    if ($null -ne $rawDuration -and $rawDuration -is [ValueType] -and $rawDuration -isnot [bool]) {
+      try {
+        $duration = [double]$rawDuration
+        $validTiming = -not [double]::IsNaN($duration) -and -not [double]::IsInfinity($duration) -and $duration -ge 0
+      } catch { $validTiming = $false }
+    }
+    if ($validTiming) {
+      $durations += $duration
+      if ($item.sample -eq 1) { $firstMs = $duration }
+    } else {
+      $invalidTimingCount += 1
+    }
+    if ($item.ok -ne $true -or $item.status_code -ne 200) { $requestErrorCount += 1 }
+    if ($item.timed_out -eq $true) { $timeoutCount += 1 }
+  }
+  $sampleIds = @($healthSamples | ForEach-Object { $_.sample } | Sort-Object -Unique)
+  $validSampleIds = @($sampleIds | Where-Object { $_ -ge 1 -and $_ -le $ExpectedSamples })
+  $missingSampleCount = [math]::Max(0, $ExpectedSamples - $validSampleIds.Count)
+  $coverageValid = $healthSamples.Count -eq $ExpectedSamples -and
+    $validSampleIds.Count -eq $ExpectedSamples -and $sampleIds.Count -eq $ExpectedSamples
+  $overLimitCount = @($durations | Where-Object { $_ -gt 200.0 }).Count
+  $status = if ($requestErrorCount -gt 0 -or $timeoutCount -gt 0 -or $overLimitCount -gt 0) {
+    'FAIL'
+  } elseif (-not $coverageValid -or $invalidTimingCount -gt 0 -or $null -eq $firstMs) {
+    'NOT_MEASURED'
+  } else { 'PASS' }
+  return [ordered]@{
+    scope = 'observed_client_health_requests_only'
+    full_performance_gate = 'NOT_EVALUATED'
+    status = $status
+    expected_sample_count = $ExpectedSamples
+    observed_sample_count = $healthSamples.Count
+    measured_sample_count = $durations.Count
+    sample_coverage_valid = $coverageValid
+    missing_sample_count = $missingSampleCount
+    invalid_timing_count = $invalidTimingCount
+    request_error_count = $requestErrorCount
+    timeout_count = $timeoutCount
+    over_200ms_count = $overLimitCount
+    over_50ms_warning_count = @($durations | Where-Object { $_ -gt 50.0 }).Count
+    first_ms = $firstMs
+    max_ms = Get-LatencyPercentile -Values $durations -Quantile 1.0
+    p50_ms = Get-LatencyPercentile -Values $durations -Quantile 0.50
+    p95_ms = Get-LatencyPercentile -Values $durations -Quantile 0.95
+    p99_ms = Get-LatencyPercentile -Values $durations -Quantile 0.99
+    timing_scope = 'request_start_through_body_or_error_body_read; excludes_JSON_parse'
   }
 }
 
@@ -505,6 +689,8 @@ function ConvertTo-SafeImageCaptureStatus {
     enqueued_count = Get-PropertyValue -Object $ImageCapture -Name "enqueued_count"
     written_count = Get-PropertyValue -Object $ImageCapture -Name "written_count"
     dropped_count = Get-PropertyValue -Object $ImageCapture -Name "dropped_count"
+    dropped_oversize_count = Get-PropertyValue -Object $ImageCapture -Name "dropped_oversize_count"
+    dropped_queue_full_count = Get-PropertyValue -Object $ImageCapture -Name "dropped_queue_full_count"
     failure_count = Get-PropertyValue -Object $ImageCapture -Name "failure_count"
     last_enqueue_at = Get-PropertyValue -Object $ImageCapture -Name "last_enqueue_at"
     last_write_at = Get-PropertyValue -Object $ImageCapture -Name "last_write_at"
@@ -758,6 +944,9 @@ for ($sample = 1; $sample -le $Samples; $sample += 1) {
       status_code = $result.status_code
       ok = $result.ok
       error = $result.error
+      timed_out = $result.timed_out
+      request_started_at = $result.request_started_at
+      client_elapsed_ms = $result.client_elapsed_ms
       body = $result.body
     }
     $envelope | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $rawFile -Encoding UTF8
@@ -767,6 +956,10 @@ for ($sample = 1; $sample -le $Samples; $sample += 1) {
       relative_path = (Split-Path -Leaf $rawFile)
       status_code = $result.status_code
       ok = $result.ok
+      error = $result.error
+      timed_out = $result.timed_out
+      request_started_at = $result.request_started_at
+      client_elapsed_ms = $result.client_elapsed_ms
     }
   }
 
@@ -836,6 +1029,7 @@ $summary = [ordered]@{
   error_samples = @($errorSamples)
   spot_config_samples = @($spotConfigSamples)
   analysis = $runAnalysis
+  client_health_latency = Get-ClientHealthLatencySummary -RawIndex $rawIndex -ExpectedSamples $Samples
   raw_hash_manifest = @($hashManifest)
   sanitization = [ordered]@{
     spot_image_fact_manifest_paths = "fact_path and capture_root are omitted from sanitized summary; basename and SHA-256 are retained."

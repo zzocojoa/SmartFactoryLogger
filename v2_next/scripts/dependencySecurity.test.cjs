@@ -6,6 +6,24 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
 
+test('source-map-js rejects indexed offsets that could amplify a tiny map', () => {
+  const { SourceMapConsumer } = require(path.join(root, 'frontend/node_modules/source-map-js'));
+  const basic = { version: 3, sources: ['input.js'], sourcesContent: ['x'], names: [], mappings: 'AAAA' };
+  const indexed = (line, map = basic) => ({
+    version: 3,
+    sections: [{ offset: { line, column: 0 }, map }],
+  });
+  const valid = new SourceMapConsumer(indexed(2));
+  const mappings = [];
+  valid.eachMapping((mapping) => mappings.push(mapping.generatedLine));
+  assert.deepEqual(mappings, [3]);
+  // Constructor-only checks: never serialize or expand a large offset, even on old versions.
+  // GHSA-68fv-2mgg-jv7q also requires the accumulated nested offset to be bounded.
+  assert.throws(() => new SourceMapConsumer(indexed(10000001)), /must not exceed/);
+  assert.throws(() => new SourceMapConsumer(indexed(5000000, indexed(5000000, indexed(5000000)))),
+    /including offsets of nested sections/);
+});
+
 for (const hook of ['beforeSanitizeElements', 'uponSanitizeElement', 'afterSanitizeElements', 'afterSanitizeAttributes']) {
   test(`DOMPurify neutralizes a detached descendant through ${hook}`, () => {
     const frontendRequire = Module.createRequire(path.join(root, 'frontend/package.json'));
