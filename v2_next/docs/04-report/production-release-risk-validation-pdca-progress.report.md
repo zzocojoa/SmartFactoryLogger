@@ -4,6 +4,8 @@
 
 2026-10-13 후속: [종료 영수증 검사 보완](production-release-risk-validation-receipt-test-20261013.report.md). 테스트 시계만 분리했고 제품 제한·현장 gate는 유지한다.
 
+2026-10-13 추가: [브라우저 계측 OFF/ON 비교](production-release-risk-validation-browser-overhead-20261013.report.md). 같은 후보·입력의 전면 시험과 독립 검산을 완료했으며 현장/전체 출시 HOLD는 유지한다.
+
 최신 완료 범위와 남은 조건은 [현재 gate 검토](production-release-risk-validation-current-gates-20261013.report.md)를 따른다.
 아래 누적 기록의 “실행 중/대기”는 각 기록 시점의 상태다. PLC·서버 이미지·NAS ZIP 최종
 검사가 완료된 뒤의 요약을 연결했으며 과거 실패·미검증을 PASS로 변경하지 않았다.

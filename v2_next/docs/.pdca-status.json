@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T06:19:08.016713+00:00",
+  "lastUpdated": "2026-10-13T07:10:05.211051+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3030,7 +3030,7 @@
         },
         "releaseRiskStatus": {
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
-          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_120s_warmup_300s_observation_complete; supplemental_backend_probe_ABBA_complete_with_common_host_disk_counters; browser_CDP_web_vitals_OFF_three_server_starts_final_candidate_field15_120_and_full_performance_contract_pending; HOLD",
+          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD",
           "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending",
           "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD",
           "R5": "historical_drop15_and_current_541d_session_drop44_separate_UNCONFIRMED; local_reason_counters_verified",
@@ -6743,6 +6743,77 @@
             "promoted": false,
             "r1R6": "HOLD",
             "fullDataGate": "NOT_EVALUATED"
+          },
+          "browserInstrumentationStage": {
+            "recordedAt": "2026-10-13T07:10:05.211051+00:00",
+            "status": "INCREMENTAL_BROWSER_OFF_ON_COLLECTION_AND_REVIEW_COMPLETE_FULL_R2_HOLD",
+            "report": "docs/04-report/production-release-risk-validation-browser-overhead-20261013.report.md",
+            "offEvidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_BROWSER_OVERHEAD_20261013_c8720a5e_r3",
+            "onEvidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_BROWSER_OVERHEAD_20261013_c8720a5e_r4",
+            "candidateCommit": "4cc7393e1bafbf90a329726aed9470fe0daacb21",
+            "installerSha256": "8821746bbed47850ead68c66894e5580afac63483b1569865915dadc30cfc848",
+            "plannedHttpCount": 940,
+            "plannedHttpFailures": 0,
+            "healthMaxMsOffOn": [
+              76.4105,
+              34.3503
+            ],
+            "healthWarning50MsCountOffOn": [
+              1,
+              0
+            ],
+            "healthObservationMeanDifferenceOnMinusOffMs": 1.0152333333333337,
+            "resourceSamplesPerTrial": 85,
+            "observationSamplesPerTrial": 61,
+            "backendCollectorUniqueSamplesPerTrial": 60,
+            "debuggerConnectionCountOffOn": [
+              0,
+              1
+            ],
+            "validMeasuredIntervalsBlurOrHiddenEvents": 0,
+            "commonProbesRemain": true,
+            "singleSequentialPair": true,
+            "interConditionGapSeconds": 196.358,
+            "newCsvRowsOffOn": [
+              1967,
+              1941
+            ],
+            "newImagesOffOn": [
+              390,
+              388
+            ],
+            "trialActualExitCodes": [
+              0,
+              0
+            ],
+            "independentCheckActualExitCodes": [
+              0,
+              0,
+              0
+            ],
+            "supplementActualExitCode": 0,
+            "preparationOrConditionFailuresRetained": 3,
+            "onLayout404BeforeMeasurement": 2,
+            "recordsRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_BROWSER_OVERHEAD_RECORDS_20261013_c8720a5e",
+            "sharedDirectory": "Z:\\SmartFactory\\20261013\\records\\PDCA_BROWSER_OVERHEAD_c8720a5e",
+            "selectedFilesIncludingManifest": 5187,
+            "manifestSha256": "b42864c1f9bc4ca0cf8d4ef6084a4b43b00d30cf3db8a5eacf2e30693e9e0d0e",
+            "snapshotScope": "Selected closed evidence; repeated large CSV/full fact and profiles omitted; not entire-work-root seal",
+            "productSourceChanged": false,
+            "serverMutation": false,
+            "serverDelivered": false,
+            "promoted": false,
+            "fullR2Gate": "NOT_EVALUATED",
+            "r1R6": "HOLD",
+            "fullDataGate": "NOT_EVALUATED",
+            "supersededR2Summary": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_120s_warmup_300s_observation_complete; supplemental_backend_probe_ABBA_complete_with_common_host_disk_counters; browser_CDP_web_vitals_OFF_three_server_starts_final_candidate_field15_120_and_full_performance_contract_pending; HOLD",
+            "nativeChromiumErrorRecordsOffOn": [
+              6,
+              10
+            ],
+            "nativeBrowserEnvironmentErrorFree": false,
+            "nativeBackgroundServiceEffect": "UNCONFIRMED; prevents attribution of observed resource difference solely to instrumentation",
+            "nativeLogAddendumSharedDirectory": "Z:\\SmartFactory\\20261013\\records\\PDCA_BROWSER_OVERHEAD_c8720a5e_native_logs"
           }
         }
       }
