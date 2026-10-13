@@ -307,3 +307,15 @@ clean 후보4cc의 기존 소스에서 빌드했다. 보존 I4/I5 사본 이미�
 최종 절대경로/파일 존재를 UI로 확인했다. 서버 로컬 해시·실행/전체 현장 QA는 미완료다.
 선택적 외부 fact 경로 부재는 실행 전후 확인에 한정되며 보호된 전체 입력 경계는 남는다.
 R1–R6 HOLD·full_data_gate NOT_EVALUATED·운영/다음 롤백541d/08C·미서명 정책을 유지한다.
+
+## 2026-10-14 CSV 소비 입력과 종료 metadata 결합
+
+[CSV 입력 결합](production-release-risk-validation-csv-input-binding-20261014.report.md)은
+선택한 여섯 입력과 선택적 fact/report의 SHA·크기를 잠근 바이트에 대조하고 posthoc 경로만
+바꾼 파생 metadata로 검사한다. 부재 fact는 잠긴 일반 파일 아래 생성 불가능한 경로로 연결한다.
+기존 CLI override의 SHA/행 수 완화와 report SHA 미검증을 실제 EXE로 재현해 보완했다.
+최종16시험 exit0/skip0, 실제 CSV12실행의 예상 exit0 8개/exit1 4개, Ruff exit0을 확인했다.
+원본12파일과 EXE는 보존했고 Job 잔존0이다. 같은 잠긴 원본 metadata에 종료/설정 대조도 연결했다.
+실제 보존 attestation FAIL은 유지하며 합성 기준의 PASS는 현장 승인이 아니다.
+현재는 개발 모듈로, 보호된 통합 실행기·입력 inventory 출처 인증·이미지 바이트 결합·실제
+정상 종료·현장15분/120분·물리 경계와 승격이 남는다. R1–R6 HOLD 및 운영/롤백 기준을 유지한다.

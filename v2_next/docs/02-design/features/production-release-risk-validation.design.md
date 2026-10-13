@@ -370,3 +370,24 @@ manifest 불일치를 주입한다. 기존 CSV 검사기만 통과하는 이미�
 
 구현 확인: portable 이미지 묶음의 서버 로컬 전달/파일 존재는 2026-10-14 r2 영수증으로
 확인했다. 서버 로컬 해시·실행 및 보호된 통합 실행기 전달은 아직 미완료다.
+
+### 5.13 CSV 검사기의 모든 데이터 입력 경로 결합
+
+최종 종료 자료에서 선택한 v1/v2/metadata/관찰 fact/이미지 fact/최종 manifest와 선택적
+posthoc fact/report를 외부 고정 목록의 SHA·크기에 대조하고 Windows 읽기 공유 핸들로 유지한다.
+원본 metadata는 변경하지 않는다. 검사 전용 새 metadata는 posthoc의 fact_path/report_path만
+잠긴 사본 경로로 바꾸며 원본·파생본 해시와 정확한 변경 목록을 보존한다. 그 외 모든 필드의
+동등성을 확인한다. posthoc CLI override는 SHA/행 수 실패 조건을 완화하므로 사용하지 않는다.
+
+선택적 fact가 외부 목록에 없고 원본 manifest가 row_count=0/sha256=null인 경우에만 부재를
+허용한다. 잠긴 일반 파일을 부모로 하는 불가능한 자식 경로로 연결해 검사 중 파일 생성이나
+부모 교체가 불가능함을 native Windows에서 검증한다. 값이 없는 fact 파일을 합성하지 않는다.
+일치하지 않는 이름·미선언 파일·nonempty manifest·단독 linkage 파일·잘못된 JSON은 거부한다.
+기존 CSV 도구가 강제하지 않는 linkage manifest의 report_sha256은 잠긴 report 바이트와 별도로 대조한다.
+
+실제 고정 CSV EXE를 같은 잠금 구간 안에서 실행해 보존 I4/I5 사본, 외부 경로의 오염 파일,
+선택적 fact의 올바른/잘못된 행 수·SHA, 최종 manifest 실패를 확인한다. context 종료 오류는
+실행 exit0이어도 바이트 결합 PASS가 될 수 없다. 이 모듈은 CSV 입력/소비 경계만 담당한다.
+이미지 바이트 검사·정상 종료·attestation·보호된 외부 실행기·최종 현장 QA는 함께 연결해야 한다.
+`shutdown_csv_inputs`는 앞서 관찰한 종료 기대값과 고정 설정 기준을 같은 잠긴 원본 metadata에
+적용한 뒤에만 명령을 노출한다. 실제 보존 attestation FAIL은 유지하고 합성 기준의 PASS와 구분한다.
