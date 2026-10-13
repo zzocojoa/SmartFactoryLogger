@@ -22,6 +22,7 @@ import time
 import field_installation_binding as binding
 import field_generation_binding as generation_binding
 import field_configuration_binding as configuration_binding
+import field_shutdown_binding as shutdown_binding
 import field_http_sampling as http
 import field_resource_sampling as resource
 from field_windows_job import CollectorJob
@@ -335,6 +336,9 @@ def run_observation(spec, output, duration_seconds, stop, notify):
                 reference_sha256=spec.configuration_reference_sha256, scope='REPORTED_CONFIGURATION_BOUNDARIES')
             result['closeout'] = payload.recheck()
             result['review'] = review_window(spec, output, origin, duration_seconds, sessions, [initial, final])
+            result['shutdown_expectation'] = shutdown_binding.expectation_from_boundary(final, spec.backend)
+            result['shutdown_expectation_file'] = write_json(output / 'shutdown-expectation.json',
+                                                            result['shutdown_expectation'])
             if (result['review']['status'] == 'PASS' and not stop.is_set()
                     and control_final['generation_status'] == 'PASS'
                     and configuration_final['configuration_status'] == 'PASS'

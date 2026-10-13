@@ -228,7 +228,7 @@ Codex가 서버에서 직접 확인하고 유지보수는 아무 때나 해도 �
 **검증 방법**
 
 - CSV는 모든 행의 파싱·필수 열·스키마·sequence·허용 빈값·온도 TTL·최종 sequence·fact/manifest 개수·해시를 검증한다.
-- `scripts/validate_csv_v2_shadow.py`의 `--v2`, `--metadata`, `--spot-observation-fact`, `--spot-image-fact`, `--spot-image-fact-final-manifest` 연결 검사를 활용한다. `--require-current-server-promotion-profile`은 적용 가능한 현재·신규 자료에만 사용한다.
+- `scripts/validate_csv_v2_shadow.py`의 `--v2`, `--metadata`, `--spot-observation-fact`, `--spot-image-fact`, `--spot-image-fact-final-manifest` 연결 검사를 활용한다. `--require-current-server-promotion-profile`은 코드에 고정된 과거 운영 프로파일(comparator verified=false 포함)의 회귀에만 적용한다. 최종 후보 QA는 기존 `qa_spot_temperature_v25.ps1` 호출처럼 이 옵션 없이 일반 CSV/설정 계약을 검사하고, 별도의 최종 pinned attestation·comparator verified=true·관찰 실행/정상 종료 파일 연결을 요구한다. 옵션을 생략해도 일반 schema·범위·provenance 검사는 유지한다.
 - 기존 validator의 fact 해시·개수·경로 안전성 확인과 이미지 개별 실물 해시·디코딩 검사를 구분한다. 기존 도구만으로 모든 이미지가 검증됐다고 주장하지 않는다.
 - 참조된 이미지의 존재·해시·전체 디코딩을 검사하고, 어느 기록에도 연결되지 않는 파일도 역방향으로 보고한다.
 - 큰 파일은 streaming·디스크 index 방식으로 처리하되 전체 규칙과 전역 일관성 검사를 유지한다. 작은 동일 입력에서 기존 validator와 결과를 비교한다.

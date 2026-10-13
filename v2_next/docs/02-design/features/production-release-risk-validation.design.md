@@ -325,3 +325,28 @@ canonical JSON SHA256을 재계산한다. 필수 값/타입·프로파일의 소
 설정 endpoint의 임의 성능 상한을 새로 만들지 않으며 기존 전체 요청 timeout을 적용한다.
 이 검사는 API가 보고한 설정과 attest 정보의 무결성/일치다. 물리 장비 readback·comparator
 실증·기준의 실제 승인 확인·정상 종료 metadata와의 최종 대조를 대신하지 않는다.
+
+### 5.11 관찰 종료 health와 정상 종료 sidecar의 연결
+
+관찰 마지막의 검증된 health 원문에서 build·logger UUID·schema·현재 CSV 파일명·마지막
+sample 번호를 추출하고 원문 SHA와 함께 `shutdown-expectation.json`으로 보존한다.
+필수 값 누락·잘못된 타입·경로·원문 해시 불일치는 관찰 실패다. 후속 보호된 실행기는
+성공한 감독 결과와 이 파일의 해시를 연결해야 하며 파일 자체를 현장 승인으로 취급하지 않는다.
+
+`field_shutdown_binding.py`는 이 기대값의 정확한 CSV/sidecar 이름만 읽는다. 최신 시각이나
+glob의 첫 파일로 대체하지 않는다. 기본 스트림을 읽기 공유로 잠그고 크기·SHA·파일 식별을
+전후 대조하며 pinned 최종 설정 기준도 함께 유지한다. sidecar 양쪽 build/logger, schema,
+hardening, finalized=true, reason=shutdown, final sample>=관찰 sample 및 설정 fingerprint/
+attestation을 검사한다. `persisted_at`은 마지막 저장 시각으로만 검증하며 종료 시각으로
+해석하거나 관찰 이후여야 한다는 조건을 만들지 않는다.
+
+성공 범위는 관찰 기대값과 종료 파일의 식별/설정 연결이다. 정상 종료 실제 수행/프로세스 소멸,
+CSV 전체 행·fact/image 연결 검사는 별도다. PASS에도 field/full CSV/normal shutdown gate는
+NOT_EVALUATED이고 release는 HOLD다. 앱 종료·설치·설정 변경은 이 모듈에 포함하지 않는다.
+최종 caller는 이 결과의 파일 해시와 full validator가 읽은 바이트를 다시 결합해야 한다.
+
+검증은 합성 기준과 native 파일 잠금, 누락/교차 logger·build·파일·sample·schema·미완료 종료,
+설정 변조 및 실제 보존 I4/I5 후보 sidecar를 사용한다. 실제 기록의 미검증 attestation은 FAIL로
+유지한다. 기존 CSV validator의 opt-in `--require-current-server-promotion-profile`은 특정
+과거 운영값(comparator verified=false 포함)의 회귀 조건이다. 최종 QA 실제 호출처럼 일반
+CSV 계약을 검사하고 별도의 최종 pinned attestation 조건을 적용하며 과거 상수는 바꾸지 않는다.

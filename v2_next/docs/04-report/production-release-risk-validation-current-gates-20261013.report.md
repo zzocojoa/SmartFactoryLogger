@@ -284,3 +284,14 @@ R1–R6 HOLD·full_data_gate NOT_EVALUATED·현재 운영/롤백541d/08C와 미�
 적용 범위 정합화를 현장 실행 조건으로 남겼다. 실제 최종 attestation 기준·물리 시험·
 보호된 launcher·전체 현장15분/120분·종료 delta·승격은 미완료다.
 R1–R6 HOLD·full_data_gate NOT_EVALUATED·현재 운영/롤백541d/08C와 미서명 정책을 유지한다.
+
+## 2026-10-14 관찰 종료와 sidecar 연결
+
+[종료 자료 대조](production-release-risk-validation-shutdown-binding-20261014.report.md)는 마지막
+health의 build/logger/CSV/schema/sample을 원문 SHA와 보존하고 정확한 종료 파일·설정 기준에
+연결한다. 57시험 및 독립 Ruff exit0/skip0, 정상 fixture의 결과/원문 해시와 Job 잔존0을 확인했다.
+실제 후보 I4/I5 보존 자료는 식별 PASS·최종 설정/attestation FAIL이다.
+기존 QA 실제 호출은 과거 current-promotion opt-in을 사용하지 않아 호출 간 comparator 조건
+충돌은 없었다. 계획에서 과거 프로파일 회귀와 최종 pinned attestation의 적용 범위를 명확히 했다.
+증거6,811항목의 ZIP 내부 SHA/CRC 및 공유 사본 SHA를 검산했다. 실제 정상 종료/CSV 전수 검증,
+보호된 launcher·UI/packet·현장15분/120분과 승격은 남는다. 운영/롤백·R1–R6 HOLD를 유지한다.

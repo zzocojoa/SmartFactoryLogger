@@ -129,7 +129,8 @@ class Handler(BaseHTTPRequestHandler):
    if mode=='initial-error' and count==1: status=503
    logger='22222222-2222-4222-8222-222222222222'
    if mode=='changed-service' and count>=3: logger='33333333-3333-4333-8333-333333333333'
-   body=json.dumps(dict(app_version='1.0.28',runtime_kind='frozen',mode='REAL',executable_path=sys.executable,frontend_source='resources',frontend_static_ready=True,spot_temperature=dict(build_git_commit='4cc7393e1bafbf90a329726aed9470fe0daacb21',diagnostics_available=True,spot_service_instance_id='11111111-1111-4111-8111-111111111111',v2_4_operational=dict(enabled=True,logger_service_instance_id=logger)))).encode()
+   seq=0 if mode=='invalid-shutdown' and count>=3 else count
+   body=json.dumps(dict(app_version='1.0.28',runtime_kind='frozen',mode='REAL',executable_path=sys.executable,frontend_source='resources',frontend_static_ready=True,spot_temperature=dict(build_git_commit='4cc7393e1bafbf90a329726aed9470fe0daacb21',diagnostics_available=True,spot_service_instance_id='11111111-1111-4111-8111-111111111111',v2_4_operational=dict(enabled=True,logger_service_instance_id=logger,schema_version='2.5.2',current_v2_csv_file_name='Factory_Integrated_Log_v2_fixture.csv',last_sample_seq=seq)))).encode()
   elif self.path=='/api/control/health':
    control_count+=1
    if mode=='slow-control': time.sleep(.25)
@@ -419,6 +420,12 @@ class ObservationTests(unittest.TestCase):
             self.assertEqual(worker['review']['resource_rows_checked_for_backend'], 2)
             self.assertEqual(worker['review']['summary']['resources']['resource_coverage_status'], 'NOT_MEASURED')
             self.assertEqual(worker['field_gate'], 'NOT_EVALUATED')
+            expectation, raw = observation.read_json(self.folder / 'out/shutdown-expectation.json')
+            self.assertEqual(expectation, worker['shutdown_expectation'])
+            self.assertEqual(raw_fact(raw), worker['shutdown_expectation_file'])
+            final, _ = observation.read_json(self.folder / 'out/final.json')
+            self.assertEqual(expectation['health_body_sha256'], final['health_record']['body_sha256'])
+            self.assertEqual(expectation['logger_service_instance_id'], final['sessions']['logger_service_instance_id'])
             self.assertEqual(result['job_after_cleanup']['active_processes'], 0)
             self.assertEqual(result['job_after_cleanup']['total_processes'], 4)
             self.assertEqual(ProcessIdentity.read(spec.main.pid), spec.main)
@@ -447,6 +454,15 @@ class ObservationTests(unittest.TestCase):
             self.assertEqual(result['supervisor_status'], 'FAIL')
             worker, _ = observation.read_json(self.folder / 'out/worker-result.json')
             self.assertIn('health-1-session', worker['review']['issues'])
+
+    def test_invalid_final_shutdown_identity_fails_observation(self):
+        with fixture_app(self.folder, 'invalid-shutdown') as spec:
+            result = observation.supervise_observation(spec, self.folder / 'out', duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'], 'FAIL')
+            worker, _ = observation.read_json(self.folder / 'out/worker-result.json')
+            self.assertEqual(worker['observation_status'], 'FAIL')
+            self.assertIn('shutdown-expectation-sequence', worker['errors'][0]['reason'])
+            self.assertFalse((self.folder / 'out/shutdown-expectation.json').exists())
 
     def test_authenticated_backend_session_change_is_not_passed(self):
         with fixture_app(self.folder, 'control-changed') as spec:
