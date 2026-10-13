@@ -198,3 +198,75 @@ C# 추출6개·IL 추출4개와 `verify_contract.py`는 actual exit0이다.
 행 대조 가능한 내보내기 자료, 데이터 책임자의 영향·보존/처리 결정이다.
 제품·서버·원본을 변경하지 않아 health·NSIS·현장 시험을 반복하지 않았다.
 R4의 원인/영향/처리와 최종 현장 종료 delta는 미완료이며 전체 출시 HOLD를 유지한다.
+
+## 후속: 서버 설치본·설정과 과거 SPOTViewer 로그
+
+서버 Explorer에서 `C:/Program Files (x86)/AMETEK Land/SPOTViewer/SpotViewer.exe`의
+파일·제품 버전 `5.2.0.7443`을 확인했다. 설치 폴더의 선택 파일17개를 공유 return으로
+복사한 뒤 개발 PC에서 대조했으며, 모두 위 보존 설치 자료의 추출 파일과 SHA256이 같았다.
+실행 파일 SHA256은 `327563d27a421224dd64377fa8f102e0b3e956136bdce478ee2da66351a7a349`다.
+이로써 **현재 서버에서 회수한 설치 파일과 분석한 설치 자료의 연결**을 확보했다.
+2024년 당시 실행 파일·설정이 계속 같았다는 증명이나 서버 원본 해시 측정은 아니다.
+
+`C:/ProgramData/LandInstruments/SpotViewer`의 설정·예외 기록8개와 `Logs`의 선택 로그8개도
+Explorer로 회수했다. 로그 폴더에서 보인124항목 중 선택8개이며 전체 로그 조사는 아니다.
+초기 Explorer 파일명 검색은 실제 존재하는 파일에도0건을 반환해 목록 탐색으로 전환했다.
+검색0건을 파일 부재로 해석하지 않는다. 공유 return은
+`Z:/SmartFactory/20261013/return/PDCA_SPOTVIEWER_INSTALLED_f259c582`이며
+공유 사본의 복사 전/후와 개발 사본 해시가 일치했다. 서버 원본의 해시·원자적 snapshot은 미확인이다.
+
+| 설정·구현 근거 | 확인한 내용 | 범위와 한계 |
+| --- | --- | --- |
+| 현재 `LoggingConfiguration.xml` | `LogGroupConfiguration`, `SettingsVersion=1.0`; Continuous/PT1S/FileStorage/CSV 두 경로에 Temperature·TemperatureFast | 바탕화면 `새 폴더 (2)` 및 NAS `출구부 온도/2호기`; 파일 수정 시각2024-11-19, 과거 설정 연속성 미확인 |
+| 현재 `SpotActuatorSettings.xml` | `HoldOnScan=false` | 수정 시각2024-11-19; 이전 NULL 구간의 스캔 상태를 증명하지 않음 |
+| `SettingsBase` | 같은 XML 이름을 `DataLogSettings`와 `LogGroupConfiguration`이 각각 읽음 | 전자는 `Version=1.0`을 요구하므로 현재의 다른 형식을 같은 DB 기록 설정으로 취급하지 않음 |
+| `Processors.Logging.LogProcess` | 무효 TimedDouble을 `-`/기본 context0으로 전달하고 숫자 파싱 실패 시 Value를 비움; 일반 값은 Now, 컬렉션은 원소 TimeStamp | 보존 DLL 정적 구현; 당시 선택한 경로와 개별 NULL 사유는 미확인 |
+| `SystemInformation.txt` | SPOTViewer5.2.0.7443 표기2회; DB 열기 실패와 multimedia Timer 시작 실패 스택 | 내용 자체의 사건 시각 없음; 수정 시각을 각 사건 시각으로 바꾸지 않음 |
+
+설치 실행 파일의 부트스트랩은 `Tags.DataLogService`도 생성한다. 별도의
+`Processors.Logging.LogService`는 LogGroupConfiguration을 사용하며 과거 예외 스택에도 나온다.
+따라서 앞 절의 DataLogService만을 모든 역사 행의 유일한 생성 경로로 단정하지 않는다.
+현재 설정과 기록을 수정하거나 제조사 코드를 실행하지 않았다.
+
+로그8개는 838,860,271바이트, LF 기준6,738,533행이었다. 최초 UTF-8 분석은 디코딩 오류로
+exit1이었고, 같은 바이트를 CP949 strict로 읽은 후속 분석은 exit0이었다. 대체 문자로
+문제를 숨기거나 파일 인코딩을 변환하지 않았다. 내부 timestamp 범위는
+2024-09-02 13:43:27.3897부터2024-10-19 12:56:55.8090까지이며,
+파일 이름은 최초 사건 시각과 다를 수 있다. 이 범위가 무중단 수집이나 완전한 보존을 뜻하지 않는다.
+
+| 선택 로그의 메시지 | 기록 수 | 확인 범위 |
+| --- | ---: | --- |
+| `Connection lost to device: SPOT` | 769,640 | 호출 때마다 남기는 경고 수; 독립 장애 횟수 아님 |
+| `Connection lost to device: Actuator` | 5,439,082 | 동일하게 반복 경고 수로 보존 |
+| `Error in MultiMediaTimerTick` | 35,272 | FileLogger의 네트워크 경로 접근 실패 스택 표본 확인; 소실 행 수로 환산하지 않음 |
+| `WaitForFile` 잠금 실패 / 10회 재시도 포기 / `WriteDelimited` 오류 | 41 / 3 / 3 | 2024-09-10, NAS `LandData 2024-09-09-08-14-15.csv`; 다른 프로세스 사용 중이라는 IOException |
+| 기록 창 열기 FATAL / DispatcherUnhandledException | 2 / 1 | 9월2일·4일 TimerStartException 스택 확인 |
+| Actuator 스캔 스레드 예외 | 1 | 9월30일01:13:46.7545, TcpClientConnection.get_IsConnected의 NullReferenceException |
+
+현재 설치 파일의 NLog 규칙은 Warn 이상만 남긴다. 연결 경고 출력은
+`StartConnectionPolling`에서 기존 polling thread 유무를 확인하기 **전**에 발생한다.
+따라서 경고 개수를 단절 횟수로 세거나 경고가 없는 시간을 정상 수신으로 판단하지 않는다.
+형식 미지원/기본값 사용 경고11개와 선택 파일 순서의 timestamp 감소2개도 보존했다.
+
+가장 긴 NULL179,455행의 원시 정수를 .NET ticks로 해석하면 날짜 표지는
+2024-09-28 06:12:10.4897471–2024-09-30 08:03:00.5970325다.
+**DB와 로그가 같은 시계·시간대를 썼다는 확인 없이 비교한 조건부 구간**에 SPOT 경고695,983개,
+Actuator 경고4,848,837개와 위 스캔 예외1개가 들어간다. SPOT 경고의 첫/마지막 표지는
+9월28일07:42:03.4282와9월30일07:35:07.3368로 NULL 양 끝과도 일치하지 않는다.
+동일 시계가 확인되더라도 시간 겹침만으로 모든 NULL의 통신 원인을 확정할 수 없다.
+NULL·199.0을 치환하거나 과거 소실/손상 finding을 해소 처리하지 않았다.
+
+[설치 파일 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_INSTALLED_20261013_f259c582/installed-copy-receipt.json),
+[설정 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_INSTALLED_20261013_f259c582/settings-copy-receipt.json),
+[로그 사본 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_INSTALLED_20261013_f259c582/logs-copy-receipt.json),
+[로그 집계·원문 표본](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_INSTALLED_20261013_f259c582/log-analysis.json),
+[독립 검산](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_INSTALLED_20261013_f259c582/installed-verification.json),
+[해석과 재사용 체크리스트](C:/Users/user/Desktop/SmartFactory/PDCA_SPOTVIEWER_INSTALLED_20261013_f259c582/README.md)를 보존한다.
+독립 검산은 사본33개 해시·XML 두 경로·rg의 로그 수준별24집계·원문 표본·정수 ticks 기반
+조건부 구간 집계·분별 합계를 대조한다. 최초 코드 절의 유일성 검사 실패도 별도로 보존하고,
+확인한 DataLogSettings 위치로 범위를 좁힌 최종 검산 exit0을 기록한다.
+
+20:18 KST 서버 앱을 전면으로 복원해 Running, EX/LS/SPOT/Temp/Comm OK와 작업60322/9를
+관찰했다. 기존 제품·장비 설정이나 운영본·롤백 기준을 변경하지 않았다. 남은 확인은 역사 DB와
+실제 실행 경로/시계의 연결, 오류의 영향 행·보존/처리 판단, 최종 후보의 현장 검증이다.
+제품 변경이 없어 health·NSIS를 반복하지 않으며 R4와 전체 출시 HOLD를 유지한다.
