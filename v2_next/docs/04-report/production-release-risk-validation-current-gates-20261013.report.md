@@ -51,6 +51,13 @@ Codex는 작업 정보·설정·앱 실행 상태를 변경하지 않았다.
 
 후속 [브라우저 추가 계측 비교](production-release-risk-validation-browser-overhead-20261013.report.md)에서 유효 OFF/ON 전면 시험과 검산을 완료했다. 계획 HTTP940개 성공, 시작50ms 경고1건·준비/표시 조건 실패3건은 보존했다. 공통 probe·순차 실행 한계와 메모리 상향 추세가 있어 전체 성능 PASS로 확대하지 않는다.
 
+16:22/16:30 KST [서버 직접 재확인](production-release-risk-validation-field-entry-20261013.report.md)에서
+같은 운영 build541d·logger `e9a785c0…`·SPOT `efca4313…`의 image drop이173건이었다.
+같은 세대의03:58 기록은0건이며, 기존15/다른 세대44와 별도 사건이다.
+마지막 두 표본 사이469.566390초 동안 CSV 카운터+2,082·image written+410,
+drop 증가0이었다. 원인·프레임/행 식별·복구 가능성은 미확정이다.
+프로파일 fingerprint mismatch와 effective operator/comparator false도 유지된다.
+
 ## 남은 조건과 실행 순서
 
 | 항목 | 남은 조건 | 다음 증거 |
@@ -59,7 +66,7 @@ Codex는 작업 정보·설정·앱 실행 상태를 변경하지 않았다.
 | R2 | 실제 서버 정상 시작3회, 최종 설치본 현장15분/120분·물리 디스크·전체 성능 계약 | 첫 요청을 포함한 현장 원시값·오류·종료 증거. 브라우저 추가 계측 비교는 아래 후속 보고서에서 완료 |
 | R3 | 실제 모델명은 사용자 답변 “미정”; 승인 전체 프로파일·물리 경계 comparator·최종 fingerprint/attestation 미완료 | 승인 근거와 실제 readback/경계 시험, 같은 build/세대의 시작·종료 대조 |
 | R4 | 과거 누락·미참조·손상·시간 순서의 원인/영향/처리, 최종 현장 종료 delta 미완료 | 항목별 원시 증거와 데이터 책임자 처리 기록, 새 후보 데이터 전체 검증 |
-| R5 | 이전4c drop15와 당시541d 세대 drop44의 원인/처리 미확정 | 별도 세대별 수량·영향·복구 가능성·처리 결정; 저장실패16과 합산 금지 |
+| R5 | 이전4c drop15·다른541d 세대 drop44·현재e9a785c0/efca4313 세대 drop173의 원인/처리 미확정 | 별도 세대별 수량·영향·복구 가능성·처리 결정; 저장실패16과 합산 금지 |
 | R6 | 최종 installer의 현장 설정·one-command QA·정상 종료·승격 미실행 | 정확한 동일 installer의 FINAL PASS·현장 결과·적용 확인 후 기준 갱신 |
 
 실행 체크리스트:

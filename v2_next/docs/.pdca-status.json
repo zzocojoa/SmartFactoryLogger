@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T07:10:05.211051+00:00",
+  "lastUpdated": "2026-10-13T07:38:13.576870+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3033,7 +3033,7 @@
           "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD",
           "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending",
           "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD",
-          "R5": "historical_drop15_and_current_541d_session_drop44_separate_UNCONFIRMED; local_reason_counters_verified",
+          "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
           "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; field_QA_and_other_gates_pending; HOLD"
         },
         "followup": {
@@ -6814,6 +6814,93 @@
             "nativeBrowserEnvironmentErrorFree": false,
             "nativeBackgroundServiceEffect": "UNCONFIRMED; prevents attribution of observed resource difference solely to instrumentation",
             "nativeLogAddendumSharedDirectory": "Z:\\SmartFactory\\20261013\\records\\PDCA_BROWSER_OVERHEAD_c8720a5e_native_logs"
+          },
+          "fieldEntryReadStage": {
+            "recordedAt": "2026-10-13T07:38:13.576870+00:00",
+            "status": "READ_AND_RECONCILIATION_COMPLETE_NEW_DROP173_FIELD_ENTRY_HOLD",
+            "report": "docs/04-report/production-release-risk-validation-field-entry-20261013.report.md",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_FIELD_ENTRY_20261013_42d60689",
+            "reviewExit": 0,
+            "httpGetCount": 12,
+            "operatingBuild": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+            "logger": "e9a785c0-46a2-45d2-bf7a-4187cce08771",
+            "spot": "efca4313-f987-4bb2-bcc8-4de40712396c",
+            "priorCaptureDrop": 0,
+            "currentCaptureDrop": [
+              173,
+              173
+            ],
+            "sampleGapSeconds": 469.56639,
+            "sampleDelta": {
+              "rows": 2082,
+              "written": 410,
+              "drops": 0,
+              "write_failures": 0
+            },
+            "sourceDropIncrementLines": [
+              1035,
+              1063
+            ],
+            "cause": "UNCONFIRMED_OVERSIZE_OR_QUEUE_FULL_NOT_DISTINGUISHABLE_IN_INSTALLED_BUILD",
+            "impact": "173 rejected enqueue attempts; unique missing frames and affected row identities unknown",
+            "recovery": "UNCONFIRMED_NO_DROPPED_PAYLOAD_IDENTITIES",
+            "transportFailureTotal": 154,
+            "transportFailures": {
+              "image": 90,
+              "temperature": 28,
+              "internal_temperature": 29,
+              "diagnostic": 7,
+              "connection_test": 0,
+              "focus_read": 0,
+              "focus_write": 0,
+              "actuator_read": 0,
+              "actuator_write": 0
+            },
+            "correlatedFailureEvents": {
+              "image": 90,
+              "diagnostic": 7
+            },
+            "profile": {
+              "settings_file_sha256": "55ea6a48ea1480891f8eeebf60969e3a25791335614aea5ab7c250466b31b220",
+              "spot_config_fingerprint_sha256": "f84f9d9ddc3b958b1048cbf7bba37933d9e9e83e5b98ba666c6326154c2f74d5",
+              "config_attestation_status": "fingerprint_mismatch",
+              "config_operator_verified": false,
+              "low_signal_comparator_verified": false,
+              "low_signal_comparator_configured_verified": true,
+              "config_drift_detected": true,
+              "device_config_readback_status": "not_supported",
+              "diagnostics_collection_mode": "async_fact_only",
+              "spot_model_info": "SPOT+ AL",
+              "spot_app_mode": "App1: AL E",
+              "spot_range_min_c": 200.0,
+              "spot_range_max_c": 900.0
+            },
+            "job": {
+              "Product_No_operator": "60322",
+              "Mold_No_operator": "10",
+              "operator_metadata_updated_at": "2026-10-13T04:39:05.986350Z",
+              "operator_metadata_valid": true
+            },
+            "sharedRecord": {
+              "export_exit": 0,
+              "destination": "Z:\\SmartFactory\\20261013\\records\\PDCA_FIELD_ENTRY_42d60689",
+              "files_including_manifest": 29,
+              "evidence_bytes_excluding_manifest": 1061910,
+              "manifest_sha256": "6482f834053aeadf81fec545adfbbe549e92fe4cfb00dffc8e129d3cf22720d9"
+            },
+            "releaseGate": "HOLD",
+            "fullDataGate": "NOT_EVALUATED",
+            "installedOrRestarted": false,
+            "profileOrCounterChanged": false,
+            "uiEditingMode": "briefly enabled during menu access; turned off without layout movement or save",
+            "priorR5Summary": "historical_drop15_and_current_541d_session_drop44_separate_UNCONFIRMED; local_reason_counters_verified",
+            "limitations": [
+              "Two samples do not observe every queue transition between them.",
+              "Live counters and fact hash do not validate closed files or filesystem durability.",
+              "Sample timing includes JSON parsing and evidence-file writes; not the formal HTTP performance contract.",
+              "ConnectTimeout observations do not identify device, network, OS, or drop root cause.",
+              "Configured software model and comparator flag do not prove the physical profile."
+            ]
           }
         }
       }
