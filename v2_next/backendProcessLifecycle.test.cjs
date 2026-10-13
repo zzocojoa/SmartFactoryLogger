@@ -11,6 +11,7 @@ const {
   createBackendCloseoutGate,
   createBackendRestartController,
   createCloseoutVerifiedStop,
+  createRendererShutdownController,
   isVerifiedGracefulShutdownResult,
   stopProcessTree,
 } = require('./backendProcessLifecycle');
@@ -22,6 +23,67 @@ function createChild(pid = 1234) {
   child.signalCode = null;
   return child;
 }
+
+function createRendererHarness(timeoutMs = 1000) {
+  const ipcMain = new EventEmitter();
+  const contents = new EventEmitter();
+  const sent = [];
+  contents.isDestroyed = () => false;
+  contents.send = (channel, attemptId) => sent.push({ channel, attemptId });
+  const window = { isDestroyed: () => false, webContents: contents };
+  const controller = createRendererShutdownController({
+    ipcMain, getMainWindow: () => window,
+    isTrustedSender: (event) => event?.trusted === true,
+    timeoutMs,
+  });
+  return { ipcMain, contents, sent, controller };
+}
+
+test('renderer preparation waits for a trusted matching acknowledgement and survives early document load', async () => {
+  const { ipcMain, contents, sent, controller } = createRendererHarness();
+  let completed = false;
+  const pending = controller.prepare();
+  assert.equal(controller.prepare(), pending);
+  void pending.then(() => { completed = true; });
+  await Promise.resolve();
+  const attemptId = sent[0].attemptId;
+  ipcMain.emit('sfl:renderer-shutdown-ready', { trusted: false }, { attemptId, ok: true });
+  ipcMain.emit('sfl:renderer-shutdown-ready', { trusted: true }, { attemptId: 'stale', ok: true });
+  await Promise.resolve();
+  assert.equal(completed, false);
+  contents.emit('dom-ready');
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].attemptId, attemptId);
+  ipcMain.emit('sfl:renderer-shutdown-ready', { trusted: true }, { attemptId, ok: true });
+  await pending;
+  assert.equal(completed, true);
+  assert.equal(ipcMain.listenerCount('sfl:renderer-shutdown-ready'), 0);
+  assert.equal(contents.listenerCount('dom-ready'), 0);
+});
+
+test('renderer refusal and timeout preserve failure, release listeners, and allow a fresh attempt', async () => {
+  const { ipcMain, contents, sent, controller } = createRendererHarness(20);
+  const first = controller.prepare();
+  await Promise.resolve();
+  ipcMain.emit('sfl:renderer-shutdown-ready', { trusted: true }, { attemptId: sent[0].attemptId, ok: false });
+  await assert.rejects(first, /could not drain/);
+  assert.equal(controller.resume(), true);
+  assert.equal(sent[1].channel, 'sfl:resume-after-shutdown-failure');
+  const retry = controller.prepare();
+  await Promise.resolve();
+  assert.notEqual(sent[2].attemptId, sent[0].attemptId);
+  await assert.rejects(retry, /timed out/);
+  assert.equal(ipcMain.listenerCount('sfl:renderer-shutdown-ready'), 0);
+  assert.equal(contents.listenerCount('destroyed'), 0);
+});
+
+test('a renderer destroyed during preparation cannot leave the shutdown waiting', async () => {
+  const { contents, sent, controller } = createRendererHarness();
+  const pending = controller.prepare();
+  contents.emit('destroyed');
+  await pending;
+  assert.equal(sent.length, 0);
+});
 
 test('native window close is held until application shutdown completes', async () => {
   let releaseShutdown;
@@ -149,6 +211,33 @@ test('prepare failure keeps shutdown retryable and preserves operation order', a
     'shutdown',
     'quit',
   ]);
+});
+
+test('backend shutdown waits for renderer preparation and keeps an async failure retryable', async () => {
+  let finishPreparation;
+  let shutdownCalls = 0;
+  const failures = [];
+  const controller = createApplicationShutdownController({
+    setQuitting: () => undefined,
+    prepareShutdown: () => new Promise((resolve, reject) => {
+      finishPreparation = { resolve, reject };
+    }),
+    shutdown: async () => { shutdownCalls += 1; },
+    quitApplication: () => undefined,
+    onFailure: (error) => failures.push(error.message),
+  });
+
+  const firstAttempt = controller.beginShutdown();
+  assert.equal(shutdownCalls, 0, 'Backend must remain running while renderer requests drain');
+  finishPreparation.reject(new Error('renderer did not drain'));
+  assert.equal(await firstAttempt, false);
+  assert.equal(shutdownCalls, 0);
+  assert.deepEqual(failures, ['renderer did not drain']);
+
+  const retry = controller.beginShutdown();
+  finishPreparation.resolve();
+  assert.equal(await retry, true);
+  assert.equal(shutdownCalls, 1);
 });
 
 test('quit failure resets completion and permits a retry', async () => {

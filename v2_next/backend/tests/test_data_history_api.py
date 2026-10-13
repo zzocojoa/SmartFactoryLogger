@@ -476,17 +476,17 @@ class ElectronPreloadContractTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertEqual(root_package["version"], "1.0.27")
-        self.assertEqual(frontend_package["version"], "1.0.27")
-        self.assertIn('__version__ = "1.0.27"', backend_version)
+        self.assertEqual(root_package["version"], "1.0.28")
+        self.assertEqual(frontend_package["version"], "1.0.28")
+        self.assertIn('__version__ = "1.0.28"', backend_version)
         for lock_path in (
             self.repo_root / "package-lock.json",
             self.repo_root / "frontend" / "package-lock.json",
         ):
             with self.subTest(lock_path=lock_path.name, parent=lock_path.parent.name):
                 lock = json.loads(lock_path.read_text(encoding="utf-8"))
-                self.assertEqual(lock["version"], "1.0.27")
-                self.assertEqual(lock["packages"][""]["version"], "1.0.27")
+                self.assertEqual(lock["version"], "1.0.28")
+                self.assertEqual(lock["packages"][""]["version"], "1.0.28")
         self.assertEqual(
             root_package["build"]["nsis"]["artifactName"],
             "smart-factory-logger-v2 Setup ${version}.${ext}",
@@ -593,8 +593,20 @@ class ElectronPreloadContractTests(unittest.TestCase):
         self.assertIn("ipcRenderer.on('sfl:startup-state-changed'", preload_text)
         self.assertIn("ipcRenderer.removeListener('sfl:startup-state-changed'", preload_text)
         self.assertEqual(preload_text.count("ipcRenderer.invoke"), 7)
-        self.assertEqual(preload_text.count("ipcRenderer.on("), 1)
-        self.assertNotIn("ipcRenderer.send", preload_text)
+        self.assertEqual(preload_text.count("ipcRenderer.on("), 3)
+        self.assertEqual(
+            re.findall(r"ipcRenderer\.on\('([^']+)'", preload_text),
+            [
+                "sfl:startup-state-changed",
+                "sfl:prepare-shutdown",
+                "sfl:resume-after-shutdown-failure",
+            ],
+        )
+        self.assertEqual(preload_text.count("ipcRenderer.send("), 2)
+        self.assertEqual(
+            re.findall(r"ipcRenderer\.send\('([^']+)'", preload_text),
+            ["sfl:renderer-shutdown-ready", "sfl:renderer-shutdown-ready"],
+        )
         self.assertNotIn("ipcRenderer.once", preload_text)
         self.assertNotIn("...args", preload_text)
         self.assertNotIn("SFL_CONTROL_TOKEN", preload_text)

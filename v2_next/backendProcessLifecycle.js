@@ -1,5 +1,7 @@
 'use strict';
 
+const { randomUUID } = require('node:crypto');
+
 function isProcessMissingError(error) {
   if (!error) {
     return false;
@@ -290,7 +292,10 @@ function createApplicationShutdownController(options) {
     setQuitting(true);
     const shutdownAttempt = (async () => {
       try {
-        prepareShutdown();
+        const preparation = prepareShutdown();
+        if (preparation && typeof preparation.then === 'function') {
+          await preparation;
+        }
         await shutdown();
         shutdownComplete = true;
         quitApplication();
@@ -379,11 +384,76 @@ function createBackendRestartController(options) {
   };
 }
 
+function createRendererShutdownController({
+  ipcMain,
+  getMainWindow,
+  isTrustedSender,
+  timeoutMs = 15_000,
+}) {
+  let active = null;
+  const readyChannel = 'sfl:renderer-shutdown-ready';
+
+  const prepare = () => {
+    if (active) return active.promise;
+    const window = getMainWindow();
+    const contents = window?.webContents;
+    if (!window || window.isDestroyed() || !contents || contents.isDestroyed()) {
+      return Promise.resolve();
+    }
+    const attemptId = randomUUID();
+    let settled = false;
+    const promise = new Promise((resolve, reject) => {
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        ipcMain.removeListener(readyChannel, onReady);
+        contents.removeListener('dom-ready', sendPreparation);
+        contents.removeListener('destroyed', onDestroyed);
+        active = null;
+        if (error) reject(error);
+        else resolve();
+      };
+      const onReady = (event, result) => {
+        if (getMainWindow() !== window || !isTrustedSender(event) || result?.attemptId !== attemptId) return;
+        if (result.ok === true) finish();
+        else finish(new Error('Renderer image requests could not drain before shutdown.'));
+      };
+      const sendPreparation = () => {
+        if (settled) return;
+        try { contents.send('sfl:prepare-shutdown', attemptId); }
+        catch (error) { finish(error); }
+      };
+      const onDestroyed = () => finish();
+      const timer = setTimeout(() => finish(new Error('Renderer shutdown preparation timed out.')), timeoutMs);
+      ipcMain.on(readyChannel, onReady);
+      contents.on('dom-ready', sendPreparation);
+      contents.once('destroyed', onDestroyed);
+      // Send after active is assigned, including when a test/renderer answers immediately.
+      queueMicrotask(sendPreparation);
+    });
+    active = { promise };
+    return promise;
+  };
+
+  const resume = () => {
+    const window = getMainWindow();
+    const contents = window?.webContents;
+    if (window && !window.isDestroyed() && contents && !contents.isDestroyed()) {
+      try { contents.send('sfl:resume-after-shutdown-failure'); }
+      catch (_error) { return false; }
+    }
+    return true;
+  };
+  return { prepare, resume };
+}
+
 module.exports = {
   createApplicationShutdownController,
   createBackendCloseoutGate,
   createBackendRestartController,
   createCloseoutVerifiedStop,
+  createRendererShutdownController,
   hasProcessExited,
   isProcessMissingError,
   isVerifiedGracefulShutdownResult,

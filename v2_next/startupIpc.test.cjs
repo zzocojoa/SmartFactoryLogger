@@ -2,11 +2,69 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 
 const {
   createStartupIpcHandlers,
   isTrustedStartupSender,
 } = require('./startupIpc');
+
+function createPreloadHarness() {
+  const ipcRenderer = new EventEmitter();
+  const sent = [];
+  let bridge;
+  ipcRenderer.invoke = async () => ({ ok: true });
+  ipcRenderer.send = (channel, result) => sent.push({ channel, ...result });
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8'), {
+    require: (name) => {
+      assert.equal(name, 'electron');
+      return { ipcRenderer, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } } };
+    },
+    console,
+  });
+  return { ipcRenderer, sent, bridge };
+}
+
+test('preload marks shutdown synchronously and acknowledges only after the image listener drains', async () => {
+  const { ipcRenderer, sent, bridge } = createPreloadHarness();
+  let release;
+  const states = [];
+  bridge.onShutdownStateChanged((stopping) => {
+    states.push(stopping);
+    if (stopping) return new Promise((resolve) => { release = resolve; });
+  });
+  ipcRenderer.emit('sfl:prepare-shutdown', {}, 'attempt-one');
+  assert.equal(bridge.isShuttingDown(), true);
+  assert.equal(sent.length, 0);
+  release();
+  await new Promise(setImmediate);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].ok, true);
+  assert.equal(sent[0].attemptId, 'attempt-one');
+  ipcRenderer.emit('sfl:resume-after-shutdown-failure');
+  await new Promise(setImmediate);
+  assert.equal(bridge.isShuttingDown(), false);
+  assert.deepEqual(states, [true, false]);
+});
+
+test('preload reports a failed drain and does not acknowledge a cancelled preparation', async () => {
+  const { ipcRenderer, sent, bridge } = createPreloadHarness();
+  const unsubscribe = bridge.onShutdownStateChanged(() => Promise.reject(new Error('failed')));
+  ipcRenderer.emit('sfl:prepare-shutdown', {}, 'failed-attempt');
+  await new Promise(setImmediate);
+  assert.equal(sent[0].ok, false);
+  unsubscribe();
+  let release;
+  bridge.onShutdownStateChanged((stopping) => stopping ? new Promise((resolve) => { release = resolve; }) : undefined);
+  ipcRenderer.emit('sfl:prepare-shutdown', {}, 'cancelled-attempt');
+  ipcRenderer.emit('sfl:resume-after-shutdown-failure');
+  release();
+  await new Promise(setImmediate);
+  assert.equal(sent.length, 1);
+});
 
 function createHarness(overrides = {}) {
   const mainFrame = { url: 'file:///C:/SmartFactory/frontend/index.html#/dashboard' };

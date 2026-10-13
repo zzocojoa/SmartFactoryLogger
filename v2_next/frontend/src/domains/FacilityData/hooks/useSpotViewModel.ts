@@ -192,6 +192,8 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   const pendingImageUrlRef = useRef<string | null>(null);
   const pendingPreviousImageStateRef = useRef<SpotImageState | null>(null);
   const inFlightRef = useRef(false);
+  const shutdownRef = useRef(false);
+  const imageDrainWaitersRef = useRef<Array<() => void>>([]);
   const automaticRetryAttemptRef = useRef(0);
   const automaticRetryTimerRef = useRef<number | null>(null);
   const normalRefreshTimerRef = useRef<number | null>(null);
@@ -255,6 +257,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
     cancelNormalImageRefresh();
     const currentConfig = configRef.current;
     if (
+      shutdownRef.current || window.smartFactoryElectron?.isShuttingDown?.() ||
       !currentConfig?.image_url ||
       automaticRetryTimerRef.current !== null ||
       (typeof document !== 'undefined' && document.visibilityState === 'hidden')
@@ -296,7 +299,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   }, [cancelPendingImageRetry]);
 
   const scheduleAutomaticImageRetry = useCallback((): void => {
-    if (automaticRetryTimerRef.current !== null) {
+    if (shutdownRef.current || window.smartFactoryElectron?.isShuttingDown?.() || automaticRetryTimerRef.current !== null) {
       return;
     }
     cancelNormalImageRefresh();
@@ -446,7 +449,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   const runSpotFetch = useCallback(
     async (reason: string): Promise<void> => {
       const currentConfig = configRef.current;
-      if (!currentConfig?.image_url) {
+      if (shutdownRef.current || window.smartFactoryElectron?.isShuttingDown?.() || !currentConfig?.image_url) {
         return;
       }
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
@@ -583,6 +586,7 @@ export const useSpotViewModel = (): UseSpotViewModel => {
           last_fetch_completed_at: completedAt,
           last_fetch_latency_ms: completedAt - startedAt,
         }));
+        for (const resolve of imageDrainWaitersRef.current.splice(0)) resolve();
       }
     },
     [cancelNormalImageRefresh, publishImageFailure, syncDashboardSpotImageState]
@@ -667,15 +671,35 @@ export const useSpotViewModel = (): UseSpotViewModel => {
   );
 
   useEffect(() => {
+    let mounted = true;
+    shutdownRef.current = window.smartFactoryElectron?.isShuttingDown?.() ?? false;
+    const waitForImageDrain = (): Promise<void> => inFlightRef.current
+      ? new Promise((resolve) => imageDrainWaitersRef.current.push(resolve))
+      : Promise.resolve();
+    const unsubscribe = window.smartFactoryElectron?.onShutdownStateChanged?.(async (stopping) => {
+      if (!mounted) return waitForImageDrain();
+      shutdownRef.current = stopping;
+      if (stopping) {
+        cancelPendingImageRetry();
+        cancelNormalImageRefresh();
+        await waitForImageDrain();
+      } else {
+        resumeImageRefreshWhenVisible();
+      }
+    });
     return () => {
+      mounted = false;
+      shutdownRef.current = true;
       cancelPendingImageRetry();
       cancelNormalImageRefresh();
+      // An unmounted widget may still own a response; keep it in the drain handshake.
+      void waitForImageDrain().then(() => unsubscribe?.());
       const pendingPreviousUrl = pendingPreviousImageStateRef.current?.imageUrl ?? null;
       if (pendingPreviousUrl && pendingPreviousUrl !== prevUrlRef.current) {
         URL.revokeObjectURL(pendingPreviousUrl);
       }
     };
-  }, [cancelNormalImageRefresh, cancelPendingImageRetry]);
+  }, [cancelNormalImageRefresh, cancelPendingImageRetry, resumeImageRefreshWhenVisible]);
 
   useSpotViewModelEffects({
     config,

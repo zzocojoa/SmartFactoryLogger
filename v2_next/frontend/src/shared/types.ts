@@ -653,6 +653,10 @@ export interface SmartFactoryElectronBridge {
   onStartupStateChanged?: (
     listener: (state: ElectronStartupState) => void
   ) => (() => void);
+  isShuttingDown?: () => boolean;
+  onShutdownStateChanged?: (
+    listener: (stopping: boolean) => void | Promise<void>
+  ) => (() => void);
   retryStartup?: () => Promise<SmartFactoryStartupEventResult>;
   continueStartupOffline?: () => Promise<SmartFactoryStartupEventResult>;
   exitStartup?: () => Promise<SmartFactoryStartupEventResult>;

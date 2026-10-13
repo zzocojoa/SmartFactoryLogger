@@ -15,6 +15,7 @@ const {
   createBackendCloseoutGate,
   createBackendRestartController,
   createCloseoutVerifiedStop,
+  createRendererShutdownController,
   stopProcessTree,
 } = require('./backendProcessLifecycle');
 const {
@@ -872,18 +873,27 @@ const backendRestartController = createBackendRestartController({
   },
 });
 
+const rendererShutdownController = createRendererShutdownController({
+  ipcMain,
+  getMainWindow: () => mainWindow,
+  isTrustedSender: (event) => isTrustedStartupSender(event, mainWindow, trustedMainDocumentUrl),
+});
+
 const applicationShutdownController = createApplicationShutdownController({
   setQuitting: (value) => {
     markShutdownDiagnostic('application.set-quitting', { value });
     applicationQuitting = value;
   },
-  prepareShutdown: () => {
+  prepareShutdown: async () => {
     markShutdownDiagnostic('application.prepare-shutdown-start');
     if (backendStartFallbackTimer !== null) {
       clearTimeout(backendStartFallbackTimer);
       backendStartFallbackTimer = null;
     }
     startupCoordinator.dispose();
+    logStartupEvent('renderer.shutdown-prepare-start');
+    await rendererShutdownController.prepare();
+    logStartupEvent('renderer.shutdown-ready');
     markShutdownDiagnostic('application.prepare-shutdown-complete');
   },
   shutdown: async () => {
@@ -914,6 +924,9 @@ const applicationShutdownController = createApplicationShutdownController({
   },
   quitApplication: () => app.quit(),
   onFailure: (error) => {
+    if (!rendererShutdownController.resume()) {
+      logStartupEvent('renderer.shutdown-resume-failed');
+    }
     const message = error instanceof Error ? error.message : String(error);
     logStartupEvent('backend.shutdown-failed', { message });
     log(`Backend shutdown failed: ${message}`);

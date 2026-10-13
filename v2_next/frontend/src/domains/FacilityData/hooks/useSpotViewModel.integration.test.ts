@@ -130,6 +130,27 @@ const setVisibilityState = (state: DocumentVisibilityState): void => {
   });
 };
 
+const installShutdownBridge = () => {
+  let stopping = false;
+  const listeners = new Set<(value: boolean) => void | Promise<void>>();
+  window.smartFactoryElectron = {
+    getMemory: vi.fn(),
+    recordStartupEvent: vi.fn(async () => ({ ok: true })),
+    isShuttingDown: () => stopping,
+    onShutdownStateChanged: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+  return {
+    listeners,
+    setStopping: async (value: boolean) => {
+      stopping = value;
+      await Promise.all(Array.from(listeners, (listener) => listener(value)));
+    },
+  };
+};
+
 describe('useSpotViewModel integration', () => {
   beforeEach(() => {
     mockControlSpotFocus.mockResolvedValue({
@@ -152,6 +173,7 @@ describe('useSpotViewModel integration', () => {
   });
 
   afterEach(() => {
+    delete window.smartFactoryElectron;
     vi.useRealTimers();
     mockFetchSpotConfig.mockReset();
     mockFetchSpotImageResponse.mockReset();
@@ -161,6 +183,84 @@ describe('useSpotViewModel integration', () => {
     mocks.cancelNormalImageRefresh = undefined;
     mocks.resumeImageRefreshWhenVisible = undefined;
     setVisibilityState('visible');
+  });
+
+  it('drains an active image before acknowledging shutdown and blocks manual, visible and timer refreshes', async () => {
+    vi.useFakeTimers();
+    const bridge = installShutdownBridge();
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:drained');
+    URL.revokeObjectURL = vi.fn();
+    let releaseResponse!: (response: Response) => void;
+    mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
+    mockFetchSpotImageResponse.mockReturnValueOnce(new Promise((resolve) => { releaseResponse = resolve; }));
+    mockFetchSpotImageResponse.mockImplementation(async () => buildValidJpegResponse());
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => { await result.current.refreshConfig(); });
+      act(() => result.current.refreshImage());
+      let acknowledged = false;
+      let shutdown!: Promise<void>;
+      act(() => { shutdown = bridge.setStopping(true).then(() => { acknowledged = true; }); });
+      await act(async () => {
+        result.current.refreshImage();
+        mocks.resumeImageRefreshWhenVisible?.();
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(acknowledged).toBe(false);
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+      await act(async () => { releaseResponse(buildValidJpegResponse()); await shutdown; });
+      expect(acknowledged).toBe(true);
+      await act(async () => {
+        result.current.handleImageLoad(result.current.imageUrl);
+        result.current.refreshImage();
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+      expect(result.current.diagnostics.error_count).toBe(0);
+      await act(async () => { await bridge.setStopping(false); });
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount(); URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  it('keeps an unmounted active request in the shutdown drain and preserves its real transport failure', async () => {
+    const bridge = installShutdownBridge();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    let rejectResponse!: (reason: Error) => void;
+    mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
+    mockFetchSpotImageResponse.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectResponse = reject; }));
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    try {
+      await act(async () => { await result.current.refreshConfig(); });
+      act(() => result.current.refreshImage());
+      unmount();
+      let acknowledged = false;
+      const shutdown = bridge.setStopping(true).then(() => { acknowledged = true; });
+      await Promise.resolve();
+      expect(acknowledged).toBe(false);
+      rejectResponse(new Error('real transport failure'));
+      await shutdown;
+      expect(consoleError).toHaveBeenCalledWith('Image fetch failed', expect.objectContaining({ message: 'real transport failure' }));
+      expect(bridge.listeners.size).toBe(0);
+      expect(mockFetchSpotImageResponse).toHaveBeenCalledTimes(1);
+    } finally { consoleError.mockRestore(); }
+  });
+
+  it('does not start image requests when mounted after shutdown preparation already began', async () => {
+    const bridge = installShutdownBridge();
+    await bridge.setStopping(true);
+    mockFetchSpotConfig.mockResolvedValue(BASE_SPOT_CONFIG);
+    const { result, unmount } = renderHook(() => useSpotViewModel());
+    await act(async () => {
+      await result.current.refreshConfig();
+      result.current.refreshImage();
+      mocks.resumeImageRefreshWhenVisible?.();
+    });
+    expect(mockFetchSpotImageResponse).not.toHaveBeenCalled();
+    unmount();
   });
 
   it('publishes payload rejection to shared state and recovers through explicit retry', async () => {

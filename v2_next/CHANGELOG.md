@@ -2,6 +2,29 @@
 
 All notable changes to Smart Factory Logger V2 are documented here.
 
+## [1.0.28] - Candidate, 2026-10-13
+
+### Changed
+
+- Pause renderer image polling and wait for active response processing before
+  requesting backend shutdown. This addresses image requests racing the backend
+  shutdown gate during a normal application close.
+- Require the trusted current renderer to acknowledge a unique shutdown attempt.
+  Failed or timed-out preparation keeps the application open and resumes polling;
+  existing backend closeout, data preservation and native exit checks still apply.
+- Cover asynchronous preparation, bounded preload channels, image draining across
+  unmount, retry/resume and real transport failure reporting with regression tests.
+
+### Validation status
+
+- This is an unsigned internal candidate. The prior 1.0.27 installation/recovery
+  evidence retains its six shutdown image 502 errors and failed error-log review.
+- Source regression checks and a real Electron preload/controller probe passed.
+  Final clean-source release-lock validation, rebuilt package and installed runtime
+  checks must identify this candidate's own commit and installer hash.
+- Server field QA, device profile and full data dispositions remain open. The
+  operating installer and next rollback baseline have not changed.
+
 ## [1.0.27] - Candidate, 2026-10-13
 
 ### Changed
