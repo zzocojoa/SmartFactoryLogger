@@ -202,8 +202,10 @@ Codex가 서버에서 직접 확인하고 유지보수는 아무 때나 해도 �
 - 기존 도구가 증명하는 필드 범위를 확인하고, 도구 밖의 승인 필수 항목도 별도 증거로 대조한다.
 - attestation 생성 시 도구가 요구하는 운영자 확인과 정상 종료 상태를 지킨다.
 - [Low Signal 시험 준비 검토](../../04-report/production-release-risk-validation-comparator-readiness-20261013.report.md)의
-  적용 모드·정밀도 한계를 지킨다. Ratio/Multi 설명을 App1/펌웨어40.38의 검증으로
-  확대하지 않으며 REST 정수 표시값의 동일성을 내부 경계값 동일성으로 간주하지 않는다.
+  적용 모드·정밀도 한계를 지킨다. REST alarmstatus bit4 각주의 Application-specific 모델
+  범위와 Family 안내서의 Ratio/Multi 모드 설명을 구분한다. 어느 설명도 App1/펌웨어40.38의
+  실증으로 확대하지 않으며 REST 정수 표시값의 동일성을 내부 경계값 동일성으로 간주하지 않는다.
+  제조사 문의 발송/답변 확보와 실제 경계 시험 완료도 각각 별도로 기록한다.
 
 **완료 조건(DoD)**
 

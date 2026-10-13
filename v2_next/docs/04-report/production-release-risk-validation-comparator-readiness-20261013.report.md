@@ -17,9 +17,14 @@
 직접 다운로드 및 페이지 이미지 조회는 사이트 점검 HTML을 반환했다.
 원본 PDF를 확보·시각 검증했다는 주장은 하지 않으며 색인 본문이라는 출처 한계를 남긴다.
 
-별도로 보유한 [REST API 안내서](../reference/ametek_land_spot.pdf) Issue2의 8쪽(인쇄2-2)을
-텍스트와 렌더링 이미지로 대조했다. `signalpc`는 Ratio/Application 모델에서 제공하는
-0–100의 정수 %다. 이 출력의 정밀도와 내부 알람 비교 정밀도가 같다는 설명은 없다.
+별도로 보유한 [REST API 안내서](../reference/ametek_land_spot.pdf) Issue2(2024-07-31)의
+7–8쪽(인쇄2-1/2-2)을 텍스트와 렌더링 이미지로 대조했다. 7쪽의 `alarmstatus` bit4에도
+별표가 있으며, 8쪽의 해당 각주는 Ratio 또는 Application-specific **모델**을 포함한다.
+이는 Application 모델의 프로토콜 제공 근거를 보완한다. Family 안내서의 Ratio/Multi
+**모드** 설명과 적용 범위가 달라 App1/40.38의 동작 확인이 필요하다. 모든 App 모드의
+지원이나 미지원을 이 두 설명만으로 확정하지 않는다. 12쪽의 Application 응답 예시도
+실제 장비 시험 결과가 아니다.
+`signalpc`는 0–100의 정수 %다. 이 출력과 내부 알람 비교의 정밀도가 같다는 설명은 없다.
 **추론:** 표시값 2%는 내부 비교값의 정확한 동일성을 증명하지 않으며, 알람 bit4가
 0이었다는 사실만으로 `<`를 확정할 수 없다. 현재처럼 알람이 꺼져 있을 때의 bit4=0도
 활성 알람의 경계 동작을 검증하지 못한다.
@@ -100,3 +105,23 @@ USER_SELF는 CMD OUT 알람 접점이 PLC/설비의 정지·제어 입력에 “
 
 다음 단계는 App1/40.38에서의 알람 적용 및 동일값 확인 방법에 대한 제조사 근거 또는
 해당 조건을 입증할 격리 시험 설계다. 배선 답변만으로 물리 경계·attestation을 PASS로 바꾸지 않는다.
+
+## 프로토콜 범위 보완과 제조사 문의 발송
+
+[프로토콜 대조 기록](C:/Users/user/Desktop/SmartFactory/PDCA_PROTOCOL_CONTRACT_20261013_6d6df2e6/protocol-review.json)에
+REST 원본 PDF의 SHA256, 확인한 쪽과 렌더링, 별표의 적용 범위를 보존했다.
+이전 SPOT AL/AL LT 안내서 811299 Issue7(2021-08-26)의 4.6절도 Low Signal을 설명하지만,
+세대가 다른 이 자료를 SPOT+ AL/40.38 동작의 검증으로 사용하지 않는다.
+
+사용자는 처음 “본인이 구매처에 전달”이라고 답한 뒤 “아니다. 너가 전달해라.”라고
+명시적으로 변경했다. 이에 따라 준비된 [영문 문의](C:/Users/user/Desktop/SmartFactory/PDCA_PROTOCOL_CONTRACT_20261013_6d6df2e6/manufacturer-inquiry.txt)를
+2026-10-13 19:06:27 KST에 제조사 공식 주소 `land.enquiry@ametek.com`으로 발송했다.
+App1 알람 지원, `<`/`<=`와 내부 정밀도, 승인된 미만/동일/초과 시험 방법을 문의했다.
+본문에는 모델·펌웨어·설정과 공개 문서만 포함하고 첨부파일은 없다.
+[발송 영수증](C:/Users/user/Desktop/SmartFactory/PDCA_PROTOCOL_CONTRACT_20261013_6d6df2e6/email-send-receipt.json)에
+Gmail SENT 상태와 수신 주소·제목·본문의 발송 후 일치를 기록했다. 수신자의 열람이나
+답변을 확인했다는 뜻은 아니다. 기존 프로토콜 기록의 발송 대기 표시는 당시 기록으로 보존한다.
+
+후속 답변에서는 모델/펌웨어/모드의 적용 범위, 비교식과 정밀도, equality 시험 가능 여부를
+각각 확인한다. 답변만으로 실제 경계 시험이나 최종 후보 attestation을 완료 처리하지 않는다.
+현재 물리 시험 `NOT_TESTED`, App1/40.38 계약 미확정, 정식 출시 **HOLD**를 유지한다.
