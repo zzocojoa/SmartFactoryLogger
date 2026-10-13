@@ -308,3 +308,20 @@ OS 식별값을 대조하고 접근 거부·프로세스 변경·누락 값은 �
 첫 인증 실패는 주기 관찰을 시작하지 않고, 종료 실패는 전체 관찰을 FAIL로 남긴다.
 이 검사는 시작·종료 경계 표본이며 모든 중간 순간의 증거는 아니다. 장비 fingerprint/attestation,
 보호된 외부 실행기·화면/packet·정상 종료/최종 delta·실제 현장 QA는 별도로 남는다.
+
+### 5.10 최종 설정 기준과 runtime fingerprint의 경계 대조
+
+최종 후보의 실제 attestation에서 작성한 설정 기준 JSON을 외부 SHA로 잠가 읽는다.
+기준은 승인된 관찰 프로파일 기록의 SHA와 연결하고, USER_SELF의 최종 fingerprint/설정 SHA,
+build·운영자 확인·UTC 시각·readback/comparator 상태를 포함한다. 현재 존재하는 운영본의
+fingerprint_mismatch를 고치거나 승인 기록만으로 최종 기준을 자동 생성하지 않는다.
+테스트용 기준과 실제 최종 기준은 구분하며 보호된 launcher가 실제 기준 SHA를 고정해야 한다.
+
+`/api/spot/config`의 image 진단에서 제품 소스와 동일한22개 fingerprint 입력을 선택해
+canonical JSON SHA256을 재계산한다. 필수 값/타입·프로파일의 소프트웨어 대응 필드·별칭을
+검사하고 불일치·미검증·drift·기준 변경은 실패로 남긴다. 원문과 판정 이유를 보존한다.
+설정 GET 앞뒤 OS 식별·같은 SPOT 서비스와 관찰 시작/종료의 고정 기준을 결합한다.
+초기 실패는 주기 수집 전 중단하고 종료 실패는 관찰 전체를 FAIL로 남긴다.
+설정 endpoint의 임의 성능 상한을 새로 만들지 않으며 기존 전체 요청 timeout을 적용한다.
+이 검사는 API가 보고한 설정과 attest 정보의 무결성/일치다. 물리 장비 readback·comparator
+실증·기준의 실제 승인 확인·정상 종료 metadata와의 최종 대조를 대신하지 않는다.

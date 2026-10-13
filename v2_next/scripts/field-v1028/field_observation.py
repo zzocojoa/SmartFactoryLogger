@@ -21,6 +21,7 @@ import time
 
 import field_installation_binding as binding
 import field_generation_binding as generation_binding
+import field_configuration_binding as configuration_binding
 import field_http_sampling as http
 import field_resource_sampling as resource
 from field_windows_job import CollectorJob
@@ -35,6 +36,8 @@ class ObservationSpec:
     port: int
     reference_sha256: str = binding.REFERENCE_SHA
     extras: dict = field(default_factory=dict)
+    configuration_reference: str = ''
+    configuration_reference_sha256: str = ''
 
     def validate(self):
         binding.plain_path(self.root)
@@ -46,6 +49,10 @@ class ObservationSpec:
         binding.require(isinstance(self.reference_sha256, str)
                         and re.fullmatch('[0-9a-f]{64}', self.reference_sha256), 'invalid-reference-hash')
         binding.require(isinstance(self.extras, dict), 'invalid-extra-facts')
+        binding.plain_path(self.configuration_reference)
+        binding.require(isinstance(self.configuration_reference_sha256, str)
+                        and re.fullmatch('[0-9a-f]{64}', self.configuration_reference_sha256),
+                        'invalid-configuration-reference-hash')
 
 
 def write_json(path, value):
@@ -273,7 +280,9 @@ def run_observation(spec, output, duration_seconds, stop, notify):
               'started_utc': datetime.now(timezone.utc).isoformat()}
     try:
         with binding.InstalledPayload(spec.root, spec.reference,
-                                      expected_reference_sha256=spec.reference_sha256, extras=spec.extras) as payload:
+                                      expected_reference_sha256=spec.reference_sha256, extras=spec.extras) as payload, \
+                configuration_binding.configuration_reference(spec.configuration_reference,
+                    spec.configuration_reference_sha256) as expected_configuration:
             initial = binding.capture_runtime_binding(payload, spec.main, spec.backend, spec.port)
             write_json(output / 'initial.json', initial)
             binding.require(initial['binding_status'] == 'PASS', 'initial-binding-failed')
@@ -281,6 +290,10 @@ def run_observation(spec, output, duration_seconds, stop, notify):
             control_initial = generation_binding.capture_generation(payload, spec.main, spec.backend, spec.port)
             write_json(output / 'control-initial.json', control_initial)
             binding.require(control_initial['generation_status'] == 'PASS', 'initial-control-binding-failed')
+            configuration_initial = configuration_binding.capture_configuration(
+                payload, spec.main, spec.backend, spec.port, sessions, expected_configuration)
+            write_json(output / 'configuration-initial.json', configuration_initial)
+            binding.require(configuration_initial['configuration_status'] == 'PASS', 'initial-configuration-failed')
             origin = time.perf_counter_ns() + 3_000_000_000
             result['origin_ns'] = origin
             write_json(output / 'observation.json', {'origin_ns': origin, 'duration_seconds': duration_seconds,
@@ -315,17 +328,24 @@ def run_observation(spec, output, duration_seconds, stop, notify):
             write_json(output / 'control-final.json', control_final)
             result['control_binding'] = dict(initial=control_initial, final=control_final,
                                              scope='AUTHENTICATED_BOUNDARY_SAMPLES')
+            configuration_final = configuration_binding.capture_configuration(
+                payload, spec.main, spec.backend, spec.port, sessions, expected_configuration)
+            write_json(output / 'configuration-final.json', configuration_final)
+            result['configuration_binding'] = dict(initial=configuration_initial, final=configuration_final,
+                reference_sha256=spec.configuration_reference_sha256, scope='REPORTED_CONFIGURATION_BOUNDARIES')
             result['closeout'] = payload.recheck()
             result['review'] = review_window(spec, output, origin, duration_seconds, sessions, [initial, final])
             if (result['review']['status'] == 'PASS' and not stop.is_set()
                     and control_final['generation_status'] == 'PASS'
+                    and configuration_final['configuration_status'] == 'PASS'
                     and all(code == 0 for code in result['component_exits'].values())):
                 result['observation_status'] = 'PASS'
     except Exception as error:
         result['errors'].append(resource.error_record(error))
+        result['observation_status'] = 'FAIL'
         stop.set()
     result.update(stop_requested=stop.is_set(), finished_ns=time.perf_counter_ns())
-    result['remaining_gates'] = ['device_fingerprint_attestation',
+    result['remaining_gates'] = ['physical_device_and_comparator_verification', 'reference_approval_and_shutdown_attestation',
                                 'UI_web_vitals', 'packet_contract', 'normal_application_shutdown_and_final_delta',
                                 'all_release_plan_gates']
     return result

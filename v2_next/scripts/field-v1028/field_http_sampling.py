@@ -29,7 +29,7 @@ class Endpoint:
     path: str
     interval_seconds: float
     kind: str
-    warning_ms: float
+    warning_ms: float | None
     failure_ms: float | None
     max_body_bytes: int
 
@@ -40,10 +40,11 @@ ENDPOINTS = (
     Endpoint('image', '/api/spot/live_image.jpg', .25, 'jpeg', 500, None, 2 * 1024 * 1024),
 )
 CONTROL_HEALTH = Endpoint('control_health', '/api/control/health', 5.0, 'json', 50, 200, 1024 * 1024)
+SPOT_CONFIG = Endpoint('spot_config', '/api/spot/config', 5.0, 'json', None, None, 8 * 1024 * 1024)
 
 
 def _validate_endpoint(endpoint):
-    reference = next((item for item in (*ENDPOINTS, CONTROL_HEALTH) if item.name == endpoint.name), None)
+    reference = next((item for item in (*ENDPOINTS, CONTROL_HEALTH, SPOT_CONFIG) if item.name == endpoint.name), None)
     if reference is None or any(getattr(reference, key) != getattr(endpoint, key)
                                 for key in ('path', 'kind', 'warning_ms', 'failure_ms', 'max_body_bytes')):
         raise ValueError('Endpoint contract mismatch')
@@ -275,7 +276,7 @@ def summarize_channel(endpoint, records, expected_slots):
             'max_ms': values[-1] if values else None, 'p50_ms': percentile(.5),
             'p95_ms': percentile(.95), 'p99_ms': percentile(.99),
             'max_start_lateness_ms': max((record['start_lateness_ms'] for record in attempted if numeric(record.get('start_lateness_ms'))), default=None),
-            'warnings': sum(value > endpoint.warning_ms for value in values),
+            'warnings': sum(value > endpoint.warning_ms for value in values) if endpoint.warning_ms is not None else None,
             'failure_threshold_ms': endpoint.failure_ms, 'threshold_failures': threshold_failures,
             'http_component_status': status}
 

@@ -270,3 +270,17 @@ ZIP 내부 SHA/크기/CRC 및 공유 ZIP/manifest SHA로 검산했다.
 보호된 외부 launcher·fingerprint/attestation·UI/packet·정상 종료/최종 delta 통합과 실제 현장
 설치/복구/15분/120분·승격이 남는다. 이번 새 소스의 장시간 성능 검사는 수행하지 않았다.
 R1–R6 HOLD·full_data_gate NOT_EVALUATED·현재 운영/롤백541d/08C와 미서명 정책을 유지한다.
+
+## 2026-10-14 최종 설정 기준과 보고된 fingerprint의 결합
+
+[설정 기준/경계 대조](production-release-risk-validation-configuration-binding-20261014.report.md)를
+통합했다. 외부 SHA로 잠긴 최종 기준, 제품의22개 fingerprint 입력 재계산, 승인 프로파일의
+소프트웨어 대응15필드·운영자/attestation·OS/서비스를 대조한다. 실제 서버 보존2표본의
+지문 재계산은 일치했지만 후보 build·운영자·승인 지문·drift 검사는 FAIL로 유지했다.
+종료 읽기 오류에서 worker PASS가 남는 문제를 재현하고 FAIL로 수정했다.
+최종 설정7·통합26·인증8·HTTP31시험과 독립 Ruff F/E9는 모두 exit0/skip0이다.
+최종 증거6,838항목을 ZIP 내부 SHA/크기/CRC 및 공유 ZIP·manifest SHA로 검산해 보존했다.
+기존 CSV current-promotion 옵션의 comparator=false와 최종 QA의 true 요구 차이도 재현해,
+적용 범위 정합화를 현장 실행 조건으로 남겼다. 실제 최종 attestation 기준·물리 시험·
+보호된 launcher·전체 현장15분/120분·종료 delta·승격은 미완료다.
+R1–R6 HOLD·full_data_gate NOT_EVALUATED·현재 운영/롤백541d/08C와 미서명 정책을 유지한다.

@@ -4,6 +4,7 @@ The fixture uses copied local Python binaries, synthetic candidate metadata and
 an explicit fixture reference hash. It is never evidence of candidate field QA.
 """
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import hashlib
 import io
 import json
@@ -23,6 +24,7 @@ import psutil
 
 import field_installation_binding as binding
 import field_observation as observation
+import field_configuration_binding as configuration
 from field_resource_sampling import ProcessIdentity
 
 
@@ -81,6 +83,19 @@ def after_ready_hang_worker(spec, output, duration, stop, sender):
         time.sleep(1)
 
 
+def configuration_closeout_failure_worker(spec, output, duration, stop, sender):
+    original = configuration.configuration_reference
+
+    @contextmanager
+    def fail_closeout(*args):
+        with original(*args) as expected:
+            yield expected
+            raise OSError('injected-configuration-closeout-read-failure')
+
+    with patch.object(configuration, 'configuration_reference', fail_closeout):
+        observation._worker_entry(spec, output, duration, stop, sender)
+
+
 MAIN_SOURCE = '''import json,os,secrets,subprocess,sys
 from pathlib import Path
 r=Path(__file__).parent
@@ -102,10 +117,11 @@ r=Path(__file__).parent
 mode=sys.argv[1]
 count=0
 control_count=0
+configuration_count=0
 started=datetime.now(timezone.utc).isoformat(timespec='seconds')
 class Handler(BaseHTTPRequestHandler):
  def do_GET(self):
-  global count,control_count
+  global count,control_count,configuration_count
   status=200
   if self.path=='/health':
    count+=1
@@ -121,6 +137,15 @@ class Handler(BaseHTTPRequestHandler):
    if mode=='control-changed' and control_count>=2: session='abcdef654321'
    if self.headers.get('X-SFL-Control-Token')!=os.environ['SFL_CONTROL_TOKEN']: status=403
    body=json.dumps(dict(running=True,backend_process_id=os.getpid(),backend_generation_id=os.environ['SFL_BACKEND_GENERATION_ID'],backend_session_id=session,started_at=started)).encode()
+  elif self.path=='/api/spot/config':
+   configuration_count+=1
+   snap=json.loads((r/'fixture-configuration.json').read_text())
+   snap['config_captured_at']=datetime.now(timezone.utc).isoformat()
+   snap['spot_service_instance_id']='11111111-1111-4111-8111-111111111111'
+   if mode=='configuration-changed' and configuration_count>=2: snap['low_signal_threshold_pc']=3.0
+   if mode=='configuration-unverified': snap['config_operator_verified']=False
+   if mode=='configuration-session': snap['spot_service_instance_id']='33333333-3333-4333-8333-333333333333'
+   body=json.dumps(dict(image=snap)).encode()
   elif self.path=='/api/spot/live_image.jpg': body=(r/'image.jpg').read_bytes()
   elif self.path=='/api/data': body=b'{"fixture":true}'
   else: status=404;body=b'{}'
@@ -136,6 +161,32 @@ assert not t.is_alive()
 
 def raw_fact(raw):
     return dict(bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+
+
+def configuration_snapshot():
+    """Synthetic attestation for isolated tests only; never a field approval."""
+    stamp = datetime.now(timezone.utc).isoformat()
+    snapshot = dict(configuration.PROFILE, spot_config_revision='spot-config-provenance-v1',
+        build_git_commit=binding.BUILD, settings_file_sha256='a' * 64, spot_ip='192.0.2.1',
+        low_signal_comparator='lt', low_signal_comparator_configured_verified=True,
+        low_signal_comparator_verified=True, diagnostics_collection_mode='async_fact_only',
+        config_source='runtime_config_attestation', config_operator_verified_requested=True,
+        config_operator_verified=True, config_attestation_status='verified', spot_config_verified_at=stamp,
+        spot_config_verified_by='USER_SELF', device_config_readback_status='not_supported',
+        device_config_fingerprint_sha256='', config_drift_detected=False, config_drift_fields=[],
+        spot_ratio_raw_enabled=False, config_captured_at=stamp)
+    fingerprint = configuration.canonical_fingerprint(snapshot)
+    snapshot.update(spot_config_fingerprint_sha256=fingerprint, spot_config_verified_fingerprint_sha256=fingerprint)
+    return snapshot
+
+
+def configuration_reference(folder, name='fixture-configuration-reference.json'):
+    path = folder / name
+    snapshot = configuration_snapshot()
+    fact = observation.write_json(path, dict(schema='sfl-field-configuration-reference-v1',
+        profile_approval_sha256=configuration.PROFILE_APPROVAL_SHA, snapshot=snapshot,
+        classification='SYNTHETIC_TEST_NOT_FIELD_APPROVAL'))
+    return path, fact, snapshot
 
 
 @contextmanager
@@ -160,6 +211,8 @@ def fixture_app(folder, mode='normal'):
     (root / 'resources/app.asar').write_bytes(b'SYNTHETIC TEST ONLY; no Electron app')
     (root / 'main.py').write_text(MAIN_SOURCE, encoding='utf-8')
     (root / 'backend.py').write_text(BACKEND_SOURCE, encoding='utf-8')
+    configuration_path, configuration_fact, snapshot = configuration_reference(folder)
+    observation.write_json(root / 'fixture-configuration.json', snapshot)
     picture = io.BytesIO()
     Image.new('RGB', (32, 24), (20, 80, 120)).save(picture, 'JPEG')
     (root / 'image.jpg').write_bytes(picture.getvalue())
@@ -182,7 +235,9 @@ def fixture_app(folder, mode='normal'):
         ready = json.loads(line)
         spec = observation.ObservationSpec(str(root), str(reference), ProcessIdentity.read(ready['main_pid']),
                                            ProcessIdentity.read(ready['backend']['pid']), ready['backend']['port'],
-                                           reference_sha256=reference_fact['sha256'])
+                                           reference_sha256=reference_fact['sha256'],
+                                           configuration_reference=str(configuration_path),
+                                           configuration_reference_sha256=configuration_fact['sha256'])
         observation.write_json(folder / 'fixture-ready.json', dict(main_pid=process.pid, ready=ready))
         yield spec
     finally:
@@ -204,8 +259,10 @@ class ObservationTests(unittest.TestCase):
         self.folder.mkdir()
         self.reference = self.folder / 'empty-reference.json'
         self.reference.write_text('{}')
+        configuration_path, configuration_fact, _ = configuration_reference(self.folder, 'supervisor-configuration-reference.json')
         self.spec = observation.ObservationSpec(str(self.folder), str(self.reference),
-            ProcessIdentity(100, 1.0, 'C:\\main.exe'), ProcessIdentity(101, 2.0, 'C:\\backend.exe'), 8000)
+            ProcessIdentity(100, 1.0, 'C:\\main.exe'), ProcessIdentity(101, 2.0, 'C:\\backend.exe'), 8000,
+            configuration_reference=str(configuration_path), configuration_reference_sha256=configuration_fact['sha256'])
 
     def run_worker(self, target, **kwargs):
         result = observation.supervise_observation(self.spec, self.folder / 'out', duration_seconds=.2,
@@ -398,6 +455,33 @@ class ObservationTests(unittest.TestCase):
             worker, _ = observation.read_json(self.folder / 'out/worker-result.json')
             self.assertEqual(worker['control_binding']['initial']['generation_status'], 'PASS')
             self.assertEqual(worker['control_binding']['final']['generation_status'], 'FAIL')
+
+    def test_changed_configuration_fails_final_observation(self):
+        with fixture_app(self.folder, 'configuration-changed') as spec:
+            result = observation.supervise_observation(spec, self.folder / 'out', duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'], 'FAIL')
+            worker, _ = observation.read_json(self.folder / 'out/worker-result.json')
+            self.assertEqual(worker['configuration_binding']['initial']['configuration_status'], 'PASS')
+            self.assertEqual(worker['configuration_binding']['final']['configuration_status'], 'FAIL')
+            self.assertIn('approved-profile:low_signal_threshold_pc',
+                          worker['configuration_binding']['final']['review']['issues'])
+
+    def test_configuration_reference_closeout_error_cannot_leave_pass(self):
+        with fixture_app(self.folder) as spec:
+            result = observation.supervise_observation(spec, self.folder / 'out', duration_seconds=.5,
+                _worker_target=configuration_closeout_failure_worker)
+            self.assertEqual(result['supervisor_status'], 'FAIL')
+            worker, _ = observation.read_json(self.folder / 'out/worker-result.json')
+            self.assertEqual(worker['observation_status'], 'FAIL')
+            self.assertIn('injected-configuration-closeout-read-failure', worker['errors'][0]['reason'])
+
+    def test_unverified_configuration_never_starts_periodic_collection(self):
+        with fixture_app(self.folder, 'configuration-unverified') as spec:
+            result = observation.supervise_observation(spec, self.folder / 'out', duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'], 'FAIL')
+            initial, _ = observation.read_json(self.folder / 'out/configuration-initial.json')
+            self.assertIn('not-verified:config_operator_verified', initial['review']['issues'])
+            self.assertFalse((self.folder / 'out/http').exists())
 
     def test_first_authenticated_health_latency_is_not_discarded(self):
         with fixture_app(self.folder, 'slow-control') as spec:
