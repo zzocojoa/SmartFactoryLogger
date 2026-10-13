@@ -185,3 +185,17 @@ SmartFactory/PDCA_FIELD128_20261013_450e9f1b로 복사하고 절대경로·파�
 잠긴 실행 launcher와 전체15분/120분 수집·판정 도구, 기존 R1–R6 조건은 계속 남는다.
 21:39 KST 복귀 화면은 Running과 제품60366/금형2였으며 Codex가 작업 정보를 변경하지 않았다.
 제조사 문의는19:06 발송됐고 이후 Gmail 확인에는 발신1개만 있었다. 중복 발송하지 않았다.
+
+## 후속 패키지 읽기 실행 도우미
+
+[잠금 바이트 실행·결과 보존 도우미](production-release-risk-validation-field-launch-20261013.report.md)의
+기본14/추가7 조건이 기대 종료 코드와 일치했다. 원시 출력21개·실제 결과 manifest3개·
+전달/공유5파일 SHA 검산 exit0, Python 도우미3개의 Ruff F/E9 exit0이다.
+초기 ACL 시험의 Synchronize 기대값 오류는 시험만 수정하고 최초 실패를 보존했다.
+개발 PC 권한 치환 fixture와 실제 서버 관리자 실행은 구분한다.
+
+서버 `C:\Users\user\Desktop\SmartFactory\FREAD128_20261013_06df50b9`의5파일·절대경로와
+명령문을 화면으로 확인했다. 사용자 직접 실행을 요청했으며 실제 서버 결과·로컬 SHA는 아직
+미확인이다. 129개 시험/전달 기록은 공유 records에 전체 SHA를 대조해 보존했다.
+전체15분/120분 수집·판정 도구, 실제 설치/설정 QA·최종 delta·승격은 계속 남는다.
+현재541d/08C 운영·롤백 identity, 미서명 정책, R1–R6 HOLD와 전체 목표 active를 유지한다.

@@ -185,3 +185,17 @@ R1~R6 각각: FACT 또는 INFERENCE / evidence 경로·해시 / PASS·FAIL·HOLD
 같은 잠긴 도구 바이트를 실행하는 launcher와 전체 현장 수집·판정은 후속 단계다.
 정상2·부정16 실행과 서버 최종 경로/파일 존재 근거는
 [패키지 보고](../../04-report/production-release-risk-validation-field-package-20261013.report.md)에 기록한다.
+
+### 같은 잠금 바이트 실행과 결과 보존
+
+`invoke-field-package-read.ps1`은 전달 검증기56144abd와 manifest58012882를 고정한다.
+관리자 네이티브 PS5.1에서 새 결과 자식 폴더만 만들고 부모/패키지/운영본은 변경하지 않는다.
+외부 고정 SHA의 bootstrap이 컨트롤러를 잠가 읽고, 컨트롤러의 새 자식 프로세스도 검증기를
+잠금→길이/SHA 확인→동일 스트림 UTF-8 해석→ScriptBlock 실행 순서로 처리한다.
+해시 뒤 `-File`로 경로를 다시 열어 실행하지 않는다. 부모와 자식의 입력 경로를 검사한다.
+결과 ACL은 Administrators/SYSTEM 쓰기와 운영자 읽기이며 기존 경로·reparse·240자 초과를 거부한다.
+stdout/stderr/구조화 결과/manifest를 새 파일로 쓰고 결과 경로·manifest SHA를 콘솔에 출력한다.
+120초 상한은 이 도우미가 직접 만든 검증 자식에만 적용하며 앱 프로세스는 제어하지 않는다.
+검증 기준: 정확한 바이트 실행, 변조/경로 거부, 실행 중 쓰기·삭제 잠금, 실패/timeout의 HOLD,
+결과 원문·해시·새 경로/ACL·재실행 보존, 비관리자 무변경 거부다. 개발 PC 권한 치환 fixture와
+실제 관리자 서버 실행을 구분하며, 후자가 끝나기 전 서버 hash 검증 완료로 표시하지 않는다.
