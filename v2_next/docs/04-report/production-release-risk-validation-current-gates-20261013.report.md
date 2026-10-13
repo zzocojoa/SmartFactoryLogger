@@ -357,3 +357,13 @@ R1–R6 HOLD, full_data_gate NOT_EVALUATED, 현재 운영/롤백541d/08C와 미�
 이 완료는 FREAD의 패키지 읽기에 한정된다. 별도 RUN128 실행·최종 요청/attestation,
 설치된 트리·정상 종료/최종 사본·현장 QA·15분/120분·물리 경계·과거 finding 처리·운영 승격은
 남아 있다. R1–R6 HOLD, full_data_gate NOT_EVALUATED와 현재 운영/롤백541d/08C를 유지한다.
+
+## 2026-10-14 실제 관찰 요청의 설정 입력 확인
+
+[현재 서버 직접 대조](production-release-risk-validation-field-entry-20261013.report.md)에서
+GET6개와 기존 봉인 근거를 검산했다(exit0). 승인 프로파일의 소프트웨어15필드는 일치하지만
+실행본은541d이고 최종 확인은 이전 Operator1/fingerprint를 가리킨다. 최종 후보 입력의
+7개 실패 조건을 그대로 보존해 현재 snapshot을15분/120분 기준으로 쓰지 않았다.
+동일 logger/SPOT의 전날16:30 대비 CSV+247,366·image written+50,399,
+drop173·writer failure0·transport failure154 유지도 표본 비교로 기록했다.
+제조사 계약·물리 시험과 실제 후보 최종 attestation, 현장 QA·승격은 미완료다.

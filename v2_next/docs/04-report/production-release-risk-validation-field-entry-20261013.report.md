@@ -80,3 +80,38 @@ GET elapsed는 JSON 파싱과 증거 파일 쓰기를 포함하여 정식 HTTP �
 `Z:/SmartFactory/20261013/records/PDCA_FIELD_ENTRY_42d60689`에 복사하고 전부 대조했다.
 manifest SHA256은 `6482f834053aeadf81fec545adfbbe549e92fe4cfb00dffc8e129d3cf22720d9`다.
 공유 보존이며 서버 실행 묶음의 전달이나 작업 폴더 전체 봉인을 뜻하지 않는다.
+
+## 2026-10-14 패키지 확인 후 실제 시험 입력 대조
+
+FREAD 패키지 검증이 끝난 뒤 08:18:54 KST에 기존 읽기 전용 수집기를 새 폴더에서 재사용했다.
+GET6개는 HTTP200·수집기 exit0이었다. 원문 길이/SHA, 이전 봉인 manifest와 선택3파일,
+동일 build·SPOT/logger 세대, 승인 기록 SHA와 설정 비교 결과를 검산해 exit0을 확인했다.
+[새 원문·대조 기록](C:/Users/user/Desktop/SmartFactory/PDCA_FIELD_STATE_20261014_0d2eac91/entry-review.json)에
+도구/검사 소스 해시와 실제 판정 범위를 보존했다.
+
+실행본은 여전히 `541d701d…`, logger `e9a785c0…`, SPOT `efca4313…`다.
+전날16:30 표본과56,893.724379초 차이로 CSV 누계206,188→453,554(+247,366),
+이미지 written40,968→91,367(+50,399)이다. drop173·writer failure0·transport failure154와
+보존 transport event97개는 같았다. 현재 CSV는 날짜 전환 후
+`Factory_Integrated_Log_v2_20261014_000000.csv`다. 이 차이는 표본 누계 대조이며
+중간 모든 상태·닫힌 파일/최종 delta의 무결성 또는 과거 drop 원인을 증명하지 않는다.
+
+승인 프로파일의 소프트웨어 표현15필드는 일치하고 현재 fingerprint를 재계산한 값도
+`f84f9d9d…`와 일치했다. 설정 SHA `55ea6a48…`는 이전 표본과 같다.
+그러나 보존된 확인자는 `Operator1`, 확인 fingerprint는 `74d2c051…`이며
+effective operator/comparator false·`fingerprint_mismatch`다. configured comparator true를
+물리 검증 근거로 사용하지 않는다. 최종 후보 입력 검사는7개 이유로 FAIL이다:
+후보 build 불일치, effective comparator/operator 미확인, attestation 상태, drift,
+확인자 identity, 확인 fingerprint 불일치. 운영본을 후보 기준으로 검사한 build 실패는
+예상된 선행 조건 미충족이며 새 제품 결함으로 분류하지 않는다.
+
+이 snapshot은 최종15분/120분 요청의 기준으로 사용할 수 없다. 제조사 계약·물리 경계 증거와
+실제 후보 세대의 최종 USER_SELF attestation이 필요하다. 승인 기록을 복사하거나 bool을
+true로 바꿔 기준을 만들지 않았다. 현재 작업60580/1은 API 관찰값이며 입력/설정/앱 제어는
+수행하지 않았다. 수집 시간은 parsing/파일 쓰기를 포함하므로 정식 성능 수치로 판정하지 않는다.
+제품 변경이 없어 health·설치본 재빌드·동일 회귀시험은 반복하지 않았다. R1–R6 HOLD를 유지한다.
+
+원문·기준 사본·검사 기록·갱신 전 PDCA 상태15파일(983,004bytes)과 manifest를
+`Z:/SmartFactory/20261014/records/PDCA_FIELD_STATE_0d2eac91`에 보존해 전체 바이트를 대조했다(exit0).
+manifest SHA256은 `cbd95c2bc64a9754eee2abfb2d1978ebf3f0ebba767a6109d39205a988abdffd`다.
+기록 보존이며 서버 실행 묶음 전달이나 실제 현장 QA 완료를 뜻하지 않는다.

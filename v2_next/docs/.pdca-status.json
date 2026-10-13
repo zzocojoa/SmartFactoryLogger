@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T23:12:36.348687+00:00",
+  "lastUpdated": "2026-10-13T23:25:23.686643+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8443,6 +8443,59 @@
             "promotionAllowed": false,
             "releaseGate": "HOLD",
             "fullDataGate": "NOT_EVALUATED"
+          },
+          "fieldFinalInputPreflightStage": {
+            "recordedAt": "2026-10-13T23:18:54.590177+00:00",
+            "reviewedAt": "2026-10-13T23:21:30.943091+00:00",
+            "status": "OPERATING_SNAPSHOT_VERIFIED_FINAL_CANDIDATE_INPUT_FAIL",
+            "report": "docs/04-report/production-release-risk-validation-field-entry-20261013.report.md",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_FIELD_STATE_20261014_0d2eac91",
+            "reviewSha256": "a6361c147b8cd922df386f0f270d0dfa24e3a5a9b149d2996fb1d3f9a8b3578c",
+            "scope": "READ_ONLY_OPERATING_SERVER_PREFLIGHT_NOT_CANDIDATE_FIELD_QA",
+            "getResponsesVerified": 6,
+            "verificationExit": 0,
+            "softwareProfileFieldsMatched": 15,
+            "operatingCommit": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+            "logger": "e9a785c0-46a2-45d2-bf7a-4187cce08771",
+            "spot": "efca4313-f987-4bb2-bcc8-4de40712396c",
+            "sampleGapSeconds": 56893.724379,
+            "sampleDelta": {
+              "rows": 247366,
+              "written": 50399,
+              "drops": 0,
+              "writer_failures": 0,
+              "transport_failures": 0
+            },
+            "droppedCount": 173,
+            "transportFailures": 154,
+            "configurationReview": {
+              "status": "FAIL",
+              "issues": [
+                "candidate-build",
+                "not-verified:low_signal_comparator_verified",
+                "not-verified:config_operator_verified",
+                "attestation-status",
+                "config-drift",
+                "operator-identity",
+                "attested-fingerprint-mismatch"
+              ],
+              "recomputed_fingerprint": "f84f9d9ddc3b958b1048cbf7bba37933d9e9e83e5b98ba666c6326154c2f74d5",
+              "profile_scope": "SOFTWARE_REPRESENTED_APPROVED_FIELDS",
+              "physical_device_gate": "NOT_EVALUATED"
+            },
+            "fieldObservationRequestCanUseThisSnapshot": false,
+            "requiredBeforeFinalObservation": [
+              "actual_candidate_installed_generation",
+              "manufacturer_contract_and_physical_comparator_evidence",
+              "actual_final_candidate_USER_SELF_attestation"
+            ],
+            "installationPerformed": false,
+            "settingsChanged": false,
+            "fieldQaExecuted": false,
+            "canaryStarted": false,
+            "fullDataGate": "NOT_EVALUATED",
+            "releaseGate": "HOLD",
+            "promotionAllowed": false
           }
         }
       }
