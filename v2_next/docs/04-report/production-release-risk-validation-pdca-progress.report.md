@@ -532,3 +532,16 @@ validator는 exit0이었다. 최초 도우미의 상대 자산 경로 오류와 
 [범위·경고/미검증·원문·보존 해시](production-release-risk-validation-unsigned-candidate-20261013.report.md#2026-10-13-frozen-backend-격리-시작수집재시작정상-종료)를 따른다.
 짧은 합성 backend 시험이며 Electron 전체 앱·실제 설치/업그레이드/복구·현장 QA는 남아 있다.
 전체 목표 active, R1–R6 HOLD, full_data_gate=NOT_EVALUATED와 현재 운영·롤백 기준을 유지한다.
+
+
+## 2026-10-13 실제 NSIS 설치·업그레이드·이전본 복구
+
+offline Sandbox에서 동일19e0e314/F17040FC 후보 신규 설치/제거와541d 기준의 업그레이드·
+후보 재시작·이전본 복구를 실행했다. 네 설치 exit0, 후보1,814/기존1,771파일과 config/data/
+profile 보존, 네 앱/backend 정상 종료0을 확인했다. CSV v1/v2 각각1,207행·observation98개·
+이미지264개와 접두부/세대/종료 증거 검산, 실제 CSV/image validator8회는 exit0이다.
+[상세 설치 단계·도우미 실패·잔여502·보존 해시](production-release-risk-validation-unsigned-candidate-20261013.report.md#2026-10-13-실제-nsis-설치업그레이드이전본-복구)를 따른다.
+독립 review는107/111조건 통과로 exit1이며, 네 실패 조건은 종료 요청 이후의 이미지502
+총6건 때문이다. 시각 분류 exit0은 원래 실패를 PASS로 바꾸지 않는다. 회수 후 시험 Sandbox를
+종료했다. 제품 소스·서버·운영/롤백 기준 변경은 없다. 종료 이미지502·현장/전체 데이터/
+성능·설정·승격 근거가 남아 전체 목표 active, R1–R6 HOLD를 유지한다.

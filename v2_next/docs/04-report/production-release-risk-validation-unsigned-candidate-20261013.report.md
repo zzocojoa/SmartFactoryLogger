@@ -170,3 +170,91 @@ validator 임시 환경은 제외했으며 실제 installer는 앞선 후보 묶
 후속은 동일 installer의 격리 신규 설치·업그레이드·이전본 복구와 packaged Electron 전체 앱,
 설정/데이터 보존이다. 승인 장비 프로파일·물리 비교, 과거 timeout/drop 처리, 전체 데이터·
 성능·현장15분/120분 QA·승격/적용 확인은 남아 있다. 운영본/다음 롤백 기준은 유지한다.
+
+
+## 2026-10-13 실제 NSIS 설치·업그레이드·이전본 복구
+
+동일 v1.0.27/19e0e314/F17040FC 후보와 현재 운영·롤백 기준 v1.0.26/541d701d/08C061EE를
+새 offline Windows Sandbox에서 실행했다. 후보 신규 설치·제거, 기존본 신규 설치,
+후보 업그레이드·시작·재시작, 기존본 재설치·복구 후 시작 순서다. per-user 기본 설치 경로와
+실제 packaged Electron/backend를 사용했다. 두 설치본의 `NotSigned`를 다시 확인했다.
+호스트와 운영 서버에 설치하지 않았고 운영본·다음 롤백 기준은 갱신하지 않았다.
+
+Network/clipboard/GPU/audio/video/printer를 끈 Sandbox에 input을 읽기 전용, output만
+쓰기로 연결했다. input677파일/363,444,383bytes를 guest로 복사해 전수 재해시했다.
+외부 IPv4는 없으며 `V2_MODE=REAL`의 실제 PLC/SPOT 드라이버가 loopback 합성 장비에
+연결됐다. 제품/금형99001/1, 온도500°C·count20·main pressure30·speed1과 합성160×120 JPEG를
+사용했다. 실제 생산 제품번호나 장비 설정을 확인한 시험이 아니다. 표시 성능·현장15/120분
+QA는 이 약74~75초 실행들로 대체하지 않는다. renderer ready는 로그로 확인한 범위다.
+
+| 단계 | 검증 결과 |
+|---|---|
+| 후보 신규 설치 | NSIS exit0, 설치 파일1,814개·build commit·등록 버전·바로가기·uninstaller 일치 |
+| 후보 제거 | uninstaller exit0, 앱/등록 제거와 AppData/profile 미생성 확인 |
+| 기존본 신규 설치 | NSIS exit0, 설치 파일1,771개·등록/바로가기·build commit 일치 |
+| 기존본→후보 업그레이드 | NSIS exit0,1,814개 일치, 닫힌 config/AppData/profile/data 전후 해시 동일 |
+| 후보→기존본 복구 | NSIS exit0,1,771개 일치, 닫힌 config/AppData/profile/data 전후 해시 동일 |
+
+| 실제 앱 실행 | CSV v1/v2 각각 | 해당 세대 observation | 새 이미지 | main/backend OS exit |
+|---|---:|---:|---:|---|
+| 기존본 최초 |303행|24|66|0/0|
+| 업그레이드 후보 |280행|25|67|0/0|
+| 후보 재시작 |322행|25|66|0/0|
+| 복구 기존본 |302행|24|65|0/0|
+
+합계 CSV v1/v2 각각1,207행, observation98개, 이미지264개다. 네 실행의 logger/SPOT 세대는
+서로 다르고, 각15개 표본의 실제 executable/version/commit·resources frontend·장비 snapshot
+진행·운영자 fixture·비loopback 연결 없음과 이미지200을 검산했다. 후보 history 페이지와
+재시작 후 이전 cursor reset도 확인했다. 종료는 정확한 owned PID/create_time/exe/hash의
+WM_CLOSE였고 강제 종료는 없다. 모든 descendants/8000 listener가 사라졌음을 확인했다.
+
+기존 source의 `validate_csv_v2_shadow.py`와 `validate_spot_image_files.py`를 각 실행의
+닫힌 사본에 실행한 총8개 명령은 actual exit0이었다. v1/v2 행 차이0, observation key 연결
+100%·누락0, 이미지 길이/해시/디코딩/fact·final manifest 일치, 고아0/문제0이다. CSV/metadata와
+기존 이미지의 이전 바이트, 누적 fact 접두부, 전체 closed-data 복사본도 대조했다.
+프로필은 ZIP 내부 모든 파일의 길이·해시를 원본 inventory와 대조했다.
+shutdown begin/final·sidecar·세대/commit/PID와 native exit를 연결했으며 이미지 저장 실패/drop/
+queue/inflight/unfinished는 모두0, writes_drained/worker_stopped true였다.
+각 CSV 검사에는 position 두 열 값 없음 경고가 있고 phase/changeover/linkage 일부는
+unknown/not applicable, server promotion profile 요구는 false다. 전수 운영 데이터 PASS가 아니다.
+
+독립 `review_matrix.py`는 **actual exit1**,111조건 중107통과·4실패다. 실패4개는 각 누적
+로그의 “error 없음” 조건이다. 중복 제거한 이미지 `shutdown` HTTP502가6건(실행별1/2/2/1)
+있고, 전부 owned WM_CLOSE 이후 native exit 이전이다. 별도 `classify_findings.py` exit0으로
+시각/종류/경로/표본을 검산했으며 원래 실패를 PASS로 바꾸지 않았다. 종료 전 직접 이미지
+요청60개는 모두200이다. 현재 판정은 `INSTALL_RECOVERY_DATA_VERIFIED_SHUTDOWN_HTTP_502_OPEN`.
+
+소스에서 `main.js`의 종료는 backend closeout 후 app.quit를 수행하고, 이미지 서비스는
+정지 이후 `SpotImageFetchError("shutdown")`를 반환하며 `backend/app.py`의 공통 처리에서
+502로 기록한다. 화면 polling이 종료 대기 중 지속됐다는 해석은 이 코드와 관측 시각에 근거한
+추론이다. 제품 코드는 수정하지 않았다. 종료 요청·renderer polling의 경계를 후속 확인하되
+전송 오류·writer 실패·종료 검증을 숨기거나 약화하지 않는다.
+
+도우미 실패도 보존했다. 최초 profile 캐시 경로는 원본231자에서 복사 대상275자로 길어져
+copytree가 중단됐다. 이때 앱/backend는 이미 정상 exit0이었으나 PowerShell Start-Process
+래퍼의 Python exit가 null이라 외부 CLI exit0을 전체 성공으로 해석할 수 없었다.
+원본은 그대로 두고 프로필 ZIP 보존/전수 대조, native handle 유지와 의도적 exit7 검증을
+추가했다. 재개r2는 UTF-8 traceback의 cp949 읽기 오류로 설치 전 exit1, 명시적 UTF-8의
+r3는 원본 설치/닫힌 상태를 재확인한 후 남은 단계만 실행해 실제 child/wrapper/host exit0이다.
+첫 inline PowerShell guest cold 확인은 durable 출력이 없어서 불완전으로 남겼고,
+후속 `-File` 실행에서 실제 빈 process/listener 목록과 loopback-only를 확인했다.
+
+모든 필요한 데이터/AppData/profile/종료 자료 회수·검산 후 owned Sandbox만 종료했다.
+`wsb stop` exit0와 목록에서 해당 ID 부재를 확인했다. 시험 프로세스 강제 종료는 없다.
+제품 코드가 바뀌지 않아 전체 health/빌드는 반복하지 않았고 도우미 Python 정적 검사와
+PowerShell 구문 검사는 exit0이었다. 운영 서버에는 접속·설치·변경하지 않았다.
+
+- [원문·독립 검사](C:/Users/user/Desktop/SmartFactory/PDCA_NSIS_20261013_5d8f24ab/review/review.json),
+  [502 분류](C:/Users/user/Desktop/SmartFactory/PDCA_NSIS_20261013_5d8f24ab/review/finding-disposition.json).
+- [설치/복구 검토 ZIP](C:/Users/user/Desktop/SmartFactory/PDCA_NSIS_RECORDS_20261013_5d8f24ab/PDCA_NSIS_5d8f24ab.zip).
+- 입력 1904파일/386340215bytes, ZIP 1905항목/344722857bytes를 원본·ZIP·공유 사본과 대조.
+- ZIP SHA256 `fe514e18de297f4ee5cad88a0ffd4887ab28e5db8164dd6d802477fe2436ad1e`.
+- manifest SHA256 `7b7936a81c0e2abadd79e07baecf50045cc47f8958d81eccdf778556c0b0822e`.
+- 공유 `Z:/SmartFactory/20261013/records/PDCA_NSIS_5d8f24ab`; 서버 최종 전달 아님.
+
+두 installer·portable Python 포함 전체 input과 도우미·실패·닫힌 사본·검사 원문을 보존했다.
+중복 baseline 추출 payload·validator 임시 환경·bytecode cache는 제외했다. 기본 스트림
+스냅샷이며 전체 작업 루트 봉인이나 host/server 환경 백업은 아니다. 보존 도우미 exit0.
+후속은 종료 이미지502 처리, browser/CDP OFF·서버 실제 시작3회, 승인 실장비 프로파일·
+물리 비교·과거 timeout/drop·전체 데이터 처리와 최종 현장15분/120분 QA·승격/적용 확인이다.
+전체 목표 active, R1–R6 HOLD, full_data_gate NOT_EVALUATED를 유지한다.
