@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T07:38:13.576870+00:00",
+  "lastUpdated": "2026-10-13T08:21:32.588271+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3031,7 +3031,7 @@
         "releaseRiskStatus": {
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
           "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD",
-          "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending",
+          "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending; metadata411798_name_search_and_manufacturer_DB17966329_rows_checked_no_approved_profile; official_indexed_Name_description_user_defined_not_exact_model; physical_SKU_UNDETERMINED_HOLD",
           "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD",
           "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
           "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; field_QA_and_other_gates_pending; HOLD"
@@ -6901,6 +6901,58 @@
               "ConnectTimeout observations do not identify device, network, OS, or drop root cause.",
               "Configured software model and comparator flag do not prove the physical profile."
             ]
+          },
+          "profileSearchAndManufacturerDbStage": {
+            "recordedAt": "2026-10-13T08:21:32.588271+00:00",
+            "status": "SEARCH_AND_DATABASE_COPY_REVIEW_COMPLETE_PROFILE_HOLD",
+            "report": "docs/04-report/production-release-risk-validation-profile-search-20261013.report.md",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_PROFILE_SEARCH_20261013_bcf53e17",
+            "priorR3Summary": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending",
+            "metadataNameSearch": {
+              "rows": 411798,
+              "matches": 0,
+              "contentsOrAllServerLocationsSearched": false
+            },
+            "additionalDatabase": {
+              "originalServerPath": "C:/Documents/SpotViewer/LandData.db",
+              "bytes": 874827776,
+              "sha256": "95ca1fe92d85c1636027bb8109bf80bb3efdfd2be871319e95962f4db6e04c42",
+              "originalServerHash": "NOT_MEASURED",
+              "atomicSnapshotProven": false,
+              "sharedAndDevelopmentCopiesMatch": true,
+              "rows": 17966329,
+              "integrityCheck": "ok",
+              "temperatureRows": 5494857,
+              "temperatureNullRows": 1689070,
+              "temperatureFastRows": 12471472,
+              "temperatureFastNullRows": 0,
+              "settingsRows": 0,
+              "systemInfoRows": 0,
+              "dateEpochTimezoneContextAndNullMeaning": "UNCONFIRMED",
+              "scope": "Additional historical manufacturer DB, separate from existing cold CSV/image snapshot"
+            },
+            "manufacturerNameFinding": "Official indexed documentation describes a user-defined name; header alone cannot prove physical model",
+            "manufacturerPdfVisualCheck": "NOT_COMPLETED_SITE_MAINTENANCE",
+            "readCopyExit": 0,
+            "databaseReviewExit": 0,
+            "sharedRecord": {
+              "export_exit": 0,
+              "destination": "Z:\\SmartFactory\\20261013\\records\\PDCA_PROFILE_SEARCH_bcf53e17",
+              "files_including_manifest": 16,
+              "evidence_bytes_excluding_manifest": 117416,
+              "manifest_sha256": "ba3fae36f46ed3c04c9e2100b87b4b22d1437d3d2b59daa4a74dd77534a54f78",
+              "external_database_verified": true,
+              "server_original_hash": "NOT_MEASURED"
+            },
+            "deviceIdentity": "UNDETERMINED",
+            "approvedProfile": "NOT_ESTABLISHED",
+            "releaseGate": "HOLD",
+            "fullDataGate": "NOT_EVALUATED",
+            "productSourceChanged": false,
+            "installedOrRestarted": false,
+            "serverOriginalDatabaseOrSettingsChanged": false,
+            "promoted": false,
+            "turnProgress": "PROGRESS_NEW_DATABASE_SCOPE_AND_EVIDENCE"
           }
         }
       }

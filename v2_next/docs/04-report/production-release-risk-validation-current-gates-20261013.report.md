@@ -24,6 +24,7 @@ PLC 작업 `78990`과 서버 이미지 작업 `88251`은 이미 끝났다. NAS Z
 | 같은 브라우저 탭 비교 | 1개/3개 각각 준비 120초+관측 300초 완료, 계획 HTTP 실패 0 | 3화면 동시 전면 표시·계측 OFF·최종 설치본 현장 성능 |
 | 추가 backend 계측 비교 | OFF→ON→ON→OFF, 계획 요청 2,920개 확인, exit 0 | browser/CDP/web-vitals OFF·제품 귀속 물리 디스크 사용량 |
 | 후보 1.0.28 | health/build/payload 및 격리 NSIS 설치·복구 완료; 후보 정상 종료 2회 새 이미지 502=0 | 실제 장비·현장 QA·운영 승격 |
+| 추가 SpotViewer DB | 사본 874,827,776바이트·17,966,329행, SQLite integrity_check ok·전체 집계 정산 exit0 | 서버 원본 해시/원자성·데이터 의미·모델/승인 프로파일 |
 
 후보 전체 health는 backend 919통과/비공개 F01 fixture 1생략, Electron 100,
 frontend Vitest 437이며 actual exit 0이다. 격리 NSIS 누적 오류 review는
@@ -57,6 +58,13 @@ Codex는 작업 정보·설정·앱 실행 상태를 변경하지 않았다.
 마지막 두 표본 사이469.566390초 동안 CSV 카운터+2,082·image written+410,
 drop 증가0이었다. 원인·프레임/행 식별·복구 가능성은 미확정이다.
 프로파일 fingerprint mismatch와 effective operator/comparator false도 유지된다.
+
+후속 [승인 자료 탐색](production-release-risk-validation-profile-search-20261013.report.md)에서
+기존 metadata 411,798행의 지정 파일명 검색과 제조사 폴더를 확인했다.
+새 SpotViewer DB를 발견했으나 설정/시스템 정보는 비어 있었다. Temperature의 NULL
+1,689,070행은 의미·원인 미확정으로 보존한다. 제조사 공식 색인 설명의 Name은
+사용자 지정 명칭이며, `AL Spot` 문구만으로 실제 모델을 확정하지 않는다.
+이 추가 DB는 기존 CSV/이미지 snapshot과 별도 범위이며 전체 gate 통과가 아니다.
 
 ## 남은 조건과 실행 순서
 

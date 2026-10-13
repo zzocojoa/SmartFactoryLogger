@@ -380,6 +380,12 @@ Codex가 서버에서 직접 확인하고 유지보수는 아무 때나 해도 �
 | 2026-10-13 현재 요약 정합성 확인 | 완료 범위 정정·출시 HOLD 유지 | PLC127,158파일·서버 이미지312,985개·NAS439 원본 최종 검증 완료를 영수증과 대조. 탭 비교/추가 backend 계측 완료와 browser OFF·현장 미완료를 구분. [현재 조건·실행 순서](../../04-report/production-release-risk-validation-current-gates-20261013.report.md) |
 | 2026-10-13 실제 서버 현장 진입 확인 | 새 누락 발견·출시 HOLD 유지 | 동일541d/e9a785c0/efca4313 세대의 image drop0→173 확인. 16:22→16:30 표본 사이 drop 증가0·image written+410·CSV rows+2,082. 운영 소스의 두 원인 경로는 확인했으나 실제 원인·영향은 미확정. [서버 재확인](../../04-report/production-release-risk-validation-field-entry-20261013.report.md) |
 
+후속 [승인 자료 탐색·SpotViewer DB 검사](../../04-report/production-release-risk-validation-profile-search-20261013.report.md)에서
+이전 metadata 411,798행의 지정 파일명 검색과 서버 제조사 폴더를 확인했다.
+추가 DB 874,827,776바이트·17,966,329행의 사본 무결성/집계는 통과했으나 설정과
+시스템 정보는 비어 있어 모델/승인 프로파일을 확정하지 못했다. 서버 원본 해시·원자성,
+NULL 의미·데이터 연속성은 미검증이다. R3/R4 및 정식 출시 HOLD를 유지한다.
+
 계획 문서의 완료 조건은 원본 브랜치명·목표·포함/제외 범위·수정 대상·단계·검증·여섯 DoD·진행 상태가 저장되고 파일명과 실제 브랜치가 일치하는 것이다. 이는 기술적 리스크 해소나 정식 출시 완료와 구분한다.
 
 ### 변경 이력
