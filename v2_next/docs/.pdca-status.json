@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T05:34:15.910399+00:00",
+  "lastUpdated": "2026-10-13T05:50:10.572553+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-13T04:42:42.246438+00:00"
+        "lastUpdated": "2026-10-13T05:50:10.572553+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; exact clean commit/hash/payload/provenance and installation/recovery/device/performance/full-data/field QA remain required; no new installer applied or promotion",
@@ -3030,9 +3030,9 @@
         },
         "releaseRiskStatus": {
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending",
-          "R2": "formal_performance_NOT_MEASURED; observed_client_timing_added",
+          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_120s_warmup_300s_observation_complete; supplemental_backend_probe_ABBA_complete_with_common_host_disk_counters; browser_CDP_web_vitals_OFF_three_server_starts_final_candidate_field15_120_and_full_performance_contract_pending; HOLD",
           "R3": "responsible_equipment_operations_QA_release_roles_USER_SELF; 7_mode_range_analog_LowSignal_fields_and_5_filter_bool_fields_GUI_matched_to_prior_metadata_at_separate_times; focus_window_observed; model_metadata_from_software_config_not_hardware_readback; exact_SKU_approved_full_profile_physical_comparator_boundary_final_attestation_pending",
-          "R4": "full_NAS_metadata and named temperature/plain source copies verified; all439 outer ZIP member audit records committed with2 BadZipFile preserved, final original rehash pending; known17046 archive CSV structure inspected, prior5 and delta149 findings classified by format with historical cause/business completeness open;127158 PLC CSV final job78990 running; server cold-copy final verification and all-image QA pending",
+          "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD",
           "R5": "historical_drop15_and_current_541d_session_drop44_separate_UNCONFIRMED; local_reason_counters_verified",
           "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; field_QA_and_other_gates_pending; HOLD"
         },
@@ -6645,6 +6645,65 @@
             "sandboxDisposed": true,
             "serverMutation": false,
             "serverDelivered": false,
+            "promoted": false,
+            "r1R6": "HOLD",
+            "fullDataGate": "NOT_EVALUATED"
+          },
+          "currentGateReviewStage": {
+            "recordedAt": "2026-10-13T05:50:10.572553+00:00",
+            "status": "COMPLETED_EVIDENCE_SUMMARIES_RECONCILED_REMAINING_GATES_EXPLICIT",
+            "report": "docs/04-report/production-release-risk-validation-current-gates-20261013.report.md",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_GATE_REVIEW_20261013_a8079c24",
+            "scope": "Existing terminal-result reconciliation; no new payload/data benchmark or production validation.",
+            "verifiedInputRecords": 7,
+            "supersededCurrentSummary": {
+              "R2": "formal_performance_NOT_MEASURED; observed_client_timing_added",
+              "R4": "full_NAS_metadata and named temperature/plain source copies verified; all439 outer ZIP member audit records committed with2 BadZipFile preserved, final original rehash pending; known17046 archive CSV structure inspected, prior5 and delta149 findings classified by format with historical cause/business completeness open;127158 PLC CSV final job78990 running; server cold-copy final verification and all-image QA pending"
+            },
+            "serverObservation": {
+              "recordedAt": "2026-10-13T05:50:10.572553+00:00",
+              "source": "CUA screenshots of the existing DESKTOP-Extrusion remote-desktop tab",
+              "serverClockDisplayed": [
+                "2026-10-13 14:42 KST",
+                "2026-10-13 14:44 KST"
+              ],
+              "connection": "connected",
+              "appStatusDisplayed": "Running",
+              "indicatorsDisplayed": [
+                "EX OK",
+                "LS OK",
+                "SPOT OK",
+                "Temp OK",
+                "Comm OK",
+                "작업 정보 OK"
+              ],
+              "productNoDisplayed": "60322",
+              "moldNoDisplayed": "10",
+              "jobAppliedTimeDisplayed": "2026-10-13 13:39:05 KST",
+              "liveValuesChangedBetweenObservations": true,
+              "agentAppliedJobOrConfig": false,
+              "buildOrLoggerIdentityReread": false,
+              "scope": "Two UI observations only; not continuous error-free operation or same-generation QA."
+            },
+            "completedJobsMustNotResume": [
+              78990,
+              88251,
+              96822
+            ],
+            "remainingIndependentWork": [
+              "Browser/CDP/web-vitals instrumentation comparison",
+              "Intermittent receipt timeout causal diagnosis"
+            ],
+            "remainingFieldDependencies": [
+              "Approved physical profile/comparator and same-build attestation",
+              "Three actual server normal starts",
+              "Final installer field QA/15-minute/120-minute observations and final data delta"
+            ],
+            "remainingHistoricalDependencies": [
+              "Original timeout/drop causes and data-owner impact/disposition"
+            ],
+            "serverMutation": false,
+            "productSourceChanged": false,
             "promoted": false,
             "r1R6": "HOLD",
             "fullDataGate": "NOT_EVALUATED"

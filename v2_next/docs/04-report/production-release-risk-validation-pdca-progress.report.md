@@ -1,6 +1,10 @@
 # 프로덕션 출시 후속 PDCA 진행 기록
 
 작성일: 2026-10-10. 전체 목표 진행 중, R1~R6 정식 출시 **HOLD**.
+
+최신 완료 범위와 남은 조건은 [현재 gate 검토](production-release-risk-validation-current-gates-20261013.report.md)를 따른다.
+아래 누적 기록의 “실행 중/대기”는 각 기록 시점의 상태다. PLC·서버 이미지·NAS ZIP 최종
+검사가 완료된 뒤의 요약을 연결했으며 과거 실패·미검증을 PASS로 변경하지 않았다.
 기준은 [원래 출시 계획](../01-plan/features/production-release-risk-validation-codex-production-release-risk-validation-20261010.plan.md)이다.
 앞선 검토·초기 구현 요청의 완료와 이번 현장 PDCA 목표의 완료를 구분한다.
 
