@@ -267,7 +267,8 @@ def _prepare_output(output):
 
 
 def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
-                        timeout_seconds=5.0, stop_event=None, body_byte_budget=4 * 1024**3):
+                        timeout_seconds=5.0, stop_event=None, body_byte_budget=4 * 1024**3,
+                        origin_ns=None):
     """Collect a bounded component window. Caller owns installation/session binding."""
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('Loopback port required')
@@ -289,25 +290,30 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
     counts = {name: (duration + value - 1) // value for name, value in period.items()}
     if sum(counts.values()) > 50000:
         raise ValueError('Sample count budget')
+    origin = observation_origin(origin_ns)
     output = _prepare_output(output)
     stop = stop_event if stop_event is not None else threading.Event()
     lock = threading.Lock()
     files, rows, errors = {}, {e.name: [] for e in endpoints}, []
+    write_timings = []
     body_bytes = 0
 
     def write_new(name, data):
+        started = time.perf_counter_ns()
         with (output / name).open('xb') as stream:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+        finished = time.perf_counter_ns()
         with lock:
             files[name] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+            write_timings.append({'file': name, 'started_ns': started, 'finished_ns': finished,
+                                  'file_persistence_ms': (finished - started) / 1e6})
 
     def write_json(name, record):
         write_new(name, (json.dumps(record, ensure_ascii=False, allow_nan=False) + '\n').encode('utf-8'))
 
     # Allow workers to be ready before a shared first slot; no unrecorded HTTP warmup.
-    origin = time.perf_counter_ns() + 100_000_000
     write_json('origin.json', {'origin_ns': origin, 'recorded_utc': datetime.now(timezone.utc).isoformat(),
                'duration_ns': duration, 'period_ns': period, 'expected_slots': counts,
                'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -359,13 +365,28 @@ def collect_http_window(port, output, *, duration_seconds, endpoints=ENDPOINTS,
             future.result()
     # Finish the planned observation interval even when its final request ended early.
     stop.wait(max(0, (origin + duration - time.perf_counter_ns()) / 1e9))
+    # Preserve open/write/flush/fsync/close wall time separately from network latency.
+    # The trace covers origin and request files, not its own finalization writes.
+    observed_writes = list(write_timings)
+    write_json('writes.json', {'scope': 'ORIGIN_AND_REQUEST_FILES', 'writes': observed_writes})
     summary = {'scope': 'HTTP_COMPONENT_ONLY', 'origin_ns': origin, 'finished_ns': time.perf_counter_ns(),
                'duration_ns': duration, 'body_bytes': body_bytes, 'worker_errors': errors,
                'stop_requested': stop.is_set(), 'channels': {
                    e.name: summarize_channel(e, rows[e.name], counts[e.name]) for e in endpoints},
+               'file_persistence_max_ms': max((r['file_persistence_ms'] for r in observed_writes), default=None),
                'field_gate': 'NOT_EVALUATED', 'release_gate': 'HOLD', 'promotion_allowed': False}
     summary['http_component_status'] = 'PASS' if not errors and not stop.is_set() and all(
         row['http_component_status'] == 'PASS' for row in summary['channels'].values()) else 'FAIL'
     write_json('summary.json', summary)
     write_json('manifest.json', {'schema_version': 'sfl-field-http-component-v1', 'files': dict(files)})
     return summary
+
+
+def observation_origin(origin_ns=None):
+    """Accept a common, future monotonic origin before any output is created."""
+    now = time.perf_counter_ns()
+    if origin_ns is None:
+        return now + 100_000_000
+    if type(origin_ns) is not int or not now < origin_ns <= now + 30_000_000_000:
+        raise ValueError('Shared origin must be an integer within the next 30 seconds')
+    return origin_ns

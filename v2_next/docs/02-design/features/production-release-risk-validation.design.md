@@ -224,3 +224,20 @@ health2초/data6초/image250ms 각각 단일 worker와 같은 monotonic 원점�
 시간값, 중복·누락 순번은 NOT_MEASURED이며 첫 실패 표본을 삭제하지 않는다. 정상6.2초
 fixture의 기본 주기와 느린 이미지에 대한 독립성을 별도로 검사한다. 이 설계의 수집/쓰기
 오버헤드는 최종 field collector의 실제 부하 검증에 포함하며 기존 보조 계측 결과로 대체하지 않는다.
+
+### 5.5 프로세스·물리 디스크 및 같은 관찰 시작 시각
+
+`field_resource_sampling.py`는 PID/create-time/exe로 루트를 고정하고 관찰된 자식별 CPU·메모리·
+스레드·핸들·I/O를 읽는다. PhysicalDrive는 Windows 원시 DISK_PERFORMANCE와100ns 단위를
+보존한다. host 전체 물리 디스크와 프로세스 I/O, RSS 합과 고유 물리 메모리를 구분한다.
+구성 변경·읽기 실패·비정상 수치·카운터 감소·누락·중단은 유효 변화량이나 성능 PASS가 아니다.
+기본5초·준비120초·관찰300초·최소48표본/240초와 최종 파일 경로240자 예산을 적용한다.
+같은 future monotonic origin을 HTTP와 자원 worker에 전달하며 원문에 각자 기록한다.
+동기 Windows 조회의 외부 watchdog은 현장 launcher 통합에서 필요하다.
+
+[자원 수집 시험](../../04-report/production-release-risk-validation-resource-collector-20261013.report.md)의
+개발 PC420초 관찰에서85/관찰61표본과 두 디스크를 확보했으나 HTTP health1/image17 슬롯이
+누락됐다. fetch/해석 반환 후의 지연까지 좁혔으며 정확한 저장/스케줄링 원인은 미확정이다.
+HTTP `writes.json`은 원시 파일별 open/write/flush/fsync/close 시간을 보존한다.
+계측 추가가 누락 수정 또는 최종 통합/현장 QA 통과를 뜻하지 않는다. native API의 카운터
+활성화 효과와 단위·범위·프로세스/장치 식별 한계도 보고서와 결과에 기록한다.

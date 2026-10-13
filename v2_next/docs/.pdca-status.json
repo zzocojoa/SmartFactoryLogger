@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T22:48:44.542980+09:00",
+  "lastUpdated": "2026-10-13T23:22:20.700906+09:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3030,11 +3030,11 @@
         },
         "releaseRiskStatus": {
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
-          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD; independent_HTTP_component_health2s_data6s_image250ms_loopback31_tests_exit0; invalid_timing_and_duplicate_sequence_red2_green_preserved; full_candidate_field_binding_resources_physical_disk_UI_packet_and_15_120_pending",
+          "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD; independent_HTTP_component_health2s_data6s_image250ms_loopback31_tests_exit0; invalid_timing_and_duplicate_sequence_red2_green_preserved; full_candidate_field_binding_resources_physical_disk_UI_packet_and_15_120_pending; local_resource_native_physical_disk_collector23_tests_and_HTTP31_exit0; 420s_fixture_resources85_observation61_complete_but_HTTP_health1_image17_missed_FAIL; post_fetch_delay_exact_cause_unconfirmed; per_file_persistence_timing_added_not_fixed; final_long_integration_overhead_and_server_QA_pending",
           "R3": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; observed_operational_profile_APPROVED_BY_USER_SELF_record94873cc2; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD; physical_test_requires_App1_AL_E_firmware40_38_alarm_applicability_and_internal_equality_method; family_manual_and_integer_REST_output_insufficient; software_guard_tests7_exit0; USER_SELF_reports_CMD_OUT_not_connected_to_PLC_or_machine_control; independent_wiring_inspection_false; physical_trial_NOT_TESTED; REST_alarm_bit4_footnote_includes_Application_models_but_App1_40_38_mode_contract_unconfirmed; manufacturer_inquiry_SENT_Gmail_readback_verified_20261013_190627KST; physical_boundary_NOT_TESTED",
           "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed; historical_SpotViewer17966329_rows_NULL1689070_context0_correlated_with_adjacent_fast199_all1633135_mixed39418_other16517; reverse_numeric_all199_4613; raw_temperature_time_reversals4; encoding_cause_and_business_disposition_unconfirmed; archived_SpotViewer5.2.0.7443_static_contract_context0Unknown_1Celsius_invalid_to_NULL_and_multiple_invalid_paths_confirmed; five_DB_schemas_match; historical_executable_configuration_row_causes_and_disposition_unconfirmed; current_server_SpotViewer17_copied_files_match_archived5.2.0.7443; settings8_and_logs8_6738533_lines_verified; historical_connection_warnings_file_lock_network_path_and_timer_errors_recorded; conditional_NULL_window_overlap_not_causation; historical_identity_clock_row_impact_disposition_pending; long_NULL_run_contains172413_consecutive_blocks_repeating_same_two_fast_ticks199; selected_CSV4_2057323_rows_have689652_matching_ms_pair_rows_and344826_repeat_pair_time_decreases; SQL_rg_prior_audit_reconciled; not_fresh_acquisition_count_or_one_to_one_copy; historical_clock_all_NULL_causes_and_business_disposition_pending",
           "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
-          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution"
+          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution; resource_collector_and_common_origin_local_validation_complete; HTTP_persistence_trace_added_after_native_slot_miss_FAIL; protected_launcher_watchdog_full_candidate_binding_and_field_QA_pending"
         },
         "followup": {
           "goalStatus": "active",
@@ -7536,6 +7536,55 @@
             "releaseGate": "HOLD",
             "fullDataGate": "NOT_EVALUATED",
             "turnProgress": "PROGRESS_INDEPENDENT_HTTP_SAMPLING_COMPONENT_IMPLEMENTED_RED_GREEN_AND_EVIDENCE_PRESERVED"
+          },
+          "fieldResourceSamplingStage": {
+            "recordedAt": "2026-10-13T23:22:20.699903+09:00",
+            "priorRiskSummaries": {
+              "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD; independent_HTTP_component_health2s_data6s_image250ms_loopback31_tests_exit0; invalid_timing_and_duplicate_sequence_red2_green_preserved; full_candidate_field_binding_resources_physical_disk_UI_packet_and_15_120_pending",
+              "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution"
+            },
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_RES128_20261013_3bc421b7",
+            "preparationBaseHead": "a5b921aad55c02b0120eab1355c2d3b450f11cb1",
+            "report": "docs/04-report/production-release-risk-validation-resource-collector-20261013.report.md",
+            "finalSourceSha256": {
+              "field_http_sampling.py": "6b47aa425b7cc7484fa8f843037f03b9dcb7183866a6abab98d2a045e9d9ea01",
+              "field_resource_sampling.py": "517a28f6de00e495ac16c74099f1e8c949d67d5b0e76069bbe4e9ec8bb91816c",
+              "test_field_http_sampling.py": "d2a623954e63646d0ba956bcc359e1c608be4b595cc272aaf11fda9a2fa2c37e",
+              "test_field_resource_sampling.py": "7acac89d613418425a4f0fd815a57b54227b38ebc5c326cee3105890dfdc1f45"
+            },
+            "resourceTests": 23,
+            "httpTests": 31,
+            "testExit": 0,
+            "ruffExit": 0,
+            "resultManifestsVerified": 39,
+            "nativeSeconds": 420,
+            "resourceSamples": 85,
+            "observationSamples": 61,
+            "nativeHttpGate": "FAIL",
+            "nativeHttpMissedSlots": {
+              "health": 1,
+              "data": 0,
+              "image": 17
+            },
+            "nativeCaptureSourceSha256": {
+              "field_http_sampling.py": "d863286ff1ef1909066e8f10928765233ee0bfb1abf08a6f0ca93ba2749f5ef1",
+              "field_resource_sampling.py": "4e2c2a869554ed53f46159e33b7da92f3f4fceaec369ecab4d1b3dc025b72036"
+            },
+            "finalEvaluatorRecheckedNative": true,
+            "exactPostFetchDelayCause": "UNCONFIRMED",
+            "filePersistenceTimingAdded": true,
+            "timingAdditionIsFixClaim": false,
+            "recordsTransfer": {
+              "destination": "Z:\\SmartFactory\\20261013\\records\\PDCA_RES128_3bc421b7",
+              "files": 4781,
+              "bytes_excluding_manifest": 5363037,
+              "manifest_sha256": "205a9e2d1a920a441949d0ae508721f4bd725f657b557b5c1ece77ee4b57eea4",
+              "verified": true
+            },
+            "actualServerExecution": false,
+            "fullFieldGate": "NOT_EVALUATED",
+            "releaseGate": "HOLD",
+            "promotionAllowed": false
           }
         }
       }
