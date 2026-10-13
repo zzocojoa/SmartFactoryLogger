@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T19:05:33.357775+00:00",
+  "lastUpdated": "2026-10-13T19:51:54.096242+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -3032,9 +3032,9 @@
           "R1": "original_timeout_UNCONFIRMED; exact_historical_fact_cold_config_HTTP_timeout_reproduced_and_local_wait_corrected; field_recheck_pending; local_receipt_synchronization_test_timing_failure_reproduced_and_test_clock_isolated_with_delayed_red_green_and_full_health_exit0; product_1s_limit_unchanged; host_OS_and_historical_server_causes_unconfirmed",
           "R2": "isolated_full_app_startup_and_resource_diagnostics_complete; same_browser_one_three_tabs_complete; supplemental_backend_probe_ABBA_complete; incremental_browser_CDP_web_vitals_OFF_ON_actual_foreground_120s_warmup_300s_observation_complete_with_common_probes_and_sequential_order_limits; three_server_starts_final_candidate_field15_120_physical_disk_and_full_performance_contract_pending; HOLD; independent_HTTP_component_health2s_data6s_image250ms_loopback31_tests_exit0; invalid_timing_and_duplicate_sequence_red2_green_preserved; full_candidate_field_binding_resources_physical_disk_UI_packet_and_15_120_pending; local_resource_native_physical_disk_collector23_tests_and_HTTP31_exit0; 420s_fixture_resources85_observation61_complete_but_HTTP_health1_image17_missed_FAIL; post_fetch_delay_exact_cause_unconfirmed; per_file_persistence_timing_added_not_fixed; final_long_integration_overhead_and_server_QA_pending; bounded_async_durable_HTTP_writer_controlled120ms_red1_green0_and_1s_stall31requests_verified; final_resource_persistence28_HTTP31_tests_exit0; final420s_fixture_HTTP1960_missing_error_timeout0_persisted1960_resources85_observation61; original_host_delay_and_transient_ENOSPC_causes_unconfirmed; actual_product_overhead_and_server_QA_pending; installation_process_listener_SPOT_logger_identity_component23_tests_exit0; complete_field_integration_watchdog_fingerprint_generation_and_server_QA_pending; supervised_collection21_tests_and_synthetic420_exit0; controlled_GIL_stall_fixed; actual_ENOSPC_cause_unconfirmed; server_complete_QA_pending; authenticated_control_boundary_initial_final_identity_and_200ms_checks_added; generation8_observation23_HTTP31_tests_exit0; final_source_long_duration_and_actual_field_performance_pending",
           "R3": "USER_SELF_roles_confirmed; device_GET_control_info_SPOT_PLUS_AL_confirmed; device_HTML_selected_Mode7_App1_AL_E_matches_diagnostic7; current_mode_range_analog_LowSignal_and_five_filter_metadata_fields_matched; observed_operational_profile_APPROVED_BY_USER_SELF_record94873cc2; physical_comparator_boundary_and_final_build_fingerprint_attestation_pending; HOLD; physical_test_requires_App1_AL_E_firmware40_38_alarm_applicability_and_internal_equality_method; family_manual_and_integer_REST_output_insufficient; software_guard_tests7_exit0; USER_SELF_reports_CMD_OUT_not_connected_to_PLC_or_machine_control; independent_wiring_inspection_false; physical_trial_NOT_TESTED; REST_alarm_bit4_footnote_includes_Application_models_but_App1_40_38_mode_contract_unconfirmed; manufacturer_inquiry_SENT_Gmail_readback_verified_20261013_190627KST; physical_boundary_NOT_TESTED; pinned_configuration_reference_and_runtime_fingerprint_boundary_checker_integrated; product22_inputs_and_approved15_software_fields_checked; archived_server2_fingerprints_match_but_attestation_readiness_FAIL; actual_final_attestation_and_physical_boundary_pending; exact_observed_shutdown_metadata_configuration_binding_verified_locally; archived_I4_I5_final_attestation_FAIL_preserved; physical_final_attestation_pending; HOLD",
-          "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed; historical_SpotViewer17966329_rows_NULL1689070_context0_correlated_with_adjacent_fast199_all1633135_mixed39418_other16517; reverse_numeric_all199_4613; raw_temperature_time_reversals4; encoding_cause_and_business_disposition_unconfirmed; archived_SpotViewer5.2.0.7443_static_contract_context0Unknown_1Celsius_invalid_to_NULL_and_multiple_invalid_paths_confirmed; five_DB_schemas_match; historical_executable_configuration_row_causes_and_disposition_unconfirmed; current_server_SpotViewer17_copied_files_match_archived5.2.0.7443; settings8_and_logs8_6738533_lines_verified; historical_connection_warnings_file_lock_network_path_and_timer_errors_recorded; conditional_NULL_window_overlap_not_causation; historical_identity_clock_row_impact_disposition_pending; long_NULL_run_contains172413_consecutive_blocks_repeating_same_two_fast_ticks199; selected_CSV4_2057323_rows_have689652_matching_ms_pair_rows_and344826_repeat_pair_time_decreases; SQL_rg_prior_audit_reconciled; not_fresh_acquisition_count_or_one_to_one_copy; historical_clock_all_NULL_causes_and_business_disposition_pending; portable_image_validator_exact_candidate4cc_Python_EXE_equivalence8_conditions24_executions_verified; archived_isolated_I4_I5_images133_199_PASS_and_faults_detected; optional_metadata_external_fact_absence_before_after_only; protected_consumer_closure_and_full_data_pending; HOLD; pinned_CSV_input_closure_16_tests_and_12_native_EXE_runs_expected_results_verified; path_only_metadata_projection_and_locked_absence_preserve_manifest_hash_row_checks; linkage_report_SHA_guard_added; full_data_pending; HOLD; same_locked_CSV_and_image_subtree_dual_validator_pipeline15_tests_14_actual_EXE_runs_expected_results_verified; original344_files_unchanged; full_data_NOT_EVALUATED; HOLD",
+          "R4": "server_cold_copy314675_files680_ADS_verified; selected_server_images312985_all_hash_decode_complete; PLC127158_files15329516_data_rows_copy_final_source_and_syntax_reconciled_complete_exit0; NAS439_final_source_rehash_complete_copy_exit0_content_exit1_two_BadZIP_preserved; NAS_loose_images20157_decode_pass20154_zero_byte_fail3_preserved; historical_missing3830540_orphan16_and_CSV_time_order_business_cause_disposition_and_final_candidate_delta_pending; full_data_gate_NOT_EVALUATED; HOLD; historical_PLC_converter_notebook_found_static_review_only_exact_producer_lineage_and_root_cause_not_confirmed; selected_archive_MES_sources14_and_referenced_local_transform_reviewed_no_exact_producer_lineage_confirmed; historical_SpotViewer17966329_rows_NULL1689070_context0_correlated_with_adjacent_fast199_all1633135_mixed39418_other16517; reverse_numeric_all199_4613; raw_temperature_time_reversals4; encoding_cause_and_business_disposition_unconfirmed; archived_SpotViewer5.2.0.7443_static_contract_context0Unknown_1Celsius_invalid_to_NULL_and_multiple_invalid_paths_confirmed; five_DB_schemas_match; historical_executable_configuration_row_causes_and_disposition_unconfirmed; current_server_SpotViewer17_copied_files_match_archived5.2.0.7443; settings8_and_logs8_6738533_lines_verified; historical_connection_warnings_file_lock_network_path_and_timer_errors_recorded; conditional_NULL_window_overlap_not_causation; historical_identity_clock_row_impact_disposition_pending; long_NULL_run_contains172413_consecutive_blocks_repeating_same_two_fast_ticks199; selected_CSV4_2057323_rows_have689652_matching_ms_pair_rows_and344826_repeat_pair_time_decreases; SQL_rg_prior_audit_reconciled; not_fresh_acquisition_count_or_one_to_one_copy; historical_clock_all_NULL_causes_and_business_disposition_pending; portable_image_validator_exact_candidate4cc_Python_EXE_equivalence8_conditions24_executions_verified; archived_isolated_I4_I5_images133_199_PASS_and_faults_detected; optional_metadata_external_fact_absence_before_after_only; protected_consumer_closure_and_full_data_pending; HOLD; pinned_CSV_input_closure_16_tests_and_12_native_EXE_runs_expected_results_verified; path_only_metadata_projection_and_locked_absence_preserve_manifest_hash_row_checks; linkage_report_SHA_guard_added; full_data_pending; HOLD; same_locked_CSV_and_image_subtree_dual_validator_pipeline15_tests_14_actual_EXE_runs_expected_results_verified; original344_files_unchanged; full_data_NOT_EVALUATED; HOLD; portable_runner_closed_data_synthetic_PASS_actual_attestation_FAIL_and_output_hashes_verified; input_provenance_and_actual_full_field_chain_pending; HOLD",
           "R5": "historical_4c_drop15_and_other_541d_session_drop44_separate_UNCONFIRMED; current_541d_logger_e9a785c0_SPOT_efca4313_drop0_at0358_to173_at1622_and1630_KST; two_samples_469_566390s_delta_drop0_written410_rows2082; actual_cause_impact_recovery_disposition_UNCONFIRMED; local_reason_counters_verified; HOLD",
-          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution; resource_collector_and_common_origin_local_validation_complete; HTTP_persistence_trace_added_after_native_slot_miss_FAIL; protected_launcher_watchdog_full_candidate_binding_and_field_QA_pending; bounded_HTTP_persistence_and_drain_verified_local420s_only; original_ENOSPC_failed_runs_preserved; field_launcher_watchdog_identity_full_QA15_120_promotion_still_pending; pinned_payload1814_default_stream_files_verified_on_actual_extracted_candidate_with_lock_and_closeout_checks; current_running_server_candidate_not_verified; HOLD; owned_Windows_job_and_PID_session_payload_observation_integrated; protected_outer_launcher_and_generation_fingerprint_UI_packet_shutdown_pending; HOLD; authenticated_generation_boundary_integration_verified_on_native_Windows_fixture; escaped_token_response_red1_green_preserved; protected_outer_launcher_fingerprint_UI_packet_shutdown_and_actual_server_QA_pending; HOLD; configuration7_observation26_generation8_HTTP31_tests_and_isolated_Ruff_exit0; context_closeout_worker_PASS_discrepancy_red1_green_preserved; current_promotion_comparator_false_vs_final_QA_true_contract_conflict_reproduced_unresolved; actual_field_QA_and_promotion_pending; HOLD; observed_final_health_to_exact_shutdown_files_binding57_tests_exit0; historical_profile_flag_not_used_by_final_QA_scope_clarified; protected_launcher_UI_packet_actual_shutdown_full_CSV_and_field_QA_pending; HOLD; portable_image_EXE5601b347_UNSIGNED_INTERNAL_10_unit_tests_and_final_helper_Ruff_exit0; r2_bundle6_files_shared_SHA_and_server_local_path_presence_verified; server_local_SHA_execution_and_complete_field_QA_pending; HOLD; same_locked_CSV_metadata_shutdown_configuration_binding_verified_locally; archived_actual_attestation_FAIL_preserved; final16_tests_and_Ruff_exit0; protected_outer_launcher_and_actual_field_QA_pending; HOLD; owned_gated_job_dual_validator_shutdown_metadata_pipeline_verified_locally; timeout_orphan_output_budget_supervisor_death_and_context_close_fail_closed; actual_attestation_FAIL_and_no_field_execution; protected_outer_launcher_and_actual_full_QA_pending; HOLD"
+          "R6": "unsigned_internal_policy; v1.0.28_clean4cc7393e_installer8821746b_health_build_payload_NSIS_recovery_exit0; candidate_two_normal_closes_new_image502_zero_ordered_drain_verified; original541d_and_historical502_preserved; portable_CSV_validator_exact4cc_locked_environment_equivalence7_cases_exit0; candidate_rollback_QA27_file_package_and_18_identity_tests_verified; locked_package_read_launcher21_test_conditions_verified_and_server_local5_files_UI_delivered; actual_server_admin_execution_and_package_SHA_unconfirmed; complete_field_collector_attestation_QA_15_120_and_other_gates_pending; HOLD; independent_HTTP_sampling_component31_tests_verified_no_production_entrypoint_or_server_execution; resource_collector_and_common_origin_local_validation_complete; HTTP_persistence_trace_added_after_native_slot_miss_FAIL; protected_launcher_watchdog_full_candidate_binding_and_field_QA_pending; bounded_HTTP_persistence_and_drain_verified_local420s_only; original_ENOSPC_failed_runs_preserved; field_launcher_watchdog_identity_full_QA15_120_promotion_still_pending; pinned_payload1814_default_stream_files_verified_on_actual_extracted_candidate_with_lock_and_closeout_checks; current_running_server_candidate_not_verified; HOLD; owned_Windows_job_and_PID_session_payload_observation_integrated; protected_outer_launcher_and_generation_fingerprint_UI_packet_shutdown_pending; HOLD; authenticated_generation_boundary_integration_verified_on_native_Windows_fixture; escaped_token_response_red1_green_preserved; protected_outer_launcher_fingerprint_UI_packet_shutdown_and_actual_server_QA_pending; HOLD; configuration7_observation26_generation8_HTTP31_tests_and_isolated_Ruff_exit0; context_closeout_worker_PASS_discrepancy_red1_green_preserved; current_promotion_comparator_false_vs_final_QA_true_contract_conflict_reproduced_unresolved; actual_field_QA_and_promotion_pending; HOLD; observed_final_health_to_exact_shutdown_files_binding57_tests_exit0; historical_profile_flag_not_used_by_final_QA_scope_clarified; protected_launcher_UI_packet_actual_shutdown_full_CSV_and_field_QA_pending; HOLD; portable_image_EXE5601b347_UNSIGNED_INTERNAL_10_unit_tests_and_final_helper_Ruff_exit0; r2_bundle6_files_shared_SHA_and_server_local_path_presence_verified; server_local_SHA_execution_and_complete_field_QA_pending; HOLD; same_locked_CSV_metadata_shutdown_configuration_binding_verified_locally; archived_actual_attestation_FAIL_preserved; final16_tests_and_Ruff_exit0; protected_outer_launcher_and_actual_field_QA_pending; HOLD; owned_gated_job_dual_validator_shutdown_metadata_pipeline_verified_locally; timeout_orphan_output_budget_supervisor_death_and_context_close_fail_closed; actual_attestation_FAIL_and_no_field_execution; protected_outer_launcher_and_actual_full_QA_pending; HOLD; clean_c98_helper_EXE_native_job_locked_request_controller_local_validation_and_server8_file_UI_delivery_complete; actual_admin_ACL_hash_execution_field15_120_and_promotion_pending; HOLD"
         },
         "followup": {
           "goalStatus": "active",
@@ -8289,6 +8289,118 @@
               "final_field_attestation_UI_packet_and_physical_comparator",
               "server_install_recovery_three_starts_15min_120min_QA",
               "historical_disposition_all_release_gates_and_operating_promotion"
+            ]
+          },
+          "fieldProtectedRunnerStage": {
+            "date": "2026-10-14",
+            "status": "PORTABLE_RUNNER_LOCALLY_VALIDATED_SERVER_FILES_DELIVERED",
+            "report": "docs/04-report/production-release-risk-validation-protected-runner-20261014.report.md",
+            "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_RUN128_20261014_f1378d29",
+            "helperCommit": "c98a7b1e8a58e89825c33d99dd611d515ef686ae",
+            "candidateCommit": "4cc7393e1bafbf90a329726aed9470fe0daacb21",
+            "executable": {
+              "bytes": 16058064,
+              "sha256": "0e4026fe36dcbcb6bd36e457e5a1fc50f95299b3d5ab38fc277f2739eaf65937"
+            },
+            "signaturePolicy": "UNSIGNED_INTERNAL",
+            "authenticode": "NotSigned",
+            "pythonTests": {
+              "count": 9,
+              "exit": 0,
+              "skipped": 0
+            },
+            "nativeTestConditions": 12,
+            "portableInvocations": 6,
+            "bootstrapConditions": 4,
+            "finalRuffExit": 0,
+            "auditExit": 0,
+            "sourceFilesVerified": 27,
+            "inputFilesUnchanged": 282,
+            "productionAclApplied": false,
+            "developmentControllerChangesRecorded": true,
+            "nativeSupervisorDeathChildrenGone": 5,
+            "launcherReceiptsReconciled": 5,
+            "recordedJobsActiveZero": true,
+            "actualAttestation": "FAIL_COMMAND_NOT_STARTED",
+            "successfulAttestation": "SYNTHETIC_TEST_NOT_FIELD_APPROVAL",
+            "package": {
+              "build-provenance.json": {
+                "bytes": 8249,
+                "sha256": "b46b45eb33947b0de8981ce16677bb1a6facfb29e465169d6e74eee154060132"
+              },
+              "candidate-payload.json": {
+                "bytes": 340717,
+                "sha256": "a5de26c2db81c8d69418fd3e574d4180b2dd895ab94b9cbf064959369644af5c"
+              },
+              "field_runner.exe": {
+                "bytes": 16058064,
+                "sha256": "0e4026fe36dcbcb6bd36e457e5a1fc50f95299b3d5ab38fc277f2739eaf65937"
+              },
+              "invoke-field-run.ps1": {
+                "bytes": 22366,
+                "sha256": "cf4528b8a3ead699895efdc05f28d42e42c5f0d3d1fcc80e2f156c65b72fccff"
+              },
+              "manifest.json": {
+                "bytes": 1182,
+                "sha256": "7319a035a5333e3542b11d9f0139aec76109e447a7b3ff17e0654937356725a4"
+              },
+              "README.txt": {
+                "bytes": 592,
+                "sha256": "d9c4d6adb55b888212203abf3ebdf4a293b74985d887b50fd9927041314511b8"
+              },
+              "validate_csv_v2_shadow.exe": {
+                "bytes": 9494053,
+                "sha256": "e728730ad841dd4a754a6c0880e0e1216de5e3d0cd5646c22de9245fc85b0b2f"
+              },
+              "validate_spot_image_files.exe": {
+                "bytes": 16208474,
+                "sha256": "5601b347637bd0dcb9971839ec93bdc2860ad4594e5ba328acd4e70fa91d5f14"
+              }
+            },
+            "serverTransfer": {
+              "server_absolute_path": "C:/Users/user/Desktop/SmartFactory/RUN128_20261014_f1378d29",
+              "observed_at": "2026-10-14T04:47:00+09:00",
+              "server_file_count": 8,
+              "server_path_and_files_UI_verified": true,
+              "server_hash_verified": false,
+              "server_executed": false,
+              "runnable_field_request_prepared": false,
+              "shared_hash_verified": true,
+              "evidence": [
+                "server-local-package.png",
+                "server-local-files.png"
+              ],
+              "release_gate": "HOLD"
+            },
+            "archive": {
+              "status": "PASS",
+              "members": 1472,
+              "raw_bytes": 112165279,
+              "zip": {
+                "bytes": 102857475,
+                "sha256": "5c9bd2715b414b41c7241502731d47cbd65edb18d0e0c4034dfebc90f806c96f"
+              },
+              "manifest": {
+                "bytes": 290568,
+                "sha256": "d32ab4d5553df739d077b261d0ff94d25b07031a14d8aed17981d82bb77a12ab"
+              },
+              "shared": "Z:\\SmartFactory\\20261014\\records\\PDCA_RUN128_f1378d29",
+              "zip_member_hash_size_crc_verified": true,
+              "shared_hash_verified": true,
+              "server_executed": false,
+              "release_gate": "HOLD"
+            },
+            "actualServerExecution": false,
+            "fullDataGate": "NOT_EVALUATED",
+            "releaseGate": "HOLD",
+            "promotionAllowed": false,
+            "remaining": [
+              "server_admin_ACL_and_hash_execution_verification",
+              "actual_field_request_configuration_and_input_provenance",
+              "actual_observation_normal_shutdown_copy_final_delta_connection",
+              "field_attestation_UI_packet_physical_comparator",
+              "same_candidate_install_recovery_three_starts_15min_120min",
+              "historical_disposition_release_gates_operating_promotion"
             ]
           }
         }

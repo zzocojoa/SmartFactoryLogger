@@ -330,3 +330,16 @@ CSV/image fact와 선택 이미지 전체를 두 고정 EXE에 연결하고 실�
 실제 보존 attestation FAIL은 명령 실행 전 거부했고 합성 기준의 성공은 현장 승인과 구분했다.
 보호된 외부 실행기·출처 인증·실제 정상 종료/관찰 연결·UI/packet·현장15분/120분·물리 경계와
 승격은 남는다. R1–R6 HOLD, full_data_gate NOT_EVALUATED, 현재 운영/롤백·미서명 정책을 유지한다.
+
+## 2026-10-14 고정 요청 진입점과 portable 실행기
+
+[보호된 실행기 검증](production-release-risk-validation-protected-runner-20261014.report.md)은
+clean c98a7b1e 도우미를 EXE로 빌드하고 요청·controller 고정 SHA와 native Job 감독을 연결했다.
+Python9시험, native12조건, portable6실행, bootstrap4조건 및 최종 감사/Ruff는 exit0이다.
+원문27파일·기준 입력282파일·패키지8파일의 일치와 기록된5개 Job의 active0을 확인했다.
+실제 보존 attestation 실패는 유지했고 합성 성공과 구분했다. 비관리자 개발용 ACL 차이를
+명시했으며 생산 controller의 관리자 조건 거부는 확인했으나 서버 ACL 적용은 미검증이다.
+공유 해시 검산 뒤 서버 `Desktop/SmartFactory/RUN128_20261014_f1378d29`의 절대경로와
+8파일을 탐색기에서 확인했다. 실제 서버 해시/실행·최종 요청/attestation·정상 종료와
+최종 사본 연결·UI/packet·현장15분/120분·물리 경계 및 운영 승격은 남는다.
+R1–R6 HOLD, full_data_gate NOT_EVALUATED, 현재 운영/롤백541d/08C와 미서명 정책을 유지한다.

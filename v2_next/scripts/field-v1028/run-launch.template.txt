@@ -1,0 +1,49 @@
+& {
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference='Stop'
+    $fieldNative=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
+    $fieldSavedModules=$env:PSModulePath
+    $fieldSavedPath=$env:PATH
+    $fieldBootstrap=@'
+Set-StrictMode -Version Latest
+$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+$fieldStream=$null;$fieldSha=$null;$fieldReader=$null
+try {
+    $fieldPath='@@CONTROLLER_PATH@@'
+    $fieldNode=[IO.FileInfo]::new($fieldPath)
+    while($null -ne $fieldNode){
+        if([int]$fieldNode.Attributes -eq -1 -or ($fieldNode.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'bootstrap-missing-or-reparse'}
+        if($fieldNode -is [IO.FileInfo]){$fieldNode=$fieldNode.Directory}else{$fieldNode=$fieldNode.Parent}
+    }
+    $fieldStream=[IO.File]::Open($fieldPath,'Open','Read','Read')
+    if($fieldStream.Length -ne @@CONTROLLER_LENGTH@@){throw 'bootstrap-controller-length'}
+    $fieldSha=[Security.Cryptography.SHA256]::Create()
+    $fieldHash=[BitConverter]::ToString($fieldSha.ComputeHash($fieldStream)).Replace('-','').ToLowerInvariant()
+    if($fieldHash -cne '@@CONTROLLER_HASH@@'){throw 'bootstrap-controller-hash'}
+    $fieldStream.Position=0
+    $fieldReader=[IO.StreamReader]::new($fieldStream,[Text.UTF8Encoding]::new($false,$true),$false,4096,$true)
+    $fieldCode=[scriptblock]::Create($fieldReader.ReadToEnd())
+    & $fieldCode -PackageRoot '@@PACKAGE_PATH@@' -RequestPath '@@REQUEST_PATH@@' -ExpectedRequestSha256 '@@REQUEST_SHA256@@' -ResultParent '@@RESULT_PARENT@@' -OperatorSid '@@OPERATOR_SID@@'
+    throw 'controller-returned-without-exit'
+} catch {
+    [ordered]@{result='FIELD_RUN_BOOTSTRAP_HOLD';reason=$_.Exception.Message;installation_performed=$false;field_run_completed=$false}|ConvertTo-Json -Compress
+    exit 1
+} finally {
+    if($null -ne $fieldReader){$fieldReader.Dispose()};if($null -ne $fieldSha){$fieldSha.Dispose()};if($null -ne $fieldStream){$fieldStream.Dispose()}
+}
+'@
+    try {
+        $env:PSModulePath=[IO.Path]::GetDirectoryName($fieldNative)+'\Modules'
+        $env:PATH=[Environment]::SystemDirectory+';'+[IO.Path]::GetDirectoryName($fieldNative)
+        $fieldEncoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($fieldBootstrap))
+        & $fieldNative -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand $fieldEncoded
+        $fieldExit=$LASTEXITCODE
+        Write-Host ('LAUNCH_EXIT='+$fieldExit)
+        if($fieldExit -ne 0){throw ('Field run HOLD: child exit '+$fieldExit)}
+    } finally {
+        $env:PSModulePath=$fieldSavedModules
+        $env:PATH=$fieldSavedPath
+    }
+}
