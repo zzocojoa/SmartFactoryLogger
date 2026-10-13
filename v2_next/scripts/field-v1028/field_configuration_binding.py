@@ -20,6 +20,10 @@ from field_resource_sampling import error_record
 
 
 PROFILE_APPROVAL_SHA = '94873cc2a677ccc79bfbda11f65b736717ff97ed0bf07fc8449254253cf995df'
+FIELD_SEQUENCE_APPROVAL_SHA = '6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685'
+STRICT_SCOPE = 'VERIFIED_COMPARATOR_CONFIGURATION'
+DISABLED_SCOPE = 'DISABLED_LOW_SIGNAL_FIELD_TRIAL'
+DISABLED_SCHEMA = 'sfl-field-configuration-disabled-low-signal-v1'
 PROFILE = {
     'spot_model_info': 'SPOT+ AL', 'spot_app_mode': 'App1: AL E',
     'spot_range_min_c': 200.0, 'spot_range_max_c': 900.0,
@@ -44,6 +48,20 @@ ATTESTATION_KEYS = (
     'device_config_readback_status', 'device_config_fingerprint_sha256',
     'config_drift_detected', 'config_drift_fields', 'spot_ratio_raw_enabled',
 )
+
+
+class ReferenceSnapshot(dict):
+    """Scope from a pinned, approved reference; never from runtime JSON fields."""
+
+    def __init__(self, snapshot):
+        super().__init__(snapshot)
+
+
+def scope_fields(reference):
+    limited = type(reference) is ReferenceSnapshot
+    return dict(validation_scope=DISABLED_SCOPE if limited else STRICT_SCOPE,
+                physical_device_gate='NOT_TESTED' if limited else 'NOT_EVALUATED',
+                formal_qa_gate='HOLD')
 
 
 def canonical_fingerprint(snapshot):
@@ -89,8 +107,12 @@ def review_snapshot(snapshot, expected=None):
         issues.append('spot-ip-format')
     check(snapshot.get('low_signal_comparator') in ('lt', 'lte'), 'comparator-unverified')
     check(snapshot.get('diagnostics_collection_mode') == 'async_fact_only', 'diagnostics-mode')
-    for key in ('low_signal_comparator_configured_verified', 'low_signal_comparator_verified',
-                'config_operator_verified_requested', 'config_operator_verified'):
+    scope = scope_fields(expected if expected is not None else snapshot)
+    comparator_verified = scope['validation_scope'] == STRICT_SCOPE
+    for key in ('low_signal_comparator_configured_verified', 'low_signal_comparator_verified'):
+        check(snapshot.get(key) is comparator_verified,
+              ('not-verified:' if comparator_verified else 'must-remain-unverified:') + key)
+    for key in ('config_operator_verified_requested', 'config_operator_verified'):
         check(snapshot.get(key) is True, 'not-verified:' + key)
     check(snapshot.get('spot_ratio_raw_enabled') is snapshot.get('ratio_raw_enabled')
           and type(snapshot.get('spot_ratio_raw_enabled')) is bool, 'ratio-alias')
@@ -123,7 +145,7 @@ def review_snapshot(snapshot, expected=None):
             check(key in snapshot and key in expected and type(snapshot[key]) is type(expected[key])
                   and snapshot[key] == expected[key], 'pinned-reference:' + key)
     return dict(status='FAIL' if issues else 'PASS', issues=issues, recomputed_fingerprint=computed,
-                profile_scope='SOFTWARE_REPRESENTED_APPROVED_FIELDS', physical_device_gate='NOT_EVALUATED')
+                profile_scope='SOFTWARE_REPRESENTED_APPROVED_FIELDS', **scope)
 
 
 @contextmanager
@@ -136,10 +158,14 @@ def configuration_reference(path, expected_sha256):
         raw = stream.read(32769)
         binding.require(hashlib.sha256(raw).hexdigest() == expected_sha256, 'configuration-reference-hash')
         value = binding.strict_json(raw)
-        binding.require(value.get('schema') == 'sfl-field-configuration-reference-v1'
+        binding.require(value.get('schema') in ('sfl-field-configuration-reference-v1', DISABLED_SCHEMA)
                         and value.get('profile_approval_sha256') == PROFILE_APPROVAL_SHA,
                         'configuration-reference-approval-binding')
         snapshot = value.get('snapshot')
+        if value['schema'] == DISABLED_SCHEMA:
+            binding.require(value.get('field_sequence_approval_sha256') == FIELD_SEQUENCE_APPROVAL_SHA
+                            and isinstance(snapshot, dict), 'field-sequence-approval-binding')
+            snapshot = ReferenceSnapshot(snapshot)
         binding.require(review_snapshot(snapshot)['status'] == 'PASS', 'configuration-reference-not-verified')
         yield snapshot
         binding.require(binding.stream_fact(stream) == dict(bytes=len(raw), sha256=expected_sha256),
@@ -150,6 +176,7 @@ def capture_configuration(payload, main, backend, port, sessions, expected):
     result = dict(configuration_status='FAIL', started_ns=time.perf_counter_ns(),
                   errors=[], field_gate='NOT_EVALUATED', release_gate='HOLD', promotion_allowed=False)
     try:
+        result.update(scope_fields(expected))
         binding.require(payload.active, 'payload-context-not-active')
         binding.require(main.exe == os.path.normcase(str(payload.root / 'smart-factory.exe'))
                         and backend.exe == os.path.normcase(str(payload.root / binding.BACKEND)),

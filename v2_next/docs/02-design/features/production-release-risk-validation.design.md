@@ -311,6 +311,17 @@ OS 식별값을 대조하고 접근 거부·프로세스 변경·누락 값은 �
 
 ### 5.10 최종 설정 기준과 runtime fingerprint의 경계 대조
 
+2026-10-14 사용자 승인에 따라 `sfl-field-configuration-disabled-low-signal-v1` 기준을 추가한다.
+기존 v1 기준의 comparator=true 조건은 유지한다. 추가 기준은 승인된 관찰 프로파일 SHA와
+시험 순서 승인 SHA `6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685`,
+Low Signal off, configured/effective comparator=false를 모두 요구한다. 다른 검사는 동일하다.
+기준 JSON의 외부 고정 SHA를 먼저 검증하고, 해당 승인 SHA/전용 schema를 확인한 reader만
+검증 범위를 담는 ReferenceSnapshot을 만든다. 장비 HTTP JSON의 추가 필드는 제한 모드를
+선택할 수 없다. 이후 runtime·정상 종료 검사는 같은 기준 객체와 정확한 fingerprint를 대조한다.
+결과에 DISABLED_LOW_SIGNAL_FIELD_TRIAL·physical NOT_TESTED·formal QA HOLD를 명시하며
+수집/데이터 구성요소의 PASS를 정식 QA PASS로 확대하지 않는다. 기본 경로와 거부 검사를
+함께 검증하고 설정 도우미의 한정 확인 경로도 같은 승인·미검증 상태에 결합한다.
+
 최종 후보의 실제 attestation에서 작성한 설정 기준 JSON을 외부 SHA로 잠가 읽는다.
 기준은 승인된 관찰 프로파일 기록의 SHA와 연결하고, USER_SELF의 최종 fingerprint/설정 SHA,
 build·운영자 확인·UTC 시각·readback/comparator 상태를 포함한다. 현재 존재하는 운영본의

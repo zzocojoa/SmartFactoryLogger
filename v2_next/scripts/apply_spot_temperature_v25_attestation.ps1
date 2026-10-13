@@ -4,11 +4,18 @@ param(
     [string]$LogPath = "",
     [string]$MetadataPath = "",
     [string]$OperatorId = "",
+    [string]$FieldSequenceApprovalSha256 = "",
+    [string]$ExpectedConfigSha256 = "",
+    [string]$ExpectedMetadataSha256 = "",
     [switch]$Confirm
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$disabledLowSignalTrial = -not [string]::IsNullOrWhiteSpace($FieldSequenceApprovalSha256)
+if ($disabledLowSignalTrial -and $FieldSequenceApprovalSha256 -cne "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685") {
+    throw "Unknown field sequence approval."
+}
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     if (-not [string]::IsNullOrWhiteSpace($env:SFL_CONFIG_PATH)) {
@@ -238,6 +245,29 @@ if ($null -eq $metadataFile) {
     throw "No Factory_Integrated_Log_v2_*.metadata.json file was found. Run the v2.5 app once and close it normally first."
 }
 
+function Get-Sha256 {
+    param([string]$Path)
+    $stream = [System.IO.File]::OpenRead($Path)
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Assert-LimitedInputHashes {
+    if ($ExpectedConfigSha256 -cnotmatch "^[0-9a-f]{64}$" -or $ExpectedMetadataSha256 -cnotmatch "^[0-9a-f]{64}$") {
+        throw "Limited field attestation requires externally pinned config and metadata hashes."
+    }
+    if ((Get-Sha256 -Path $ConfigPath) -cne $ExpectedConfigSha256 -or
+        (Get-Sha256 -Path $metadataFile.FullName) -cne $ExpectedMetadataSha256) {
+        throw "Limited field attestation input hash mismatch."
+    }
+}
+if ($disabledLowSignalTrial) { Assert-LimitedInputHashes }
+
 $metadata = Get-Content -LiteralPath $metadataFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
 $schema = Get-ObjectProperty $metadata "schema_metadata"
 $snapshot = Get-ObjectProperty $metadata "spot_configuration_snapshot"
@@ -282,7 +312,32 @@ $readbackStatus = [string](Get-ObjectProperty $snapshot "device_config_readback_
 if ($readbackStatus -notin @("matched", "not_supported")) {
     throw "Device readback status does not allow attestation: $readbackStatus"
 }
-if (-not (Convert-ToBoolean (Get-ObjectProperty $snapshot "low_signal_comparator_configured_verified" $false))) {
+if ($disabledLowSignalTrial) {
+    if ($buildCommit -cne "4cc7393e1bafbf90a329726aed9470fe0daacb21") { throw "Limited field candidate build mismatch." }
+    $limitedProfile = @{
+        spot_model_info = "SPOT+ AL"; spot_app_mode = "App1: AL E"
+        spot_range_min_c = 200.0; spot_range_max_c = 900.0
+        spot_analog_4ma_c = 200.0; spot_analog_20ma_c = 800.0
+        low_signal_alarm_enabled = $false; low_signal_threshold_pc = 2.0
+        low_signal_comparator_configured_verified = $false; low_signal_comparator_verified = $false
+        peak_picker_enabled = $false; limiter_enabled = $false; averager_enabled = $false
+        modemaster_enabled = $false; ratio_raw_enabled = $false
+        window_obscuration_pc = 12.0; focus_mm = 6071.0
+    }
+    foreach ($key in $limitedProfile.Keys) {
+        $actual = Get-ObjectProperty $snapshot $key
+        $expected = $limitedProfile[$key]
+        $typeMatches = if ($expected -is [bool]) { $actual -is [bool] }
+            elseif ($expected -is [string]) { $actual -is [string] }
+            else { $actual -is [int] -or $actual -is [long] -or $actual -is [double] -or $actual -is [decimal] }
+        if (-not $typeMatches -or $actual -cne $expected) { throw "Limited field profile mismatch: $key" }
+    }
+    foreach ($key in @("low_signal_alarm_enabled", "low_signal_comparator_verified")) {
+        if ((Get-IniValue -Path $ConfigPath -Section "SPOT" -Key $key) -notmatch "^(?i:false|0|no|off)$") {
+            throw "Limited field config must keep $key false."
+        }
+    }
+} elseif (-not (Convert-ToBoolean (Get-ObjectProperty $snapshot "low_signal_comparator_configured_verified" $false))) {
     throw "low_signal_comparator_verified was not configured true before this metadata was created."
 }
 
@@ -290,6 +345,7 @@ if ([string]::IsNullOrWhiteSpace($OperatorId)) {
     $OperatorId = Read-Host "Operator ID (letters, numbers, dot, underscore, hyphen)"
 }
 $OperatorId = $OperatorId.Trim()
+if ($disabledLowSignalTrial -and $OperatorId -cne "USER_SELF") { throw "Limited field operator must be USER_SELF." }
 if ($OperatorId -notmatch "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$") {
     throw "Invalid operator ID. Use only letters, numbers, dot, underscore, or hyphen."
 }
@@ -319,6 +375,7 @@ $attestationValues = [ordered]@{
 }
 $configFile = Read-TextFilePreservingEncoding -Path $ConfigPath
 $updatedText = Set-IniSectionValues -Text $configFile.Text -Section "SPOT" -Values $attestationValues
+if ($disabledLowSignalTrial) { Assert-LimitedInputHashes }
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $backupPath = "$ConfigPath.backup-v25-attestation-$stamp"
 $tempPath = "$ConfigPath.v25-attestation.tmp"
@@ -335,10 +392,20 @@ try {
 }
 
 Write-Host ""
-Write-Host "ATTESTATION APPLIED" -ForegroundColor Green
+if ($disabledLowSignalTrial) {
+    Write-Host "FIELD TRIAL SETTINGS ATTESTATION APPLIED" -ForegroundColor Yellow
+    Write-Host "Physical boundary: NOT_TESTED; comparator verified: false; formal QA: HOLD"
+    Write-Host "Field sequence approval SHA256: $FieldSequenceApprovalSha256"
+} else {
+    Write-Host "ATTESTATION APPLIED" -ForegroundColor Green
+}
 Write-Host "Config: $ConfigPath"
 Write-Host "Backup: $backupPath"
 Write-Host "Verified at: $verifiedAt"
 Write-Host ""
-Write-Host "Start SmartFactoryLogger, wait for the SPOT temperature, then run:"
-Write-Host ".\qa_spot_temperature_v25.cmd" -ForegroundColor Cyan
+if ($disabledLowSignalTrial) {
+    Write-Host "Use the pinned disabled-low-signal field reference after restarting and reading the actual candidate."
+} else {
+    Write-Host "Start SmartFactoryLogger, wait for the SPOT temperature, then run:"
+    Write-Host ".\qa_spot_temperature_v25.cmd" -ForegroundColor Cyan
+}

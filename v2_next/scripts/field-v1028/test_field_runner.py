@@ -30,11 +30,12 @@ class RunnerTests(unittest.TestCase):
         self.folder = ROOT / f't{self.counter:02d}'
         self.folder.mkdir()
 
-    def prepare(self, synthetic=False):
+    def prepare(self, synthetic=False, *, disabled_low_signal=False):
         helper = fixtures.ClosedDataTests()
         helper.folder = self.folder
         folder, data, roles, images = helper.prepare()
-        expected, reference, sha = helper.reference(folder, data, roles, synthetic)
+        expected, reference, sha = helper.reference(folder, data, roles, synthetic,
+                                                   disabled_low_signal=disabled_low_signal)
         package = ROOT / 'package'
         output = self.folder / 'output'; output.mkdir()
         request = dict(schema=runner.SCHEMA, mode='closed-data', candidate_commit=runner.binding.BUILD,
@@ -77,6 +78,20 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code,1)
         self.assertEqual(receipt['status'],'FAIL')
         self.assertFalse((output/'session/closed-data/checks').exists())
+
+    def test_disabled_trial_result_exposes_pending_physical_and_formal_qa(self):
+        _,path,output,package=self.prepare(True, disabled_low_signal=True)
+        code,receipt=self.invoke(path,output,package)
+        self.assertEqual(code,0,receipt)
+        result=json.loads((output/'session/result.json').read_bytes())
+        self.assertEqual(result['validation_scope'],fixtures.inputs.configuration.DISABLED_SCOPE)
+        self.assertEqual(result['physical_device_gate'],'NOT_TESTED')
+        self.assertEqual(result['formal_qa_gate'],'HOLD')
+        self.assertEqual(receipt['validation_scope'],result['validation_scope'])
+        self.assertEqual(receipt['physical_device_gate'],'NOT_TESTED')
+        self.assertEqual(receipt['formal_qa_gate'],'HOLD')
+        self.assertEqual(result['release_gate'],'HOLD')
+        self.assertFalse(result['promotion_allowed'])
 
     def test_request_hash_mismatch_starts_no_phase(self):
         _,path,output,package=self.prepare()

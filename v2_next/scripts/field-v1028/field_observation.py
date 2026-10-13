@@ -284,6 +284,7 @@ def run_observation(spec, output, duration_seconds, stop, notify):
                                       expected_reference_sha256=spec.reference_sha256, extras=spec.extras) as payload, \
                 configuration_binding.configuration_reference(spec.configuration_reference,
                     spec.configuration_reference_sha256) as expected_configuration:
+            result.update(configuration_binding.scope_fields(expected_configuration))
             initial = binding.capture_runtime_binding(payload, spec.main, spec.backend, spec.port)
             write_json(output / 'initial.json', initial)
             binding.require(initial['binding_status'] == 'PASS', 'initial-binding-failed')
@@ -479,6 +480,9 @@ def supervise_observation(spec, output, *, duration_seconds, preparation_timeout
             binding.require(file_fact(output / 'worker-result.json') == done, 'worker-result-hash')
             result, _ = read_json(output / 'worker-result.json')
             receipt['worker_result'] = done
+            for key in ('validation_scope', 'physical_device_gate', 'formal_qa_gate'):
+                if key in result:
+                    receipt[key] = result[key]
             binding.require(result['field_gate'] == 'NOT_EVALUATED' and result['release_gate'] == 'HOLD'
                             and result['promotion_allowed'] is False, 'invalid-worker-release-claim')
             if (process.exitcode == 0 and observing and finalizing

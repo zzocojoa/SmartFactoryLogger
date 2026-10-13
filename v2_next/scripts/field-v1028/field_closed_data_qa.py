@@ -291,6 +291,9 @@ def validate_closed_data(bound, image_files, image_executable, output, expected_
                   promotion_allowed=False, errors=[])
     try:
         with csv_inputs.shutdown_csv_inputs(bound, expected_shutdown, configuration_path, configuration_sha256):
+            review = bound.receipt['shutdown_review']['configuration_review']
+            result.update({key: review[key] for key in
+                           ('validation_scope', 'physical_device_gate', 'formal_qa_gate')})
             result['checks'] = check_bound_data(bound, image_files, image_executable, output / 'checks', timeout=timeout)
             binding.require(result['checks']['data_checks_status'] == 'PASS', 'closed-data-checks-failed')
         binding.require(bound.receipt['input_binding_status'] == 'PASS', 'csv-input-closeout-failed')

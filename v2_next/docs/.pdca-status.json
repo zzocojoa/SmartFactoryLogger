@@ -8510,6 +8510,31 @@
             "settingsChanged": false,
             "releaseGate": "HOLD",
             "promotionAllowed": false
+          },
+          "limitedFieldSequenceStage": {
+            "status": "APPROVED_LOCAL_HELPER_TESTS_PASS_SERVER_EXECUTION_PENDING",
+            "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
+            "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
+            "userStatement": "예, 다른 현장 검증부터 진행",
+            "tests": {
+              "configuration": 10,
+              "attestation": 8,
+              "closedData": 16,
+              "runner": 10,
+              "observation": 27,
+              "shutdown": 10
+            },
+            "localTestsTotal": 81,
+            "localTestsExitCode": 0,
+            "physicalBoundaryTest": "NOT_TESTED",
+            "lowSignalAlarmEnabled": false,
+            "comparatorVerified": false,
+            "installationPerformed": false,
+            "settingsChanged": false,
+            "fieldQaExecuted": false,
+            "canaryStarted": false,
+            "releaseGate": "HOLD",
+            "promotionAllowed": false
           }
         }
       }

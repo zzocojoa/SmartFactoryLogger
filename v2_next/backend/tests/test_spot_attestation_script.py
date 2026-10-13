@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -28,6 +30,10 @@ class SpotAttestationScriptTests(unittest.TestCase):
         schema_version: object = "2.5.0",
         hardening_enabled: bool = True,
         comparator_verified: bool = True,
+        limited_trial: bool = False,
+        metadata_overrides: dict[str, object] | None = None,
+        approval_hash: str = "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
+        config_hash_override: str | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], str]:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -35,7 +41,8 @@ class SpotAttestationScriptTests(unittest.TestCase):
             config_path.write_text(
                 "[SPOT]\n"
                 "low_signal_comparator = lt\n"
-                "low_signal_comparator_verified = true\n"
+                f"low_signal_comparator_verified = {str(comparator_verified).lower()}\n"
+                "low_signal_alarm_enabled = false\n"
                 "config_operator_verified = true\n"
                 "config_verified_at = 2026-07-12T00:00:00Z\n"
                 "config_verified_by = previous_operator\n"
@@ -68,6 +75,20 @@ class SpotAttestationScriptTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            metadata = json.loads(metadata_path.read_bytes())
+            snapshot = metadata["spot_configuration_snapshot"]
+            snapshot.update(spot_range_min_c=200.0, spot_range_max_c=900.0,
+                spot_analog_4ma_c=200.0, spot_analog_20ma_c=800.0,
+                peak_picker_enabled=False, limiter_enabled=False, averager_enabled=False,
+                modemaster_enabled=False, ratio_raw_enabled=False, window_obscuration_pc=12.0,
+                focus_mm=6071.0, low_signal_comparator_verified=comparator_verified)
+            if limited_trial:
+                snapshot["build_git_commit"] = "4cc7393e1bafbf90a329726aed9470fe0daacb21"
+            snapshot.update(metadata_overrides or {})
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+            trial_args = ["-FieldSequenceApprovalSha256", approval_hash,
+                "-ExpectedConfigSha256", config_hash_override or hashlib.sha256(config_path.read_bytes()).hexdigest(),
+                "-ExpectedMetadataSha256", hashlib.sha256(metadata_path.read_bytes()).hexdigest()] if limited_trial else []
             result = subprocess.run(
                 [
                     str(self.powershell),
@@ -83,13 +104,15 @@ class SpotAttestationScriptTests(unittest.TestCase):
                     "-MetadataPath",
                     str(metadata_path),
                     "-OperatorId",
-                    "qa_operator",
+                    "USER_SELF" if limited_trial else "qa_operator",
                     "-Confirm",
+                    *trial_args,
                 ],
                 capture_output=True,
                 text=True,
                 timeout=30,
                 check=False,
+                env={key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"},
             )
             updated_config = config_path.read_text(encoding="utf-8")
             return result, updated_config
@@ -104,6 +127,37 @@ class SpotAttestationScriptTests(unittest.TestCase):
         self.assertIn("ATTESTATION APPLIED", result.stdout)
         self.assertIn("config_operator_verified = true", updated_config)
         self.assertIn(f"config_verified_fingerprint_sha256 = {'a' * 64}", updated_config)
+
+    def test_approved_disabled_field_settings_keep_comparator_unverified(self) -> None:
+        result, config = self._run_attestation(drift_fields=["spot_config_fingerprint_sha256"],
+            attestation_status="fingerprint_mismatch", comparator_verified=False, limited_trial=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("FIELD TRIAL SETTINGS ATTESTATION APPLIED", result.stdout)
+        self.assertIn("Physical boundary: NOT_TESTED", result.stdout)
+        self.assertIn("formal QA: HOLD", result.stdout)
+        self.assertIn("low_signal_comparator_verified = false", config)
+        self.assertIn("low_signal_alarm_enabled = false", config)
+        self.assertIn("config_verified_by = USER_SELF", config)
+        self.assertIn(f"config_verified_fingerprint_sha256 = {'a' * 64}", config)
+
+    def test_disabled_trial_rejects_unapproved_changed_or_incompatible_inputs(self) -> None:
+        cases = [
+            ({"approval_hash": "0" * 64}, "Unknown field sequence approval"),
+            ({"config_hash_override": "0" * 64}, "input hash mismatch"),
+            ({"metadata_overrides": {"low_signal_alarm_enabled": True}}, "profile mismatch: low_signal_alarm_enabled"),
+            ({"metadata_overrides": {"low_signal_comparator_verified": True}}, "profile mismatch: low_signal_comparator_verified"),
+            ({"metadata_overrides": {"low_signal_alarm_enabled": "false"}}, "profile mismatch: low_signal_alarm_enabled"),
+            ({"metadata_overrides": {"spot_range_max_c": 800.0}}, "profile mismatch: spot_range_max_c"),
+            ({"metadata_overrides": {"build_git_commit": "c" * 40}}, "candidate build mismatch"),
+        ]
+        for options, message in cases:
+            with self.subTest(options=options):
+                result, config = self._run_attestation(drift_fields=[], attestation_status="not_requested",
+                    comparator_verified=False, limited_trial=True, **options)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(message, result.stdout + result.stderr)
+                self.assertIn("config_verified_by = previous_operator", config)
+                self.assertIn(f"config_verified_fingerprint_sha256 = {'b' * 64}", config)
 
     def test_blocks_device_readback_drift(self) -> None:
         result, _updated_config = self._run_attestation(

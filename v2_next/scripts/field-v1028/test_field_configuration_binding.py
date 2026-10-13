@@ -12,7 +12,7 @@ from unittest.mock import patch
 import field_configuration_binding as configuration
 import field_installation_binding as binding
 import field_observation as observation
-from test_field_observation import configuration_snapshot, fixture_app
+from test_field_observation import configuration_reference, configuration_snapshot, fixture_app
 
 
 ROOT = Path(os.environ['SFL_CONFIGURATION_TEST_ROOT'])
@@ -112,6 +112,86 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 with configuration.configuration_reference(target, target_fact['sha256']):
                     self.fail('invalid reference accepted')
+
+    def test_disabled_reference_requires_pinned_approval_and_cannot_change_strict_default(self):
+        path, fact, snapshot = configuration_reference(self.folder, disabled_low_signal=True)
+        self.assertEqual(configuration.review_snapshot(snapshot)['status'], 'FAIL')
+        with configuration.configuration_reference(path, fact['sha256']) as reference:
+            review = configuration.review_snapshot(snapshot, reference)
+            self.assertEqual(review['status'], 'PASS', review)
+            self.assertEqual(review['validation_scope'], configuration.DISABLED_SCOPE)
+            self.assertEqual(review['physical_device_gate'], 'NOT_TESTED')
+            self.assertEqual(review['formal_qa_gate'], 'HOLD')
+            for key, value in [('low_signal_alarm_enabled', True),
+                               ('low_signal_comparator_configured_verified', True),
+                               ('low_signal_comparator_verified', True),
+                               ('config_operator_verified', False), ('spot_config_verified_by', 'Operator1'),
+                               ('config_drift_detected', True), ('build_git_commit', '0' * 40),
+                               ('spot_config_verified_fingerprint_sha256', '0' * 64)]:
+                with self.subTest(key=key):
+                    changed = dict(snapshot, **{key: value})
+                    self.assertEqual(configuration.review_snapshot(changed, reference)['status'], 'FAIL')
+        # Runtime JSON cannot select a policy by claiming the tool's scope fields.
+        spoofed = dict(snapshot, validation_scope=configuration.DISABLED_SCOPE,
+                       field_sequence_approval_sha256=configuration.FIELD_SEQUENCE_APPROVAL_SHA)
+        self.assertEqual(configuration.review_snapshot(spoofed)['status'], 'FAIL')
+        value = json.loads(path.read_bytes())
+        value['field_sequence_approval_sha256'] = '0' * 64
+        bad = self.folder / 'wrong-approval.json'
+        bad_fact = observation.write_json(bad, value)
+        with self.assertRaisesRegex(ValueError, 'field-sequence-approval-binding'):
+            with configuration.configuration_reference(bad, bad_fact['sha256']):
+                self.fail('unapproved limited policy accepted')
+
+    def test_disabled_native_observation_and_configuration_change(self):
+        for mode in ('normal', 'configuration-changed'):
+            folder = self.folder / mode
+            folder.mkdir()
+            with fixture_app(folder, mode, disabled_low_signal=True) as spec:
+                result = observation.supervise_observation(spec, folder / 'observe', duration_seconds=.5)
+            self.assertEqual(result['supervisor_status'], 'PASS' if mode == 'normal' else 'FAIL', result)
+            self.assertEqual(result['validation_scope'], configuration.DISABLED_SCOPE)
+            self.assertEqual(result['physical_device_gate'], 'NOT_TESTED')
+            self.assertEqual(result['formal_qa_gate'], 'HOLD')
+            self.assertEqual(result['release_gate'], 'HOLD')
+            self.assertFalse(result['promotion_allowed'])
+            worker = json.loads((folder / 'observe/worker-result.json').read_bytes())
+            if mode != 'normal':
+                self.assertEqual(worker['configuration_binding']['final']['configuration_status'], 'FAIL')
+            self.assertEqual(result['job_after_cleanup']['active_processes'], 0)
+
+    def test_disabled_product_configuration_preserves_unverified_numeric_evidence(self):
+        repository = Path(os.environ['SFL_CONFIGURATION_REPO'])
+        sys.path.insert(0, str(repository))
+        try:
+            from backend.FacilityData.spot_config_provenance import build_spot_configuration_snapshot
+            from backend.FacilityData.spot_low_signal import derive_low_signal_evidence
+            from backend.tests.test_spot_config_provenance import config_namespace, attest
+            config = config_namespace(SPOT_LOW_SIGNAL_ALARM_ENABLED=False,
+                                      SPOT_LOW_SIGNAL_COMPARATOR_VERIFIED=False)
+            path = self.folder / 'settings.ini'
+            path.write_text('[SPOT]\nmodelinfo=SPOT+ AL\n', encoding='utf-8')
+            config.CONFIG_PATH = path
+            before = build_spot_configuration_snapshot(config, runtime_git_commit=binding.BUILD)
+            config = attest(config, before['spot_config_fingerprint_sha256'])
+            config.SPOT_CONFIG_VERIFIED_BY = 'USER_SELF'
+            actual = build_spot_configuration_snapshot(config, runtime_git_commit=binding.BUILD)
+            reference_path = self.folder / 'reference.json'
+            fact = observation.write_json(reference_path, dict(schema=configuration.DISABLED_SCHEMA,
+                profile_approval_sha256=configuration.PROFILE_APPROVAL_SHA,
+                field_sequence_approval_sha256=configuration.FIELD_SEQUENCE_APPROVAL_SHA, snapshot=actual))
+            with configuration.configuration_reference(reference_path, fact['sha256']) as reference:
+                self.assertEqual(configuration.review_snapshot(actual, reference)['status'], 'PASS')
+            self.assertTrue(actual['config_operator_verified'])
+            self.assertFalse(actual['low_signal_comparator_verified'])
+            evidence = derive_low_signal_evidence(alarmstatus=16, signalpc=1.0,
+                low_signal_alarm_enabled=False, low_signal_threshold_pc=2.0,
+                low_signal_comparator='lt', low_signal_comparator_verified=False)
+            self.assertTrue(evidence['low_signal_alarm_active'])
+            self.assertIsNone(evidence['numeric_low_signal'])
+            self.assertIn('signalpc_present_comparator_unverified', evidence['evidence_codes'])
+        finally:
+            sys.path.remove(str(repository))
 
     def test_oversize_duplicate_and_invalid_reference_json(self):
         for name, raw in [('oversize', b' ' * 32769), ('duplicate', b'{"snapshot":{},"snapshot":{}}'),

@@ -86,7 +86,7 @@ class ClosedDataTests(unittest.TestCase):
     def bind(self, folder, data, roles):
         return inputs.CsvInputs(data, folder / 'bound', roles, {n: fact(data / n) for n in roles.values()}, CSV_EXE)
 
-    def reference(self, folder, data, roles, synthetic):
+    def reference(self, folder, data, roles, synthetic, *, disabled_low_signal=False):
         metadata = json.loads((data / roles['metadata']).read_bytes())
         expected = dict(schema=inputs.shutdown.SCHEMA, build_git_commit=inputs.binding.BUILD,
             logger_service_instance_id=metadata['schema_metadata']['logger_service_instance_id'],
@@ -94,8 +94,16 @@ class ClosedDataTests(unittest.TestCase):
             csv_file_name=roles['v2'], minimum_sample_seq=metadata['csv_closeout']['final_persisted_sample_seq'],
             health_body_sha256='a' * 64, observed_at=datetime.now(timezone.utc).isoformat())
         snapshot = configuration_snapshot()
+        schema = 'sfl-field-configuration-reference-v1'
+        approval = {}
+        if disabled_low_signal:
+            snapshot.update(low_signal_comparator_configured_verified=False, low_signal_comparator_verified=False)
+            fingerprint = inputs.configuration.canonical_fingerprint(snapshot)
+            snapshot.update(spot_config_fingerprint_sha256=fingerprint, spot_config_verified_fingerprint_sha256=fingerprint)
+            schema = inputs.configuration.DISABLED_SCHEMA
+            approval['field_sequence_approval_sha256'] = inputs.configuration.FIELD_SEQUENCE_APPROVAL_SHA
         reference = folder / 'synthetic-reference.json'
-        save(reference, dict(schema='sfl-field-configuration-reference-v1',
+        save(reference, dict(schema=schema, **approval,
             profile_approval_sha256=inputs.configuration.PROFILE_APPROVAL_SHA, snapshot=snapshot,
             classification='SYNTHETIC_TEST_NOT_FIELD_APPROVAL'))
         if synthetic:
@@ -126,6 +134,18 @@ class ClosedDataTests(unittest.TestCase):
         result = qa.validate_closed_data(self.bind(folder, data, roles), images, IMAGE_EXE,
                                          folder / 'qa', expected, reference, sha)
         self.assertEqual(result['closed_data_status'], 'PASS', result)
+        self.assertEqual(result['release_gate'], 'HOLD')
+        self.assertFalse(result['promotion_allowed'])
+
+    def test_disabled_trial_both_validators_keep_physical_and_release_pending(self):
+        folder, data, roles, images = self.prepare()
+        expected, reference, sha = self.reference(folder, data, roles, True, disabled_low_signal=True)
+        result = qa.validate_closed_data(self.bind(folder, data, roles), images, IMAGE_EXE,
+                                         folder / 'qa', expected, reference, sha)
+        self.assertEqual(result['closed_data_status'], 'PASS', result)
+        self.assertEqual(result['validation_scope'], inputs.configuration.DISABLED_SCOPE)
+        self.assertEqual(result['physical_device_gate'], 'NOT_TESTED')
+        self.assertEqual(result['formal_qa_gate'], 'HOLD')
         self.assertEqual(result['release_gate'], 'HOLD')
         self.assertFalse(result['promotion_allowed'])
 

@@ -181,17 +181,25 @@ def configuration_snapshot():
     return snapshot
 
 
-def configuration_reference(folder, name='fixture-configuration-reference.json'):
+def configuration_reference(folder, name='fixture-configuration-reference.json', *, disabled_low_signal=False):
     path = folder / name
     snapshot = configuration_snapshot()
-    fact = observation.write_json(path, dict(schema='sfl-field-configuration-reference-v1',
+    approval = {}
+    schema = 'sfl-field-configuration-reference-v1'
+    if disabled_low_signal:
+        snapshot.update(low_signal_comparator_configured_verified=False, low_signal_comparator_verified=False)
+        fingerprint = configuration.canonical_fingerprint(snapshot)
+        snapshot.update(spot_config_fingerprint_sha256=fingerprint, spot_config_verified_fingerprint_sha256=fingerprint)
+        schema = configuration.DISABLED_SCHEMA
+        approval['field_sequence_approval_sha256'] = configuration.FIELD_SEQUENCE_APPROVAL_SHA
+    fact = observation.write_json(path, dict(schema=schema, **approval,
         profile_approval_sha256=configuration.PROFILE_APPROVAL_SHA, snapshot=snapshot,
         classification='SYNTHETIC_TEST_NOT_FIELD_APPROVAL'))
     return path, fact, snapshot
 
 
 @contextmanager
-def fixture_app(folder, mode='normal'):
+def fixture_app(folder, mode='normal', *, disabled_low_signal=False):
     root = folder / 'app'
     root.mkdir()
     source = Path(sys._base_executable).parent
@@ -212,7 +220,8 @@ def fixture_app(folder, mode='normal'):
     (root / 'resources/app.asar').write_bytes(b'SYNTHETIC TEST ONLY; no Electron app')
     (root / 'main.py').write_text(MAIN_SOURCE, encoding='utf-8')
     (root / 'backend.py').write_text(BACKEND_SOURCE, encoding='utf-8')
-    configuration_path, configuration_fact, snapshot = configuration_reference(folder)
+    configuration_path, configuration_fact, snapshot = configuration_reference(
+        folder, disabled_low_signal=disabled_low_signal)
     observation.write_json(root / 'fixture-configuration.json', snapshot)
     picture = io.BytesIO()
     Image.new('RGB', (32, 24), (20, 80, 120)).save(picture, 'JPEG')

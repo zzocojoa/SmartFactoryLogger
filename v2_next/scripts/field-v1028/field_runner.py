@@ -100,6 +100,9 @@ def run(request_path, request_sha256, output_root, package):
                 binding.require(path != output_root and output_root not in path.parents
                                 and path not in output_root.parents, 'output-input-boundary')
             result['phase'], passed = execute_phase(request, folder, package)
+            for key in ('validation_scope', 'physical_device_gate', 'formal_qa_gate'):
+                if key in result['phase']:
+                    result[key] = result['phase'][key]
             binding.require(result['phase'].get('release_gate') == 'HOLD'
                             and result['phase'].get('promotion_allowed') is False, 'phase-release-scope')
             stream.seek(0)
@@ -114,8 +117,9 @@ def run(request_path, request_sha256, output_root, package):
     qa.write_json(folder / 'manifest.json', dict(schema='sfl-field-run-files-v1', files=facts,
                                                 release_gate='HOLD', promotion_allowed=False))
     with binding.locked_read(folder / 'manifest.json') as stream: manifest = inputs.file_fact(stream)
+    scope = {key: result[key] for key in ('validation_scope', 'physical_device_gate', 'formal_qa_gate') if key in result}
     return dict(status=result['status'], mode=result.get('mode'), result_path=str(folder), manifest=manifest,
-                request_sha256=request_sha256, release_gate='HOLD', promotion_allowed=False)
+                request_sha256=request_sha256, release_gate='HOLD', promotion_allowed=False, **scope)
 
 
 def main(argv=None):
