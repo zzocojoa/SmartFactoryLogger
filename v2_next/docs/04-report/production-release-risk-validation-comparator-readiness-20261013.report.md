@@ -1766,3 +1766,38 @@ suite SHA256 `e355eee44f3c84418dc1a24a4dca7c8c6520a4c03a32ff167a032f7aef94d24a`.
 15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
 
 출력 완료 계약: [Microsoft Process.WaitForExit](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforexit?view=netframework-4.8.1).
+
+
+## 2026-10-15 R5 세 추적 결과 확인과 대체 해독 경로 조사
+
+R5 TS31ecead606bb의 Normal T70da953ccd7a, ControllerExit Tb0fbd84b2e1e,
+Deadline T82d774356b09 결과에서 각각 지정된 종료 이유·추적 저장·해당 instance 정리를 확인했다.
+모든 WPR 명령은 actualexit0, force 없음, 소유 job active0이며 result/lease/ETL 및 Guard stdout SHA를 대조했다.
+해당6개 제어·감시 PID는 후속 조회에서 없었다. 하지만 suite45888(생성 FILETIME134364938856872760)은
+실제 프로세스 핸들에 대한10초 WaitForExit에서도 살아 있었고 summary/LAUNCH_EXIT는 아직 없다.
+Windows PowerShell event400의 HostApplication은 이 R5 suite/manifest를 명시한다.
+사용자는 ‘진행 중’이라고 답했다. 콘솔 선택 상태 가능성을 확인하도록 Esc1회를 요청했으며,
+선택 여부와 정지 원인은 미확정이다. 창 목록 도구에는 해당 관리자 콘솔이 나타나지 않았다.
+같은 실행을 다시 시작하거나 완료/PASS로 바꾸지 않는다. 이 관찰은 verified live wait다.
+
+R4 원본 두 ETL은 별도 개발 폴더의 Microsoft.Diagnostics.Tracing.TraceEvent4.0.0으로 읽었다.
+전체156906/60127사건과 CSwitch91708/30672, ReadyThread55267/20439 수가 tracerpt 원문과 같다.
+세 표본에서 원시 QPC·버전·TID/PID·CPU를 대조했다. ThreadTraceData가 EventData 앞8바이트를
+repurpose하므로, 라이브러리 반환 payload를 원본 바이트로 오인하지 않도록 별도 기록했다.
+미처리 사건1867/1001은 남는다. 전수 payload·thread generation·request QPC·계측 오버헤드 검증은 미완료이며,
+기존 tracerpt INCOMPLETE_OR_UNUSABLE 판정이나 현장 latency 원인을 변경하지 않는다.
+
+조사 위치: `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_PAYLOAD_20261015_d199ce01`.
+probe build exit0(원시 QPC API 사용 경고3), 두 ETL 실행exit0, 개수/표본/15개 의존 패키지 기록 검사exit0이다.
+NuGet archive SHA512는 cache sha512와, 서명 제외 contentHash는 metadata/lock과 각각 대조했다.
+두 해시의 의미를 혼동하지 않는다. SDK 최초 실행이 자동 만든 localhost 개발 인증서는 정확한 thumbprint와
+생성 시각을 확인해 CurrentUser/My에서 제거했고, Root 신뢰 저장소에는 없었다. 앱 코드서명 인증서가 아니다.
+출처·바이트 기록은 probe-review.json SHA256
+`7793231b3b7615d40bb91368249a6efe4794249d66bf1bf6a6348b574a0c0b59`에 있다.
+
+다음 절차: 동일 R5 프로세스의 종료와 최종 summary를 확인한 뒤, 대체 해독기의 전수 payload 및
+요청-스레드 연결 검증을 이어간다. 제품/설치본은 변경하지 않았다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+출처: [Microsoft TraceEvent parser](https://raw.githubusercontent.com/microsoft/perfview/10e5d271cebcdf5d6cf122c6ab9c863860a7a2f1/src/TraceEvent/Parsers/KernelTraceEventParser.cs),
+[NuGet contentHash 정의](https://github.com/NuGet/Home/wiki/Nupkg-Metadata-File).

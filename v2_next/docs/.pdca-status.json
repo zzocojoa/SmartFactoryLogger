@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T23:24:10.679937+00:00",
+  "lastUpdated": "2026-10-14T23:34:21.819335+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T23:24:10.679937+00:00"
+        "lastUpdated": "2026-10-14T23:34:21.819335+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Run the pinned R5 command once in standalone elevated development-PC PowerShell and inspect all three lifecycle conditions. R4 Normal and ControllerExit trace save/cleanup were verified; suite FAIL and missing Deadline remain preserved. Independently resolve real ETL decoder gaps: CSwitch v5 is opaque in tracerpt and thread v3 events have processing errors. Do not infer thread coverage, latency cause, or field PASS from zero reported loss. Field15 FAIL, canary120 not started, release HOLD remain.",
+            "nextAction": "Observe the same live R5 suite PID45888 (creation FILETIME134364938856872760), without restarting. All three trace result/ETL hashes and owned cleanup were verified; summary and LAUNCH_EXIT are still absent. User was asked to press Escape once to test a possible console selection pause, which remains unconfirmed. Continue full scheduler payload, thread generation and request-QPC validation using the pinned TraceEvent offline probe; two trace counts and three samples do not establish usable field analysis. Preserve field15 FAIL and release HOLD.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11270,6 +11270,70 @@
               "canary120Started": false,
               "physicalBoundary": "NOT_TESTED",
               "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "tracePayloadProbeStage": {
+              "recordedAt": "2026-10-14T23:34:21.819335+00:00",
+              "status": "R5_THREE_TRACE_RESULTS_VERIFIED_SUITE_LIVE_AND_ALTERNATE_DECODER_PROBED",
+              "r5SuitePid": 45888,
+              "r5SuiteCreatedFiletime": "134364938856872760",
+              "r5SuiteLive": true,
+              "r5LaunchExit": null,
+              "r5SuitePassed": false,
+              "r5SummaryObserved": false,
+              "r5TraceSaveAndCleanupConfirmed": 3,
+              "r5SelectionPause": "UNCONFIRMED_USER_ESCAPE_REQUESTED",
+              "verifiedLiveWait": true,
+              "traceEventVersion": "4.0.0",
+              "decoderScope": "OFFLINE_TWO_LOCAL_R4_ETLS_ONLY",
+              "decoderEvents": [
+                156906,
+                60127
+              ],
+              "decoderUnhandledEvents": [
+                1867,
+                1001
+              ],
+              "sampleCrosschecks": 3,
+              "fullPayloadValidation": "NOT_EVALUATED",
+              "threadGenerationBinding": "NOT_EVALUATED",
+              "requestTimeCoverage": "NOT_EVALUATED",
+              "latencyCause": "UNDETERMINED",
+              "buildExit": 0,
+              "buildWarnings": 3,
+              "probeExits": [
+                0,
+                0
+              ],
+              "reviewExit": 0,
+              "evidence": {
+                "probe": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_PAYLOAD_20261015_d199ce01\\probe-review.json",
+                  "bytes": 20964,
+                  "sha256": "7793231b3b7615d40bb91368249a6efe4794249d66bf1bf6a6348b574a0c0b59"
+                },
+                "r5Observation": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_PAYLOAD_20261015_d199ce01\\r5-results-observation.json",
+                  "bytes": 2748,
+                  "sha256": "9e1fad4aad276e97b567b65b7f83341275bcd675d2e76106f4c6116597f9165f"
+                },
+                "liveObservation": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_PAYLOAD_20261015_d199ce01\\r5-live-observation.json",
+                  "bytes": 270,
+                  "sha256": "93c5f9546dbbd96f5e42876aed88487ca38165d64a3cf0127883aaa0fc5ab8a7"
+                },
+                "sdkCleanup": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_PAYLOAD_20261015_d199ce01\\sdk-certificate-cleanup.json",
+                  "bytes": 419,
+                  "sha256": "87f7aee01a17bdee291e3a33edac0cb91150078f4965ec4e8e3bbae820f0f837"
+                }
+              },
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "productOrInstallerChanged": false,
               "releaseGate": "HOLD",
               "promotionAllowed": false
             }
