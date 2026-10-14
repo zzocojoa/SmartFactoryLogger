@@ -8555,7 +8555,12 @@
               "provisionalAbsentCsvFiles": 514,
               "provisionalAbsentCsvBytes": 42094160521,
               "provisionalDifferenceCause": "UNKNOWN",
-              "provisionalReviewPath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/provisional-manifest-review-r1/provisional-difference-detail-r2.json"
+              "provisionalReviewPath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/provisional-manifest-review-r1/provisional-difference-detail-r2.json",
+              "provisionalAddedImageFiles": 94022,
+              "provisionalAddedImagesMatchShutdownWrittenCount": true,
+              "provisionalImageNameHashTimeViolations": 0,
+              "provisionalImageFactGenerationJoinPerformed": false,
+              "provisionalImageDecodePerformed": false
             },
             "installerHelper": {
               "sourceSha256": "1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f",
