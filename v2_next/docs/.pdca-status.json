@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T05:11:28+00:00",
+  "lastUpdated": "2026-10-14T05:18:00.445259+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T05:11:28+00:00"
+        "lastUpdated": "2026-10-14T05:18:00.445259+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -8712,7 +8712,29 @@
                 "finalServerRequestCreated": false,
                 "serverDelivered": false,
                 "serverExecuted": false,
+                "staticStagePath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/POSTVERIFY_20261014_0dd2ced0",
+                "staticStageFiles": 8,
+                "staticStageVerified": true,
                 "nextDependency": "OPERATOR_INTERRUPT_CONFIRMATION_AND_PRIOR_RESULT_RECOVERY"
+              },
+              "partialResultSnapshot": {
+                "status": "PARTIAL_INSTALL_RECEIPTS_MATCH_PINNED_REQUEST_AND_PAYLOAD",
+                "localPath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/server-install-r2-snapshot1",
+                "sharePath": "Z:/SmartFactory/20261014/return/POSTINSTALL_I90b5ed1b_SNAPSHOT1/I90b5ed1b",
+                "files": 6,
+                "reviewSha256": "ed3e2f780363a23b72082543f38ce5ab29f46588f36e0621049d8562c2e5fe2e",
+                "installerExitReceiptSha256": "534f53436096a462de2c28a249667e4dec8a0fe3117705479fd545f6ef4af27b",
+                "installedFilesReceiptSha256": "3db2514b5d0a2a749efc8dc557d31aa3b2890e361733e549273a5dcd867f00df",
+                "requestMatchesShipped": true,
+                "configBeforePinMatches": true,
+                "installedReceiptFiles": 1815,
+                "referencePayloadFilesMatched": 1814,
+                "currentServerFilesRehashed": false,
+                "consoleFinalResultHashAvailable": false,
+                "operatorInterruptConfirmed": false,
+                "postinstallPreservationVerified": false,
+                "configurationCorrectionVerified": false,
+                "reviewExitCode": 0
               }
             },
             "physicalBoundaryTest": "NOT_TESTED",

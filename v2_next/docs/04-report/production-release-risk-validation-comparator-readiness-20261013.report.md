@@ -647,3 +647,35 @@ launcher는 helper/request/index 잠금, 외부 핀/입력/폴더 구성 거부,
 
 현재는 1번의 사용자 중단 확인을 기다린다. 원격 터미널 조작을 하지 않으며,
 설치 완료 관찰과 아직 미완료인 설치 후 검산을 구분한다. release HOLD를 유지한다.
+
+### 2026-10-14 14:18 KST 설치 결과의 중간 사본 회수
+
+사용자 중단 확인 전에도 이미 생성된 결과를 분석할 수 있도록 서버 탐색기에서
+`I90b5ed1b`의 6파일을 새 공유 폴더
+`Z:/SmartFactory/20261014/return/POSTINSTALL_I90b5ed1b_SNAPSHOT1/I90b5ed1b`로 복사했다.
+주소 전송을 사이에 둔 첫 복사 시도는 대상에 파일이 생기지 않았으며, 원본/대상 탭을
+미리 열고 파일 복사 후 탭만 전환하는 방법으로 회수했다. 개발 사본
+`PDCA_LIMITED_FIELD_20261014_0dd2ced0/server-install-r2-snapshot1`은 각 파일의
+공유/개발 크기·해시를 대조했고 기존 원본은 변경하지 않았다.
+
+설치 exit0/PID12752/시작·종료 시각은 앞선 화면 관찰과 일치한다. 회수된 installer-exit은
+487B/SHA256 `534f53436096a462de2c28a249667e4dec8a0fe3117705479fd545f6ef4af27b`다.
+request는 전달한 R2 요청과 의미상 전부 같고, config-before는 원래 설정 핀과 일치한다.
+runtime-before는 앱/포트가 비어 있었다. installed-files는 708,232B/SHA256
+`3db2514b5d0a2a749efc8dc557d31aa3b2890e361733e549273a5dcd867f00df`이며,
+기록된 1,815파일 중 후보 기준 1,814파일의 크기·해시가 전부 일치하고 나머지는 허용된
+uninstaller 한 파일이다. config 본문을 출력하지 않았다.
+
+검토 프로그램 `recover-install-snapshot1.py`는 exit0였다. 검토 영수증
+`server-install-r2-snapshot1-review.json`은 1,926B/SHA256
+`ed3e2f780363a23b72082543f38ce5ab29f46588f36e0621049d8562c2e5fe2e`다.
+이는 중간 기록의 대조이며 현재 서버 파일을 다시 해시한 결과나 콘솔 최종 결과 해시에
+결합된 완료 영수증이 아니다. `postinstall-snapshot1-index-NOT_FOR_EXECUTION.json`에는
+`normal_console_interrupt_confirmed=false`를 명시했다. 최종 index로 자동 사용하지 않는다.
+
+재개용 `POSTVERIFY_20261014_0dd2ced0`의 고정 기준 자료/수정 도우미/설명서 8파일은
+개발 PC에서 준비·검증했다(exit0). index/request/manifest와 실행 명령은 미생성 상태이며
+서버로 전달하지 않았다. 서버 콘솔을 가리던 탐색기만 최소화했고, 콘솔에는 아직 최종
+결과나 `PS C:\...>` 복귀가 보이지 않는다. 터미널 입력은 하지 않았다. 14:18 KST 이후
+제조사 Gmail 문의 thread도 읽기 확인했으며 현재 발신 메시지 1개뿐이고 답신은 없다.
+기존 명령의 중단 확인 후 결과 폴더 최종 상태를 대조해 재개 절차를 이어가야 한다.
