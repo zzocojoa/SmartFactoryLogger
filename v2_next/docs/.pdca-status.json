@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-13T23:35:11.857837+00:00",
+  "lastUpdated": "2026-10-14T04:46:39.245405+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-13T06:19:08.016713+00:00"
+        "lastUpdated": "2026-10-14T04:46:39.245405+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; exact clean commit/hash/payload/provenance and installation/recovery/device/performance/full-data/field QA remain required; no new installer applied or promotion",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "APPROVED_BACKUP_VERIFIED_INSTALL_BUNDLE_DELIVERED_OPERATOR_EXECUTION_PENDING",
+            "status": "APPROVED_PREINSTALL_LOADER_HOLD_FIXED_R2_DELIVERED_OPERATOR_EXECUTION_PENDING",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8611,14 +8611,14 @@
               }
             },
             "installerHelper": {
-              "sourceSha256": "1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f",
+              "sourceSha256": "7b9f9de874adb099300d340dc0a54849b482e415ff0b39c0cff77bc677b6179d",
               "unitChecks": 28,
               "unitExitCode": 0,
               "syntheticControllerExitCode": 0,
               "carrierChecks": 7,
               "carrierExitCode": 0,
               "staticInputFiles": 6,
-              "staticInputBytes": 825532,
+              "staticInputBytes": 825955,
               "bundleBuilderFixtureChecks": 13,
               "bundleBuilderFixtureExitCode": 0,
               "bundleBuilderFixtureReview": "C:/Users/user/Desktop/SmartFactory/PDCA_FIELD_CAPACITY_20261014_0dd2ced0/DEV_ONLY_install_builder_r2/summary.json",
@@ -8626,13 +8626,51 @@
               "precedingBundleManifestSha256": "a928cdaf7eb134acf50a02099b9c6768d076ab965fb529ef3f961f267b7c1e45",
               "finalServerRequestCreated": true,
               "bundleCompletionExitCode": 0,
-              "finalBundleManifestSha256": "c9143a129c78ec1aa1c0febaf8daabb4671aa8fa2020af0737a0b70570f6e27a",
-              "serverPath": "C:/Users/user/Desktop/SmartFactory/INSTALL_OFF_20261014_0dd2ced0",
+              "finalBundleManifestSha256": "2685066d3d92d2b3ae0771824f35c80a2dd4c94bb847cf8e0e75ded96b0faa78",
+              "serverPath": "C:/Users/user/Desktop/SmartFactory/INSTALL_OFF_20261014_0dd2ced0_R2",
               "serverLocalCopyObserved": true,
               "serverBundleFilesObserved": 10,
               "serverCommandOpenedInNotepad": true,
               "serverLocalHashesVerified": false,
-              "serverExecution": "AWAITING_USER_RUN"
+              "serverExecution": "R2_AWAITING_USER_RUN",
+              "previousAttempt": {
+                "sourceSha256": "1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f",
+                "unitChecks": 28,
+                "unitExitCode": 0,
+                "syntheticControllerExitCode": 0,
+                "carrierChecks": 7,
+                "carrierExitCode": 0,
+                "staticInputFiles": 6,
+                "staticInputBytes": 825532,
+                "bundleBuilderFixtureChecks": 13,
+                "bundleBuilderFixtureExitCode": 0,
+                "bundleBuilderFixtureReview": "C:/Users/user/Desktop/SmartFactory/PDCA_FIELD_CAPACITY_20261014_0dd2ced0/DEV_ONLY_install_builder_r2/summary.json",
+                "bundleBuilderActualServerInputsTested": true,
+                "precedingBundleManifestSha256": "a928cdaf7eb134acf50a02099b9c6768d076ab965fb529ef3f961f267b7c1e45",
+                "finalServerRequestCreated": true,
+                "bundleCompletionExitCode": 0,
+                "finalBundleManifestSha256": "c9143a129c78ec1aa1c0febaf8daabb4671aa8fa2020af0737a0b70570f6e27a",
+                "serverPath": "C:/Users/user/Desktop/SmartFactory/INSTALL_OFF_20261014_0dd2ced0",
+                "serverLocalCopyObserved": true,
+                "serverBundleFilesObserved": 10,
+                "serverCommandOpenedInNotepad": true,
+                "serverLocalHashesVerified": true,
+                "serverExecution": "HOLD_BEFORE_INSTALLER_START",
+                "resultPath": "C:/Users/user/Desktop/SmartFactory/Idb221abf",
+                "holdSha256": "855bb31fc5809efc0197eb1d6414df636d69aa1fa504aaf51dc5a7bd150893f2",
+                "actualLaunchExit": 1,
+                "installerStarted": false,
+                "configurationChanged": false,
+                "errorHresult": "0x80131515"
+              },
+              "engineLoaderRegressionChecks": 9,
+              "engineLoaderRegressionExitCode": 0,
+              "engineLoaderRegressionReview": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\engine-load-r2-test1\\review.json",
+              "syntheticControllerReview": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\install-integration-r9\\integration-review.json",
+              "carrierOutputReviewed": true,
+              "serverDeliveryReview": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-install-delivery-r2.json",
+              "systemSecuritySettingsChanged": false,
+              "originalNamedStreamsRemoved": false
             },
             "physicalBoundaryTest": "NOT_TESTED",
             "lowSignalAlarmEnabled": false,
@@ -8642,7 +8680,9 @@
             "fieldQaExecuted": false,
             "canaryStarted": false,
             "releaseGate": "HOLD",
-            "promotionAllowed": false
+            "promotionAllowed": false,
+            "comparatorFlagCorrectionApplied": false,
+            "actualPreInstallComparatorConfigValue": true
           }
         }
       }

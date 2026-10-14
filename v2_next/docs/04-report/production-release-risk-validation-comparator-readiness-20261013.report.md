@@ -507,3 +507,58 @@ Low Signal OFF, physical NOT_TESTED, formal release HOLD, promotion false를 유
 최종 목록의 바이트가 같아 기존 이미지94,022개 대장 연결 근거를 유지할 수 있다.
 CSV 소비자 재검사는 13:29 KST에도 실제 프로세스가 실행 중이며 결과는 미확정이다.
 과거 입력 영수증의 잠정 상태를 소급 수정하지 않고 최종 결합 근거를 별도로 남겼다.
+
+### 2026-10-14 설치 전 DLL 로드 중단과 R2 수정 전달
+
+사용자가 실행 완료를 알린 첫 설치 명령은 `LAUNCH_EXIT=1`이었다. 서버 결과
+`C:/Users/user/Desktop/SmartFactory/Idb221abf/hold.json`은
+`backup-and-cold-preconditions` 단계의 DLL 로드 오류 `0x80131515`를 기록했다.
+`installer_started=false`, `installer_exit=null`, `configuration_changed=false`,
+`force_calls=0`이며, 같은 결과의 runtime-before는 앱/백엔드 프로세스와 포트 목록이 비어 있다.
+설치 프로그램을 시작하기 전 중단됐으므로 후보 설치나 설정 변경 완료로 처리하지 않는다.
+
+서버 탐색기로 3개 결과 파일을 공유 드라이브에 회수하고 개발 사본까지 해시를 검증했다.
+콘솔 HOLD SHA256은 `855bb31fc5809efc0197eb1d6414df636d69aa1fa504aaf51dc5a7bd150893f2`다.
+첫 전사는 `6414df`를 `6414cf`로 읽어 대조에서 거부됐고, 콘솔을 다시 확인한 후
+정확한 핀으로 hold와 내부 증거 2개를 대조했다(exit0). 공유 부모 이름의 `Ib221abf`와
+실제 결과 자식 `Idb221abf`도 구분했다. 회수 원문은 개발 증거 폴더의
+`server-install-hold-Idb221abf`, 검토 기록은 `install-hold-review-r2-preparation.json`이다.
+
+원 도우미의 `Add-Type -LiteralPath`를, 이미 백업 도우미에서 사용한 잠금 스트림의
+고정 해시·길이 검증 후 `Assembly.Load(byte[])` 방식으로 바꿨다. 로더는 같은 검증
+핸들에서 DLL 바이트를 읽고 핸들을 계속 유지한다. 원 파일/추가 스트림 삭제, 시스템
+보안 설정 변경, 설치본 재빌드는 없다. 서버의 Zone.Identifier 내용은 직접 읽지 않았으므로
+그 값은 확정하지 않는다. 개발 PC에서 ZoneId=3을 붙인 동일 DLL 사본의 기존 로더가
+같은 오류를 내는 것을 재현했다. 이 오류 조건은
+[Microsoft의 .NET Framework 설명](https://learn.microsoft.com/en-us/dotnet/framework/configure-apps/file-schema/runtime/loadfromremotesources-element)과도 일치한다.
+
+수정 도우미는 20,776B/SHA256
+`7b9f9de874adb099300d340dc0a54849b482e415ff0b39c0cff77bc677b6179d`다.
+다음 검사는 모두 실제 exit0이며 개발 PC의 격리된 입력만 사용했다.
+
+- `test_pinned_backup_engine.ps1`: 기존 오류 재현, 변조/길이 불일치 거부,
+  파일 잠금, DLL/Zone 스트림 유지, 실제 백업 엔진의 본문/추가 스트림 검산 등 9개 PASS.
+  결과 `engine-load-r2-test1/review.json`.
+- `test_install_field_candidate.ps1`: 기존 설치·정상 종료 전제·설정 보존 검사 28개 PASS.
+  결과 `install-function-tests-r2/tests-result.json`.
+- `validate-install-controller.ps1`: 합성 설치 프로그램의 실제 exit0, 설치 파일,
+  원본/추가 스트림 보존과 승인한 한 설정값 변경 흐름 PASS.
+  결과 `install-integration-r9/integration-review.json`. 서버 registry/관리자 ACL 검증은 아니다.
+- `test-install-launcher-r2.py`: native PowerShell 5.1 호출 7개가 각각 기대한 종료 코드와
+  출력을 반환했다. stderr의 모든 CLIXML 문서를 읽어 progress/information만 있음을 확인했다.
+  결과 `install-carrier-tests-r2/result.json`, `output-review.json`.
+
+최종 백업/정상 종료/비교의 같은 핀으로 별도 R2 생성기를 실행했다(exit0).
+서버 최종 폴더는 `C:/Users/user/Desktop/SmartFactory/INSTALL_OFF_20261014_0dd2ced0_R2`다.
+10파일 묶음 manifest SHA256은
+`2685066d3d92d2b3ae0771824f35c80a2dd4c94bb847cf8e0e75ded96b0faa78`이며,
+별도 `PINNED_FIELD_INSTALL_COMMAND_0dd2ced0_R2.txt`는 8,409B/SHA256
+`12b025261689f214e2a26018cc8febac0b037676be1a3199385ab8ea0af51d9f`다.
+기존 묶음/실패 결과를 보존하고 총11파일을 새 공유 전달 폴더에서 서버 SmartFactory까지
+복사했다. 개발/공유 모든 해시를 대조했으며 서버에서는 절대경로, 묶음10파일,
+메모장에 열린 R2 경로·핀을 확인했다. `server-install-delivery-r2.json`과 3개 화면에 기록했다.
+서버 R2 로컬 해시 검사는 사용자 실행 시 launcher가 수행하며 아직 완료로 주장하지 않는다.
+
+사용자에게 열린 R2 명령 본문을 관리자 PowerShell 5.1에서 한 번 실행하도록 요청했다.
+앱은 종료 상태로 유지하며, 실제 설치 결과 확인 후에만 재시작과 승인된 나머지 현장
+검증을 진행한다. 물리 경계 NOT_TESTED, 정식 출시 HOLD, promotion false를 유지한다.

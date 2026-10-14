@@ -44,6 +44,16 @@ function ReadLockedJson([IO.Stream]$Stream,[long]$Limit=2097152) {
     $Stream.Position=0;$reader=[IO.StreamReader]::new($Stream,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
     try{return ($reader.ReadToEnd()|ConvertFrom-Json)}finally{$reader.Dispose()}
 }
+function ImportBackupEngine([string]$Path) {
+    $stream=LockFile $Path 'fb12e3acb370d86999156600efb3cd23083d890dfec1216cf4e06e9c1cce2a26' 24576
+    # Load the same hash-verified, held bytes. Preserve the file and its named streams.
+    $bytes=New-Object byte[] ([int]$stream.Length);$stream.Position=0;$offset=0
+    while($offset -lt $bytes.Length){
+        $read=$stream.Read($bytes,$offset,$bytes.Length-$offset)
+        Require ($read -gt 0) 'backup-engine-truncated';$offset+=$read
+    }
+    [void][Reflection.Assembly]::Load($bytes)
+}
 function SaveJson([string]$Name,$Value) {
     Require ($Name -cmatch '^[a-z0-9-]+$') 'receipt-name'
     $Name += '.json'
@@ -189,8 +199,7 @@ try {
     foreach($path in @($candidate,$request.rollback_installer)){Require ((Get-AuthenticodeSignature -LiteralPath $path).Status.ToString() -ceq 'NotSigned') 'unsigned-installer-state'}
     $payload=ReadLockedJson (LockFile $request.payload_reference 'a5de26c2db81c8d69418fd3e574d4180b2dd895ab94b9cbf064959369644af5c')
     Require ($payload.candidate_commit -ceq $request.candidate_commit -and $payload.payload_file_count -eq 1814 -and @($payload.payload_files.PSObject.Properties).Count -eq 1814) 'payload-reference-contract'
-    $null=LockFile $request.backup_engine 'fb12e3acb370d86999156600efb3cd23083d890dfec1216cf4e06e9c1cce2a26' 24576
-    Add-Type -LiteralPath $request.backup_engine
+    ImportBackupEngine $request.backup_engine
     $configPath=$roots[0]+'\config.ini';Require ((Fact $configPath).sha256 -ceq $request.config_sha256) 'preinstall-config-pin'
     $configBefore=[IO.File]::ReadAllBytes($configPath);$configAfter=DisableComparator $configBefore;$configStreams=ConfigStreamFacts $configPath
     $beforePath=$script:resultRoot+'\config-before.ini';[IO.File]::WriteAllBytes($beforePath,$configBefore)
