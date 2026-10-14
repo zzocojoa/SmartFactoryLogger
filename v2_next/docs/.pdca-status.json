@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "POSTINSTALL_ONLY_R2_RUNNING_PRESERVATION_VERIFICATION",
+            "status": "CANDIDATE_ATTESTATION_DELIVERED_AWAITING_OPERATOR_EXECUTION",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8646,7 +8646,7 @@
               "serverBundleFilesObserved": 10,
               "serverCommandOpenedInNotepad": true,
               "serverLocalHashesVerified": false,
-              "serverExecution": "R2_INSTALLER_EXIT0_OBSERVED_FINAL_RESULT_PENDING",
+              "serverExecution": "INSTALLER_EXIT0_POSTINSTALL_RESULT_VERIFIED",
               "previousAttempt": {
                 "sourceSha256": "1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f",
                 "unitChecks": 28,
@@ -8690,7 +8690,7 @@
               "installerStartedAtUtcObserved": "2026-10-14T04:48:45.5958403+00:00",
               "installerEndedAtUtcObserved": "2026-10-14T04:49:19.5212467+00:00",
               "actualResultPathObserved": "C:/Users/user/Desktop/SmartFactory/I90b5ed1b",
-              "finalResultVerified": false,
+              "finalResultVerified": true,
               "operatorNormalInterruptRequested": true,
               "operatorNormalInterruptConfirmed": false,
               "registrationSerializationIssueReproducedLocally": true,
@@ -8720,11 +8720,11 @@
                 "serverDelivered": true,
                 "serverBundleFilesObserved": 11,
                 "serverCommandOpenedInNotepad": true,
-                "serverLocalHashesVerified": false,
+                "serverLocalHashesVerified": true,
                 "serverExecuted": true,
                 "deliveryReviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-postverify-r2-delivery.json",
                 "deliveryReviewSha256": "e10037ff3f0db6b91ac829a5ec534409f34a647c7dddee5ba38258f72e55aacb",
-                "nextDependency": "PINNED_POSTINSTALL_RESULT_REVIEW_BEFORE_STANDARD_USER_START",
+                "nextDependency": "CANDIDATE_PROFILE_ATTESTATION_THEN_MEASURED_STARTUPS",
                 "previousDevelopmentRevision": {
                   "sourcePath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/verify-field-install-resume.ps1",
                   "sourceSha256": "ac197fb1b41317e3bd162b27ffb7907f44c15c9ca71a45323a09cb68b2d94a33",
@@ -8744,9 +8744,14 @@
                   "staticStageVerified": true,
                   "nextDependency": "OPERATOR_INTERRUPT_CONFIRMATION_AND_PRIOR_RESULT_RECOVERY"
                 },
-                "serverExecution": "PRESERVATION_VERIFICATION_RUNNING_FINAL_RESULT_PENDING",
+                "serverExecution": "POSTINSTALL_PRESERVATION_AND_APPROVED_FLAG_VERIFIED",
                 "executionObservationPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\postverify-r2-running-observation.json",
-                "executionObservationSha256": "04665458bd1be9e6218b4df96eee1d9da24763ad11e9ea5d396a769d810f69c3"
+                "executionObservationSha256": "04665458bd1be9e6218b4df96eee1d9da24763ad11e9ea5d396a769d810f69c3",
+                "finalResultPath": "C:/Users/user/Desktop/SmartFactory/I741a00a0",
+                "finalResultSha256": "4724dd7d0e30dbbad1cb673b3936e1d84b58433a4546eb6341733730cc25438a",
+                "actualLaunchExit": 0,
+                "resultReviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\postverify-r2-production-review.json",
+                "resultReviewSha256": "9ef69ff9c80abdef8ee84aef9c42f9072ea5af81436e7635bc5d22147530ee19"
               },
               "partialResultSnapshot": {
                 "status": "PARTIAL_INSTALL_RECEIPTS_MATCH_PINNED_REQUEST_AND_PAYLOAD",
@@ -8771,7 +8776,7 @@
               "operatorConsoleCloseObserved": true,
               "operatorStopMethod": "operator-console-close",
               "operatorConsoleCloseConfirmationSha256": "f890e897c0bbd09a9b6d64ec8d14818deb935a491a69ea17d50c072ad8582488",
-              "priorLauncherAbsenceVerified": false,
+              "priorLauncherAbsenceVerified": true,
               "stoppedResultSnapshot": {
                 "status": "INSTALL_RECEIPTS_RECOVERED_AFTER_OPERATOR_CONSOLE_CLOSE",
                 "localPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-install-r2-stopped",
@@ -8788,13 +8793,54 @@
             "lowSignalAlarmEnabled": false,
             "comparatorVerified": false,
             "installationPerformed": true,
-            "settingsChanged": false,
+            "settingsChanged": true,
             "fieldQaExecuted": false,
             "canaryStarted": false,
             "releaseGate": "HOLD",
             "promotionAllowed": false,
-            "comparatorFlagCorrectionApplied": false,
-            "actualPreInstallComparatorConfigValue": true
+            "comparatorFlagCorrectionApplied": true,
+            "actualPreInstallComparatorConfigValue": true,
+            "candidateConfigurationAcquisition": {
+              "status": "CONFIG_ACQUISITION_CLOSED_PENDING_OPERATOR_ATTESTATION",
+              "standardUserShortcutStarted": true,
+              "uiNormalCloseRequested": true,
+              "reviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\candidate-config-acquisition-review.json",
+              "reviewSha256": "22353e397b1413055a478729c5f2e46b86272c733d56c5763257736e4609c9da",
+              "loggerServiceInstanceId": "b5902b84-a041-451a-9f46-451b17bda87d",
+              "metadataSha256": "a7ed4b2f906ce13d53d8a706b0f184028e8e77165751910af327a8385e38bdbf",
+              "configSha256": "be03f4ef477e4333f616ca8e0f3ef270b2ce3acaa05aeaef3075da3d46557b57",
+              "fingerprint": "3ddc2e9080e7d804bdb1eb784d5136b38286c92dc927850c82d16a04732c7683",
+              "attestationStatus": "fingerprint_mismatch",
+              "attestationApplied": false,
+              "csvRows": 1152,
+              "temperatureOutputCounts": {
+                "startup_pending": 22,
+                "stale": 197,
+                "valid": 933
+              },
+              "shutdownStageExitCode": 0,
+              "imagesDrained": 241,
+              "processExitObserved": false,
+              "formalStartupMeasurementCycles": 0,
+              "fieldPerformanceTestStarted": false,
+              "imageManifestVsShutdownDifferencePending": true,
+              "fullDataQa": "NOT_EVALUATED",
+              "attestationDelivery": {
+                "receiptPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-attestation-delivery.json",
+                "receiptSha256": "054ad77b5851cfc8912ef29f168f56c732b121cceed3f6bee64d273b54708b96",
+                "serverPath": "C:\\Users\\user\\Desktop\\SmartFactory\\ATTEST_OFF_20261014_0dd2ced0",
+                "commandPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PINNED_FIELD_ATTEST_COMMAND_0dd2ced0.txt",
+                "manifestSha256": "288a2b93979d2bea08ff03f35dee928b75323cec99f00c698b7760f4daaa37c0",
+                "helperSha256": "0a519643275da1c72329e2a34fdbaf1f47d661b09a78d5ce51afc7e30a089a3a",
+                "commandSha256": "6daa1e181e26735a9e46e17042ec4b75a60ce632c69105f6f8707439152b5cb4",
+                "serverLocalCopyObserved": true,
+                "serverLocalHashesVerified": false,
+                "serverExecuted": false,
+                "nativeChecks": 7,
+                "carrierChecks": 7,
+                "driversExitCode": 0
+              }
+            }
           }
         }
       }

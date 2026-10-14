@@ -736,3 +736,79 @@ native PowerShell 5.1 재개 시험 10개와 launcher 시험 7개의 최종 출�
 남은 절차는 새 결과의 `RESULT_PATH`, `RESULT_SHA256`, `LAUNCH_EXIT` 확인 → 새 return
 폴더로 회수 → 콘솔 핀/증거 대조 → 통과 시 표준 사용자 앱 시작 순서다. 결과 확인 전
 설치를 반복하거나 앱을 시작하지 않는다. 15분/120분 현장 시험과 정식 출시는 미완료다.
+
+
+## 2026-10-14 설치 후 검증 완료와 후보 설정 확인 실행
+
+15:45 KST 서버 검증 전용 R2가 `LAUNCH_EXIT=0`으로 완료됐다. 설치를 반복하지 않았다.
+실제 결과 `C:/Users/user/Desktop/SmartFactory/I741a00a0/result.json`은 4,955B,
+SHA256 `4724dd7d0e30dbbad1cb673b3936e1d84b58433a4546eb6341733730cc25438a`다.
+콘솔 확대 증거와 회수본을 대조하고, 11개 결과 파일의 해시·요청·후보 payload 1,814개·
+등록 버전 1.0.28·이전 installer exit0·이전 도우미 부재를 확인했다.
+원본/사본 325,089파일·246폴더·680 named streams·14,095,162,877B가 보존됐다.
+그 뒤 `SPOT.low_signal_comparator_verified=false` 정정만 적용됐으며 설정 결과는
+2,671B / `be03f4ef477e4333f616ca8e0f3ef270b2ce3acaa05aeaef3075da3d46557b57`다.
+
+검토기는 `review-postverify-r2-result.py`, 실제 실행 exit0이며 결과
+`postverify-r2-production-review.json`은 2,606B /
+`9ef69ff9c80abdef8ee84aef9c42f9072ea5af81436e7635bc5d22147530ee19`다.
+작은 콘솔 화면의 최초 경로/해시 전사 오류는 원본 기록을 보존하고
+`postverify-r2-console-correction.json`으로 정정했다. 공유 회수 wrapper 이름은
+`POSTVERIFY_I714a00a0`이나 그 안 실제 서버 폴더는 `I741a00a0`다. 설치/서버 결과를
+다시 만들거나 이름을 바꾸지 않았다.
+
+15:56 KST 일반 사용자 바탕화면 바로가기로 후보 4cc를 시작했다. 두 차례의 각 6개
+read-only API 조회는 모두 HTTP200/collector exit0였다. logger
+`b5902b84-a041-451a-9f46-451b17bda87d`, schema2.5.2, 작업60580/1을 관찰했다.
+Low Signal alarm 및 configured/effective comparator는 false다. 승인 프로파일과
+일치하지만 이전 Operator1 지문 때문에 `fingerprint_mismatch`로 표시됐다.
+현재 후보 지문은 `3ddc2e9080e7d804bdb1eb784d5136b38286c92dc927850c82d16a04732c7683`다.
+
+이 실행은 설정 획득용이며 계측 기동 3회 중 하나로 계산하지 않는다. 16:01 KST
+앱 X로 정상 종료를 요청했다. 회수된 CSV는 1–1152 연속이며 startup_pending22,
+stale197, valid933이다. 시작 시 observation fact 초기화는 약26.94초였고 후속 조회에서
+stale197은 증가하지 않았다. 이 값을 기동 성능 PASS로 바꾸지 않는다.
+CSV closeout은 shutdown/finalized이며 같은 시각 후보의 종료 영수증은 10개 서비스
+종료/배출 단계와 이미지241건 전량 저장·실패0·drop0을 기록한다. native process exit는
+아직 독립 확인하지 않았다. metadata의 이미지 요약 written0/이전 fact row_count와
+종료 영수증241의 차이는 별도 데이터 검증 대상이다. 전체 CSV-fact join·이미지 decode는
+이 설정 확인 검토에서 수행하지 않았다.
+
+`review-candidate-config-closed.py`는 exit0, 검토 결과
+`candidate-config-acquisition-review.json`은 5,173B /
+`22353e397b1413055a478729c5f2e46b86272c733d56c5763257736e4609c9da`다.
+서버 설정 재확인 도우미는 아직 미실행이며 앱은 종료 상태다. 후속 순서는 승인된 USER_SELF
+설정 확인 기록 적용, 실제 재기동 설정 확인, 계측 기동3회·15분/120분·종료 데이터 QA다.
+물리 경계 NOT_TESTED, 정식 QA/출시 HOLD, 운영 승격 금지는 유지한다.
+
+
+## 2026-10-14 후보 운영자 확인 기록 도우미 전달
+
+기존 승인 USER_SELF를 실제 후보 지문에 연결하는 `ATTEST_OFF_20261014_0dd2ced0`을
+준비했다. 기존 attestation 도우미 바이트는 변경하지 않았다. 새 wrapper는 서버/SID/
+native PowerShell5.1·승인·프로파일·닫힌 metadata·설정 해시·앱/8000 부재·config 추가
+스트림0을 검사한다. 고정된 잠금 바이트로 기존 도우미를 실행한 뒤 네 attestation 필드
+외 내용이 바뀌지 않았는지 확인한다. 결과는 새 보호 폴더에 만들고 콘솔 해시를 출력한다.
+설치 반복·앱 시작·운영 승격 코드는 없다. 이미 적용된 설정으로 재실행하면 원본 해시
+검사에서 중단한다.
+
+격리 Windows PowerShell5.1 검사7개(정상 적용, 앱 활성, 설정/metadata 해시 불일치,
+config 추가 스트림, 재실행, 개발 PC에서 실제 서버용 코드 차단)와 carrier 검사7개가
+모두 기대한 exit0/1/17을 냈으며 두 드라이버는 exit0다. 모든 stdout과 stderr를 검토했다.
+stderr의 UTF-8/CP949 및 부모·자식 CLIXML 결합 때문에 검토기 두 번이 중단됐으나,
+출력 형식을 처리한 최종 검토에서는 information/progress만 확인했다. 서버용 코드나
+검사 결과를 바꾸거나 이 검토 오류를 서버 장애로 기록하지 않았다.
+
+묶음10파일과 명령1파일, 총82,210B를 공유 send 아래로 전송해 해시를 대조한 뒤,
+서버 `C:/Users/user/Desktop/SmartFactory/ATTEST_OFF_20261014_0dd2ced0`의 실제 경로와
+10개 파일을 일반 탐색기로 확인했다. 서버 루트의
+`PINNED_FIELD_ATTEST_COMMAND_0dd2ced0.txt`는 메모장에 열었다.
+bundle-manifest SHA256은
+`288a2b93979d2bea08ff03f35dee928b75323cec99f00c698b7760f4daaa37c0`,
+wrapper SHA256은 `0a519643275da1c72329e2a34fdbaf1f47d661b09a78d5ce51afc7e30a089a3a`다.
+서버 로컬 해시는 아직 실행 전이며 파일 존재 관찰을 해시 검증으로 대체하지 않았다.
+전달 영수증은 `server-attestation-delivery.json`이다.
+
+원격 UI 터미널 조작 제한에 따라 사용자에게 전체 본문 복사·PowerShell 실행만 요청했다.
+이 기록 시점에 서버 attestation은 미실행이며 앱은 종료 상태다. 실행 결과를 회수·대조하기
+전에는 앱을 다시 시작하지 않는다. 물리 경계 NOT_TESTED, 정식 QA/출시 HOLD를 유지한다.
