@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T13:52:57.612052+00:00",
+  "lastUpdated": "2026-10-14T14:08:45.231167+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T13:52:57.612052+00:00"
+        "lastUpdated": "2026-10-14T14:08:45.231167+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Run the pinned package-r2 three-scenario lifecycle suite from a standalone elevated native Windows PowerShell 5.1 on the development PC. Verify actual guardian terminal state, owned WPR absence and ETL bytes; then examine trace decoding/loss/coverage and overhead before any server delivery. Do not repeat the unchanged field 15-minute failure or start 120 minutes. Retain job 60345/1 and recheck live metadata before field work.",
+            "nextAction": "Await the existing pinned package-r2 elevated development-PC three-scenario run; no new execution request is needed. Bind resulting ETL/commands/exports by locked hashes and inspect real loss, decode gaps and coverage. Target scheduler payload/identity/request-QPC joins remain unverified; do not infer the 203.1356ms server cause or repeat the unchanged 15-minute run/start 120 minutes. Retain 60345/1 and recheck live job metadata before field work.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -10857,6 +10857,80 @@
               "traceLossCoverage": "NOT_EVALUATED",
               "traceDecoder": "NOT_EVALUATED",
               "traceOverhead": "NOT_EVALUATED",
+              "serverDeliveredOrExecuted": false,
+              "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "traceDecoderStage": {
+              "recordedAt": "2026-10-14T14:08:45.231167+00:00",
+              "status": "TRACE_XML_QUALITY_PREFLIGHT_VERIFIED_WITH_PUBLIC_FIXTURES",
+              "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_DECODE_20261014_20b4649c",
+              "checks": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_DECODE_20261014_20b4649c\\checks.json",
+                "bytes": 2984,
+                "sha256": "ad971748be8d0e987e53b775b79f70b00be3a258dd0d4c4d894d03d1ad787135"
+              },
+              "publicFixtures": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_DECODE_20261014_20b4649c\\public-fixtures.json",
+                "bytes": 2033,
+                "sha256": "7ec87f85c3a10597b433ea2c44f9cb4cec819b62bc3c955129597969728c9021"
+              },
+              "publicVerification": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_DECODE_20261014_20b4649c\\public-quality-verification-r2.json",
+                "bytes": 1830,
+                "sha256": "687a466bff95f64e869efb27e114d00da7f2f14465b1954c7c9836858d48319a"
+              },
+              "sources": [
+                {
+                  "path": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v2_next\\scripts\\field-v1028\\field_trace_quality.py",
+                  "bytes": 13493,
+                  "sha256": "f9993bfd5cf233bb6b9e48c0806c8a8c500f674e598007546e26303c3f69e98f"
+                },
+                {
+                  "path": "C:\\Users\\user\\Documents\\GitHub\\SmartFactoryLogger\\v2_next\\scripts\\field-v1028\\test_field_trace_quality.py",
+                  "bytes": 10385,
+                  "sha256": "f724b446cd4cb04d7bb36c73deab2f98c74ba3b1c275b278b738d19696540f1d"
+                }
+              ],
+              "unitTests": 12,
+              "unitExit": 0,
+              "ruffExit": 0,
+              "tracerptInvocations": 4,
+              "tracerptActualExits": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "fixtureEventCounts": [
+                23,
+                71
+              ],
+              "fixtureProcessingErrors": [
+                3,
+                1
+              ],
+              "fixtureQuality": [
+                "INCOMPLETE_OR_UNUSABLE",
+                "INCOMPLETE_OR_UNUSABLE"
+              ],
+              "actualLocalTraceResultObserved": false,
+              "localGuardianValidation": "PENDING_USER_EXECUTION",
+              "requestTimeCoverage": "NOT_EVALUATED",
+              "threadGenerationBinding": "NOT_EVALUATED",
+              "schedulerPayloadValidation": "NOT_EVALUATED",
+              "latencyCause": "UNDETERMINED",
+              "manufacturerReplyCheck": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_DECODE_20261014_20b4649c\\manufacturer-reply-check.json",
+                "bytes": 325,
+                "sha256": "234f81986e4f22d50fba3abdce3a93d1b9db2a76bd08d52e7dd9fb6c42b7009b"
+              },
+              "manufacturerReplyObserved": false,
               "serverDeliveredOrExecuted": false,
               "productOrInstallerChanged": false,
               "field15Status": "FAIL",

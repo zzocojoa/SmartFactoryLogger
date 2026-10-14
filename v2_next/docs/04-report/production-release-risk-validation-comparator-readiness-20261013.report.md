@@ -1574,3 +1574,51 @@ portable 서버 전달/실행은 아직 미검증이다. 이 준비를 현장 QA
 근거: [WPR 명령과 instance](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options),
 [ETW 세션](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/sessions),
 [Start-Process](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/start-process?view=powershell-5.1).
+
+
+## 2026-10-14 tracerpt 원시 사건·손실 판독 사전 검증
+
+이전 차례는 고유 WPR Guard와 실행 묶음을 구현·검증한 PROGRESS였다.
+이번 차례 시작/후속 확인에서 해당 묶음의 새 TS/T 결과 폴더 및 일치하는 PowerShell
+프로세스를 찾지 못했다. 실제 live handle을 확인한 대기가 아니며 사용자 실행 질문은 유지한다.
+기존 제조사 문의 thread는 SENT1건이며 수신 답장은 없었다. 재발송하지 않았다.
+
+관리자 실행에 의존하지 않는 공개 ETL 판독으로 다음 단계를 검증했다.
+Microsoft PerfView commit `10e5d271cebcdf5d6cf122c6ab9c863860a7a2f1`의 작은 시험 ETL2개와
+MIT LICENSE를 받아 Git blob 식별값·크기·SHA256을 확인했다. 이 파일은 서버 증거가 아니다.
+Windows tracerpt로 각각 원시 `-rts` XML과 별도 report XML을 출력했다. 실제4명령 exit0,
+명령 소유 job active0과 원문 결과를 보존했다. `-rts`와 report/summary는 같은 실행에 섞지 않는다.
+
+| 공개 fixture | 원시/보고 사건 수 | ProcessingErrorData | 손실 선언 | 판독 품질 |
+| --- | ---: | ---: | --- | --- |
+| SelfDescribingSingleEvent | 23/23 | 3 | 0 | INCOMPLETE_OR_UNUSABLE |
+| gcevents | 71/71 | 1 | 0 | INCOMPLETE_OR_UNUSABLE |
+
+두 결과 모두 opcode80 오류15005와 미해독 BinaryEventData가 있다. 첫 시험에서 빈 Provider를
+필수 GUID로 처리해 전체 판독이 중단된 문제를 수정했다. 빈 Provider와 binary payload를
+알 수 없는 값/미해독 사건으로 세어 보존하며, 무시하거나 정상 해독으로 간주하지 않는다.
+오류 없는 mock만으로 완료하지 않고 실제2 ETL의 사건 수·오류 수·원시 정수 보존을 대조했다.
+
+`field_trace_quality.py`는 같은 ETL에 묶인 두 명령과 raw/report XML을 외부 receipt SHA 및
+read-share-only file handle로 검산한다. 실제 command exit/종료 정리, `-rts`와 입력 경로,
+event/header clock·종료 시각·손실·report 개수/skip·개별 해독 오류를 검사한다.
+시각은 정수로 보존하며 UTF-8/16/32 DTD/entity, 중복 필드, overflow, 입력/사건 예산,
+바뀐 파일·receipt·입력 경로를 거부한다. 실제CSwitch/ReadyThread payload·프로세스/스레드 세대
+연결·요청 QPC 범위·circular overwrite 여부는 아직 미검증이다. 손실0은 전체 범위 증명이 아니다.
+
+12회귀 검사 및 변경2파일 Ruff F/E9는 실제exit0이다. 공개 ETL 검사 CLI도 각각exit0이지만,
+이 값은 검사가 끝났다는 뜻이며 결과 품질 또는 현장 QA PASS가 아니다.
+사용 예: `python scripts/field-v1028/field_trace_quality.py --receipt <입력 영수증.json>
+--receipt-sha256 <영수증 SHA256> --output <새 결과.json>`.
+검증/공개 원문: `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_DECODE_20261014_20b4649c`.
+`public-quality-verification-r2.json` SHA256 `687a466bff95f64e869efb27e114d00da7f2f14465b1954c7c9836858d48319a`.
+
+기존 로컬 WPR 실행 묶음의 바이트는 바꾸지 않았으며, 사용자 실행 요청은 반복하지 않았다.
+제품/설치본 변경이 없어 전체 health/build·서버 적용은 수행하지 않았다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+근거: [tracerpt](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/tracerpt),
+[trace header](https://learn.microsoft.com/en-us/windows/win32/etw/trace-logfile-header),
+[thread 사건](https://learn.microsoft.com/en-us/windows/win32/etw/thread-v2),
+[ReadyThread](https://learn.microsoft.com/en-us/windows/win32/etw/readythread),
+[공개 fixture 출처](https://github.com/microsoft/perfview/tree/10e5d271cebcdf5d6cf122c6ab9c863860a7a2f1/src/TraceEvent/TraceEvent.Tests/inputs).
