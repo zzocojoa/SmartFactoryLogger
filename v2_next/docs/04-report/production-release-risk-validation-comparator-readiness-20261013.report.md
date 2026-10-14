@@ -1312,3 +1312,77 @@ outer8프로세스 active0/강제 종료0/errors0이며 이전15분 정리 경�
 3. 새 PREPARATION_PATH/SHA256 및 RESULT_PATH/LAUNCHER_SHA256/LAUNCH_EXIT를 확인하고 회수한다.
 4. 기존15분 FAIL을 보존한 채 새 결과를 검산한다. 120분 미시작, 물리 NOT_TESTED,
    정식 QA/출시 HOLD 및 기존 롤백 기준은 새 검산 전까지 유지한다.
+
+
+### 같은 날 후속: 탐색기 창을 닫은 정식 15분 재관찰 FAIL
+
+사용자 실행 후 새 준비 `Pa723f319`와 `run-d86a587e6803`를 확인했다. 실제 관찰은
+20:21:31경–20:36:31경 KST의900초이며,20:38 화면에서 `LAUNCH_EXIT=1`과 프롬프트 복귀를
+확인했다. 준비 SHA256은 기존 `091746d11e1d2c7722c9c35f38945db8ab81f410af14efe54e03ecc1ee3ac31f`,
+launcher SHA256은 `67188c36070463bb127e7c2d03e5b2d4c3d6a0270b50535b2c224912cfda5ed1`이다.
+콘솔의36번째 글자6을f로 옮겨 적은 첫 회수 시도는 해시 불일치 exit1로 복사 전 중단됐다.
+콘솔을 다시 읽어 별도 `observe15-recheck-console-r2.json`에 정정했고 원 기록·도우미를 보존했다.
+
+측정 중 Codex는 수동 화면 확인만 했으며 탐색기·작업 관리자·파일 복사를 사용하지 않았다.
+두 화면 사이 PowerShell 창 위치가 바뀐 사실은 기록한다. 추가 host 수집기가 없는 기존
+observe 도구와 기존 판정 기준을 유지했다. 같은 후보4cc7393e/installer8821746b·설정·
+main/backend 세대·SPOT/logger, 동일 request와 겹치지 않는900초 구간을 확인했다.
+두 구간150개 data 표본 모두 제품60580/금형1·Running·작업 정보 유효·Low Signal OFF다.
+압출/정지/unknown은128/19/3→133/17/0, 평균 속도2.551→2.572,
+평균 압력112.741→114.489로 달라 통제된 부하 비교가 아니다.
+
+| 항목 | 첫15분 | 이번15분 |
+| --- | ---: | ---: |
+| health 최대 / p95 | 3189.366 / 1270.119ms | 203.136 / 72.536ms |
+| health200ms 초과 / 일정 누락 | 134 / 5 | 1 / 0 |
+| data 최대 / 500ms 초과 | 2342.922ms / 21 | 148.480ms / 0 |
+| image 조회 / 예정 | 2441 / 3600 | 3596 / 3600 |
+| image 일정 누락 | 1159 | 4 |
+| HTTP 요청 오류 / timeout | 1 / 0 | 0 / 0 |
+
+이번health450/450, data150/150이며health142는20:26:15.221에203.1356ms,
+trace `50251a77-1490-4cb8-bc03-89de8b10a24d`다. 헤더 대기200.810ms가 대부분이고
+첫 경계health7.1272ms, 경계 포함452요청 최대도203.1356ms다. 기준 초과를 반올림으로 숨기지 않는다.
+image720/2344/2571/3045는 직전 응답이 다음 예정 시각을 넘겼다. 직전 요청 시간은
+336.125/264.606/260.459/273.835ms, 응답 header의 refresh 시간은31/47/250/265ms다.
+정확한 후보 소스의 header는 cache entry의 refresh coroutine 구간값이며 전체 client 시간이나
+순수 장비/네트워크 시간은 아니다. upstream/coalesced와 시간 차이는 보존하지만 서버 처리·
+event-loop/lock 대기·client scheduling의 원인을 분리했다고 주장하지 않는다.
+
+자원·프로세스181표본, 자원300초 창3개의61표본 및 coverage를 재계산했다. 앱 프로세스 CPU
+개별 비율 합의 평균18.762%/최대26.656%이며 host 총 CPU가 아니다. 자원 성능 gate는
+NOT_EVALUATED다. 이미지enqueued/written11408→12210, failure/drop0→0,
+전후queue/inflight0/0이다. 조회 누락4건은 이미지 저장 drop이 아니며 전수 이미지 QA나 종료 drain 통과도 아니다.
+outer7프로세스의active1→0, 강제 종료0, `outer-descendants-remain`이 다시 기록됐다.
+남은 프로세스 식별 정보가 없어 원인은 미확정이다. HTTP child1/자원0/프로세스0이고
+관찰worker 오류0이며 실제 앱의 정상 종료를 수행한 기록은 아니다.
+
+서버 탐색기를 통해 `Z:/SmartFactory/20261014/return/OBS15_RECHECK_PREP_Pa723f319`와
+`OBS15_RECHECK_RUN_d86a587e6803`에 회수했다. 준비4파일6064B, run8792파일48,114,678B의
+공유 전후·개발 사본 해시가 일치한다. session manifest8787파일을 전수 검산하고 고정 소스로
+HTTP·자원·통합 판정을 재계산했다. 회수·재계산·상세 분석·사건 비교 모두 실제exit0,
+replay 오류0, `RECORDED_SUMMARIES_REPRODUCED`이며 실제 관찰의FAIL을 재현했다.
+
+- 재계산: `observe15-recheck-replay.json`, SHA256 `f4129b718f266755eafbf88ffafa9e8fb870e216d0e2d1878e3fd80fd6899a3a`.
+- 상세 분석: `observe15-recheck-analysis.json`, SHA256 `e9c24523b08421e9db68b0d67729a3c077be51b5c94c835d96d07899bffae350`.
+- 사건·조건 비교: `observe15-recheck-event-comparison.json`, SHA256 `c0cf170aa2de2574e18b862bbaec3273f2d3254ad3cdc28c4b73bb3ab45e3456`.
+- 전체 기록: `observe15-recheck-result-record.json`, SHA256 `8eb7c7a9224d92f0abe1befb3317478f1769e13e80b6703bf42bb22304e09a9e`.
+
+위 파일은 개발 PC `PDCA_LIMITED_FIELD_20261014_0dd2ced0` 아래에 보존한다.
+다음 조치는 남은 요청의 backend 실행/대기와 client scheduling을 분리하고 outer job의
+잔여 프로세스 식별을 남길 계측 준비다. 같은15분 반복으로 통과를 찾거나 기준을 완화하지 않는다.
+독립적인 전체 데이터 QA를 계속하며120분은 미시작, 물리NOT_TESTED, 정식QA/출시HOLD,
+운영 승격·롤백 기준 갱신 미실행을 유지한다. 제품 코드·설치본·설정은 변경하지 않았다.
+
+21:16 KST 화면에서는 작업 정보가 다시필수값 미입력이고 최근 적용 시각이20:52:06으로
+바뀌었다. 이는 관찰 종료 후의 상태이며 이번150개 유효 표본을 소급 무효화하지 않는다.
+현재 실제 제품·금형 번호를 사용자에게 요청했으며 이전60580·1을 임의 재적용하지 않았다.
+현재 상태 증거는 `observe15-recheck-after-recovery.png`다.
+
+후속 계측 후보로 WPR/ETW를 조사했다. [Microsoft 명령 참조](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options)와
+[대기 분석 안내](https://learn.microsoft.com/en-us/troubleshoot/windows-server/support-tools/support-tools-xperf-wpa-wpr)를
+확인했고 개발 PC의 `wpr -profiles` 및 `wpr -profiledetails CPU`는exit0이다.
+개발 PC CPU.Verbose.Memory의CSwitch/ReadyThread 제공을 확인했으나 기본system buffer가
+1024KB×1630개이므로 이 설정을 서버에 그대로 사용하지 않는다. 서버 지원·자원 예산·
+계측 부하·event loss·시각 정렬과 Python 단계 계측 보완은 미검증이며 trace를 시작하지 않았다.
+`observe15-recheck-next-timing-options.json`에 기술 준비 조건을 남겼다.

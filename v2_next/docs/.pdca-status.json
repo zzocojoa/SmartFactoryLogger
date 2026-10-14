@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T11:17:24.686575+00:00",
+  "lastUpdated": "2026-10-14T12:19:46.037184+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "HOST_COMPARISON_FAIL_REPRODUCED_OBSERVE15_RECHECK_READY",
+            "status": "FAIL_REPRODUCED_RESIDUAL_TIMING_AND_OUTER_CLEANUP_UNCONFIRMED",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -9536,7 +9536,1061 @@
               },
               "releaseGate": "HOLD",
               "promotionAllowed": false
-            }
+            },
+            "observe15RecheckResult": {
+              "schema": "sfl-observe15-recheck-result-v1",
+              "recordedUtc": "2026-10-14T12:19:46.037184+00:00",
+              "status": "FAIL_REPRODUCED_RESIDUAL_TIMING_AND_OUTER_CLEANUP_UNCONFIRMED",
+              "serverPreparation": "C:\\Users\\user\\Desktop\\SmartFactory\\Pa723f319",
+              "serverRun": "C:\\Users\\user\\Desktop\\SmartFactory\\run-d86a587e6803",
+              "preparationSha256": "091746d11e1d2c7722c9c35f38945db8ab81f410af14efe54e03ecc1ee3ac31f",
+              "launcherSha256": "67188c36070463bb127e7c2d03e5b2d4c3d6a0270b50535b2c224912cfda5ed1",
+              "serverLaunchExit": 1,
+              "durationSeconds": 900,
+              "recoveredFiles": 8792,
+              "recoveredBytes": 48114678,
+              "sessionManifestMembers": 8787,
+              "recoveryExitCode": 0,
+              "replayExitCode": 0,
+              "analysisExitCode": 0,
+              "eventComparisonExitCode": 0,
+              "consoleTranscriptionCorrection": {
+                "reason": "Console re-read: character 36 is 6, initially transcribed as f. Original console record preserved.",
+                "original_record": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-console.json",
+                "original_sha256": "3a56d4032407b9012847851f2ce6485f553777d09cc04c9f48b2b92aee1ebabd",
+                "first_recovery_exit": 1,
+                "first_recovery_reason": "external-pin:launcher.json",
+                "local_copy_created_by_failed_attempt": false,
+                "independent_console_reread": true
+              },
+              "evidence": {
+                "observe15-recheck-console.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-console.json",
+                  "bytes": 823,
+                  "sha256": "3a56d4032407b9012847851f2ce6485f553777d09cc04c9f48b2b92aee1ebabd"
+                },
+                "observe15-recheck-console-r2.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-console-r2.json",
+                  "bytes": 1376,
+                  "sha256": "9b149ea991fdca1f7846a04755dadaa751a802a72ed9095499e744e1e6c20994"
+                },
+                "observe15-recheck-recovery-preparation.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-recovery-preparation.json",
+                  "bytes": 1223,
+                  "sha256": "d1132674599b108e19a4a2a3372afd8b1226548e659f430f71c6b76ad5ab5e0b"
+                },
+                "observe15-recheck-recovery-run.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-recovery-run.json",
+                  "bytes": 1463011,
+                  "sha256": "49960e42f9441dea0faea35cdd2fded93d89d9ed7dd09be654693dbf1311d69a"
+                },
+                "observe15-recheck-replay.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-replay.json",
+                  "bytes": 1341253,
+                  "sha256": "f4129b718f266755eafbf88ffafa9e8fb870e216d0e2d1878e3fd80fd6899a3a"
+                },
+                "observe15-recheck-analysis.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-analysis.json",
+                  "bytes": 42122,
+                  "sha256": "e9c24523b08421e9db68b0d67729a3c077be51b5c94c835d96d07899bffae350"
+                },
+                "observe15-recheck-event-comparison.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-event-comparison.json",
+                  "bytes": 2075777,
+                  "sha256": "c0cf170aa2de2574e18b862bbaec3273f2d3254ad3cdc28c4b73bb3ab45e3456"
+                },
+                "recover-observe15-recheck-r2.py": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\recover-observe15-recheck-r2.py",
+                  "bytes": 3960,
+                  "sha256": "dd35771c12cc51ae2e3349847fb6fac2e7040c5743deacb31b3efb3f5c09c6b4"
+                },
+                "analyze-observe15-recheck-r2.py": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\analyze-observe15-recheck-r2.py",
+                  "bytes": 9203,
+                  "sha256": "889fd02802541c3d501bcd87d2de77e7a8b94ae6d39d18faabe863210068bf16"
+                },
+                "review-observe15-recheck-events.py": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\review-observe15-recheck-events.py",
+                  "bytes": 6406,
+                  "sha256": "e16b792e6f078092ce4d658a850c441682cdaefe71ff925f50c24ec8ec68f939"
+                },
+                "record-observe15-recheck.py": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\record-observe15-recheck.py",
+                  "bytes": 13930,
+                  "sha256": "21313bd68462298d6aa5b05e262fd2248517385a764e03f2d96bd84b9c0b61d0"
+                },
+                "observe15-recheck-next-timing-options.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-next-timing-options.json",
+                  "bytes": 2005,
+                  "sha256": "cf5c9463037bc59de07de4e0762106018d202707ba56066580481959d545c6c9"
+                },
+                "observe15-recheck-console.png": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-console.png",
+                  "bytes": 231654,
+                  "sha256": "6f20eb5c079dfc07d5632924eb559af34a7916b8b70a2941aaa895d15909b949"
+                },
+                "observe15-recheck-shared-copy.png": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-shared-copy.png",
+                  "bytes": 175364,
+                  "sha256": "bd9cba8cba190d9518a7537f0f3e875e471efc01535f0fa113d8d2798a391833"
+                },
+                "observe15-recheck-after-recovery.png": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-after-recovery.png",
+                  "bytes": 235267,
+                  "sha256": "07ea70ea517276072367c6b83e52a10a7014b34c270b20d80e2cd02833937439"
+                }
+              },
+              "sameRequestRuntimeAndServices": true,
+              "disjoint900SecondWindows": true,
+              "workloadControlled": false,
+              "workloadBefore": {
+                "samples": 150,
+                "jobs": [
+                  [
+                    "60580",
+                    "1"
+                  ]
+                ],
+                "valid": 150,
+                "runtime_statuses": {
+                  "Running": 150
+                },
+                "process_states": {
+                  "extruding": 128,
+                  "stopped": 19,
+                  "unknown": 3
+                },
+                "speed_mean": 2.550666666666667,
+                "pressure_mean": 112.74066666666667,
+                "counts": [
+                  15,
+                  16,
+                  17,
+                  18,
+                  19
+                ],
+                "low_signal_enabled": [
+                  false
+                ]
+              },
+              "workloadAfter": {
+                "samples": 150,
+                "jobs": [
+                  [
+                    "60580",
+                    "1"
+                  ]
+                ],
+                "valid": 150,
+                "runtime_statuses": {
+                  "Running": 150
+                },
+                "process_states": {
+                  "extruding": 133,
+                  "stopped": 17
+                },
+                "speed_mean": 2.572,
+                "pressure_mean": 114.48933333333333,
+                "counts": [
+                  65,
+                  66,
+                  67,
+                  68,
+                  69
+                ],
+                "low_signal_enabled": [
+                  false
+                ]
+              },
+              "httpBefore": {
+                "health": {
+                  "expected_slots": 450,
+                  "requests": 445,
+                  "missed_slots": 5,
+                  "cancelled_slots": 0,
+                  "unaccounted_slots": 0,
+                  "invalid_record_count": 0,
+                  "schedule_complete": false,
+                  "request_errors": 0,
+                  "timeouts": 0,
+                  "first_ms": 7.2111,
+                  "max_ms": 3189.3657,
+                  "p50_ms": 35.7842,
+                  "p95_ms": 1270.1193,
+                  "p99_ms": 1951.7349,
+                  "max_start_lateness_ms": 1138.3481,
+                  "warnings": 206,
+                  "failure_threshold_ms": 200,
+                  "threshold_failures": 134,
+                  "http_component_status": "FAIL"
+                },
+                "data": {
+                  "expected_slots": 150,
+                  "requests": 150,
+                  "missed_slots": 0,
+                  "cancelled_slots": 0,
+                  "unaccounted_slots": 0,
+                  "invalid_record_count": 0,
+                  "schedule_complete": true,
+                  "request_errors": 0,
+                  "timeouts": 0,
+                  "first_ms": 3.6436,
+                  "max_ms": 2342.9222,
+                  "p50_ms": 17.6063,
+                  "p95_ms": 1158.1565,
+                  "p99_ms": 1663.5851,
+                  "max_start_lateness_ms": 769.669,
+                  "warnings": 49,
+                  "failure_threshold_ms": 500,
+                  "threshold_failures": 21,
+                  "http_component_status": "FAIL"
+                },
+                "image": {
+                  "expected_slots": 3600,
+                  "requests": 2441,
+                  "missed_slots": 1159,
+                  "cancelled_slots": 0,
+                  "unaccounted_slots": 0,
+                  "invalid_record_count": 0,
+                  "schedule_complete": false,
+                  "request_errors": 1,
+                  "timeouts": 0,
+                  "first_ms": 118.7575,
+                  "max_ms": 2599.6609,
+                  "p50_ms": 10.1256,
+                  "p95_ms": 636.6943,
+                  "p99_ms": 1658.0617,
+                  "max_start_lateness_ms": 357.5784,
+                  "warnings": 150,
+                  "failure_threshold_ms": null,
+                  "threshold_failures": null,
+                  "http_component_status": "FAIL"
+                }
+              },
+              "httpAfter": {
+                "health": {
+                  "expected_slots": 450,
+                  "requests": 450,
+                  "missed_slots": 0,
+                  "cancelled_slots": 0,
+                  "unaccounted_slots": 0,
+                  "invalid_record_count": 0,
+                  "schedule_complete": true,
+                  "request_errors": 0,
+                  "timeouts": 0,
+                  "first_ms": 17.4581,
+                  "max_ms": 203.1356,
+                  "p50_ms": 21.4265,
+                  "p95_ms": 72.5363,
+                  "p99_ms": 110.9773,
+                  "max_start_lateness_ms": 68.314,
+                  "warnings": 84,
+                  "failure_threshold_ms": 200,
+                  "threshold_failures": 1,
+                  "http_component_status": "FAIL"
+                },
+                "data": {
+                  "expected_slots": 150,
+                  "requests": 150,
+                  "missed_slots": 0,
+                  "cancelled_slots": 0,
+                  "unaccounted_slots": 0,
+                  "invalid_record_count": 0,
+                  "schedule_complete": true,
+                  "request_errors": 0,
+                  "timeouts": 0,
+                  "first_ms": 9.0799,
+                  "max_ms": 148.48,
+                  "p50_ms": 10.1962,
+                  "p95_ms": 27.7197,
+                  "p99_ms": 62.772,
+                  "max_start_lateness_ms": 84.5224,
+                  "warnings": 1,
+                  "failure_threshold_ms": 500,
+                  "threshold_failures": 0,
+                  "http_component_status": "PASS"
+                },
+                "image": {
+                  "expected_slots": 3600,
+                  "requests": 3596,
+                  "missed_slots": 4,
+                  "cancelled_slots": 0,
+                  "unaccounted_slots": 0,
+                  "invalid_record_count": 0,
+                  "schedule_complete": false,
+                  "request_errors": 0,
+                  "timeouts": 0,
+                  "first_ms": 7.2913,
+                  "max_ms": 336.125,
+                  "p50_ms": 6.9419,
+                  "p95_ms": 57.6384,
+                  "p99_ms": 103.3121,
+                  "max_start_lateness_ms": 94.8629,
+                  "warnings": 0,
+                  "failure_threshold_ms": null,
+                  "threshold_failures": null,
+                  "http_component_status": "FAIL"
+                }
+              },
+              "residualEvents": {
+                "health": [
+                  {
+                    "event": {
+                      "kind": "request",
+                      "sequence": 142,
+                      "scheduled_ns": 390254834971500,
+                      "started_ns": 390254845286700,
+                      "started_utc": "2026-10-14T11:26:15.220519+00:00",
+                      "finished_ns": 390255048577300,
+                      "response_finished_ns": 390255048422300,
+                      "queued_ns": 390255048621300,
+                      "client_request_and_body_ms": 203.1356,
+                      "connect_ms": 1.9388,
+                      "send_ms": 0.1996,
+                      "headers_wait_ms": 200.81,
+                      "body_ms": 0.1872,
+                      "decode_ms": 0.1477,
+                      "start_lateness_ms": 10.3152,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-trace-id": "50251a77-1490-4cb8-bc03-89de8b10a24d"
+                      }
+                    },
+                    "previous": {
+                      "kind": "request",
+                      "sequence": 141,
+                      "scheduled_ns": 390252834971500,
+                      "started_ns": 390252839662400,
+                      "started_utc": "2026-10-14T11:26:13.215748+00:00",
+                      "finished_ns": 390252853672400,
+                      "response_finished_ns": 390252853430600,
+                      "queued_ns": 390252853719400,
+                      "client_request_and_body_ms": 13.7682,
+                      "connect_ms": 2.7859,
+                      "send_ms": 0.9646,
+                      "headers_wait_ms": 9.9,
+                      "body_ms": 0.1177,
+                      "decode_ms": 0.2341,
+                      "start_lateness_ms": 4.6909,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-trace-id": "83f3a5d4-0646-4b55-ac0d-6bb38901d78e"
+                      }
+                    },
+                    "next": {
+                      "kind": "request",
+                      "sequence": 143,
+                      "scheduled_ns": 390256834971500,
+                      "started_ns": 390256841716000,
+                      "started_utc": "2026-10-14T11:26:17.217889+00:00",
+                      "finished_ns": 390256863378000,
+                      "response_finished_ns": 390256863142500,
+                      "queued_ns": 390256863421700,
+                      "client_request_and_body_ms": 21.4265,
+                      "connect_ms": 0.4888,
+                      "send_ms": 0.0462,
+                      "headers_wait_ms": 20.7746,
+                      "body_ms": 0.1169,
+                      "decode_ms": 0.2286,
+                      "start_lateness_ms": 6.7445,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-trace-id": "a0962b95-5116-4991-bfc2-62427000625e"
+                      }
+                    }
+                  }
+                ],
+                "image": [
+                  {
+                    "event": {
+                      "kind": "missed_slot",
+                      "sequence": 720,
+                      "scheduled_ns": 390150834971500,
+                      "queued_ns": 390150933290400,
+                      "reason": "previous-request-decode-or-enqueue-overrun",
+                      "headers": {}
+                    },
+                    "previous": {
+                      "kind": "request",
+                      "sequence": 719,
+                      "scheduled_ns": 390150584971500,
+                      "started_ns": 390150596002900,
+                      "started_utc": "2026-10-14T11:24:30.971219+00:00",
+                      "finished_ns": 390150933163400,
+                      "response_finished_ns": 390150932127900,
+                      "queued_ns": 390150933225500,
+                      "client_request_and_body_ms": 336.125,
+                      "connect_ms": 9.7585,
+                      "send_ms": 0.3327,
+                      "headers_wait_ms": 325.461,
+                      "body_ms": 0.5728,
+                      "decode_ms": 1.0251,
+                      "start_lateness_ms": 11.0314,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-spot-image-profile": "operator_live",
+                        "x-spot-image-at": "1791977071306",
+                        "x-spot-image-source": "upstream",
+                        "x-spot-image-latency-ms": "31.0",
+                        "x-spot-image-age-ms": "0.0",
+                        "x-trace-id": "fc655378-e632-499a-ac3d-6d2dfc70c9b1"
+                      }
+                    },
+                    "next": {
+                      "kind": "request",
+                      "sequence": 721,
+                      "scheduled_ns": 390151084971500,
+                      "started_ns": 390151085875400,
+                      "started_utc": "2026-10-14T11:24:31.461978+00:00",
+                      "finished_ns": 390151092731700,
+                      "response_finished_ns": 390151090719200,
+                      "queued_ns": 390151093028200,
+                      "client_request_and_body_ms": 4.8438,
+                      "connect_ms": 1.0909,
+                      "send_ms": 0.2257,
+                      "headers_wait_ms": 3.2158,
+                      "body_ms": 0.3114,
+                      "decode_ms": 1.9944,
+                      "start_lateness_ms": 0.9039,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-spot-image-profile": "operator_live",
+                        "x-spot-image-at": "1791977071306",
+                        "x-spot-image-source": "cache",
+                        "x-spot-image-latency-ms": "31.0",
+                        "x-spot-image-age-ms": "157.0",
+                        "x-trace-id": "89da00f4-7c0a-43ab-b5bb-8ddd8266e5cd"
+                      }
+                    }
+                  },
+                  {
+                    "event": {
+                      "kind": "missed_slot",
+                      "sequence": 2344,
+                      "scheduled_ns": 390556834971500,
+                      "queued_ns": 390556869389500,
+                      "reason": "previous-request-decode-or-enqueue-overrun",
+                      "headers": {}
+                    },
+                    "previous": {
+                      "kind": "request",
+                      "sequence": 2343,
+                      "scheduled_ns": 390556584971500,
+                      "started_ns": 390556603846300,
+                      "started_utc": "2026-10-14T11:31:16.979269+00:00",
+                      "finished_ns": 390556869262600,
+                      "response_finished_ns": 390556868452100,
+                      "queued_ns": 390556869322100,
+                      "client_request_and_body_ms": 264.6058,
+                      "connect_ms": 1.164,
+                      "send_ms": 0.1482,
+                      "headers_wait_ms": 263.1209,
+                      "body_ms": 0.1727,
+                      "decode_ms": 0.8014,
+                      "start_lateness_ms": 18.8748,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-spot-image-profile": "operator_live",
+                        "x-spot-image-at": "1791977477002",
+                        "x-spot-image-source": "coalesced",
+                        "x-spot-image-latency-ms": "47.0",
+                        "x-spot-image-age-ms": "0.0",
+                        "x-trace-id": "ee7f3447-f077-40b0-a66b-df5bb30b5f0f"
+                      }
+                    },
+                    "next": {
+                      "kind": "request",
+                      "sequence": 2345,
+                      "scheduled_ns": 390557084971500,
+                      "started_ns": 390557090327300,
+                      "started_utc": "2026-10-14T11:31:17.465911+00:00",
+                      "finished_ns": 390557130764600,
+                      "response_finished_ns": 390557129420600,
+                      "queued_ns": 390557130860500,
+                      "client_request_and_body_ms": 39.0933,
+                      "connect_ms": 2.8825,
+                      "send_ms": 2.499,
+                      "headers_wait_ms": 33.5146,
+                      "body_ms": 0.1972,
+                      "decode_ms": 1.3309,
+                      "start_lateness_ms": 5.3558,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-spot-image-profile": "operator_live",
+                        "x-spot-image-at": "1791977477502",
+                        "x-spot-image-source": "upstream",
+                        "x-spot-image-latency-ms": "31.0",
+                        "x-spot-image-age-ms": "0.0",
+                        "x-trace-id": "643a4930-9e0d-4ae7-a215-c9a9a76ac9d9"
+                      }
+                    }
+                  },
+                  {
+                    "event": {
+                      "kind": "missed_slot",
+                      "sequence": 2571,
+                      "scheduled_ns": 390613584971500,
+                      "queued_ns": 390613606759100,
+                      "reason": "previous-request-decode-or-enqueue-overrun",
+                      "headers": {}
+                    },
+                    "previous": {
+                      "kind": "request",
+                      "sequence": 2570,
+                      "scheduled_ns": 390613334971500,
+                      "started_ns": 390613345126100,
+                      "started_utc": "2026-10-14T11:32:13.720069+00:00",
+                      "finished_ns": 390613606594600,
+                      "response_finished_ns": 390613605585100,
+                      "queued_ns": 390613606669900,
+                      "client_request_and_body_ms": 260.459,
+                      "connect_ms": 1.3694,
+                      "send_ms": 0.2872,
+                      "headers_wait_ms": 257.6897,
+                      "body_ms": 1.1127,
+                      "decode_ms": 0.9977,
+                      "start_lateness_ms": 10.1546,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-spot-image-profile": "operator_live",
+                        "x-spot-image-at": "1791977533962",
+                        "x-spot-image-source": "upstream",
+                        "x-spot-image-latency-ms": "250.0",
+                        "x-spot-image-age-ms": "0.0",
+                        "x-trace-id": "6419fd94-c676-4644-ace3-1f2b40eb324e"
+                      }
+                    },
+                    "next": {
+                      "kind": "request",
+                      "sequence": 2572,
+                      "scheduled_ns": 390613834971500,
+                      "started_ns": 390613844098700,
+                      "started_utc": "2026-10-14T11:32:14.219337+00:00",
+                      "finished_ns": 390613853652800,
+                      "response_finished_ns": 390613850810900,
+                      "queued_ns": 390613853836000,
+                      "client_request_and_body_ms": 6.7122,
+                      "connect_ms": 1.5296,
+                      "send_ms": 0.2667,
+                      "headers_wait_ms": 4.51,
+                      "body_ms": 0.4059,
+                      "decode_ms": 2.8188,
+                      "start_lateness_ms": 9.1272,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-spot-image-profile": "operator_live",
+                        "x-spot-image-at": "1791977533962",
+                        "x-spot-image-source": "cache",
+                        "x-spot-image-latency-ms": "250.0",
+                        "x-spot-image-age-ms": "250.0",
+                        "x-trace-id": "ad0f209b-9867-497f-96e0-e97df0430c2b"
+                      }
+                    }
+                  },
+                  {
+                    "event": {
+                      "kind": "missed_slot",
+                      "sequence": 3045,
+                      "scheduled_ns": 390732084971500,
+                      "queued_ns": 390732113499200,
+                      "reason": "previous-request-decode-or-enqueue-overrun",
+                      "headers": {}
+                    },
+                    "previous": {
+                      "kind": "request",
+                      "sequence": 3044,
+                      "scheduled_ns": 390731834971500,
+                      "started_ns": 390731838769300,
+                      "started_utc": "2026-10-14T11:34:12.213995+00:00",
+                      "finished_ns": 390732113360000,
+                      "response_finished_ns": 390732112604300,
+                      "queued_ns": 390732113425300,
+                      "client_request_and_body_ms": 273.835,
+                      "connect_ms": 1.3682,
+                      "send_ms": 0.2666,
+                      "headers_wait_ms": 272.0747,
+                      "body_ms": 0.1255,
+                      "decode_ms": 0.7454,
+                      "start_lateness_ms": 3.7978,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-spot-image-profile": "operator_live",
+                        "x-spot-image-at": "1791977652486",
+                        "x-spot-image-source": "coalesced",
+                        "x-spot-image-latency-ms": "265.0",
+                        "x-spot-image-age-ms": "0.0",
+                        "x-trace-id": "ec47d0a4-0931-4192-b750-57a8e7692851"
+                      }
+                    },
+                    "next": {
+                      "kind": "request",
+                      "sequence": 3046,
+                      "scheduled_ns": 390732334971500,
+                      "started_ns": 390732351505900,
+                      "started_utc": "2026-10-14T11:34:12.726762+00:00",
+                      "finished_ns": 390732356173800,
+                      "response_finished_ns": 390732355090700,
+                      "queued_ns": 390732356298800,
+                      "client_request_and_body_ms": 3.5848,
+                      "connect_ms": 0.9576,
+                      "send_ms": 1.7356,
+                      "headers_wait_ms": 0.7525,
+                      "body_ms": 0.1391,
+                      "decode_ms": 1.0655,
+                      "start_lateness_ms": 16.5344,
+                      "request_success": true,
+                      "status": 200,
+                      "headers": {
+                        "x-spot-image-profile": "operator_live",
+                        "x-spot-image-at": "1791977652486",
+                        "x-spot-image-source": "cache",
+                        "x-spot-image-latency-ms": "265.0",
+                        "x-spot-image-age-ms": "250.0",
+                        "x-trace-id": "d5955d0f-11c0-45d5-9a73-9f5f2f7bd03f"
+                      }
+                    }
+                  }
+                ]
+              },
+              "configurationBoundaries": {
+                "initial": {
+                  "status": "PASS",
+                  "review_reproduced": true,
+                  "review": {
+                    "status": "PASS",
+                    "issues": [],
+                    "recomputed_fingerprint": "3ddc2e9080e7d804bdb1eb784d5136b38286c92dc927850c82d16a04732c7683",
+                    "profile_scope": "SOFTWARE_REPRESENTED_APPROVED_FIELDS",
+                    "validation_scope": "DISABLED_LOW_SIGNAL_FIELD_TRIAL",
+                    "physical_device_gate": "NOT_TESTED",
+                    "formal_qa_gate": "HOLD"
+                  },
+                  "latency_ms": 15.2129
+                },
+                "final": {
+                  "status": "PASS",
+                  "review_reproduced": true,
+                  "review": {
+                    "status": "PASS",
+                    "issues": [],
+                    "recomputed_fingerprint": "3ddc2e9080e7d804bdb1eb784d5136b38286c92dc927850c82d16a04732c7683",
+                    "profile_scope": "SOFTWARE_REPRESENTED_APPROVED_FIELDS",
+                    "validation_scope": "DISABLED_LOW_SIGNAL_FIELD_TRIAL",
+                    "physical_device_gate": "NOT_TESTED",
+                    "formal_qa_gate": "HOLD"
+                  },
+                  "latency_ms": 14.1704
+                }
+              },
+              "generation": {
+                "initial": {
+                  "status": "PASS",
+                  "identity": {
+                    "backend_process_id": 10724,
+                    "backend_generation_id": "56a8911b183d2eb0ee9edb3e14eff2cc",
+                    "backend_session_id": "0bb15639768c",
+                    "started_at": "2026-10-14T07:43:48+00:00"
+                  },
+                  "errors": [],
+                  "latency_ms": 2.4482,
+                  "request_success": true,
+                  "http_status": 200,
+                  "process_identity_stable": true,
+                  "image_capture": {
+                    "shutdown_id": null,
+                    "requested_at": null,
+                    "historical_failures": null,
+                    "historical_dropped_count": null,
+                    "historical_last_error_at": null,
+                    "new_failures_during_drain": null,
+                    "worker_started": true,
+                    "worker_alive": true,
+                    "worker_stopped": false,
+                    "queue_size": 0,
+                    "unfinished_tasks": 0,
+                    "inflight_count": 0,
+                    "enqueue_disabled": false,
+                    "stop_requested": false,
+                    "enqueued_count": 11408,
+                    "written_count": 11408,
+                    "failure_count": 0,
+                    "dropped_count": 0,
+                    "dropped_oversize_count": 0,
+                    "dropped_queue_full_count": 0,
+                    "last_error_at": null,
+                    "accounting_consistent": true,
+                    "writes_drained": false,
+                    "integrity_unresolved": true
+                  }
+                },
+                "final": {
+                  "status": "PASS",
+                  "identity": {
+                    "backend_process_id": 10724,
+                    "backend_generation_id": "56a8911b183d2eb0ee9edb3e14eff2cc",
+                    "backend_session_id": "0bb15639768c",
+                    "started_at": "2026-10-14T07:43:48+00:00"
+                  },
+                  "errors": [],
+                  "latency_ms": 2.1516,
+                  "request_success": true,
+                  "http_status": 200,
+                  "process_identity_stable": true,
+                  "image_capture": {
+                    "shutdown_id": null,
+                    "requested_at": null,
+                    "historical_failures": null,
+                    "historical_dropped_count": null,
+                    "historical_last_error_at": null,
+                    "new_failures_during_drain": null,
+                    "worker_started": true,
+                    "worker_alive": true,
+                    "worker_stopped": false,
+                    "queue_size": 0,
+                    "unfinished_tasks": 0,
+                    "inflight_count": 0,
+                    "enqueue_disabled": false,
+                    "stop_requested": false,
+                    "enqueued_count": 12210,
+                    "written_count": 12210,
+                    "failure_count": 0,
+                    "dropped_count": 0,
+                    "dropped_oversize_count": 0,
+                    "dropped_queue_full_count": 0,
+                    "last_error_at": null,
+                    "accounting_consistent": true,
+                    "writes_drained": false,
+                    "integrity_unresolved": true
+                  }
+                },
+                "same_identity": true
+              },
+              "resources": {
+                "coverage": "SUFFICIENT",
+                "valid_samples": 181,
+                "windows": [
+                  {
+                    "start_seconds": 120,
+                    "end_seconds": 420,
+                    "count": 61,
+                    "span_seconds": 300.0107824,
+                    "coverage_sufficient": true,
+                    "process_gauges_sum": {
+                      "rss_bytes": {
+                        "count": 61,
+                        "min": 1364602880,
+                        "max": 1453195264,
+                        "first": 1447837696,
+                        "last": 1396125696,
+                        "first_20pct_mean": 1446064758.1538463,
+                        "last_20pct_mean": 1392227249.2307692,
+                        "mean_change": -53837508.92307711
+                      },
+                      "vms_bytes": {
+                        "count": 61,
+                        "min": 695050240,
+                        "max": 705994752,
+                        "first": 699764736,
+                        "last": 700424192,
+                        "first_20pct_mean": 699970481.2307693,
+                        "last_20pct_mean": 701979726.7692307,
+                        "mean_change": 2009245.5384614468
+                      },
+                      "threads": {
+                        "count": 61,
+                        "min": 113,
+                        "max": 114,
+                        "first": 114,
+                        "last": 114,
+                        "first_20pct_mean": 114,
+                        "last_20pct_mean": 114,
+                        "mean_change": 0
+                      },
+                      "handles": {
+                        "count": 61,
+                        "min": 2828,
+                        "max": 2864,
+                        "first": 2833,
+                        "last": 2862,
+                        "first_20pct_mean": 2838.230769230769,
+                        "last_20pct_mean": 2849.923076923077,
+                        "mean_change": 11.692307692308077
+                      }
+                    }
+                  },
+                  {
+                    "start_seconds": 420,
+                    "end_seconds": 720,
+                    "count": 61,
+                    "span_seconds": 299.9448404,
+                    "coverage_sufficient": true,
+                    "process_gauges_sum": {
+                      "rss_bytes": {
+                        "count": 61,
+                        "min": 1365073920,
+                        "max": 1403170816,
+                        "first": 1396125696,
+                        "last": 1397837824,
+                        "first_20pct_mean": 1391758414.7692308,
+                        "last_20pct_mean": 1388950449.2307692,
+                        "mean_change": -2807965.538461685
+                      },
+                      "vms_bytes": {
+                        "count": 61,
+                        "min": 696303616,
+                        "max": 708067328,
+                        "first": 700424192,
+                        "last": 705703936,
+                        "first_20pct_mean": 702384285.5384616,
+                        "last_20pct_mean": 702165307.0769231,
+                        "mean_change": -218978.46153843403
+                      },
+                      "threads": {
+                        "count": 61,
+                        "min": 113,
+                        "max": 114,
+                        "first": 114,
+                        "last": 114,
+                        "first_20pct_mean": 113.76923076923077,
+                        "last_20pct_mean": 114,
+                        "mean_change": 0.2307692307692264
+                      },
+                      "handles": {
+                        "count": 61,
+                        "min": 2835,
+                        "max": 2874,
+                        "first": 2862,
+                        "last": 2852,
+                        "first_20pct_mean": 2856,
+                        "last_20pct_mean": 2851.230769230769,
+                        "mean_change": -4.769230769230944
+                      }
+                    }
+                  },
+                  {
+                    "start_seconds": 600,
+                    "end_seconds": 900,
+                    "count": 61,
+                    "span_seconds": 299.9707138,
+                    "coverage_sufficient": true,
+                    "process_gauges_sum": {
+                      "rss_bytes": {
+                        "count": 61,
+                        "min": 1365073920,
+                        "max": 1419915264,
+                        "first": 1396649984,
+                        "last": 1419915264,
+                        "first_20pct_mean": 1387390503.3846154,
+                        "last_20pct_mean": 1395652450.4615386,
+                        "mean_change": 8261947.076923132
+                      },
+                      "vms_bytes": {
+                        "count": 61,
+                        "min": 696303616,
+                        "max": 707354624,
+                        "first": 701284352,
+                        "last": 704335872,
+                        "first_20pct_mean": 700653568,
+                        "last_20pct_mean": 700036332.3076923,
+                        "mean_change": -617235.6923077106
+                      },
+                      "threads": {
+                        "count": 61,
+                        "min": 113,
+                        "max": 114,
+                        "first": 114,
+                        "last": 114,
+                        "first_20pct_mean": 113.84615384615384,
+                        "last_20pct_mean": 113.92307692307692,
+                        "mean_change": 0.0769230769230802
+                      },
+                      "handles": {
+                        "count": 61,
+                        "min": 2835,
+                        "max": 2869,
+                        "first": 2865,
+                        "last": 2856,
+                        "first_20pct_mean": 2860.076923076923,
+                        "last_20pct_mean": 2857.6923076923076,
+                        "mean_change": -2.3846153846152447
+                      }
+                    }
+                  }
+                ],
+                "application_cpu_machine_percent": {
+                  "count": 180,
+                  "min": 11.219957948291752,
+                  "max": 26.65563720827002,
+                  "mean": 18.76216485817615,
+                  "first": 15.961555578041517,
+                  "last": 17.863714669307445
+                },
+                "per_process": {
+                  "6680": {
+                    "exe": "C:\\Users\\user\\AppData\\Local\\Programs\\smart-factory-logger-v2\\smart-factory.exe",
+                    "rss_bytes": {
+                      "count": 181,
+                      "min": 88190976,
+                      "max": 106962944,
+                      "mean": 89966829.61325967,
+                      "first": 90304512,
+                      "last": 97746944
+                    },
+                    "vms_bytes": {
+                      "count": 181,
+                      "min": 24682496,
+                      "max": 25063424,
+                      "mean": 24841832.662983425,
+                      "first": 24875008,
+                      "last": 24707072
+                    }
+                  },
+                  "9700": {
+                    "exe": "C:\\Users\\user\\AppData\\Local\\Programs\\smart-factory-logger-v2\\smart-factory.exe",
+                    "rss_bytes": {
+                      "count": 181,
+                      "min": 773062656,
+                      "max": 818814976,
+                      "mean": 801148656.441989,
+                      "first": 809574400,
+                      "last": 818814976
+                    },
+                    "vms_bytes": {
+                      "count": 181,
+                      "min": 199245824,
+                      "max": 210386944,
+                      "mean": 204768838.71823204,
+                      "first": 207409152,
+                      "last": 205914112
+                    }
+                  },
+                  "9944": {
+                    "exe": "C:\\Users\\user\\AppData\\Local\\Programs\\smart-factory-logger-v2\\smart-factory.exe",
+                    "rss_bytes": {
+                      "count": 181,
+                      "min": 48033792,
+                      "max": 48451584,
+                      "mean": 48132910.67403315,
+                      "first": 48103424,
+                      "last": 48451584
+                    },
+                    "vms_bytes": {
+                      "count": 181,
+                      "min": 13000704,
+                      "max": 13209600,
+                      "mean": 13085203.801104972,
+                      "first": 13062144,
+                      "last": 13066240
+                    }
+                  },
+                  "10068": {
+                    "exe": "C:\\Users\\user\\AppData\\Local\\Programs\\smart-factory-logger-v2\\smart-factory.exe",
+                    "rss_bytes": {
+                      "count": 181,
+                      "min": 89251840,
+                      "max": 91824128,
+                      "mean": 90144451.18232045,
+                      "first": 91570176,
+                      "last": 91250688
+                    },
+                    "vms_bytes": {
+                      "count": 181,
+                      "min": 36028416,
+                      "max": 38920192,
+                      "mean": 36965970.03314917,
+                      "first": 38637568,
+                      "last": 38125568
+                    }
+                  },
+                  "10724": {
+                    "exe": "C:\\Users\\user\\AppData\\Local\\Programs\\smart-factory-logger-v2\\resources\\backend\\SmartFactoryBackend.exe",
+                    "rss_bytes": {
+                      "count": 181,
+                      "min": 353021952,
+                      "max": 413523968,
+                      "mean": 374883186.5635359,
+                      "first": 412348416,
+                      "last": 363651072
+                    },
+                    "vms_bytes": {
+                      "count": 181,
+                      "min": 421462016,
+                      "max": 422522880,
+                      "mean": 421841495.6906077,
+                      "first": 421462016,
+                      "last": 422522880
+                    }
+                  }
+                },
+                "performance_gate": "NOT_EVALUATED",
+                "limitations": [
+                  "RSS sum includes shared pages; not unique physical memory",
+                  "Process I/O includes non-disk/cached activity",
+                  "PhysicalDrive counters are host-wide, not application-attributed",
+                  "Device number/manager are not immutable hardware serial identity",
+                  "No per-operation disk latency, busy percent, or exhaustive open-file count"
+                ]
+              },
+              "outerChild": {
+                "status": "FAIL",
+                "created_suspended": true,
+                "job_assigned_before_resume": true,
+                "termination_requested": false,
+                "errors": [
+                  "outer-descendants-remain"
+                ],
+                "pid": 8556,
+                "actual_exit_code": 1,
+                "job_before_cleanup": [
+                  7,
+                  1,
+                  0
+                ],
+                "job_after_cleanup": [
+                  7,
+                  0,
+                  0
+                ],
+                "elapsed_seconds": 946.452829
+              },
+              "workerComponentExits": {
+                "http": 1,
+                "resources": 0,
+                "processes": 0
+              },
+              "rootCause": "UNCONFIRMED",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "resourcePerformanceGate": "NOT_EVALUATED",
+              "fullDataGate": "NOT_EVALUATED",
+              "formalQaGate": "HOLD",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false,
+              "postWindowJobMetadataObservation": {
+                "observedServerClock": "2026-10-14 21:16 KST",
+                "status": "REQUIRED_VALUES_MISSING",
+                "lastAppliedServerClock": "2026-10-14 20:52:06 KST",
+                "actualProductAndMold": "USER_INPUT_PENDING",
+                "measurementWindowMetadataWasValid": true,
+                "screenshot": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-recheck-after-recovery.png",
+                  "bytes": 235267,
+                  "sha256": "07ea70ea517276072367c6b83e52a10a7014b34c270b20d80e2cd02833937439"
+                }
+              },
+              "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
+            },
+            "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
           }
         }
       }
