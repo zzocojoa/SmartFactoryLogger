@@ -922,3 +922,97 @@ stdout/stderr 원문·설정/세대 경계의 의미·자원 성능을 별도로
 
 제조사 문의 thread1a134ba4e225b647은 재조회 결과 발신1건만 있고 답신은 없었다.
 물리 경계 NOT_TESTED, 정식 QA/출시 HOLD, 운영 승격 금지를 유지한다.
+
+
+## 2026-10-14 실제 15분 관찰 완료: FAIL 및 원시 기록 검산
+
+사용자 실행 후 준비 폴더 `C:/Users/user/Desktop/SmartFactory/Pdcdfcda8`와
+900초 시작 출력을 확인했다. preparation SHA256은
+`091746d11e1d2c7722c9c35f38945db8ab81f410af14efe54e03ecc1ee3ac31f`다.
+준비 4파일을 회수해 콘솔 핀·manifest·실제 main10068/backend10724 식별값과 요청을
+대조했다. `observe15-native-preparation-review.json` 검토 exit0다.
+종료 전 작업 관리자에서 field_runner PID12268/11876/12012/4928/8288/13444의
+Running 상태를 관찰했으며, 재실행하지 않고 같은 실행의 완료를 기다렸다.
+
+실제 결과는 `C:/Users/user/Desktop/SmartFactory/run-b1c4ac5cd2c1`, `LAUNCH_EXIT=1`이다.
+launcher SHA256 `a6d81deedcb97a6873db1e47656d937f4e27ada9092c42644a82a120c5429c1c`를
+콘솔에서 읽고 공유 `Z:/SmartFactory/20261014/return/OBS15_run-b1c4ac5cd2c1`와
+개발 작업 루트의 `server-observe15-run-b1c4ac5cd2c1`로 회수했다.
+7,632파일/36,825,802B의 공유·개발 사본 해시가 같고, launcher→session manifest→
+7,627개 session 멤버의 바이트 연결 및 정확한 파일 집합을 검증했다.
+회수 영수증 `observe15-result-recovery.json` SHA256은
+`46445077cabbf224354922215eb302426d476f10a97798f93ae83b474ba5181f`다.
+
+원시 표본으로 HTTP·자원·결합 검토를 재계산한 `review-observation-recovered.py`는
+exit0/RECORDED_SUMMARIES_REPRODUCED이며 **관찰 판정은 FAIL**이다.
+`observe15-production-replay-review.json` SHA256은
+`7de524e1f905dd26f1d50616701b1fab847f4e76141820a77ad6652698afb6ea`다.
+재계산 성공을 현장 성능 통과로 바꾸지 않는다. 측정은 서버 시각 기준 약17:21:18–17:36:18,
+900초다. supervisor는 observing→finalizing→done을 기록했고 강제 종료 요청은 없었다.
+
+| 항목 | 실제 표본 / 예정 표본 | 관측 결과 |
+| --- | --- | --- |
+| `/health` 정기 요청 | 445 / 450 | 200ms 초과134건, 최대3189.3657ms, p95 1270.1193ms, 예정5회 누락 |
+| 시작·종료 health | 2 / 2 | 6.8373ms / 114.9339ms; 첫 요청 포함, 경계 합계447/452 |
+| `/api/data` | 150 / 150 | 500ms 초과21건, 최대2342.9222ms, p95 1158.1565ms |
+| 이미지 API | 2441 / 3600 | 예정1159회 누락, HTTP502 1건, 최대2599.6609ms, 500ms 경고150건 |
+| 자원·프로세스 | 각181 / 181 | 표본 범위 충족, 모든 프로세스/listener 표본 PASS; 자원 성능 gate는 NOT_EVALUATED |
+
+정기 HTTP timeout은0이다. 이미지 예정 표본 누락은 계측 요청 일정의 미수행이며 앱의
+이미지 저장 drop으로 해석하지 않는다. 최초 health 기준 초과는17:22:10, 292.5392ms다.
+health 초과134건 중125건의 가장 큰 클라이언트 단계는 응답 헤더 대기였지만 이 시간에는
+클라이언트·서버 스케줄링 지연도 포함될 수 있다. 단독 backend 병목의 증거로 삼지 않는다.
+측정 중 준비 파일 회수용 탐색기 조작과 읽기 전용 작업 관리자 확인을 수행했다.
+작업 관리자에서 높은 host/Explorer CPU를 관찰했으나 host 전체 프로세스 시계열은
+수집하지 않아 인과를 확정하지 못했다. 이 구간이나 지연값을 제외하지 않았다.
+
+설정 양쪽 경계의 raw body와 승인 기준을 다시 계산해 같은 지문·Low Signal OFF·
+comparator 미검증을 확인했다. 앱 payload1814파일, main/backend, SPOT/logger 세대는
+양쪽 경계에서 일치한다. control-final도 같은 backend 세대와 HTTP200이나377.5647ms로
+200ms 조건을 초과해 FAIL이다. 이 중 연결 단계375.0058ms였다.
+445개 health body는 모두 Running/driver 연결/success/fresh였고 관측 저장 실패·거절0이다.
+앱 프로세스 합산 CPU는 머신 용량 기준 평균7.52%/최대15.03%였다. Electron PID9700의
+RSS는318,984,192→745,070,592B로 증가했다. 역할별 프로세스 명령행과 장기 회수 추세를
+확인하지 않았으므로 이를 메모리 누수 확정이나 자원 성능 PASS로 표현하지 않는다.
+
+worker는 HTTP exit1, resources/processes exit0이며 오류 예외 목록은 비어 있다.
+outer launcher는 종료 직후 job active1 때문에 `outer-descendants-remain`을 추가 기록했고,
+이어 강제 종료 없이 active0이 됐다. 잔류 프로세스 식별값은 기록되지 않았다.
+동일 frozen 계측기의 개발 PC `--help` 3회로는 재현되지 않았고 각 actual exit0/
+launcher PASS였다. 이는 실제 observe 자식 구성을 재현한 시험이 아니며 원인 해결로
+계산하지 않는다. 운영본·계측기 바이트는 변경하지 않았다.
+10개 stdout/stderr 중 root stdout의 FAIL JSON 외에는 모두 비어 있었다.
+`analyze-observe15-failure.py` exit0, 결과 `observe15-failure-analysis.json` SHA256은
+`b3bc7cc29f987fcd508aee3cce9bbdae9d969df5742d6b384040eedabe8ae2aa`다.
+
+측정 후 기존 읽기 도우미로 LAN GET6회 모두200/exit0를 확인했다. 이미지502의 원문과
+오류 API, transport 실패 event22152는 correlation
+`transport:b52e652bca9445349c0790183b3bc4cd`로 연결된다.17:24:21의 장비 이미지 요청이
+RemoteDisconnected/1422ms로 실패했고 포트 재사용 위반·bind 충돌·풀 고갈은0이었다.
+이 연결 단절의 근본 원인은 미확정이다. 후속 이미지 상태는ok, 저장3227/실패0/drop0이다.
+`observe15-post-read-review.json` SHA256은
+`5e8658af62b09aae7e41f576d5306042df0ea7443a62eac4967b6d10e21ddcc4`다.
+LAN 단발 조회의 회복을 실패한15분 결과의 대체 PASS로 삼지 않는다.
+
+서버 `AppData/Roaming/SmartFactoryLogger/logs/system`의 system.log/status.log를 탐색기로
+공유 `OBS15_LOGS_1758_b1c4ac5c` 아래 회수했다. 운영 중 파일의 사본으로 atomic snapshot이나
+서버 콘솔 핀은 없으며, 공유·개발 사본 해시와 분석 범위만 보증한다.
+같은 PID10724/session0bb15639768c의 health slow9건에서 PLC1429.1ms,
+runtime info1005.5ms, frontend 파일 확인1060.2ms의 단계별 최대가 관찰됐다.
+여러 단계에 분포해 단일 원인을 특정하지 못했다. 같은 시간대 plain-text Config 경고18건은
+별도 로그 형식으로 보존했고 JSON 손상으로 분류하지 않았다. status.log는
+17:24:27 Running→Warning,17:25:22 Warning→Running을 기록한다.
+`observe15-live-log-review.json` SHA256은
+`1a8c24a783c53466e360c8f940e427228e5f2220fb746739ae4cefa41e178ca4`, 검토 exit0다.
+
+다음 진단 체크리스트:
+
+- 동일 실행의 서버 slow 로그와 클라이언트 시간, 계측 부하 및 host 프로세스 자원 경합을
+  구분할 최소 계측을 준비한다. 현장 원인 미확정 상태에서 단순 재시험으로 실패를 대체하지 않는다.
+- outer job 종료 경고는 실제 observe 자식 구성을 사용하는 격리 재현으로 조사한다.
+  자식 종료 확인·잠긴 입력·실패 보존을 약화하지 않는다.
+- 원인과 필요한 조치를 확인한 뒤 영향받은15분 조건을 다시 검증하고120분 착수 여부를 결정한다.
+- 계측 기동3회, UI/packet/전체 데이터·정상 종료 QA 및 물리 경계는 여전히 미완료다.
+
+앱은 Running, 120분 미시작, 물리 경계 NOT_TESTED, 정식 QA/출시 HOLD를 유지한다.
+설치·설정 변경·재시작·운영 승격·롤백 기준 갱신을 수행하지 않았다.

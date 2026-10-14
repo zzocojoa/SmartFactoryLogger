@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T05:52:52.961074+00:00",
+  "lastUpdated": "2026-10-14T09:03:23.922618+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "OBSERVE15_R2_DELIVERED_AWAITING_USER_EXECUTION",
+            "status": "OBSERVE15_ACTUAL_FAIL_EVIDENCE_REPLAYED_CAUSE_PENDING",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8897,9 +8897,11 @@
               "moldNo": "1",
               "measuredStartupCycles": 0,
               "formalPerformanceMeasured": false,
-              "field15minComplete": false,
+              "field15minComplete": true,
               "field120minComplete": false,
-              "applicationRunning": true
+              "applicationRunning": true,
+              "field15minPassed": false,
+              "nativeObservationPerformed": true
             },
             "observe15Delivery": {
               "receiptPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-observe15-r2-delivery.json",
@@ -8910,22 +8912,78 @@
               "helperSha256": "d5ff3ddf1ad941da5b5ad97791e190a200c4d50ffdb8d310d06fbcbedc61c235",
               "commandSha256": "515ad2e0e71e2f436147310cd4bb6516d8608f32709d21b1bdb7d304e2180f60",
               "serverLocalCopyObserved": true,
-              "serverLocalHashesVerified": false,
-              "serverExecuted": false,
+              "serverLocalHashesVerified": true,
+              "serverExecuted": true,
               "durationSeconds": 900,
               "nativeChecks": 10,
               "carrierChecks": 7,
               "driversExitCode": 0,
               "actualNativeIdentityPrecisionCheckPassed": true,
-              "productionFieldResult": "NOT_RUN",
+              "productionFieldResult": "FAIL",
               "offlineReviewPreparation": {
                 "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observation-review-readiness.json",
                 "sha256": "31ae2b58dea1350d2310d661ac903523ffdabf2171bb6c551d9b8f2e4d4632c6",
                 "checks": 16,
                 "testExit": 0,
-                "productionReviewExecuted": false,
+                "productionReviewExecuted": true,
                 "fullPipelineFixtureExecuted": false
               }
+            },
+            "observe15Result": {
+              "serverPath": "C:\\Users\\user\\Desktop\\SmartFactory\\run-b1c4ac5cd2c1",
+              "launcherSha256": "a6d81deedcb97a6873db1e47656d937f4e27ada9092c42644a82a120c5429c1c",
+              "launchExit": 1,
+              "preparationPath": "C:\\Users\\user\\Desktop\\SmartFactory\\Pdcdfcda8",
+              "preparationSha256": "091746d11e1d2c7722c9c35f38945db8ab81f410af14efe54e03ecc1ee3ac31f",
+              "recovery": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-result-recovery.json",
+                "sha256": "46445077cabbf224354922215eb302426d476f10a97798f93ae83b474ba5181f"
+              },
+              "replay": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-production-replay-review.json",
+                "sha256": "7de524e1f905dd26f1d50616701b1fab847f4e76141820a77ad6652698afb6ea"
+              },
+              "analysis": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-failure-analysis.json",
+                "sha256": "b3bc7cc29f987fcd508aee3cce9bbdae9d969df5742d6b384040eedabe8ae2aa"
+              },
+              "postRead": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-post-read-review.json",
+                "sha256": "5e8658af62b09aae7e41f576d5306042df0ea7443a62eac4967b6d10e21ddcc4"
+              },
+              "liveLogReview": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-live-log-review.json",
+                "sha256": "1a8c24a783c53466e360c8f940e427228e5f2220fb746739ae4cefa41e178ca4"
+              },
+              "reviewExitCode": 0,
+              "replayStatus": "RECORDED_SUMMARIES_REPRODUCED",
+              "observationStatus": "FAIL",
+              "durationSeconds": 900,
+              "sessionManifestMembers": 7627,
+              "recoveredFiles": 7632,
+              "healthThresholdFailures": 134,
+              "healthMissedSlots": 5,
+              "dataThresholdFailures": 21,
+              "imageMissedSlots": 1159,
+              "imageHttp502": 1,
+              "httpTimeouts": 0,
+              "resourceSamples": 181,
+              "resourceCoverage": "SUFFICIENT",
+              "resourcePerformanceGate": "NOT_EVALUATED",
+              "configurationBoundaryReviews": "PASS",
+              "backendGenerationSame": true,
+              "controlFinalLatencyMs": 377.5647,
+              "outerLauncherErrors": [
+                "outer-descendants-remain"
+              ],
+              "outerJobAfterCleanupActive": 0,
+              "outerTerminationRequested": false,
+              "localHelpReproTrials": 3,
+              "localHelpReproduced": false,
+              "rootCause": "UNCONFIRMED",
+              "nextAction": "Correlate server stage timing and host/collector scheduling; reproduce actual observe child exit in isolation before deciding corrective action and repeat field measurement",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
             }
           }
         }
