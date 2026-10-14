@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T12:19:46.037184+00:00",
+  "lastUpdated": "2026-10-14T12:43:15.014742+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -10590,7 +10590,148 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
+            "nextAction": "Current job 60345/1 is user-confirmed and matches the applied server UI. Closed preinstall snapshot image byte/decode coverage is complete for 324193 files, including 94022 new ledger-linked images; preserve historical absence/orphan/drop findings. Prepare targeted timing to separate backend execution/event-loop or lock waits from client scheduling and identify remaining owned processes. Do not repeat the same 15-minute test to seek PASS, relax thresholds, start 120 minutes, or promote. Candidate runtime/closed data QA remains pending.",
+            "closedSnapshotImageQa": {
+              "schema": "sfl-closed-snapshot-image-coverage-record-v1",
+              "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
+              "status": "CLOSED_SNAPSHOT_IMAGE_CONTENT_AND_DECODE_COVERAGE_COMPLETE",
+              "serverBackupRoot": "C:/Users/user/Desktop/SmartFactory/Q3d9da3",
+              "operatingBuildAtBackup": "541d701d544eea6a8a4e4836047077eaf9cfaf30",
+              "actualRecoveryAndReviewExitCode": 0,
+              "actualScopeTestsExitCode": 0,
+              "scopeTests": 7,
+              "result": {
+                "status": "CLOSED_SNAPSHOT_IMAGE_CONTENT_AND_DECODE_COVERAGE_COMPLETE",
+                "exit_code": 0,
+                "archive_counts": {
+                  "files": 109542,
+                  "bytes": 1065522110,
+                  "decode_PASS": 109542,
+                  "directories": 3,
+                  "unique_contents_checked": 109542,
+                  "unique_contents_newly_decoded": 94022,
+                  "unique_prior_contents_reused": 15520
+                },
+                "zip_sha256": "98bf58e33467bb227d4a24cfb62b39307c7f476c37f9495f0397718f630aa751",
+                "zip_bytes": 1092689038,
+                "new_image_files": 94022,
+                "new_image_bytes": 916112088,
+                "new_image_ledger_join_count": 94022,
+                "prior_unchanged_files": 230171,
+                "current_snapshot_images_covered": 324193,
+                "current_snapshot_image_bytes": 3178166328,
+                "prior_images_absent_from_current": 82814,
+                "absence_cause": "UNCONFIRMED",
+                "manifest_sha256": "ab637280383d38777649310f00cd586a80e7f74e0cf159d9535a1d170287f393",
+                "records_sha256": "6fcd2fea66cc922f7d9faac43a7e05f1f8fa638f35a14f20bd22eeeec41daf27",
+                "combined_coverage_sha256": "5680e056ccf74dd27bf1f26f5e58c3ca0dcc48dea78081449e70aa5de4e9efdb",
+                "selection_sha256": "a43cd30a1fa43d0dc5c10f93c625e6961b6d6f385ffe048fbfed77cfa6f1f333",
+                "helper_sha256": "3e0936c9aec12e0ad100dbab671e3cd8af6b7a87851a1b18a75470502b8512c5",
+                "server_zip_container_hash_verified_on_server": false,
+                "named_streams_preserved_by_zip": false,
+                "candidate_runtime_images_in_scope": false,
+                "historical_missing_or_orphan_disposition_complete": false,
+                "historical_drop173_resolved": false,
+                "full_data_gate": "NOT_EVALUATED",
+                "release_gate": "HOLD",
+                "promotion_allowed": false,
+                "elapsed_seconds": 166.60999999998603,
+                "finished_utc": "2026-10-14T12:42:13.028222+00:00"
+              },
+              "evidence": [
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\summary.json",
+                  "bytes": 1682,
+                  "sha256": "86c73296057c50e25debb7cec471b9fdc12ce6afae9632275e1fe120d5673e57"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\exit.json",
+                  "bytes": 68,
+                  "sha256": "baf1ff67cd69c37740c3f0faa0bc77d7e7f957ed1478816ae41e79f23ad352ab"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\terminal-exit.json",
+                  "bytes": 163,
+                  "sha256": "8a72ff267ace39ea8c2421429bb74c4f35105eb920d76f9ed6de0b538acb7251"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\selection.json",
+                  "bytes": 2046,
+                  "sha256": "a43cd30a1fa43d0dc5c10f93c625e6961b6d6f385ffe048fbfed77cfa6f1f333"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\scope-tests.json",
+                  "bytes": 245,
+                  "sha256": "5ffacefdb2a25845208ecab6c1ad91b10a73537ae926a38c28d59e631f7fe610"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\receive-verify-delta.py",
+                  "bytes": 13894,
+                  "sha256": "3e0936c9aec12e0ad100dbab671e3cd8af6b7a87851a1b18a75470502b8512c5"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\test-delta-scope.py",
+                  "bytes": 4264,
+                  "sha256": "1b635045ab74e84967fdde1c5e18537ef8106977535ad3a31f6f844bd9e34ca0"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\transfer-and-job-receipt.json",
+                  "bytes": 2085,
+                  "sha256": "bc457505811051dfd39cabf87c780bdd8a9a8c024dfc401c3c98acd39bdf42d2"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\server-zip-settings.png",
+                  "bytes": 134483,
+                  "sha256": "e4faf46dc7b0b4e189579ffddcf3ef1f8fc946e36ee372c3ddbe419c4104c91f"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\server-zip-returned.png",
+                  "bytes": 130516,
+                  "sha256": "2bcb89b27e7ef7df230587427c9e9d83519e7992de0c81717addeaf971052d87"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\server-job-60345-1.png",
+                  "bytes": 138295,
+                  "sha256": "386da40d6c6ed89991b264485d749dccda6ecbd3979525261e87bcbb07df6d88"
+                },
+                {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\record-completion.py",
+                  "bytes": 10809,
+                  "sha256": "60c34b2508d2e6c9953cb5afe85649a2d933b07a5414e74787185be4b67a5a44"
+                }
+              ],
+              "currentJob": {
+                "product": "60345",
+                "mold": "1",
+                "exact_user_reply": "60345, 1",
+                "screen_applied_at_kst": "2026-10-14 21:30:09",
+                "agent_entered_values": false,
+                "screen_matches_reply": true
+              },
+              "field15Status": "FAIL",
+              "physicalBoundary": "NOT_TESTED",
+              "canary120Started": false,
+              "releaseGate": "HOLD",
+              "promotionAllowed": false,
+              "completionRecord": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\completion-record.json",
+                "bytes": 5452,
+                "sha256": "92321d613404a8447eb7a596d2129cdf182dbb779216e5af945cda31239b6b66"
+              }
+            },
+            "currentJobConfirmation": {
+              "product": "60345",
+              "mold": "1",
+              "exact_user_reply": "60345, 1",
+              "screen_applied_at_kst": "2026-10-14 21:30:09",
+              "agent_entered_values": false,
+              "screen_matches_reply": true,
+              "receipt": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_CLOSED_IMAGES_20261014_b14a7744\\transfer-and-job-receipt.json",
+                "bytes": 2085,
+                "sha256": "bc457505811051dfd39cabf87c780bdd8a9a8c024dfc401c3c98acd39bdf42d2"
+              }
+            }
           }
         }
       }
