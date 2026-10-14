@@ -434,3 +434,16 @@ full_data NOT_EVALUATED, physical NOT_TESTED, release HOLD를 바꾸지 않았�
 당시 실패는 운영자 확인 프로파일 조건이며 현재 자료의 결과로 재사용하지 않는다.
 이 기록은 현재 1,800초 예산이 부족할 수 있다는 근거다. 실행 중 검사를 중복 시작하거나
 완료로 간주하지 않고 실제 종료 상태를 확인한다.
+
+13:02 KST에 첫 로컬 CSV 검사는 `command-deadline`으로 끝났다. driver exit0는
+결과 기록 성공이며 소비자 PASS가 아니다. 소비자 exit는 없고, 소유한 Windows Job의
+작업들을 제한 시간에 종료한 뒤 active_processes=0, worker_still_alive=false를 확인했다.
+stdout/stderr는 모두 0B였고, 잠근 입력의 종료 재검산만 PASS다. 원본 기록
+`recovered-csv-r1/review.json`의 SHA256은
+`ae79ee1d0628b0632ef7a2ef010bcb40c27dc62e312b09465ccc926eca84e40b`다.
+
+같은 입력 5파일과 같은 고정 검증기로 `run-recovered-csv-r2.py`를 실행했다.
+앞선 실패·Job 종료·입력 해시를 확인하고 시간 예산만 기존 허용 범위인 3,600초로 늘렸다.
+입력 사본은 재사용하되 새 경로 전용 metadata와 결과는 `recovered-csv-r2`에 기록한다.
+13:03 KST 실제 소비자 실행을 확인했으며 결과는 아직 미확정이다. 서버 도우미·앱·
+설치본은 재실행하지 않았다. 검증 조건과 정식 출시 HOLD는 그대로 유지한다.
