@@ -1016,3 +1016,74 @@ runtime info1005.5ms, frontend 파일 확인1060.2ms의 단계별 최대가 관�
 
 앱은 Running, 120분 미시작, 물리 경계 NOT_TESTED, 정식 QA/출시 HOLD를 유지한다.
 설치·설정 변경·재시작·운영 승격·롤백 기준 갱신을 수행하지 않았다.
+
+## 2026-10-14 지연 구간 대조와 host 진단 소스 검증
+
+원시 응답의 `x-trace-id`와 회수한 system.log를 같은 식별자로 연결해 health 6건과
+이미지 오류 1건을 대조했다. 최대 health 요청 `health-00223.json`의 클라이언트 시간은
+3189.3657ms, 서버 build_health 구간은1010.6ms(runtime_info1005.5ms)였다.
+차이2178.7657ms에는 계측하지 않은 처리·대기·클라이언트/서버 스케줄링이 포함될 수 있다.
+이를 특정 CPU 병목이나 네트워크 대기 시간으로 단정하지 않는다. 같은 세대의 다른 요청도
+PLC·runtime_info·frontend 구간에 지연이 분포했다. 근본 원인은 UNCONFIRMED다.
+
+`observe15-trace-joined-records.json` SHA256은
+`cbc6ca3380bfd411be72273a489f676a160e01df19379fea4bd780d3a5325ca8`이다.
+원시 표본의 session manifest와 로그 사본 해시를 대조한 통합 검토
+`observe15-causal-followup-review.json`은 exit0, SHA256
+`b5fa188a515f0d98185f7cdd311df4f8de72f170c1029966db7b6f8eb341fecd`다.
+
+종료 경고는 기존 f274b534 helper 소스28개를 해시 검증해 복사한 뒤 실제 observation의
+HTTP/resources/processes 자식 구성과 같은 outer launcher로 격리 재현했다.
+개발 PC에서 frozen onefile의5초 관찰3회는 모두 actual exit0, outer7/active0,
+inner4/active0, 강제 종료0이었고 fixture 앱도 정상 종료했다. 당시 서버의
+`outer-descendants-remain`은 재현되지 않았다. 짧은 합성 시험이므로 실제15분의
+종료 경합을 배제하거나 실패가 해결됐다고 해석하지 않는다. 기존 launcher 판정은 유지한다.
+근거는 바탕화면 `SmartFactory/PDCA_OBS15_DIAG_20261014_b1c4ac5c/result.json`, SHA256
+`e2fc874a4dc8ec54ed3199d45d86527c70658f8cc57898085a41c0ea24e6b619`다.
+
+새 개발 소스 `scripts/field-v1028/field_host_sampling.py`는 host CPU/메모리와
+각 프로세스의 PID·생성 시각·실행 파일명·CPU·메모리만 읽는다. Windows의 제한 조회
+핸들 하나로 동일 프로세스 객체를 읽고 원시 생성 시각으로 PID 재사용을 구분한다.
+명령행·환경 변수·사용자명·실행 경로는 결과에 저장하지 않는다. 접근 거부·세대 변경·
+감소한 카운터는0으로 채우지 않고 미측정으로 남긴다. PID0의 idle 시간은 프로세스
+CPU 합산에서 제외하며 host idle 카운터에는 포함한다. 작업 집합 합계의 공유 메모리와
+Windows PagefileUsage(commit charge) 의미도 기록한다.
+
+첫 psutil 방식은 개발 PC 약495프로세스에1.5–2.1초가 걸렸다. 제한 조회 방식의 최종
+통합 fixture는517–519프로세스에33.5–46.0ms, collector CPU31.25–46.875ms였다.
+읽기 불가192–195프로세스가 있어 같은 범위의 단순 속도 비교가 아니다. 관리자 서버의
+실제 수집 비용과 접근 범위는 미검증이며, 비용과 누락을 매 표본에 남긴다.
+API 근거: [GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes),
+[GetProcessMemoryInfo](https://learn.microsoft.com/en-us/windows/win32/api/psapi/nf-psapi-getprocessmemoryinfo),
+[PROCESS_MEMORY_COUNTERS](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters).
+
+`field_host_diagnostic.py`는 기존 observation에 별도 host 수집 자식을 더한다.
+기본5초 간격, 최대300초/121표본, 놓친 일정·중단·수집 비용과 파일 해시를 기록한다.
+동일 supervisor의 소유 job 안에서만 실행하며 운영 앱을 종료 대상으로 삼지 않는다.
+`field_runner.py`의 새 `host-diagnostic` 요청은 정확히300초만 허용한다.
+기존 `observe`의900/7200초 조건·후보/설정 핀·실패 판정은 유지한다.
+새 진단의 scope는 `HOST_ATTRIBUTION_DIAGNOSTIC_NOT_RELEASE_QA`이며 정식 QA/HOLD와 구분한다.
+
+검증 근거:
+
+- `python -B -m unittest -v test_field_host_sampling test_field_host_diagnostic`: 15검사 exit0.
+  Windows 네이티브 조회, 핸들 정리, PID 재사용, 누락/취소, 해시 manifest와 재계산,
+  정상/앱 세대 변경5초 fixture를 확인했다. 두 fixture의 소유 프로세스5개는 모두
+  active0/강제 종료0, 앱 정상 종료0이며 세대 변경은 observation FAIL/worker exit1을 유지했다.
+- `test_field_host_runner` 3검사와 기존 runner의 duration/reference·describe/필수 인수2검사:
+  총5검사 exit0. 첫 실행은 시험용 경로가 없어1건 실패했고, 실제 임시 fixture 경로를
+  만들도록 시험을 수정한 뒤 통과했다. 전체 제품 health 검사는 제품 코드 변경이 없어 실행하지 않았다.
+- `review-host-diagnostic-development.py`는 저장된 원시 표본·manifest·interval 재계산,
+  두 fixture의 종료와 잔존 세대 부재를 검토해 exit0이다.
+  `host-diagnostic-development-review.json` SHA256은
+  `490fc9dda66d5cd6b72d4f78d681c0d3413f127f61da84466424f02bb5ee73da`다.
+
+다음 실행 체크리스트:
+
+1. 확정 소스로 frozen 진단 도우미와 해시 결합 실행 요청을 새 폴더에 준비하고
+   소유 job/실패·세대 변경/긴 경로/보호 ACL을 검증한다.
+2. 공유 send와 서버 로컬 최종 폴더까지 복사·확인한 뒤 필요한 사용자 실행을 안내한다.
+3. 같은 설정·실행 세대에서5분 진단 결과와 실제 CPU/응답 시계열을 회수·대조한다.
+
+현재 새 도우미는 소스·개발 시험 단계이며 frozen 서버 묶음·전달·실행은 아직 하지 않았다.
+실패한15분, 120분 미시작, 물리 경계 NOT_TESTED, 정식 QA/출시 HOLD를 유지한다.

@@ -13,6 +13,7 @@ import field_closed_data_qa as qa
 import field_csv_inputs as inputs
 import field_installation_binding as binding
 import field_observation as observation
+import field_host_diagnostic as host_diagnostic
 from field_resource_sampling import ProcessIdentity, error_record
 
 
@@ -20,6 +21,7 @@ SCHEMA = 'sfl-field-run-request-v1'
 COMMON = {'schema', 'mode', 'candidate_commit', 'signature_policy'}
 MODE_FIELDS = {
     'observe': {'spec', 'duration_seconds'},
+    'host-diagnostic': {'spec', 'duration_seconds'},
     'closed-data': {'data_root', 'roles', 'expected_files', 'image_files', 'shutdown_expectation',
                     'configuration_reference', 'configuration_reference_sha256', 'validator_timeout_seconds'},
 }
@@ -32,9 +34,10 @@ def validate_request(value):
     mode = value.get('mode')
     binding.require(isinstance(mode, str) and mode in MODE_FIELDS
                     and set(value) == COMMON | MODE_FIELDS[mode], 'request-mode-fields')
-    if mode == 'observe':
-        binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] in (900, 7200),
-                        'field-duration-must-be-15-or-120-minutes')
+    if mode in ('observe', 'host-diagnostic'):
+        durations = (300,) if mode == 'host-diagnostic' else (900, 7200)
+        binding.require(type(value['duration_seconds']) is int and value['duration_seconds'] in durations,
+                        'duration-does-not-match-request-mode')
         data = value['spec']
         binding.require(isinstance(data, dict) and set(data) == {f.name for f in fields(observation.ObservationSpec)},
                         'observation-spec-fields')
@@ -54,14 +57,15 @@ def validate_request(value):
 
 def execute_phase(request, folder, package):
     mode = validate_request(request)
-    if mode == 'observe':
+    if mode in ('observe', 'host-diagnostic'):
         data = dict(request['spec'])
         data['main'] = ProcessIdentity(**data['main'])
         data['backend'] = ProcessIdentity(**data['backend'])
         spec = observation.ObservationSpec(**data)
         spec.validate()
+        options = {'_worker_target': host_diagnostic.worker_entry} if mode == 'host-diagnostic' else {}
         result = observation.supervise_observation(spec, folder / 'observation',
-                                                   duration_seconds=request['duration_seconds'])
+                                                   duration_seconds=request['duration_seconds'], **options)
         return result, result['supervisor_status'] == 'PASS'
     bound = inputs.CsvInputs(request['data_root'], folder / 'csv-inputs', request['roles'],
                              request['expected_files'], package / 'validate_csv_v2_shadow.exe')
@@ -94,7 +98,8 @@ def run(request_path, request_sha256, output_root, package):
             request = binding.strict_json(raw)
             result['mode'] = validate_request(request)
             input_paths = ([request['spec']['root'], request['spec']['configuration_reference'], request['spec']['reference']]
-                           if result['mode'] == 'observe' else [request['data_root'], request['configuration_reference']])
+                           if result['mode'] in ('observe', 'host-diagnostic')
+                           else [request['data_root'], request['configuration_reference']])
             for path in input_paths:
                 path = binding.plain_path(path)
                 binding.require(path != output_root and output_root not in path.parents

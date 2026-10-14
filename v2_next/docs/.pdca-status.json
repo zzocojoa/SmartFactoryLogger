@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T09:03:23.922618+00:00",
+  "lastUpdated": "2026-10-14T09:28:31.336170+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "OBSERVE15_ACTUAL_FAIL_EVIDENCE_REPLAYED_CAUSE_PENDING",
+            "status": "HOST_DIAGNOSTIC_SOURCE_VERIFIED_PACKAGING_PENDING",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8981,7 +8981,30 @@
               "localHelpReproTrials": 3,
               "localHelpReproduced": false,
               "rootCause": "UNCONFIRMED",
-              "nextAction": "Correlate server stage timing and host/collector scheduling; reproduce actual observe child exit in isolation before deciding corrective action and repeat field measurement",
+              "nextAction": "Package and verify bounded 300-second host attribution diagnostic, deliver to server, then correlate actual host CPU with HTTP latency; root cause remains unconfirmed",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false,
+              "causalFollowupReview": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observe15-causal-followup-review.json",
+                "bytes": 1758,
+                "sha256": "b5fa188a515f0d98185f7cdd311df4f8de72f170c1029966db7b6f8eb341fecd"
+              },
+              "localFrozenObserveReproTrials": 3,
+              "localFrozenObserveReproduced": false
+            },
+            "hostDiagnosticPreparation": {
+              "status": "SOURCE_VERIFIED_NOT_PACKAGED",
+              "review": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\host-diagnostic-source-readiness.json",
+                "bytes": 1717,
+                "sha256": "2efa80c75126d52ed95ace0a2b63498cebdfae8a925b4aa5d471ec6209946e99"
+              },
+              "localTests": 20,
+              "testsExitCode": 0,
+              "serverPackaged": false,
+              "serverDelivered": false,
+              "serverExecuted": false,
+              "scope": "HOST_ATTRIBUTION_DIAGNOSTIC_NOT_RELEASE_QA",
               "releaseGate": "HOLD",
               "promotionAllowed": false
             }
