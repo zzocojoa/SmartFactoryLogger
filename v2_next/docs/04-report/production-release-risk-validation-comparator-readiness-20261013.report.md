@@ -679,3 +679,60 @@ uninstaller 한 파일이다. config 본문을 출력하지 않았다.
 결과나 `PS C:\...>` 복귀가 보이지 않는다. 터미널 입력은 하지 않았다. 14:18 KST 이후
 제조사 Gmail 문의 thread도 읽기 확인했으며 현재 발신 메시지 1개뿐이고 답신은 없다.
 기존 명령의 중단 확인 후 결과 폴더 최종 상태를 대조해 재개 절차를 이어가야 한다.
+
+### 2026-10-14 14:51 KST 콘솔 닫기 확인과 설치 후 검산 재개
+
+사용자는 Ctrl+C 후에도 `>>`가 그대로라고 보고했고, 지정한 관리자 PowerShell 창을
+X로 닫아 달라는 요청에 “해당 창이 닫힘”이라고 답했다. 원격 화면에서도 창이 사라진
+것을 확인했다. 이는 `operator-console-close`이며 정상 Ctrl+C 중단으로 기록하지 않는다.
+확인 기록 `operator-console-close-confirmation.json`은 620B/SHA256
+`f890e897c0bbd09a9b6d64ec8d14818deb935a491a69ea17d50c072ad8582488`다.
+창이 닫힌 관찰만으로 관련 프로세스 부재를 확정하지 않는다.
+
+닫힌 후 서버 `I90b5ed1b`를 새 공유 return 폴더
+`POSTINSTALL_I90b5ed1b_STOPPED/I90b5ed1b`와 개발 `server-install-r2-stopped`로 회수했다.
+6파일의 크기·해시는 앞선 중간 사본과 모두 동일했고 최종 result/registration은 없었다.
+`recover-install-stopped.py`는 exit0, 검토 영수증은 2,013B/SHA256
+`d2a4c09d53f6044fcb7a34a26b1282018b076f40d2fb6977fa7c34e338276f2f`다.
+후보 설치 exit0와 1,814파일 일치 기록을 보존하며 설치는 반복하지 않는다.
+
+별도 검산 도우미 R2는 위 닫기 방식과 기존 launcher의 UTF-16 명령 SHA256을 결합했다.
+실제 기존 launcher가 남아 있으면 설정 변경 전에 거부한다. 설치 실행 함수/호출은 없고,
+registry 기록은 검증에 필요한 문자열만 저장한다. 원본·백업 본문 및 추가 스트림을
+전수 검산한 후에만 `SPOT.low_signal_comparator_verified`를 false로 바꾼다.
+Low Signal 경고 OFF, 앱 종료, 물리 경계 NOT_TESTED, 정식 출시 HOLD를 유지한다.
+
+native PowerShell 5.1 재개 시험 10개와 launcher 시험 7개의 최종 출력·종료 코드를 검토했다.
+정상 재개/driver는 exit0였고 각 거부 시험은 예상 exit1/17을 확인했다. 두 정상 중단 방식,
+잘못된 중단 방식, 기존 프로세스 활성 및 기존 영수증/설치 파일 변조를 포함한다.
+재개 단계의 설치 실행은 0회다. 개발 검토 영수증
+`postinstall-resume-development-review-r2.json`은 12,368B/SHA256
+`1c511d6a1869f7af82f744c9d4b07c055e4a8a0d5013a72ae3c927058618043a`다.
+이는 모의 검증이며 실제 서버 검산 통과를 대신하지 않는다.
+
+최종 묶음 `POSTVERIFY_20261014_0dd2ced0_R2`의 주요 핀은 다음과 같다.
+
+| 항목 | SHA256 |
+|---|---|
+| helper | `8d620268451e1dc83a80bd75fab734da5fa1f166dcb48e4c71152028f8d857a7` |
+| manifest | `e1194c514cb3af61d87f71123a77658a1643cc8308c81723bd1d0a70a529d80c` |
+| request | `aa3423dcc7b27610db72a9ad574af81180f5fcff4028905d676ae6ee611d825f` |
+| index | `490225f54893dabbecfa93624605619972d7deeac36db6835cd95da41fabc317` |
+| command | `9e484cd6cbe87f8f70557f59c19b2397b8de56b6e7876e16d95e2d29af6a4e97` |
+
+개발/공유의 12파일 해시를 대조한 뒤, 서버 탐색기로 바탕화면 SmartFactory에 폴더와
+명령 텍스트를 복사했다. 실제 절대경로
+`C:/Users/user/Desktop/SmartFactory/POSTVERIFY_20261014_0dd2ced0_R2`와 내부 11파일을
+확인하고 `PINNED_POSTINSTALL_VERIFY_COMMAND_0dd2ced0_R2.txt`를 서버 메모장에 열었다.
+전송 영수증 `server-postverify-r2-delivery.json`은 3,677B/SHA256
+`e10037ff3f0db6b91ac829a5ec534409f34a647c7dddee5ba38258f72e55aacb`다.
+서버 파일 존재 화면과 서버 로컬 해시 검증은 구분한다. 기존 R1/R2 증거는 수정하지 않았다.
+
+사용자가 새 관리자 PowerShell에서 “실행 중”이라고 답했고, 14:51 KST 화면에
+`VERIFY phase=source-and-restored-verification`이 출력되는 것을 확인했다.
+설치 파일/등록 확인 다음의 데이터 검산 단계에 도달한 관찰이며 아직 완료가 아니다.
+백업의 기존 180분 제한은 유지했다. 준비 당시 나이는 원문 UTC 기준 84.08분이었다.
+
+남은 절차는 새 결과의 `RESULT_PATH`, `RESULT_SHA256`, `LAUNCH_EXIT` 확인 → 새 return
+폴더로 회수 → 콘솔 핀/증거 대조 → 통과 시 표준 사용자 앱 시작 순서다. 결과 확인 전
+설치를 반복하거나 앱을 시작하지 않는다. 15분/120분 현장 시험과 정식 출시는 미완료다.

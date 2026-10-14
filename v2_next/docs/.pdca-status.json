@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T05:18:00.445259+00:00",
+  "lastUpdated": "2026-10-14T05:52:52.961074+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T05:18:00.445259+00:00"
+        "lastUpdated": "2026-10-14T05:52:52.961074+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "CANDIDATE_INSTALLER_EXIT0_OBSERVED_POSTINSTALL_RECEIPT_DELAY_OPERATOR_STOP_REQUESTED",
+            "status": "POSTINSTALL_ONLY_R2_RUNNING_PRESERVATION_VERIFICATION",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8699,23 +8699,54 @@
               "registrationFixChecksExitCode": 0,
               "registrationFixSyntheticControllerExitCode": 0,
               "postinstallResume": {
-                "sourcePath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/verify-field-install-resume.ps1",
-                "sourceSha256": "ac197fb1b41317e3bd162b27ffb7907f44c15c9ca71a45323a09cb68b2d94a33",
+                "sourcePath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\POSTVERIFY_20261014_0dd2ced0_R2\\verify-field-install-resume-r2.ps1",
+                "sourceSha256": "8d620268451e1dc83a80bd75fab734da5fa1f166dcb48e4c71152028f8d857a7",
                 "containsInstallerStartCode": false,
-                "syntheticControllerCases": 8,
+                "syntheticControllerCases": 10,
                 "syntheticControllerDriverExitCode": 0,
                 "carrierCases": 7,
                 "carrierDriverExitCode": 0,
-                "reviewPath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/postinstall-resume-development-review.json",
-                "reviewSha256": "a2f7042413f57910095491031ee5dd24c5ca3d0c6dcf045cc4d0508a27ab04aa",
+                "reviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\postinstall-resume-development-review-r2.json",
+                "reviewSha256": "1c511d6a1869f7af82f744c9d4b07c055e4a8a0d5013a72ae3c927058618043a",
                 "outputReviewExitCode": 0,
-                "finalServerRequestCreated": false,
-                "serverDelivered": false,
-                "serverExecuted": false,
-                "staticStagePath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/POSTVERIFY_20261014_0dd2ced0",
-                "staticStageFiles": 8,
-                "staticStageVerified": true,
-                "nextDependency": "OPERATOR_INTERRUPT_CONFIRMATION_AND_PRIOR_RESULT_RECOVERY"
+                "operatorStopMethod": "operator-console-close",
+                "priorLauncherUtf16Sha256": "e212bba2e11f99c06109fcd749816813078040345b77b8b68114a51f9d8d91bc",
+                "finalServerRequestCreated": true,
+                "manifestSha256": "e1194c514cb3af61d87f71123a77658a1643cc8308c81723bd1d0a70a529d80c",
+                "requestSha256": "aa3423dcc7b27610db72a9ad574af81180f5fcff4028905d676ae6ee611d825f",
+                "indexSha256": "490225f54893dabbecfa93624605619972d7deeac36db6835cd95da41fabc317",
+                "commandSha256": "9e484cd6cbe87f8f70557f59c19b2397b8de56b6e7876e16d95e2d29af6a4e97",
+                "serverPath": "C:\\Users\\user\\Desktop\\SmartFactory\\POSTVERIFY_20261014_0dd2ced0_R2",
+                "serverDelivered": true,
+                "serverBundleFilesObserved": 11,
+                "serverCommandOpenedInNotepad": true,
+                "serverLocalHashesVerified": false,
+                "serverExecuted": true,
+                "deliveryReviewPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-postverify-r2-delivery.json",
+                "deliveryReviewSha256": "e10037ff3f0db6b91ac829a5ec534409f34a647c7dddee5ba38258f72e55aacb",
+                "nextDependency": "PINNED_POSTINSTALL_RESULT_REVIEW_BEFORE_STANDARD_USER_START",
+                "previousDevelopmentRevision": {
+                  "sourcePath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/verify-field-install-resume.ps1",
+                  "sourceSha256": "ac197fb1b41317e3bd162b27ffb7907f44c15c9ca71a45323a09cb68b2d94a33",
+                  "containsInstallerStartCode": false,
+                  "syntheticControllerCases": 8,
+                  "syntheticControllerDriverExitCode": 0,
+                  "carrierCases": 7,
+                  "carrierDriverExitCode": 0,
+                  "reviewPath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/postinstall-resume-development-review.json",
+                  "reviewSha256": "a2f7042413f57910095491031ee5dd24c5ca3d0c6dcf045cc4d0508a27ab04aa",
+                  "outputReviewExitCode": 0,
+                  "finalServerRequestCreated": false,
+                  "serverDelivered": false,
+                  "serverExecuted": false,
+                  "staticStagePath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/POSTVERIFY_20261014_0dd2ced0",
+                  "staticStageFiles": 8,
+                  "staticStageVerified": true,
+                  "nextDependency": "OPERATOR_INTERRUPT_CONFIRMATION_AND_PRIOR_RESULT_RECOVERY"
+                },
+                "serverExecution": "PRESERVATION_VERIFICATION_RUNNING_FINAL_RESULT_PENDING",
+                "executionObservationPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\postverify-r2-running-observation.json",
+                "executionObservationSha256": "04665458bd1be9e6218b4df96eee1d9da24763ad11e9ea5d396a769d810f69c3"
               },
               "partialResultSnapshot": {
                 "status": "PARTIAL_INSTALL_RECEIPTS_MATCH_PINNED_REQUEST_AND_PAYLOAD",
@@ -8735,6 +8766,22 @@
                 "postinstallPreservationVerified": false,
                 "configurationCorrectionVerified": false,
                 "reviewExitCode": 0
+              },
+              "operatorConsoleCloseConfirmed": true,
+              "operatorConsoleCloseObserved": true,
+              "operatorStopMethod": "operator-console-close",
+              "operatorConsoleCloseConfirmationSha256": "f890e897c0bbd09a9b6d64ec8d14818deb935a491a69ea17d50c072ad8582488",
+              "priorLauncherAbsenceVerified": false,
+              "stoppedResultSnapshot": {
+                "status": "INSTALL_RECEIPTS_RECOVERED_AFTER_OPERATOR_CONSOLE_CLOSE",
+                "localPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-install-r2-stopped",
+                "sharePath": "Z:\\SmartFactory\\20261014\\return\\POSTINSTALL_I90b5ed1b_STOPPED\\I90b5ed1b",
+                "files": 6,
+                "sameHashesAsPartialSnapshot": true,
+                "reviewSha256": "d2a4c09d53f6044fcb7a34a26b1282018b076f40d2fb6977fa7c34e338276f2f",
+                "reviewExitCode": 0,
+                "postinstallPreservationVerified": false,
+                "configurationCorrectionVerified": false
               }
             },
             "physicalBoundaryTest": "NOT_TESTED",
