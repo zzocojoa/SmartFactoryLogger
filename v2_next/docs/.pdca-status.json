@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T09:35:34.006900+00:00",
+  "lastUpdated": "2026-10-14T09:54:03.249295+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "HOST_DIAGNOSTIC_FROZEN_VERIFIED_PREPARATION_PENDING",
+            "status": "HOST_DIAGNOSTIC_DELIVERED_MANUAL_EXECUTION_PENDING",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8981,7 +8981,7 @@
               "localHelpReproTrials": 3,
               "localHelpReproduced": false,
               "rootCause": "UNCONFIRMED",
-              "nextAction": "Prepare and test pinned 300-second server preparation and carrier; copy complete bundle through share to server, then request only required manual execution. Preserve 15-minute FAIL and release HOLD.",
+              "nextAction": "Observe required manual execution and recover the 300-second diagnostic result. Verify launcher/native preparation pins and raw host/HTTP/process evidence. Preserve the original 15-minute FAIL and release HOLD.",
               "releaseGate": "HOLD",
               "promotionAllowed": false,
               "causalFollowupReview": {
@@ -8993,7 +8993,7 @@
               "localFrozenObserveReproduced": false
             },
             "hostDiagnosticPreparation": {
-              "status": "FROZEN_VERIFIED_SERVER_PREPARATION_PENDING",
+              "status": "SERVER_DELIVERED_MANUAL_EXECUTION_PENDING",
               "review": {
                 "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\host-diagnostic-source-readiness.json",
                 "bytes": 1717,
@@ -9001,8 +9001,8 @@
               },
               "localTests": 20,
               "testsExitCode": 0,
-              "serverPackaged": false,
-              "serverDelivered": false,
+              "serverPackaged": true,
+              "serverDelivered": true,
               "serverExecuted": false,
               "scope": "HOST_ATTRIBUTION_DIAGNOSTIC_NOT_RELEASE_QA",
               "releaseGate": "HOLD",
@@ -9017,7 +9017,41 @@
               "runnerPackageCreated": true,
               "portableEntryCases": 2,
               "frozenWindowCases": 2,
-              "serverPreparationComplete": false
+              "serverPreparationComplete": true,
+              "serverLocalHashesVerified": false,
+              "nativePreparationCases": 10,
+              "nativeCarrierCases": 7,
+              "preparationDriverExitCode": 0,
+              "carrierDriverExitCode": 0,
+              "transferDriverExitCode": 0,
+              "serverPath": "C:\\Users\\user\\Desktop\\SmartFactory\\HOSTDIAG_20261014_29e99522",
+              "commandPath": "C:\\Users\\user\\Desktop\\SmartFactory\\HOSTDIAG_20261014_29e99522\\PINNED_HOST_DIAGNOSTIC_COMMAND_29e99522.txt",
+              "deliveryReview": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\server-delivery.json",
+                "bytes": 5964,
+                "sha256": "b6add98b18e74071642ad86142cd296c634d5dab59baf71016a8ab21a7087eee"
+              },
+              "shareTransfer": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\share-transfer.json",
+                "bytes": 10623,
+                "sha256": "1d7ac4d2dd6b79608b4223db78b0aa8d590bb27312fc883210c1935e8ebb3c07"
+              },
+              "offlineComponentReview": {
+                "reviewer": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\review-host-component.py",
+                  "bytes": 8334,
+                  "sha256": "7313c95ff5ad317b97c3d5a7daff4c80b4d5d2cdf36cb28b9b8f5a3314978ab8"
+                },
+                "checks": 9,
+                "driverExitCode": 0,
+                "readiness": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\host-component-review-tests-r2\\result.json",
+                  "bytes": 1225,
+                  "sha256": "164934df5913a6a4c12b94e8eea0daf1684dcafb2f7fb49280f32295264c483f"
+                },
+                "serverReviewPerformed": false,
+                "scope": "HOST_COMPONENT_ONLY_OUTER_SESSION_AND_HTTP_REVIEW_REQUIRED"
+              }
             }
           }
         }
