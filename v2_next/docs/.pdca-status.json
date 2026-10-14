@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T09:28:31.336170+00:00",
+  "lastUpdated": "2026-10-14T09:35:34.006900+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "HOST_DIAGNOSTIC_SOURCE_VERIFIED_PACKAGING_PENDING",
+            "status": "HOST_DIAGNOSTIC_FROZEN_VERIFIED_PREPARATION_PENDING",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8981,7 +8981,7 @@
               "localHelpReproTrials": 3,
               "localHelpReproduced": false,
               "rootCause": "UNCONFIRMED",
-              "nextAction": "Package and verify bounded 300-second host attribution diagnostic, deliver to server, then correlate actual host CPU with HTTP latency; root cause remains unconfirmed",
+              "nextAction": "Prepare and test pinned 300-second server preparation and carrier; copy complete bundle through share to server, then request only required manual execution. Preserve 15-minute FAIL and release HOLD.",
               "releaseGate": "HOLD",
               "promotionAllowed": false,
               "causalFollowupReview": {
@@ -8993,7 +8993,7 @@
               "localFrozenObserveReproduced": false
             },
             "hostDiagnosticPreparation": {
-              "status": "SOURCE_VERIFIED_NOT_PACKAGED",
+              "status": "FROZEN_VERIFIED_SERVER_PREPARATION_PENDING",
               "review": {
                 "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\host-diagnostic-source-readiness.json",
                 "bytes": 1717,
@@ -9006,7 +9006,18 @@
               "serverExecuted": false,
               "scope": "HOST_ATTRIBUTION_DIAGNOSTIC_NOT_RELEASE_QA",
               "releaseGate": "HOLD",
-              "promotionAllowed": false
+              "promotionAllowed": false,
+              "frozenReview": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\frozen-host-diagnostic-review.json",
+                "bytes": 2444,
+                "sha256": "a1d6ab4762b8d3b7e5af759d7fb1c0448de4aec75392665017d87d1f484a3455"
+              },
+              "helperCommit": "29e995224b3a4b5528fd9cf999cc2e3bdbd97514",
+              "helperExeSha256": "9c9d6c4c7a12bf68c3ac04241f8e9cd52e3fc49f8b6a4747ba21f69b485df804",
+              "runnerPackageCreated": true,
+              "portableEntryCases": 2,
+              "frozenWindowCases": 2,
+              "serverPreparationComplete": false
             }
           }
         }

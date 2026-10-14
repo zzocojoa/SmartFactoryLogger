@@ -1087,3 +1087,34 @@ API 근거: [GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/ap
 
 현재 새 도우미는 소스·개발 시험 단계이며 frozen 서버 묶음·전달·실행은 아직 하지 않았다.
 실패한15분, 120분 미시작, 물리 경계 NOT_TESTED, 정식 QA/출시 HOLD를 유지한다.
+
+### 같은 날 후속: 진단 실행 파일의 개발 검증
+
+위 소스를 clean commit `29e995224b3a4b5528fd9cf999cc2e3bdbd97514`에서 추출한36파일로
+빌드했다. PyInstaller exit0, 빌드 전후 소스·의존성·HEAD 일치를 확인했다.
+새 helper `field_runner.exe`는16,074,189B, SHA256
+`9c9d6c4c7a12bf68c3ac04241f8e9cd52e3fc49f8b6a4747ba21f69b485df804`이다.
+제품 후보4cc7393e의 installer/payload는 이 helper 빌드와 별개이며 변경하지 않았다.
+
+개발 위치는 `SmartFactory/PDCA_HOSTDIAG_20261014_29e99522`다.
+`HOSTDIAG_20261014_29e99522/RUN128`에 새 manifest·controller·필수 기준 자료를 준비했다.
+실행 파일 내부13모듈의 code object와 확정 소스, embedded HTTP/resources 소스를 대조했다.
+네이티브 PS5.1의 실제 소유 job에서 describe exit0, 필수 인수 누락 exit1을 확인했다.
+두 경우 모두 잔존·강제 종료·launcher 예외0이며 운영자 관리자/ACL 본 실행은 수행하지 않았다.
+
+추가로 같은 소스의 frozen 시험용 entry에서 정상·앱 세대 변경5초 동시 관찰을 실행했다.
+정상 actual exit0/PASS, 세대 변경 actual exit1/FAIL을 보존했고 host 수집은 각2표본 완료다.
+각 outer8/inner5프로세스는 active0, 강제 종료0이며 fixture 앱도 정상 종료했다.
+제품용 실행 파일과 시험용 실행 파일이 공유하는10모듈의 code object가 같고,
+시험 사본34소스의 해시도 일치했다. host manifest/interval 재계산과 fixture 잔존 부재를
+다시 확인했다. 짧은 합성 시험이며 서버300초·정식15/120분의 통과로 계산하지 않는다.
+
+개발·요청20검사, 휴대 실행2경우, frozen 동시 관찰2경우가 기대 결과를 충족했다.
+검토 드라이버 exit0의 `frozen-host-diagnostic-review.json` SHA256은
+`a1d6ab4762b8d3b7e5af759d7fb1c0448de4aec75392665017d87d1f484a3455`다.
+빌드 경고는 선택적/다른 플랫폼 모듈 및 multiprocessing의 정적 분석 항목이며,
+실제 Windows spawn 동작을 위 두 경우로 확인했다.
+
+현재 남은 준비는 서버 세대·설정 핀을 묶는5분 실행 요청/준비 도우미와 그 네이티브
+거부 검사, 공유·서버 로컬 전달이다. 아직 사용자 실행을 요청하지 않았다.
+서버에 새 진단을 실행하지 않았으며 지연 원인은 UNCONFIRMED, 출시 HOLD다.
