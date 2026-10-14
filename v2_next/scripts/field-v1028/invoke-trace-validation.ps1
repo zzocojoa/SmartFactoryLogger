@@ -106,6 +106,34 @@ function Start-TraceProcess([string]$Executable,[string]$ArgumentLine,[string]$S
         return $process
     }catch{$process.Dispose();throw}
 }
+function Read-TraceProcessLogs([Diagnostics.Process]$Process,[string]$Stdout,[string]$Stderr,[int]$TimeoutMilliseconds=10000){
+    Assert-Trace ($TimeoutMilliseconds -gt 0 -and $TimeoutMilliseconds -le 10000) 'trace-log-wait-budget'
+    Assert-Trace ($Process.HasExited) 'trace-log-process-still-running'
+    $clock=[Diagnostics.Stopwatch]::StartNew();$retries=0
+    while($true){
+        $streams=[Collections.Generic.List[IO.Stream]]::new()
+        try{
+            # A timed process wait can finish before redirected-output handlers.
+            # Hold both logs read-only, denying writers, before reading either.
+            foreach($path in @($Stdout,$Stderr)){
+                $stream=[IO.File]::Open((Get-TracePath $path),'Open','Read','Read');$streams.Add($stream)
+                Assert-Trace ($stream.Length -le 64KB) 'controller-log-budget'
+            }
+            $text=@()
+            foreach($stream in $streams){
+                $reader=[IO.StreamReader]::new($stream,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
+                try{$text+=,$reader.ReadToEnd()}finally{$reader.Dispose()}
+            }
+            return @{stdout=$text[0];stderr=$text[1];writers_closed=$true;sharing_retries=$retries;elapsed_ms=$clock.ElapsedMilliseconds}
+        }catch [IO.IOException]{
+            $code=$_.Exception.HResult -band 0xffff
+            if($code -ne 32 -and $code -ne 33){throw}
+            Assert-Trace ($clock.ElapsedMilliseconds -lt $TimeoutMilliseconds) 'controller-logs-not-closed-do-not-rerun'
+            $retries++
+        }finally{foreach($stream in $streams){$stream.Dispose()}}
+        Start-Sleep -Milliseconds ([Math]::Min(25,[Math]::Max(1,$TimeoutMilliseconds-$clock.ElapsedMilliseconds)))
+    }
+}
 function Assert-TraceLease($Lease,[string]$Directory){
     Assert-Trace ($Lease.schema -ceq 'sfl-local-trace-lease-v1' -and $Lease.scope -ceq 'LOCAL_CONTROLLER_VALIDATION_ONLY') 'trace-lease-schema'
     Assert-Trace ($Lease.instance -cmatch '^SFLTrace_[0-9a-f]{32}$') 'trace-instance'

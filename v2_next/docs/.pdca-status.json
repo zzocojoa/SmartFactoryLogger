@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T23:12:12.716860+00:00",
+  "lastUpdated": "2026-10-14T23:24:10.679937+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T23:12:12.716860+00:00"
+        "lastUpdated": "2026-10-14T23:24:10.679937+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Run the pinned R4 command once in standalone elevated development-PC PowerShell. R3 native/runtime and result hash were confirmed; it failed before trace start due to malformed WPR arguments, with a separate null ExitCode defect. Both defects now have actual native regression evidence. Inspect new TS/T results, exact exits and ETL quality before further execution or field progression. Preserve prior FAIL results, field15 FAIL, 120-minute not started and release HOLD.",
+            "nextAction": "Run the pinned R5 command once in standalone elevated development-PC PowerShell and inspect all three lifecycle conditions. R4 Normal and ControllerExit trace save/cleanup were verified; suite FAIL and missing Deadline remain preserved. Independently resolve real ETL decoder gaps: CSwitch v5 is opaque in tracerpt and thread v3 events have processing errors. Do not infer thread coverage, latency cause, or field PASS from zero reported loss. Field15 FAIL, canary120 not started, release HOLD remain.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11102,6 +11102,169 @@
                 }
               },
               "r4ElevatedTraceExecuted": false,
+              "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "traceLogR5Stage": {
+              "recordedAt": "2026-10-14T23:24:10.679937+00:00",
+              "status": "R4_TWO_TRACES_VERIFIED_LOG_READ_FAILURE_R5_PREPARED",
+              "r4UserLaunchExit": 1,
+              "r4SummarySha256": "f21d7d131381d51268af89d30734bc55cffca72cebef86a622a4bb41152bee56",
+              "r4NormalControllerExit": 0,
+              "r4ControllerExitCodeUnknown": true,
+              "verifiedTraceResults": 2,
+              "traceCleanupConfirmed": 2,
+              "deadlineScenarioExecuted": false,
+              "originalFailurePreserved": true,
+              "originalFilesPreserved": 64,
+              "observedDefect": "Suite read redirected stdout immediately after a timed process wait while the file was still in use",
+              "originalLockOwner": "UNCONFIRMED",
+              "unforcedReproductionTrials": 20,
+              "unforcedReproductionFailures": 0,
+              "forcedSharingViolationReproductions": 2,
+              "fix": "Record the actual exit first, then read both logs under read-only locks with bounded sharing-only retries",
+              "logWaitLimitMs": 10000,
+              "lifecycleCases": 14,
+              "nativePsSuites": 11,
+              "logFinalizationCases": 7,
+              "retainedExitAndFinalOutputCases": 6,
+              "coreTestsExit": 0,
+              "architectureInvocations": 8,
+              "architectureInputRejections": 7,
+              "architectureTestsExit": 0,
+              "ruffExit": 0,
+              "finalPackageVerificationExit": 0,
+              "tracerptInvocations": 4,
+              "tracerptExits": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "qualityInspections": [
+                {
+                  "scenario": "Normal",
+                  "inspection_exit": 0,
+                  "result": {
+                    "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\decode-r4\\Normal-quality.json",
+                    "bytes": 7697,
+                    "sha256": "12e18fe4e58483ceb8fd4e0994ba664ce817f40881fcde5ef1cee1eeab33efc2"
+                  },
+                  "quality": "INCOMPLETE_OR_UNUSABLE",
+                  "issues": [
+                    "event_decode_errors",
+                    "provider_guids_missing",
+                    "opaque_binary_events_not_decoded"
+                  ],
+                  "declared_loss": "ZERO_DECLARED_NOT_COVERAGE_PROOF",
+                  "request_time_coverage": "NOT_EVALUATED",
+                  "scheduler_payload_validation": "NOT_EVALUATED",
+                  "raw_events": 156906,
+                  "processing_errors": 6825,
+                  "scheduler_events": {
+                    "cswitch": 91708,
+                    "ready_thread": 55267
+                  },
+                  "headers": [
+                    {
+                      "PerfFreq": 10000000,
+                      "ReservedFlags": 1,
+                      "EventsLost": 0,
+                      "BuffersLost": 0,
+                      "StartTime": 134364933412291127,
+                      "EndTime": 134364933446057842,
+                      "BuffersWritten": 62,
+                      "NumberOfProcessors": 12
+                    }
+                  ]
+                },
+                {
+                  "scenario": "ControllerExit",
+                  "inspection_exit": 0,
+                  "result": {
+                    "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\decode-r4\\ControllerExit-quality.json",
+                    "bytes": 7725,
+                    "sha256": "10d6879591cd677f171a9554f4b263977d7cb3f9048579f1f75f0b1638de9995"
+                  },
+                  "quality": "INCOMPLETE_OR_UNUSABLE",
+                  "issues": [
+                    "event_decode_errors",
+                    "provider_guids_missing",
+                    "opaque_binary_events_not_decoded"
+                  ],
+                  "declared_loss": "ZERO_DECLARED_NOT_COVERAGE_PROOF",
+                  "request_time_coverage": "NOT_EVALUATED",
+                  "scheduler_payload_validation": "NOT_EVALUATED",
+                  "raw_events": 60127,
+                  "processing_errors": 6762,
+                  "scheduler_events": {
+                    "cswitch": 30672,
+                    "ready_thread": 20439
+                  },
+                  "headers": [
+                    {
+                      "PerfFreq": 10000000,
+                      "ReservedFlags": 1,
+                      "EventsLost": 0,
+                      "BuffersLost": 0,
+                      "StartTime": 134364933496120374,
+                      "EndTime": 134364933506390548,
+                      "BuffersWritten": 34,
+                      "NumberOfProcessors": 12
+                    }
+                  ]
+                }
+              ],
+              "requestTimeCoverage": "NOT_EVALUATED",
+              "threadGenerationBinding": "NOT_EVALUATED",
+              "traceOverhead": "NOT_EVALUATED",
+              "manifestSha256": "313112238ff09826e7abbb80ae4651e0e502db991c71c591ce1e4580151009bf",
+              "suiteSha256": "e355eee44f3c84418dc1a24a4dca7c8c6520a4c03a32ff167a032f7aef94d24a",
+              "commandPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\PINNED_LOCAL_TRACE_COMMAND_R5.txt",
+              "commandSha256": "dff6d91f0a59bc8219403b532324ad54ae2476785bb04c794b6e9b7f2e1d73db",
+              "evidence": {
+                "r4Review": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\r4-failure-review.json",
+                  "bytes": 25181,
+                  "sha256": "e72d4e366062ac312b9096851950dbd6efb296c689235e784fcca6b0b97a5f33"
+                },
+                "unforcedReproduction": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\log-race-reproduction.json",
+                  "bytes": 5117,
+                  "sha256": "d8259b1ef16a610146d165d6ef7431c180233a28b62ec1a705371b0d966f74ed"
+                },
+                "coreTests": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\tests-r2\\summary.json",
+                  "bytes": 1712,
+                  "sha256": "7b3a744c8509e6ad5c8fa6972e7fdfbb457f11dc34949c81cf96dfc0b190e38f"
+                },
+                "architectureTests": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\architecture-tests\\summary.json",
+                  "bytes": 1519,
+                  "sha256": "2dca26da67f3a784ae8911e3b69825c543d81565162314c90003a08a8c187ed2"
+                },
+                "readiness": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\package-readiness-r5.json",
+                  "bytes": 1829,
+                  "sha256": "196d98ade30d0a30f3e15a932246ae3f1bd740d6b9866491c66b7854fc6d6a2c"
+                },
+                "packageVerification": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\final-package-verification.json",
+                  "bytes": 1248,
+                  "sha256": "dd33391bb233700caf9dfad8e708853b7b765b8504b94cc50c7199ccc5fba1bb"
+                },
+                "traceQuality": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\decode-r4\\inspection-review.json",
+                  "bytes": 2489,
+                  "sha256": "9d1d7b1a6d83f926c5b6607c9482808ffe9d6badc4bbd65a91cdbb76063f2e64"
+                }
+              },
+              "r5ElevatedTraceExecuted": false,
               "productOrInstallerChanged": false,
               "field15Status": "FAIL",
               "canary120Started": false,

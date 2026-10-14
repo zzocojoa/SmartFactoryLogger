@@ -199,13 +199,15 @@ Check ($rejected -eq 4) 'unsafe command rejection'
 $rows=@()
 foreach($delay in @(0,250)){
  foreach($code in @(0,1,23)){
-  $line='-NoProfile -NonInteractive -Command "Start-Sleep -Milliseconds '+$delay+';exit '+$code+'"'
+  $line='-NoProfile -NonInteractive -Command "Start-Sleep -Milliseconds '+$delay+';[Console]::WriteLine(''stdout-final'');[Console]::Error.WriteLine(''stderr-final'');[Environment]::Exit('+$code+')"'
   $name=$delay.ToString()+'-'+$code
   $p=Start-TraceProcess $native $line ($directory+'\exit-'+$name+'.stdout.log') ($directory+'\exit-'+$name+'.stderr.log')
   try{
    Check ($p.WaitForExit(10000)) 'fixture bounded exit'
    Check ($null -ne $p.ExitCode -and $p.ExitCode -eq $code) 'actual retained exit code'
-   $rows+=@{delay_ms=$delay;expected=$code;actual=$p.ExitCode}
+   $logs=Read-TraceProcessLogs $p ($directory+'\exit-'+$name+'.stdout.log') ($directory+'\exit-'+$name+'.stderr.log')
+   Check ($logs.writers_closed -and $logs.stdout.Trim() -ceq 'stdout-final' -and $logs.stderr.Trim() -ceq 'stderr-final') 'redirected final output complete'
+   $rows+=@{delay_ms=$delay;expected=$code;actual=$p.ExitCode;sharing_retries=$logs.sharing_retries}
   }finally{$p.Dispose()}
  }
 }
@@ -213,6 +215,78 @@ $rows|ConvertTo-Json
 '''
     exit_results = run('redirected-process-exit-codes', exit_body)
     assert len(exit_results) == 6
+    log_body = '$native=' + quote(native) + '\n$directory=' + quote(root) + '\n'
+    log_body += r'''
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Threading;
+public sealed class SflDelayedLogWriter {
+ public ManualResetEvent Ready=new ManualResetEvent(false);
+ public Thread Worker;
+ public Exception Error;
+ public SflDelayedLogWriter(string path,int delay) {
+  Worker=new Thread(()=>{
+   try {using(var f=new FileStream(path,FileMode.Create,FileAccess.Write,FileShare.ReadWrite)){
+    var b=Encoding.UTF8.GetBytes("prefix-"); f.Write(b,0,b.Length);f.Flush();Ready.Set();Thread.Sleep(delay);
+    b=Encoding.UTF8.GetBytes("final");f.Write(b,0,b.Length);f.Flush();
+   }}catch(Exception e){Error=e;Ready.Set();}
+  });Worker.IsBackground=true;Worker.Start();
+ }
+}
+'@
+$p=Start-TraceProcess $native '-NoProfile -NonInteractive -Command "exit 0"' ($directory+'\log-fixture.stdout.log') ($directory+'\log-fixture.stderr.log')
+$rows=@()
+try{
+ Check ($p.WaitForExit(10000)) 'fixture terminal'
+ foreach($role in @('stdout','stderr')){
+  $out=$directory+'\delayed-'+$role+'.out';$err=$directory+'\delayed-'+$role+'.err'
+  [IO.File]::WriteAllText($out,'stable');[IO.File]::WriteAllText($err,'stable')
+  $writer=[SflDelayedLogWriter]::new($(if($role -eq 'stdout'){$out}else{$err}),350)
+  try{
+   Check ($writer.Ready.WaitOne(3000) -and $null -eq $writer.Error) 'writer ready'
+   $originalRejected=$false
+   try{[void][IO.File]::ReadAllText($(if($role -eq 'stdout'){$out}else{$err}))}catch [IO.IOException]{$originalRejected=($_.Exception.HResult -band 0xffff) -eq 32}
+   Check $originalRejected 'original reader sharing violation reproduced'
+   $logs=Read-TraceProcessLogs $p $out $err 2000
+   Check ($logs.writers_closed -and $logs.sharing_retries -gt 0 -and $logs.$role -ceq 'prefix-final') 'wait for complete writer output'
+   $rows+=@{case='delayed-'+$role;retries=$logs.sharing_retries;original_reader_rejected=$originalRejected}
+  }finally{Check ($writer.Worker.Join(3000)) 'writer joined';$writer.Ready.Dispose()}
+ }
+ $out=$directory+'\timeout.out';$err=$directory+'\timeout.err';[IO.File]::WriteAllText($err,'')
+ $writer=[SflDelayedLogWriter]::new($out,600)
+ try{
+  Check ($writer.Ready.WaitOne(3000)) 'timeout writer ready'
+  $clock=[Diagnostics.Stopwatch]::StartNew();$rejected=$false
+  try{Read-TraceProcessLogs $p $out $err 100}catch{$rejected=$_.Exception.Message -ceq 'controller-logs-not-closed-do-not-rerun'}
+  Check ($rejected -and $clock.ElapsedMilliseconds -lt 1500) 'bounded log timeout'
+  $rows+=@{case='writer-timeout';elapsed_ms=$clock.ElapsedMilliseconds}
+ }finally{Check ($writer.Worker.Join(3000)) 'timeout writer joined';$writer.Ready.Dispose()}
+ foreach($role in @('stdout','stderr')){
+  $out=$directory+'\oversize-'+$role+'.out';$err=$directory+'\oversize-'+$role+'.err'
+  [IO.File]::WriteAllText($out,'');[IO.File]::WriteAllText($err,'')
+  [IO.File]::WriteAllBytes($(if($role -eq 'stdout'){$out}else{$err}),[byte[]]::new(65537))
+  $rejected=$false
+  try{Read-TraceProcessLogs $p $out $err}catch{$rejected=$_.Exception.Message -ceq 'controller-log-budget'}
+  Check $rejected 'oversize logs rejected';$rows+=@{case='oversize-'+$role}
+ }
+ $clock=[Diagnostics.Stopwatch]::StartNew();$rejected=$false
+ try{Read-TraceProcessLogs $p ($directory+'\missing.out') $err}catch [IO.FileNotFoundException]{$rejected=$true}
+ Check ($rejected -and $clock.ElapsedMilliseconds -lt 1000) 'missing logs fail without retry'
+ $rows+=@{case='missing-log'}
+}finally{$p.Dispose()}
+$p=Start-TraceProcess $native '-NoProfile -NonInteractive -Command "Start-Sleep -Seconds 2"' ($directory+'\live.out') ($directory+'\live.err')
+try{
+ $rejected=$false
+ try{Read-TraceProcessLogs $p ($directory+'\live.out') ($directory+'\live.err')}catch{$rejected=$_.Exception.Message -ceq 'trace-log-process-still-running'}
+ Check $rejected 'live process log read rejected';$rows+=@{case='live-process'}
+ Check ($p.WaitForExit(10000)) 'live fixture terminal'
+}finally{$p.Dispose()}
+$rows|ConvertTo-Json -Depth 6
+'''
+    log_results = run('redirected-log-finalization', log_body)
+    assert len(log_results) == 7
     readonly_body = 'Initialize-RunNative\n'
     readonly_body += "$instance='SFLTrace_" + os.urandom(16).hex() + "'\n"
     readonly_body += '$argv=@(Get-TraceArguments status ' + quote(source.parent)
@@ -262,7 +336,7 @@ $rows|ConvertTo-Json
         status='PASS', scope='SIMULATED_LIFECYCLE_AND_NATIVE_OWNED_COMMANDS_ONLY',
         simulated_lifecycle_cases=14, actual_etw_executed=False,
         command_argument_operations=4, unsafe_command_rejections=4,
-        retained_exit_code_cases=6, real_wpr_readonly_status_exit=0,
+        retained_exit_code_cases=6, redirected_log_finalization_cases=7, real_wpr_readonly_status_exit=0,
         receipts=receipts, sources=facts, release_gate='HOLD', promotion_allowed=False,
     ))
     print(json.dumps(dict(status='PASS', lifecycle_cases=14, process_suites=len(receipts), actual_etw_executed=False)))

@@ -56,14 +56,16 @@ try{
         $controller=Start-TraceProcess $nativePs $line $out $err
         $children.Add($controller)
         Assert-Trace ($controller.WaitForExit(240000)) 'controller-terminal-not-observed-do-not-rerun'
-        Assert-Trace (([IO.FileInfo]::new($out)).Length -le 64KB -and ([IO.FileInfo]::new($err)).Length -le 64KB) 'controller-log-budget'
-        $output=[IO.File]::ReadAllText($out)
+        $item=[ordered]@{scenario=$scenario;run_path=$null;controller_pid=$controller.Id;controller_exit=$controller.ExitCode}
+        $summary.scenarios+=$item
+        $logs=Read-TraceProcessLogs $controller $out $err
+        $item.log_completion=@{writers_closed=$logs.writers_closed;sharing_retries=$logs.sharing_retries;elapsed_ms=$logs.elapsed_ms}
+        $output=$logs.stdout
         $pathMatches=[regex]::Matches($output,'(?m)^TRACE_RUN_PATH=(.+)\r?$')
         Assert-Trace ($pathMatches.Count -eq 1) 'controller-run-path-missing'
         $run=Get-TracePath $pathMatches[0].Groups[1].Value.Trim()
         Assert-Trace ([IO.Path]::GetDirectoryName($run) -ieq $parent -and [IO.Path]::GetFileName($run) -cmatch '^T[0-9a-f]{12}$') 'controller-run-path-boundary'
-        $item=[ordered]@{scenario=$scenario;run_path=$run;controller_exit=$controller.ExitCode}
-        $summary.scenarios+=$item
+        $item.run_path=$run
         Assert-Trace ($controller.ExitCode -eq $(if($scenario -ceq 'ControllerExit'){23}else{0})) 'controller-exit-unexpected'
         $guard=Read-TraceJson ($run+'\guard-process.json')
         $clock=[Diagnostics.Stopwatch]::StartNew()

@@ -1725,3 +1725,44 @@ suite SHA256 `aae7da0ba5f44b025c51f77b5c1c303a5f64d3d047a620cf2f878178cb12fb30`.
 
 관련 근거: [PowerShell Start-Process 종료 코드 문제](https://github.com/PowerShell/PowerShell/issues/20400),
 [Microsoft Process.WaitForExit](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforexit).
+
+
+## 2026-10-15 R4 실제 추적 저장·정리와 로그 완료 대기 보완
+
+사용자 콘솔 LAUNCH_EXIT1 및 TS0077ea5bb8cc summary SHA256
+`f21d7d131381d51268af89d30734bc55cffca72cebef86a622a4bb41152bee56`를 실제 파일과 대조했다.
+Normal의 controller exit0, result/ETL 해시와5개 WPR 명령의 실제exit0/소유 job active0을 확인했다.
+ControllerExit의 별도 Guard result도 controller-exited, 추적 저장·해당 instance 정리 완료이며,
+controller37500/guard31812 및 Normal37928/14204는 후속 프로세스 목록에서 없었다.
+ControllerExit 실제 종료 코드는 summary 작성 전 로그 읽기 실패로 미기록이므로23을 추정해 채우지 않는다.
+suite FAIL과 Deadline 미실행을 유지한다. 원본64파일을 새 폴더에 복사하고 길이/SHA를 대조했다.
+
+실제 실패는 timed WaitForExit 직후 ControllerExit.stdout.log의 ReadAllText 공유 위반이다.
+원래 파일 잠금 소유자는 미확정이다. 단순 native 자식20회에서는 자연 재현되지 않았지만,
+출력 writer를 지연시킨2조건에서 같은 공유 위반을 재현했다. 프로세스 종료만으로 비동기 출력
+처리까지 끝났다고 볼 수 없다는 Microsoft 계약에 맞춰 R5는 두 로그를 읽기 전용으로 동시에 열고
+쓰기를 배제한 뒤 읽는다. 공유/잠금 위반만 최대10초 재시도하며 파일 누락·크기64KiB 초과는 실패한다.
+무제한 WaitForExit나 고정 지연을 추가하지 않았다. 실제 종료 코드는 로그 읽기 전에 기록한다.
+
+최종 tests-r2: lifecycle14조건/native PS5.1 suite11개, 로그 지연2·시간 초과·크기 초과2·파일 누락·
+실행 중 읽기 거부7조건, 종료0/1/23과 최종 stdout/stderr6조건이 실제exit0이다.
+첫 tests-r1은 PowerShell 예외 래핑에 대한 시험의 타입 판별 오류로 실패했다. 진단으로
+FileNotFoundException을 확인해 typed catch로 고쳤고 원래 결과를 보존한 채 전체 관련 검사를 재실행했다.
+32/64비트8실행·입력 거부7조건, Ruff, 최종 R5 묶음의 양쪽 비트수 일반 권한 거부 검사도exit0이다.
+
+R4 ETL 두 개를 잠근 상태로 tracerpt raw/report4회를 실행해 각각exit0을 확인했다.
+Normal은156906사건/해독오류6825, ControllerExit는60127사건/해독오류6762다.
+둘 다 EventsLost/BuffersLost0이나 CSwitch v5가 opaque이고 thread v3 해독오류가 있어 품질은
+INCOMPLETE_OR_UNUSABLE이다. Normal CSwitch91708/ReadyThread55267,
+ControllerExit30672/20439 사건 수는 payload·thread generation·요청 QPC 연결 검증을 뜻하지 않는다.
+이는 실제 추적을 확보한 진전이며 성능 원인 확정이나 현장 QA 통과가 아니다. 별도 decoder 보완이 필요하다.
+
+근거·새 묶음: `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_LOGS_20261015_4b381b92`.
+사용 절차: 개발 PC의 독립 관리자 PowerShell에서 `PINNED_LOCAL_TRACE_COMMAND_R5.txt` 본문 전체를
+한 번 실행하고 LAUNCH_EXIT를 확인한다. 오류 시 재실행하지 않고 새 TS/T 원문부터 확인한다.
+R5 manifest SHA256 `313112238ff09826e7abbb80ae4651e0e502db991c71c591ce1e4580151009bf`.
+suite SHA256 `e355eee44f3c84418dc1a24a4dca7c8c6520a4c03a32ff167a032f7aef94d24a`.
+제품/설치본 변경이 없어 앱 health/build·설치를 반복하지 않았다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+출력 완료 계약: [Microsoft Process.WaitForExit](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforexit?view=netframework-4.8.1).
