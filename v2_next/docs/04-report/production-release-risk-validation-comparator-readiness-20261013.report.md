@@ -404,3 +404,10 @@ path·크기·SHA256·capture ID·captured 상태가 일치한다. 전부 같은
 추가 이미지 본문 디코딩, 전체 보존 이력의 무결성, 과거 drop173의 원인·영향을 증명하지는
 않는다. 서버 전체 사본 검산과 최종 콘솔 해시가 아직 없어 잠정 증거로 유지하며
 full_data NOT_EVALUATED, physical NOT_TESTED, release HOLD를 바꾸지 않았다.
+
+같은 잠정 목록에 결합한 닫힌 v2 CSV·metadata·관측 fact·이미지 fact·최종 manifest의
+새 로컬 사본으로 `run-recovered-csv.py`도 시작했다. 서버 앱이나 설치본을 실행하지 않고
+고정 CSV 검증기만 별도 Windows Job에서 실행하며 1,800초 제한과 입력 잠금을 적용한다.
+현재 검사는 실행 중이고 실제 consumer exit는 미확정이다. 자료 위치는 위 증거 폴더의
+`recovered-csv-r1`, 콘솔 기록은 `recovered-csv-r1.log`다. 새 용량 한도로 큰 입력을
+수용했다는 사실은 이 자료의 의미 검증 통과를 뜻하지 않는다.
