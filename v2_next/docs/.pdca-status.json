@@ -8917,7 +8917,15 @@
               "carrierChecks": 7,
               "driversExitCode": 0,
               "actualNativeIdentityPrecisionCheckPassed": true,
-              "productionFieldResult": "NOT_RUN"
+              "productionFieldResult": "NOT_RUN",
+              "offlineReviewPreparation": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\observation-review-readiness.json",
+                "sha256": "31ae2b58dea1350d2310d661ac903523ffdabf2171bb6c551d9b8f2e4d4632c6",
+                "checks": 16,
+                "testExit": 0,
+                "productionReviewExecuted": false,
+                "fullPipelineFixtureExecuted": false
+              }
             }
           }
         }

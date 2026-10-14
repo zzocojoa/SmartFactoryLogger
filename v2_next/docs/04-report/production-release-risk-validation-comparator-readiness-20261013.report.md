@@ -897,3 +897,28 @@ STARTING_FIELD_OBSERVATION_SECONDS=900을 출력하며, 이후 상세 출력 없
 마지막 RESULT_PATH/LAUNCH_EXIT와 결과 파일을 회수·대조한 뒤 측정 결과를 판단한다.
 15분/120분, 사전 계측 기동3회, 전체 데이터 QA는 미완료다.
 물리 경계 NOT_TESTED, 정식 QA/출시 HOLD, 운영 승격 금지를 유지한다.
+
+
+## 2026-10-14 15분 회수 결과의 오프라인 검토 준비
+
+서버 측정 실행 답변·시작 출력은 아직 확인되지 않았다. 살아 있는 계측 프로세스의
+현재 핸들을 확인한 상태가 아니므로 verified wait나 실행 중으로 분류하지 않는다.
+기존 실행 요청을 유지하며 중복 요청·설치·앱 재시작은 하지 않았다.
+
+작업 루트의 `review-observation-recovered.py`를 준비했다. 실제 콘솔의
+LAUNCHER_SHA256/PREPARATION_SHA256을 받아 launcher→session manifest→모든 파일과
+preparation→실제 native 요청의 바이트 연결을 확인한다. 고정된 helper f274b534 소스를
+검산한 뒤 기존 순수 계산 함수로 HTTP·자원 요약과 결합 window 검토를 다시 계산한다.
+서버 API/프로세스에 접근하지 않는 회수 사본 전용 도구다. `RECORDED_SUMMARIES_REPRODUCED`는
+저장된 계산 결과의 재현이며 관찰 PASS·전체 성능/정식 QA PASS와 구분한다.
+
+파일 변조·누락·추가·경로 탈출·JSON 중복/비정상 수치·승격 주장 거부, frozen 소스 핀,
+첫 health 요청223.4887ms 실패 보존, 자원 표본 누락과 성능 gate 구분 등16검사 exit0다.
+첫 실행은 기존 fixture의 시험 폴더 환경값이 없어 import 중 exit1이었다.
+시험용 환경값을 지정한 후 통과했으며 검토기 코드는 이 수정으로 바뀌지 않았다.
+전체 pipeline fixture와 실제 서버 결과 실행은 아직 미수행이다. 실제 회수 후에는
+stdout/stderr 원문·설정/세대 경계의 의미·자원 성능을 별도로 검토한다.
+근거는 `observation-review-readiness.json`과 `observation-recovered-review-tests-r2/result.json`이다.
+
+제조사 문의 thread1a134ba4e225b647은 재조회 결과 발신1건만 있고 답신은 없었다.
+물리 경계 NOT_TESTED, 정식 QA/출시 HOLD, 운영 승격 금지를 유지한다.
