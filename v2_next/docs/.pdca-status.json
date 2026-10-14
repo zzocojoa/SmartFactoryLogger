@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T13:22:11.731191+00:00",
+  "lastUpdated": "2026-10-14T13:52:57.612052+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,8 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T13:22:11.731191+00:00"
+        "lastUpdated": "2026-10-14T13:22:11.731191+00:00",
+        "updatedAt": "2026-10-14T13:52:57.612052+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10591,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Prepare and test a bounded uniquely owned trace controller and decoder, including failure cleanup and trace loss/coverage. Then verify exact portable helper bytes before delivery and the required elevated local tracing check. Preserve the current field FAIL; do not infer a root cause or start 120 minutes from these local checks. Retain earlier job confirmation 60345/1 and recheck live metadata before field work.",
+            "nextAction": "Run the pinned package-r2 three-scenario lifecycle suite from a standalone elevated native Windows PowerShell 5.1 on the development PC. Verify actual guardian terminal state, owned WPR absence and ETL bytes; then examine trace decoding/loss/coverage and overhead before any server delivery. Do not repeat the unchanged field 15-minute failure or start 120 minutes. Retain job 60345/1 and recheck live metadata before field work.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -10815,6 +10816,48 @@
               "wprProfileDetailsExit": 0,
               "wprTraceStarted": false,
               "developerProcessElevated": false,
+              "serverDeliveredOrExecuted": false,
+              "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "traceControllerStage": {
+              "recordedAt": "2026-10-14T13:52:57.612052+00:00",
+              "status": "LOCAL_TRACE_CONTROLLER_PREPARED_AWAITING_ELEVATED_EXECUTION",
+              "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_CONTROL_20261014_2d99c972",
+              "readiness": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_CONTROL_20261014_2d99c972\\package-readiness-r2.json",
+                "bytes": 1597,
+                "sha256": "c9f4394c1a1d3abe39637334f2d1f051d675e865d69f601672a53635686f82e3"
+              },
+              "verification": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_CONTROL_20261014_2d99c972\\package-verification.json",
+                "bytes": 1446,
+                "sha256": "da6318d86655846cc859cd7e08ac85bbe7f9455158ec3ab35e0179f4a944ff7a"
+              },
+              "sourceControllerSha256": "34767aca04d274346619d664cf799f7356291c1a26461e59fa757173a702d7fb",
+              "sourceSuiteSha256": "14c3cbf189d87af5afca04a6c3c8079a191da0ba8e54fd045c09fe0443558966",
+              "manifestSha256": "6fd9771885eb853f34bf2b5b0974cd499a7229e9eaded5b04ad931d0b9e72e04",
+              "simulatedLifecycleCases": 14,
+              "nativePsSuites": 7,
+              "testsExit": 0,
+              "ruffExit": 0,
+              "bootstrapParseExit": 0,
+              "bootstrapNormalUserInnerExit": 1,
+              "bootstrapTamperedPinExit": 1,
+              "expectedPrerequisiteRejections": true,
+              "readonlyWprStatusExit": 0,
+              "developerProcessElevated": false,
+              "developerProcessInJob": true,
+              "elevatedEtwExecuted": false,
+              "actualGuardianLifecycleVerified": false,
+              "traceLossCoverage": "NOT_EVALUATED",
+              "traceDecoder": "NOT_EVALUATED",
+              "traceOverhead": "NOT_EVALUATED",
               "serverDeliveredOrExecuted": false,
               "productOrInstallerChanged": false,
               "field15Status": "FAIL",

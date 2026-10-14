@@ -1526,3 +1526,51 @@ WPR의 CSwitch/ProcessThread/ReadyThread/ThreadPriority만 켜는 Memory 프로�
 [thread time](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getthreadtimes),
 [WPR 명령·instance](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options),
 [버퍼 설정](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/buffers).
+
+
+## 2026-10-14 로컬 WPR 추적 제어·복구 도우미 준비
+
+현재 작업 정보60345/1은 사용자 답변 및 기존21:30:09 화면 적용 기록으로 유지한다.
+완료된15분 측정60580/1의 당시 기록은 변경하지 않는다. 새 현장 작업 전에는 live 값을 재확인한다.
+
+추적 제어기를 고유 `SFLTrace_<GUID>` instance로 한정했다. 모든 WPR 명령의 마지막에
+같은 `-instancename`을 붙이며 default/다른 세션은 stop/cancel하지 않는다.
+Guard는 부모 PID+생성 FILETIME을 검증한 프로세스 handle을 보유하고, 정상 요청·부모 종료·
+8초 감시 제한 때 저장/정리를 수행한다.8초는 전체 프로그램 실행 제한이 아니다.
+개별 start/status/cancel20초, stop60초, 해당 명령 job 정리10초의 별도 제한이 있다.
+명령 root와 소유 job 전체가 원래 제한 안에 종료됐는지 함께 기다린다.
+기존 현장 runner의 즉시 descendants 판정은 변경하지 않았다.
+
+WPR start 전 ABSENT 관찰과 lease/manifest/Guard 세대를 durable intent에 기록한다.
+동시 Guard/Recover는 열린 배타적 lock으로 막는다. Guard 소멸 후의 복구는 같은 lease,
+manifest, instance와 Guard 세대 부재를 확인한 경우만 허용한다. stop나 로그 기록 실패가
+발생해도 상태 재조회·해당 instance cancel을 독립적으로 시도하고 원래 FAIL을 보존한다.
+결과/ETL은 새 파일로 보존한다. PID 재사용을 다른 프로세스 종료로 처리하지 않는다.
+
+모의 lifecycle14조건과 PS5.1 네이티브7 suite는 실제exit0이다. 정상/부모 종료/제한,
+미확인·기존 세션 불변, 시작/저장/상태/기록 콜백 실패, 복구 소유권, 정확한 프로세스 세대,
+실제 자식의 지연 종료/timeout 정리/exit7/없는 실행 파일/무관 프로세스 보존을 확인했다.
+변경 테스트의 Ruff F/E9 exit0이다. 최종 묶음 PS5.1 parse exit0,
+일반 권한의 내부 실행 exit1과 틀린 외부 SHA의 exit1은 기대한 선행 조건 거부다.
+실제 WPR 읽기 전용 status는 exit0, ABSENT, 명령 job active0으로 끝났다.
+WPR status exit0만으로 녹화 중이라고 판단하지 않는다.
+
+`package-r2`와 `PINNED_LOCAL_TRACE_COMMAND_2d99c972_R2.txt`를 준비했다.
+첫 생성 명령의 Python 경로 escape 오류는 실행/전달 전에 검출했으며 R1은 NOT_FOR_EXECUTION이다.
+묶음 manifest SHA256: `6fd9771885eb853f34bf2b5b0974cd499a7229e9eaded5b04ad931d0b9e72e04`.
+controller SHA256: `34767aca04d274346619d664cf799f7356291c1a26461e59fa757173a702d7fb`.
+suite SHA256: `14c3cbf189d87af5afca04a6c3c8079a191da0ba8e54fd045c09fe0443558966`.
+증거 위치: `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_CONTROL_20261014_2d99c972`.
+
+실제 개발 프로세스는 일반 권한이며 상위 job에 속해 있다. Guard가 제어 창과 함께 제거될
+환경을 수용하지 않도록 실제 실행은 Codex/IDE 밖의 관리자 PS5.1을 요구한다.
+사용자 실행 단계는 개발 PC에서 정상 종료→제어 프로세스 종료→감시 제한3조건을 자동 검사한다.
+직전 조건 실패 시 다음 조건은 시작하지 않는다. 별도 세션 복구가 필요하면 기록을 먼저 검산한다.
+실제 elevated WPR lifecycle, parser의 ACTIVE 형식, ETL decoding/loss/coverage 및 부하,
+portable 서버 전달/실행은 아직 미검증이다. 이 준비를 현장 QA PASS로 해석하지 않는다.
+제품/설치본 변경이 없어 전체 앱 health/build는 실행하지 않았다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+근거: [WPR 명령과 instance](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options),
+[ETW 세션](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/sessions),
+[Start-Process](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/start-process?view=powershell-5.1).
