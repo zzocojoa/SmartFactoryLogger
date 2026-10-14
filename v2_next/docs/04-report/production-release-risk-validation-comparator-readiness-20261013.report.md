@@ -337,3 +337,29 @@ CSV514개의 부재 원인을 확정하지 않는다. 최종 사본 검산·콘�
 완성한다. 잠정 비교 결과는 입력으로 수용하지 않는다. 문법 검사와 `--help`는 exit0였으며
 실제 최종 입력이 없어 묶음 완성 실행은 아직 하지 않았다. 기존 6개 준비 파일과 후보·
 복귀 설치본은 유지하고, 서버 검산/설치 도우미를 수정하거나 실행 중 작업을 다시 시작하지 않았다.
+
+### 2026-10-14 실제 입력 용량과 v2 전용 기록의 도우미 호환 수정
+
+잠정 목록의 `spot_image_fact.csv`는 2,171,614,099B로 기존 도우미의 2GiB 한도를
+넘는다. 2GiB+1B의 새 합성 파일로 기존 `csv-input-fact-contract` 실패를 재현했다.
+`field_csv_inputs.py`는 이미지 fact 역할에만 4GiB 한도를 적용한다. 다른 입력의
+2GiB 한도와 1MiB 단위 스트리밍 해시, Windows 읽기 잠금, 종료 시 재검산은 유지한다.
+이 수정은 큰 CSV 내용의 의미 검증을 통과시킨 것이 아니다.
+
+회수한 실제 config의 `csv_v1_enabled=false`와 닫힌 metadata의
+`schema_metadata.v1_csv_enabled=false`도 일치한다. v1을 항상 요구하던 도우미는
+이 운영 형태를 처리할 수 없었다. 이제 해시로 결합한 metadata에 정확한 boolean false가
+있고 같은 날짜의 v1 파일도 없을 때만 `--v1`을 생략한다. 예를 들어 v2 전용 요청에서는
+`roles`와 `expected_files`에서 v1만 빼고, v2·metadata·observation·image·image_final을
+그대로 제공한다. `v1_comparison_requested=false`와 생략 근거를 결과에 남기며,
+구형 CSV 비교를 PASS로 기록하지 않는다. flag 누락·true·0·문자열 false 또는 결합되지
+않은 v1 파일이 있으면 거부한다. 운영 설정을 바꾸거나 v1 데이터를 만들어 채우지 않는다.
+
+증거 폴더는 `C:/Users/user/Desktop/SmartFactory/PDCA_FIELD_CAPACITY_20261014_0dd2ced0`다.
+최종 수정 상태에서 `unittest test_field_csv_inputs -v` 22개와
+`unittest test_field_closed_data_qa test_field_runner -v` 27개가 모두 실제 exit0였다.
+전자는 2GiB+1B 파일의 해시·쓰기 차단·재검산과 기존 고정 CSV 실행 파일의 v2 전용
+검사를 포함한다. 후자는 합성 승인 자료로 v2 전용 전체 흐름을 실행하고 물리 NOT_TESTED,
+정식 HOLD를 유지했는지 확인한다. 제품·frontend·backend 변경이 없어 전체 health는
+반복하지 않았다. 새 도우미 빌드·휴대 실행 검증·서버 전달은 별도로 완료해야 한다.
+이미 전달한 구도우미는 보존하며 이 큰 입력의 검사에 사용하지 않는다.

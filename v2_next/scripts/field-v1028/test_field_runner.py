@@ -79,6 +79,26 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(receipt['status'],'FAIL')
         self.assertFalse((output/'session/closed-data/checks').exists())
 
+    def test_v2_only_pipeline_keeps_v1_comparison_unrequested(self):
+        request,path,output,package=self.prepare(True, disabled_low_signal=True)
+        data=Path(request['data_root'])
+        name=request['roles'].pop('v1')
+        (data/name).rename(self.folder/'omitted-v1.csv')
+        del request['expected_files'][name]
+        metadata_path=data/request['roles']['metadata']
+        metadata=json.loads(metadata_path.read_bytes())
+        metadata['schema_metadata']['v1_csv_enabled']=False
+        fixtures.save(metadata_path,metadata)
+        request['expected_files'][metadata_path.name]=fixtures.fact(metadata_path)
+        fixtures.save(path,request)
+        code,receipt=self.invoke(path,output,package)
+        self.assertEqual(code,0,receipt)
+        result=json.loads((output/'session/result.json').read_bytes())
+        self.assertFalse(result['phase']['csv_inputs']['v1_comparison_requested'])
+        self.assertEqual(result['full_data_gate'],'NOT_EVALUATED')
+        self.assertEqual(result['physical_device_gate'],'NOT_TESTED')
+        self.assertEqual(result['formal_qa_gate'],'HOLD')
+
     def test_disabled_trial_result_exposes_pending_physical_and_formal_qa(self):
         _,path,output,package=self.prepare(True, disabled_low_signal=True)
         code,receipt=self.invoke(path,output,package)

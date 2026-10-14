@@ -19,7 +19,11 @@ import field_shutdown_binding as shutdown
 
 
 CSV_EXE_SHA = 'e728730ad841dd4a754a6c0880e0e1216de5e3d0cd5646c22de9245fc85b0b2f'
-REQUIRED = {'v1', 'v2', 'metadata', 'observation', 'image', 'image_final'}
+DEFAULT_INPUT_MAX_BYTES = 2 * 1024**3
+# The cumulative field image ledger has exceeded 2 GiB. Other inputs retain
+# their existing limit; hashing still reads at most 1 MiB into memory per chunk.
+IMAGE_FACT_MAX_BYTES = 4 * 1024**3
+REQUIRED = {'v2', 'metadata', 'observation', 'image', 'image_final'}
 OPTIONAL = {
     'changeover': ('changeover_candidate_resolution_fact_manifest', 'fact_path'),
     'phase': ('process_phase_event_fact_manifest', 'fact_path'),
@@ -28,12 +32,14 @@ OPTIONAL = {
 }
 
 
-def file_fact(stream):
+def file_fact(stream, *, maximum_bytes=DEFAULT_INPUT_MAX_BYTES):
+    binding.require(type(maximum_bytes) is int and 0 < maximum_bytes <= IMAGE_FACT_MAX_BYTES,
+                    'csv-input-byte-budget')
     stream.seek(0)
     digest, count = hashlib.sha256(), 0
     while chunk := stream.read(1024 * 1024):
         count += len(chunk)
-        binding.require(count <= 2 * 1024**3, 'csv-input-byte-budget')
+        binding.require(count <= maximum_bytes, 'csv-input-byte-budget')
         digest.update(chunk)
     return dict(bytes=count, sha256=digest.hexdigest())
 
@@ -64,13 +70,17 @@ class CsvInputs:
                             field_gate='NOT_EVALUATED', image_bytes_gate='NOT_EVALUATED',
                             release_gate='HOLD', promotion_allowed=False)
 
+    def _maximum_bytes(self, path):
+        return IMAGE_FACT_MAX_BYTES if path == self.root / self.roles['image'] else DEFAULT_INPUT_MAX_BYTES
+
     def _hold(self, path, expected=None):
         path = binding.plain_path(path)
         binding.require(path not in self.held, 'duplicate-held-input')
         stream = self.stack.enter_context(binding.locked_read(path))
         stat = os.fstat(stream.fileno())
-        binding.require(stat.st_size <= 2 * 1024**3, 'csv-input-byte-budget')
-        value = file_fact(stream)
+        maximum_bytes = self._maximum_bytes(path)
+        binding.require(stat.st_size <= maximum_bytes, 'csv-input-byte-budget')
+        value = file_fact(stream, maximum_bytes=maximum_bytes)
         binding.require(expected is None or value == expected, 'csv-input-fact-mismatch:' + path.name)
         self.held[path] = (stream, (stat.st_dev, stat.st_ino, stat.st_size), value)
         return stream
@@ -81,21 +91,21 @@ class CsvInputs:
         try:
             binding.plain_path(self.root)
             binding.require(self.root.is_dir(), 'csv-root-directory')
-            binding.require(REQUIRED <= self.roles.keys() <= REQUIRED | OPTIONAL.keys(), 'csv-role-set')
+            binding.require(REQUIRED <= self.roles.keys() <= REQUIRED | OPTIONAL.keys() | {'v1'}, 'csv-role-set')
             binding.require(len(set(self.roles.values())) == len(self.roles), 'csv-role-alias')
             binding.require(set(self.roles.values()) == self.expected.keys(), 'exact-csv-input-facts')
             for name, value in self.expected.items():
                 binding.entry_name(name)
                 binding.require('/' not in name, 'csv-input-direct-child')
                 binding.require(isinstance(value, dict) and set(value) == {'bytes', 'sha256'}
-                                and type(value['bytes']) is int and 0 <= value['bytes'] <= 2 * 1024**3
+                                and type(value['bytes']) is int and 0 <= value['bytes'] <= self._maximum_bytes(self.root / name)
                                 and isinstance(value['sha256'], str)
                                 and re.fullmatch('[0-9a-f]{64}', value['sha256']), 'csv-input-fact-contract')
                 self._hold(self.root / name, value)
             self.paths = {role: self.root / name for role, name in self.roles.items()}
             v2 = self.roles['v2']
             binding.require(re.fullmatch(r'Factory_Integrated_Log_v2_[A-Za-z0-9_.-]+\.csv', v2)
-                            and self.roles['v1'] == v2.replace('_v2_', '_', 1)
+                            and ('v1' not in self.roles or self.roles['v1'] == v2.replace('_v2_', '_', 1))
                             and self.roles['metadata'] == str(Path(v2).with_suffix('.metadata.json')),
                             'csv-pair-identity')
             binding.require(isinstance(self.executable_sha256, str)
@@ -106,6 +116,13 @@ class CsvInputs:
             binding.require(os.fstat(metadata_stream.fileno()).st_size <= 4 * 1024**2, 'metadata-byte-budget')
             metadata_stream.seek(0)
             original = binding.strict_json(metadata_stream.read())
+            self.absent_v1 = None
+            if 'v1' not in self.roles:
+                schema = original.get('schema_metadata')
+                binding.require(isinstance(schema, dict) and schema.get('v1_csv_enabled') is False,
+                                'v1-omission-requires-explicit-disabled-metadata')
+                self.absent_v1 = self.root / v2.replace('_v2_', '_', 1)
+                binding.require(not self.absent_v1.exists(), 'unbound-local-v1-input')
             projected = deepcopy(original)
             binding.require(self.work.is_absolute() and not self.work.exists()
                             and self.work != self.root and self.root not in self.work.parents,
@@ -153,9 +170,12 @@ class CsvInputs:
             self._hold(self.projected_path)
             self.absent = absent
             self.receipt.update(input_binding_status='ACTIVE', input_files=self.expected,
+                                input_byte_limits={name: self._maximum_bytes(self.root / name) for name in self.expected},
                                 executable_sha256=self.executable_sha256, path_changes=changes,
                                 projected_metadata=file_fact(self.held[self.projected_path][0]),
                                 original_metadata=self.expected[self.roles['metadata']], absent_inputs=absent,
+                                v1_comparison_requested='v1' in self.roles,
+                                v1_omission_reason=None if self.absent_v1 is None else 'AUTHENTICATED_METADATA_DISABLED',
                                 non_path_metadata_fields_unchanged=True)
             self.active = True
             self.recheck()
@@ -168,18 +188,22 @@ class CsvInputs:
 
     def command(self):
         binding.require(self.active, 'csv-context-not-active')
-        return [str(self.executable), '--v1', str(self.paths['v1']), '--v2', str(self.paths['v2']),
+        v1_args = ['--v1', str(self.paths['v1'])] if 'v1' in self.paths else []
+        return [str(self.executable), *v1_args, '--v2', str(self.paths['v2']),
                 '--metadata', str(self.projected_path), '--spot-observation-fact', str(self.paths['observation']),
                 '--spot-image-fact', str(self.paths['image']), '--spot-image-fact-final-manifest',
                 str(self.paths['image_final'])]
 
     def recheck(self):
         binding.require(self.active, 'csv-context-not-active')
+        if self.absent_v1 is not None:
+            binding.require(not self.absent_v1.exists(), 'unbound-local-v1-input')
         for path, (stream, identity, expected) in self.held.items():
             current = binding.plain_path(path).stat()
             binding.require((current.st_dev, current.st_ino, current.st_size) == identity,
                             'csv-input-identity-changed')
-            binding.require(file_fact(stream) == expected, 'csv-input-bytes-changed')
+            binding.require(file_fact(stream, maximum_bytes=self._maximum_bytes(path)) == expected,
+                            'csv-input-bytes-changed')
         for item in self.absent:
             binding.require(not Path(item['consumer_path']).exists(), 'optional-consumer-path-exists')
             binding.require(not Path(item['source_copy_path']).exists(), 'optional-source-copy-changed')

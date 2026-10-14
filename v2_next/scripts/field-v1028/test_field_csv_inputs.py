@@ -2,6 +2,8 @@
 from copy import deepcopy
 from datetime import datetime, timezone
 import csv
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -234,6 +236,90 @@ class CsvInputTests(unittest.TestCase):
             with ctx: self.fail()
         with self.assertRaisesRegex(ValueError, 'executable-mismatch'):
             with self.bind(folder, data, roles, executable_sha256='0' * 64): self.fail()
+
+    def test_image_ledger_over_2gib_keeps_native_lock_and_hash_checks(self):
+        folder, data, roles = self.prepare()
+        large = data / roles['image']
+        # Only this newly generated synthetic file is removed after the test.
+        self.assertTrue(large.resolve().is_relative_to(ROOT.resolve()))
+        self.addCleanup(large.unlink)
+        size = 2 * 1024**3 + 1
+        with large.open('wb') as stream:
+            stream.truncate(size)
+        expected = {name: fact(data / name) for name in roles.values() if name != roles['image']}
+        with large.open('rb') as stream:
+            expected[roles['image']] = dict(bytes=size, sha256=hashlib.file_digest(stream, 'sha256').hexdigest())
+        save(folder / 'synthetic-large-file.json', expected[roles['image']])
+        ctx = inputs.CsvInputs(data, folder / 'bound', roles, expected, EXE)
+        with ctx:
+            self.assertEqual(ctx.held[large][2], expected[roles['image']])
+            with self.assertRaises(PermissionError): large.write_bytes(b'forbidden')
+        self.assertEqual(ctx.receipt['input_binding_status'], 'PASS')
+        self.assertEqual(ctx.receipt['field_gate'], 'NOT_EVALUATED')
+        save(folder / 'binding-receipt.json', ctx.receipt)
+
+    def omit_v1(self, folder, data, roles, flag=False):
+        name = roles.pop('v1')
+        (data / name).rename(folder / 'omitted-v1.csv')
+        metadata = json.loads((data / roles['metadata']).read_bytes())
+        metadata['schema_metadata']['v1_csv_enabled'] = flag
+        save(data / roles['metadata'], metadata)
+        return name
+
+    def test_explicit_disabled_v1_runs_pinned_consumer_without_pair_claim(self):
+        folder, data, roles = self.prepare()
+        self.omit_v1(folder, data, roles)
+        original = (data / roles['metadata']).read_bytes()
+        ctx = self.bind(folder, data, roles)
+        with ctx:
+            self.assertNotIn('--v1', ctx.command())
+            code, stdout = self.execute(folder, 'v2-only', ctx.command())
+            self.assertEqual(code, 0, stdout)
+            self.assertIn('v1_rows=not checked', stdout)
+            self.assertFalse(ctx.receipt['v1_comparison_requested'])
+        self.assertEqual(ctx.receipt['input_binding_status'], 'PASS')
+        self.assertEqual(ctx.receipt['v1_omission_reason'], 'AUTHENTICATED_METADATA_DISABLED')
+        self.assertEqual((data / roles['metadata']).read_bytes(), original)
+        save(folder / 'binding-receipt.json', ctx.receipt)
+
+    def test_v1_omission_rejects_missing_or_nonboolean_disabled_flag(self):
+        for index, flag in enumerate((True, None, 0, 'false', 'missing')):
+            folder, data, roles = self.prepare(str(index))
+            self.omit_v1(folder, data, roles, flag)
+            if flag == 'missing':
+                metadata = json.loads((data / roles['metadata']).read_bytes())
+                del metadata['schema_metadata']['v1_csv_enabled']
+                save(data / roles['metadata'], metadata)
+            with self.assertRaisesRegex(ValueError, 'v1-omission-requires-explicit-disabled-metadata'):
+                with self.bind(folder, data, roles): self.fail('unproven omission accepted')
+
+    def test_unbound_v1_present_or_created_during_context_rejects(self):
+        for timing in ('before', 'during'):
+            folder, data, roles = self.prepare(timing)
+            name = self.omit_v1(folder, data, roles)
+            if timing == 'before':
+                shutil.copy2(folder / 'omitted-v1.csv', data / name)
+            ctx = self.bind(folder, data, roles)
+            with self.assertRaisesRegex(ValueError, 'unbound-local-v1-input'):
+                with ctx:
+                    shutil.copy2(folder / 'omitted-v1.csv', data / name)
+            self.assertEqual(ctx.receipt['input_binding_status'], 'FAIL')
+
+    def test_image_ledger_limit_does_not_expand_other_input_limits(self):
+        for role, size in (('v2', 2 * 1024**3 + 1), ('image', 4 * 1024**3 + 1)):
+            folder, data, roles = self.prepare(role)
+            expected = {name: fact(data / name) for name in roles.values()}
+            expected[roles[role]]['bytes'] = size
+            ctx = inputs.CsvInputs(data, folder / 'bound', roles, expected, EXE)
+            with self.assertRaisesRegex(ValueError, 'csv-input-fact-contract'):
+                with ctx: self.fail('out-of-budget input accepted')
+            self.assertEqual(ctx.receipt['input_binding_status'], 'FAIL')
+
+    def test_streaming_hash_enforces_supplied_budget(self):
+        with self.assertRaisesRegex(ValueError, 'csv-input-byte-budget'):
+            inputs.file_fact(io.BytesIO(b'x' * 33), maximum_bytes=32)
+        self.assertEqual(inputs.file_fact(io.BytesIO(b'x' * 32), maximum_bytes=32),
+                         dict(bytes=32, sha256=hashlib.sha256(b'x' * 32).hexdigest()))
 
     def test_malformed_duplicate_json_and_unsafe_manifest_paths_reject(self):
         for index, bad_path in enumerate(('../escape.csv', 'C:relative.csv', '//host/share/f.csv', 'C:/safe/f.csv:ads', 'NUL.csv', None)):
