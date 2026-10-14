@@ -222,3 +222,40 @@ registry/프로세스 상태를 사용했으며, 운영 서버 관리자 ACL·�
 `1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f`다.
 운영 서버 식별자 차단도 실제 exit1을 확인했다. 서버용 실행 요청은 최신 백업과
 종료 로그 검토 후 고정할 예정이며, 이 기록으로 서버 설치 완료를 주장하지 않는다.
+
+## 2026-10-14 같은 운영 세대 종료·CSV 검토와 백업 완료 대기
+
+`Q3d9da3` 복사 중에 탐색기로 종료 자료를 회수했다. 회수 위치는
+`Z:/SmartFactory/20261014/return/FIELD_OFF_0dd2ced0_shutdown`이며 개발 증거는
+`C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0`에 보존했다.
+공유 사본과 개발 사본의 바이트·해시는 일치한다. 서버 최종 manifest 결합은 대기 중이다.
+
+| 확인한 자료 | 확인 결과와 범위 |
+| --- | --- |
+| Electron 종료 로그 | main10788/backend9028의 종료 요청 09:07:34.703 KST, backend 실제 exit0 09:07:49.407, forced=false |
+| 같은 세대 begin/final 종료 영수증 | 세대·sidecar SHA 일치, 종료 단계 10개 완료, 이미지 enqueued=written=94,022, queue/inflight/unfinished/new failures during drain=0 |
+| 당일 닫힌 CSV·metadata | 142,273행, 순번323776–466048 연속, 마지막09:07:34.930912, finalized=true/reason=shutdown; 전체 의미 검증은 아님 |
+| system/status 로그 | 동일 세대 정상 종료 단계와 Offline 전환 일치; 과거 통신 경고 원문 보존 |
+| 승인 설정 변경 미리보기 | 실제 config SHA6841…을 입력으로 comparator 검증 값만 true→false; 다른 바이트 불변, 서버 설정 미변경 |
+
+종료 영수증의 `historical_dropped_count=173`, `integrity_unresolved=true`는 미해결이다.
+설치된541d 소스는 크기 초과와 queue.Full을 같은 dropped_count로 기록하며 원인별
+카운터가 없다. 이 수치를 실제 저장 파일 173개 손실이나 확인된 단일 원인으로 해석하지 않는다.
+이번 종료 중 새 실패 0과 과거 drop의 원인·영향 확인은 별개다.
+
+검토 스크립트 `review-preclose.py`, `review-shutdown-receipts.py`, `review-closed-csv.py`,
+`preview-approved-config.ps1`, `review-system-logs.py`의 최종 실행은 각각 exit0다.
+system.log 첫 검토는 JSON과 일반 텍스트가 섞인 형식을 가정하지 못해 exit1이었고,
+두 형식을 명시적으로 읽는 재실행 `server-system-logs-r2`에서 25,168개 기록을 검토했다.
+과거 로그를 포함한 경고544개는 발생 횟수가 아니라 기록 개수이며 별도 JSONL로 보존했다.
+
+새 사전 조사 용량14,087,444,216B와 이전 검산 백업55,562,005,735B의 차이는 아직
+설명되지 않았다. 이전 원문을 보존하고, 새 최종 manifest의 파일별 추가·변경·부재와
+본문/추가 스트림 용량을 대조하도록 도구를 준비했다. manifest 구조·부모 결합·해시·
+수량/용량 불일치와 이전 백업 오사용 차단 등 로컬11개 검사는 exit0였다.
+이 검사는 현재 서버 사본 검산 성공을 뜻하지 않는다.
+
+다음 순서는 최종 콘솔 해시 회수 → 새 manifest와 위 원본 자료 결합 → 이전 manifest와
+용량 차이 검토 → 고정 설치 요청의 서버 최종 전달이다. 이 기록 시점에는 앱이 종료된
+유지보수 구간이며 백업 복사 중이다. 후보 설치·설정 변경·현장 계측은 아직 미실행이며,
+물리 시험 NOT_TESTED, 정식 출시 HOLD, 승격 금지를 유지한다.

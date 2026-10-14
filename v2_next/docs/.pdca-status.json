@@ -8531,8 +8531,20 @@
               "phase": "COPYING",
               "appClosedThroughUi": true,
               "runtimeAbsenceObservedAtUtc": "2026-10-14T00:07:56.7832272Z",
-              "sameGenerationNormalExitLogReviewed": false,
-              "finalCopyVerified": false
+              "sameGenerationNormalExitLogReviewed": true,
+              "finalCopyVerified": false,
+              "reviewEvidenceRoot": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0",
+              "backendExitCode": 0,
+              "forcedTermination": false,
+              "closedCsvRows": 142273,
+              "closedCsvFinalSequence": 466048,
+              "closedCsvFinalized": true,
+              "sourceManifestBindingVerified": false,
+              "historicalImageDropCount": 173,
+              "historicalImageDropCauseResolved": false,
+              "preflightBytes": 14087444216,
+              "previousBackupBytes": 55562005735,
+              "backupSizeDifferenceExplained": false
             },
             "installerHelper": {
               "sourceSha256": "1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f",
