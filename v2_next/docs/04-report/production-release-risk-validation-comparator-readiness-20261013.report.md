@@ -1801,3 +1801,33 @@ NuGet archive SHA512는 cache sha512와, 서명 제외 contentHash는 metadata/l
 
 출처: [Microsoft TraceEvent parser](https://raw.githubusercontent.com/microsoft/perfview/10e5d271cebcdf5d6cf122c6ab9c863860a7a2f1/src/TraceEvent/Parsers/KernelTraceEventParser.cs),
 [NuGet contentHash 정의](https://github.com/NuGet/Home/wiki/Nupkg-Metadata-File).
+
+
+## 2026-10-15 선택한 추적 필드 전수 대조와 R5 대기
+
+보존한 R4 Normal/ControllerExit ETL을 각각 TraceEvent4.0.0으로 다시 읽고, 별도 Python 검사로
+tracerpt 원시 XML과 선택 기록153,793/57,866건(합계211,659건)을 전수 대조했다.
+전체 사건 수156,906/60,127, 선택 종류별 수, 원시 QPC·CPU·opcode/version·payload·TID/PID가 일치한다.
+정렬 순서 대신 중복 수를 보존한 multiset을 비교했으며 이 두 자료의 동일 선택 기록 중복은0건이다.
+ReadyThread8바이트는 tracerpt의5개 필드로 재구성했다. ThreadTraceData가 내부 수정한 앞8바이트는
+해독 PID/TID로 복원한 뒤 원래 XML EventPayload와 대조했다. ETL·XML·명령 영수증·해독 출력은
+동일 잠금 바이트의 SHA/크기를 확인했고, 서로 다른 ETL을 결합하는 경우를 거부한다.
+
+이 결과의 범위는 선택 필드 일치다. CSwitch 나머지 비트/상태 의미, 미처리 사건1867/1001의 영향,
+스레드 세대 구분과 실제 요청 구간의 포함 여부는 미검증이다. 기존 tracerpt의
+INCOMPLETE_OR_UNUSABLE 판정은 보존하며, 서버203ms 지연 원인이나 현장 QA PASS로 확대하지 않는다.
+이 짧은 로컬 추적에는 앞선 HTTP 관찰의 같은 실행·요청 시각 자료가 없으므로 서로 연결하지 않는다.
+
+개발 증거 위치: `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_CROSSCHECK_20261015_3a71efd6`.
+`crosscheck-results.json` SHA256은
+`2c20efdd33deec2f1260aba98261201b453af67a3065515de4d0950b715ffd2f`이다.
+빌드 exit0/경고0, 두 추출 exit0, 전수 대조 exit0, 최종 단위 검사16개 exit0,
+선택 Ruff 검사 exit0를 확인했다. 잘못된 ETL 해시와 기존 출력 폴더를 입력한 두 음성 검사는
+각각 실제 exit3762504530으로 해당 오류를 내며 거부했다. 기록을 덮어쓰지 않았다.
+검증 원문·도구 소스·빌드 파일 사실은 verification.json에 기록했다.
+
+R5는 같은 suite45888/생성 FILETIME134364938856872760이08:43:36KST의 실제 핸들10초 대기에서도
+살아 있었고 최종 summary는 없었다. 세 Guard의 저장·정리 확인은 이전 기록대로 보존한다.
+콘솔 선택으로 멈췄는지는 아직 미확정이며 앞선 Esc1회 요청의 답을 기다린다. 재실행하지 않는다.
+최종 suite 종료 코드와 요약 확인 후, 요청·스레드 연결에 필요한 검증을 이어간다.
+제품/설치본 변경 없음, 15분FAIL·120분미시작·물리NOT_TESTED·full_data NOT_EVALUATED·출시HOLD다.

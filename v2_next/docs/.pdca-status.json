@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T23:34:21.819335+00:00",
+  "lastUpdated": "2026-10-14T23:44:24.927557+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T23:34:21.819335+00:00"
+        "lastUpdated": "2026-10-14T23:44:24.927557+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Observe the same live R5 suite PID45888 (creation FILETIME134364938856872760), without restarting. All three trace result/ETL hashes and owned cleanup were verified; summary and LAUNCH_EXIT are still absent. User was asked to press Escape once to test a possible console selection pause, which remains unconfirmed. Continue full scheduler payload, thread generation and request-QPC validation using the pinned TraceEvent offline probe; two trace counts and three samples do not establish usable field analysis. Preserve field15 FAIL and release HOLD.",
+            "nextAction": "Observe the same live R5 suite PID45888, creation FILETIME134364938856872760; do not restart or infer its exit code from completed Guard results. The pending user Escape request tests an unconfirmed console selection pause. Offline R4 crosscheck now matches all 211659 selected records (QPC, CPU, opcode/version, payload and TID/PID); full semantics, unhandled event relevance, thread generation and request-clock coverage still require validation. Preserve field15 FAIL and release HOLD.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11329,6 +11329,78 @@
                   "sha256": "87f7aee01a17bdee291e3a33edac0cb91150078f4965ec4e8e3bbae820f0f837"
                 }
               },
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "productOrInstallerChanged": false,
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "traceSelectedCrosscheckStage": {
+              "recordedAt": "2026-10-14T23:44:24.927557+00:00",
+              "status": "R4_SELECTED_FIELDS_CROSSCHECKED_R5_SUITE_STILL_LIVE",
+              "decoderScope": "OFFLINE_TWO_LOCAL_R4_ETLS_ONLY",
+              "selectedRecords": 211659,
+              "scenarioRecords": [
+                153793,
+                57866
+              ],
+              "traceEventVersion": "4.0.0",
+              "checkedFields": [
+                "qpc",
+                "cpu",
+                "opcode",
+                "version",
+                "payload_bytes",
+                "thread_ids",
+                "thread_process_id"
+              ],
+              "duplicateRecords": [
+                0,
+                0
+              ],
+              "readyPayload": "RECONSTRUCTED_FROM_FIVE_TRACERPT_FIELDS",
+              "threadPrefix": "RECONSTRUCTED_LIBRARY_PREFIX_COMPARED_TO_ORIGINAL_XML_BYTES",
+              "fullPayloadSemantics": "NOT_EVALUATED",
+              "threadGenerationBinding": "NOT_EVALUATED",
+              "requestTimeCoverage": "NOT_EVALUATED",
+              "latencyCause": "UNDETERMINED",
+              "buildExit": 0,
+              "buildWarnings": 0,
+              "exportExits": [
+                0,
+                0
+              ],
+              "crosscheckExit": 0,
+              "unitTests": 16,
+              "unitTestExit": 0,
+              "exporterRejections": 2,
+              "selectedRuffExit": 0,
+              "evidence": {
+                "crosscheck": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_CROSSCHECK_20261015_3a71efd6\\crosscheck-results.json",
+                  "bytes": 3270,
+                  "sha256": "2c20efdd33deec2f1260aba98261201b453af67a3065515de4d0950b715ffd2f"
+                },
+                "verification": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_CROSSCHECK_20261015_3a71efd6\\verification.json",
+                  "bytes": 10655,
+                  "sha256": "53cc2109b31d00e0040bde642117a2dd6509d09ac7e5df30ddee8aa4616b67bf"
+                },
+                "r5Live": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_CROSSCHECK_20261015_3a71efd6\\r5-live-observation.json",
+                  "bytes": 398,
+                  "sha256": "b9b01bd1ca11bb504dd600fae0d3dbb24ad8d330a278a83ac0852ff630105828"
+                }
+              },
+              "r5SuitePid": 45888,
+              "r5SuiteCreatedFiletime": "134364938856872760",
+              "r5SuiteLive": true,
+              "r5SummaryObserved": false,
+              "r5LaunchExit": null,
+              "r5SuitePassed": false,
+              "verifiedLiveWait": true,
               "field15Status": "FAIL",
               "canary120Started": false,
               "physicalBoundary": "NOT_TESTED",
