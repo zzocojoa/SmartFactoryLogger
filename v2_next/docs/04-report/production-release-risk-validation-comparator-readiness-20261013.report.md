@@ -1427,3 +1427,46 @@ ZIP 컨테이너 해시를 서버 콘솔에서 검증한 것은 아니며 NTFS �
 120분 미시작, 물리 NOT_TESTED, full_data NOT_EVALUATED, 정식 QA/출시 HOLD를 유지한다.
 다음 성능 시험 전에는 같은 반복으로 통과를 찾지 않고 지연 구간과 잔여 owned 프로세스의
 식별을 남기는 계측을 준비한다. 후보 종료 후 생성 자료의 전수 QA는 별도로 남는다.
+
+
+## 2026-10-14 outer job 잔여 프로세스의 로컬 재현과 식별 계측
+
+기존 도우미 바이트(SHA256 `ab3c98d2611fe5d0c75056e194bf0f26c107dc137a78f93588ce3777387480c8`)로
+정상 종료만 하는 Python을 30회 실행했다. 실제 root exit는 모두0이지만29회에서
+`outer-descendants-remain`,28회에서 owned job 종료 요청이 기록됐고 최종active는 모두0이었다.
+별도 직접 관찰100회도 root 종료 신호 뒤active1을 읽었으며 추가 관찰 중 모두0으로 바뀌었다.
+이 단계만으로 실제 남은 프로세스가 없었다거나 서버 경고가 오탐이라고 판단하지 않았다.
+
+읽기 전용 프로세스 식별 계측을 추가한 사본에서 base Python과 venv Python을 각각100회 관찰했다.
+각99회, 총198회에서 명시적 owned job membership·생성 시각·실행 경로와 함께
+`C:\Windows\System32\conhost.exe`의 아직 종료되지 않은 상태를 확인했다.
+200회 모두 강제 종료 없이 정리됐지만 일부 조회는 종료 경합으로 실패했다.
+초기 진단 사본의 실패한 API 필드 기본0을 종료 증거로 해석하지 않았으며 해당 원문을 보존했다.
+따라서 로컬 재현에는 일시적으로 살아 있는 console 보조 프로세스가 관여한다.
+서버의 미식별 잔여 PID가 같은 프로세스였는지, HTTP 지연과 관련이 있는지는 **미확정**이다.
+
+새 `invoke-field-run.template.ps1`은 suspended root의 실제 경로·생성 시각을 먼저 고정하고,
+종료/오류 정리 직전에 owned job PID 목록과 handle 기반 membership·종료 신호·exit를 기록한다.
+최대1024 PID, 조회 실패/목록 불완전은PARTIAL, 알 수 없는 필드는null이며 관찰은 원자적 snapshot이 아니다.
+원래accounting과 실패 판정·시간 제한·owned job 종료·kill-on-close를 유지했다.
+진단 오류가 정리를 건너뛰게 하지 않으며 일반 프로세스 이름으로 종료하지 않는다.
+새 관찰값은 추가 진단 필드이며 이전 서버 결과의 판정을 바꾸지 않는다.
+
+PowerShell5.1 x64 네이티브14조건 검사와 변경 테스트 파일의 Ruff F/E9는 실제exit0이다.
+살아 있는 orphan·timeout child, supervisor 종료, 무관한 프로세스 보존, 진단 호출 실패,
+출력 원문/경로 검산 및 빠른 종료30회에서 기존 실패 판정 보존을 확인했다.
+추가30회에서는 경고30회/강제 정리28회가 남았으며 이를 수정 완료로 표시하지 않는다.
+제품 소스 변경이 없어 전체 앱 health·installer 재빌드·새 현장 시험은 실행하지 않았다.
+
+개발 기록: `C:/Users/user/Desktop/SmartFactory/PDCA_OUTER_JOB_20261014_09c971c5`.
+`analysis.json` SHA256 `b3ec626eca5bf2802f59b55f464f635d25426efdfff2c17e3bc39b481814b2a3`,
+`evidence-manifest.json` SHA256 `68ec971203b15da20217bdebf7c054311d3050ec0a37b7eda6c5858c211c3616`.
+새 도우미 source SHA256은 `163d4d04938e341200bdfa68b2c632752191aa2f30280f410740acfe891bfc18`이다.
+기존 서버 묶음은 보존했으며 새 도우미의 서버 전달·실행은 아직 하지 않았다.
+차기 묶음의 실제 portable 검증과 지연 구간 계측의 부하·손실·시각 정렬 확인이 남는다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+API 해석 근거: [Microsoft job accounting](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information),
+[PID 목록](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_process_id_list),
+[명시적 job membership](https://learn.microsoft.com/en-us/windows/win32/api/jobapi/nf-jobapi-isprocessinjob).
+accounting의 종료 참조 영향은 가능한 해석이며 이번 실제 conhost 식별을 대신하는 원인 확정이 아니다.

@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T12:43:15.014742+00:00",
+  "lastUpdated": "2026-10-14T13:03:10.424511+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T05:52:52.961074+00:00"
+        "lastUpdated": "2026-10-14T13:03:10.424511+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Current job 60345/1 is user-confirmed and matches the applied server UI. Closed preinstall snapshot image byte/decode coverage is complete for 324193 files, including 94022 new ledger-linked images; preserve historical absence/orphan/drop findings. Prepare targeted timing to separate backend execution/event-loop or lock waits from client scheduling and identify remaining owned processes. Do not repeat the same 15-minute test to seek PASS, relax thresholds, start 120 minutes, or promote. Candidate runtime/closed data QA remains pending.",
+            "nextAction": "Current job 60345/1 is confirmed. Local quick-exit reproduction identified transient owned live conhost processes; the server remaining process is still unidentified. Native helper identity/state observation is verified by 14 checks and retains the original failure verdict. Prepare bounded targeted latency instrumentation with overhead/loss/time alignment checks and verify a separately pinned portable helper before field delivery. Preserve the 15-minute FAIL, closed image coverage and historical absence/orphan/drop evidence. Do not repeat unchanged performance tests to seek PASS, start 120 minutes or promote; candidate closed QA remains pending.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -10731,6 +10731,40 @@
                 "bytes": 2085,
                 "sha256": "bc457505811051dfd39cabf87c780bdd8a9a8c024dfc401c3c98acd39bdf42d2"
               }
+            },
+            "outerJobObservationStage": {
+              "recordedAt": "2026-10-14T13:03:10.424511+00:00",
+              "status": "OWNED_JOB_OBSERVABILITY_VERIFIED_LOCALLY_SERVER_CAUSE_UNCONFIRMED",
+              "evidenceRoot": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_OUTER_JOB_20261014_09c971c5",
+              "analysis": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_OUTER_JOB_20261014_09c971c5\\analysis.json",
+                "bytes": 5819,
+                "sha256": "b3ec626eca5bf2802f59b55f464f635d25426efdfff2c17e3bc39b481814b2a3"
+              },
+              "evidenceManifest": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_OUTER_JOB_20261014_09c971c5\\evidence-manifest.json",
+                "bytes": 332151,
+                "sha256": "68ec971203b15da20217bdebf7c054311d3050ec0a37b7eda6c5858c211c3616"
+              },
+              "sourceSha256": "163d4d04938e341200bdfa68b2c632752191aa2f30280f410740acfe891bfc18",
+              "originalWrapperTrials": 30,
+              "originalWrapperWarnings": 29,
+              "originalWrapperForced": 28,
+              "ownedLiveConhostConfirmedTrials": 198,
+              "processObservationTrials": 200,
+              "nativeCases": 14,
+              "nativeExit": 0,
+              "ruffExit": 0,
+              "verdictRelaxed": false,
+              "originalServerFailureReclassified": false,
+              "actualServerExecution": false,
+              "field15Status": "FAIL",
+              "serverCauseConfirmed": false,
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
             }
           }
         }

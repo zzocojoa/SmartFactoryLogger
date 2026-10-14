@@ -129,7 +129,13 @@ public sealed class SflOwnedRun : IDisposable {
     [DllImport("kernel32.dll",SetLastError=true)] static extern uint ResumeThread(IntPtr h);
     [DllImport("kernel32.dll",SetLastError=true)] static extern uint WaitForSingleObject(IntPtr h,uint ms);
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr h,out uint code);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,uint pid);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool IsProcessInJob(IntPtr p,IntPtr j,out bool member);
+    [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetProcessTimes(IntPtr p,out long created,out long exited,out long kernel,out long user);
+    [DllImport("kernel32.dll",SetLastError=true,CharSet=CharSet.Unicode)] static extern bool QueryFullProcessImageNameW(IntPtr p,uint flags,StringBuilder name,ref uint size);
     IntPtr job, process;
+    long rootCreated;
+    string rootExecutable;
     FileStream stdout, stderr, stdin;
     public uint Pid {get; private set;}
     static void Check(bool ok){if(!ok)throw new Win32Exception(Marshal.GetLastWin32Error());}
@@ -166,6 +172,9 @@ public sealed class SflOwnedRun : IDisposable {
             Check(CreateProcessW(exe,command,IntPtr.Zero,IntPtr.Zero,true,0x08080404,env,cwd,ref si,out pi));
             process=pi.process;Pid=pi.pid;
             Check(AssignProcessToJobObject(job,process));assigned=true;
+            long exited,kernel,user;Check(GetProcessTimes(process,out rootCreated,out exited,out kernel,out user));
+            uint nameSize=32768;StringBuilder name=new StringBuilder((int)nameSize);
+            Check(QueryFullProcessImageNameW(process,0,name,ref nameSize));rootExecutable=name.ToString();
             if(ResumeThread(pi.thread)==0xffffffff)throw new Win32Exception(Marshal.GetLastWin32Error());
         }catch{
             if(pi.process!=IntPtr.Zero && !assigned){TerminateProcess(pi.process,1);WaitForSingleObject(pi.process,10000);}
@@ -180,6 +189,67 @@ public sealed class SflOwnedRun : IDisposable {
     public bool Wait(int milliseconds){uint r=WaitForSingleObject(process,(uint)milliseconds);if(r==0)return true;if(r==258)return false;throw new Win32Exception(Marshal.GetLastWin32Error());}
     public uint ExitCode(){uint code;Check(GetExitCodeProcess(process,out code));return code;}
     public int[] Accounting(){IntPtr p=Marshal.AllocHGlobal(48);try{Check(QueryInformationJobObject(job,1,p,48,IntPtr.Zero));return new int[]{Marshal.ReadInt32(p,36),Marshal.ReadInt32(p,40),Marshal.ReadInt32(p,44)};}finally{Marshal.FreeHGlobal(p);}}
+    public sealed class ProcessObservation {
+        public uint pid;
+        public bool? owned, signaled;
+        public long? created_filetime, exited_filetime;
+        public uint? exit_code;
+        public string executable, error_stage, error;
+        public int? win32_error;
+    }
+    ProcessObservation ObserveProcess(uint pid,IntPtr held){
+        ProcessObservation r=new ProcessObservation();r.pid=pid;IntPtr p=held;string stage="open-process";
+        try{
+            // A PID from the owned job may exit/recycle before OpenProcess. Check
+            // membership through this handle before reading identity or state.
+            if(p==IntPtr.Zero){p=OpenProcess(0x101000,false,pid);Check(p!=IntPtr.Zero);}
+            stage="owned-job-membership";bool member;Check(IsProcessInJob(p,job,out member));r.owned=member;
+            if(!member){r.error_stage=stage;r.error="not-owned-or-pid-reused";return r;}
+            stage="process-times";long created,exited,kernel,user;
+            Check(GetProcessTimes(p,out created,out exited,out kernel,out user));r.created_filetime=created;
+            if(held!=IntPtr.Zero && created!=rootCreated)throw new InvalidOperationException("root-identity-changed");
+            stage="process-wait";uint wait=WaitForSingleObject(p,0);
+            if(wait!=0 && wait!=258)throw new Win32Exception(Marshal.GetLastWin32Error());
+            r.signaled=wait==0;
+            if(wait==0){
+                // Query times again after observing the terminal signal; the
+                // earlier exit time is undefined if it was still running.
+                stage="terminal-process-times";Check(GetProcessTimes(p,out created,out exited,out kernel,out user));
+                r.exited_filetime=exited;stage="exit-code";uint code;Check(GetExitCodeProcess(p,out code));r.exit_code=code;
+            }
+            stage="executable";
+            if(held!=IntPtr.Zero){r.executable=rootExecutable;}
+            else{uint size=32768;StringBuilder name=new StringBuilder((int)size);Check(QueryFullProcessImageNameW(p,0,name,ref size));r.executable=name.ToString();}
+        }catch(Exception e){r.error_stage=stage;r.error=e.Message;Win32Exception w=e as Win32Exception;if(w!=null)r.win32_error=w.NativeErrorCode;}
+        finally{if(held==IntPtr.Zero && p!=IntPtr.Zero)CloseHandle(p);}
+        return r;
+    }
+    public sealed class JobObservation {
+        public string schema="sfl-owned-job-observation-v1";
+        public string status="PARTIAL", error;
+        public bool sequence_not_atomic=true;
+        public long started_ticks,ended_ticks,stopwatch_frequency=System.Diagnostics.Stopwatch.Frequency;
+        public int[] accounting_before,accounting_after;
+        public uint? assigned,listed;
+        public ProcessObservation root;
+        public List<ProcessObservation> members=new List<ProcessObservation>();
+    }
+    public JobObservation ObserveJob(){
+        JobObservation r=new JobObservation();r.started_ticks=System.Diagnostics.Stopwatch.GetTimestamp();IntPtr b=IntPtr.Zero;
+        try{
+            r.accounting_before=Accounting();r.root=ObserveProcess(Pid,process);
+            b=Marshal.AllocHGlobal(8200);Check(QueryInformationJobObject(job,3,b,8200,IntPtr.Zero));
+            uint assigned=(uint)Marshal.ReadInt32(b,0),listed=(uint)Marshal.ReadInt32(b,4);r.assigned=assigned;r.listed=listed;
+            // Bound work and fail closed on truncation; never claim an empty job
+            // from a failed query or an incomplete process list.
+            if(assigned!=listed || listed>1024)throw new InvalidOperationException("owned-process-list-incomplete");
+            uint[] ids=new uint[listed];for(int i=0;i<ids.Length;i++)ids[i]=checked((uint)Marshal.ReadInt64(b,8+8*i));
+            foreach(uint pid in ids)r.members.Add(ObserveProcess(pid,pid==Pid?process:IntPtr.Zero));
+            r.accounting_after=Accounting();r.status=r.root.error==null && r.members.TrueForAll(p=>p.error==null)?"OBSERVED":"PARTIAL";
+        }catch(Exception e){r.error=e.Message;}
+        finally{if(b!=IntPtr.Zero)Marshal.FreeHGlobal(b);r.ended_ticks=System.Diagnostics.Stopwatch.GetTimestamp();}
+        return r;
+    }
     public void Terminate(){Check(TerminateJobObject(job,1));}
     public void Dispose(){
         if(job!=IntPtr.Zero){CloseHandle(job);job=IntPtr.Zero;}
@@ -215,12 +285,20 @@ function Invoke-RunNative([string]$Executable,[string[]]$Arguments,[string]$Dire
         }
         $record.actual_exit_code=$child.ExitCode()
         $record.job_before_cleanup=$child.Accounting()
+        try{$record.job_observation_before_cleanup=$child.ObserveJob()}
+        catch{$record.job_observation_error=$_.Exception.Message}
         Assert-RunCondition ($record.job_before_cleanup[1] -eq 0) 'outer-descendants-remain'
         foreach($name in @('stdout.log','stderr.log')){Assert-RunCondition (([IO.FileInfo]::new($Directory+'\'+$name)).Length -le 128MB) 'outer-final-output-budget'}
         if($record.actual_exit_code -eq 0){$record.status='PASS'}
     }catch{$record.errors+= $_.Exception.Message}
     finally{
         if($null -ne $child){
+            # Diagnostic fields never replace the original accounting verdict or
+            # prevent cleanup. The observation spans multiple native calls.
+            if(-not $record.Contains('job_observation_before_cleanup') -and -not $record.Contains('job_observation_error')){
+                try{$record.job_observation_before_cleanup=$child.ObserveJob()}
+                catch{$record.job_observation_error=$_.Exception.Message}
+            }
             try{
                 if($child.Accounting()[1] -ne 0){$record.termination_requested=$true;$record.status='FAIL';$child.Terminate()}
                 $drain=[Diagnostics.Stopwatch]::StartNew()

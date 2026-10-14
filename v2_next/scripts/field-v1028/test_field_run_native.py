@@ -92,12 +92,57 @@ elif mode=='exit7':raise SystemExit(7)
             if name=='args':body+="Check ($r.status -ceq 'PASS' -and $r.actual_exit_code -eq 0 -and -not $r.termination_requested) 'normal child'\n"
             elif name=='exit7':body+="Check ($r.status -ceq 'FAIL' -and $r.actual_exit_code -eq 7 -and -not $r.termination_requested) 'actual exit7'\n"
             else:body+="Check ($r.status -ceq 'FAIL' -and $r.termination_requested) 'owned fault termination'\n"
-            run(name,body)
+            observation=json.loads(run(name,body))['job_observation_before_cleanup']
+            assert observation['schema']=='sfl-owned-job-observation-v1',observation
+            assert observation['sequence_not_atomic'] is True and observation['stopwatch_frequency']>0,observation
+            assert observation['ended_ticks']>=observation['started_ticks'],observation
+            root_observation=observation['root']
+            assert root_observation['owned'] is True and root_observation['created_filetime']>0,observation
+            assert Path(root_observation['executable']).resolve()==Path(sys._base_executable).resolve(),observation
+            assert root_observation['signaled'] is (name!='hang'),observation
+            assert root_observation['error'] is None,observation
+            assert unrelated.pid not in [p['pid'] for p in observation['members']],observation
+            if name in ('hang','orphan'):
+                child_pid=json.loads(marker.read_bytes())['pid']
+                owned_child=[p for p in observation['members'] if p['pid']==child_pid]
+                assert len(owned_child)==1 and owned_child[0]['owned'] is True and owned_child[0]['signaled'] is False,observation
+                assert owned_child[0]['created_filetime']>0 and owned_child[0]['exit_code'] is None,observation
             if name=='args':
                 value=json.loads((directory/'stdout.log').read_bytes())
                 assert value==dict(args=arguments[4:],stdin='',unexpected_environment=None),value
             if marker.exists():assert not psutil.pid_exists(json.loads(marker.read_bytes())['pid'])
             assert unrelated.poll() is None
+        # A failed diagnostic must not skip termination of the owned tree or
+        # touch a process outside that tree. Inject failure at the call site.
+        directory=root/'diagnostic-failure';directory.mkdir();marker=root/'diagnostic-failure-child.json'
+        arguments=['-S',str(fixture),'hang',str(marker)]
+        body="""
+$definition=(Get-Command Invoke-RunNative).Definition.Replace('$child.ObserveJob()',"`$(throw 'synthetic-observation-failure')")
+Set-Item Function:Invoke-RunNative ([scriptblock]::Create($definition))
+"""
+        body+='$r=Invoke-RunNative '+quote(sys._base_executable)+' @('+','.join(quote(x) for x in arguments)+') '+quote(directory)+' 1\n'
+        body+="$r|ConvertTo-Json -Depth 8\nCheck ($r.status -ceq 'FAIL' -and $r.termination_requested -and $r.job_after_cleanup[1] -eq 0 -and $r.job_observation_error -ceq 'synthetic-observation-failure') 'diagnostic failure still cleans owned tree'\n"
+        run('diagnostic-failure',body)
+        assert marker.exists() and not psutil.pid_exists(json.loads(marker.read_bytes())['pid'])
+        assert unrelated.poll() is None
+
+        # Repeated quick exits exercise transient console descendants. Keep the
+        # original accounting verdict, even when the later observation is empty.
+        directory=root/'quick-exits';directory.mkdir()
+        body='$parent='+quote(directory)+'\n$records=@()\n'
+        body+='for($i=0;$i -lt 30;$i++){\n$d=Join-Path $parent ([string]$i);[void][IO.Directory]::CreateDirectory($d)\n'
+        body+='$r=Invoke-RunNative '+quote(sys.executable)+" @('-S','-c','pass') $d 15\n"
+        body+="Check ($r.actual_exit_code -eq 0 -and $r.job_after_cleanup[1] -eq 0) 'quick root exited and job cleaned'\n"
+        body+="if($r.job_before_cleanup[1] -ne 0){Check ($r.status -ceq 'FAIL' -and $r.errors -contains 'outer-descendants-remain') 'original accounting failure retained'}\n"
+        body+="$records+=$r\n}\n$records|ConvertTo-Json -Depth 8\n"
+        records=json.loads(run('quick-exits',body))
+        assert len(records)==30
+        for record in records:
+            observation=record['job_observation_before_cleanup']
+            assert observation['root']['signaled'] is True and observation['root']['exit_code']==0,observation
+            assert observation['root']['error'] is None,observation
+            assert all(p['signaled'] is None for p in observation['members'] if p['owned'] is not True),observation
+        assert unrelated.poll() is None
         directory=root/'death';directory.mkdir();marker=root/'death-child.json'
         args=['-S',str(fixture),'hang',str(marker)]
         script=root/'death.ps1'
