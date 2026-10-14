@@ -411,3 +411,26 @@ full_data NOT_EVALUATED, physical NOT_TESTED, release HOLD를 바꾸지 않았�
 현재 검사는 실행 중이고 실제 consumer exit는 미확정이다. 자료 위치는 위 증거 폴더의
 `recovered-csv-r1`, 콘솔 기록은 `recovered-csv-r1.log`다. 새 용량 한도로 큰 입력을
 수용했다는 사실은 이 자료의 의미 검증 통과를 뜻하지 않는다.
+
+### 최종 설치 묶음 생성기의 격리 입력 검사
+
+같은 개발 증거 폴더의 `test-install-bundle-builder.py`로 실제 생성기를 격리된
+`DEV_ONLY_install_builder_r2`에서 검사했다. 13개 검사는 실제 exit0였고
+`install-builder-tests-r2.log`와 `DEV_ONLY_install_builder_r2/summary.json`에 보존했다.
+미완료 백업, 다른 백업 경로, false/숫자형 증명값, 오래된 결과, 잘못된 해시 결합,
+실패한 정상 종료 검토, 다른 실행 세대, 잠정 비교, 운영 승격 주장, 변조한 정적 파일,
+잘못된 외부 해시의 12개 입력은 출력 변경 전에 거부했다. 합성 정상 입력에서는
+10파일 묶음의 전체 해시를 재대조하고 같은 출력의 재사용도 거부하는지 확인했다.
+
+최초 `DEV_ONLY_install_builder_r1`의 정상 입력은 허용된 Desktop/SmartFactory 밖의
+시험 경로여서 launcher의 경로 검사에 걸렸다(exit1). 시험 경로만 허용 부모 아래의
+`DEV_ONLY_NOT_FOR_SERVER_...`로 고친 두 번째 검사가 위 결과다. 최초 실패와 부분
+시험 출력도 보존했다. 실제 6파일 준비 묶음과 생성기·launcher 원문은 변경하지 않았다.
+합성 요청은 서버로 전달하거나 실행하지 않았으며, 실제 최종 서버 결과를 결합한
+설치 요청 생성·설치는 계속 미실행이다.
+
+이전 전체 CSV 소비자 검사의 실제 소요시간은 2,404.04초였고 실제 exit1이었다
+(`PDCA_STREAM_COPY_20261012_5a7ed041/validator-memory-validation/completion-review.json`).
+당시 실패는 운영자 확인 프로파일 조건이며 현재 자료의 결과로 재사용하지 않는다.
+이 기록은 현재 1,800초 예산이 부족할 수 있다는 근거다. 실행 중 검사를 중복 시작하거나
+완료로 간주하지 않고 실제 종료 상태를 확인한다.

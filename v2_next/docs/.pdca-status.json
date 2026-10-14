@@ -8600,6 +8600,10 @@
               "carrierExitCode": 0,
               "staticInputFiles": 6,
               "staticInputBytes": 825532,
+              "bundleBuilderFixtureChecks": 13,
+              "bundleBuilderFixtureExitCode": 0,
+              "bundleBuilderFixtureReview": "C:/Users/user/Desktop/SmartFactory/PDCA_FIELD_CAPACITY_20261014_0dd2ced0/DEV_ONLY_install_builder_r2/summary.json",
+              "bundleBuilderActualServerInputsTested": false,
               "precedingBundleManifestSha256": "a928cdaf7eb134acf50a02099b9c6768d076ab965fb529ef3f961f267b7c1e45",
               "finalServerRequestCreated": false,
               "serverExecution": "NOT_STARTED"
