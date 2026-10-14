@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T09:54:03.249295+00:00",
+  "lastUpdated": "2026-10-14T10:39:51.068594+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "HOST_DIAGNOSTIC_DELIVERED_MANUAL_EXECUTION_PENDING",
+            "status": "HOST_DIAGNOSTIC_FAIL_EXPLORER_CLOSED_COMPARISON_EXECUTION_PENDING",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8981,7 +8981,7 @@
               "localHelpReproTrials": 3,
               "localHelpReproduced": false,
               "rootCause": "UNCONFIRMED",
-              "nextAction": "Observe required manual execution and recover the 300-second diagnostic result. Verify launcher/native preparation pins and raw host/HTTP/process evidence. Preserve the original 15-minute FAIL and release HOLD.",
+              "nextAction": "Execute the same pinned 300-second diagnostic once with idle Explorer windows and Task Manager closed, without file copy or UI inspection during sampling. Preserve running app/settings and use new preparation/run folders. Recover and compare identical-generation raw evidence; no causation or release PASS claim yet.",
               "releaseGate": "HOLD",
               "promotionAllowed": false,
               "causalFollowupReview": {
@@ -8993,7 +8993,7 @@
               "localFrozenObserveReproduced": false
             },
             "hostDiagnosticPreparation": {
-              "status": "SERVER_DELIVERED_MANUAL_EXECUTION_PENDING",
+              "status": "SERVER_EXECUTED_RESULT_VERIFIED",
               "review": {
                 "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\host-diagnostic-source-readiness.json",
                 "bytes": 1717,
@@ -9003,7 +9003,7 @@
               "testsExitCode": 0,
               "serverPackaged": true,
               "serverDelivered": true,
-              "serverExecuted": false,
+              "serverExecuted": true,
               "scope": "HOST_ATTRIBUTION_DIAGNOSTIC_NOT_RELEASE_QA",
               "releaseGate": "HOLD",
               "promotionAllowed": false,
@@ -9018,7 +9018,7 @@
               "portableEntryCases": 2,
               "frozenWindowCases": 2,
               "serverPreparationComplete": true,
-              "serverLocalHashesVerified": false,
+              "serverLocalHashesVerified": true,
               "nativePreparationCases": 10,
               "nativeCarrierCases": 7,
               "preparationDriverExitCode": 0,
@@ -9049,8 +9049,115 @@
                   "bytes": 1225,
                   "sha256": "164934df5913a6a4c12b94e8eea0daf1684dcafb2f7fb49280f32295264c483f"
                 },
-                "serverReviewPerformed": false,
+                "serverReviewPerformed": true,
                 "scope": "HOST_COMPONENT_ONLY_OUTER_SESSION_AND_HTTP_REVIEW_REQUIRED"
+              }
+            },
+            "hostDiagnosticResult": {
+              "schema": "sfl-host-diagnostic-result-record-v1",
+              "recordedUtc": "2026-10-14T10:39:51.068594+00:00",
+              "status": "FAIL_REPRODUCED_HOST_SATURATION_EXPLORER_COMPARISON_PENDING",
+              "serverPath": "C:\\Users\\user\\Desktop\\SmartFactory\\run-42a20723fc0c",
+              "preparationPath": "C:\\Users\\user\\Desktop\\SmartFactory\\Pbf042b6a",
+              "launcherSha256": "74c4bb529b8c611c55d55edeb447282112f29816e81a7dcda5f390e3853cf25f",
+              "preparationSha256": "14911f5b3c1b0ac837b8842b32ec8c9d31381fc9cdbf945cfbdef2db1cfdd8e4",
+              "launchExit": 1,
+              "durationSeconds": 300,
+              "recoveredFiles": 2635,
+              "recoveredBytes": 21239737,
+              "sessionManifestMembers": 2630,
+              "consoleReceipt": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\server-console-result.json",
+                "bytes": 744,
+                "sha256": "b4aebb4d91dd7801c8c008b6e35cb7a3a571a390036d43613df4dfd5778632ef"
+              },
+              "preparationRecovery": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\recovery-preparation.json",
+                "bytes": 1201,
+                "sha256": "c1e4970eabcc7f5b7c4a72263da06b29a867c3feab58b90d18bc482287a64115"
+              },
+              "recovery": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\recovery-run.json",
+                "bytes": 438451,
+                "sha256": "8deb50dd1e8710df168fd479d6859fadde33306c94f87752ebfa0db2efe72b8b"
+              },
+              "replay": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\host-diagnostic-production-review.json",
+                "bytes": 454288,
+                "sha256": "b61229dabbe60fea2418211157dd64f3f340cec366017596ea8f0dcaec0cb455"
+              },
+              "analysis": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\host-diagnostic-production-analysis.json",
+                "bytes": 220106,
+                "sha256": "748b15ea5dc78c755e391e0ca467d3504defb573ca765b5ac1c3978594bbc685"
+              },
+              "recoveryExitCode": 0,
+              "replayExitCode": 0,
+              "analysisExitCode": 0,
+              "observationStatus": "FAIL",
+              "hostRecordingStatus": "COMPLETE",
+              "hostCapturedSlots": 61,
+              "partialHostIntervals": 60,
+              "hostCpuIntervalMeanPercent": 99.67358355683638,
+              "explorerCpuWeightedPercent": 56.57987107492803,
+              "appCpuIndividualPercentSum": 9.130647239154476,
+              "healthThresholdFailures": 43,
+              "healthMissedSlots": 2,
+              "dataThresholdFailures": 5,
+              "imageMissedSlots": 383,
+              "httpRequestErrors": 0,
+              "httpTimeouts": 0,
+              "configurationBoundaryReviews": "PASS",
+              "backendGenerationSame": true,
+              "outerJobAfterCleanupActive": 0,
+              "outerTerminationRequested": false,
+              "previousOuterCleanupWarningReproduced": false,
+              "resourcePerformanceGate": "NOT_EVALUATED",
+              "fullDataGate": "NOT_EVALUATED",
+              "rootCause": "UNCONFIRMED",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false,
+              "runReviewerChecks": 16,
+              "runReviewerChecksExitCode": 0,
+              "runReviewerChecksEvidence": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\host-run-recovered-review-tests-r2\\result.json",
+                "bytes": 1785,
+                "sha256": "120cc57ea4a465bcbe088e690ce2b904d6088cad5ccf97783096c6f1ceebe215"
+              },
+              "comparison": {
+                "status": "COMMAND_PREPARED_OPERATOR_EXECUTION_REQUIRED",
+                "sameCommandBytes": true,
+                "command": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\HOSTDIAG_20261014_29e99522\\PINNED_HOST_DIAGNOSTIC_COMMAND_29e99522.txt",
+                  "bytes": 8198,
+                  "sha256": "7ed52de9f7b04c1f88d7f06d91f4cbc808a48769c4366334a86317b1a682b99b"
+                },
+                "serverCommand": "C:\\Users\\user\\Desktop\\SmartFactory\\HOSTDIAG_20261014_29e99522\\PINNED_HOST_DIAGNOSTIC_COMMAND_29e99522.txt",
+                "durationSeconds": 300,
+                "newPreparationAndRunDirectoriesRequired": true,
+                "appMustRemainRunning": true,
+                "explorerWindowsAndTaskManagerMustRemainClosed": true,
+                "noFileCopyDuringMeasurement": true,
+                "processTerminationPerformed": false,
+                "securitySettingsChanged": false,
+                "instantUiCpuObservationsPercent": [
+                  40,
+                  88
+                ],
+                "instantUiObservationIsPerformanceProof": false,
+                "screenshots": [
+                  {
+                    "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\server-explorer-closed-cpu.png",
+                    "bytes": 153185,
+                    "sha256": "f52ab387db7688df8091229b37c84553a5229f380fc74fa414462fb205b48efc"
+                  },
+                  {
+                    "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\server-comparison-ready.png",
+                    "bytes": 336988,
+                    "sha256": "7397cd23d110f9a29c1a95019e4a6be6a01bd321a710aa2b263da75779a62f8f"
+                  }
+                ],
+                "reason": "Largest measured process consumer was Explorer; compare without idle folder windows and UI observers."
               }
             }
           }

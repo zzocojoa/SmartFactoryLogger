@@ -1157,3 +1157,75 @@ FAIL을 대체하지 않는다.120분 미시작, 물리 경계 NOT_TESTED, 정�
 `164934df5913a6a4c12b94e8eea0daf1684dcafb2f7fb49280f32295264c483f`다.
 이는 host 구성요소 검산 준비이며 실제 서버 결과 검토는 미실행이다. 별도 준비/launcher/session
 신뢰 연결과 HTTP·앱 세대 대조를 완료해야 하며 근본 원인 확정이나 출시 통과를 반환하지 않는다.
+
+### 같은 날 후속: 실제 5분 진단 FAIL 검산과 탐색기 부하 확인
+
+사용자 실행 후 서버 콘솔에서 `run-42a20723fc0c`, `LAUNCH_EXIT=1`을 확인했다.
+준비 `Pbf042b6a`의 SHA256은
+`14911f5b3c1b0ac837b8842b32ec8c9d31381fc9cdbf945cfbdef2db1cfdd8e4`,
+launcher SHA256은 `74c4bb529b8c611c55d55edeb447282112f29816e81a7dcda5f390e3853cf25f`다.
+원격 탐색기로 공유 return 아래 `HOSTDIAG_PREP_Pbf042b6a`와
+`HOSTDIAG_run-42a20723fc0c`에 회수하고 개발 PC의 기존 진단 폴더 아래 별도 사본으로 보존했다.
+준비4파일6,086B, run2,635파일21,239,737B의 공유·개발 사본 해시가 일치하며 회수 드라이버 exit0이다.
+run 회수 영수증 `recovery-run.json` SHA256은
+`8deb50dd1e8710df168fd479d6859fadde33306c94f87752ebfa0db2efe72b8b`다.
+
+콘솔 핀→준비/요청→launcher→session manifest2,630파일→원시 HTTP/resources/process/host
+자료를 대조했다. 고정 소스로 HTTP·자원·통합 판정·host CPU를 재계산한 검토는 exit0,
+`RECORDED_SUMMARIES_REPRODUCED`이며 실제 진단 FAIL을 그대로 재현했다.
+검토 도구 준비16검사도 exit0이다. 첫 검사에서300초 자료에 자원 판정 창1개를 기대한
+시험 가정을 수정했다. 실제 계약은120초 warmup 뒤300초 창이므로 이 진단의 창은0개다.
+자원 성능 NOT_EVALUATED와 정식 QA HOLD는 바꾸지 않았다.
+
+측정은2026-10-14 19:11–19:16 KST의300초다. 같은 main10068/backend10724와 승인된
+Low Signal OFF 설정을 전후 확인했다. host61표본/60구간, 자원61표본, 프로세스61표본을
+수집했다. HTTP exit1, 나머지 수집기 exit0이다. outer8/inner5프로세스 모두 active0,
+강제 종료0이고 이전15분의 `outer-descendants-remain` 경고는 이번에는 발생하지 않았다.
+이 사실이 이전 경고 원인의 해결을 뜻하지는 않는다.
+
+| 항목 | 이번 실제 결과 |
+| --- | --- |
+| 서버 전체 CPU | 구간 평균99.674%, 최소94.136%, 최대100%; 60구간 중59구간이95% 이상 |
+| 탐색기 PID9804 | CPU340.141초, 동일 세대 카운터 시간으로 가중한 전체 용량56.580%; 단순 구간 평균56.181% |
+| 백신 MsMpEng PID4144 | 전체 용량9.209% |
+| 앱5프로세스 | 개별 카운터 비율 합계9.131%; backend3.306%, PID9700 4.060% 포함 |
+| 진단 helper 프로세스 | 개별 카운터 비율 합계1.916% |
+| health | 148/150요청, 일정 누락2, 200ms 초과43; 최대3503.145ms, p951239.275ms |
+| data | 50/50요청, 500ms 초과5; 최대3349.933ms, p95574.838ms |
+| image | 817/1200요청, 일정 누락383; 요청 오류/timeout0, 최대3520.005ms |
+
+프로세스별 카운터 시각이 달라 비율 합계는 정확한 host CPU 총합이 아니다. 보호 프로세스
+3개의 카운터는 모든 표본에서 읽기 불가였고 전체60구간을 partial로 보존했다.
+host capture wall time은 평균688.964ms/최대7149.328ms, 수집 함수 자신의 CPU 시간은
+61회 합계0.984375초였다. wall 지연을 수집기의 실제 CPU 사용으로 해석하지 않는다.
+측정 중 작업 관리자를 잠시 열었던 관찰자 영향도 기록했다. 미측정 프로세스·스케줄링·
+스택 자료가 없어 CPU 포화와 HTTP 지연의 인과관계 및 탐색기 부하 원인은 UNCONFIRMED다.
+
+이미지 저장 카운터는 written7636→7860, failure/drop0→0이다. 끝 경계에서 enqueued7861,
+inflight1이었다. 이미지 HTTP 일정 누락383건은 저장 drop이 아니며 이미지 바이트 전수 검증이나
+정상 종료 drain 검증으로 확대하지 않는다.
+
+핵심 근거는 `PDCA_HOSTDIAG_20261014_29e99522`의 다음 파일이다.
+
+- `host-diagnostic-production-review.json`: SHA256
+  `b61229dabbe60fea2418211157dd64f3f340cec366017596ea8f0dcaec0cb455`, 검토 exit0.
+- `host-diagnostic-production-analysis.json`: SHA256
+  `748b15ea5dc78c755e391e0ca467d3504defb573ca765b5ac1c3978594bbc685`, 분석 exit0.
+  최초 분석은 `in_flight_count`라는 잘못된 키를 거부해 출력 생성 전 exit1이었다.
+  실제 필드 `inflight_count`로 수정하고 전체 원시 파일 대조부터 다시 실행했다.
+- `host-run-recovered-review-tests-r2/result.json`:16검사, SHA256
+  `120cc57ea4a465bcbe088e690ce2b904d6088cad5ccf97783096c6f1ceebe215`.
+
+후속 비교 준비 체크리스트:
+
+1. 복사가 끝난 탐색기 폴더 창과 작업 관리자만 정상적으로 닫는다. explorer 프로세스,
+   백신·서비스·운영 앱은 종료하지 않고 설정도 바꾸지 않는다.
+2. 같은 검증된 명령으로 새 준비/결과 폴더에300초를 측정한다. 측정 중 탐색기·작업 관리자를
+   열거나 파일을 복사하지 않는다. 원격 화면/전후 상태의 차이도 한계로 남긴다.
+3. 동일 앱·설정 핀을 먼저 대조한 뒤 CPU 사용 프로세스와 HTTP 지연/누락을 비교한다.
+   이 비교가 끝나기 전 탐색기 원인 확정이나15분 재통과를 선언하지 않는다.
+
+19:31경 첫 탐색기 창 종료 후 작업 관리자 순간값40%를 관찰했지만, 이후88%와 백신47.1%,
+backend26.9%도 관찰했다. 탐색기는 그 화면에서0%였다. 순간값의 변동만으로 개선을 확정하지
+않으며 비교 진단을 준비한다. 원래15분 FAIL, 120분 미시작, 물리 경계 NOT_TESTED,
+정식 QA/출시 HOLD와 기존 롤백 기준을 유지한다.
