@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T10:39:51.068594+00:00",
+  "lastUpdated": "2026-10-14T11:17:24.686575+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -8512,7 +8512,7 @@
             "promotionAllowed": false
           },
           "limitedFieldSequenceStage": {
-            "status": "HOST_DIAGNOSTIC_FAIL_EXPLORER_CLOSED_COMPARISON_EXECUTION_PENDING",
+            "status": "HOST_COMPARISON_FAIL_REPRODUCED_OBSERVE15_RECHECK_READY",
             "approvalPath": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\approval.json",
             "approvalSha256": "6517011d8f51eb4cff560bf83c8dcbb471bd4add99f21cdac59387d3d1c93685",
             "userStatement": "예, 다른 현장 검증부터 진행",
@@ -8981,7 +8981,7 @@
               "localHelpReproTrials": 3,
               "localHelpReproduced": false,
               "rootCause": "UNCONFIRMED",
-              "nextAction": "Execute the same pinned 300-second diagnostic once with idle Explorer windows and Task Manager closed, without file copy or UI inspection during sampling. Preserve running app/settings and use new preparation/run folders. Recover and compare identical-generation raw evidence; no causation or release PASS claim yet.",
+              "nextAction": "Operator executes the existing pinned 900-second observe command once with Explorer/Task Manager closed and no file copies during measurement. Recover new console-bound output and review against unchanged thresholds. Do not start 120 minutes or promote on the 300-second comparison. Existing successful /health logs do not provide per-stage traces for these 206/260ms events; do not claim log absence proves fast execution.",
               "releaseGate": "HOLD",
               "promotionAllowed": false,
               "causalFollowupReview": {
@@ -9159,6 +9159,383 @@
                 ],
                 "reason": "Largest measured process consumer was Explorer; compare without idle folder windows and UI observers."
               }
+            },
+            "hostDiagnosticComparisonResult": {
+              "schema": "sfl-host-comparison-result-record-v1",
+              "recordedUtc": "2026-10-14T11:17:24.686575+00:00",
+              "status": "FAIL_REPRODUCED_LATENCY_REDUCED_FORMAL_RECHECK_PREPARED",
+              "serverPath": "C:\\Users\\user\\Desktop\\SmartFactory\\run-9c66a5ffdab8",
+              "preparationPath": "C:\\Users\\user\\Desktop\\SmartFactory\\Pa5cbdd9c",
+              "launcherSha256": "802e9d917ffea2148915daa4228a554fe1e83a833be1f9128522f511b185c985",
+              "preparationSha256": "14911f5b3c1b0ac837b8842b32ec8c9d31381fc9cdbf945cfbdef2db1cfdd8e4",
+              "launchExit": 1,
+              "durationSeconds": 300,
+              "recoveredFiles": 3019,
+              "recoveredBytes": 25294821,
+              "sessionManifestMembers": 3014,
+              "recoveryExitCode": 0,
+              "comparisonExitCode": 0,
+              "analysisExitCode": 0,
+              "comparisonChecks": 16,
+              "comparisonChecksExitCode": 0,
+              "evidence": {
+                "comparison-console-result.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\comparison-console-result.json",
+                  "bytes": 754,
+                  "sha256": "ef659eeb0bb3cdd8e0897ed1d295a6044184070a627e092ca14eeb433736c83e"
+                },
+                "comparison-recovery-preparation.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\comparison-recovery-preparation.json",
+                  "bytes": 1196,
+                  "sha256": "b1f25e2efb94710f24314f8abffaf03973cfd975c254748629241ef34880b712"
+                },
+                "comparison-recovery-run.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\comparison-recovery-run.json",
+                  "bytes": 502573,
+                  "sha256": "85c0c52d5a3542d9fbfc8105b70b07b82ebeedaed7d43b52767a53f6e3c510d7"
+                },
+                "host-diagnostic-comparison.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\host-diagnostic-comparison.json",
+                  "bytes": 775892,
+                  "sha256": "4eed66f8aaf02b3544fbc8a9bd0fd1b756660e30e83ffcddedf136ca7371f965"
+                },
+                "host-comparison-followup-analysis.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\host-comparison-followup-analysis.json",
+                  "bytes": 228703,
+                  "sha256": "42ea89436bd78f31846ba943bd936654f60423436be0e99a859d17c513132979"
+                },
+                "host-comparison-tests-r2.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\host-comparison-tests-r2.json",
+                  "bytes": 3405,
+                  "sha256": "31e3d247f5f1500344d9e6c516f04f9ce41b4ad1b8af029722927e678d80824c"
+                },
+                "comparison-logging-coverage.json": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\comparison-logging-coverage.json",
+                  "bytes": 945,
+                  "sha256": "fb098f8d7b23a9cf4aa5afa23f6e77ff20926c6557c49eca83f50149f9c9f0ad"
+                }
+              },
+              "sameCandidateConfigurationAndRuntimeGeneration": true,
+              "workloadBefore": {
+                "decoded_data_samples": 50,
+                "jobs": [
+                  [
+                    "60580",
+                    "1"
+                  ]
+                ],
+                "operator_metadata_valid_samples": 50,
+                "runtime_statuses": {
+                  "Running": 50
+                },
+                "process_states": {
+                  "extruding": 42,
+                  "stopped": 8
+                },
+                "speed": {
+                  "count": 50,
+                  "min": 0.0,
+                  "mean": 2.472,
+                  "max": 3.0
+                },
+                "pressure": {
+                  "count": 50,
+                  "min": 0.0,
+                  "mean": 105.266,
+                  "max": 169.6
+                },
+                "counts": [
+                  45,
+                  46,
+                  47
+                ],
+                "low_signal_enabled_values": [
+                  false
+                ],
+                "spot_service_ids": [
+                  "f1ccda6b-117e-4ec5-a4c1-b8109fd815b3"
+                ]
+              },
+              "workloadAfter": {
+                "decoded_data_samples": 50,
+                "jobs": [
+                  [
+                    "60580",
+                    "1"
+                  ]
+                ],
+                "operator_metadata_valid_samples": 50,
+                "runtime_statuses": {
+                  "Running": 50
+                },
+                "process_states": {
+                  "extruding": 41,
+                  "stopped": 9
+                },
+                "speed": {
+                  "count": 50,
+                  "min": 0.0,
+                  "mean": 2.356,
+                  "max": 3.0
+                },
+                "pressure": {
+                  "count": 50,
+                  "min": 0.0,
+                  "mean": 108.41,
+                  "max": 174.3
+                },
+                "counts": [
+                  54,
+                  55,
+                  56
+                ],
+                "low_signal_enabled_values": [
+                  false
+                ],
+                "spot_service_ids": [
+                  "f1ccda6b-117e-4ec5-a4c1-b8109fd815b3"
+                ]
+              },
+              "workloadFlags": [
+                "process-state-mix-differs"
+              ],
+              "workloadControlled": false,
+              "hostCpuMeanBefore": 99.67358355683638,
+              "hostCpuMeanAfter": 75.14603864528786,
+              "explorerWeightedCpuBefore": 56.57987107492803,
+              "explorerWeightedCpuAfter": 11.909098501798507,
+              "httpChanges": {
+                "health": {
+                  "requests": {
+                    "before": 148,
+                    "after": 150
+                  },
+                  "missed_slots": {
+                    "before": 2,
+                    "after": 0
+                  },
+                  "request_errors": {
+                    "before": 0,
+                    "after": 0
+                  },
+                  "timeouts": {
+                    "before": 0,
+                    "after": 0
+                  },
+                  "threshold_failures": {
+                    "before": 43,
+                    "after": 2
+                  },
+                  "max_ms": {
+                    "before": 3503.1446,
+                    "after": 260.3873
+                  },
+                  "p95_ms": {
+                    "before": 1239.2747,
+                    "after": 96.5431
+                  },
+                  "http_component_status": {
+                    "before": "FAIL",
+                    "after": "FAIL"
+                  }
+                },
+                "data": {
+                  "requests": {
+                    "before": 50,
+                    "after": 50
+                  },
+                  "missed_slots": {
+                    "before": 0,
+                    "after": 0
+                  },
+                  "request_errors": {
+                    "before": 0,
+                    "after": 0
+                  },
+                  "timeouts": {
+                    "before": 0,
+                    "after": 0
+                  },
+                  "threshold_failures": {
+                    "before": 5,
+                    "after": 0
+                  },
+                  "max_ms": {
+                    "before": 3349.9334,
+                    "after": 88.8113
+                  },
+                  "p95_ms": {
+                    "before": 574.8375,
+                    "after": 45.5105
+                  },
+                  "http_component_status": {
+                    "before": "FAIL",
+                    "after": "PASS"
+                  }
+                },
+                "image": {
+                  "requests": {
+                    "before": 817,
+                    "after": 1199
+                  },
+                  "missed_slots": {
+                    "before": 383,
+                    "after": 1
+                  },
+                  "request_errors": {
+                    "before": 0,
+                    "after": 0
+                  },
+                  "timeouts": {
+                    "before": 0,
+                    "after": 0
+                  },
+                  "threshold_failures": {
+                    "before": null,
+                    "after": null
+                  },
+                  "max_ms": {
+                    "before": 3520.0049,
+                    "after": 243.243
+                  },
+                  "p95_ms": {
+                    "before": 690.6728,
+                    "after": 51.6721
+                  },
+                  "http_component_status": {
+                    "before": "FAIL",
+                    "after": "FAIL"
+                  }
+                }
+              },
+              "residualHealthRequests": [
+                {
+                  "sequence": 52,
+                  "started_utc": "2026-10-14T10:45:46.933091+00:00",
+                  "started_ns": 387826551112000,
+                  "finished_ns": 387826757367500,
+                  "client_request_and_body_ms": 206.096,
+                  "connect_ms": 1.9444,
+                  "send_ms": 0.1161,
+                  "headers_wait_ms": 203.8993,
+                  "body_ms": 0.1362,
+                  "trace_id": "7b47fa0d-b725-4fef-ad6f-3f0208c7da55"
+                },
+                {
+                  "sequence": 65,
+                  "started_utc": "2026-10-14T10:46:12.937948+00:00",
+                  "started_ns": 387852556075200,
+                  "finished_ns": 387852816619200,
+                  "client_request_and_body_ms": 260.3873,
+                  "connect_ms": 1.6883,
+                  "send_ms": 0.1409,
+                  "headers_wait_ms": 258.4208,
+                  "body_ms": 0.1373,
+                  "trace_id": "51f7f371-cfcc-4461-9f3c-5a67f3d6254f"
+                }
+              ],
+              "imageMissedSlot": {
+                "kind": "missed_slot",
+                "sequence": 521,
+                "scheduled_ns": 387852794858600,
+                "reason": "previous-request-decode-or-enqueue-overrun",
+                "queued_ns": 387852801814600
+              },
+              "precedingImageRequestMs": 243.243,
+              "imageRequestOverlapsSecondResidualHealth": true,
+              "boundaryImageCounters": {
+                "initial": {
+                  "enqueued_count": 9357,
+                  "written_count": 9348,
+                  "failure_count": 0,
+                  "dropped_count": 0,
+                  "queue_size": 8,
+                  "inflight_count": 1
+                },
+                "final": {
+                  "enqueued_count": 9626,
+                  "written_count": 9626,
+                  "failure_count": 0,
+                  "dropped_count": 0,
+                  "queue_size": 0,
+                  "inflight_count": 0
+                }
+              },
+              "outerJobAfterCleanupActive": 0,
+              "outerTerminationRequested": false,
+              "observationStatus": "FAIL",
+              "rootCause": "UNCONFIRMED",
+              "resourcePerformanceGate": "NOT_EVALUATED",
+              "fullDataGate": "NOT_EVALUATED",
+              "physicalBoundary": "NOT_TESTED",
+              "formalQaGate": "HOLD",
+              "releaseGate": "HOLD",
+              "promotionAllowed": false,
+              "observe15RecheckPreparation": {
+                "status": "EXISTING_PINNED_COMMAND_REOPENED_OPERATOR_EXECUTION_REQUIRED",
+                "command": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\PINNED_FIELD_OBSERVE15_COMMAND_0dd2ced0_R2.txt",
+                  "bytes": 8143,
+                  "sha256": "515ad2e0e71e2f436147310cd4bb6516d8608f32709d21b1bdb7d304e2180f60"
+                },
+                "serverCommand": "C:\\Users\\user\\Desktop\\SmartFactory\\PINNED_FIELD_OBSERVE15_COMMAND_0dd2ced0_R2.txt",
+                "serverBundle": "C:\\Users\\user\\Desktop\\SmartFactory\\OBS15_OFF_20261014_0dd2ced0_R2",
+                "originalDelivery": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-observe15-r2-delivery.json",
+                  "bytes": 1994,
+                  "sha256": "b95d4fd588ad2214f26351cec6de876ece8c3fbd31278daf6c2201454a25132a"
+                },
+                "durationSeconds": 900,
+                "mode": "observe",
+                "fullHostProcessCollector": false,
+                "serverRecheckExecuted": false,
+                "freshPreparationAndRunRequired": true,
+                "conditionChange": "Explorer folder windows and Task Manager closed, no file copy during measurement.",
+                "rationale": "Lower CPU and HTTP delays were reproduced after closing folder windows; qualify the changed condition with the existing formal observer, without the additional host diagnostic collector.",
+                "candidateRebuilt": false,
+                "thresholdsChanged": false,
+                "settingsChanged": false,
+                "screenshot": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\server-observe15-comparison-handoff.png",
+                  "bytes": 368566,
+                  "sha256": "b0ff3c3286903e64caf0d10abac99d059f9d5433c4e9d5f157dc6a213b1991f5"
+                },
+                "releaseGate": "HOLD",
+                "promotionAllowed": false
+              },
+              "nextAction": "Operator executes the existing pinned 900-second observe command once with Explorer/Task Manager closed and no file copies during measurement. Recover new console-bound output and review against unchanged thresholds. Do not start 120 minutes or promote on the 300-second comparison. Existing successful /health logs do not provide per-stage traces for these 206/260ms events; do not claim log absence proves fast execution."
+            },
+            "observe15RecheckPreparation": {
+              "status": "EXISTING_PINNED_COMMAND_REOPENED_OPERATOR_EXECUTION_REQUIRED",
+              "command": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\PINNED_FIELD_OBSERVE15_COMMAND_0dd2ced0_R2.txt",
+                "bytes": 8143,
+                "sha256": "515ad2e0e71e2f436147310cd4bb6516d8608f32709d21b1bdb7d304e2180f60"
+              },
+              "serverCommand": "C:\\Users\\user\\Desktop\\SmartFactory\\PINNED_FIELD_OBSERVE15_COMMAND_0dd2ced0_R2.txt",
+              "serverBundle": "C:\\Users\\user\\Desktop\\SmartFactory\\OBS15_OFF_20261014_0dd2ced0_R2",
+              "originalDelivery": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_LIMITED_FIELD_20261014_0dd2ced0\\server-observe15-r2-delivery.json",
+                "bytes": 1994,
+                "sha256": "b95d4fd588ad2214f26351cec6de876ece8c3fbd31278daf6c2201454a25132a"
+              },
+              "durationSeconds": 900,
+              "mode": "observe",
+              "fullHostProcessCollector": false,
+              "serverRecheckExecuted": false,
+              "freshPreparationAndRunRequired": true,
+              "conditionChange": "Explorer folder windows and Task Manager closed, no file copy during measurement.",
+              "rationale": "Lower CPU and HTTP delays were reproduced after closing folder windows; qualify the changed condition with the existing formal observer, without the additional host diagnostic collector.",
+              "candidateRebuilt": false,
+              "thresholdsChanged": false,
+              "settingsChanged": false,
+              "screenshot": {
+                "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_HOSTDIAG_20261014_29e99522\\server-observe15-comparison-handoff.png",
+                "bytes": 368566,
+                "sha256": "b0ff3c3286903e64caf0d10abac99d059f9d5433c4e9d5f157dc6a213b1991f5"
+              },
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
             }
           }
         }

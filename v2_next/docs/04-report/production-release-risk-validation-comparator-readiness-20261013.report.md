@@ -1229,3 +1229,86 @@ inflight1이었다. 이미지 HTTP 일정 누락383건은 저장 drop이 아니�
 backend26.9%도 관찰했다. 탐색기는 그 화면에서0%였다. 순간값의 변동만으로 개선을 확정하지
 않으며 비교 진단을 준비한다. 원래15분 FAIL, 120분 미시작, 물리 경계 NOT_TESTED,
 정식 QA/출시 HOLD와 기존 롤백 기준을 유지한다.
+
+### 같은 날 후속: 탐색기 창을 닫은 5분 비교 결과와 15분 재검증 준비
+
+사용자가 두 번째 실행 완료를 알렸고 콘솔에서 `Pa5cbdd9c`, `run-9c66a5ffdab8`,
+`LAUNCH_EXIT=1`을 확인했다. 가려진 창을 옮겨 launcher SHA256
+`802e9d917ffea2148915daa4228a554fe1e83a833be1f9128522f511b185c985`를 읽고 회수 파일과
+대조했다. 준비 SHA256은 첫 진단과 같은
+`14911f5b3c1b0ac837b8842b32ec8c9d31381fc9cdbf945cfbdef2db1cfdd8e4`다. 새 폴더에서도
+앱 식별 정보와 설정이 같으면 준비 JSON 바이트는 같을 수 있다. 서로 다른 launcher와 겹치지 않는
+후속 측정 구간을 별도로 검증했으며 같은 자료를 두 번 비교한 결과가 아니다.
+
+원격 탐색기로 `Z:\SmartFactory\20261014\return\HOSTCOMP_PREP_1950` 및
+`HOSTCOMP_RUN_1950`에 복사했다. 준비 4파일 6,086B, run 3,019파일 25,294,821B의
+공유·개발 사본 해시가 일치하며 회수 exit0이다. session manifest의 3,014개 파일을 전수 대조하고
+고정 소스로 HTTP·자원·통합 판정·host 카운터를 재계산했다. 비교와 후속 분석 모두 exit0,
+`RECORDED_SUMMARIES_REPRODUCED`, replay 오류 0이며 실제 FAIL을 그대로 재현했다.
+
+두 번째 구간은 2026-10-14 19:44:02–19:49:02 KST다. 측정 중 탐색기·작업 관리자를
+열거나 파일을 복사하지 않았다. 앱 버전·설정·main/backend 세대·SPOT 서비스와 제품 60580/금형 1이
+동일하고 Low Signal OFF를 유지했다. 50개 data 표본 모두 Running/작업 정보 유효다.
+압출/정지 표본 수는 첫 측정 42/8에서 두 번째 41/9, 평균 속도는 2.472에서 2.356,
+평균 압력은 105.266에서 108.410으로 달라 통제된 부하 비교는 아니다.
+
+| 항목 | 첫 5분 | 탐색기 창을 닫은 후 5분 |
+| --- | ---: | ---: |
+| 전체 CPU 구간 평균 | 99.674% | 75.146% |
+| 탐색기 PID9804 가중 CPU | 56.580% | 11.909% |
+| health 최대 / p95 | 3503.145 / 1239.275ms | 260.387 / 96.543ms |
+| health 200ms 초과 / 일정 누락 | 43 / 2 | 2 / 0 |
+| data 최대 / 500ms 초과 | 3349.933ms / 5 | 88.811ms / 0 |
+| image 최대 / 일정 누락 | 3520.005ms / 383 | 243.243ms / 1 |
+| HTTP 요청 오류 / timeout | 0 / 0 | 0 / 0 |
+
+두 번째 host 61표본/60구간과 앱 자원·프로세스 표본은 완전 수집됐다. 보호 프로세스 카운터를
+읽지 못한 부분은 계속 partial이며 0 사용으로 계산하지 않는다. 백신 가중 CPU 12.794%,
+backend 12.628%, 앱 5프로세스의 개별 비율 합계 23.777%다. 카운터 시각이 달라 프로세스별
+비율 합계는 정확한 host 총합이 아니다. host 수집 함수 CPU는 61회 합계 0.796875초,
+capture wall time 평균 154.374ms/최대 626.213ms다. 관찰자 부하·생산 상태·다른 프로세스
+변동과 스케줄링 자료 부족 때문에 탐색기 단독 원인 또는 완전 해결을 확정하지 않는다.
+
+남은 health 실패는 sequence52(19:45:46.933, 206.096ms,
+trace `7b47fa0d-b725-4fef-ad6f-3f0208c7da55`)와 sequence65(19:46:12.938, 260.387ms,
+trace `51f7f371-cfcc-4461-9f3c-5a67f3d6254f`)다. 모두 HTTP200이며 응답 헤더 대기 시간이
+각각 203.899/258.421ms다. 전후 경계 health는 14.880/7.743ms이고 경계 포함 최대도 260.387ms다.
+같은 시각 image520의 243.243ms 요청이 다음 예정 시각을 넘어 image521이
+`previous-request-decode-or-enqueue-overrun`으로 누락됐다. 이 동시 발생만으로 원인을 확정하지 않는다.
+
+이미지 저장 카운터 written9348→9626, failure/drop0→0, 마지막 queue/inflight0/0이다.
+초기 queue8/inflight1이 있어 written 증가량을 이 구간의 신규 생성 수와 동일시하지 않는다.
+조회 일정 누락은 저장 drop이 아니며 이미지 바이트 전수 QA나 정상 종료 drain 통과도 아니다.
+outer8프로세스 active0/강제 종료0/errors0이며 이전15분 정리 경고는 이번에도 재현되지 않았다.
+
+설치된 정확한 commit `4cc7393e1bafbf90a329726aed9470fe0daacb21`의 `backend/app.py`를
+확인했다. health 단계별 경고 기준은 500ms이고 성공 `/health` 접근 완료 로그는 생략한다.
+따라서 이 두 206/260ms 요청의 단계별 trace가 기존 로그에 있을 것이라고 가정할 수 없다.
+로그가 없다는 사실을 서버 내부 지연이 없었다는 증거로 쓰지 않는다. 코드 변경은 하지 않았다.
+
+주요 증거는 개발 PC `PDCA_HOSTDIAG_20261014_29e99522` 아래에 보존한다.
+
+- `comparison-recovery-run.json`: `85c0c52d5a3542d9fbfc8105b70b07b82ebeedaed7d43b52767a53f6e3c510d7`.
+- `host-diagnostic-comparison.json`: `4eed66f8aaf02b3544fbc8a9bd0fd1b756660e30e83ffcddedf136ca7371f965`.
+- `host-comparison-followup-analysis.json`: `42ea89436bd78f31846ba943bd936654f60423436be0e99a859d17c513132979`.
+- `host-comparison-tests-r2.json`: 16검사 exit0,
+  `31e3d247f5f1500344d9e6c516f04f9ce41b4ad1b8af029722927e678d80824c`.
+- `comparison-logging-coverage.json`: `fb098f8d7b23a9cf4aa5afa23f6e77ff20926c6557c49eca83f50149f9c9f0ad`.
+- `host-comparison-result-record.json`: 기록·상태 연결 검산 exit0,
+  `6ebc697dcf73d878a347826ca21e3df0718791bc918fec79eb97a762fae6761e`.
+
+다음 단계는 조건 변경 후 정식900초 재검증이다. 추가 host 프로세스 수집기가 없는 기존
+`observe` 도구로 같은 기준을 확인한다. 서버의 기존
+`C:\Users\user\Desktop\SmartFactory\PINNED_FIELD_OBSERVE15_COMMAND_0dd2ced0_R2.txt`를
+메모장에 다시 열고 탐색기 창을 닫았다. 명령 SHA256은
+`515ad2e0e71e2f436147310cd4bb6516d8608f32709d21b1bdb7d304e2180f60`으로 기존 전달본과 같다.
+원래 도우미가 실행마다 새 준비/run 폴더를 만들고 앱·설정·도우미 핀을 확인한다. 설치본 재빌드,
+설정 변경, 판정 기준 완화 없이 사용자 실행만 대기한다. 900초 재검증은 아직 실행하지 않았다.
+
+후속 실행 체크리스트:
+
+1. Running 유지, Low Signal OFF 유지, 탐색기·작업 관리자 닫힘, 측정 중 파일 복사 없음.
+2. 메모장의 `$observeBundle=` 본문 전체를 관리자 Windows PowerShell5.1에서 한 번 실행한다.
+3. 새 PREPARATION_PATH/SHA256 및 RESULT_PATH/LAUNCHER_SHA256/LAUNCH_EXIT를 확인하고 회수한다.
+4. 기존15분 FAIL을 보존한 채 새 결과를 검산한다. 120분 미시작, 물리 NOT_TESTED,
+   정식 QA/출시 HOLD 및 기존 롤백 기준은 새 검산 전까지 유지한다.
