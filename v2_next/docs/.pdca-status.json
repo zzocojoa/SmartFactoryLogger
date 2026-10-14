@@ -8528,7 +8528,7 @@
             "localTestsExitCode": 0,
             "serverBackup": {
               "path": "C:/Users/user/Desktop/SmartFactory/Q3d9da3",
-              "phase": "COPYING",
+              "phase": "SOURCE_AND_COPY_VERIFICATION_IN_PROGRESS",
               "appClosedThroughUi": true,
               "runtimeAbsenceObservedAtUtc": "2026-10-14T00:07:56.7832272Z",
               "sameGenerationNormalExitLogReviewed": true,
@@ -8544,7 +8544,18 @@
               "historicalImageDropCauseResolved": false,
               "preflightBytes": 14087444216,
               "previousBackupBytes": 55562005735,
-              "backupSizeDifferenceExplained": false
+              "backupSizeDifferenceExplained": false,
+              "copyPhaseCompletedAtKst": "2026-10-14 11:22",
+              "provisionalManifestSha256": "ab637280383d38777649310f00cd586a80e7f74e0cf159d9535a1d170287f393",
+              "provisionalManifestConsolePinReceived": false,
+              "provisionalManifestFiles": 325089,
+              "provisionalManifestDirectories": 246,
+              "provisionalManifestNamedStreams": 680,
+              "provisionalManifestBytes": 14095162877,
+              "provisionalAbsentCsvFiles": 514,
+              "provisionalAbsentCsvBytes": 42094160521,
+              "provisionalDifferenceCause": "UNKNOWN",
+              "provisionalReviewPath": "C:/Users/user/Desktop/SmartFactory/PDCA_LIMITED_FIELD_20261014_0dd2ced0/provisional-manifest-review-r1/provisional-difference-detail-r2.json"
             },
             "installerHelper": {
               "sourceSha256": "1007cac441476a9540d1d13b24dd52193a4d329e755e1f9f308dffef9a6a618f",
