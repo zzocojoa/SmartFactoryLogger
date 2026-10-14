@@ -1654,3 +1654,35 @@ manifest·suite·controller·native helper·WPR profile5파일의 크기/SHA256�
 이번 변경은 조사 기록과 다음 행동의 갱신이다. 제품·설치본·서버 실행은 변경하지 않아
 앱 health/build·현장15분/120분 시험은 실행하지 않았다.
 15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+
+## 2026-10-15 사용자 콘솔 확인과 32/64비트 실행 경로 보완
+
+사용자가 R2의 실제 콘솔을 제공했다: `native PS5.1 x64 required`, `LAUNCH_EXIT=1`,
+scenarios0이다. 이 오류는 WPR 시작 전 native runtime 검사에서 발생한다.
+사용자 출력에는 실행 시각과 부모 프로세스 비트수가 없어, 앞선00:19 PID99316의
+일반적인 시스템 오류와 동일 실행이라고 확정하지 않는다.
+
+읽기 전용 재현에서 기존 고정 System32 명령은 64비트 부모에서는 native 검사를 통과하지만,
+32비트 부모에서는 자식 실제 경로가 SysWOW64로 바뀌어 같은 native 검사를 실패했다.
+사용자 원래 창의 비트수는 미확정이며, 확인된 보완 대상은 이 bootstrap의 32비트 호환 결함이다.
+`trace_validation_bootstrap.py`는 32비트 부모에서 Sysnative, 64비트 부모에서 System32를 선택한다.
+suite는 실제 비트수·edition·version·expected/actual exe를 출력한다. 기존 native PS5.1 x64,
+관리자, 상위 job 부재, 해시 잠금, 세션 소유권/종료 및 출시 gate는 그대로 유지한다.
+
+실제 x86/x64 프로세스8회에서 올바른 native 자식, 실행 중 suite 쓰기 차단, 틀린 SHA 실행 거부,
+공백/따옴표 경로, 실제 suite의 일반 권한 거부와 직접 x86 실행 거부를 확인했다.
+입력 경로/해시 거부7조건을 포함한 검사 exit0, 변경 Python2파일 Ruff 및 git diff check exit0이다.
+최종 R3 명령 파일 자체도 양쪽 부모에서 실행해 native 통과 후 관리자 조건에서 inner exit1로
+거부되는 것을 확인했다. 이 두 실행은 예상 거부 검증이며 관리자 WPR 시험 통과가 아니다.
+
+새 묶음: `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_ARCH_20261015_4f4490f1/package-r3`.
+명령: 같은 부모의 `PINNED_LOCAL_TRACE_COMMAND_R3.txt` 본문 전체를 개발 PC의 독립 관리자
+Windows PowerShell에 한 번 실행한다. 완료 시 LAUNCH_EXIT, 오류 시 runtime/errors를 확인한다.
+R2와 기존 해시 결합 증거를 덮어쓰지 않았다. controller/helper/profile3파일은 같은 바이트다.
+R3 suite SHA256: `4eede2324f9dfff7beaed877793c5a28265a3b4b55a2d7d49a343dbcb63f9543`.
+명령 SHA256: `1da29e5abcc3fb02868d54dc17ab41c645328a94e41cf86eccf0881578317b69`.
+실제 관리자 추적·ETL·현장 검증은 남는다. 제품/설치본 변경이 없어 앱 health/build는 반복하지 않았다.
+15분FAIL,120분미시작,물리NOT_TESTED,full_data NOT_EVALUATED,출시HOLD를 유지한다.
+
+Windows 경로 처리 근거: [Microsoft File System Redirector](https://learn.microsoft.com/en-us/windows/win32/winprog64/file-system-redirector).

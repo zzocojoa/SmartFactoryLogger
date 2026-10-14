@@ -9,7 +9,8 @@ $held=[Collections.Generic.List[IO.Stream]]::new();$suitePath=$null
 $summary=[ordered]@{status='FAIL';scope='LOCAL_WPR_CONTROLLER_LIFECYCLE_ONLY';scenarios=@();errors=@();release_gate='HOLD';promotion_allowed=$false;field_gate='NOT_EVALUATED';trace_quality='NOT_EVALUATED'}
 try{
     $nativePs=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
-    if(-not ([Environment]::Is64BitProcess -and $PSVersionTable.PSEdition -ceq 'Desktop' -and $PSVersionTable.PSVersion.ToString().StartsWith('5.1.') -and [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName -ieq $nativePs)){throw 'native PS5.1 x64 required'}
+    $summary.runtime=[ordered]@{is_64_bit_process=[Environment]::Is64BitProcess;ps_edition=$PSVersionTable.PSEdition;ps_version=$PSVersionTable.PSVersion.ToString();expected_executable=$nativePs;actual_executable=[Diagnostics.Process]::GetCurrentProcess().MainModule.FileName}
+    if(-not ($summary.runtime.is_64_bit_process -and $summary.runtime.ps_edition -ceq 'Desktop' -and $summary.runtime.ps_version.StartsWith('5.1.') -and $summary.runtime.actual_executable -ieq $nativePs)){throw 'native PS5.1 x64 required'}
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
     if(-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'administrator PowerShell required'}
     # Bootstrap pins this suite. Lock and verify the package before importing
