@@ -1831,3 +1831,42 @@ R5는 같은 suite45888/생성 FILETIME134364938856872760이08:43:36KST의 실�
 콘솔 선택으로 멈췄는지는 아직 미확정이며 앞선 Esc1회 요청의 답을 기다린다. 재실행하지 않는다.
 최종 suite 종료 코드와 요약 확인 후, 요청·스레드 연결에 필요한 검증을 이어간다.
 제품/설치본 변경 없음, 15분FAIL·120분미시작·물리NOT_TESTED·full_data NOT_EVALUATED·출시HOLD다.
+
+
+## 2026-10-15 R5 종료 확인과 요청 연결의 남은 조건
+
+사용자 콘솔의 LAUNCH_EXIT0와 summary SHA256
+`93c6d756a41dd89277f5843a46eac35f0a5d17f0bf33308b8ee3c536ef7e8585`를 실제 잠금 파일과 대조했다.
+Normal/ControllerExit/Deadline의 실제 controller exit는0/23/0이며23은 해당 격리 시나리오의 예정된 종료다.
+세 결과의 lease·instance·ETL·Guard stdout 해시, 시작/정리 상태와15개 WPR 명령의 actualexit0,
+force 없음·소유 job active0를 확인했다. suite45888과 여섯 controller/guard PID는 모두 없었다.
+95개 결과 파일을 새 사본으로 보존하고 크기·SHA를 대조했다. 현재 source와 package도 일치한다.
+
+ControllerExit의 로그 대기는2002ms, 공유 위반 재시도59회 후 writers_closed=true였다.
+R4에서 중단됐던 실제 로그 경쟁 조건을 R5의 제한 시간 내 대기가 처리했다.
+최종 suite 상태는 CONTROL_FLOW_COMPLETE, scope는 LOCAL_WPR_CONTROLLER_LIFECYCLE_ONLY다.
+콘솔 선택 정지가 원인이었는지는 별도 관측으로 증명하지 않았다. R5는 완료됐으므로 재실행하지 않는다.
+검토 스크립트의 초기 저장소 profile 경로 가정을 실제 R4 package 출처로 정정한 후 재검토exit0였다.
+추적 자체를 다시 실행하거나 고정 package를 변경하지 않았다.
+검토 기록은 `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_LOGS_20261015_4b381b92/r5-completion-review.json`,
+SHA256 `dad7a94b8ed10a52921d7a5e778f9929642589643458f3896c5a14770d485b8a`다.
+
+추가로 R4 두 자료의 CPU별 선택 사건 순서까지 tracerpt와 독립 해독 출력을 대조했다.
+CSwitch 연속성 불일치0/0, 시각 역전0/0, 참조한 nonidle TID1112/839개 중 lifecycle 기록 없는 TID0/0,
+관찰 구간 내 동일 TID의 다른 PID·반복 시작·종료 후 재시작0/0을 확인했다.
+이는 전체 추적 누락 없음이나 native 생성 시각 결합의 증명이 아니다.
+[Microsoft 문서](https://learn.microsoft.com/en-us/windows/win32/etw/thread-v2-typegroup1)의 DCStart/DCEnd는
+수집 시작/종료 시점의 스레드 목록이므로 native 생성 시각으로 대체하지 않는다.
+
+이전 합성 HTTP142건은 전날 별도 실행의 기록이다. UTC 시작 시각도 R4 trace header 구간보다 앞선다.
+coverage-audit.json의 overlaps_with_r4는 숫자 QPC 범위 비교만 뜻하며, 별도 실행의 clock epoch가
+같다는 증명이 아니다. 이 의미와 결합 금지를 coverage-qualification.json에 명시했다.
+같은 수집 실행·시간 기준·PID/TID 생성 식별자·실제 요청 구간을 결합한 새 검증이 필요하다.
+또한 관찰한 CSwitch V5 payload의 byte13에는0/1 외 값이 다수 있다.
+[기존 V2 문서](https://learn.microsoft.com/en-us/windows/win32/etw/cswitch)의 WaitMode 정의를
+그대로 적용하지 않으며, 나머지 bit/상태 의미와 전체 scheduler duration 해석은 미검증으로 둔다.
+
+검사 위치는 `C:/Users/user/Desktop/SmartFactory/PDCA_TRACE_COVERAGE_20261015_110b3ae4`다.
+coverage audit/7개 회귀 조건 및 선택 Ruff exit0, 문서 과거 단계 보존 검사를 수행했다.
+이제 종료 코드 대기 대신 같은 실행의 요청·추적 연결 시험을 준비한다.
+제품/설치본 변경 없음, 서버 지연 원인 미확정,15분FAIL·120분미시작·물리NOT_TESTED·출시HOLD를 유지한다.

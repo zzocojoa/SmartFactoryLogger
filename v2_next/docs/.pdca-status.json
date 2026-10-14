@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "lastUpdated": "2026-10-14T23:44:24.927557+00:00",
+  "lastUpdated": "2026-10-14T23:52:36.464027+00:00",
   "activeFeatures": [
     "spot-live-image",
     "spot-temperature-state-labeling",
@@ -2996,7 +2996,7 @@
       ],
       "timestamps": {
         "started": "2026-10-10T00:12:06.007Z",
-        "lastUpdated": "2026-10-14T23:44:24.927557+00:00"
+        "lastUpdated": "2026-10-14T23:52:36.464027+00:00"
       },
       "notes": {
         "scope": "Full follow-up PDCA active; current and future internal operation uses user-approved unsigned installers per 2026-10-12 instruction; candidate 4cc7393e installer exit0 observed on 2026-10-14, postinstall preservation verification pending; exact clean commit/hash/payload/provenance and recovery/device/performance/full-data/field QA remain required; no operating promotion",
@@ -10590,7 +10590,7 @@
               },
               "nextAction": "Preserve the residual 203.1356ms health event, four image sampling overruns and the outer job accounting transition. Before another field performance run, prepare targeted timing that separates backend execution/event-loop or lock waits from collector scheduling and records the remaining owned process identity. Do not rerun the same 15-minute test merely to seek PASS, relax thresholds, start 120 minutes, or promote this result. Continue independent full-data QA. Current job metadata was observed missing at 21:16 KST, with last applied time 20:52:06; obtain actual product/mold values before further field work. Do not reuse earlier values without confirmation."
             },
-            "nextAction": "Observe the same live R5 suite PID45888, creation FILETIME134364938856872760; do not restart or infer its exit code from completed Guard results. The pending user Escape request tests an unconfirmed console selection pause. Offline R4 crosscheck now matches all 211659 selected records (QPC, CPU, opcode/version, payload and TID/PID); full semantics, unhandled event relevance, thread generation and request-clock coverage still require validation. Preserve field15 FAIL and release HOLD.",
+            "nextAction": "R5 user LAUNCH_EXIT0 and summary SHA93c6d756 were independently verified; suite and six owned controller/guard processes are absent. Do not repeat R5. Prepare a bounded same-run HTTP/thread/QPC capture using the verified trace lifecycle, ready handshake, fixed source identity and owned cleanup. R4 per-CPU ordering and CSwitch chain continuity match, but earlier 142 HTTP requests belong to different sessions and must not be joined. Require recording-session/clock-domain binding, native process/thread generation and target-request event coverage; do not apply legacy V2 WaitMode semantics to the observed V5 byte13. Keep server203ms cause unresolved, field15 FAIL, canary120 unstarted and release HOLD.",
             "closedSnapshotImageQa": {
               "schema": "sfl-closed-snapshot-image-coverage-record-v1",
               "recordedUtc": "2026-10-14T12:43:15.014742+00:00",
@@ -11406,6 +11406,102 @@
               "physicalBoundary": "NOT_TESTED",
               "fullDataGate": "NOT_EVALUATED",
               "productOrInstallerChanged": false,
+              "releaseGate": "HOLD",
+              "promotionAllowed": false
+            },
+            "traceControlCompleteCoverageStage": {
+              "recordedAt": "2026-10-14T23:52:36.464027+00:00",
+              "status": "R5_CONTROL_FLOW_COMPLETE_AND_R4_ORDER_COVERAGE_AUDITED",
+              "r5SuitePid": 45888,
+              "r5SuiteProcessAbsent": true,
+              "r5UserLaunchExit": 0,
+              "r5Scope": "LOCAL_WPR_CONTROLLER_LIFECYCLE_ONLY",
+              "r5SummarySha256": "93c6d756a41dd89277f5843a46eac35f0a5d17f0bf33308b8ee3c536ef7e8585",
+              "controllerExits": [
+                0,
+                23,
+                0
+              ],
+              "threeTraceSaveAndCleanupConfirmed": true,
+              "wprCommandExits": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ],
+              "copiedEvidenceFiles": 95,
+              "controllerExitLogWaitMs": 2002,
+              "controllerExitSharingRetries": 59,
+              "logWriterClosureConfirmed": true,
+              "selectionPauseCause": "NOT_INDEPENDENTLY_PROVEN",
+              "r4PerCpuSelectedSequenceMatch": true,
+              "r4CswitchChainBreaks": [
+                0,
+                0
+              ],
+              "r4TimestampReversals": [
+                0,
+                0
+              ],
+              "r4ReferencedNonidleTids": [
+                1112,
+                839
+              ],
+              "r4ReferencedTidsWithoutLifecycle": [
+                0,
+                0
+              ],
+              "r4ObservedTidReuse": [
+                0,
+                0
+              ],
+              "nativeCreationTimeBinding": "NOT_EVALUATED",
+              "priorRequestCount": 142,
+              "priorRequestJoinAllowed": false,
+              "qpcEpochBindingBetweenSeparateRuns": "NOT_ESTABLISHED",
+              "fullPayloadSemantics": "NOT_EVALUATED",
+              "coverageAuditExit": 0,
+              "coverageRegressionCases": 7,
+              "r5ReviewExit": 0,
+              "selectedRuffExit": 0,
+              "evidence": {
+                "r5Review": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\r5-completion-review.json",
+                  "bytes": 38058,
+                  "sha256": "dad7a94b8ed10a52921d7a5e778f9929642589643458f3896c5a14770d485b8a"
+                },
+                "coverage": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COVERAGE_20261015_110b3ae4\\coverage-audit.json",
+                  "bytes": 93947,
+                  "sha256": "d5c1d8adfdab77f33fbb27ba7fc1986f17dacfa62051c4f990750b5be6a14583"
+                },
+                "qualification": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_COVERAGE_20261015_110b3ae4\\coverage-qualification.json",
+                  "bytes": 1455,
+                  "sha256": "d205bfb49bbe4858f3333552012694bead3b213542c87facbc70ddc20b273fa9"
+                },
+                "r5ReviewSource": {
+                  "path": "C:\\Users\\user\\Desktop\\SmartFactory\\PDCA_TRACE_LOGS_20261015_4b381b92\\review-r5.py",
+                  "bytes": 6898,
+                  "sha256": "99dda2edbec1a480d0cda52463c9510853eae9722011e93ab210042d1427f2c3"
+                }
+              },
+              "productOrInstallerChanged": false,
+              "field15Status": "FAIL",
+              "canary120Started": false,
+              "physicalBoundary": "NOT_TESTED",
+              "fullDataGate": "NOT_EVALUATED",
               "releaseGate": "HOLD",
               "promotionAllowed": false
             }
