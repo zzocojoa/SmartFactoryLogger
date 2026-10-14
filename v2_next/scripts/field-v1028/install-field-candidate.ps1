@@ -160,6 +160,14 @@ function ConfigStreamFacts([string]$Path) {
     }
     return $facts
 }
+function RegistrationFacts($Registration,[string]$Location) {
+    # Registry provider objects contain recursive PSDrive/PSProvider metadata.
+    # Record only the scalar fields used to verify this installation.
+    foreach($key in @('PSChildName','DisplayName','DisplayVersion','UninstallString')){
+        Require ($Registration.$key -is [string]) ('registration-field-type:'+ $key)
+    }
+    return [ordered]@{key_name=$Registration.PSChildName;display_name=$Registration.DisplayName;display_version=$Registration.DisplayVersion;uninstall_string=$Registration.UninstallString;install_location=$Location}
+}
 
 try {
     $native=[Environment]::SystemDirectory+'\WindowsPowerShell\v1.0\powershell.exe'
@@ -212,7 +220,7 @@ try {
     Require ($registrations.Count -eq 1 -and $registrations[0].DisplayVersion -ceq '1.0.28' -and $registrations[0].UninstallString -like ('*'+$installRoot+'\Uninstall smart-factory.exe*')) 'installed-registration'
     $registeredLocation=(Get-ItemProperty -LiteralPath ('HKCU:\Software\'+$registrations[0].PSChildName) -Name InstallLocation).InstallLocation
     Require ($registeredLocation -ieq $installRoot) 'registered-install-location'
-    SaveJson 'registration' $registrations
+    SaveJson 'registration' (RegistrationFacts $registrations[0] $registeredLocation)
     $script:phase='postinstall-original-data-preservation'
     $guard=[Action]{AssertCold (ColdSnapshot)};$progress=[Action[string,long,long,long]]{param($phase,$bytes,$files,$elapsed) Write-Host ('VERIFY phase='+$phase+' files='+$files+' bytes='+$bytes)}
     $engine=[SflColdCopyStreamsV2.Engine]::new($roots,$guard,$progress)

@@ -562,3 +562,88 @@ CSV 소비자 재검사는 13:29 KST에도 실제 프로세스가 실행 중이�
 사용자에게 열린 R2 명령 본문을 관리자 PowerShell 5.1에서 한 번 실행하도록 요청했다.
 앱은 종료 상태로 유지하며, 실제 설치 결과 확인 후에만 재시작과 승인된 나머지 현장
 검증을 진행한다. 물리 경계 NOT_TESTED, 정식 출시 HOLD, promotion false를 유지한다.
+
+### 2026-10-14 13:49 KST 닫힌 CSV 검사 완료와 후보 설치 종료 관찰
+
+로컬 CSV 재검사의 실제 소비자는 exit0, worker/driver도 exit0로 끝났다. 소요시간은
+2,810.281초(약46분50초)이며 강제 종료가 없고 소유 Job의 잔존 프로세스는 0이다.
+stdout 5,931B의 마지막 PASS뿐 아니라 terminal과 모든 출력 해시, 종료 후 입력 결합을
+확인했다. raw `recovered-csv-r2/review.json` SHA256은
+`a83117821ae8a6c53c876d4317ac5692d061d5c5d15d32dcd92ae62178dd271c`다.
+이미 검증한 최종 서버 manifest의 동일 입력5파일에 결과를 결합한 별도 검토
+`PDCA_FIELD_CAPACITY_20261014_0dd2ced0/recovered-csv-r2-final-review.json`은
+2,216B/SHA256 `fa4ac4b637502e5e99edc0dc8ed680689c27efb70a518af8ffaf2def7ec04eab`다.
+기존 잠정 상태의 원문은 소급 변경하지 않았다.
+
+CSV142,273행/seq323776–466048, 관측 대장314,216행의 행 수/해시와 CSV142,273행의
+연결률100%/키 누락0/진단 출처 불일치0, 이미지 대장4,237,531행의 행 수/해시가 통과했다.
+이 검사는 이전 운영 build541d의 회수된 닫힌 CSV와 지정 대장 범위다. v1은 검증된
+metadata에서 비활성화되어 요청하지 않았고, 선택 changeover/phase 대장은 0행 manifest와
+부재 상태를 유지했다. `current_server_promotion_profile_required=False`이며 새 후보의
+현장 QA·개별 이미지 바이트 디코딩·전체 과거 데이터·drop173 해소의 PASS는 아니다.
+
+사용자가 R2 실행 완료를 알린 후 새 서버 결과 폴더
+`C:/Users/user/Desktop/SmartFactory/I90b5ed1b`를 확인했다. installer-exit 원문을 메모장으로
+읽어 후보 설치 PID12752, 시작04:48:45.5958403Z, 종료04:49:19.5212467Z,
+실제 exit0/forced_termination=false를 관찰했다. 화면은
+`server-install-r2-installer-exit-observed.png`에 보존했다. 아직 최종 결과 해시를
+회수한 상태는 아니며 설치·설정·데이터 보존 검산 전체 완료로 처리하지 않는다.
+
+13:54 KST까지 request/runtime-before/config-before/installer-start/installer-exit/
+installed-files의 6파일만 보이고 registration 및 검산 진행 출력이 없었다. 개발 PC에서
+같은 native PowerShell의 실제 registry 객체를 `ConvertTo-Json -Depth 35`로 변환하는
+읽기 전용 재현은 15초 제한을 넘겼고, 검증에 쓰는 문자열5개만 추린 변환은 34.6ms/exit0였다.
+원 객체에는 PSDrive/PSProvider 부가 객체가 있다. 결과는
+`registration-serialization-probe-r1/comparison.json`에 기록했다. 서버의 지연 위치와
+일치하는 원인 후보지만 서버 프로세스의 호출 스택을 직접 확인한 것은 아니다.
+
+등록 정보 기록을 문자열5개만 저장하도록 수정했다. 수정 소스 SHA256은
+`a95ec69d7fef3371745ad32685fa10b26f858ef9f93fe1a8669c39b25e225c1a`다.
+실제 provider 부가 객체/읽으면 실패하는 무관한 속성을 배제하는 회귀를 포함한
+`test_install_field_candidate.ps1` 31개와 합성 전체 제어 흐름이 exit0였다
+(`install-function-tests-r3`, `install-integration-r10`). 이 수정본을 서버에서 실행했다고
+주장하지 않는다. 사용자에게 지연된 확인 명령을 Ctrl+C로 정상 중단하고 프롬프트가
+돌아왔는지 알려 달라고 요청했다. 설치는 반복하지 않으며, 중단 결과 확인 후 별도
+검산 도우미로 현재 후보 파일·설정·데이터 보존을 확인할 예정이다.
+
+### 2026-10-14 설치 없이 검산만 재개하는 도우미 개발 검증
+
+`PDCA_LIMITED_FIELD_20261014_0dd2ced0/verify-field-install-resume.ps1`은 위 수정 소스에서
+설치 실행 함수와 호출을 제거한 별도 도우미다. SHA256은
+`ac197fb1b41317e3bd162b27ffb7907f44c15c9ca71a45323a09cb68b2d94a33`이며,
+원 소스와 정확한 변경 내역은 `postinstall-resume-source-derivation.json`에 보존했다.
+이 도우미는 기존 설치 exit0·PID·시각, 이전 결과 파일의 크기/해시, 원래 요청/설정,
+중단 확인 및 이전 launcher 프로세스 부재를 확인한 뒤 남은 검산을 수행한다.
+설치 실행 코드는 없으며 원본/백업의 본문·추가 스트림 전수 검산이 끝나야
+승인된 comparator 플래그 하나를 false로 바꾼다. 앱 실행이나 운영 승격은 수행하지 않는다.
+
+native PowerShell 5.1의 모의 재개 시험 8개와 별도 launcher 시험 7개가 통과했다.
+정상 재개는 실제 모의 설치를 사전 준비에서 한 번만 실행하고 재개에서는 0회 실행했다.
+이전 설치 실패, 영수증 해시 불일치, 이전 요청 불일치, 중단 미확인, 이전 프로세스 활성,
+결과 폴더 구성 변경, 설치 파일 변조를 각각 설정 변경 전에 거부했다.
+launcher는 helper/request/index 잠금, 외부 핀/입력/폴더 구성 거부, 실제 child 종료 코드,
+부모 콘솔 유지, 개발 호스트 거부를 검사했다. 각 거부 시험의 예상 exit1/17은 PASS의
+조건이며 정상 재개와 시험 driver는 exit0였다. stdout/stderr를 모두 검토했고, stderr의
+복수 CLIXML 문서는 progress/information뿐이었다. 첫 출력 검토는 CP949를 UTF-8로
+해석해 exit1이었으나 strict CP949 해독을 추가한 검토는 exit0였다. 시험을 재실행하거나
+원 출력 파일을 바꾸지 않았다.
+
+종합 결과 `postinstall-resume-development-review.json`은 10,983B/SHA256
+`a2f7042413f57910095491031ee5dd24c5ca3d0c6dcf045cc4d0508a27ab04aa`다.
+이는 개발 모의 검증이며 실제 서버 registry/관리자 ACL/데이터 검산 통과가 아니다.
+서버 실행용 최종 요청·index는 아직 생성하지 않았고, 새 묶음을 전달하거나 실행하지 않았다.
+
+재개 절차는 다음 순서를 따른다.
+
+1. 사용자 Ctrl+C 후 기존 관리자 콘솔의 프롬프트 복귀와 결과 파일 상태를 확인한다.
+   설치 명령은 반복하지 않는다.
+2. `I90b5ed1b`의 실제 최종 파일을 새 공유 return 폴더로 회수하고, 기존 설치 시각/PID,
+   요청 및 설정 핀을 대조한다. 민감한 config 본문은 출력하지 않는다.
+3. 회수 원문을 보존하고 외부 고정 index/새 요청/묶음과 실행 명령을 만든다.
+   기존 R1/R2 바이트를 바꾸지 않고 개발/공유 해시 및 서버 최종 경로·파일을 확인한다.
+4. 중단과 이전 프로세스 부재를 확인한 재개 도우미만 사용자에게 실행 안내한다.
+   백업의 기존 180분 유효성 검사는 유지하며, 기한이 지나면 임의로 완화하지 않는다.
+5. 새 콘솔 결과 해시를 회수 파일과 대조한 뒤 표준 사용자 앱 시작과 현장 검증을 진행한다.
+
+현재는 1번의 사용자 중단 확인을 기다린다. 원격 터미널 조작을 하지 않으며,
+설치 완료 관찰과 아직 미완료인 설치 후 검산을 구분한다. release HOLD를 유지한다.

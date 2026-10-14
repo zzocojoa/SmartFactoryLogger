@@ -21,6 +21,15 @@ Reject {AssertCold @{processes=@();listeners=@(@{port=8000})}} 'application-or-p
 Reject {Plain '\\server\share\file'} 'absolute-local-path' 'reject-network-path'
 Reject {Plain 'C:\fixture:stream'} 'absolute-local-path' 'reject-named-input-stream'
 
+$registration=[pscustomobject]@{PSChildName='fixture-key';DisplayName='smart-factory';DisplayVersion='1.0.28';UninstallString='C:\fixture\Uninstall smart-factory.exe';PSDrive=(Get-PSDrive HKCU);PSProvider=(Get-PSProvider Registry)}
+$registration|Add-Member ScriptProperty UnrelatedProperty {throw 'unrelated-provider-property-read'}
+$scalar=RegistrationFacts $registration 'C:\fixture'
+$serialized=$scalar|ConvertTo-Json -Depth 35
+Pass ($scalar.Count -eq 5 -and $serialized.Length -lt 1024 -and $serialized -notmatch 'PSDrive|PSProvider|UnrelatedProperty') 'registry-provider-metadata-excluded-from-receipt'
+Pass ($scalar.display_version -ceq '1.0.28' -and $scalar.key_name -ceq 'fixture-key' -and $scalar.install_location -ceq 'C:\fixture') 'verified-registration-scalars-preserved'
+$registration.DisplayVersion=28
+Reject {RegistrationFacts $registration 'C:\fixture'} 'registration-field-type:DisplayVersion' 'reject-nonscalar-registration-contract'
+
 $utf8=[Text.UTF8Encoding]::new($true,$true)
 $text="[SETTINGS]`r`nlabel = 공장`r`n[SPOT]`r`nlow_signal_alarm_enabled = false`r`nlow_signal_comparator_verified = true`r`nconfig_verified_by = Operator1`r`n[NEXT]`r`nx = true`r`n"
 $inputBytes=$utf8.GetPreamble()+$utf8.GetBytes($text)
